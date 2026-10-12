@@ -383,45 +383,63 @@ async def test_idle_force_only_original_live_host_can_observe(
     ).fetchone() == ("done", True)
 
 
-def _aged_envelope(
-    exec_dir: Path, agent_id: int, *, owner: object | None, age_s: float = 3600.0
-) -> Path:
-    """One request envelope whose mtime predates any live birth window."""
-    agent_dir = exec_dir / str(agent_id)
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    request = agent_dir / f"req-{uuid4().hex}.json"
-    envelope: dict[str, object] = {
-        "v": 1,
-        "code": "print('x')",
-        "agent_id": agent_id,
-        "timeout_s": 30.0,
-    }
-    if owner is not None:
-        envelope["incarnation"] = {"generation": str(uuid4()), "owner": str(owner)}
-    request.write_text(json.dumps(envelope))
-    stamp = request.stat().st_mtime - age_s
-    os.utime(request, (stamp, stamp))
-    return request
+async def test_a_force_its_original_host_never_observed_is_not_settled_by_a_successor(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    *,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    """A host that dies between applying and observing a force leaves it pending.
 
-
-def _unreadable_envelope(exec_dir: Path, agent_id: int, *, age_s: float) -> Path:
-    """One killed parent's unreadable remnant, aged as asked."""
-    agent_dir = exec_dir / str(agent_id)
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    request = agent_dir / f"req-{uuid4().hex}.json"
-    request.write_text("")  # zero-byte remnant: nothing to attribute
-    stamp = request.stat().st_mtime - age_s
-    os.utime(request, (stamp, stamp))
-    return request
-
-
-def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
-    """A `psutil.process_iter` stand-in yielding no processes at all."""
-    return iter(())
-
-
-def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """This box runs other agents' exec children; isolate the test's own legs."""
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
+    No boot of a successor host settles it on a guess: the agent stays
+    terminated with its lifecycle pointer set, a different owner cannot observe
+    it, and resurrection is refused until an operator settles the command (the
+    stuck-pointer scan in `services/upkeep/ttl_reaper` alerts on exactly this).
+    """
+    machine_identity.set(name="claim-test")
+    agent_id = agent_row(db_conn)
+    old_host = AgentHost(
+        policy=configured_policy(),
+        pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine=configured_machine(name="claim-test"),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(gate=database_gate),
+        catalog=model_catalog,
     )
+    assert (
+        await hosted.admit_hosted_runtime(
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
+        )
+        is not None
+    )
+    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
+        _, _, _, command, _cutoff = await asyncio.to_thread(
+            _force_terminate_transaction, agent_id, pool, source="user"
+        )
+
+    # The successor host that boots after the crash cannot observe the force.
+    assert not await original_host_force(
+        aops_pool, agent_id, uuid4(), "claim-test", command_id=command, quiescent=True
+    )
+
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NULL FROM inbound_messages WHERE id=%s", (command,)
+    ).fetchone() == ("claimed", True)
+    assert db_conn.execute(
+        "SELECT status,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated", command)
+    db_conn.commit()
+    with pytest.raises(ResurrectSettlementDeferredError):
+        await asyncio.to_thread(
+            resurrect_agent,
+            Database.from_settings(gate=database_gate),
+            EventBus.from_settings(),
+            agent_id,
+            resurrected_by="user",
+            local_machine=machine_identity.name(),
+        )

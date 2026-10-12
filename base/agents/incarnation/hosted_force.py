@@ -2,7 +2,10 @@
 
 Only the live host's serialized turn pump may observe completion, after its real
 continuation and owned exec cleanup return. Lease expiry, an empty cache, and
-the host process dying are not proof that independent exec children ended.
+the host process dying are not proof that independent exec children ended, so
+nothing settles an unobserved force on their strength: if the original host
+dies first, the lifecycle pointer stays set and the stuck-lifecycle-pointer
+scan (`services/upkeep/ttl_reaper/lifecycle_fences.py`) alerts an operator.
 """
 
 import asyncio
@@ -13,7 +16,6 @@ import psycopg
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.incarnation.exec_request_evidence import RequestEvidence, quarantine_stale
 from base.agents.incarnation.lifecycle_acceptance import COMMAND_KILLS_SHELL_SESSIONS
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -42,7 +44,6 @@ def install_hosted_force(conn: psycopg.Connection, agent_id: int, command_id: in
         (command_id, agent_id),
     )
     from base.agents.incarnation.resources import freeze_resources
-    from base.native_process.runtime_incarnation import RuntimeIncarnation
 
     resources = conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent_id,)
@@ -119,116 +120,6 @@ async def original_host_force(
     if quiescent:
         await _sweep_requested_shell_kill(agent_id, row[2], command[1], kill_shell_sessions)
     return True
-
-
-async def recover_orphaned_hosted_forces(
-    pool: AsyncConnectionPool,
-    machine: str,
-    *,
-    kill_shell_sessions: Callable[[int, int], None] | None = None,
-) -> tuple[list[int], dict[int, tuple[RequestEvidence, ...]]]:
-    """Observe resource-free applied forces after an exclusive host boot.
-
-    The caller must own the agent-host pidfile and call this before starting
-    its scheduler. That process exclusivity proves the old owner is gone and
-    prevents a new turn from creating exec resources during this scan.
-
-    A request envelope that can still belong to a live exec domain — a live
-    process reference, an unattributable envelope, or resource evidence that
-    contradicts the boot premise — defers recovery for that agent. Envelopes
-    that prove otherwise are quarantined here, preserved with a receipt, and do
-    not defer: a stale envelope attributed to a superseded incarnation must not
-    fence an unrelated newer lifecycle (issue #2157; see
-    base/agents/incarnation/exec_request_evidence.py for the classification contract).
-
-    The database transition re-locks and revalidates the exact command target;
-    it never retargets a force to the new host owner. Returned deferred entries
-    are diagnostic evidence for an operator, not cleanup authorization.
-
-    The candidate predicate admits both `claimed` and `done` commands: a
-    command torn into `done` with the pointer still alive (an out-of-band write;
-    task #3678) is blind to boot recovery and live observation alike, and this
-    scan is the one recoverer that can settle it. Everything else stays the
-    strict conjunction — applied set, observation missing, target matching the
-    current incarnation, pointer alive. A recovered force that asked to kill
-    the agent's shell sessions captures one cutoff in the validated transaction
-    and attempts older sessions after committing, as the live settlement does.
-    """
-    async with pool.connection() as conn:
-        candidates = await (
-            await conn.execute(
-                "SELECT m.id,m.runtime_generation,m.runtime_owner,m.incarnation_resources "
-                "FROM agents_meta m JOIN inbound_messages force "
-                "ON force.id=m.lifecycle_command_id AND force.agent_id=m.id "
-                "WHERE m.machine=%s AND m.status='terminated' "
-                "AND m.runtime_kind='hosted' AND m.runtime_generation IS NOT NULL "
-                "AND m.runtime_owner IS NOT NULL AND force.kind='terminate' "
-                "AND force.status IN ('claimed','done') AND force.applied_at IS NOT NULL "
-                "AND force.observed_at IS NULL "
-                "AND force.target_generation=m.runtime_generation "
-                "AND force.target_owner=m.runtime_owner ORDER BY m.id",
-                (machine,),
-            )
-        ).fetchall()
-
-    recovered: list[int] = []
-    deferred: dict[int, tuple[RequestEvidence, ...]] = {}
-    for agent_id, generation, owner, resources in candidates:
-        report = quarantine_stale(
-            agent_id,
-            incumbent=RuntimeIncarnation(agent_id, generation, owner),
-            resources=resources,
-            reason="hosted boot recovery",
-        )
-        if report.retained:
-            deferred[agent_id] = report.retained
-            continue
-        async with async_write_transaction(pool) as conn:
-            row = await (
-                await conn.execute(
-                    "SELECT runtime_generation,runtime_owner,lifecycle_command_id,session_index "
-                    "FROM agents_meta WHERE id=%s AND machine=%s "
-                    "AND status='terminated' AND runtime_kind='hosted' "
-                    "FOR UPDATE",
-                    (agent_id, machine),
-                )
-            ).fetchone()
-            if row is None or row[:2] != (generation, owner) or row[2] is None:
-                continue
-            command = await (
-                await conn.execute(
-                    sql.SQL(
-                        "SELECT id, {} FROM inbound_messages WHERE id=%s AND agent_id=%s "
-                        "AND kind='terminate' AND status IN ('claimed','done') "
-                        "AND applied_at IS NOT NULL AND observed_at IS NULL "
-                        "AND target_generation=%s AND target_owner=%s FOR UPDATE"
-                    ).format(sql.SQL(COMMAND_KILLS_SHELL_SESSIONS)),
-                    (row[2], agent_id, row[0], row[1]),
-                )
-            ).fetchone()
-            if command is None:
-                continue
-            _require_shell_killer(command[1], kill_shell_sessions)
-            observed = await conn.execute(
-                "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
-                "WHERE id=%s AND agent_id=%s AND kind='terminate' "
-                "AND status IN ('claimed','done') "
-                "AND applied_at IS NOT NULL AND observed_at IS NULL "
-                "AND target_generation=%s AND target_owner=%s",
-                (row[2], agent_id, row[0], row[1]),
-            )
-            cleared = await conn.execute(
-                "UPDATE agents_meta SET lifecycle_command_id=NULL,lease_expires_at=NULL "
-                "WHERE id=%s AND machine=%s AND status='terminated' "
-                "AND runtime_kind='hosted' AND lifecycle_command_id=%s "
-                "AND runtime_generation=%s AND runtime_owner=%s",
-                (agent_id, machine, row[2], row[0], row[1]),
-            )
-            if observed.rowcount != 1 or cleared.rowcount != 1:
-                raise RuntimeError("orphaned hosted-force recovery lost its locked target")
-        recovered.append(agent_id)
-        await _sweep_requested_shell_kill(agent_id, row[3], command[1], kill_shell_sessions)
-    return recovered, deferred
 
 
 async def _sweep_requested_shell_kill(

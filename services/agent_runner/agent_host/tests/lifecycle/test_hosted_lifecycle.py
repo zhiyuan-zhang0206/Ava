@@ -2,7 +2,6 @@
 
 import asyncio
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -21,7 +20,6 @@ from agent.ownership.hosted import (
 from agent.ownership.tests.test_lifecycle_intent import _command
 from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
-from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -30,7 +28,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.lifecycle.termination import _force_terminate_transaction
-from services.agent_runner.agent_host.force_termination import kill_terminating_agent_shells
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
@@ -558,46 +555,3 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     assert db_conn.execute(
         "SELECT observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
     ).fetchone() == (True,)
-
-
-async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    database: Database,
-    model_catalog: ModelCatalog,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    agent_id = agent_row(db_conn)
-    old = AgentHost(
-        policy=configured_policy(),
-        pool=aops_pool,
-        checkpointer=Mock(),
-        graph=Mock(),
-        machine=configured_machine(name="claim-test"),
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(gate=database_gate),
-        catalog=model_catalog,
-    )
-    await admit_hosted_runtime(
-        aops_pool, agent_id, "claim-test", old._owner, expected_from="idling", db=database
-    )
-    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
-        _, _, _, command, _cutoff = await asyncio.to_thread(
-            _force_terminate_transaction,
-            agent_id,
-            pool,
-            source="user",
-            kill_all_shell_sessions=True,
-        )
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
-    )
-    sweeps = _record_force_sweeps(monkeypatch, command)
-    recovered, _ = await recover_orphaned_hosted_forces(
-        aops_pool, "claim-test", kill_shell_sessions=kill_terminating_agent_shells
-    )
-    assert recovered == [agent_id]
-    assert sweeps == [(agent_id, True)]

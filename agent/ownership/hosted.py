@@ -1,7 +1,6 @@
 """Hosted incarnation admission and settlement, replacing status-only writes."""
 
 import asyncio
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,7 +14,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted_claim import claim_admission_row
 from agent.ownership.hosted_cleanup import finish_termination
 from base import telemetry
-from base.agents.incarnation.host_process_evidence import local_host_evidence
 from base.agents.incarnation.lifecycle_acceptance import (
     RECORD_APPLIED,
     terminate_kills_shell_sessions,
@@ -31,16 +29,12 @@ from base.agents.observation.evidence import AdmissionOutcome
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.deploy.maintenance import admission
-from base.deploy.progress_timeout import (
-    AGENT_LEASE_TTL_S,
-    LEGACY_HOST_ADOPTION_SILENCE_S,
-)
+from base.deploy.progress_timeout import AGENT_LEASE_TTL_S
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from base.paths import ava_home
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
@@ -271,127 +265,27 @@ async def _held_owner_matches(pool: AsyncConnectionPool, agent_id: int, owner: U
     return held_owner == (owner, "hosted")
 
 
-@dataclass(frozen=True)
-class _LegacyAdoption:
-    """Evidence-backed proposal to replace a dead legacy owner before expiry."""
-
-    owner: UUID
-    generation: UUID | None
-    lease_expires_at: datetime
-    silence_s: float
-
-    def matches(self, previous: tuple[Any, ...]) -> bool:
-        """Whether the locked row still equals the exact observed target.
-
-        Any concurrent write — a live owner renewing, a successor adopting —
-        changes one of these fields and voids the evidence gathered for it.
-        """
-        return (previous[1], previous[0], previous[5]) == (
-            self.owner,
-            self.generation,
-            self.lease_expires_at,
-        )
-
-
-async def _legacy_dead_host_adoption(
-    pool: AsyncConnectionPool, agent_id: int, machine: str, owner: UUID
-) -> _LegacyAdoption | None:
-    """Propose admitting a legacy NULL row over a demonstrably dead local host.
-
-    Legacy rows (``incarnation_resources IS NULL``) predate resource evidence,
-    so the exact-process proof an evidence-carrying row offers does not exist
-    for them. A same-machine successor may instead stand
-    on this evidence set, re-pinned under the admission row lock by the caller
-    (issue #2156; the 2026-09-10 force-restart stall where a fresh host waited
-    out the dead predecessor's full lease):
-
-    - renewal silence: the row's lease has not been renewed for
-      ``LEGACY_HOST_ADOPTION_SILENCE_S`` — the predecessor's ownership beat
-      stopped, not merely its owner UUID;
-    - no live same-home agent-host daemon and no live exec child of this agent
-      (``base.agents.incarnation.host_process_evidence``) — no concurrent owner survives;
-    - the row is unmarked (``last_turn_fatal_at IS NULL``): crash corpses keep
-      their own reaper/resurrect recovery.
-
-    NULL evidence alone never authorizes takeover: with any probe missing the
-    proposal is None and the row keeps today's behavior — waiting for lease
-    expiry. A refusal that a live process caused is logged with its facts.
-    """
-    async with pool.connection() as conn:
-        row = await (
-            await conn.execute(
-                "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
-                "incarnation_resources,lease_expires_at,clock_timestamp(),"
-                "last_turn_fatal_at IS NULL FROM agents_meta WHERE id=%s",
-                (agent_id,),
-            )
-        ).fetchone()
-    if row is None:
-        return None
-    generation, prior_owner, kind, row_machine, resources, lease, now, unmarked = row
-    if (
-        prior_owner is None
-        or prior_owner == owner
-        or row_machine != machine
-        or kind != "hosted"
-        or resources is not None
-        or not unmarked
-        or lease is None
-    ):
-        return None
-    silence_s = AGENT_LEASE_TTL_S - (lease - now).total_seconds()
-    if silence_s < LEGACY_HOST_ADOPTION_SILENCE_S:
-        # The row still looks beaten by a live owner; it is not a candidate yet.
-        return None
-    evidence = await asyncio.to_thread(
-        local_host_evidence, agent_id, ava_home(), exclude_pid=os.getpid()
-    )
-    if not evidence.clean:
-        logger.info(
-            "hosted legacy adoption blocked for agent {agent_id}: predecessor "
-            "{predecessor} silent {silence}s but {reasons}",
-            agent_id=agent_id,
-            predecessor=str(prior_owner),
-            silence=round(silence_s, 1),
-            reasons="; ".join(evidence.blocking_reasons()),
-        )
-        return None
-    return _LegacyAdoption(
-        owner=prior_owner,
-        generation=generation,
-        lease_expires_at=lease,
-        silence_s=silence_s,
-    )
-
-
 async def _dead_predecessor_evidence(
     previous: tuple[Any, ...],
     *,
     owner: UUID,
     machine: str,
     host: psutil.Process,
-    legacy_adoption: _LegacyAdoption | None,
-) -> tuple[ResourceProcess | None, bool]:
-    """Which dead-predecessor proof licenses replacing this local row, if any.
+) -> ResourceProcess | None:
+    """The exited predecessor host process that licenses replacing this local row, if any.
 
-    Runs inside the caller's metadata-lock transaction: the exact-process
-    observation and the legacy proposal's pin are both bound to the locked row
-    state. Returns the exited host process for the managed transfer and
-    whether the legacy evidence replaces it. A live exact host raises the
-    refusal that rolls the transaction back.
+    Runs inside the caller's metadata-lock transaction, so the exact-process
+    observation is bound to the locked row state. A live exact host raises the
+    refusal that rolls the transaction back. A row without stored host-process
+    evidence (``incarnation_resources IS NULL``) offers no such proof: it keeps
+    waiting for its lease to expire.
     """
     # Resolved at call time: the exact-exit probe is monkeypatched at its
     # source module in the resident tests.
     from base.agents.incarnation.exec_owner_recovery import process_ended
 
-    if previous[1] == owner or previous[3] != machine:
-        return None, False
-    if previous[4] is None:
-        # A legacy NULL row can never prove its predecessor's exact exit —
-        # there is no stored host process. The proposal is the replacement
-        # proof, gathered before this transaction and pinned to the row state
-        # it observed: it applies only while the locked row still matches.
-        return None, legacy_adoption is not None and legacy_adoption.matches(previous)
+    if previous[1] == owner or previous[3] != machine or previous[4] is None:
+        return None
     prior_resources = decode_resources(previous[4])
     if (
         isinstance(prior_resources, IncarnationResources)
@@ -405,10 +299,10 @@ async def _dead_predecessor_evidence(
         if not prior_resources.host_process.same_birth(current_host):
             if not await asyncio.to_thread(process_ended, prior_resources.host_process):
                 _refuse_hosted_admission()
-            return prior_resources.host_process, False
+            return prior_resources.host_process
         # The same real host may transfer a closed incarnation only through
         # admit_resources_async's durable predecessor check.
-    return None, False
+    return None
 
 
 async def _lock_previous(conn: psycopg.AsyncConnection[Any], agent_id: int, owner: UUID) -> Any:
@@ -441,34 +335,6 @@ async def _lock_previous(conn: psycopg.AsyncConnection[Any], agent_id: int, owne
     return previous
 
 
-async def _record_legacy_adoption(
-    conn: psycopg.AsyncConnection[Any], agent_id: int, adoption: _LegacyAdoption
-) -> telemetry.Event:
-    """The adoption audit: who was replaced, on what evidence, and how stale the predecessor's
-    ownership beat was. Recorded in the takeover's own transaction."""
-    adoption_event = prepare_event_log(
-        event_type="hosted_legacy_adoption",
-        agent_id=agent_id,
-        source="system",
-        payload={
-            "predecessor_owner": str(adoption.owner),
-            "lease_silence_s": round(adoption.silence_s, 1),
-            "same_home_host_daemons": 0,
-            "agent_exec_children": 0,
-        },
-    )
-    recorded = await record_audit_async(conn, adoption_event)
-    logger.info(
-        "hosted legacy adoption: admitted agent {agent_id} over dead local "
-        "predecessor {predecessor} after {silence}s of lease silence "
-        "(no live same-home host daemon, no live exec child)",
-        agent_id=agent_id,
-        predecessor=str(adoption.owner),
-        silence=round(adoption.silence_s, 1),
-    )
-    return recorded
-
-
 async def admit_hosted_runtime(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -480,9 +346,8 @@ async def admit_hosted_runtime(
 ) -> RuntimeIncarnation | None:
     """Keep this owner's logical incarnation across turns; reject live others.
 
-    A local legacy NULL row (no stored resource evidence) may be replaced
-    before its lease expires only through the evidence-gated proposal of
-    ``_legacy_dead_host_adoption``, re-checked under this row lock.
+    A row owned by another host is replaced only after its lease expires, or
+    earlier when its stored host process provably exited.
 
     Admission reads and locks no deployment-wide state.
     """
@@ -501,7 +366,6 @@ async def admit_hosted_runtime(
     await asyncio.to_thread(recover_local_resources, db, agent_id, machine)
     native = psutil.Process()
     host_identity = ResourceProcess.capture(native)
-    legacy_adoption = await _legacy_dead_host_adoption(pool, agent_id, machine, owner)
     recorded: list[telemetry.Event] = []
     try:
         async with async_write_transaction(pool) as conn:
@@ -511,12 +375,8 @@ async def admit_hosted_runtime(
                 if previous[1:3] == (owner, "hosted") and previous[0] is not None
                 else uuid4()
             )
-            exited_predecessor, legacy_adoption_used = await _dead_predecessor_evidence(
-                previous,
-                owner=owner,
-                machine=machine,
-                host=native,
-                legacy_adoption=legacy_adoption,
+            exited_predecessor = await _dead_predecessor_evidence(
+                previous, owner=owner, machine=machine, host=native
             )
 
             await admit_resources_async(
@@ -526,9 +386,7 @@ async def admit_hosted_runtime(
                 exited_predecessor=exited_predecessor,
             )
             # Exact local host death and resource closure are stronger than
-            # its remaining lease; the same row lock protects both proofs. A
-            # legacy NULL row has no exact process to prove: its re-pinned
-            # evidence set stands in for the proof (issue #2156).
+            # its remaining lease; the same row lock protects both proofs.
             row = await claim_admission_row(
                 conn,
                 agent_id=agent_id,
@@ -536,13 +394,11 @@ async def admit_hosted_runtime(
                 owner=owner,
                 generation=generation,
                 expected_from=expected_from,
-                takeover=exited_predecessor is not None or legacy_adoption_used,
+                takeover=exited_predecessor is not None,
             )
             if row is None:
                 # Resource transfer and ordinary admission are one transaction.
                 _refuse_hosted_admission()
-            if legacy_adoption_used and legacy_adoption is not None:
-                recorded.append(await _record_legacy_adoption(conn, agent_id, legacy_adoption))
             from agent.ownership.lifecycle_intent import observe_hosted_admission
 
             await observe_hosted_admission(conn, RuntimeIncarnation(agent_id, row[0], owner))

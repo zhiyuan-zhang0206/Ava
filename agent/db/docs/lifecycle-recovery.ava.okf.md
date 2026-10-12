@@ -76,6 +76,11 @@ with its resurrection marker and optional work, then publishes the wake. A
 refusal rolls the whole transaction back, fence included. The agent host admits
 the successor; no OS launcher is involved.
 
+A force-terminate whose original host died before observing it keeps its
+lifecycle pointer set; resurrection is refused with "outstanding hosted
+lifecycle command has not settled" until an operator settles the command, and
+the hourly `lifecycle_pointer_stuck` alert says so.
+
 A queued wake keeps its original inbound identity. A changed home, paused
 machine or unsettled prior execution cannot be bypassed by retrying the wake.
 

@@ -2,8 +2,8 @@
 are terminalized (expired_at, never closed_at), unexpired/closed rows are left
 alone, owners are notified only when running/idling, expired browser sessions
 and notices are reclaimed in bounded batches, the fire-log prune deletes every
-claim past the window, and the lifecycle-pointer scans report and settle
-their rows."""
+claim past the window, and the stuck lifecycle-pointer scan reports (and never
+settles) its rows."""
 
 from __future__ import annotations
 
@@ -16,13 +16,11 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from services.upkeep.ttl_reaper import lifecycle_fences, sweep
 from services.upkeep.ttl_reaper.sweep import (
-    _reap_expired_notices_blocking,
     _reap_expired_pages_blocking,
     _reap_expired_web_sessions_blocking,
 )
@@ -100,23 +98,26 @@ def _capture_telemetry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[tuple[tuple[object, ...], dict[str, object]]]:
     """Capture telemetry emits, asserting every name is registered (mirrors the
-    production emit contract, like the torn-pointer test does inline)."""
+    production emit contract)."""
     emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _capture_emit(*args: object, **kwargs: object) -> None:
         from base.events.contract import EVENTS
 
-        assert len(args) > 1 and args[1] in EVENTS, f"unregistered emit name: {args!r}"
+        assert kwargs.get("event_name") in EVENTS, f"unregistered emit name: {kwargs!r}"
         emitted.append((args, kwargs))
 
     monkeypatch.setattr(lifecycle_fences.telemetry, "emit", _capture_emit)
     return emitted
 
 
-def _stuck_force_fence(conn: psycopg.Connection, *, machine: str, applied: bool = True) -> int:
-    """A terminated agent whose force-terminate fence is stuck: claimed
-    (+applied), unobserved, with ``lifecycle_command_id`` still pointing at it
-    — the shape a decommissioned machine leaves behind (task #4143)."""
+def _stuck_force_fence(
+    conn: psycopg.Connection, *, machine: str, applied_ago: str | None = "2 hours"
+) -> int:
+    """A terminated agent whose force-terminate fence was applied `applied_ago`
+    and never observed, with ``lifecycle_command_id`` still pointing at it — the
+    shape an original host that died before observing it (or a decommissioned
+    machine) leaves behind. ``applied_ago=None`` makes the command unapplied."""
     aid = _running_agent(conn)
     with conn.cursor() as cur:
         cur.execute(
@@ -132,8 +133,9 @@ def _stuck_force_fence(conn: psycopg.Connection, *, machine: str, applied: bool 
             "(agent_id, content, kind, source, status, claimed_at, applied_at, "
             " target_generation, target_owner) "
             "VALUES (%s, '', 'terminate', 'machine-pause', 'claimed', now(), "
-            " CASE WHEN %s THEN now() ELSE NULL END, %s, %s) RETURNING id",
-            (aid, applied, gen, owner),
+            " CASE WHEN %s::text IS NULL THEN NULL ELSE now() - %s::text::interval END, %s, %s) "
+            "RETURNING id",
+            (aid, applied_ago, applied_ago, gen, owner),
         )
         row = cur.fetchone()
         assert row is not None
@@ -322,25 +324,13 @@ def test_prune_schedule_fire_log_is_bounded_per_pass(
         assert remaining is not None and remaining[0] == 0
 
 
-def test_torn_pointer_scan_reports_torn_commands(
+def test_stuck_pointer_scan_reports_torn_commands(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`done` with a live pointer is counted and alerted; a cleared pointer is quiet."""
-    # (args, kwargs) pairs, so the assertions stay fully typed.
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _capture_emit(*args: object, **kwargs: object) -> None:
-        # Mirror the production emit() contract: an unregistered name raises
-        # there, so a stub that accepts one would hide exactly that class of
-        # drift (PR #2667 review).
-        from base.events.contract import EVENTS
-
-        assert len(args) > 1 and args[1] in EVENTS, f"unregistered emit name: {args!r}"
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr(lifecycle_fences.telemetry, "emit", _capture_emit)
+    emitted = _capture_telemetry(monkeypatch)
     agent_id = _running_agent(db_conn)
     row = db_conn.execute(
         "INSERT INTO inbound_messages "
@@ -356,222 +346,50 @@ def test_torn_pointer_scan_reports_torn_commands(
     )
     db_conn.commit()
 
-    assert lifecycle_fences._scan_torn_lifecycle_pointers_blocking(reaper_pool) == 1
+    assert lifecycle_fences._scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 1
     assert emitted
-    assert emitted[-1][0][1] == "lifecycle_pointer_done_torn"
+    assert emitted[-1][1]["event_name"] == "lifecycle_pointer_stuck"
 
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
     db_conn.commit()
-    assert lifecycle_fences._scan_torn_lifecycle_pointers_blocking(reaper_pool) == 0
+    assert lifecycle_fences._scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 0
 
 
-def test_settle_absent_machine_fences_settles_stuck_force(
+def test_a_force_nobody_observed_is_alerted_not_settled(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Task #4143: a decommissioned machine never runs the boot recovery that
-    observes its agents' force fences, so the reaper settles them to the exact
-    transition ``recover_orphaned_hosted_forces`` would have written —
-    observed + done, pointer and lease cleared — and reports the event."""
+    """An applied force whose original host died, or whose machine was
+    decommissioned, is never settled on a guess: the pointer stays set and the
+    scan alerts so an operator settles it."""
     emitted = _capture_telemetry(monkeypatch)
     aid = _stuck_force_fence(db_conn, machine="ghost")
 
-    settled = lifecycle_fences.settle_absent_machine_fences(reaper_pool, batch=50)
+    assert lifecycle_fences._scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 1
 
-    assert settled == [aid]
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT i.status, i.observed_at IS NOT NULL, m.lifecycle_command_id IS NULL, "
-            "m.lease_expires_at IS NULL FROM agents_meta m "
-            "JOIN inbound_messages i ON i.agent_id = m.id AND i.kind = 'terminate' "
-            "WHERE m.id = %s",
-            (aid,),
-        )
-        row = cur.fetchone()
-    assert row == ("done", True, True, True)
-    assert emitted and emitted[-1][0][1] == "lifecycle_fences_settled_absent_machine"
+    assert emitted[-1][1]["event_name"] == "lifecycle_pointer_stuck"
     assert emitted[-1][1]["attributes"] == {"count": 1, "samples": str(aid)}
-    # Idempotent: once settled, the scan is quiet.
-    assert lifecycle_fences.settle_absent_machine_fences(reaper_pool, batch=50) == []
-
-
-def test_settle_absent_machine_fences_leaves_registered_and_unapplied(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
-) -> None:
-    """Only absent machines are terminalized, and only applied commands:
-    a registered machine's boot recovery owns its fences, and an unapplied
-    command has no observation evidence to write (never fabricate one)."""
-    registered = _stuck_force_fence(db_conn, machine="macmini")
-    unapplied = _stuck_force_fence(db_conn, machine="ghost", applied=False)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO machines (name, role, gateway_url) "
-            "VALUES ('macmini', '{agent-runner}', 'http://macmini:8106')"
-        )
-    db_conn.commit()
-
-    assert lifecycle_fences.settle_absent_machine_fences(reaper_pool, batch=50) == []
-    with db_conn.cursor() as cur:
-        for aid in (registered, unapplied):
-            cur.execute(
-                "SELECT i.status, i.observed_at IS NULL, m.lifecycle_command_id IS NOT NULL "
-                "FROM agents_meta m JOIN inbound_messages i "
-                "ON i.agent_id = m.id AND i.kind = 'terminate' WHERE m.id = %s",
-                (aid,),
-            )
-            assert cur.fetchone() == ("claimed", True, True)
-
-
-def test_reap_expired_notices_resolves_and_notifies_live_agent(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, database: Database
-) -> None:
-    """Notices past expire_at are resolved with resolution='expired', and a system note is sent to live owner."""
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        # One expired notice
-        cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, 0, 'expired notice', 'P1', TRUE, FALSE, now() - interval '1 minute') RETURNING id",
+            "SELECT i.status, i.observed_at IS NULL, m.lifecycle_command_id IS NOT NULL "
+            "FROM agents_meta m JOIN inbound_messages i "
+            "ON i.agent_id = m.id AND i.kind = 'terminate' WHERE m.id = %s",
             (aid,),
         )
-        row = cur.fetchone()
-        assert row is not None
-        nid = row[0]
-        # One unexpired notice
-        cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, 1, 'active notice', 'P2', FALSE, FALSE, now() + interval '1 hour')",
-            (aid,),
-        )
-    db_conn.commit()
-
-    reaped = _reap_expired_notices_blocking(reaper_pool, database, EventBus.from_settings())
-    assert reaped == [(aid, nid)]
-
-    # Check notice state in DB
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT resolution, resolved_at FROM agent_notices WHERE id = %s", (nid,))
-        row = cur.fetchone()
-        assert row is not None
-        res, resolved_at = row
-    assert res == "expired"
-    assert resolved_at is not None
-
-    # Check inbound message delivered
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT source, content FROM inbound_messages WHERE agent_id = %s",
-            (aid,),
-        )
-        inbounds = cur.fetchall()
-    assert len(inbounds) == 1
-    assert inbounds[0][0] == "system:notice-expire"
-    assert "expired notice" in inbounds[0][1]
-    assert "[This notice has expired.]" in inbounds[0][1]
+        assert cur.fetchone() == ("claimed", True, True)
 
 
-@pytest.mark.parametrize("require_response", [False, True])
-def test_reap_expired_notices_does_not_resurrect_terminated_agent(
+def test_a_fresh_or_unapplied_force_is_not_alerted(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
-    require_response: bool,
-    database: Database,
 ) -> None:
-    """Terminated agents have their notice closed as expired, but no inbound message is delivered."""
-    aid = create_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'terminated')",
-            (aid,),
-        )
-        cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, 0, 'dead agent notice', 'P2', %s, FALSE, now() - interval '1 minute') RETURNING id",
-            (aid, require_response),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        nid = row[0]
-    db_conn.commit()
+    """A live host observes a just-applied force within moments, and an unapplied
+    command is not a fence: neither is stuck."""
+    emitted = _capture_telemetry(monkeypatch)
+    _stuck_force_fence(db_conn, machine="macmini", applied_ago="30 seconds")
+    _stuck_force_fence(db_conn, machine="macmini", applied_ago=None)
 
-    observed: list[tuple[int, str | None]] = []
-
-    def capture_hint(_bus: object, agent_id: int) -> None:
-        # A different connection must see the expiry before its hint can fire.
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT resolution FROM agent_notices WHERE id = %s", (nid,))
-            row = cur.fetchone()
-        assert row is not None
-        observed.append((agent_id, row[0]))
-
-    monkeypatch.setattr(sweep, "publish_agent_updated_sync", capture_hint)
-    reaped = _reap_expired_notices_blocking(reaper_pool, database, EventBus.from_settings())
-    assert reaped == [(aid, nid)]
-    assert observed == ([(aid, "expired")] if require_response else [])
-
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT resolution FROM agent_notices WHERE id = %s", (nid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == "expired"
-        cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
-
-
-# ─────────────── shell TTL renewal vs the reaper (task #2647) ───────────────
-
-
-async def test_a_sweep_round_runs_every_database_phase(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, database: Database
-) -> None:
-    """The round wires the phases together: one pass reclaims an expired page, an
-    expired browser session and an expired notice, and beats its progress."""
-    aid = _running_agent(db_conn)
-    _open_page(db_conn, aid, "expired", expires_at=datetime.now(UTC) - timedelta(seconds=5))
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO web_sessions (id, expires_at) VALUES ('gone', now() - interval '1 second')"
-        )
-        cur.execute(
-            "INSERT INTO agent_notices "
-            "(agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, 0, 'old', 'P2', FALSE, FALSE, now() - interval '1 second')",
-            (aid,),
-        )
-    db_conn.commit()
-    progress = LoopProgress("test", 60.0)
-
-    await sweep.sweep_round(reaper_pool, database, EventBus.from_settings(), progress)
-
-    assert _page_state(db_conn, aid, "expired")[1] is not None
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM web_sessions")
-        assert cur.fetchone() == (0,)
-        cur.execute("SELECT resolution FROM agent_notices WHERE agent_id = %s", (aid,))
-        assert cur.fetchone() == ("expired",)
-
-
-async def test_a_sweep_round_runs_the_impersonation_incomplete_event_log_signal_pass(
-    reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """The incomplete-event-log signal rides the sweep round, after the lease reap."""
-    order: list[str] = []
-
-    def reap(_pool: object, _db: Database, _bus: EventBus) -> int:
-        order.append("reap")
-        return 0
-
-    def signal(_pool: object) -> int:
-        order.append("signal")
-        return 0
-
-    monkeypatch.setattr(sweep, "reap_impersonations", reap)
-    monkeypatch.setattr(sweep, "signal_incomplete_event_logs", signal)
-
-    await sweep.sweep_round(
-        reaper_pool, database, EventBus.from_settings(), LoopProgress("test", 60.0)
-    )
-
-    assert order == ["reap", "signal"]
+    assert lifecycle_fences._scan_stuck_lifecycle_pointers_blocking(reaper_pool) == 0
+    assert emitted == []

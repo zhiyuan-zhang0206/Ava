@@ -256,7 +256,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `ava-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
 | `ava-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
 | `ava-ops-im-feishu-owner-seed-failed` | `im_feishu_owner_seed_failed` | 0s | warning | a direct owner message |
-| `ava-ops-hosted-boot-recovery-deferred` | `hosted_boot_recovery_deferred` >2 in 24h | 0s | warning | the consecutive-boot streak ledger |
+| `ava-ops-lifecycle-pointer-stuck` | `lifecycle_pointer_stuck` (2h) | 0s | warning | the settle of an unobserved force-terminate fence (boot recovery and the absent-machine sweep): now an operator settles it by hand |
 | `ava-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `ava-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
 | `ava-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind` | 0m | error / critical | the root unit episode store and its posts |

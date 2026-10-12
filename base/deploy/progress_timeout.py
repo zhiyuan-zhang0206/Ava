@@ -52,16 +52,6 @@ AGENT_LEASE_TTL_S = 600.0
 # so a still-running parked row is never raced.
 CORPSE_REAP_GRACE_S = 900.0
 
-# How much renewal silence a legacy (NULL-resource) hosted row must show before
-# a same-machine successor may replace its owner without waiting the full
-# `AGENT_LEASE_TTL_S` (issue #2156). The hosted ownership beat renews leases
-# every `AGENT_LEASE_RENEW_INTERVAL_S`, so this is four missed beats (a lattice
-# floor) — the same "the host stopped beating" idiom as the
-# turn-progress heartbeat TTL — while staying far inside the lease TTL the
-# fence still protects. Silence is only one probe of the evidence set; the
-# others (no live same-home host daemon, no live exec child of the agent) are
-# gathered in `base.agents.incarnation.host_process_evidence`.
-LEGACY_HOST_ADOPTION_SILENCE_S = 60.0
 # How long a pure agent-runner's start preflight keeps re-dialing the gateway
 # before it declines (`cli.commands._repo._probe_gateway_or_die`, run by
 # `ava start`): whether a *single* refused dial is enough to declare the gateway

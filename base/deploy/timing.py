@@ -111,12 +111,6 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.AGENT_LEASE_RENEW_INTERVAL_S,
         "the agent host's ownership beat: how often it renews hosted agent leases",
     ),
-    "LEGACY_HOST_ADOPTION_SILENCE_S": Clock(
-        "agent-lease",
-        lambda: deploy.LEGACY_HOST_ADOPTION_SILENCE_S,
-        "renewal silence a legacy NULL row must show before a local successor "
-        "may replace its dead owner before lease expiry",
-    ),
     "CORPSE_REAP_GRACE_S": Clock(
         "agent-lease",
         lambda: deploy.CORPSE_REAP_GRACE_S,
@@ -204,22 +198,6 @@ CONSTRAINTS: list[Constraint] = [
         "10 * AGENT_LEASE_RENEW_INTERVAL_S",
         "the lease must outlive at least ten missed renewal beats, so a transient "
         "renewal blip never reads as death against the reaper cadence",
-    ),
-    Constraint(
-        ">=",
-        "LEGACY_HOST_ADOPTION_SILENCE_S",
-        "4 * AGENT_LEASE_RENEW_INTERVAL_S",
-        "legacy adoption needs four missed renewal beats of silence, so a live "
-        "predecessor between two beats (or behind one slow renewal) never reads "
-        "as silent",
-    ),
-    Constraint(
-        "<",
-        "LEGACY_HOST_ADOPTION_SILENCE_S",
-        "AGENT_LEASE_TTL_S",
-        "the legacy adoption silence window must land inside the lease it "
-        "shortens — at or beyond the TTL a dead predecessor's row could only "
-        "ever be adopted by natural expiry, and the evidence gate would be inert",
     ),
     # --- wedged family ---
     Constraint(

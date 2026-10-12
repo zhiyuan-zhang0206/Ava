@@ -74,7 +74,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `restart` | agent restart initiated | business | — | events |
 | `cancel` | in-flight turn cancelled | business | — | events |
 | `resurrect` | terminated agent woken | business | — | events |
-| `hosted_legacy_adoption` | a hosted successor replaced a legacy NULL-resource owner before lease expiry on machine-local evidence (dead predecessor probe set) | business | — | events |
 | `compact` | agent context compacted | business | — | events |
 | `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped background model re-fires until the cause is corrected | business | — | events |
 | `exit` | agent process exited | business | — | events |
@@ -194,7 +193,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `host_turn_reconcile_failed` | the immediate inbound reconcile at a finished hosted turn raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events | — |
 | `impersonation_aborted` | the native impersonation supervisor detected a dead core component (the executor's recorded process chain all dead/reused, or the bound relay's heartbeat stale past the exception window) and closed the lease: carries the agent, lease, session, the dead component (executor | relay) and its detail; the end note is delivered through the resume chain | anomaly | — | — | events | — |
 | `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (AVA_HOST_MAX_CONCURRENT_TURNS) for at least AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events | — |
-| `hosted_boot_recovery_deferred` | hosted boot recovery was deferred for an agent: retained exec request evidence is not disposable yet. Emitted once per deferred agent per boot; repeats across boots mean the evidence is not clearing on its own — inspect the named evidence and its disposition commands | anomaly | — | — | events | — |
 | `host_turn_stall_detected` | the hosted dispatcher's durable scan found an in-flight turn whose turn-progress clock (base/agents/observation/turn_progress.py: node enters, completed LLM steps, streamed LLM chunks) has been silent past the wedged budget while NO pending inbound exists — the turn-level fake-alive shape (process alive, turn dead) that pending-row and pid-based detectors cannot see. The turn task is cancelled and the agent rescheduled; a turn that refuses to unwind instead escalates to a daemon restart | anomaly | — | — | events | — |
 | `inbound_reconcile` | claimed inbounds consumed after interruption | noise | — | — | events | — |
 | `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events | — |
@@ -296,6 +294,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `service_start_unready` | a non-critical service missed its readiness window at ava start | anomaly | service | — | events | — |
 | `boot_retries_exhausted` | the boot-time ava start failed through its whole attempt budget and is no longer retried | anomaly | attempts, exit_code | — | events | — |
 | `schedule_verify_failed` | ava schedules verify found in-store schedule scripts that fail dry-import, an undefined-name read or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events | — |
+| `lifecycle_pointer_stuck` | the TTL reaper's hourly scan found agents_meta.lifecycle_command_id pointing at a lifecycle command that nothing will settle on its own: one sitting at done (an out-of-band torn write, task #3678) or an applied force-terminate still unobserved an hour after it was applied (its original host crashed or its machine was decommissioned). Every resurrect of the named agent(s) defers until an operator settles the command | anomaly | count, samples | — | events | — |
 
 ## 4. Log (bare logs, category=log)
 
@@ -309,8 +308,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `shell_ttl_expired` | the TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
 | `log` | bare log line | noise | msg | events |
-| `lifecycle_pointer_done_torn` | the TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
-| `lifecycle_fences_settled_absent_machine` | the TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples | observation | — | events |
 
 ## 5. SSE roles (live channel, not persisted)
 

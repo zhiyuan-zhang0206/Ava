@@ -19,8 +19,8 @@ phase is a bounded batch, and a backlog drains over successive rounds:
   ``impersonation_event_log_incomplete`` signal.
 - **Schedule fire log** — ``schedule_fire_log`` claims older than the configured
   retention window (30 days by default) are deleted once per day.
-- **Lifecycle pointers** — the hourly torn-pointer scan and absent-machine
-  fence settle (``lifecycle_fences``).
+- **Lifecycle pointers** — the hourly scan that alerts on a pointer nothing
+  will settle (``lifecycle_fences``).
 
 The slow phases are claimed in ``maintenance_state`` (``cadence``), so a restart
 resumes their cadence. Owners are notified (inbound, source ``"system"``) only
@@ -56,10 +56,7 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
 from ops import lifecycle
 from services.upkeep.ttl_reaper import cadence
-from services.upkeep.ttl_reaper.lifecycle_fences import (
-    _scan_torn_lifecycle_pointers_blocking,
-    settle_absent_machine_fences,
-)
+from services.upkeep.ttl_reaper.lifecycle_fences import _scan_stuck_lifecycle_pointers_blocking
 from services.upkeep.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
 
 _log = logging.getLogger(__name__)
@@ -220,10 +217,10 @@ def _prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
         return cur.rowcount
 
 
-async def _slow_phases(pool: ConnectionPool) -> tuple[int, int, int]:
-    """The cadence-gated phases that came due: (pruned fire-log rows, torn
-    lifecycle pointers found, absent-machine fences settled)."""
-    pruned = torn = settled = 0
+async def _slow_phases(pool: ConnectionPool) -> tuple[int, int]:
+    """The cadence-gated phases that came due: (pruned fire-log rows, stuck
+    lifecycle pointers found)."""
+    pruned = stuck = 0
     if await asyncio.to_thread(
         cadence.claim_due,
         pool,
@@ -232,14 +229,10 @@ async def _slow_phases(pool: ConnectionPool) -> tuple[int, int, int]:
     ):
         pruned = await asyncio.to_thread(_prune_schedule_fire_log_blocking, pool)
     if await asyncio.to_thread(
-        cadence.claim_due, pool, cadence.TORN_POINTER_SCAN, cadence.HOURLY_S
+        cadence.claim_due, pool, cadence.STUCK_POINTER_SCAN, cadence.HOURLY_S
     ):
-        torn = await asyncio.to_thread(_scan_torn_lifecycle_pointers_blocking, pool)
-    if await asyncio.to_thread(
-        cadence.claim_due, pool, cadence.ABSENT_FENCE_SETTLE, cadence.HOURLY_S
-    ):
-        settled = len(await asyncio.to_thread(settle_absent_machine_fences, pool, batch=PASS_BATCH))
-    return pruned, torn, settled
+        stuck = await asyncio.to_thread(_scan_stuck_lifecycle_pointers_blocking, pool)
+    return pruned, stuck
 
 
 async def sweep_round(
@@ -259,7 +252,7 @@ async def sweep_round(
     for agent_id, nid in notices:
         await lifecycle.publish_notice_resolved(bus, agent_id, nid)
     progress.beat()
-    pruned_fire_log, torn_pointers, absent_fences = await _slow_phases(pool)
+    pruned_fire_log, stuck_pointers = await _slow_phases(pool)
     if (
         pages
         or sessions
@@ -267,22 +260,19 @@ async def sweep_round(
         or notices
         or reminded
         or pruned_fire_log
-        or torn_pointers
-        or absent_fences
+        or stuck_pointers
     ):
         _log.info(
             "[ttl-reaper] reclaimed %d page(s), %d web session(s), %d impersonation(s), "
             "%d notice(s); reminded %d impersonation lease(s); "
-            "pruned %d schedule fire-log row(s); found %d torn lifecycle pointer(s); "
-            "settled %d absent-machine lifecycle fence(s)",
+            "pruned %d schedule fire-log row(s); found %d stuck lifecycle pointer(s)",
             len(pages),
             sessions,
             impersonations,
             len(notices),
             reminded,
             pruned_fire_log,
-            torn_pointers,
-            absent_fences,
+            stuck_pointers,
         )
 
 
