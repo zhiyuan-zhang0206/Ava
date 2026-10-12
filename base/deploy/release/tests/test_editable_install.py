@@ -1,11 +1,10 @@
-"""Regression guards for the editable-install pointer shared by Ava lifecycle paths."""
+"""Regression guards for the read-only editable-install inspection shared by exec and health."""
 
 from __future__ import annotations
 
 import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import venv
@@ -21,136 +20,6 @@ def _write_pth(source_root: Path, target: Path) -> Path:
     pth.parent.mkdir(parents=True)
     pth.write_text(str(target))
     return pth
-
-
-def test_poisoned_missing_target_is_repaired_and_emits_warning_event(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A dangling target must not survive a guard pass without an audit event."""
-    source_root = tmp_path / "prod" / "source"
-    pth = _write_pth(source_root, tmp_path / "deleted-worktree")
-    pth.chmod(0o444)
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def record_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr("base.telemetry.emit", record_emit)
-
-    editable_install.repair_editable_ava_pth(source_root)
-
-    assert pth.read_text() == str(source_root)
-    assert stat.S_IMODE(pth.stat().st_mode) == 0o444
-    assert emitted == [
-        (
-            ("telemetry", "editable_pth_repaired"),
-            {
-                "level": "warning",
-                "source": "converge",
-                "attributes": {
-                    "pth_path": str(pth),
-                    "poisoned_target": str(tmp_path / "deleted-worktree"),
-                    "source_root": str(source_root),
-                },
-            },
-        )
-    ]
-
-
-def test_worktree_below_allowlisted_dev_clone_is_still_repaired(tmp_path: Path) -> None:
-    """Allowlisting a clone root must not implicitly allow its disposable worktrees."""
-    source_root = tmp_path / "prod" / "source"
-    dev_clone = tmp_path / "Ava"
-    worktree = dev_clone / ".worktrees" / "feature"
-    worktree.mkdir(parents=True)
-    pth = _write_pth(source_root, worktree)
-
-    editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
-
-    assert pth.read_text() == str(source_root)
-
-
-def test_exact_allowlisted_dev_clone_target_is_left_unchanged(tmp_path: Path) -> None:
-    """The allowlist is exact-root based, so an approved stable clone remains legal."""
-    source_root = tmp_path / "prod" / "source"
-    dev_clone = tmp_path / "Ava"
-    dev_clone.mkdir(parents=True)
-    pth = _write_pth(source_root, dev_clone)
-
-    editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
-
-    assert pth.read_text() == str(dev_clone)
-
-
-def test_repair_leaves_a_legal_single_line_pointer_byte_identical(tmp_path: Path) -> None:
-    """A single allowed source line is legal regardless of a trailing newline."""
-
-    source_root = tmp_path / "prod" / "source"
-    dev_clone = tmp_path / "Ava"
-    dev_clone.mkdir(parents=True)
-    pth = _write_pth(source_root, dev_clone)
-    pth.write_text(str(dev_clone))
-
-    editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
-
-    assert pth.read_bytes() == str(dev_clone).encode()
-
-
-def test_repair_leaves_uv_native_repeated_pth_entries_byte_identical(tmp_path: Path) -> None:
-    """uv's one-line-per-wheel pointer is legal when every line is allowed."""
-
-    source_root = tmp_path / "prod" / "source"
-    pth = _write_pth(source_root, source_root)
-    _write_direct_url(source_root, source_root.as_uri())
-    pth.write_text(f"{source_root}\n{source_root}")
-    before = pth.read_bytes()
-
-    assert editable_install.editable_install_violations(source_root) == ()
-    assert editable_install.repair_editable_ava_pth(source_root) == ()
-
-    assert pth.read_bytes() == before
-
-
-def test_repair_leaves_a_legal_source_pointer_without_trailing_newline(tmp_path: Path) -> None:
-    """Pointer legality is semantic rather than a trailing-newline byte form."""
-
-    source_root = tmp_path / "prod" / "source"
-    pth = _write_pth(source_root, source_root)
-    pth.write_text(str(source_root))
-
-    editable_install.repair_editable_ava_pth(source_root)
-
-    assert pth.read_bytes() == str(source_root).encode()
-
-
-def test_crlf_semantic_pth_is_read_without_repair(tmp_path: Path) -> None:
-    """Universal-newline reading accepts a CRLF pointer without changing its bytes."""
-
-    source_root = tmp_path / "prod" / "source"
-    pth = _write_pth(source_root, source_root)
-    _write_direct_url(source_root, source_root.as_uri())
-    pth.write_bytes(f"{source_root}\r\n".encode())
-    before = pth.read_bytes()
-
-    assert editable_install.editable_install_violations(source_root) == ()
-    assert editable_install.repair_editable_ava_pth(source_root) == ()
-    assert pth.read_bytes() == before
-
-
-def test_empty_pth_is_reported_and_repaired_to_source_content(tmp_path: Path) -> None:
-    """An empty pointer cannot be interpreted as a legal editable target."""
-
-    source_root = tmp_path / "prod" / "source"
-    pth = _write_pth(source_root, source_root)
-    _write_direct_url(source_root, source_root.as_uri())
-    pth.write_text("")
-
-    violations = editable_install.editable_install_violations(source_root)
-    editable_install.repair_editable_ava_pth(source_root)
-
-    assert len(violations) == 1
-    assert "names" in violations[0]
-    assert pth.read_bytes() == str(source_root).encode()
 
 
 def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> Path:
@@ -169,47 +38,129 @@ def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> 
     return du
 
 
-def test_missing_direct_url_beside_pth_is_reported_and_repaired(tmp_path: Path) -> None:
-    """A removed direct-URL record is the reverse half-uninstall direction."""
+def test_worktree_below_allowlisted_dev_clone_is_a_violation(tmp_path: Path) -> None:
+    """Allowlisting a clone root must not implicitly allow its disposable worktrees."""
+    source_root = tmp_path / "prod" / "source"
+    dev_clone = tmp_path / "Ava"
+    worktree = dev_clone / ".worktrees" / "feature"
+    worktree.mkdir(parents=True)
+    pth = _write_pth(source_root, worktree)
+    du = _write_direct_url(source_root, worktree.as_uri())
 
+    violations = editable_install.editable_install_violations(
+        source_root, allowed_roots=(dev_clone,)
+    )
+
+    assert len(violations) == 2
+    assert str(pth) in violations[0] and str(du) in violations[1]
+    assert pth.read_text() == str(worktree)  # inspection never rewrites
+
+
+def test_a_legal_pointer_is_clean_without_a_trailing_newline(tmp_path: Path) -> None:
+    """Pointer legality is semantic rather than a trailing-newline byte form."""
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_text(str(source_root))
+
+    assert editable_install.editable_install_violations(source_root) == ()
+
+
+def test_crlf_semantic_pth_is_clean(tmp_path: Path) -> None:
+    """Universal-newline reading accepts a CRLF pointer."""
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_bytes(f"{source_root}\r\n".encode())
+
+    assert editable_install.editable_install_violations(source_root) == ()
+
+
+def test_empty_pth_is_reported(tmp_path: Path) -> None:
+    """An empty pointer cannot be interpreted as a legal editable target."""
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_text("")
+
+    violations = editable_install.editable_install_violations(source_root)
+
+    assert len(violations) == 1
+    assert "names" in violations[0]
+    assert pth.read_text() == ""  # inspection never rewrites
+
+
+def test_missing_direct_url_beside_pth_is_reported(tmp_path: Path) -> None:
+    """A removed direct-URL record is a half-uninstall violation."""
     source_root = tmp_path / "prod" / "source"
     pth = _write_pth(source_root, source_root)
     direct_url = _write_direct_url(source_root, source_root.as_uri())
     direct_url.unlink()
 
     violations = editable_install.editable_install_violations(source_root)
-    repairs = editable_install.repair_editable_install(source_root)
 
     assert len(violations) == 1
     assert str(pth) in violations[0]
     assert "metadata missing" in violations[0]
-    assert json.loads(direct_url.read_text()) == {
-        "url": source_root.as_uri(),
-        "dir_info": {"editable": True},
-    }
-    assert repairs == (
-        editable_install.EditableInstallRepair(
-            path=direct_url,
-            poisoned_target="(missing)",
-            source_root=source_root,
-        ),
-    )
+    assert not direct_url.exists()  # the operator's `uv sync` recreates it, not inspection
 
 
-def test_missing_dist_info_beside_pth_is_reported_without_fabrication(tmp_path: Path) -> None:
-    """A missing directory supplies no version, so only uv may recreate it."""
-
+def test_missing_dist_info_beside_pth_is_reported(tmp_path: Path) -> None:
+    """A pointer with no dist-info directory at all is a half-uninstall violation."""
     source_root = tmp_path / "prod" / "source"
     pth = _write_pth(source_root, source_root)
 
     violations = editable_install.editable_install_violations(source_root)
-    repairs = editable_install.repair_editable_install(source_root)
 
     assert len(violations) == 1
     assert str(pth) in violations[0]
     assert "metadata missing" in violations[0]
-    assert repairs == ()
-    assert not list(pth.parent.glob("ava-*.dist-info"))
+
+
+def test_half_uninstall_pointer_missing_beside_metadata_is_reported(tmp_path: Path) -> None:
+    """Existing editable metadata makes a missing pointer a violation."""
+    source_root = tmp_path / "prod" / "source"
+    direct_url = _write_direct_url(source_root, source_root.as_uri())
+    pth = direct_url.parent.parent / editable_install.EDITABLE_PTH_NAME
+
+    violations = editable_install.editable_install_violations(source_root)
+
+    assert len(violations) == 1
+    assert str(pth) in violations[0]
+    assert "metadata present but pointer missing" in violations[0]
+    assert not pth.exists()
+
+
+def test_both_missing_records_are_clean(tmp_path: Path) -> None:
+    """A venv with no editable records has nothing to assert."""
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+
+    assert editable_install.editable_install_violations(source_root) == ()
+
+
+def test_non_editable_direct_url_is_a_violation(tmp_path: Path) -> None:
+    """A record denying editability contradicts the pointer beside it."""
+    source_root = tmp_path / "prod" / "source"
+    _write_pth(source_root, source_root)
+    du = _write_direct_url(source_root, source_root.as_uri(), editable=False)
+
+    violations = editable_install.editable_install_violations(source_root)
+
+    assert len(violations) == 1 and str(du) in violations[0]
+
+
+def test_exact_allowlisted_dev_clone_direct_url_is_clean(tmp_path: Path) -> None:
+    """The exact-root allowlist applies to the direct_url record too."""
+    source_root = tmp_path / "prod" / "source"
+    dev_clone = tmp_path / "Ava"
+    dev_clone.mkdir(parents=True)
+    _write_pth(source_root, dev_clone)
+    _write_direct_url(source_root, dev_clone.as_uri())
+
+    assert (
+        editable_install.editable_install_violations(source_root, allowed_roots=(dev_clone,)) == ()
+    )
 
 
 def test_editable_console_script_violations_follow_the_posix_venv_layout(tmp_path: Path) -> None:
@@ -229,147 +180,6 @@ def test_editable_console_script_violations_follow_the_posix_venv_layout(tmp_pat
     assert editable_install.editable_console_script_violations(source_root) == (
         f"{console_script} editable console script missing",
     )
-
-
-def test_poisoned_direct_url_is_repaired_and_emits_warning_event(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A direct_url naming a worktree is the same poison recorded elsewhere."""
-    source_root = tmp_path / "prod" / "source"
-    du = _write_direct_url(source_root, (tmp_path / "deleted-worktree").as_uri())
-    du.chmod(0o444)
-    original = du.read_text()
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def record_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr("base.telemetry.emit", record_emit)
-
-    editable_install.repair_editable_direct_url(source_root)
-
-    assert json.loads(du.read_text()) == {
-        "url": source_root.as_uri(),
-        "dir_info": {"editable": True},
-    }
-    assert stat.S_IMODE(du.stat().st_mode) == 0o444
-    assert emitted == [
-        (
-            ("telemetry", "editable_direct_url_repaired"),
-            {
-                "level": "warning",
-                "source": "converge",
-                "attributes": {
-                    "direct_url_path": str(du),
-                    "poisoned_target": original.strip(),
-                    "source_root": str(source_root),
-                },
-            },
-        )
-    ]
-
-
-def test_healthy_direct_url_is_left_unchanged(tmp_path: Path) -> None:
-    """A direct_url naming the source root itself must survive a guard pass."""
-    source_root = tmp_path / "prod" / "source"
-    du = _write_direct_url(source_root, source_root.as_uri())
-    original = du.read_text()
-
-    assert editable_install.repair_editable_direct_url(source_root) == ()
-    assert du.read_text() == original
-
-
-def test_exact_allowlisted_dev_clone_direct_url_is_left_unchanged(
-    tmp_path: Path,
-) -> None:
-    """The exact-root allowlist applies to the direct_url record too."""
-    source_root = tmp_path / "prod" / "source"
-    dev_clone = tmp_path / "Ava"
-    dev_clone.mkdir(parents=True)
-    du = _write_direct_url(source_root, dev_clone.as_uri())
-    original = du.read_text()
-
-    editable_install.repair_editable_direct_url(source_root, allowed_roots=(dev_clone,))
-
-    assert du.read_text() == original
-
-
-def test_worktree_below_allowlisted_dev_clone_direct_url_is_repaired(
-    tmp_path: Path,
-) -> None:
-    """Allowlisting a clone root must not implicitly allow its disposable worktrees."""
-    source_root = tmp_path / "prod" / "source"
-    dev_clone = tmp_path / "Ava"
-    worktree = dev_clone / ".worktrees" / "feature"
-    worktree.mkdir(parents=True)
-    du = _write_direct_url(source_root, worktree.as_uri())
-
-    editable_install.repair_editable_direct_url(source_root, allowed_roots=(dev_clone,))
-
-    assert json.loads(du.read_text())["url"] == source_root.as_uri()
-
-
-def test_unparsable_direct_url_is_repaired(tmp_path: Path) -> None:
-    """A truncated or garbage record must not survive without a repair."""
-    source_root = tmp_path / "prod" / "source"
-    du = (
-        source_root
-        / ".venv"
-        / "lib"
-        / "python3.12"
-        / "site-packages"
-        / "ava-0.1.5.dist-info"
-        / "direct_url.json"
-    )
-    du.parent.mkdir(parents=True)
-    du.write_text("{not json")
-
-    editable_install.repair_editable_direct_url(source_root)
-
-    assert json.loads(du.read_text()) == {
-        "url": source_root.as_uri(),
-        "dir_info": {"editable": True},
-    }
-
-
-def test_non_editable_direct_url_is_repaired(tmp_path: Path) -> None:
-    """A record denying editability contradicts the pointer beside it."""
-    source_root = tmp_path / "prod" / "source"
-    du = _write_direct_url(source_root, source_root.as_uri(), editable=False)
-
-    editable_install.repair_editable_direct_url(source_root)
-
-    assert json.loads(du.read_text()) == {
-        "url": source_root.as_uri(),
-        "dir_info": {"editable": True},
-    }
-
-
-def test_repair_editable_install_repairs_pointer_and_direct_url(tmp_path: Path) -> None:
-    """The combined entry point leaves neither record pointing at a worktree."""
-    source_root = tmp_path / "prod" / "source"
-    pth = _write_pth(source_root, tmp_path / "deleted-worktree")
-    du = _write_direct_url(source_root, (tmp_path / "deleted-worktree").as_uri())
-
-    repairs = editable_install.repair_editable_install(source_root)
-
-    assert pth.read_text() == str(source_root)
-    assert json.loads(du.read_text())["url"] == source_root.as_uri()
-    assert len(repairs) == 2
-
-
-def test_repair_leaves_no_temp_file_behind(tmp_path: Path) -> None:
-    """The atomic-write repair must not accumulate temp files in site-packages."""
-    source_root = tmp_path / "prod" / "source"
-    _write_pth(source_root, tmp_path / "deleted-worktree")
-    _write_direct_url(source_root, (tmp_path / "deleted-worktree").as_uri())
-
-    editable_install.repair_editable_install(source_root)
-
-    assert list(source_root.rglob("*.tmp")) == []
-
-
-# ─── read-only violations report (public twin of the repair primitives) ─────
 
 
 def test_editable_install_violations_healthy_is_empty(tmp_path: Path) -> None:
@@ -393,37 +203,6 @@ def test_editable_install_violations_accepts_repeated_checkout_pth_entries(
     pth.write_text(f"{source_root}\n{source_root}")
 
     assert editable_install.editable_install_violations(source_root) == ()
-
-
-def test_editable_install_violations_both_missing_records_are_empty(tmp_path: Path) -> None:
-    """A venv with no editable records has nothing to assert or repair."""
-    source_root = tmp_path / "prod" / "source"
-    source_root.mkdir(parents=True)
-
-    assert editable_install.editable_install_violations(source_root) == ()
-    assert editable_install.repair_editable_install(source_root) == ()
-
-
-def test_half_uninstall_pointer_missing_beside_metadata_is_repaired(tmp_path: Path) -> None:
-    """Existing editable metadata makes a missing pointer a repairable violation."""
-    source_root = tmp_path / "prod" / "source"
-    direct_url = _write_direct_url(source_root, source_root.as_uri())
-    pth = direct_url.parent.parent / editable_install.EDITABLE_PTH_NAME
-
-    violations = editable_install.editable_install_violations(source_root)
-
-    assert len(violations) == 1
-    assert str(pth) in violations[0]
-    assert "metadata present but pointer missing" in violations[0]
-    repairs = editable_install.repair_editable_install(source_root)
-    assert pth.read_text() == str(source_root)
-    assert repairs == (
-        editable_install.EditableInstallRepair(
-            path=pth,
-            poisoned_target="(missing)",
-            source_root=source_root,
-        ),
-    )
 
 
 def test_editable_install_violations_allowlisted_clone_is_empty(tmp_path: Path) -> None:
@@ -467,80 +246,6 @@ def test_editable_install_violations_unparsable_record_is_reported(
     violations = editable_install.editable_install_violations(source_root)
 
     assert len(violations) == 1 and str(record) in violations[0]
-
-
-def test_editable_import_gate_requires_the_checkout_editable_import(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The gate rejects a poisoned pointer and a cwd decoy outside the checkout."""
-
-    source_root = tmp_path / "source"
-    agent_package = source_root / "agent"
-    agent_package.mkdir(parents=True)
-    (agent_package / "__init__.py").write_text("")
-    (agent_package / "execution").mkdir()
-    (agent_package / "execution" / "__init__.py").write_text("")
-    (agent_package / "execution" / "child.py").write_text("VALUE = 'source'\n")
-    subprocess.run(  # noqa: S603 — test-owned interpreter and venv path
-        [sys.executable, "-m", "venv", str(source_root / ".venv")],
-        check=True,
-        capture_output=True,
-    )
-    interpreter = editable_install.venv_python(source_root)
-    assert interpreter is not None
-    site_packages = Path(
-        subprocess.check_output(  # noqa: S603 — test-owned interpreter and venv path
-            [str(interpreter), "-c", "import site; print(site.getsitepackages()[0])"],
-            text=True,
-        ).strip()
-    )
-    pth = site_packages / editable_install.EDITABLE_PTH_NAME
-    pth.write_text(f"{source_root}\n")
-
-    assert editable_install.editable_import_gate(source_root) == ()
-
-    allowed_root = tmp_path / "Ava"
-    allowed_agent = allowed_root / "agent"
-    allowed_agent.mkdir(parents=True)
-    (allowed_agent / "__init__.py").write_text("")
-    (allowed_agent / "execution").mkdir()
-    (allowed_agent / "execution" / "__init__.py").write_text("")
-    (allowed_agent / "execution" / "child.py").write_text("VALUE = 'allowed'\n")
-    pth.write_text(str(allowed_root))
-
-    assert (
-        editable_install.editable_import_gate(
-            source_root,
-            allowed_roots=(allowed_root,),
-        )
-        == ()
-    )
-
-    pth.write_text(f"{tmp_path / 'missing'}\n")
-    assert editable_install.editable_import_gate(source_root)
-
-    neutral_dir = tmp_path / "neutral"
-    decoy = neutral_dir / "agent"
-    decoy.mkdir(parents=True)
-    (decoy / "__init__.py").write_text("")
-    (decoy / "execution").mkdir()
-    (decoy / "execution" / "__init__.py").write_text("")
-    (decoy / "execution" / "child.py").write_text("VALUE = 'decoy'\n")
-    pth.write_text(f"{neutral_dir}\n")
-    monkeypatch.setattr(editable_install.tempfile, "gettempdir", lambda: str(neutral_dir))
-    violations = editable_install.editable_import_gate(source_root)
-
-    assert len(violations) == 1
-    assert "path=" in violations[0]
-    assert str(decoy / "execution" / "child.py") in violations[0]
-
-    for candidate in (
-        source_root / ".venv" / "bin" / "python3",
-        source_root / ".venv" / "bin" / "python",
-    ):
-        candidate.unlink(missing_ok=True)
-
-    assert editable_install.editable_import_gate(source_root) == ("venv python missing",)
 
 
 _GUARD_PROBE = Path(__file__).with_name("_guard_probe_child.py")

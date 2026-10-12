@@ -42,15 +42,14 @@ def core_metrics() -> list[MetricSpec]:
                 'event_name=~"checkpoint_write_failed'
                 "|compact_turn_aborted|dangling_tool_pairing_repaired"
                 "|db_pool_acquire_slow"
-                "|db_pool_acquire_timeout|delivery_stalled|editable_pth_repaired"
+                "|db_pool_acquire_timeout|delivery_stalled"
                 "|error_resolved|event_log_drop|exec_cancelled|exec_failed"
                 "|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout"
                 "|host_dispatcher_bad_channel"
                 "|host_turn_crashed|host_turn_uncancellable|label_generate_failed"
                 "|llm_cancelled|llm_provider_error|llm_turn_aborted"
                 "|page_restore_failed|page_restore_query_failed|page_serve_dir_missing"
-                "|pgbouncer_repaired|screen_capture_notify_failed|sse_drop|stream_overloaded_retry"
-                '|stream_stall_pair_terminated|stream_stalled_retry|warning_resolved")))'
+                '|screen_capture_notify_failed|sse_drop|warning_resolved")))'
             ),
             target_names=["events"],
             width=24,

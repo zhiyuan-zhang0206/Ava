@@ -1,51 +1,31 @@
-"""Guard the editable Ava install in a checkout's virtualenv.
+"""Inspect the editable Ava install in a checkout's virtualenv.
 
 uv writes ``_editable_impl_ava.pth`` into the active virtualenv, and records
 the editable source URL in the matching ``*.dist-info/direct_url.json``. A
 polluted ``VIRTUAL_ENV`` can therefore make a worktree install repoint a
-long-lived checkout's interpreter at disposable source. Lifecycle callers use
-the repair primitives for the prod checkout only; update callers use the write
-window so an operator's emergency read-only mode does not block a legitimate
-sync. The exec boundary runs the read/repair guard for every child spawn: its
-few file stats are negligible beside a process spawn, and deliberately remain
-uncached so a newly poisoned install cannot evade the next execution.
+long-lived checkout's interpreter at disposable source. This module only reads
+the install: the exec boundary refuses to spawn a child from a violating
+interpreter and the health probe reports the violation. The few file stats are
+negligible beside a process spawn, and deliberately remain uncached so a newly
+poisoned install cannot evade the next execution. Nothing here rewrites an
+install; the fix for a violation is a locked ``uv sync`` run by the operator.
 
 A failed sync that removes either the pointer or its ``direct_url.json``
-metadata is a half-uninstall, not a missing-install no-op. The repair guard
-recreates a missing record when its sibling still identifies the install before
-converge or an exec child proceeds.
+metadata is a half-uninstall, not a missing-install no-op, and is reported as a
+violation.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import stat
-import subprocess
 import sys
-import tempfile
-from collections.abc import Generator, Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
-import base.telemetry
-from base.host.atomic_io import write_text_atomic
-
 EDITABLE_PTH_NAME = "_editable_impl_ava.pth"
 EDITABLE_DIST_INFO_GLOB = "ava-*.dist-info/direct_url.json"
-_IMPORT_GATE_TIMEOUT_S = 60
-_IMPORT_GATE_CODE = "import agent.execution.child; print(agent.execution.child.__file__)"
-
-
-@dataclass(frozen=True)
-class EditableInstallRepair:
-    """One poisoned editable-install record replaced with the checkout it belongs to."""
-
-    path: Path
-    poisoned_target: str
-    source_root: Path
 
 
 def editable_ava_pth_paths(source_root: Path) -> tuple[Path, ...]:
@@ -53,7 +33,7 @@ def editable_ava_pth_paths(source_root: Path) -> tuple[Path, ...]:
 
     Virtualenvs use ``lib/pythonX.Y/site-packages`` (or ``lib64``). Scan those
     layouts explicitly rather than deriving one from the running interpreter:
-    stale Python-version directories should be repaired together rather than
+    stale Python-version directories are validated together rather than
     leaving a dormant poisoned pointer.
     """
 
@@ -106,82 +86,6 @@ def _pth_paths_without_sibling_direct_url(source_root: Path) -> tuple[Path, ...]
     return tuple(sorted(missing, key=str))
 
 
-def _missing_editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
-    """Missing direct-URL files under an existing sibling Ava dist-info dir.
-
-    A pointer with no dist-info directory at all is reported but not repaired:
-    this module cannot know the distribution version needed to fabricate a
-    directory. A later verified ``uv sync`` owns that recovery.
-    """
-
-    missing: list[Path] = []
-    for pth_path in _pth_paths_without_sibling_direct_url(source_root):
-        dist_infos = sorted(
-            (path for path in pth_path.parent.glob("ava-*.dist-info") if path.is_dir()),
-            key=str,
-        )
-        if dist_infos:
-            missing.append(dist_infos[0] / "direct_url.json")
-    return tuple(missing)
-
-
-def editable_site_packages_dirs(source_root: Path) -> tuple[Path, ...]:
-    """Existing site-packages directories under ``source_root/.venv``.
-
-    Discover layouts structurally rather than through Ava's editable-install
-    records. A partially failed sync can remove those records while leaving a
-    read-only directory that a later sync must still be able to open.
-    """
-
-    venv = source_root / ".venv"
-    matches: set[Path] = set()
-    for pattern in (
-        "lib/python*/site-packages",
-        "lib64/python*/site-packages",
-    ):
-        matches.update(path for path in venv.glob(pattern) if path.is_dir())
-    return tuple(sorted(matches, key=str))
-
-
-def editable_dist_info_dirs(source_root: Path) -> tuple[Path, ...]:
-    """Existing ``ava-*.dist-info`` directories under ``source_root/.venv``.
-
-    The structural scan mirrors :func:`editable_site_packages_dirs` and is
-    deliberately independent of the editable-install records: a converged host
-    may carry a read-only ``0o555`` dist-info directory from an earlier
-    protection pass, and uv's reinstall uninstall removes the files *inside*
-    that directory before it can rewrite the distribution — operations that
-    need owner write on the directory itself, not only on its parent
-    site-packages.
-    """
-
-    venv = source_root / ".venv"
-    matches: set[Path] = set()
-    for pattern in (
-        "lib/python*/site-packages/ava-*.dist-info",
-        "lib64/python*/site-packages/ava-*.dist-info",
-    ):
-        matches.update(path for path in venv.glob(pattern) if path.is_dir())
-    return tuple(sorted(matches, key=str))
-
-
-def protected_editable_paths(source_root: Path) -> tuple[Path, ...]:
-    """Existing directories every write window opens.
-
-    Earlier converge protection passes left these read-only (``0o555``) on
-    existing hosts. Discover bin even if a half-uninstall removed the launcher
-    or records.
-    """
-
-    dist_infos = editable_dist_info_dirs(source_root)
-    bin_dir = source_root / ".venv" / "bin"
-    return (
-        *editable_site_packages_dirs(source_root),
-        *dist_infos,
-        *((bin_dir,) if bin_dir.is_dir() else ()),
-    )
-
-
 def _normalized_exact_path(path: Path) -> str:
     """Platform-native exact path identity."""
 
@@ -203,118 +107,6 @@ def _pth_content_is_allowed(raw_text: str, allowed_roots: frozenset[str]) -> boo
         return all(_normalized_exact_path(Path(target)) in allowed_roots for target in targets)
     except (OSError, ValueError):
         return False
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Replace ``path`` through a unique same-directory temp file.
-
-    A crash mid-write must never leave a half-written pointer: the next
-    interpreter would parse a truncated target, which the allowlist rejects
-    and the next converge pass repairs — but only after this process already
-    failed to start on it.
-    """
-
-    write_text_atomic(path, text, mode=0o644, sync_file=False, sync_parent=False)
-
-
-def _restore_mode(path: Path, mode: int) -> None:
-    """Restore an existing path, including a replacement at the same location."""
-    with contextlib.suppress(FileNotFoundError):
-        path.chmod(mode)
-
-
-@contextlib.contextmanager
-def _write_window(paths: Iterable[Path]) -> Generator[None, None, None]:
-    """Temporarily add owner-write to read-only files, then restore it.
-
-    The exact original mode is restored in ``finally`` on both successful and
-    failed writes. If a writer atomically replaces the file, the replacement
-    receives the original protection too. Paths that disappear before entry
-    are skipped because a recreated virtualenv has no prior mode to restore.
-    """
-
-    # Register rollback before each mutation. ExitStack unwinds partial entry
-    # and attempts every restore even if one callback raises; errors propagate.
-    with contextlib.ExitStack() as restore:
-        for path in paths:
-            try:
-                mode = stat.S_IMODE(path.stat().st_mode)
-                if mode & stat.S_IWUSR:
-                    continue
-                restore.callback(_restore_mode, path, mode)
-                path.chmod(mode | stat.S_IWUSR)
-            except FileNotFoundError:
-                continue
-        yield
-
-
-@contextlib.contextmanager
-def editable_pth_write_window(source_root: Path) -> Generator[None, None, None]:
-    """Temporarily open protected Ava records and their directories, then restore.
-
-    The exact original mode is restored in ``finally`` on both successful and
-    failed syncs. Directory access covers uv's atomic replacement and the
-    reinstall uninstall of hardened ``ava-*.dist-info`` and ``.venv/bin``
-    directories, while file access keeps direct repair compatible with the
-    legacy file-level guard. Partial entry also restores earlier permissions.
-    """
-
-    records = editable_ava_pth_paths(source_root) + editable_direct_url_paths(source_root)
-    with _write_window((*protected_editable_paths(source_root), *records)):
-        yield
-
-
-def repair_editable_ava_pth(
-    source_root: Path,
-    *,
-    allowed_roots: Iterable[Path] = (),
-) -> tuple[EditableInstallRepair, ...]:
-    """Repair missing or illegal pointers to the resolved source root.
-
-    An allowlisted clone root is legal only as that exact path. Its
-    ``.worktrees/*`` descendants remain disposable and are repaired. A missing
-    pointer beside an existing Ava ``direct_url.json`` is a failed-sync
-    half-uninstall and is recreated.
-    """
-
-    resolved_source = source_root.expanduser().resolve(strict=False)
-    normalized_allowed = frozenset(
-        {_normalized_exact_path(resolved_source)}
-        | {_normalized_exact_path(root) for root in allowed_roots}
-    )
-    pending_repairs: dict[Path, tuple[str, str]] = {
-        path: ("(missing)", str(resolved_source))
-        for path in _missing_editable_ava_pth_paths(resolved_source)
-    }
-    for pth_path in editable_ava_pth_paths(resolved_source):
-        raw_text = pth_path.read_text()
-        if _pth_content_is_allowed(raw_text, normalized_allowed):
-            continue
-        pending_repairs[pth_path] = (raw_text.strip() or "(empty)", str(resolved_source))
-    repairs: list[EditableInstallRepair] = []
-    for pth_path, (poisoned_target, target) in sorted(
-        pending_repairs.items(), key=lambda item: str(item[0])
-    ):
-        with editable_pth_write_window(resolved_source):
-            _atomic_write_text(pth_path, target)
-        repair = EditableInstallRepair(
-            path=pth_path,
-            poisoned_target=poisoned_target,
-            source_root=resolved_source,
-        )
-        repairs.append(repair)
-        base.telemetry.emit(
-            "telemetry",
-            "editable_pth_repaired",
-            level="warning",
-            source="converge",
-            attributes={
-                "pth_path": str(pth_path),
-                "poisoned_target": poisoned_target,
-                "source_root": str(resolved_source),
-            },
-        )
-    return tuple(repairs)
 
 
 def _direct_url_is_allowed(raw_text: str, allowed_urls: frozenset[str]) -> bool:
@@ -345,71 +137,6 @@ def _direct_url_is_allowed(raw_text: str, allowed_urls: frozenset[str]) -> bool:
     return url.rstrip("/") in allowed_urls
 
 
-def repair_editable_direct_url(
-    source_root: Path,
-    *,
-    allowed_roots: Iterable[Path] = (),
-) -> tuple[EditableInstallRepair, ...]:
-    """Repair ``direct_url.json`` records outside the exact source-root allowlist.
-
-    The pointer and the URL must agree: a URL naming a worktree is the same
-    poison recorded elsewhere, and a later ``uv sync`` inside the venv would
-    install from it.
-    """
-
-    resolved_source = source_root.expanduser().resolve(strict=False)
-    allowed_urls = frozenset(
-        {resolved_source.as_uri()}
-        | {root.expanduser().resolve(strict=False).as_uri() for root in allowed_roots}
-    )
-    pending_repairs = dict.fromkeys(
-        _missing_editable_direct_url_paths(resolved_source), "(missing)"
-    )
-    for path in editable_direct_url_paths(resolved_source):
-        raw_text = path.read_text()
-        if _direct_url_is_allowed(raw_text, allowed_urls):
-            continue
-        pending_repairs[path] = raw_text.strip() or "(empty)"
-    repairs: list[EditableInstallRepair] = []
-    for path, poisoned_target in sorted(pending_repairs.items(), key=lambda item: str(item[0])):
-        repaired = json.dumps(
-            {"url": resolved_source.as_uri(), "dir_info": {"editable": True}},
-            separators=(",", ":"),
-        )
-        with editable_pth_write_window(resolved_source):
-            _atomic_write_text(path, repaired)
-        repair = EditableInstallRepair(
-            path=path,
-            poisoned_target=poisoned_target,
-            source_root=resolved_source,
-        )
-        repairs.append(repair)
-        base.telemetry.emit(
-            "telemetry",
-            "editable_direct_url_repaired",
-            level="warning",
-            source="converge",
-            attributes={
-                "direct_url_path": str(path),
-                "poisoned_target": poisoned_target,
-                "source_root": str(resolved_source),
-            },
-        )
-    return tuple(repairs)
-
-
-def repair_editable_install(
-    source_root: Path,
-    *,
-    allowed_roots: Iterable[Path] = (),
-) -> tuple[EditableInstallRepair, ...]:
-    """Repair every poisoned editable-install record (pointer + ``direct_url``)."""
-
-    return repair_editable_ava_pth(
-        source_root, allowed_roots=allowed_roots
-    ) + repair_editable_direct_url(source_root, allowed_roots=allowed_roots)
-
-
 def editable_install_violations(
     source_root: Path,
     *,
@@ -417,17 +144,15 @@ def editable_install_violations(
 ) -> tuple[str, ...]:
     """Human-readable allowlist violations of a checkout's editable install.
 
-    The read-only twin of the repair primitives: discovers the same records
-    (the ``.pth`` pointer and every ``direct_url.json``) and validates them
-    against the same exact-root allowlist, but never writes. The health probe
-    reports through this function so its detection can never drift from the
-    converge guard's repair semantics. A record that cannot be read is
-    reported as a violation rather than crashing the caller.
+    Discovers every record (the ``.pth`` pointer and every ``direct_url.json``)
+    and validates them against the exact-root allowlist; it never writes. The
+    health probe and the exec boundary report through this one function. A record
+    that cannot be read is reported as a violation rather than crashing the
+    caller.
 
-    Returns an empty tuple when every record is legal. Both editable
-    records missing is a no-op, while a missing pointer or metadata beside its
-    existing sibling is a half-uninstall violation repaired by the write side
-    when the sibling supplies enough information.
+    Returns an empty tuple when every record is legal. Both editable records
+    missing is a no-op, while a missing pointer or metadata beside its existing
+    sibling is a half-uninstall violation.
     """
 
     resolved_source = source_root.expanduser().resolve(strict=False)
@@ -493,90 +218,6 @@ def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
     if console_script.exists():
         return ()
     return (f"{console_script} editable console script missing",)
-
-
-def _stderr_tail(stderr: str | bytes | None) -> str:
-    """Keep import-gate diagnostics useful without flooding lifecycle output."""
-
-    if stderr is None:
-        return ""
-    if isinstance(stderr, bytes):
-        stderr = stderr.decode("utf-8", errors="replace")
-    return stderr[-1000:].strip()
-
-
-def _run_import_probe(interpreter: Path) -> subprocess.CompletedProcess[str] | str:
-    """The import probe's result, or the gate's failure line when it could not run."""
-    env = {
-        key: value for key, value in os.environ.items() if key not in {"VIRTUAL_ENV", "PYTHONPATH"}
-    }
-    try:
-        return subprocess.run(  # noqa: S603 — checkout venv interpreter, never user input
-            [str(interpreter), "-I", "-c", _IMPORT_GATE_CODE],
-            cwd=tempfile.gettempdir(),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=_IMPORT_GATE_TIMEOUT_S,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return (
-            "editable import gate failed "
-            f"(rc=timeout; stderr={_stderr_tail(exc.stderr)!r}; path='')"
-        )
-    except OSError as exc:
-        return f"editable import gate failed (rc=spawn-error; stderr={str(exc)!r}; path='')"
-
-
-def _resolved_absolute(path_text: str) -> Path | None:
-    """`path_text` resolved, or None when it is not an absolute, resolvable path."""
-    try:
-        reported_path = Path(path_text)
-        if not reported_path.is_absolute():
-            return None
-        return reported_path.resolve(strict=False)
-    except (OSError, ValueError):
-        return None
-
-
-def editable_import_gate(
-    source_root: Path,
-    *,
-    allowed_roots: Iterable[Path] = (),
-) -> tuple[str, ...]:
-    """Prove the checkout venv imports ``agent.execution.child`` through its pointer.
-
-    The probe deliberately starts in the platform temp directory and removes
-    ``VIRTUAL_ENV``/``PYTHONPATH`` from its environment. Neither the checkout
-    cwd nor a parent virtualenv can therefore mask a broken editable install.
-    """
-
-    resolved_source = source_root.expanduser().resolve(strict=False)
-    interpreter = venv_python(resolved_source)
-    if interpreter is None:
-        return ("venv python missing",)
-    result = _run_import_probe(interpreter)
-    if isinstance(result, str):
-        return (result,)
-
-    output_lines = result.stdout.splitlines()
-    path_text = output_lines[0].strip() if len(output_lines) == 1 else result.stdout.strip()
-    diagnostic = (
-        f"rc={result.returncode}; stderr={_stderr_tail(result.stderr)!r}; path={path_text!r}"
-    )
-    if result.returncode != 0 or len(output_lines) != 1 or not path_text:
-        return (f"editable import gate failed ({diagnostic})",)
-    imported_path = _resolved_absolute(path_text)
-    if imported_path is None:
-        return (f"editable import gate failed ({diagnostic})",)
-    allowed_source_roots = (
-        resolved_source,
-        *(root.expanduser().resolve(strict=False) for root in allowed_roots),
-    )
-    if not any(imported_path.is_relative_to(root) for root in allowed_source_roots):
-        return (f"editable import gate failed ({diagnostic})",)
-    return ()
 
 
 def current_interpreter_source_root() -> Path | None:

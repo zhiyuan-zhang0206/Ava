@@ -30,7 +30,7 @@ Raw HTTPX network and timeout errors are normalized only around the direct model
 invoke or iterator await. A transport error from an output callback or another
 service is unknown to the node's retry policy. Explicit stream stalls and the
 configured overload recovery keeps its existing contract.
-Only an expired owned model deadline grants a stall or stall-pair retry; a
+Only an expired owned model deadline grants a stall retry; a
 plain `TimeoutError` raised by model code, metadata or output delivery does not.
 External cancellation always propagates.
 

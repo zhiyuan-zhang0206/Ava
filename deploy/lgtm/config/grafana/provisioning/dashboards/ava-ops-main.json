@@ -1356,7 +1356,7 @@
    },
    "targets": [
     {
-     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"checkpoint_write_failed|compact_turn_aborted|dangling_tool_pairing_repaired|db_pool_acquire_slow|db_pool_acquire_timeout|delivery_stalled|editable_pth_repaired|error_resolved|event_log_drop|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|label_generate_failed|llm_cancelled|llm_provider_error|llm_turn_aborted|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|pgbouncer_repaired|screen_capture_notify_failed|sse_drop|stream_overloaded_retry|stream_stall_pair_terminated|stream_stalled_retry|warning_resolved\")))",
+     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"checkpoint_write_failed|compact_turn_aborted|dangling_tool_pairing_repaired|db_pool_acquire_slow|db_pool_acquire_timeout|delivery_stalled|error_resolved|event_log_drop|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|label_generate_failed|llm_cancelled|llm_provider_error|llm_turn_aborted|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|screen_capture_notify_failed|sse_drop|warning_resolved\")))",
      "refId": "A",
      "legendFormat": "events",
      "datasource": {
@@ -2002,7 +2002,7 @@
    },
    "title": "LLM errors (per minute)",
    "type": "timeseries",
-   "description": "LLM failure signals per minute (5-minute buckets / 5): llm_provider_error (provider rejection / classification error), stream_stalled_retry (stalled stream retry), llm_turn_aborted (turn aborted after retries exhausted), stream_overloaded_retry (overload retry). The event_name field is spec metadata; the query covers all 4 failure events (all telemetry).",
+   "description": "LLM failure signals per minute (5-minute buckets / 5): llm_provider_error (provider rejection / classification error) and llm_turn_aborted (turn aborted after retries exhausted). The event_name field is spec metadata; the query covers both failure events (all telemetry).",
    "targets": [
     {
      "datasource": {
@@ -2021,32 +2021,10 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"stream_stalled_retry\"} | json | category=\"telemetry\" [5m])) / 5",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_turn_aborted\"} | json | category=\"telemetry\" [5m])) / 5",
      "refId": "B",
      "queryType": "range",
-     "legendFormat": "stalled_retry"
-    },
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"llm_turn_aborted\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "C",
-     "queryType": "range",
      "legendFormat": "turn_aborted"
-    },
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"stream_overloaded_retry\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "D",
-     "queryType": "range",
-     "legendFormat": "overloaded_retry"
     }
    ]
   },
@@ -2149,93 +2127,12 @@
    ]
   },
   {
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
-    }
-   },
-   "gridPos": {
-    "h": 7,
-    "w": 12,
-    "x": 0,
-    "y": 98
-   },
-   "id": 53,
-   "options": {
-    "legend": {
-     "calcs": [
-      "mean",
-      "max",
-      "last"
-     ],
-     "displayMode": "table",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   },
-   "title": "Provider stalls (per minute)",
-   "type": "timeseries",
-   "description": "Provider stall health per minute (5-minute buckets / 5): stream_stalled_retry counted by vendor \u2014 a stalled stream segment (first-chunk / mid-stream gap / total-duration bound) was retried; the vendor dimension is the provider-health read added with the deepseek stall-wave mitigation (task #3884) \u2014 plus stream_stall_pair_terminated (two adjacent stalls: the stream segment and its non-streaming fallback both timed out, so the call was terminated early for the delayed stall-retry schedule). The pair event is deliberately outside LLM_ERROR_FAMILY (it co-emits 1:1 with the adjacent stall, which the family already counts) \u2014 this panel and the ava-ops-llm-stall-pair rule are its display surface (task #3948). event_name='stream_stalled_retry' + 'stream_stall_pair_terminated', category='telemetry'.",
-   "targets": [
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "sum by (attributes_vendor) (count_over_time({service_name=\"unknown_service\", event_name=\"stream_stalled_retry\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "A",
-     "queryType": "range",
-     "legendFormat": "{{attributes_vendor}}"
-    },
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"stream_stall_pair_terminated\"} | json | category=\"telemetry\" [5m])) / 5",
-     "refId": "B",
-     "queryType": "range",
-     "legendFormat": "stall pairs"
-    }
-   ]
-  },
-  {
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 105
+    "y": 98
    },
    "id": 2003,
    "panels": [],
@@ -2277,7 +2174,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 106
+    "y": 99
    },
    "id": 19,
    "options": {
@@ -2380,7 +2277,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 106
+    "y": 99
    },
    "id": 20,
    "options": {
@@ -2460,7 +2357,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 113
+    "y": 106
    },
    "id": 24,
    "options": {
@@ -2541,7 +2438,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 113
+    "y": 106
    },
    "id": 21,
    "options": {
@@ -3693,66 +3590,6 @@
        {
         "color": "green",
         "value": null
-       }
-      ]
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 4,
-    "w": 6,
-    "x": 6,
-    "y": 170
-   },
-   "id": 52,
-   "options": {
-    "colorMode": "value",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "orientation": "auto",
-    "reduceOptions": {
-     "calcs": [
-      "last"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "textMode": "auto"
-   },
-   "title": "Delivery poisoned (window)",
-   "type": "stat",
-   "description": "Windowed delivery_poisoned total \u2014 a delivery-watchdog row signal (a raw window count, not a per-minute rate). event_name='delivery_poisoned', category='telemetry'.",
-   "targets": [
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_poisoned\"} | json | category=\"telemetry\" [$__range]))",
-     "refId": "A",
-     "queryType": "instant",
-     "legendFormat": "poisoned"
-    }
-   ]
-  },
-  {
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
        },
        {
         "color": "red",
@@ -3776,7 +3613,7 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 12,
+    "x": 6,
     "y": 170
    },
    "id": 9,

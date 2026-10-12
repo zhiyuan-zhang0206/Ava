@@ -33,9 +33,8 @@ The three normalizations (each applied to both sides before comparison):
   spec sets no custom (the compaction pair and the cost barchart lacked it;
   the render gives every chart the one standard look).
 
-All 85 panels are covered since S2 (task #3697) registered the last 18 and
-task #3948 added the provider-stall panel, task #2174 the exec-envelope
-size/serialize pair; the fixture-only worklist
+All panels are covered since S2 (task #3697) registered the last 18 and
+task #2174 added the exec-envelope size/serialize pair; the fixture-only worklist
 (``_S2_PENDING``) is empty. The fidelity lock compares panel content AND
 geometry (gridPos) panel-for-panel; the layout replay separately locks the
 engine on the fixture's full 97-entry geometry.
