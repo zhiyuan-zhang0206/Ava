@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.agents import router as agent_router
+from gateway.agents import creation as agent_creation
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import spawn_via_http
@@ -20,7 +20,7 @@ def client(monkeypatch: pytest.MonkeyPatch, set_machine_identity):
     async def accept(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
     with TestClient(app) as value:
         yield value
 
@@ -79,7 +79,7 @@ def test_creation_retry_does_not_resurrect_terminated_agent(
     async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise AssertionError("a creation retry must not launch later terminated work")
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", unexpected)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
     retry = spawn_via_http(client, body, key=key)
     assert retry.status_code == 201
     assert retry.json()["id"] == agent_id

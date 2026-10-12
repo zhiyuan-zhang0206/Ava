@@ -114,10 +114,10 @@ from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.http.auth import rejection_log
 from gateway.http.auth import router as auth_router
-from gateway.http.auth.cors import cors_allowed_origins
 from gateway.http.auth.request_principal import SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
 from gateway.http.middleware import latency, pause_policy, runtime_metrics
+from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
 from gateway.http.middleware.error_handlers import (
     ava_agent_error_handler,
@@ -686,4 +686,4 @@ def main() -> None:
     # Task #3621: the gateway is on the full-validation whitelist — build the
     # eager config chain at the entry, before serving.
     ensure_eager()
-    _run_gateway()
+    _run_gateway(app=app)

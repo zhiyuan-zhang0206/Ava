@@ -18,6 +18,7 @@ from base.events.live.announce import publish_agent_spawned_sync, publish_task_c
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.log import logger
+from gateway.agents import creation
 from gateway.agents.creation import recover_launch, scoped_creation_key
 from gateway.agents.task_assignment.receipts import existing_assignment, save_assignment
 from gateway.agents.task_assignment.schemas import (
@@ -159,8 +160,6 @@ async def post_task_assignment(
     raw = body.model_dump(mode="json")
     result = await asyncio.to_thread(lookup_assignment, pool, key, raw)
     if result is None:
-        from gateway.agents import router as agent_router
-
         target = (
             body.agent.machine
             if body.agent.machine is not None
@@ -174,7 +173,7 @@ async def post_task_assignment(
         )
         try:
             preset_name, _, _ = await asyncio.to_thread(
-                agent_router._spawn_preflight_blocking,
+                creation.spawn_preflight_blocking,
                 db,
                 target,
                 spawn,

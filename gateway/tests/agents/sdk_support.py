@@ -64,8 +64,8 @@ def sdk_via_gateway(
         raising=False,
     )
     from base.cluster import machines as _machines
+    from gateway.agents import creation as _agents_creation
     from gateway.agents import forward as _agents_forward_router
-    from gateway.agents import router as _agents_router
     from gateway.app import app
     from ops.lifecycle import launch_agent_op, lifecycle_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
@@ -154,7 +154,7 @@ def sdk_via_gateway(
         ) as tc,
         use_client(tc),
     ):
-        monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
+        monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _in_process_forward)
         monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
         monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
         monkeypatch.setattr(_machines, "is_paused", _is_paused)

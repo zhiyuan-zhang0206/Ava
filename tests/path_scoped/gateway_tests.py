@@ -34,8 +34,8 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
+from gateway.agents import creation as _agents_creation
 from gateway.agents import forward as _agents_forward_router
-from gateway.agents import router as _agents_router
 from gateway.app import app
 from gateway.cluster.process_boot import GatewayProcess
 from ops.lifecycle import launch_agent_op, lifecycle_op
@@ -93,7 +93,7 @@ def _local_spawn_in_process(
             local_machine=machine_identity.name(),
         )
 
-    monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
+    monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _in_process_forward)
 
     # `POST /api/agents` reads the target's capability from the registry (the same
     # source the forward resolves the ops URL from) for every target, local

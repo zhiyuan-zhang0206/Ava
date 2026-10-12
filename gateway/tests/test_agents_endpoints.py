@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from gateway.app import app
-from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.middleware.cors import cors_allowed_origins
 from tests.fixtures.gateway_config import spawn_via_http
 from tests.fixtures.model_catalog import AddModels
 
@@ -400,13 +400,13 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     """An unexpected post-commit error retains the identity and CORS headers."""
     # The autouse conftest fixture stubs forward_spawn_to_remote in-process;
     # this test's monkeypatch runs later and wins, making the route itself blow up.
-    import gateway.agents.router as _agents_router
+    import gateway.agents.creation as _agents_creation
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
     async def _explode(_db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _explode)
+    monkeypatch.setattr(_agents_creation, "forward_spawn_to_remote", _explode)
     allowed_origin = cors_allowed_origins()[0]
     with TestClient(app) as client:
         resp = spawn_via_http(client, {}, headers={"Origin": allowed_origin})

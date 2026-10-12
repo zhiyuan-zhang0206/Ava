@@ -11,7 +11,7 @@ from gateway.agents.notice_operations.current import (
     mutate,
     operation_key,
 )
-from gateway.agents.notices import _publish_response_required_hint, post_notice_resolve
+from gateway.agents.notices import post_notice_resolve, publish_response_required_hint
 from gateway.agents.schemas import AgentMessageEnqueued, NoticeItem, ResolveNoticeIn
 from ops import lifecycle
 
@@ -50,9 +50,7 @@ async def edit_current(
     record = acceptance.record
     if not acceptance.replayed:
         if record.require_response:
-            await asyncio.to_thread(
-                _publish_response_required_hint, request.app.state.bus, agent_id
-            )
+            await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
         await lifecycle.publish_notice_posted(
             request.app.state.bus,
             agent_id,
@@ -78,8 +76,6 @@ async def dismiss_current(
     record = acceptance.record
     if not acceptance.replayed:
         if record.require_response:
-            await asyncio.to_thread(
-                _publish_response_required_hint, request.app.state.bus, agent_id
-            )
+            await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
         await lifecycle.publish_notice_resolved(request.app.state.bus, agent_id, record.id)
     return record
