@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.config import ConfigBoot, get_field
-from base.daemon.health import health_port
+from base.host.env.health_ports import health_port
 from base.host.env.registry import health_port_env_aliases
 from base.paths import run_dir
 

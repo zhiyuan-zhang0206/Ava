@@ -73,7 +73,7 @@ from typing import NamedTuple, TypedDict
 
 from ava import skills
 from base.config import settings
-from base.deploy.release.runtime_interpreter import external_plugin_read_root
+from base.host.runtime_interpreter import external_plugin_read_root
 from base.log import logger
 from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
 from base.packages.skills.names import display_name, match_key

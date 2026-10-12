@@ -7,8 +7,8 @@ from typing import NamedTuple
 
 from starlette.requests import Request
 
-from base.cluster.auth import verify_bearer
 from base.config import settings
+from base.host.net.auth import verify_bearer
 from gateway.http.auth.request_principal import cluster_credential
 
 

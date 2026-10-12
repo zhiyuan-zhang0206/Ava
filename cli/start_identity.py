@@ -20,9 +20,9 @@ from typing import Any, cast
 from dotenv import dotenv_values
 
 from base import cluster
-from base.cluster.auth import require_cluster_secret
 from base.host.atomic_io import write_text_atomic
 from base.host.env.dotenv_file import upsert_env
+from base.host.net.auth import require_cluster_secret
 from base.host.private_storage import ensure_private_dir, ensure_private_file
 
 INTENT_NAME = cluster.INTENT_NAME

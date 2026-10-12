@@ -2,7 +2,7 @@
 
 A host runs one cluster, so there is nothing to allocate and nothing to keep
 apart: every new home records this table as its ports at birth, and a unit whose
-`.env` names no port binds the same numbers through `daemon.health.DEFAULT_PORTS`
+`.env` names no port binds the same numbers through `host.env.health_ports.DEFAULT_PORTS`
 (derived from here). The table sits in a module that imports nothing because the
 settings-free half of the boot chain (`base.daemon.health`, the `.env` registry)
 needs it and must import neither `base.config` nor `base.cluster`.

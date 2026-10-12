@@ -88,11 +88,10 @@ from langchain_core.messages import (
 )
 from pydantic import SecretStr
 
-from base.agents.messages.kwargs import message_addl_kwargs, message_content
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-from base.lm.content import content_blocks
+from base.lm.content import content_blocks, message_addl_kwargs, message_content
 from base.lm.factory import build_chat_model
 
 # All three registered Qwen models — the vendor could revise any of them

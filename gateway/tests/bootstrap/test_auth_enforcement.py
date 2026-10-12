@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 
 import gateway.app as gateway_app
 from base import config
-from base.cluster.auth import bearer_header
 from base.cluster.machine import MachineIdentity
+from base.host.net.auth import bearer_header
 from gateway.app import app
 from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_handlers import cors_headers

@@ -60,10 +60,10 @@ def _gateway_url(config: ConfigBoot) -> str:
 def _gateway(url: str, *, config: ConfigBoot, timeout_reader: Callable[[], float]) -> Any:
     import httpx
 
-    from base.cluster.auth import bearer_header, delivered_token
     from base.cluster.machine import resolve_gateway_bearer
     from base.host.env.bootstrap import config_source_is_local
     from base.host.env.dotenv_boot import launcher_context
+    from base.host.net.auth import bearer_header, delivered_token
     from base.host.net.http_dial import transport_for_url
 
     bearer = resolve_gateway_bearer(

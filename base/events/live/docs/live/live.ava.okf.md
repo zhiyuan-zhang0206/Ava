@@ -24,7 +24,7 @@ The union is deliberately **not** forward-compatible: `EVENT_ADAPTER` raises
 to be synced in the same change rather than silently dropping frames.
 
 It lives at the top level (not under `ava/`) so the agent can publish without
-triggering SDK import side effects — same rationale as `base/agents/exit_codes.py`.
+triggering SDK import side effects — same rationale as `base/host/exit_codes.py`.
 
 ## Roles
 

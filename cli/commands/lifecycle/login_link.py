@@ -49,8 +49,8 @@ def _issue_ticket(secret: str) -> str:
         httpx.HTTPError: the gateway is unreachable or refused the request.
         ValueError: the gateway answered without a ticket.
     """
-    from base.cluster.auth import bearer_header
     from base.cluster.machine import gateway_api_base
+    from base.host.net.auth import bearer_header
     from base.host.net.http_dial import post as dial_post
 
     response = dial_post(

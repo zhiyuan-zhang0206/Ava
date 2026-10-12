@@ -236,7 +236,7 @@ def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int
     import json
 
     from base import paths
-    from base.deploy.git import host_version as host_version_mod
+    from base.host.git import host_version as host_version_mod
 
     registry = install_registry.load()
     try:

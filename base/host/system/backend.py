@@ -42,7 +42,7 @@ class PlatformBackend(abc.ABC):
 
     def venv_python(self) -> str:
         """Absolute path to the Python interpreter inside the repo's virtualenv."""
-        from base.deploy.release.runtime_interpreter import runtime_venv
+        from base.host.runtime_interpreter import runtime_venv
 
         return str(runtime_venv() / self.venv_bin_dir_name() / "python3")
 
@@ -53,7 +53,7 @@ class PlatformBackend(abc.ABC):
         `root` is the checkout holding the ``.venv`` (defaults to this one's repo
         root); the agent-runner self-update passes the repo it is upgrading.
         """
-        from base.deploy.release.runtime_interpreter import runtime_venv
+        from base.host.runtime_interpreter import runtime_venv
 
         return runtime_venv(checkout=root) / self.venv_bin_dir_name() / name
 

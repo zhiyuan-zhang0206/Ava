@@ -11,7 +11,8 @@ from typing import Literal, get_args
 from pydantic import BaseModel
 
 from base.cluster.machine import MachineRole
-from base.daemon.health import DEFAULT_PORTS, DaemonProbe
+from base.daemon.health import DaemonProbe
+from base.host.env.health_ports import DEFAULT_PORTS
 
 # The capability groups a service can belong to. These are `MachineRole` values
 # (`machine_role()` returns a frozenset of them); "capability" and "role" are the
@@ -94,7 +95,7 @@ class ServiceSpec:
             root launcher uses this declaration on every service start.
         health_name: set only by ``ops.roster.healthz.healthz_daemon``: this
             service is a standard Ava ``/healthz`` daemon whose port is the
-            ``base.daemon.health.DEFAULT_PORTS[health_name]`` slot (the same name
+            ``base.host.env.health_ports.DEFAULT_PORTS[health_name]`` slot (the same name
             the daemon passes to ``start_health_server``). None = any other shape.
         home_healthz: this service's readiness endpoint is an Ava ``/healthz``
             whose body names the unit's home, so ``ava start`` can recognise

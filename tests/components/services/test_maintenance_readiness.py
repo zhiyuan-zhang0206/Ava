@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 from psycopg_pool import PoolTimeout
 
 from base import config
-from base.cluster.auth import bearer_header
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -24,6 +23,7 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
 from base.host.env import runtime_config as rt
+from base.host.net.auth import bearer_header
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.config_face import plugin_bootstrap_config
 from gateway.app import app

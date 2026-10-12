@@ -177,7 +177,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     with ava.DB.cursor() as cur, cur.connection.transaction():
         cur.execute("SET TRANSACTION READ WRITE")
         if config_overlay:
-            from base.lm.model_config import validate_restart_model_config
+            from base.agents.model.model_config import validate_restart_model_config
 
             validate_restart_model_config(
                 cur,

@@ -10,12 +10,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
 from base.agents.labels import publish_label_updated
-from base.agents.messages.kwargs import message_content
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-from base.lm.content import content_blocks
+from base.lm.content import content_blocks, message_content
 from base.lm.errors import is_retryable_provider_error, normalize_provider_transport_error
 from base.lm.factory import build_chat_model
 from services.derived.labeler.config import LabelerConfig

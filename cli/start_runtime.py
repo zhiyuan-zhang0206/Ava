@@ -11,8 +11,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.deploy.release import runtime_interpreter
-from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+from base.host import runtime_interpreter
+from base.host.runtime_interpreter import LoadedRuntimeIdentity
 
 
 class StartRuntimeChangedError(ValueError):

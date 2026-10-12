@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from base.deploy.release.runtime_interpreter import source_digest
 from base.deploy.release.start_inputs import configuration_digest
+from base.host.runtime_interpreter import source_digest
 from cli.commands.lifecycle.start_generation import launch_digest
 
 
@@ -126,7 +126,7 @@ def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatc
 def test_loaded_source_identity_is_explicit_and_changes_with_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base.deploy.release import runtime_interpreter
+    from base.host import runtime_interpreter
 
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     member = tmp_path / "app.py"

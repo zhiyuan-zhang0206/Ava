@@ -420,7 +420,7 @@ def _restart_blocking(
             return None
         payload: dict[str, object] | None = None
         if body.config_overlay:
-            from base.lm.model_config import validate_restart_model_config
+            from base.agents.model.model_config import validate_restart_model_config
 
             # Settle a withdrawn llm_model before the overlay is stored — the
             # provider-outage model-switch channel must not persist a stale id (#4306).

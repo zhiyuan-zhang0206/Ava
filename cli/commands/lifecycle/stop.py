@@ -399,7 +399,7 @@ def _cmd_restart_body(
     """
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-    from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
     from base.host.proc import hosting_exec_domain, hosting_supervised_session
     from cli.commands import _repo
     from cli.commands.lifecycle import _start_readiness_preflight, start

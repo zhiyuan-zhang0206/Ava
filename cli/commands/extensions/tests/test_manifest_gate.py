@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from base.cluster.machine import MachineIdentity
+from base.host.git import host_version
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.mcp import cmd_mcp_install, cmd_mcp_upgrade
 from cli.commands.extensions.plugins import cmd_plugins_install
@@ -104,7 +105,7 @@ def test_mcp_install_refuses_prerelease_host_without_opt_in(
     def prerelease_host(_repo: Path) -> str:
         return "1.2.3-alpha"
 
-    monkeypatch.setattr("base.deploy.git.host_version.host_version", prerelease_host)
+    monkeypatch.setattr(host_version, "host_version", prerelease_host)
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"ava": ">=1.2.3"}))
     assert cmd_mcp_install(str(pkg), None, None) == 1

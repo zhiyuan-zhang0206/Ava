@@ -73,7 +73,7 @@ def spawn_prechecks_blocking(
     """Sync spawn pre-checks — via to_thread: model-config validation (may read
     provider API keys) + fork checkpoint lookup. Returns the fork checkpoint
     (None for a plain spawn)."""
-    from base.lm.model_config import validate_spawn_model_config
+    from base.agents.model.model_config import validate_spawn_model_config
 
     with db_pool.connection() as conn, conn.cursor() as cur:
         validate_spawn_model_config(

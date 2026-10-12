@@ -19,9 +19,9 @@ from base.agents.incarnation.native_restart_models import (
 )
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_cancel import observe_native_work_in_transaction
+from base.agents.model.model_config import validate_restart_model_config
 from base.db.transaction import write_transaction
 from base.lm.catalog import ModelCatalog
-from base.lm.model_config import validate_restart_model_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 

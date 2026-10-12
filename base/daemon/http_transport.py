@@ -12,7 +12,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 
-from base.cluster.auth import verify_bearer_digest
+from base.host.net.auth import verify_bearer_digest
 
 RouteHandler = Callable[[bytes], Awaitable[tuple[int, bytes, str]]]
 _MAX_BODY_BYTES = 64 * 1024

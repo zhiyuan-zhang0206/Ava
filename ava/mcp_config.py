@@ -32,7 +32,7 @@ import json
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
-from base.deploy.release.runtime_interpreter import external_plugin_read_root
+from base.host.runtime_interpreter import external_plugin_read_root
 from base.host.system.probes import display_available
 from base.paths import ava_home, mcps_dir, repo_root
 

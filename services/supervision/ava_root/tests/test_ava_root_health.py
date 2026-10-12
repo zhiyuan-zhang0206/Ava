@@ -18,8 +18,8 @@ from typing import Any, cast
 import psutil
 import pytest
 
-from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.daemon.health import DaemonProbe
+from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.native_process.ownership import OwnedProcess
 from services.supervision.ava_root import health as health_mod
 from services.supervision.ava_root import manifest as manifest_mod

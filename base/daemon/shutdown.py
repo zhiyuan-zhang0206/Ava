@@ -10,15 +10,8 @@ Python's existing handler.
 
 Where present, the repeated-SIGTERM guard stays at each daemon's call site.
 The daemons with an explicit drain cancel and await remaining loop tasks so
-``run()``'s cleanup can finish, then call ``hard_exit``. They do
-not close ``asyncio.Runner``: its default-executor shutdown can wait up to
-CPython's 300-second ``THREAD_JOIN_TIMEOUT``, already the stop flow's entire
-budget, and interpreter teardown can join surviving workers without a bound.
-Even ``shutdown(wait=False)`` does not prevent that atexit join. The ops pool
-has the same risk. A hard exit skips only teardown
-after daemon-owned cleanup; it also skips the telemetry emitter's atexit drain
-(accepted for this path in task #4320). Explicitly flush logs first because
-their atexit cleanup is skipped too.
+``run()``'s cleanup can finish, then call ``base.host.exit_codes.hard_exit``, which
+leaves without joining threads (see its docstring for why the runner is not closed).
 
 The in-flight work varies: agent-host recorders, delivery recovery, Feishu
 calls, heartbeat grading, page reconciliation, memory search loading, indexer
@@ -32,15 +25,8 @@ restart and indexer failures stay dirty on disk.
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import logging
-import os
 import signal
-import sys
-import traceback
 import types
-from collections.abc import Callable
-from typing import NoReturn
 
 from base.log import logger
 
@@ -60,43 +46,6 @@ def cancel_and_drain(runner: asyncio.Runner) -> list[Exception]:
         task.cancel()
     results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
     return [result for result in results if isinstance(result, Exception)]
-
-
-def hard_exit(code: int) -> NoReturn:
-    """Flush logs and exit immediately after daemon-owned async cleanup.
-
-    A failing teardown step must not block the exit: it is reported on stderr and the
-    remaining steps still run.
-    """
-
-    def close_loguru_sinks() -> None:
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-
-    def flush_stdout() -> None:
-        sys.stdout.flush()
-
-    def flush_stderr() -> None:
-        sys.stderr.flush()
-
-    steps: tuple[tuple[str, Callable[[], None]], ...] = (
-        ("closing the loguru sinks", close_loguru_sinks),
-        ("logging.shutdown", logging.shutdown),
-        ("flushing stdout", flush_stdout),
-        ("flushing stderr", flush_stderr),
-    )
-    for step, run in steps:
-        try:
-            run()
-        except Exception:
-            # Logging is closing here: stderr is the one report channel left. If stderr itself
-            # is closed or broken there is nowhere to report to.
-            with contextlib.suppress(OSError, ValueError, AttributeError):
-                sys.stderr.write(
-                    f"hard_exit: {step} failed; exiting anyway\n{traceback.format_exc()}"
-                )
-    os._exit(code)
 
 
 def install_graceful_shutdown(label: str) -> None:

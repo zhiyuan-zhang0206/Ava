@@ -40,7 +40,7 @@ from loguru import logger
 from base import paths
 from base.config import ConfigBoot
 from base.config.domains.packages import PackagesSettings
-from base.deploy.git.gitenv import git_env
+from base.host.git.gitenv import git_env
 from base.host.proc import run_bounded
 from base.host.system.cron import os_jobs_enabled
 from base.native_process.os_platform import LockTimeoutError, file_lock

@@ -8,8 +8,8 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from base.agents.messages.kwargs import message_addl_kwargs
 from base.lm.catalog import ModelCatalog
+from base.lm.content import message_addl_kwargs
 from base.lm.pricing import CostQuote
 from base.lm.pricing.cache_writes import cache_write_tokens
 from base.lm.provider_api import InferenceSpeed

@@ -102,8 +102,8 @@ def _auth_headers() -> dict[str, str]:
     secret (environment, then `.env`); else, on a remote unit, its installed
     capability's API token, only while this process runs the admitted runtime.
     """
-    from base.cluster.auth import bearer_header, delivered_token
     from base.host.env import runtime_config
+    from base.host.net.auth import bearer_header, delivered_token
 
     bearer = delivered_token() or os.environ.get("AVA_CLUSTER_SECRET")
     if bearer is None:
