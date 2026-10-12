@@ -396,30 +396,25 @@ def test_gateway_config_trace_mirror_rotation_policy(
         pytest.param(frozenset({"observability-station"}), id="station"),
     ],
 )
-def test_file_storage_caps_queue_bytes_in_every_shape(
+def test_sending_queues_are_in_memory_in_every_shape(
     monkeypatch: pytest.MonkeyPatch,
     roles: frozenset[str],
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The persistent sending queues carry a byte cap in every shape.
-
-    A request-count bound alone (5,000) still lets sustained backpressure grow
-    each queue file without limit; 1 GiB is the calibrated fleet-wide value
-    (task #4012) — the measured steady state peaks at 580M against a 30G
-    minimum disk. At the cap the collector rejects the newest write, the same
-    counted loss path as a request-full queue.
-    """
+    """No exporter queue is persisted: a restart drops what was queued (the trace
+    mirror and `ava trace ship` cover trace gaps), and only the filelog read
+    offsets keep a file_storage extension."""
     cfg = _render_real_template(
         monkeypatch, roles, operator_database=operator_database, command_runtime=command_runtime
     )
-    assert cfg["extensions"]["file_storage"] == {
-        "directory": "/home/u/.ava/otel-collector/queue",
-        "create_directory": True,
-        "timeout": "1s",
-        "max_size": 1073741824,
-    }
+
+    for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
+        assert "storage" not in cfg["exporters"][exporter_id]["sending_queue"]
+    assert "file_storage" not in cfg["extensions"]
+    assert "file_storage" not in cfg["service"]["extensions"]
+    assert "file_storage/logoffsets" in cfg["extensions"]
 
 
 def test_gateway_config_scrapes_this_clusters_own_data_plane(

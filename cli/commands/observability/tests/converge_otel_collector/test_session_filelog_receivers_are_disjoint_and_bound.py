@@ -66,15 +66,15 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
     }
 
 
-def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(
+def test_runner_forwards_to_authenticated_gateway_ingress_with_stable_exporter_ids(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     """A pure runner relays all signals to the gateway collector, never to
-    loopback backends. Exporter IDs stay byte-for-byte stable so a converge
-    adopts the existing file_storage queues instead of orphaning their backlog."""
+    loopback backends. Exporter IDs stay byte-for-byte stable across the
+    direct-backend -> relay cutover so collector self-metrics keep their series."""
     cfg = _render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),
@@ -91,9 +91,8 @@ def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queue
         exporter = exporters[exporter_id]
         assert exporter["endpoint"] == "http://10.0.0.10:4318"
         assert exporter["headers"] == {"Authorization": f"Bearer {oc.telemetry_bearer()}"}
-    assert exporters["otlphttp/tempo"]["sending_queue"]["storage"] == "file_storage"
-    assert exporters["otlphttp/loki"]["sending_queue"]["storage"] == "file_storage"
-    assert "storage" not in exporters["otlphttp/prometheus"]["sending_queue"]
+    for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
+        assert "storage" not in exporters[exporter_id]["sending_queue"]
     rendered = str(cfg)
     assert "127.0.0.1:14318" not in rendered
     assert "127.0.0.1:3100" not in rendered
@@ -646,7 +645,6 @@ def test_gateway_and_runner_exporters_drop_newest_after_bounded_retry(
         assert exporter["sending_queue"] == {
             "enabled": True,
             "queue_size": 5000,
-            "storage": "file_storage",
             "block_on_overflow": False,
             "wait_for_result": False,
         }
