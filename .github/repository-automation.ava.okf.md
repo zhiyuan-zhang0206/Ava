@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Repository Automation"
-description: "GitHub-hosted maintenance loops outside the primary CI/release gates: one-shot failed-job reruns, reviewed model-price proposals, and branch-protection drift auditing."
+description: "GitHub-hosted maintenance loops outside the primary CI/release gates: one-shot failed-job reruns, reviewed model-price proposals, nightly full-history secret scanning, and branch-protection drift auditing."
 tags:
   - ci
   - ops
@@ -69,6 +69,15 @@ The canonical uv pin is `base/host/brew_pin.py`; provisioning and every
 `uvx` audit runner from that same pin, including when an operator invokes the
 report with an older installed toolchain. PR-time CI uses the installed pinned
 `uv audit` directly. The audit job does not populate the project wheel cache.
+
+## `workflows/secret-scan-history.yml`
+
+A nightly schedule (plus manual dispatch, main only) runs `gitleaks git` over
+every fetched ref's whole history with the same `.gitleaks.toml` as the PR
+check. The required `secret scan (Gitleaks)` check in `ci.yml` scans only a
+change's own commits, so this loop is what catches a secret that reached a ref
+without passing that check. A finding keeps the run red; there is no marker
+issue.
 
 ## `workflows/audit-branch-protection.yml`
 
