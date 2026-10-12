@@ -53,7 +53,7 @@ import ast
 import re
 from pathlib import Path
 
-from scripts.structure import lint_common
+from meizel import lint_common
 from scripts.structure.ambient_state import allowlist as allow
 from scripts.structure.ambient_state import (
     bundle,

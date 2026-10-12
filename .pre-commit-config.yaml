@@ -110,7 +110,7 @@ repos:
       # The lint enforces the restore-before-import guard; see the script header.
       - id: lint-no-script-sibling-imports
         name: lint script sibling imports (PYTHONSAFEPATH guard)
-        entry: .venv/bin/python scripts/lint/no_script_sibling_imports.py --only
+        entry: .venv/bin/python -m meizel.language.no_script_sibling_imports --only
         language: system
         types: [python]
 
@@ -157,7 +157,7 @@ repos:
         entry: .venv/bin/python scripts/lint/patch_targets.py
         language: system
         require_serial: true
-        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(imports/.*|placement|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
+        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|meizel|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(imports/.*|placement|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
 
       # The full scan of the hook above, at every push that touches Python, whatever the
       # diff (pre-commit's own file selection would never pass it the untouched tests whose
@@ -183,7 +183,7 @@ repos:
         name: lint tests location (a new test belongs in its package, not the top-level tests/)
         entry: .venv/bin/python scripts/structure/tests_location.py --only
         language: system
-        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/structure/(tests_location|tests_location_allowed|tests_location_suggest)\.py|scripts/structure/baseline/.*\.json)$
+        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|meizel|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/structure/(tests_location|tests_location_allowed|tests_location_suggest)\.py|scripts/structure/baseline/.*\.json)$
 
       # The full check of the hook above at every push (every tracked top-level test, ~0.08 s, so
       # unwrapped): a per-file hook never judges a deletion, so a deleted or renamed test's stale

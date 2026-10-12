@@ -12,7 +12,7 @@ import ast
 
 import pytest
 
-from scripts.structure import path_imports
+from meizel.language import path_imports
 
 _SKILL = "ava_builtins/skills/demo/reference/run.py"
 

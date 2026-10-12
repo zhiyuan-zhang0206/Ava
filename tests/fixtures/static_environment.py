@@ -18,6 +18,7 @@ STATIC_TEST_PATHS = (
     "scripts/lint/diagnostics/tests",
     "scripts/lint/locks/tests",
     "scripts/lint/plugins/tests",
+    "meizel",
     "scripts/meizel/tests",
     "scripts/structure/tests",
     "scripts/structure/ambient_state/tests",

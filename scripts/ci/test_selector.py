@@ -20,6 +20,7 @@ if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
 from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry needs repo root first
     is_doc_path,
 )
+from meizel.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
 from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     Impact,
     base_checkout,
@@ -28,7 +29,6 @@ from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     plugin_modules,
     unknown_diagnostics,
 )
-from scripts.structure.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
 from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone script
 
 # Global paths apply to every test, so a change keeps the full suite. This is the
@@ -85,6 +85,7 @@ _PACKAGE_ROOTS = frozenset(
         "base",
         "cli",
         "gateway",
+        "meizel",
         "ops",
         "schedules",
         "scripts",

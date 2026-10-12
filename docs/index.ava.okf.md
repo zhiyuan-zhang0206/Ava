@@ -29,6 +29,7 @@ Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each
 | [[docs/mcps/mcps.ava.okf.md]] | MCP integration — built-in chrome + external servers installed via `ava mcp install` (e.g., x), invoked via daemon subprocesses |
 | [[../tests/docs/tests.ava.okf.md]] | Test suite — pytest unit / integration / e2e tests covering all modules |
 | [[../scripts/docs/scripts.ava.okf.md]] | Operations scripts — lint / build / install / provision / CI / release toolset |
+| [[../meizel/docs/meizel.ava.okf.md]] | Locality rules — shared lint scope, file and directory budgets, Python language restrictions |
 
 ## Generation method
 

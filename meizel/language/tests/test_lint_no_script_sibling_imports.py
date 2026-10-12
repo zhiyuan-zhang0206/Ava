@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import no_script_sibling_imports as _lint
+from meizel.language import no_script_sibling_imports as _lint
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning

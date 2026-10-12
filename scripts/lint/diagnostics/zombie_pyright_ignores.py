@@ -35,7 +35,7 @@ from typing import Literal, cast
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.structure import lint_common  # noqa: E402 - standalone script
+from meizel import lint_common  # noqa: E402 - standalone script
 
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
 _PYRIGHT_PATH = _REPO_ROOT / ".venv/bin/pyright"

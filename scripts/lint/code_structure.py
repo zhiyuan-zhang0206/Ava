@@ -66,7 +66,7 @@ scripts/structure/locality.py; see docs/conventions/python-conventions.md.
 
 ### Rule 6: no path imports under ava_builtins/ (package doors)
 
-`scripts/structure/path_imports.py`: a skill or plugin module may not edit `sys.path`, call
+`meizel/language/path_imports.py`: a skill or plugin module may not edit `sys.path`, call
 `site.addsitedir`, or load a module by file path (`spec_from_file_location`, `SourceFileLoader`,
 `runpy.run_path`): a path import sidesteps the package doors and the budgets. Shared code goes
 into a governed package the script imports normally. Every measured path-import site
@@ -112,30 +112,26 @@ from pathlib import Path, PurePosixPath
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
+from meizel import lint_common  # noqa: E402 — standalone script
+from meizel.budgets import limits  # noqa: E402 — standalone script
+from meizel.language import path_imports, type_checking  # noqa: E402 — standalone script
 from scripts.structure import (  # noqa: E402 — standalone script
     ambient_state,
     baseline_shards,
-    lint_common,
     locality,
-    path_imports,
 )
-from scripts.structure.budgets import (  # noqa: E402 — standalone script
-    directory_budget,
-    quality_budget,
-)
+from scripts.structure.budgets import quality_budget  # noqa: E402 — standalone script
 
 __all__ = ["main"]
 
-_HARD_CEILING = 800
 # Baseline sections whose frozen `path::target` site counts must match reality exactly.
 _SITE_SECTIONS = (*locality.EXTERNAL_SECTIONS, ambient_state.SECTION)
 _MEASURED_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SECTION)
-_DIRECTORY_CEILING = 20
 
 # AST rules track [tool.importlinter] root_packages; budgets also cover tooling/tests.
 _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 _AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
-_STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
+_STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts", "meizel")
 
 
 def _machine_role_calls(tree: ast.AST) -> list[int]:
@@ -147,84 +143,6 @@ def _machine_role_calls(tree: ast.AST) -> list[int]:
             and isinstance(node.func, ast.Name)
             and node.func.id == "machine_role"
         ):
-            hits.append(node.lineno)
-    return hits
-
-
-# Files allowed to use `if TYPE_CHECKING:` — real circular import or heavy
-# optional dependency. Add an entry with a one-line reason.
-_TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
-    {
-        # PEP 562 lazy re-export: the node set is a heavy import on paths (the
-        # exec child) that never use the names; TYPE_CHECKING restores the real
-        # signatures for static checkers without putting them back on the import
-        # path (task #3585).
-        "agent/graph/__init__.py",
-        # The exec child builds an `AvaContext` from its request envelope: the handle types
-        # (psycopg pool, redis bus, chat model) are annotation-only fields it never holds, and
-        # importing them would put the whole DB / LM stack on its boot path.
-        "base/agents/context/__init__.py",
-        # The same exec-child boot path: a ClientSet builds psycopg / redis / httpx clients on first
-        # use only, so its client types are annotation-only.
-        "base/agents/context/clients.py",
-        # LM provider registration surface: the chat-model stack is a heavy
-        # import on the exec-child boot path, which never uses the type
-        # (annotation-only references; task #3633).
-        "base/lm/catalog/provider_contract.py",
-        "base/lm/factory.py",
-        "ava_builtins/plugins/lm_alibaba/provider.py",
-        "ava_builtins/plugins/lm_anthropic/provider.py",
-        "ava_builtins/plugins/lm_deepseek/provider.py",
-        "ava_builtins/plugins/lm_google/provider.py",
-        "ava_builtins/plugins/lm_moonshot/provider.py",
-        "ava_builtins/plugins/lm_openai/provider.py",
-        "ava_builtins/plugins/lm_xiaomi/provider.py",
-        "ava_builtins/plugins/lm_zhipu/provider.py",
-        # LangChain message-stack trim on the same registration path: message
-        # types appear in annotations only, or (pricing) import at the call
-        # site of a runtime isinstance (task #3633).
-        "base/lm/stop.py",
-        "base/lm/pricing/__init__.py",
-        "base/agents/messages/kwargs.py",
-        # Exec-child boot path (`_run_code` -> sdk_telemetry): ToolMessage is
-        # runtime-only (imported at the isinstance call site), BaseMessage
-        # annotation-only (task #3633).
-        "base/agents/sdk/telemetry.py",
-        # Boot-lite facade: the names are served at runtime by the lite latch;
-        # TYPE_CHECKING keeps `from base.config import X` consumers resolving
-        # without an eager import that would rebuild the config chain the lite
-        # facade defers (task #3621).
-        "base/config/__init__.py",
-        # Boot-path trim: the skill-index stack is a heavy import every exec
-        # child pays; `SkillFile` is annotation-only on the mount helpers
-        # (script/module-level imports removed for task #3816).
-        "ava/skills/__init__.py",
-        # Boot-path trim: the fleet plugin (autoloaded into every exec child)
-        # keeps psycopg off its module import graph — `psycopg` is
-        # annotation-only here, imported at the raise sites (task #3816).
-        "ava_builtins/plugins/ava_fleet/task_registry.py",
-        "ava_builtins/plugins/ava_fleet/_task_update.py",
-        "base/agents/tasks/reparent.py",
-        "base/agents/tasks/rules.py",
-    }
-)
-
-
-def _type_checking_violations(tree: ast.Module) -> list[int]:
-    """Line numbers of `if TYPE_CHECKING:` / `if typing.TYPE_CHECKING:` blocks."""
-    hits: list[int] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.If):
-            continue
-        test = node.test
-        name = (
-            test.id
-            if isinstance(test, ast.Name)
-            else test.attr
-            if isinstance(test, ast.Attribute)
-            else None
-        )
-        if name == "TYPE_CHECKING":
             hits.append(node.lineno)
     return hits
 
@@ -241,18 +159,7 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
         tree = ast.parse(text, filename=rel_path)
     out: list[tuple[int, str]] = []
 
-    if rel_path not in _TYPE_CHECKING_ALLOWED:
-        for lineno in _type_checking_violations(tree):
-            out.append(
-                (
-                    lineno,
-                    "`if TYPE_CHECKING:` is banned — import at top level. "
-                    "App deps are always on the runtime path and LangGraph/Pydantic "
-                    "introspect type hints at runtime (deferred imports NameError). "
-                    "Real circular-import / heavy-dep cases: refactor, or add this file "
-                    "to _TYPE_CHECKING_ALLOWED in scripts/lint/code_structure.py with a reason.",
-                )
-            )
+    out.extend(type_checking.violations(tree, rel_path))
 
     for lineno in _machine_role_calls(tree):
         out.append(
@@ -279,33 +186,6 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
             files.append(root)
         elif root.is_dir():
             files.extend(root.rglob("*.py"))
-    return files
-
-
-def _budget_files(targets: list[Path], repo_root: Path) -> set[Path]:
-    """Collect the existing Python file-budget scope without following links."""
-    files: set[Path] = set()
-    visited: set[Path] = set()
-
-    def visit(directory: Path) -> None:
-        if directory in visited:
-            return
-        visited.add(directory)
-        for entry in directory_budget.entries(directory):
-            if entry.is_dir():
-                visit(entry)
-            elif entry.is_file() and entry.suffix == ".py":
-                files.add(entry)
-
-    for target in targets:
-        for scope in (repo_root / name for name in _STRUCTURE_DIRS):
-            selected = directory_budget.selected_under(target, scope, repo_root)
-            if selected is None:
-                continue
-            if selected.is_dir():
-                visit(selected)
-            elif selected.is_file() and selected.suffix == ".py":
-                files.add(selected)
     return files
 
 
@@ -474,35 +354,6 @@ def _baseline_guard(
     return errors
 
 
-def _check_budgets(
-    targets: list[Path], directory_targets: list[Path], repo_root: Path
-) -> list[str]:
-    files = _budget_files(targets, repo_root)
-    errors: list[str] = []
-    for path in sorted(files):
-        try:
-            count = len(path.read_text(encoding="utf-8").splitlines())
-        except (OSError, UnicodeDecodeError):
-            continue  # Preserve the shared lint contract for unreadable members.
-        name = path.relative_to(repo_root).as_posix()
-        if count > _HARD_CEILING:
-            errors.append(
-                f"{name}:{count}: file is {count} lines, over the {_HARD_CEILING}-line hard ceiling — split it"
-            )
-    listing = _git(repo_root, "ls-files", "-z")
-    listing.check_returncode()
-    children = directory_budget.tracked_children(listing.stdout)
-    for name in sorted(
-        directory_budget.selected_directories(children, directory_targets, repo_root)
-    ):
-        count = len(children[name])
-        if count > _DIRECTORY_CEILING:
-            errors.append(
-                f"{name}: directory has {count} direct entries, over the {_DIRECTORY_CEILING}-entry cap — split it"
-            )
-    return errors
-
-
 def _ast_rule_files(argv: list[str], repo_root: Path) -> set[Path]:
     # Preserve the AST rules' original resolved-target scope, including aliases.
     targets = [Path(a).resolve() for a in argv] if argv else [repo_root / d for d in _AST_DIRS]
@@ -533,7 +384,7 @@ def _check_ast_and_quality(
     repo_root: Path,
     renames: dict[str, str] | None = None,
 ) -> list[str]:
-    files = _budget_files(targets, repo_root)
+    files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
     locality.reset_caches()
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
@@ -631,7 +482,7 @@ def main(
         return 1
     errors = _baseline_guard(baseline, repo_root=repo_root, base=base, renames=renames)
     try:
-        errors.extend(_check_budgets(targets, directory_targets, repo_root))
+        errors.extend(limits.check(targets, directory_targets, repo_root, _STRUCTURE_DIRS))
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"cannot read tracked directory structure: {exc}", file=sys.stderr)
         return 1

@@ -50,7 +50,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.structure.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
+from meizel.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
 
 BEGIN = (
     "# BEGIN GENERATED pyright tests environments "

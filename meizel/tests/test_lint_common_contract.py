@@ -1,13 +1,13 @@
-"""Contract: the framework directory list of scripts/structure/lint_common.py equals the packages pyproject.toml declares."""
+"""Contract: the framework directory list of meizel/lint_common.py equals the packages pyproject.toml declares."""
 
 from __future__ import annotations
 
 import tomllib
 from pathlib import Path
 
-from scripts.structure import lint_common
+from meizel import lint_common
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_framework_dirs_are_the_declared_packages() -> None:

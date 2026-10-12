@@ -46,7 +46,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from scripts.structure import lint_common  # noqa: E402 - standalone script
+from meizel import lint_common  # noqa: E402 - standalone script
 
 _SCAN_DIRS = ("gateway", "ops")
 

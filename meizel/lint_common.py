@@ -130,6 +130,7 @@ def scan_roots(repo_root: Path, dirs: Iterable[str]) -> list[Path]:
 ONLY_FLAG = "--only"
 
 LINT_TOOLING = (
+    "meizel/",
     "scripts/lint/",
     "scripts/structure/",
     "scripts/content_lint/",
