@@ -108,17 +108,46 @@ sys.exit(0 if out["completed"] and out["terminate"] < 300 else 2)
 # (cwd wins sys.path, so NEW's modules are the ones imported). Nothing dials the database from the
 # worktree and no service is touched. `VERIFY_RC` is the verdict, so a crashed check (unreadable
 # table, new dependency missing) is told apart from a red.
+#
+# This script is generated from the operator's checkout (NEW code) but runs against whatever OLD
+# the hosts have, so neither step may lean on NEW-only API:
+# - the read step runs under OLD, whose `_read_schedule_rows` may or may not take a database
+#   factory (and `cli.database` may not exist); it dispatches on the signature it finds instead of
+#   importing anything unconditionally, and fails loudly on a real error rather than falling back.
+# - the check step goes through NEW's `ava schedules verify` entry point (`cli.main`) with a
+#   throwaway AVA_HOME (the rows file makes it offline, so no real home is needed and the
+#   home-ownership guard has nothing to refuse), never `cmd_schedules_verify` directly, whose
+#   keyword-only parameters change between versions.
+_READ_ROWS_PY = """\
+import inspect, json, sys
+from cli.commands.management import schedules_verify as verify
+out = sys.argv[1]
+if "database_factory" in inspect.signature(verify._read_schedule_rows).parameters:
+    from cli.database import operator_database_factory
+    from cli.database.runtime import CommandRuntime
+    host = CommandRuntime.create().machine.host
+    rows = verify._read_schedule_rows(database_factory=operator_database_factory(local_host=host))
+else:
+    rows = verify._read_schedule_rows()
+json.dump([list(row) for row in rows], open(out, "w"))
+"""
+_CHECK_ROWS_PY = """\
+import sys
+from cli.main import main
+rows = sys.argv[1]
+sys.argv = ["ava", "schedules", "verify", "--rows-file", rows, "--no-notify"]
+sys.exit(main())
+"""
 _PRE_VERIFY = """{home}
-W="$H/pre-update-verify"; R="$W.rows"
-trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"' EXIT
+W="$H/pre-update-verify"; R="$W.rows"; T=""
+trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"; [ -z "$T" ] || rm -rf "$T"' EXIT
 git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
 git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
-(umask 077; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
-  'import json, sys; from cli.database import operator_database_factory; from cli.database.runtime import CommandRuntime; command = CommandRuntime.create(); from cli.commands.management.schedules_verify import _read_schedule_rows as rows; json.dump(rows(database_factory=operator_database_factory(local_host=command.machine.host)), open(sys.argv[1], "w"))' "$R") \\
+(umask 077; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {read_rows} "$R") \\
   || {{ echo "VERIFY_RC=2"; exit 0; }}
 git -C "$S" worktree add -q "$W" {new} || {{ echo "VERIFY_RC=2"; exit 0; }}
-cd "$W" && AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
-  'import sys; from cli.database import operator_database_factory; from cli.database.runtime import CommandRuntime; command = CommandRuntime.create(); from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(database_factory=operator_database_factory(local_host=command.machine.host), notify=False, rows_file=sys.argv[1]))' "$R"
+T=$(mktemp -d) || {{ echo "VERIFY_RC=2"; exit 0; }}
+cd "$W" && AVA_HOME="$T" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {check_rows} "$R"
 echo "VERIFY_RC=$?"; exit 0"""
 
 
@@ -234,7 +263,16 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     undefined name, a changed signature) leaves it crash-looping the moment `up` starts the
     schedule-manager, and the gateway's own `ava schedules verify` only exists after that start.
     Run NEW's verify first."""
-    out = s.run(args.gateway, _PRE_VERIFY.format(home=_HOME, new=new), effect=False)
+    out = s.run(
+        args.gateway,
+        _PRE_VERIFY.format(
+            home=_HOME,
+            new=new,
+            read_rows=shlex.quote(_READ_ROWS_PY),
+            check_rows=shlex.quote(_CHECK_ROWS_PY),
+        ),
+        effect=False,
+    )
     lines = out.splitlines()
     if any(line.startswith("SKIPPED") for line in lines):
         s.say("stored schedule scripts: not checked (see above)")
