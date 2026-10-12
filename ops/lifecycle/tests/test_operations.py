@@ -149,7 +149,7 @@ class TestSpawnPrechecksBlocking:
     @pytest.fixture(autouse=True)
     def model_preflight(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """These tests isolate checkpoint lookup; DB-backed model checks have their own tests."""
-        from base.lm import model_config
+        from base.agents.model import model_config
 
         monkeypatch.setattr(
             model_config, "validate_spawn_model_config", lambda *_args, **_kwargs: "deepseek-flash"

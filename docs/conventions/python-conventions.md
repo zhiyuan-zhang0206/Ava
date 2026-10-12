@@ -475,7 +475,7 @@ spawned process is a launcher for the real work (git, ssh): orphaned `git` +
 `ssh` + `sh` processes accumulated below a killed launcher. Anything with a
 shell in the middle (`shell=True`, a `-lc` wrapper) has the same shape.
 
-Git specifically: pass `env=base.deploy.git.gitenv.git_env()` so a credential prompt
+Git specifically: pass `env=base.host.git.gitenv.git_env()` so a credential prompt
 errors instead of blocking on a terminal that does not exist, and ssh neither
 asks nor dials unbounded. Note that `ConnectTimeout` is not the bound — an
 `ssh` process can reach a state where its own timeout never fires, so the

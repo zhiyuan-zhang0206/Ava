@@ -33,8 +33,8 @@ import httpx
 import pytest
 from playwright.sync_api import Browser, BrowserContext
 
-from base.cluster.auth import API_TOKEN_ENV, bearer_header
 from base.config import settings
+from base.host.net.auth import API_TOKEN_ENV, bearer_header
 from tests.e2e._ports import GATEWAY_URL
 from tests.fixtures.unit.generation import seed_active_generation
 

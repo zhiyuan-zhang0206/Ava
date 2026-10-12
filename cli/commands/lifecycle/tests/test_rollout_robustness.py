@@ -31,11 +31,11 @@ import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.context.clients import DatabaseFactory
-from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
+from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime

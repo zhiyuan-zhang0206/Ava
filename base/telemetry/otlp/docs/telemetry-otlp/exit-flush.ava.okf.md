@@ -44,7 +44,7 @@ through this ordered seam.
 - Other processes that exit before provider bring-up (task #4314 triage:
   lifetimes under ~0.5 s) never builds providers; its records stay
   mirror-only by design (accepted, task #4320).
-- `base/daemon/shutdown.py:hard_exit` skips every atexit handler
+- `base/host/exit_codes.py:hard_exit` skips every atexit handler
   including this drain (`os._exit`); the queued batch is deliberately not
   flushed — hard-exit semantics win (accepted, task #4320).
 - A deferred hold can begin its existing exporter attempt at shutdown without

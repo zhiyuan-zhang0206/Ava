@@ -40,12 +40,11 @@ from base.agents.messages.kwargs import (
     AvaMsgType,
     NoteTag,
     kwargs_read_time,
-    message_addl_kwargs,
-    message_content,
     message_read_time,
     read_ava_kwargs,
 )
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
+from base.lm.content import message_addl_kwargs, message_content
 
 __all__ = [
     "build_timeline_items",

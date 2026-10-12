@@ -180,9 +180,9 @@ def _deliver_lite_api_token() -> None:
     descendant must keep its delivered authority boundary, even when a token is
     missing; no source leaves the existing bearer behavior in place.
     """
-    from base.cluster.auth import API_TOKEN_ENV
     from base.host.env.bootstrap import config_source_is_local
     from base.host.env.dotenv_boot import launcher_context, resolve_ava_home
+    from base.host.net.auth import API_TOKEN_ENV
 
     if os.environ.get(API_TOKEN_ENV) or launcher_context() is not None:
         return

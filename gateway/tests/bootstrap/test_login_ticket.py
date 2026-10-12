@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base import config
-from base.cluster.auth import bearer_header, cookie_name
+from base.host.net.auth import bearer_header, cookie_name
 from gateway.app import app
 from gateway.http.auth.session_store import LOGIN_TICKET_TTL_SECONDS
 from tests.fixtures.unit.gateway_auth import disable_default_gateway_credentials

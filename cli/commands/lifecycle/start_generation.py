@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 
 from base.deploy.release import start_inputs
-from base.deploy.release.runtime_interpreter import source_digest
 from base.host.env.registry import launch_input_keys
+from base.host.runtime_interpreter import source_digest
 
 
 def _write_generation(home: Path) -> dict[str, object] | None:

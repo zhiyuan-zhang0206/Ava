@@ -32,8 +32,8 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
-from base.cluster.auth import bearer_header
 from base.config import settings
+from base.host.net.auth import bearer_header
 
 __all__ = [
     "disable_default_gateway_credentials",

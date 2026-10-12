@@ -11,7 +11,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from base.cluster.auth import bearer_header
+from base.host.net.auth import bearer_header
 from tests.e2e._credentials import current_credentials
 from tests.e2e._ports import GATEWAY_URL
 

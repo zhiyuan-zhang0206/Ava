@@ -23,9 +23,9 @@ from typing import Any, Literal, cast
 import psutil
 from pydantic import Field, model_validator
 
-from base.deploy.release.verified_file import regular_bytes
 from base.host.atomic_io import write_text_atomic
 from base.host.private_storage import ensure_private_dir
+from base.host.verified_file import regular_bytes
 from base.log import logger
 from base.native_process import native_boot_id
 from base.native_process.evidence import EvidenceModel, ExpectedProcess

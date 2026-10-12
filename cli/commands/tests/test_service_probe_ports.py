@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-import base.daemon.health as dh
 from base.config import settings
 from base.daemon.tests.fakes import pin_endpoints
+from base.host.env.health_ports import DEFAULT_PORTS
 from ops.roster import build_services
 
 
@@ -23,7 +23,7 @@ def test_daemon_probe_url_follows_health_port(monkeypatch: pytest.MonkeyPatch) -
     """Pinning the 'labeler' port must be reflected in build_services()."""
 
     def _fake_health_port(name: str) -> int:
-        return 18003 if name == "labeler" else dh.DEFAULT_PORTS.get(name, 8000)
+        return 18003 if name == "labeler" else DEFAULT_PORTS.get(name, 8000)
 
     pin_endpoints(monkeypatch, port=_fake_health_port)
     specs = build_services()
@@ -136,7 +136,7 @@ def test_ops_probe_follows_health_port(monkeypatch: pytest.MonkeyPatch) -> None:
     """ops curl_url must derive from the 'ops' endpoint."""
 
     def _fake_health_port(name: str) -> int:
-        return 18106 if name == "ops" else dh.DEFAULT_PORTS.get(name, 8000)
+        return 18106 if name == "ops" else DEFAULT_PORTS.get(name, 8000)
 
     pin_endpoints(monkeypatch, port=_fake_health_port)
     spec = _spec_by_session(build_services(), "ops")

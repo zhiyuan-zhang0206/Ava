@@ -14,10 +14,10 @@ import cli.commands.converge.host as converge_host
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
-from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
@@ -77,7 +77,7 @@ def _hermetic_start(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+    from base.host.runtime_interpreter import LoadedRuntimeIdentity
 
     def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
         return serving_root.runtime

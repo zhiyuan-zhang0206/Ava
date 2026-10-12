@@ -25,7 +25,6 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from base.cluster import authority
-from base.cluster.auth import ClusterSecretMissingError, bearer_header, cookie_name
 from base.cluster.authority import api, ledger, unit
 from base.cluster.machine import (
     GatewayApiTokenMissing,
@@ -35,6 +34,7 @@ from base.cluster.machine import (
 )
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
+from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
 from cli.commands.data_plane import bringup
 from gateway.http.auth import request_principal
 from gateway.http.auth.request_principal import cluster_credential
@@ -287,7 +287,7 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(
 ) -> None:
     """`/api/auth/sessions` lists what the session check would still admit: an id
     without a mint (the pre-mint format) never appears."""
-    from base.cluster.auth import new_session_id
+    from base.host.net.auth import new_session_id
 
     runner = _tokens(gateway).api.runner
     with gateway_test_client(config_app(), machine=machine_identity) as client:

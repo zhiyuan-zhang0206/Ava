@@ -12,7 +12,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from base.deploy.git import host_version
+from base.host.git import host_version
 from base.packages.plugins import manifest as manifest_module
 from base.packages.skills import scan
 

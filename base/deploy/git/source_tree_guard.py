@@ -22,7 +22,7 @@ import subprocess
 from pathlib import Path
 
 from base.deploy.git.cluster_drift import prod_source_dir
-from base.deploy.git.gitenv import git_env
+from base.host.git.gitenv import git_env
 from base.host.proc import run_bounded
 
 # Bounded git: a guard must never hang a probe (mirrors

@@ -15,7 +15,7 @@ def serving_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> RootBirth:
     Native IPC and loaded-origin contracts have independent real socket tests.
     """
     from base.deploy.lifecycle import start_serving
-    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+    from base.host.runtime_interpreter import LoadedRuntimeIdentity
     from base.native_process.evidence import ExpectedProcess
 
     runtime = LoadedRuntimeIdentity(

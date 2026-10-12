@@ -70,7 +70,7 @@ def _join_credential(home: Path, capability: str | None) -> tuple[Any, str]:
         no_capability_message,
         open_bundle,
     )
-    from base.deploy.release.verified_file import regular_bytes
+    from base.host.verified_file import regular_bytes
 
     transport_key = os.environ.pop(CAPABILITY_KEY_ENV, "")
     bundle = None

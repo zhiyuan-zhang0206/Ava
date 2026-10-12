@@ -76,7 +76,6 @@ from base.daemon.health import (
     stop_health_server,
 )
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
-from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
@@ -84,6 +83,7 @@ from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus, EventBusConfig
+from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
@@ -149,7 +149,7 @@ def _plugins_fingerprint() -> str:
     any other file under the dir does not. The directory itself missing is a
     valid state (no plugins) — the fingerprint is then empty, not an error.
     """
-    from base.deploy.release.runtime_interpreter import external_plugin_read_root
+    from base.host.runtime_interpreter import external_plugin_read_root
 
     root = external_plugin_read_root()
     if not root.exists():

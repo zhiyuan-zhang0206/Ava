@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from base.deploy.release.verified_file import RegularFileReadError, regular_bytes
 from base.host.private_storage import create_private_bytes, private_file_problem
+from base.host.verified_file import RegularFileReadError, regular_bytes
 from base.paths import ava_home
 from services.backup.artifact.names import REMOTE_ROOT
 

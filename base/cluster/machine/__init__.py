@@ -17,8 +17,8 @@ import enum
 from collections.abc import Callable, Iterable
 from typing import Literal
 
-from base.cluster.auth import bearer_header, delivered_token, require_cluster_secret
 from base.host.env.dotenv_boot import launcher_context
+from base.host.net.auth import bearer_header, delivered_token, require_cluster_secret
 
 __all__ = [
     "GatewayApiBaseMissing",

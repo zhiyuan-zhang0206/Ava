@@ -241,16 +241,16 @@ def test_health_port_tables_in_sync():
     The tables are derived from `_HEALTH_PORT_SERVICES` and the fixed port table
     rather than hand-maintained; this test pins the derivation so a future hand
     edit is a test failure, not a silent drift."""
-    from base.daemon import health
+    from base.host.env import health_ports
     from base.host.env.port_table import FIXED_PORTS
 
     svcs = set(registry.health_port_env_aliases())
-    assert set(health._HEALTH_PORT_OVERRIDES) == svcs
-    assert set(health.DEFAULT_PORTS) == svcs
+    assert set(health_ports.HEALTH_PORT_OVERRIDES) == svcs
+    assert set(health_ports.DEFAULT_PORTS) == svcs
     # every health daemon has a slot in the fixed table
     assert svcs <= set(FIXED_PORTS)
     # the fallback is the FIXED_PORTS subset, by construction
-    assert {svc: FIXED_PORTS[svc] for svc in svcs} == health.DEFAULT_PORTS
+    assert {svc: FIXED_PORTS[svc] for svc in svcs} == health_ports.DEFAULT_PORTS
     # env vars follow the AVA_<NAME>_HEALTH_PORT shape — a rename elsewhere
     # (settings alias, dotenv_boot force set) breaks this loudly
     for svc, var in registry.health_port_env_aliases().items():

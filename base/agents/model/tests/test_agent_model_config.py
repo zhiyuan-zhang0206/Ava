@@ -8,11 +8,14 @@ from psycopg.types.json import Jsonb
 
 from base.agents import InvalidModelConfig
 from base.agents.model.birth_config import set_cluster_default_model
+from base.agents.model.model_config import (
+    validate_restart_model_config,
+    validate_spawn_model_config,
+)
 from base.config import Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
 from base.lm.catalog import ModelCatalog
-from base.lm.model_config import validate_restart_model_config, validate_spawn_model_config
 
 
 def test_fork_preflight_keeps_its_birth_model_after_default_changes(

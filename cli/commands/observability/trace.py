@@ -75,7 +75,7 @@ def _require_ship_config(*, machine: MachineIdentity) -> _ShipTarget:
             "mirror to Tempo."
         )
     if machine.role() == frozenset({"agent-runner"}):
-        from base.cluster.auth import bearer_header
+        from base.host.net.auth import bearer_header
         from cli.commands.observability.otel_collector import (
             gateway_otel_ingress_endpoint,
             telemetry_bearer,

@@ -50,7 +50,7 @@ contract).
 
 def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     """The reference participant set: health monitor + tree self-check."""
-    from base.deploy.release.runtime_interpreter import capture_loaded_runtime
+    from base.host.runtime_interpreter import capture_loaded_runtime
     from base.paths import ava_home
 
     home = ava_home().resolve(strict=True)

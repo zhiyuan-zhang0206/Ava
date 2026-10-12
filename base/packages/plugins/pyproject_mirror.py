@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from base.host.git.host_version import Version, parse_version
 from base.packages.plugins.manifest import (
     _CLAUSE_SPLIT_RE,
     _LOWER_OPS,
@@ -28,8 +29,6 @@ from base.packages.plugins.manifest import (
     ManifestError,
     PluginManifest,
     _Clause,
-    _parse_version,
-    _Version,
     parse_range,
 )
 
@@ -43,7 +42,7 @@ class _Bounds:
     """One side of a pyproject specifier set: the strictest clause it implies."""
 
     op: str  # ">", ">=", "==", "<=", "<"
-    version: _Version
+    version: Version
 
 
 def _parse_py_spec(spec: str) -> tuple[list[_Bounds], list[_Bounds]]:
@@ -73,30 +72,27 @@ def _parse_py_spec(spec: str) -> tuple[list[_Bounds], list[_Bounds]]:
 def _wildcard_bounds(spec: str, part: str) -> tuple[list[_Bounds], list[_Bounds]]:
     """Bounds of an `==X.Y.*` clause: from X.Y up to the next minor (or major for `==X.*`)."""
     core = part[2:-2].rstrip(".")
-    ver = _parse_version(core)
+    ver = parse_version(core)
     if ver is None:
         raise ManifestError(f"specifier {spec!r}: bad wildcard {part!r}")
     if len(core.split(".")) == 1:
-        upper = _Version(ver.major + 1, 0, 0)
+        upper = Version(ver.major + 1, 0, 0)
     else:
-        upper = _Version(ver.major, ver.minor + 1, 0)
+        upper = Version(ver.major, ver.minor + 1, 0)
     return [_Bounds(">=", ver)], [_Bounds("<", upper)]
 
 
 def _op_bounds(spec: str, part: str, op: str) -> tuple[list[_Bounds], list[_Bounds]]:
     """Bounds of one `op version` clause (`~=` compatible release included)."""
     if op == "~=":
-        ver = _parse_version(part[2:])
+        ver = parse_version(part[2:])
         if ver is None:
             raise ManifestError(f"specifier {spec!r}: bad ~= version")
-        if ver.patch:
-            upper = _Version(ver.major, ver.minor + 1, 0)
-        else:
-            upper = _Version(ver.major + 1, 0, 0)
+        upper = Version(ver.major, ver.minor + 1, 0) if ver.patch else Version(ver.major + 1, 0, 0)
         return [_Bounds(">=", ver)], [_Bounds("<", upper)]
     if op == "=":
         op = "=="
-    ver = _parse_version(part[len(op) :])
+    ver = parse_version(part[len(op) :])
     if ver is None:
         raise ManifestError(f"specifier {spec!r}: {part[len(op) :]!r} is not a version")
     if op == "==":

@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from base.deploy.release.verified_file import regular_bytes
+from base.host.verified_file import regular_bytes
 
 
 def configuration_digest(home: Path) -> str:

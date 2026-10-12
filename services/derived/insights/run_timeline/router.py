@@ -19,8 +19,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from base.agents.history.hierarchy.serve import ServedNode, serve_nodes
 from base.agents.history.hierarchy.store import load_generation_costs, load_nodes
 from base.agents.history.hierarchy.units import DisplayBlock
-from base.agents.messages.kwargs import message_addl_kwargs
 from base.db import Database
+from base.lm.content import message_addl_kwargs
 from services.derived.insights.run_timeline.context import router as context_router
 from services.derived.insights.run_timeline.history import HistoryView, HistoryViewCache
 from services.derived.insights.run_timeline.links import router as links_router

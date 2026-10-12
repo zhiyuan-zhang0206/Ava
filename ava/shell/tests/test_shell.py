@@ -452,7 +452,7 @@ def test_new_session_bare_python_resolves_into_venv(
     customization (pyenv/conda/nvm rewriting PATH) — only on the mechanism
     this repo actually ships.
     """
-    from base.deploy.release.runtime_interpreter import runtime_venv
+    from base.host.runtime_interpreter import runtime_venv
 
     fake_home = tmp_path / "home"
     fake_home.mkdir()

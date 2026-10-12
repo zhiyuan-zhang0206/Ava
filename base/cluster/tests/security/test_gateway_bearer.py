@@ -14,9 +14,9 @@ from __future__ import annotations
 import pytest
 
 from base.cluster import machine
-from base.cluster.auth import API_TOKEN_ENV, bearer_header
 from base.cluster.machine import gateway_auth_headers
 from base.config import settings
+from base.host.net.auth import API_TOKEN_ENV, bearer_header
 
 SECRET = "human-" + "h" * 40
 TOKEN = "delivered-" + "t" * 32

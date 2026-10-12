@@ -36,7 +36,7 @@ def restart_command_environment(
     Default role="gateway" (full service set). To test secondary, explicitly override:
         monkeypatch.setattr(_cli, "_roles_or_none", lambda *, machine: frozenset({"agent-runner"}))
         monkeypatch.setattr(_cli, "_collect_setup_values", lambda: (..., []))"""
-    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+    from base.host.runtime_interpreter import LoadedRuntimeIdentity
 
     def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
         return serving_root.runtime

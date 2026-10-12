@@ -9,10 +9,10 @@ import httpx
 import psycopg
 import pytest
 
-from base.cluster.auth import API_TOKEN_ENV
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.net.auth import API_TOKEN_ENV
 from ops.cluster.rpc import dispatch_to_machine
 from tests.components.base.poll_until import poll_until
 from tests.e2e._credentials import current_credentials
