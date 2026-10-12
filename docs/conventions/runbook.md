@@ -445,8 +445,13 @@ itself (its own public key in its own `authorized_keys`):
   schedule table (every stored script, agent-written ones included) from a
   throwaway worktree of NEW at `$HOME/.ava/pre-update-verify` on the host's current
   interpreter. The table is read by the home's own (OLD) source checkout — the only code
-  the database authority admits — and handed to the worktree as a rows file
-  (`--rows-file`), so NEW checks it offline and never dials the database. A red row (a moved module, an undefined name, a call that no longer binds), or a check that
+  the database authority admits — through whatever read API that OLD has (a
+  no-argument `_read_schedule_rows()` or one taking the operator database factory,
+  chosen by its signature, so OLD may be any older version) and handed to the
+  worktree as a rows file (`--rows-file`). NEW checks it through its own
+  `ava schedules verify --rows-file ... --no-notify` entry point under a throwaway
+  `AVA_HOME`, offline, never dialing the database and never calling its Python
+  API directly (that signature changes between versions). A red row (a moved module, an undefined name, a call that no longer binds), or a check that
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
   scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
   crash-loop after `up` until fixed). A host that has not fetched NEW (a dry run does
