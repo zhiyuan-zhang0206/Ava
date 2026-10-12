@@ -13,13 +13,13 @@ from typing import Any
 import pytest
 
 from base.db import Database
+from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import AxNode, AxTreeResult
 from services.desktop.computer import ax_gap
 from services.desktop.computer.ax_gap import Frame, GapRead, VisualBox
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
 from services.desktop.computer.tests.slices import computer_use_config
-from services.desktop.permissions_helper import client as helper
-from services.desktop.permissions_helper.client import AxNode, AxTreeResult
 
 WINDOW = (0.0, 0.0, 1000.0, 800.0)
 

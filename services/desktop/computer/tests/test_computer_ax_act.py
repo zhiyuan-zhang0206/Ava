@@ -14,9 +14,9 @@ from typing import Any
 import pytest
 
 from base.db import Database
+from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import AxNode, PermissionsHelperError
 
-from ...permissions_helper import client as helper
-from ...permissions_helper.client import AxNode, PermissionsHelperError
 from .. import ax_act as ax_action_tools
 from ..ax_ids import AxIdTable, AxSession
 from ..errors import ComputerUseError

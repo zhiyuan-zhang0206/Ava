@@ -80,12 +80,8 @@ Edges the contracts do not see or do not cover. They are listed, not exempted.
 - `ops` ↔ `services`: `ops/roster/__init__.py` and `ops/spec.py` import `services.*`
   inside functions, and many `services` modules import `ops`. No contract covers the
   pair.
-- String-form imports of a higher layer. `base/sessions/helperproc.py` loads
-  `services.desktop.permissions_helper.client` by name: a `base` → `services` edge, which
-  `base must not import services` exists to forbid. `ava/__init__.py` and
-  `ava/external/state.py` load `agent.extensions` and `agent.state` by name;
-  `ava/__init__.py` documents that as how `ava` keeps no static dependency on
-  `agent`.
+- String-form imports of a higher layer. `ava/__init__.py` loads `agent.extensions` by name;
+  it documents that as how `ava` keeps no static dependency on `agent`.
 
 ## Checking
 

@@ -8,9 +8,9 @@ import struct
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.host.permissions_helper import client as helper
 from base.paths import logs_dir
 
-from ..permissions_helper import client as helper
 from .errors import ComputerUseError
 from .targets import CaptureRegion
 

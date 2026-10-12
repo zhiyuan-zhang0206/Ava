@@ -9,8 +9,8 @@ from typing import cast
 
 import pytest
 
+from base.host.permissions_helper import client
 from base.native_process.ownership import OwnedProcess
-from services.desktop.permissions_helper import client
 from services.supervision.healthchecks import permissions_helper as hc
 
 # Real `launchctl print` excerpts (F5 run-09/10c/11 evidence), shortened. The

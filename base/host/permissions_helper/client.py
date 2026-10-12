@@ -140,19 +140,17 @@ from .wire import (
     WindowsResult as WindowsResult,
 )
 
-_LINE_LIMIT = (
+LINE_LIMIT = (
     64 * 1024 * 1024
 )  # client-side cap on one response line; metadata stays small but keep headroom
 _CONNECT_ATTEMPTS = 5
-_CONNECT_DELAY_S = 0.2
-_CALL_TIMEOUT_S = (
-    30.0  # bound a connected read so a stalled helper surfaces as an error, not a hang
-)
+CONNECT_DELAY_S = 0.2
+CALL_TIMEOUT_S = 30.0  # bound a connected read so a stalled helper surfaces as an error, not a hang
 # A helper launchd has only just bootstrapped may not have bound its socket yet.
 # Keep retrying the preflight ping for this long so a cold start is not reported
 # as a dead helper -- a false alarm is the exact failure this probe replaced.
 _PROBE_SETTLE_S = 5.0
-_PROBE_RETRY_DELAY_S = 0.25  # a ping can also fail instantly, so pace the retry
+PROBE_RETRY_DELAY_S = 0.25  # a ping can also fail instantly, so pace the retry
 
 
 class PermissionsHelperError(RuntimeError):
@@ -169,7 +167,7 @@ def connect(path: str) -> socket.socket:
     phase = ["socket"]
     policy = Policy(
         max_attempts=_CONNECT_ATTEMPTS,
-        backoff=lambda attempt: _CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
+        backoff=lambda attempt: CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
         jitter="none",
         jitter_span=1.0,
         classify=lambda exc: (
@@ -225,7 +223,7 @@ def _call(
 
 def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> Any:
     """Send one request line on a connected socket, read one reply, close it."""
-    s.settimeout(_CALL_TIMEOUT_S)
+    s.settimeout(CALL_TIMEOUT_S)
     try:
         s.sendall((json.dumps(req) + "\n").encode())
         buf = bytearray()
@@ -234,11 +232,11 @@ def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> Any:
             if not chunk:
                 break
             buf += chunk
-            if len(buf) > _LINE_LIMIT:
+            if len(buf) > LINE_LIMIT:
                 raise PermissionsHelperError("permissions helper response exceeded line limit")
     except TimeoutError as e:
         raise PermissionsHelperError(
-            f"permissions helper did not respond to {method!r} within {_CALL_TIMEOUT_S}s"
+            f"permissions helper did not respond to {method!r} within {CALL_TIMEOUT_S}s"
         ) from e
     finally:
         s.close()
@@ -694,7 +692,7 @@ def check_screen_capture(
             result = ping(sock_path=sock_path)
         except PermissionsHelperError as exc:
             if time.monotonic() < deadline:
-                time.sleep(_PROBE_RETRY_DELAY_S)
+                time.sleep(PROBE_RETRY_DELAY_S)
                 continue
             return ScreenCaptureStatus(
                 state=ScreenCaptureState.HELPER_UNREACHABLE,
@@ -732,7 +730,7 @@ def check_accessibility(
             result = ping(sock_path=sock_path)
         except PermissionsHelperError as exc:
             if time.monotonic() < deadline:
-                time.sleep(_PROBE_RETRY_DELAY_S)
+                time.sleep(PROBE_RETRY_DELAY_S)
                 continue
             return AccessibilityStatus(
                 state=AccessibilityState.HELPER_UNREACHABLE,

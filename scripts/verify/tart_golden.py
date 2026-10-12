@@ -102,7 +102,7 @@ RESTART_HELPER = guest_script(
 _VERIFY_PY = """
 import collections, json, struct, subprocess
 from base.paths import permissions_helper_app_dir
-from services.desktop.permissions_helper import client
+from base.host.permissions_helper import client
 
 def out(*argv):
     return subprocess.run(argv, capture_output=True, text=True).stdout

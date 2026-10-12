@@ -54,7 +54,7 @@ agent execute_code
   -> ava/mcps/_computer.py (direct dial, per-connection socket)
   -> services/desktop/computer/{mcp_daemon,execute,ocr_text,screen,errors}.py
                                          [serialize + audit + execute]
-  -> services/desktop/permissions_helper.client  [the TCC grant-holder]
+  -> base/host/permissions_helper/client  [the TCC grant-holder]
 ```
 `agent_id` rides the request envelope (`ava/mcps/__init__.py` stamps it from
 `AVA_AGENT_ID`; the mcp daemon forwards it onto the computer line protocol).

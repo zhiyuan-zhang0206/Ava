@@ -5,7 +5,7 @@ of the computer-use capability (task #1101). It sits between agents and the
 desktop:
 
 - Every action goes through the signed permissions helper
-  (`services.desktop.permissions_helper.client`), the only process holding the macOS
+  (`base.host.permissions_helper.client`), the only process holding the macOS
   TCC screen-recording / accessibility grants — no new code path ever touches
   CGEvent / screencapture directly.
 - Actions are serialized machine-wide (one asyncio lock around execute): the
@@ -81,6 +81,9 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.permissions_helper import client as helper
+from base.host.permissions_helper import client_stateful as stateful
+from base.host.permissions_helper.client import PermissionsHelperError
 from base.log import logger
 from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
@@ -88,9 +91,6 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home, computer_mcp_socket
 from base.telemetry import audit_events, build_pipeline
 
-from ..permissions_helper import client as helper
-from ..permissions_helper import client_stateful as stateful
-from ..permissions_helper.client import PermissionsHelperError
 from .ax_ids import AxSession
 from .config import ComputerUseConfig
 from .execute import _TOOLS, _execute_tool, _mcp_result, _priority

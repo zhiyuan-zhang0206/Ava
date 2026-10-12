@@ -12,8 +12,8 @@ from typing import Any
 import pytest
 
 from base.db.code_version_gate import ProcessDbGate
+from base.host.permissions_helper.client import PermissionsHelperError
 
-from ....permissions_helper.client import PermissionsHelperError
 from ... import mcp_daemon as daemon_mod
 from ..test_computer_mcp_daemon import (
     FakeHelper,
