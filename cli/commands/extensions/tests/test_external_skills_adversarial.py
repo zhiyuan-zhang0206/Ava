@@ -660,9 +660,10 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     assert str(client.parent) not in output.err + output.out
 
 
-def test_interrupted_post_activation_commit_recovers_deterministically(
+def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -699,11 +700,15 @@ def test_interrupted_post_activation_commit_recovers_deterministically(
     monkeypatch.setattr(bridge, "_commit_activation", interrupt_once)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
-
+    ledger_path = context.ava_home / "configs" / "external-agent-skills" / "codex.json"
+    ledger_before = ledger_path.read_text()
+    capsys.readouterr()
     monkeypatch.setattr(bridge, "_commit_activation", original_commit)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
-    assert (target / "SKILL.md").read_text() == "operator v2\n"
-    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+
+    assert "not resumed" in capsys.readouterr().err
+    assert ledger_path.read_text() == ledger_before
+    assert json.loads(ledger_before)["transaction"] is not None
 
 
 def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(

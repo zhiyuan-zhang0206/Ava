@@ -59,14 +59,6 @@
       "command": "python model-update-tracker-schedule.py"
     },
     {
-      "name": "trace-ship-tempo",
-      "class": "operator",
-      "default_enabled": false,
-      "description": "Ship the local OTel trace mirror to the local Tempo viewer (LGTM stack) every 5 minutes, incremental by per-file watermark.",
-      "script": "trace-ship-tempo-schedule.py",
-      "command": "python trace-ship-tempo-schedule.py"
-    },
-    {
       "name": "dev-ci-metrics",
       "class": "product",
       "default_enabled": true,

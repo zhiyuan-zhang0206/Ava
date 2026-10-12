@@ -225,7 +225,6 @@ def test_cluster_timezone_follows_the_setting_when_it_is_read(
         "model-update-tracker-schedule.py",
         "self-evolution-daily-schedule.py",
         "self-evolution-weekly-schedule.py",
-        "trace-ship-tempo-schedule.py",
     ],
 )
 def test_schedule_entry_retains_the_loaded_image_gate(

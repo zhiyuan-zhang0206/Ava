@@ -1,7 +1,7 @@
 """Role-specific OTLP exporter configuration fragments.
 
-Exporter component IDs remain stable across backend and relay shapes because
-the file-storage extension keys persistent queues by component ID.
+Every exporter keeps a bounded in-memory sending queue: a collector restart drops
+whatever was queued, and `ava trace ship` can replay a mirrored trace gap.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ BACKEND_EXPORTERS = """
       queue_size: 5000
       block_on_overflow: false
       wait_for_result: false
-      storage: file_storage
     retry_on_failure:
       enabled: true
       initial_interval: 5s
@@ -33,7 +32,6 @@ BACKEND_EXPORTERS = """
       queue_size: 5000
       block_on_overflow: false
       wait_for_result: false
-      storage: file_storage
     retry_on_failure:
       enabled: true
       initial_interval: 5s
@@ -59,9 +57,7 @@ BACKEND_EXPORTERS = """
 
 RELAY_EXPORTERS = """
   # Keep all three component IDs stable across the direct-backend -> relay
-  # cutover. In particular, file_storage keys the Tempo/Loki persisted queues
-  # by exporter ID; renaming either would strand the backlog this repair drains.
-  # Prometheus stays stable too, while retaining its bounded in-memory policy.
+  # cutover so dashboards and collector self-metrics keep their series.
   otlphttp/tempo:
     endpoint: {endpoint}
     headers:
@@ -74,7 +70,6 @@ RELAY_EXPORTERS = """
       queue_size: 5000
       block_on_overflow: false
       wait_for_result: false
-      storage: file_storage
     retry_on_failure:
       enabled: true
       initial_interval: 5s
@@ -92,7 +87,6 @@ RELAY_EXPORTERS = """
       queue_size: 5000
       block_on_overflow: false
       wait_for_result: false
-      storage: file_storage
     retry_on_failure:
       enabled: true
       initial_interval: 5s
