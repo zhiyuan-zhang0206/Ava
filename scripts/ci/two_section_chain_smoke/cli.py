@@ -100,7 +100,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     recorded_pids: set[int] = set()
     phases: list[str] = []
 
-    from services.desktop.permissions_helper import client as helper_client
+    from base.host.permissions_helper import client as helper_client
 
     def root_status() -> dict[str, Any]:
         return _root_call(run_dir, "status")

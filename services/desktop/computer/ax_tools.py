@@ -17,8 +17,9 @@ from __future__ import annotations
 import re
 from typing import Any, Literal, NamedTuple, cast
 
-from ..permissions_helper import client as helper
-from ..permissions_helper.client import AxNode, AxTreeResult
+from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import AxNode, AxTreeResult
+
 from . import ax_gap
 from .ax_gap import Frame
 from .ax_ids import AxSession

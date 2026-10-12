@@ -15,11 +15,11 @@ import pytest
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.permissions_helper import client
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
 from ..computer.protocol import Response
-from ..permissions_helper import client
 
 
 class Desktop:

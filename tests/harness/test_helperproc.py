@@ -13,12 +13,12 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperError
 from base.native_process import pid_starttime_ticks
 from base.sessions import helperproc
 from base.sessions.helper_chain_guard import parent_chain_intact
 from base.sessions.record import SessionRecord
-from services.desktop.permissions_helper import client
-from services.desktop.permissions_helper.client import PermissionsHelperError
 
 
 def _current_process_record(*, generation: str | None = None) -> SessionRecord:

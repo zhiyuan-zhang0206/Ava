@@ -18,8 +18,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ..permissions_helper import client as helper
-from ..permissions_helper.client import AxActResult
+from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import AxActResult
+
 from .ax_ids import AxIdTable, AxSession
 from .ax_tools import require_helper_support
 from .errors import ComputerUseError

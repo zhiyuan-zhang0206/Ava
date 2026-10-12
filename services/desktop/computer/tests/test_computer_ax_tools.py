@@ -15,9 +15,9 @@ import pytest
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import AxNode, AxTreeResult
 
-from ...permissions_helper import client as helper
-from ...permissions_helper.client import AxNode, AxTreeResult
 from .. import ax_tools as ax
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon

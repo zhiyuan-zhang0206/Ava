@@ -270,7 +270,7 @@ def fill_request_error(
 
 def helper_client() -> Any:
     try:
-        from services.desktop.permissions_helper import client
+        from base.host.permissions_helper import client
     except ImportError as exc:
         raise OnboardError(
             "run this script with the repository venv "

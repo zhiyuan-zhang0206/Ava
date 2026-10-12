@@ -699,7 +699,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
 
 
 def _helper_answers_ping() -> bool:
-    from services.desktop.permissions_helper import client
+    from base.host.permissions_helper import client
 
     for attempt in range(_HELPER_PING_ATTEMPTS):
         try:

@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from services.desktop.permissions_helper import client
+from base.host.permissions_helper import client
 
 _SWIFT = (Path(__file__).parents[1] / "helper" / "main.swift").read_text()
 

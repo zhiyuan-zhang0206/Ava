@@ -15,9 +15,9 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperError
 from services.desktop.computer.mcp_wrapper import _Link, _ReconnectingLink
-from services.desktop.permissions_helper import client
-from services.desktop.permissions_helper.client import PermissionsHelperError
 
 
 class FakeWriter:

@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from .. import client
+from base.host.permissions_helper import client
 
 
 def roundtrip(
