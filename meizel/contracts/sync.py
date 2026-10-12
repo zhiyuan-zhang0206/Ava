@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from scripts.meizel.analysis import analyze
-from scripts.meizel.manifest import manifest_path
-from scripts.meizel.model import MeizelError
+from meizel.contracts.analysis import analyze
+from meizel.contracts.manifest import manifest_path
+from meizel.graph.model import MeizelError
 
 __all__ = ["prune", "remove_entries"]
 

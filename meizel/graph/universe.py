@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.meizel.model import MeizelError
+from meizel.graph.model import MeizelError
 
 __all__ = ["MANIFEST", "Module", "Universe", "load_universe", "parent_of", "toplevel"]
 

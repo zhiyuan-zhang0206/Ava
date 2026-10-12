@@ -169,7 +169,7 @@ exports = ["handle.py", "transaction.py"]
   Adding an edge is always an explicit manifest edit, so every new dependency
   appears in review in the directory where the two sides meet.
 
-The checker lives in `scripts/meizel/`.
+The checker lives in `meizel/`.
 
 ### Mechanisms it replaces
 

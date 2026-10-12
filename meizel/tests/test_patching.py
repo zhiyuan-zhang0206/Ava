@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts.meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics
+from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics
 
 LIB = {"lib/__init__.py": "", "lib/m.py": "def f(): ...\n_hidden = 1\n\nclass K:\n    attr = 1\n"}
 

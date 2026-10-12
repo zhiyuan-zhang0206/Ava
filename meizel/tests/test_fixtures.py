@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, edges, verdict
+from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, edges, verdict
 
 
 def fixture_edges(root: Path) -> set[tuple[str, str]]:

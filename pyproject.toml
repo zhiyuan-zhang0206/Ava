@@ -1393,11 +1393,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "scripts/meizel/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "scripts/model_registry/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

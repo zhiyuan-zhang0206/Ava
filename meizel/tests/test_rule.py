@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts.meizel.tests.synthetic import RepoFactory, diagnostics, verdict
+from meizel.tests.synthetic import RepoFactory, diagnostics, verdict
 
 TWO_FILES = {
     "pkg/__init__.py": "",

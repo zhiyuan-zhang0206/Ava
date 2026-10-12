@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.meizel.cli import main
-from scripts.meizel.sync import remove_entries
-from scripts.meizel.tests.synthetic import RepoFactory, verdict
+from meizel.contracts.cli import main
+from meizel.contracts.sync import remove_entries
+from meizel.tests.synthetic import RepoFactory, verdict
 
 SOURCES = {
     "pkg/__init__.py": "",

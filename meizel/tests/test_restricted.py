@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.meizel.tests.synthetic import (
+from meizel.tests.synthetic import (
     RepoFactory,
     analysis_of,
     diagnostics,
