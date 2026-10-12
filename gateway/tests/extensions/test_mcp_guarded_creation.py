@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import sql
 
-from gateway.agents import router
+from gateway.agents import creation
 from gateway.app import app
 from gateway.tests.extensions.test_mcp_endpoint import (
     _ACCEPT,
@@ -29,20 +29,20 @@ ARGS = {"prompt": "one original goal", "idempotency_key": "original"}
 def test_response_loss_replays_one_original_birth(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    create = router.create_and_launch_agent
+    create = creation.create_and_launch_agent
 
     async def lose_response(*args: Any, **kwargs: Any) -> Any:
         await create(*args, **kwargs)
         raise RuntimeError("committed MCP response lost")
 
-    monkeypatch.setattr(router, "create_and_launch_agent", lose_response)
+    monkeypatch.setattr(creation, "create_and_launch_agent", lose_response)
     with TestClient(app) as client:
         token = _create_token(client)
         lost = _tool_call(client, token, TOOL, ARGS)
         assert lost["result"].get("isError") is True
         original = db_conn.execute("SELECT id FROM agents").fetchone()
         assert original is not None
-        monkeypatch.setattr(router, "create_and_launch_agent", create)
+        monkeypatch.setattr(creation, "create_and_launch_agent", create)
         replay = _tool_result(_tool_call(client, token, TOOL, ARGS))
     assert replay["id"] == original[0]
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
@@ -78,8 +78,8 @@ def test_historical_replay_never_wakes_successor_work(
         async def no_launch(*args: object, **kwargs: object) -> None:
             raise AssertionError("historical birth cannot wake successor work")
 
-        monkeypatch.setattr(router, "spawn_prechecks_blocking", no_preflight)
-        monkeypatch.setattr(router, "forward_spawn_to_remote", no_launch)
+        monkeypatch.setattr(creation, "spawn_prechecks_blocking", no_preflight)
+        monkeypatch.setattr(creation, "forward_spawn_to_remote", no_launch)
         replay = _tool_result(_tool_call(client, token, TOOL, ARGS))
     assert replay["id"] == agent_id
     assert replay["accepted"] is True

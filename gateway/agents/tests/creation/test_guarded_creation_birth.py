@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
-from gateway.agents import router as agent_router
+from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
@@ -61,7 +61,7 @@ def test_historical_birth_never_wakes_later_work(
     async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise AssertionError("historical creation cannot wake later work")
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", unexpected)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
     replay = client.post(PATH, json=BODY, headers=HEADERS)
     assert replay.status_code == 201, replay.text
     assert replay.json()["id"] == agent_id
@@ -100,7 +100,7 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
         calls.append((target, launch))
         return SpawnedAgent(id=launch.agent_id)
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201, replay.text
     assert len(calls) == 1
@@ -161,7 +161,7 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
     async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise AssertionError("old creation cannot dispatch a later retry attempt")
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", unexpected)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
     replay = client.post(PATH, json=BODY, headers=HEADERS)
     assert replay.status_code == 201 and replay.json()["id"] == agent_id
     assert db_conn.execute("SELECT last_launch_attempt_id FROM agents_meta").fetchone() == (
@@ -205,14 +205,14 @@ def test_same_key_birth_transaction_freezes_concurrent_winner(
     monkeypatch: pytest.MonkeyPatch,
     different: bool,
 ) -> None:
-    original = agent_router.create_agent_row
+    original = agent_creation.create_agent_row
     gate = Barrier(2)
 
     def race(*args: Any, **kwargs: Any) -> Any:
         gate.wait(timeout=10)
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(agent_router, "create_agent_row", race)
+    monkeypatch.setattr(agent_creation, "create_agent_row", race)
     bodies = [BODY, {**BODY, "prompt": "another goal"} if different else BODY]
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
@@ -258,7 +258,7 @@ def test_native_launch_ack_loss_recovers_same_attempt(
             raise TimeoutError("native launch acknowledgement lost")
         return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", lost_once)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", lost_once)
     first = client.post(PATH, json=BODY, headers=HEADERS)
     assert first.status_code == 502, first.text
     snapshot = _snapshot(db_conn)

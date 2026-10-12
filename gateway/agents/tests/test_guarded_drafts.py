@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
-from gateway.agents import router as agent_router
+from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
@@ -84,7 +84,7 @@ def test_historical_snapshot_never_wakes_later_work(
     async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise AssertionError("historical draft must not wake later work")
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", unexpected)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
     replay = client.post(path, json={"nl": "one intent"}, headers=HEADERS)
     assert replay.status_code == 200, replay.text
     assert replay.json() == first.json()
@@ -162,7 +162,7 @@ def test_lost_launch_ack_keeps_first_attempt_and_first_prompt(
             raise TimeoutError("native wake completed but acknowledgement was lost")
         return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", lost_once)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", lost_once)
     first = client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)
     assert first.status_code == 502, first.text
     retry = client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)
@@ -232,7 +232,7 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise AssertionError("original draft replay cannot launch replacement attempt")
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", unexpected)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
     replay = client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)
     assert replay.status_code == 200 and replay.json() == first.json()
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
@@ -246,14 +246,14 @@ def test_concurrent_changed_raw_intents_conflict_in_birth_transaction(
     from threading import Barrier
     from typing import Any
 
-    original = agent_router.create_agent_row
+    original = agent_creation.create_agent_row
     gate = Barrier(2)
 
     def race(*args: Any, **kwargs: Any):
         gate.wait(timeout=10)
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(agent_router, "create_agent_row", race)
+    monkeypatch.setattr(agent_creation, "create_agent_row", race)
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
             executor.submit(

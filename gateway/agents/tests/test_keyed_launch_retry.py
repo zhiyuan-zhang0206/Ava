@@ -12,8 +12,7 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from gateway.agents import launch_retry
-from gateway.agents import router as birth_router
+from gateway.agents import creation, launch_retry
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client, spawn_via_http
@@ -40,7 +39,7 @@ def client(
     async def reconcile(*_args: object, **_kwargs: object) -> dict[str, bool]:
         return {"wake_published": False}
 
-    monkeypatch.setattr(birth_router, "forward_spawn_to_remote", born)
+    monkeypatch.setattr(creation, "forward_spawn_to_remote", born)
     monkeypatch.setattr(launch_retry.rpc, "dispatch_to_machine", reconcile)
     with gateway_test_client(
         app, headers={"Authorization": "Bearer retry-test-secret"}, machine=machine_identity

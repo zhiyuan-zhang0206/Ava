@@ -32,7 +32,7 @@ from base.cluster.auth import (
 )
 from base.config.domains.gateway import GatewaySettings
 from gateway.app import app
-from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.middleware.cors import cors_allowed_origins
 from tests.fixtures.unit.gateway_auth import disable_default_gateway_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture

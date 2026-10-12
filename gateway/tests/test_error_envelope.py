@@ -26,7 +26,7 @@ from gateway.app import (
     app,
 )
 from gateway.http.auth import rejection_log
-from gateway.http.auth.cors import cors_allowed_origins
+from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.http.middleware.error_handlers import (
     ava_agent_error_handler,

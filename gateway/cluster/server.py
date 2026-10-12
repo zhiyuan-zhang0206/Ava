@@ -65,8 +65,12 @@ def serve(kwargs: dict[str, Any]) -> None:
         sys.exit(STARTUP_FAILURE)
 
 
-def main() -> None:
-    """Prepare the gateway process and start its ASGI server."""
+def main(*, app: Any) -> None:
+    """Prepare the gateway process and start its ASGI server.
+
+    `app` is the ASGI app (`gateway.app:app`) served in this process; the dev reload
+    branch has uvicorn import `gateway.app:app` by name instead.
+    """
     # The API always authenticates: a gateway without a human secret refuses to
     # serve, before it touches the database or binds a port.
     config = ConfigBoot()
@@ -98,10 +102,10 @@ def main() -> None:
 
     process = GatewayProcess(config=config, image=LOADED_IMAGE, machine=machine)
     with process.lifetime():
-        _serve_process(process)
+        _serve_process(process, app)
 
 
-def _serve_process(process: GatewayProcess) -> None:
+def _serve_process(process: GatewayProcess, app: Any) -> None:
     """Serve one owned entry; the ASGI lifespan borrows its existing root."""
     init_gateway_process(
         producer=process.event_pipeline,
@@ -167,8 +171,6 @@ def _serve_process(process: GatewayProcess) -> None:
         # Spawned reload workers construct their own root from their first load.
         serve(serve_kwargs(host=host))
     else:
-        from gateway.app import app
-
         previous = getattr(app.state, "gateway_process_input", None)
         app.state.gateway_process_input = process
         try:

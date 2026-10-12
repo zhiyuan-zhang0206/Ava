@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from gateway.agents import router as agent_router
+from gateway.agents import creation as agent_creation
 from gateway.agents.task_assignment import router as task_assignments
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
@@ -39,7 +39,7 @@ def client(
     async def accept(db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", accept)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
     with gateway_test_client(
         app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
     ) as value:
@@ -200,7 +200,7 @@ def test_launch_failure_retains_accepted_pair_and_original_attempt(
         attempts.append(launch.launch_attempt_id)
         raise RuntimeError("runner unavailable")
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", unavailable)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unavailable)
     first = client.post(PATH, json=body, headers=HEADERS)
     assert first.status_code == 201, first.text
     original = first.json()
@@ -237,7 +237,7 @@ def test_changed_placement_returns_historical_acceptance_without_launch(
         seen.append(target)
         return SpawnedAgent(id=launch.agent_id)
 
-    monkeypatch.setattr(agent_router, "forward_spawn_to_remote", unexpected)
+    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201
     assert seen == []
