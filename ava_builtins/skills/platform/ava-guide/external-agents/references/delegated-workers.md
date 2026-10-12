@@ -110,9 +110,10 @@ beginning to plan or work.
 **Every persistent coding session must have supervision.** Codex gets it
 automatically from `spawn_codex.py`. For Claude, launch the reference watcher
 (`scripts/watch_work.py`) that polls the work file's `STATUS:` line and only
-wakes you when there is something to do. Delivery retries across a gateway /
-agent restart window, and if every attempt fails the watcher exits 2, so the
-loss surfaces in its exit notice.
+wakes you when there is something to do. Each wake is sent once; a wake that
+lands in a gateway / agent restart window is not redelivered. A failed send
+exits 2 at the one-shot call sites (so the loss surfaces in the exit notice) and
+is retried at the next trigger inside the supervision loop.
 
 > **Use the reference watcher, don't write your own STATUS parser.** The
 > reference (`scripts/watch_work.py`) uses a regex (`^STATUS:\s*(\w+)`) to

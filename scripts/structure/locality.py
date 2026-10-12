@@ -17,7 +17,8 @@ from typing import cast
 
 from meizel.language import path_imports
 from meizel.owners import decisions
-from scripts.structure import ambient_state, baseline_shards, imports
+from meizel.state import ambient_state
+from scripts.structure import baseline_shards, imports
 from scripts.structure.imports import bindings
 
 SECTIONS = ("private_imports", "owner_bypasses")

@@ -30,12 +30,12 @@ time. Wake only when the awaited condition needs action, including if it already
 holds on the first check. Keep healthy samples in logs. Treat probe failures as
 failures, not as an unmet condition; alert after repeated failures and stop when
 the target is definitively gone. Use stable paths and refresh copied state before
-checking it. Arrange bounded, visible delivery retries when a lost wake would
-leave the task unattended.
+checking it. Make a failed wake send visible (log it and exit non-zero) when a
+lost wake would leave the task unattended.
 
 The bundled `scripts/watch_idle.py` is a reference body for an idle-agent wait.
 Read it only when implementing that wait; it uses authoritative status checks
-and bounded delivery retries. Do not start a duplicate monitor.
+and exits 2 when its wake send fails. Do not start a duplicate monitor.
 
 ### pause_heartbeat
 

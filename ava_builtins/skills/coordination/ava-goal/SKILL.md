@@ -167,10 +167,11 @@ pattern, these responsibilities are useful:
 ## The watcher
 
 `scripts/watch_idle.py` listens for the target's "idle" lifecycle signal and
-messages you (`ava.agents.send_message`) once when it fires. Delivery retries
-across a gateway / agent restart window (doubling gaps, ~10.5 min); if every
-attempt fails the watcher exits 2, so the loss surfaces in its exit notice. It
-is one-shot: re-launch it
+messages you (`ava.agents.send_message`) once when it fires. The send is made
+once (the SDK's own bounded retries are the only retry); a wake that lands in a
+gateway / agent restart window is not redelivered. If the send fails the
+watcher exits 2, so the loss surfaces in its exit notice and you re-launch it.
+It is one-shot: re-launch it
 each round you still need to keep watching. It reads its connection settings from
 the launching agent's own configuration, so it always listens on the same stream
 the target reports to. It sets `socket_timeout=None` explicitly (redis-py 8

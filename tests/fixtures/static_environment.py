@@ -21,7 +21,6 @@ STATIC_TEST_PATHS = (
     "meizel",
     "scripts/meizel/tests",
     "scripts/structure/tests",
-    "scripts/structure/ambient_state/tests",
     "scripts/ci/tests",
     "scripts/ci/pull_requests/tests",
     "scripts/ci/two_section_chain_smoke/tests",
