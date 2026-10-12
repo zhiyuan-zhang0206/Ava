@@ -93,7 +93,7 @@ def _rejection_reason(label: str, max_chars: int) -> str | None:
     over a bad prompt — that stance holds. What was missing is the separate
     judgement of whether the model produced a label *at all*: the caller turns a
     reason into a failed generation (`generate_label_async` -> False), which the
-    daemon already handles as exponential backoff + retry rather than a write.
+    daemon logs without retrying it in the same process.
 
     Three rules, all measured against the 287 real auto-generated labels on the
     production cluster (0 false positives) and against the nine real bad outputs
@@ -162,7 +162,7 @@ async def generate_label_async(
     """Generate a label via the LLM, CAS-write to DB, publish the event.
 
     Returns True when a label was written; False for a trusted transient
-    provider-call failure or an empty/rejected label — the caller records backoff;
+    provider-call failure or an empty/rejected label — the caller leaves the label unset;
     None when CAS skipped a user-owned label or one already set by another
     writer. An empty string is treated as unset only when it is not user-owned.
 
@@ -239,7 +239,7 @@ async def generate_label_async(
     reason = _rejection_reason(label, config.labeler_max_chars)
     if reason:
         # Not a label — a failed generation. Returning False hands it to the
-        # daemon's existing backoff-and-retry path instead of writing the
+        # daemon's failure observation path instead of writing the
         # model's answer into a user-facing field (issue #178).
         logger.error(
             "label generate rejected for agent {agent_id} ({reason}): {label!r}",

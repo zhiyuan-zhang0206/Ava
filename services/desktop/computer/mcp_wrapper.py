@@ -7,7 +7,7 @@ The tool list passes through verbatim from the daemon (single source of truth).
 `agent_id` is stamped on every request from this process's identity, so the
 audit stream carries the acting agent.
 
-Wired in ava_builtins/mcps/computer_use/.mcp.json as the local-fallback command
+Wired in ava_builtins/mcps/computer_use/.mcp.json as the compatibility command for older daemons
 (the MCP daemon's primary path dials the service directly — see
 ava/mcps/_computer.py). Takes no arguments (the socket path is derived from
 settings, matching the daemon). The MCP daemon spawns it with cwd pinned to the

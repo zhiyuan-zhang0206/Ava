@@ -7,7 +7,7 @@ tags: []
 
 # Schedule Manager & Runner
 
-A **schedule** is a resident process supervised by the `schedule-manager` service (`services/wake/schedule_manager/daemon.py`, its own root unit; the gateway only serves the API). Its script controls timing, typically with a resumable loop; the `schedules` table has no time fields. ScheduleManager maintains enabled sessions, restarts crashes and alerts on prolonged absence. Clean completion is terminal.
+A **schedule** is a resident process supervised by the `schedule-manager` service (`services/wake/schedule_manager/daemon.py`, its own root unit; the gateway only serves the API). Its script controls timing, typically with a resumable loop; the `schedules` table has no time fields. ScheduleManager admits one launch per desired revision, adopts live sessions and alerts on prolonged absence. Clean completion is terminal.
 
 ## Two Components
 
@@ -17,11 +17,11 @@ A **schedule** is a resident process supervised by the `schedule-manager` servic
 - **Edit acceptance**: same-value edits add no versions or sync work. Real changes commit with their queue entry; keyed retries and revision recovery are documented in [[schedule-convergence.ava.okf.md]].
 - **API requests**: start / stop / restart / script edit / delete do not call the service; the router upserts a row in `schedule_sync_requests` (`gateway/schedules/session_control.py`) and waits up to 8 s for it to be consumed. The service's `requests` loop (every second) converges the latest desired revision, adopting matching PTYs and deletes the row only if it is unchanged; while a maintenance hold is up the rows stay queued. Log capture reads the session straight from the shell backend in the gateway.
 - **Starts missing** sessions, **kills excess** sessions (when a schedule is disabled/deleted). Every explicit stop and enabled-state value change synchronously invokes the identity-checked PTY backend; `stopped` is written only after that backend confirms the session is gone, while a failed reap remains queued for an identity-checked retry.
-- **Generation boundary**: exact old-session records support cleanup only; they never decide desired state. A missing PTY is rebuilt after a restart when, and only when, the current schedule row remains enabled.
+- **Generation boundary**: exact old-session records support cleanup only. Loss of a started PTY does not authorize another launch for the same revision.
 - **Liveness identity**: the session name `ava-schedule-<id>` is the schedule's stable identity—it encodes no cluster/machine name (path-only cluster identity, #629/#633); the PTY session namespace itself is host-local + per-home (the service socket `$AVA_HOME/run/pty-sessions.sock`), and home already isolates sessions adequately
-- **Restart safe**: after a restart of the service (or the gateway), it re-identifies existing sessions (no need to recreate), and resumes the crash backoff and the stall clock from the row
-- **Distinguishes clean exit from crash**: each tick reads liveness before status. When a session disappears, it reads its terminal state—`status='completed'` (written by the runner before exiting with rc=0) = the resident process finished on its own, **terminal state, no restart, not counted toward circuit breaker**; no completed marker = crash (non-zero rc / signal / hard kill), brought up according to crash handling
-- **Alerts on prolonged silence**: an enabled schedule with no live session for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event. `status='error'` remains eligible even though the breaker will not relaunch it. The first sessionless observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the session live again clears both and rearms a later outage; completed and disabled schedules are excluded.
+- **Service restart**: re-identifies live sessions and retains the persisted one-attempt latch and stall clock. Missing started sessions become errors, without script replay.
+- **Terminal execution**: a disappeared session with `status=completed` remains completed. Otherwise the manager records an error requiring explicit start/restart. Neither case relaunches automatically.
+- **Alerts on prolonged silence**: an enabled schedule with no live session for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event. `status='error'` remains eligible without being relaunched. The first sessionless observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the session live again clears both and rearms a later outage; completed and disabled schedules are excluded.
 
 ### ScheduleRunner (`gateway/schedules/runner.py`)
 - The in-session entrypoint `.venv/bin/python -m services.wake.schedule_manager.runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.ava.okf.md]].
@@ -39,17 +39,18 @@ A **schedule** is a resident process supervised by the `schedule-manager` servic
 | status | meaning | reconcile behavior |
 |---|---|---|
 | `running` | manager has launched, session alive | maintain |
-| `completed` | script exited cleanly with rc=0 (**terminal**) | **no restart, no breaker**; `start`/`restart` can rerun |
-| `error` | crash loop breaker tripped (see below, **relaunch-terminal**) | **no auto restart** (same skip as `completed`)—breaker state lives in the DB (`status`, `launch_count`, `next_launch_at`), so **a restart won't relaunch it**; the two-hour silence alert still applies; recover via `start`/`restart` manually (the existing API resets status + clears backoff) |
+| `completed` | script exited cleanly with rc=0 (**terminal**) | **no restart**; `start`/`restart` can rerun |
+| `error` | failed, lost or unknown launch/execution outcome | no auto restart; explicit start/restart creates a new revision; the silence alert still applies |
 | `stopped` | disabled / killed by manager | don't restart |
 
-## Circuit Breaker
+## One launch attempt per revision
 
-Only applies to **crashes** (not clean exits) looping—clean exits go to `completed` terminal state and never reach the breaker:
-- **Max retries**: 5 (`_BREAKER_MAX`)
-- **Exponential backoff**: 2s → 4s → 8s → ... cap 60s (`_BACKOFF_CAP_S`); the launch is claimed with one conditional UPDATE of `launch_count` / `next_launch_at`
-- **Recovery condition**: schedule runs continuously for more than 60s (`_STABLE_S`) → counter reset
-- **After breaker trips**: `status='error'`, no more auto restart, waiting for manual re-enable. This `error` is **persisted**—reconcile treats it as a terminal state and skips it (same as `completed`), and the counter itself is a column, so a restart will **not** re-launch an already-tripped crash loop with a fresh counter.
+The manager conditionally commits `launch_count=1` and an unknown-outcome error
+before asking the PTY backend to create the session. It marks a confirmed live
+session running. A failed response or process disappearance is not replayed.
+The latch survives manager restart; only an explicit new revision resets it.
+The legacy `next_launch_at` column is ignored. A crash between admission and
+actual process birth can lose work; this is accepted to prevent duplicate starts.
 
 ## Key Dependencies
 

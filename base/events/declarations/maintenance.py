@@ -327,11 +327,6 @@ EVENTS: dict[str, EventSpec] = {
     "label_generate_rejected": telemetry_event(
         "label_generate_rejected", "label generation rejected as not a label", tier="noise"
     ),
-    "label_generate_retired": telemetry_event(
-        "label_generate_retired",
-        "label generation given up on after repeated failures",
-        tier="noise",
-    ),
     "understanding_enqueue_failed": telemetry_event(
         "understanding_enqueue_failed",
         "a chunk-triggered understanding job could not be enqueued (best-effort; the next trigger covers the same stretch)",

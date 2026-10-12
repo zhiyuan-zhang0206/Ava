@@ -1,14 +1,8 @@
-"""Page-server supervisor daemon.
+"""Start fresh serve() registrations once and observe their persistent sessions.
 
-Each open ``agent_pages`` serve row on this host is manifested as a daemon-owned
-persistent shell session for its agent. The shell runs the page server command,
-but remains alive when that command exits so this daemon can relaunch it in the
-same session. Page sessions are detached from the service tree, so a rollout
-does not kill pages; daemon restarts adopt their live sessions from the table.
-
-The ``agent_pages`` table is the truth source. The managed table in this module
-is only a per-process cache. Rows with an unavailable ``serve_dir`` retain the
-existing degradation ladder; rows that close or change kill their page session.
+A live session survives daemon restarts. Lost sessions and failed page servers
+close their page records without relaunch or agent wake. A new explicit serve
+registration is required to create another server.
 """
 
 from __future__ import annotations
@@ -59,12 +53,7 @@ from services.agent_runner.page_server import resources
 from services.agent_runner.page_server.config import PageServerConfig
 
 from . import dead_pages
-from .degradation import (
-    _DegradedServeDir,
-    _discard_gone_degraded,
-    _PageRow,
-    _reconcile_serve_dir,
-)
+from .degradation import _close_failed_page, _PageRow
 
 _log = logging.getLogger("services.agent_runner.page_server.daemon")
 
@@ -85,8 +74,6 @@ def page_server_config() -> PageServerConfig:
 # A new pty session needs a short window to finish its interactive-shell startup
 # and receive its initial command before a health probe can make a decision.
 _SPAWN_VERIFY_TIMEOUT_S = 5.0
-# Cooldown after a failed launch or a foreign port occupant.
-_SPAWN_BACKOFF_S = 30.0
 _PAGE_SERVER_MODULE = "services.agent_runner.page_server.server"
 
 
@@ -175,9 +162,10 @@ def _ensure_token(pool: ConnectionPool, row: _PageRow) -> str:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_pages SET server_token = COALESCE(server_token, %s) "
-            "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL "
+            "WHERE id = %s AND port = %s AND host = %s AND serve_dir = %s "
+            "AND closed_at IS NULL AND expired_at IS NULL "
             "RETURNING server_token",
-            (minted, row.id),
+            (minted, row.id, row.port, row.host, row.serve_dir),
         )
         persisted = cur.fetchone()
         conn.commit()
@@ -189,12 +177,21 @@ def _ensure_token(pool: ConnectionPool, row: _PageRow) -> str:
 def _create_page_session(
     pool: ConnectionPool, backend: SessionBackend, row: _PageRow, token: str
 ) -> str:
-    """Create or recreate the shell for a page row and persist its name."""
+    """Reserve a fresh registration before creating its shell once."""
     page_session = row.session_name
     if page_session is None:
         page_session = page_session_name(
             row.agent_id, row.name, _allocate_session_index(pool, row.agent_id)
         )
+    with write_transaction(pool) as conn:
+        claimed = conn.execute(
+            "UPDATE agent_pages SET session_name = %s WHERE id = %s "
+            "AND port = %s AND serve_dir = %s AND server_token = %s AND host = %s "
+            "AND session_name IS NULL AND closed_at IS NULL AND expired_at IS NULL",
+            (page_session, row.id, row.port, row.serve_dir, token, row.host),
+        ).rowcount
+    if claimed != 1:
+        raise RuntimeError(f"page row {row.id} changed before initial session admission")
     env = {**os.environ, "PAGE_SERVER_TOKEN": token}
     if not backend.new_session(
         page_session,
@@ -207,8 +204,9 @@ def _create_page_session(
         cur.execute(
             "UPDATE agent_pages SET session_name = %s "
             "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL "
-            "AND serve_dir IS NOT NULL AND host = %s",
-            (page_session, row.id, row.host),
+            "AND serve_dir = %s AND host = %s AND port = %s "
+            "AND session_name = %s AND server_token = %s",
+            (page_session, row.id, row.serve_dir, row.host, row.port, page_session, token),
         )
         if cur.rowcount == 0:
             # The row left the open set between the liveness re-check and this
@@ -226,13 +224,6 @@ def _create_page_session(
             raise RuntimeError(f"page row {row.id} left the open set while creating its session")
         conn.commit()
     return page_session
-
-
-def _launch_in_session(backend: SessionBackend, handle: _ServerHandle, row: _PageRow) -> None:
-    """Relaunch a crashed server without replacing its shell session."""
-    command = _server_command(row)
-    backend.send(handle.session_name, command)
-    backend.send_keys(handle.session_name, "Enter")
 
 
 def _server_is_healthy(host: str, port: int, token: str) -> bool:
@@ -377,28 +368,18 @@ def _drop_stale_handles(
     backend: SessionBackend,
     wanted: dict[tuple[int, str], _PageRow],
     managed: dict[tuple[int, str], _ServerHandle],
-    backoff: dict[tuple[int, str], float],
-    degraded: dict[tuple[int, str], _DegradedServeDir],
     live_names: set[str],
 ) -> None:
-    """Remove managed entries whose rows or sessions no longer match."""
-    for key in list(managed):
+    for key, handle in list(managed.items()):
         row = wanted.get(key)
-        handle = managed[key]
-        if row is None:
-            _log.info("[page-server] closing %s (row gone)", key)
+        if (
+            row is None
+            or row.port != handle.port
+            or row.serve_dir != handle.serve_dir
+            or row.session_name != handle.session_name
+        ):
             _kill_page_session(backend, handle)
             live_names.discard(handle.session_name)
-            del managed[key]
-        elif row.port != handle.port or row.serve_dir != handle.serve_dir:
-            _log.info("[page-server] replacing %s (port/dir changed)", key)
-            _kill_page_session(backend, handle)
-            live_names.discard(handle.session_name)
-            del managed[key]
-            backoff.pop(key, None)
-            degraded.pop(key, None)
-        elif handle.session_name not in live_names:
-            _log.warning("[page-server] page session died for %s", key)
             del managed[key]
 
 
@@ -430,176 +411,69 @@ def _ensure_handle(
     row: _PageRow,
     key: tuple[int, str],
     managed: dict[tuple[int, str], _ServerHandle],
-    backoff: dict[tuple[int, str], float],
-    degraded: dict[tuple[int, str], _DegradedServeDir],
     now: float,
     live_names: set[str],
     bus: EventBus,
-) -> tuple[_ServerHandle | None, bool]:
-    """Return a managed handle and whether this pass created its shell."""
+) -> _ServerHandle | None:
     if handle := managed.get(key):
-        return handle, False
-    if _reconcile_serve_dir(pool, row, key, degraded, backoff, now, bus):
-        return None, False
-    if now < backoff.get(key, 0.0):
-        return None, False
-    if row.session_name is not None and row.session_name in live_names:
-        handle = _ServerHandle(
-            row.agent_id,
-            row.name,
-            row.port,
-            row.serve_dir,
-            _ensure_token(pool, row),
-            row.session_name,
-            now - _SPAWN_VERIFY_TIMEOUT_S,
-        )
-        managed[key] = handle
-        return handle, False
+        return handle
     if not _row_matches_snapshot(pool, row):
-        # The row closed or was re-registered while this pass reconciled —
-        # never create a session from stale snapshot state. The next pass
-        # (poll interval away) adopts the current row truth.
-        return None, False
-    try:
+        return None
+    if not Path(row.serve_dir).is_dir():
+        _log.warning("[page-server] directory unavailable for %s; explicit serve required", key)
+        _close_failed_page(pool, row, bus)
+        return None
+    if row.session_name is not None:
+        if row.session_name not in live_names:
+            _log.warning("[page-server] session lost for %s; automatic restore disabled", key)
+            _close_failed_page(pool, row, bus)
+            return None
+        page_session = row.session_name
         token = _ensure_token(pool, row)
-        page_session = _create_page_session(pool, backend, row, token)
-    except RuntimeError as exc:
-        _log.error("[page-server] session create failed for %s: %s", key, exc)
-        backoff[key] = now + _SPAWN_BACKOFF_S
-        return None, False
+    else:
+        token = _ensure_token(pool, row)
+        row.server_token = token
+        try:
+            page_session = _create_page_session(pool, backend, row, token)
+        except RuntimeError:
+            _log.exception("[page-server] initial creation failed for %s; no retry", key)
+            _close_failed_page(pool, row, bus)
+            return None
     handle = _ServerHandle(
         row.agent_id, row.name, row.port, row.serve_dir, token, page_session, now
     )
     managed[key] = handle
-    backoff.pop(key, None)
-    _log.info(
-        "[page-server] created session %s for %s port=%s dir=%s",
-        page_session,
-        key,
-        row.port,
-        row.serve_dir,
-    )
-    return handle, True
-
-
-def _supervise_handle(
-    backend: SessionBackend,
-    row: _PageRow,
-    key: tuple[int, str],
-    handle: _ServerHandle,
-    managed: dict[tuple[int, str], _ServerHandle],
-    backoff: dict[tuple[int, str], float],
-    occupants: dict[int, tuple[int, str | None]],
-    shell_pids: dict[int, tuple[int, str]],
-    now: float,
-) -> bool:
-    """Health-check one page server and repair the matching shell as needed.
-
-    Returns True when this pass tore the session down after a failed
-    relaunch — the caller recreates it in the same pass so the page outage
-    is one poll, not two.
-    """
-    if now < backoff.get(key, 0.0) or now - handle.last_launch_monotonic < _SPAWN_VERIFY_TIMEOUT_S:
-        return False
-    if _server_is_healthy(row.host, row.port, handle.token):
-        backoff.pop(key, None)
-        return False
-    if _probe_port(row.host, row.port) is None:
-        try:
-            _launch_in_session(backend, handle, row)
-        except RuntimeError as exc:
-            # Self-healing: the wedged session is torn down and a fresh one is
-            # rebuilt in this same pass. Noise, not an incident (2026-10-03
-            # triage, E5).
-            _log.warning("[page-server] relaunch failed for %s: %s", key, exc)
-            # The shell cannot run the server command — its host is gone or
-            # wedged while the record still reads alive. A bare backoff
-            # would retry the dead transport forever; tear the session down
-            # instead (kill_session's record-based fallback reaches an
-            # unresponsive host) and drop the handle so the caller
-            # recreates a fresh session this pass (task #2670).
-            _kill_page_session(backend, handle)
-            del managed[key]
-            backoff.pop(key, None)
-            return True
-        handle.last_launch_monotonic = now
-        backoff.pop(key, None)
-        _log.warning("[page-server] relaunched server in session %s", handle.session_name)
-        return False
-    occupant = occupants.get(row.port)
-    if occupant is not None and _page_session_owner(occupant[0], shell_pids) == key:
-        _log.warning("[page-server] replacing stale server in session %s", handle.session_name)
-        _kill_page_session(backend, handle)
-        del managed[key]
-        backoff.pop(key, None)
-        return False
-    _log.warning("[page-server] port %s is occupied by a foreign server; backing off", row.port)
-    backoff[key] = now + _SPAWN_BACKOFF_S
-    return False
+    return handle
 
 
 def _reconcile_once(
     pool: ConnectionPool,
     managed: dict[tuple[int, str], _ServerHandle],
-    backoff: dict[tuple[int, str], float],
-    degraded: dict[tuple[int, str], _DegradedServeDir],
     host: str,
     bus: EventBus,
 ) -> None:
-    """Reconcile page rows with durable page-shell sessions and their health.
-
-    Newly registered rows are adopted FIRST — before the pass's slow
-    housekeeping (process scans, per-row health probes) — so a serve() caller
-    waits one poll (~2s), not one full pass. Liveness checks read the pty
-    record store once in-process instead of asking the PTY backend per name
-    (each has_session is a subprocess round-trip, ~0.25s; serialized over
-    every open row it stretched a pass to tens of seconds)."""
+    """Start fresh registrations once, adopt live sessions, and close failed links."""
     backend = get_shell_backend()
     rows = _open_rows(pool, host)
     wanted = {(row.agent_id, row.name): row for row in rows}
-    _discard_gone_degraded(degraded, wanted)
     live = _live_session_records()
     live_names = set(live)
-    now = time.monotonic()
-    # Fast path: new/unadopted rows get their session now, before the slow
-    # full-pass work. _ensure_handle's per-row snapshot re-check still guards
-    # the stale-row race (a row closed or re-registered mid-pass is skipped).
-    for key, row in wanted.items():
-        if key not in managed:
-            _ensure_handle(
-                pool, backend, row, key, managed, backoff, degraded, now, live_names, bus
-            )
-    # Re-scan: sessions created above must be visible to the liveness checks
-    # below, or a stale scan would reap them as dead in this same pass.
-    live = _live_session_records()
-    live_names = set(live)
-    occupants = _page_server_occupants()
-    shell_pids = _page_session_shell_pids(wanted, live)
-    _reclaim_occupants(rows, occupants, shell_pids)
-    _drop_stale_handles(backend, wanted, managed, backoff, degraded, live_names)
+    _drop_stale_handles(backend, wanted, managed, live_names)
     _close_persisted_sessions(backend, _closed_page_sessions(pool, host), live_names)
     now = time.monotonic()
     for key, row in wanted.items():
-        handle = managed.get(key)
-        if handle is None:
-            # A handle dropped mid-pass (row changed / session died) is
-            # re-created here, after the teardown work — same-pass recovery
-            # the pre-fast-path loop always had.
-            handle, _ = _ensure_handle(
-                pool, backend, row, key, managed, backoff, degraded, now, live_names, bus
-            )
-        if handle is not None and _supervise_handle(
-            backend, row, key, handle, managed, backoff, occupants, shell_pids, now
-        ):
-            # _supervise_handle tore the wedged session down. The pass's
-            # record scan predates the kill and still names the dead
-            # session — drop it so the re-ensure below cannot re-adopt
-            # the just-killed shell, then recreate in this same pass
-            # (task #2670).
-            live_names.discard(handle.session_name)
-            _ensure_handle(
-                pool, backend, row, key, managed, backoff, degraded, now, live_names, bus
-            )
+        handle = _ensure_handle(pool, backend, row, key, managed, now, live_names, bus)
+        if handle is None or now - handle.last_launch_monotonic < _SPAWN_VERIFY_TIMEOUT_S:
+            continue
+        if _server_is_healthy(row.host, row.port, handle.token):
+            continue
+        _log.warning("[page-server] server unavailable for %s; automatic relaunch disabled", key)
+        _close_failed_page(pool, row, bus)
+        _kill_page_session(backend, handle)
+        del managed[key]
+    live = _live_session_records()
+    occupants = _page_server_occupants()
+    _reclaim_occupants(rows, occupants, _page_session_shell_pids(wanted, live))
 
 
 async def _reconcile_loop(
@@ -613,8 +487,6 @@ async def _reconcile_loop(
     """Run page-shell reconciliation at the configured poll interval."""
     host = local_machine.host()
     managed: dict[tuple[int, str], _ServerHandle] = {}
-    backoff: dict[tuple[int, str], float] = {}
-    degraded: dict[tuple[int, str], _DegradedServeDir] = {}
     _log.info(
         "[page-server] daemon started, pid=%s, machine=%s, host=%s",
         os.getpid(),
@@ -627,7 +499,7 @@ async def _reconcile_loop(
             await asyncio.sleep(config.page_server_poll_interval_seconds)
             if admission.quiesced():
                 continue
-            await asyncio.to_thread(_reconcile_once, pool, managed, backoff, degraded, host, bus)
+            await asyncio.to_thread(_reconcile_once, pool, managed, host, bus)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
@@ -638,6 +510,7 @@ async def _reconcile_loop(
             raise
         except Exception:
             _log.exception("[page-server] poll iteration failed")
+            raise
 
 
 async def run(

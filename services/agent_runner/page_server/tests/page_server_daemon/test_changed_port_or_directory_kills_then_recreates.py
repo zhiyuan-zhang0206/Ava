@@ -15,7 +15,6 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import services.agent_runner.page_server.daemon as psd
-import services.agent_runner.page_server.degradation as page_degradation
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -63,20 +62,18 @@ def test_changed_port_or_directory_kills_then_recreates_the_page_session(
     new_dir.mkdir()
     _insert_page_row(db_conn, agent_id, "changed", 12007, old_dir)
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
-    backoff: dict[tuple[int, str], float] = {}
-    degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
 
-    _reconcile(sync_pool, managed, backoff, degraded)
+    _reconcile(sync_pool, managed)
     old_session = managed[(agent_id, "changed")].session_name
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET port = 12008, serve_dir = %s WHERE agent_id = %s AND name = 'changed'",
-            (str(new_dir), agent_id),
-        )
+    db_conn.execute(
+        "UPDATE agent_pages SET port = %s, serve_dir = %s, session_name = NULL, "
+        "server_token = NULL WHERE agent_id = %s AND name = %s",
+        (12008, str(new_dir), agent_id, "changed"),
+    )
     db_conn.commit()
-    _reconcile(sync_pool, managed, backoff, degraded)
+    _reconcile(sync_pool, managed)
     assert backend.killed == [old_session]
-    assert managed[(agent_id, "changed")].session_name == old_session
+    assert managed[(agent_id, "changed")].session_name != old_session
     assert len(backend.new_calls) == 2
 
 
@@ -113,7 +110,7 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
     monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
-    _reconcile(sync_pool, managed, {}, {})
+    _reconcile(sync_pool, managed)
 
     assert set(managed) == {(agent_id, "adopted")}
     assert backend.new_calls == []
@@ -165,75 +162,9 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
     monkeypatch.setattr(psd, "_kill_pid", killed.append)
     monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    _reconcile(sync_pool, {}, {}, {})
+    _reconcile(sync_pool, {})
 
     assert killed == [5011]
-
-
-def test_failed_session_creation_uses_spawn_backoff(
-    redis_url: str,
-    sync_pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    _insert_page_row(db_conn, agent_id, "backoff", 12012, tmp_path)
-    backend.new_result = False
-    managed: dict[tuple[int, str], psd._ServerHandle] = {}
-    backoff: dict[tuple[int, str], float] = {}
-
-    _reconcile(sync_pool, managed, backoff, {})
-    _reconcile(sync_pool, managed, backoff, {})
-
-    assert managed == {}
-    assert len(backend.new_calls) == 1
-    assert (agent_id, "backoff") in backoff
-
-
-def test_missing_serve_dir_uses_the_existing_degradation_ladder(
-    redis_url: str,
-    sync_pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    missing = tmp_path / "gone"
-    _insert_page_row(db_conn, agent_id, "missing", 12013, missing)
-    degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-
-    _reconcile(sync_pool, {}, {}, degraded)
-
-    assert backend.new_calls == []
-    assert degraded[(agent_id, "missing")].observations == 1
-    assert [page_degradation._missing_serve_dir_backoff_s(n) for n in range(1, 6)] == [
-        30.0,
-        60.0,
-        120.0,
-        240.0,
-        300.0,
-    ]
 
 
 def test_page_session_owner_walks_process_ancestry(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -131,36 +131,31 @@ _SELECTED_RE = re.compile(r"^\s*(\d+):.*\[selected\](?:\s+\S+=\S+)*\s*$", re.MUL
 
 # Upstream session teardown (chrome-devtools-mcp died: Chrome restart, npx crash,
 # OOM). The next upstream call raises one of these from the MCP stdio transport.
-# The daemon now auto-reconnects on upstream death instead of exiting, so the
-# watchdog only respawns when the whole daemon process itself dies (rare).
+# Upstream death ends this daemon generation; only the service supervisor may restart it.
 _UPSTREAM_DOWN = (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)
 # The mcp SDK surfaces a dead/wedged upstream as MCPError with these codes (not
 # as a transport-level anyio exception): CONNECTION_CLOSED when the peer's stdio
 # read loop hit EOF, REQUEST_TIMEOUT when a call got no reply within the read
 # timeout. Both mean "this upstream session is unusable" — the daemon must treat
-# them like any other _UPSTREAM_DOWN and reconnect, or a wedged (V8-crashed,
+# them like any other _UPSTREAM_DOWN and exit, or a wedged (V8-crashed,
 # assert-failed, OOM'd) upstream leaves the daemon half-alive forever: ping
 # still answers, list_tools serves its cache, and every real call hangs until
 # the 180s read timeout, with `dead` never set (2026-08-06 #899).
 _UPSTREAM_DOWN_ERROR_CODES = {CONNECTION_CLOSED, REQUEST_TIMEOUT}
-_UPSTREAM_DOWN_MSG = "chrome upstream session is down; browser-mcp will restart"
+_UPSTREAM_DOWN_MSG = "chrome upstream session is down; restart browser-mcp before continuing"
 
 
 def _is_upstream_down(exc: BaseException) -> bool:
-    """True when `exc` means the upstream session is unusable and must reconnect."""
+    """True when `exc` means this upstream session is unusable."""
     return isinstance(exc, _UPSTREAM_DOWN) or (
         isinstance(exc, MCPError) and exc.code in _UPSTREAM_DOWN_ERROR_CODES
     )
 
 
-# Reconnect backoff parameters for upstream death recovery.
-_RECONNECT_INITIAL_DELAY_S = 1.0
-_RECONNECT_MAX_DELAY_S = 30.0
-
 # Upstream watchdog: with no client calling, a wedged upstream would sit
 # undetected forever (ping answers from the daemon, list_tools serves its
 # cache). Probe the upstream itself every interval; a missing reply within the
-# timeout marks the session dead and reconnects it (2026-08-06 #899).
+# timeout marks the session dead and ends the process (2026-08-06 #899).
 _UPSTREAM_WATCHDOG_INTERVAL_S = 30.0
 _UPSTREAM_WATCHDOG_TIMEOUT_S = 10.0
 
@@ -234,8 +229,8 @@ class ChromeMcpDaemon:
     from the per-agent registry (generation-stamped — see page_lifecycle);
     requests without one fall back to the caller-supplied per-connection page.
 
-    ``pages``, ``gateway`` and ``tab_groups`` are built once by ``run()`` and
-    shared by every daemon it creates, so their state survives upstream reconnects.
+    ``pages``, ``gateway`` and ``tab_groups`` are built once by ``run()`` and shared by
+    every daemon it creates, for this daemon process.
     """
 
     def __init__(
@@ -252,13 +247,13 @@ class ChromeMcpDaemon:
         self._lock = asyncio.Lock()
         self._tools: list[types.Tool] | None = None
         # Set when an upstream call hits a closed session; run() watches it to
-        # trigger a reconnect instead of exiting.
+        # terminate this unusable generation.
         self.dead = asyncio.Event()
         self.generation = pages.new_generation()  # page ids are per process
 
     async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
         """Forward to the upstream, turning a dead session into a clean signal:
-        flag the daemon dead so run() reconnects, and raise a readable error
+        flag the daemon dead so run() exits, and raise a readable error
         so the client knows to retry."""
         try:
             return await self._upstream.call_tool(name, args)
@@ -503,9 +498,9 @@ async def _serve_line(
 
     req_id, method = req.get("id"), req.get("method")
 
-    # ping is lock-free and must succeed even during reconnection:
+    # ping is lock-free and must succeed while the upstream connects:
     # the healthcheck probes the daemon process itself (not the
-    # upstream), so a reconnect window should never trigger a
+    # upstream), so an initial connect window should never trigger a
     # false-positive death and unnecessary respawn.
     if method == "ping":
         _write(writer, {"id": req_id, "ok": True, "result": None})
@@ -514,7 +509,7 @@ async def _serve_line(
 
     daemon = daemon_ref[0]
     if daemon is None or daemon.dead.is_set():
-        # Daemon is reconnecting — tell the client to retry.
+        # The initial upstream connection is not ready.
         _write(writer, {"id": req_id, "ok": False, "error": _UPSTREAM_DOWN_MSG})
         await writer.drain()
         return conn_page
@@ -535,7 +530,7 @@ async def _handle_client(
     subprocess child — inherits the agent's page); the rest track their own
     ``(page, generation)`` (see ``forward_legacy_call``). `daemon_ref` is a
     mutable cell so the handler always sees the current daemon across
-    reconnects; when None (reconnecting), it returns a transient error."""
+    connects; when None (starting), it returns a pre-execution error."""
     conn_page: _ConnPage = None
     try:
         with suppress(ConnectionResetError, BrokenPipeError):
@@ -565,7 +560,7 @@ async def _await_death_or_stop(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> 
 
 async def _upstream_watchdog(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> None:
     """Periodically ping the upstream session; a wedged one (no reply within the
-    timeout) sets `dead` so run() reconnects even with no client calling."""
+    timeout) sets `dead` so run() exits even with no client calling."""
     # quiesce-exempt: watches the upstream browser process; no database
     while not stop.is_set():
         try:
@@ -575,7 +570,9 @@ async def _upstream_watchdog(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> No
         except (TimeoutError, MCPError) as e:
             if stop.is_set():
                 return
-            logger.error(f"[browser-mcp] upstream watchdog: {type(e).__name__} — reconnecting")
+            logger.error(
+                f"[browser-mcp] upstream watchdog: {type(e).__name__} — terminating the daemon"
+            )
             daemon.dead.set()
             return
         except Exception as e:
@@ -606,15 +603,11 @@ async def _socket_in_use(path: Path) -> bool:
     return True
 
 
-async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect loop keep run at 55 statements
-    *, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]
-) -> None:
+async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]) -> None:
     """Start the browser-mcp daemon.
 
-    Listens on the shared Unix socket and auto-reconnects the upstream
-    chrome-devtools-mcp on failure — no watchdog round-trip needed for the
-    common case (npx crash / Chrome restart / OOM). Only SIGTERM/SIGINT or
-    a fatal daemon-process error stops the loop.
+    One upstream connection serves this process. Creation failure or upstream
+    death ends the process; no browser action or session is automatically replayed.
     """
     browser_url = f"http://127.0.0.1:{browser_cdp_port}"
     sock = chrome_mcp_socket()
@@ -635,7 +628,7 @@ async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect 
         sock.unlink()
 
     # Mutable reference so _handle_client always sees the current daemon across
-    # upstream reconnects. None while reconnecting.
+    # initial upstream connection. None while starting.
     daemon_ref: list[ChromeMcpDaemon | None] = [None]
 
     server = await asyncio.start_unix_server(
@@ -644,7 +637,7 @@ async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect 
     logger.info(f"[browser-mcp] listening on {sock} (upstream {browser_url})")
 
     # Composition root of the shared page/session state: built once, handed to
-    # every ChromeMcpDaemon so it survives upstream reconnects. One TaskGroup owns
+    # every ChromeMcpDaemon for this upstream generation. One TaskGroup owns
     # the daemon-long tasks (the session refresh loop and the gateway session's
     # fire-and-forget one-shots and the tab-grouping tasks); the shutdown path cancels
     # them before it closes.
@@ -656,54 +649,19 @@ async def run(  # noqa: PLR0915 — the single-instance guard and the reconnect 
         session_task = tasks.create_task(
             contained(gateway.refresh_loop(stop), "gateway session refresh")
         )
-        # Tracks the current upstream stack so we can close it before reconnecting.
         current_stack: AsyncExitStack | None = None
-        reconnect_delay = _RECONNECT_INITIAL_DELAY_S
         try:
-            while not stop.is_set():
-                try:
-                    session, stack = await _create_upstream(
-                        browser_url, stop, connect_timeout_reader=connect_timeout_reader
-                    )
-                except _StoppingError:
-                    break
-                except Exception as e:
-                    logger.error(
-                        f"[browser-mcp] upstream creation failed: {e}; "
-                        f"retrying in {reconnect_delay:.1f}s"
-                    )
-                    await _await_stop_or_timeout(stop, reconnect_delay)
-                    if stop.is_set():
-                        break
-                    reconnect_delay = min(reconnect_delay * 2, _RECONNECT_MAX_DELAY_S)
-                    continue
-
-                # Successfully connected — swap in the new daemon and stack.
-                if current_stack is not None:
-                    await _bounded_stack_close(current_stack, "previous upstream stack close")
-                current_stack = stack
-                daemon = ChromeMcpDaemon(session, pages, gateway, tab_groups)
-                daemon_ref[0] = daemon
-                reconnect_delay = _RECONNECT_INITIAL_DELAY_S
-                logger.info(f"[browser-mcp] upstream connected, gen {daemon.generation}")
-
-                await _serve_generation(daemon, stop, gateway)
-
-                if daemon.dead.is_set():
-                    logger.error("[browser-mcp] upstream session died; reconnecting...")
-                    daemon_ref[0] = None
-                    tab_groups.cancel_pending()
-                    # Close the dead upstream stack NOW — its npx/node children
-                    # used to linger until the next successful reconnect (audit
-                    # round 2, P2), holding resources for the whole backoff window.
-                    # The close is bounded: a child that ignores termination must
-                    # not wedge the reconnect loop (2026-09-09 #2043).
-                    # current_stack is non-None here by construction: this branch
-                    # sits after a successful _create_upstream (which assigns it);
-                    # the None reset makes the next loop iteration's assignment the
-                    # only path that matters (pyright: comparison is always true).
-                    await _bounded_stack_close(current_stack, "dead upstream stack close")
-                    current_stack = None
+            try:
+                session, current_stack = await _create_upstream(
+                    browser_url, stop, connect_timeout_reader=connect_timeout_reader
+                )
+            except _StoppingError:
+                return
+            daemon = ChromeMcpDaemon(session, pages, gateway, tab_groups)
+            daemon_ref[0] = daemon
+            await _serve_generation(daemon, stop, gateway)
+            if daemon.dead.is_set():
+                raise RuntimeError("browser-mcp upstream died; explicit service restart required")
         finally:
             logger.info("[browser-mcp] shutting down")
             session_task.cancel()

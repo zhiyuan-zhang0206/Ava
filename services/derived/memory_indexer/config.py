@@ -18,8 +18,6 @@ class MemoryIndexerInputs:
     api_key: Callable[[], str | None]
     backend_name: Callable[[], str]
     search_uri: Callable[[], str]
-    retry_base: Callable[[], float]
-    retry_cap: Callable[[], float]
 
     @classmethod
     def from_boot(cls, boot: ConfigBoot) -> MemoryIndexerInputs:
@@ -35,8 +33,6 @@ class MemoryIndexerInputs:
             api_key=api_key,
             backend_name=lambda: boot.view.services.memory_search_backend,
             search_uri=lambda: boot.view.services.memory_search_uri,
-            retry_base=lambda: boot.view.services.memory_indexer_reconcile_retry_backoff_seconds,
-            retry_cap=lambda: boot.view.services.memory_indexer_reconcile_retry_backoff_cap_seconds,
         )
 
 

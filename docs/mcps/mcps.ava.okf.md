@@ -17,10 +17,10 @@ clients driving the cluster) is the gateway `/mcp` endpoint:
 MCP (Model Context Protocol) integrations let agents call external tool servers. Agents invoke tools as `ava.mcps.<server>.<tool>(...)` — calls serialize into **custom newline-delimited JSON** (`{id,method,params}` → `{id,ok,result|error}`, `ava/mcps/_daemon.py`) over a Unix socket to the **shared per-machine MCP daemon** (ops roster session "mcp-daemon", watchdog-managed) managing connections to each server. **Standard JSON-RPC is only used for the daemon↔MCP server hop** — over stdio for local servers (`command`) or Streamable HTTP for remote ones (`url`).
 
 ## Core Responsibilities
-- **Tool discovery**: config **lazy reloaded** on every call (`_load_config`); tool lists lazy-loaded on first access (daemon → 24h disk cache → local connection), `__all_for_ava__` prioritizes cache so `help()` triggers no connections — **not a one-time startup load**
+- **Tool discovery**: config **lazy reloaded** on every call (`_load_config`); tool lists lazy-loaded on first access (daemon → 24h disk cache for metadata only), `__all_for_ava__` prioritizes cache so `help()` triggers no connections — **not a one-time startup load**
 - **Tool invocation**: `ava.mcps.<server>.<tool>(**kwargs)` — sync wrapper over async Unix-socket communication
 - **Safety management**: only `_call_text` joins returned text and passes through `scan_content` (`ava/mcps/__init__.py:_call_text`, defined in `ava/security.py:scan_content`); **arguments are never scanned**, nor are `raw` / `_call_raw` images/structuredContent
-- **Graceful degradation**: daemon path wrapped in `suppress(MCPConnectError, OSError)` → **silently falls back to local stdio** (agent spawns the server itself); raises `MCPConnectError` only if local also fails
+- **Daemon required**: missing or unreachable daemon fails execution. Tool discovery may use cached metadata; the SDK never starts a local MCP server.
 
 ## Architecture
 ```
@@ -66,4 +66,4 @@ Native vs installed (mirroring skills), the relative-path `.mcp.json` startup fo
 - MCP is the only mechanism for agents to reach external processes — all other capabilities run in the `execute_code` sandbox
 - Daemon crash does not kill the agent — next MCP call raises `MCPConnectError`
 - Tool schemas cached on disk 24h, reducing startup round-trips
-- The official `mcp` SDK is pinned `>=2.0.0,<3` (2026-07-28 protocol revision): SDK field names are snake_case (`input_schema` / `is_error` / `structured_content`); daemon and local fallback re-serialize with `by_alias=True`, so the agent-facing wire protocol stays camelCase (unchanged from pre-v2)
+- The official `mcp` SDK is pinned `>=2.0.0,<3` (2026-07-28 protocol revision): SDK field names are snake_case (`input_schema` / `is_error` / `structured_content`); the daemon serializes content with `by_alias=True`, so the agent-facing wire protocol stays camelCase (unchanged from pre-v2)

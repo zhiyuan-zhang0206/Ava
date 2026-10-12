@@ -145,12 +145,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `inspect_metrics_coverage_gap` | inspector statistics read shows a live recorder gap (turns without durations inside the collection era); re-emitted on every read while it holds | anomaly | family, condition, availability | — | events | — |
 | `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | events | — |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events | ✓ |
-| `page_restore_alive` | page restore alive | noise | — | — | events | — |
-| `page_restore_reserved` | page restore reserved | noise | — | — | events | — |
-| `page_restore_query_failed` | page restore query failed | anomaly | — | — | events | — |
-| `page_restore_failed` | page restore failed | anomaly | — | — | events | — |
-| `page_restore_closed` | page restore closed | noise | — | — | events | — |
-| `page_restore_notified` | page restore notified | noise | — | — | events | — |
 | `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | events | ✓ |
 | `sse` | gateway SSE lifecycle — active connections by mode plus open/close counters | noise | mode, active_connections, opened, closed | — | events | — |
 | `gateway_process` | gateway process CPU, resident memory, and open file descriptors (60s sample) | noise | cpu_percent, rss_bytes, fd_count | — | events | — |
@@ -250,7 +244,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `label_generate_skipped` | label generation skipped | noise | — | — | events | — |
 | `label_generate_empty` | label generation empty | noise | — | — | events | — |
 | `label_generate_rejected` | label generation rejected as not a label | noise | — | — | events | — |
-| `label_generate_retired` | label generation given up on after repeated failures | noise | — | — | events | — |
 | `understanding_enqueue_failed` | a chunk-triggered understanding job could not be enqueued (best-effort; the next trigger covers the same stretch) | anomaly | agent_id, compact_version, error | — | events | — |
 | `understanding_chunk_failed` | a queued understanding chunk failed (attempted once, never retried) and stays undescribed | anomaly | agent_id, job_id, attempts, error | — | events | — |
 | `understanding_chunk_skipped` | a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk) | anomaly | agent_id, job_id, reason | — | events | — |
@@ -300,7 +293,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 
 | event_name | meaning | tier | key payload fields | destination |
 |------|------|------|-----------------|------|
-| `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | anomaly | agent_id, key, name, serve_dir, port | events |
 | `page_ttl_expired` | the TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id | observation | — | events |
 | `page_language_lookup_failed` | the gateway could not read the page copy language from user_settings (DB failure) and fell back to the default; attributes carry exc_type, exc_message | anomaly | — | events |
 | `page_proxy_502` | the gateway reverse proxy could not reach a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |

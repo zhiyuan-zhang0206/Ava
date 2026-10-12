@@ -183,7 +183,7 @@ new public writer would recreate the upgrade gate that this entry resolves.
 Ordinary edits continue to use the public CLI after maintenance ends.
 
 An edit preserves ID, name, description, command, enabled state, status, error
-and creation time. The existing writer updates script/revision/backoff metadata,
+and creation time. The existing writer updates script/revision/launch-admission metadata,
 adds a `schedule_versions` snapshot, and queues enabled schedules for later
 convergence. The tool does not wait for that queue or start/restart sessions.
 Prepared text already present is a no-op; any text matching neither the expected

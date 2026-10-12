@@ -29,22 +29,11 @@ def test_inputs_are_cold_and_owned() -> None:
         owner.set_field("gemini_api_key", SecretStr(key))
         owner.set_field("memory_search_backend", name)
         owner.set_field("memory_search_uri", f"http://{name}")
-        owner.set_field("memory_indexer_reconcile_retry_backoff_seconds", timeout)
-        owner.set_field("memory_indexer_reconcile_retry_backoff_cap_seconds", timeout * 2)
     assert first_inputs.embedding_name() == first_inputs.backend_name() == "first"
     assert second_inputs.embedding_name() == second_inputs.backend_name() == "second"
     assert first_inputs.search_uri() == "http://first"
     assert second_inputs.search_uri() == "http://second"
-    assert (first_inputs.embed_timeout(), first_inputs.retry_base(), first_inputs.retry_cap()) == (
-        11.0,
-        11.0,
-        22.0,
-    )
-    assert (
-        second_inputs.embed_timeout(),
-        second_inputs.retry_base(),
-        second_inputs.retry_cap(),
-    ) == (22.0, 22.0, 44.0)
+    assert (first_inputs.embed_timeout(), second_inputs.embed_timeout()) == (11.0, 22.0)
     assert (first_inputs.api_key(), second_inputs.api_key()) == ("first-key", "second-key")
 
 
@@ -91,3 +80,40 @@ async def test_retry_constructs_selected_backend_with_required_uri_reader(
         assert requests == ["http://selected-memory/meta"]
     finally:
         backend.close()
+
+
+@pytest.mark.parametrize(
+    "error", [httpx.ConnectError("not ready"), ValueError("bad configuration")]
+)
+async def test_backend_startup_retries_only_connection_failures(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, *, database_gate: ProcessDbGate
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    backend = MagicMock(name="backend")
+    backend.connect.side_effect = [error, None]
+    monkeypatch.setattr(daemon, "get_backend", MagicMock(return_value=backend))
+    sleep = AsyncMock()
+    monkeypatch.setattr(daemon.asyncio, "sleep", sleep)
+    if isinstance(error, httpx.ConnectError):
+        assert (
+            await daemon._connect_backend_with_retry(
+                Database.from_settings(gate=database_gate),
+                FakeProvider(),
+                name="numpy",
+                uri_reader=lambda: "http://test",
+            )
+            is backend
+        )
+        assert backend.connect.call_count == 2
+        sleep.assert_awaited_once_with(2.0)
+    else:
+        with pytest.raises(ValueError, match="bad configuration"):
+            await daemon._connect_backend_with_retry(
+                Database.from_settings(gate=database_gate),
+                FakeProvider(),
+                name="numpy",
+                uri_reader=lambda: "http://test",
+            )
+        assert backend.connect.call_count == 1
+        sleep.assert_not_awaited()

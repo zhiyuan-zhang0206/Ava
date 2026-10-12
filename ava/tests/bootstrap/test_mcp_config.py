@@ -462,7 +462,7 @@ def test_builtin_mcps_folder_surfaces_computer_use(
 
     The computer_use server is fronted the same way as chrome: shared="computer_use"
     tells the MCP daemon to dial the per-machine computer-mcp service directly,
-    and the wrapper command is the local-fallback path."""
+    and the wrapper command supports older daemons."""
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     merged = cfg_mod.load_mcp_config()
     assert "computer_use" in merged

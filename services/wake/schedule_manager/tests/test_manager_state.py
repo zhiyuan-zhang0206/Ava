@@ -1,9 +1,4 @@
-"""The schedule manager's state on the schedule row: the crash backoff and launch
-claim, the breaker, the stable-window reset and the two-hour stall alert, all of
-which survive a restart of the service.
-
-The DB is real; the session backend is a minimal fake whose live set the tests
-edit to model a crash."""
+"""Persisted one-attempt schedule admission and outage alerts survive restart."""
 
 from __future__ import annotations
 
@@ -146,65 +141,10 @@ def _age_not_live(conn: psycopg.Connection, sid: int, seconds: float) -> None:
     conn.commit()
 
 
-def test_backoff_skips_relaunch_within_window(
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    fake_session: tuple[_FakeBackend, list[int]],
-) -> None:
-    backend, launched = fake_session
-    sid = _insert(db_conn, "job-d")
-    mgr = sm.ScheduleManager(pool)
-
-    mgr.reconcile()  # launch #1 (count 0 -> a 2s backoff on the row)
-    assert launched == [sid]
-    assert _backoff_state(db_conn, sid) == (1, True)
-    backend.live.clear()  # it crashed immediately
-    mgr.reconcile()  # still within the backoff window -> no relaunch
-    assert launched == [sid]
-    _end_backoff(db_conn, sid)  # past the window
-    mgr.reconcile()  # now relaunch #2
-    assert launched == [sid, sid]
-    assert _backoff_state(db_conn, sid) == (2, True)
-
-
-def test_breaker_trips_after_max_launches(
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    fake_session: tuple[_FakeBackend, list[int]],
-) -> None:
-    backend, launched = fake_session
-    sid = _insert(db_conn, "job-e")
-    mgr = sm.ScheduleManager(pool)
-
-    # Each round: reconcile launches, the schedule "crashes" (session vanishes),
-    # the backoff window passes. After _BREAKER_MAX launches it trips.
-    for _ in range(sm._BREAKER_MAX + 3):
-        mgr.reconcile()
-        backend.live.clear()
-        _end_backoff(db_conn, sid)
-
-    assert len(launched) == sm._BREAKER_MAX  # stopped launching at the ceiling
-    assert _status(db_conn, sid) == "error"
-
-
-def test_completed_clears_prior_crash_backoff(
-    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
-) -> None:
-    _backend, launched = fake_session
-    sid = _insert(db_conn, "done-b")
-    _set_status(db_conn, sid, "completed")
-    _set_backoff(db_conn, sid, 3, seconds_ahead=3600)  # a couple crashes before it completed
-
-    sm.ScheduleManager(pool).reconcile()
-
-    assert launched == []
-    assert _backoff_state(db_conn, sid) == (0, False)  # a clean finish wipes the crash backoff
-
-
 def test_error_schedule_not_relaunched_after_restart(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # The breaker trip lives in the DB (status='error'). A fresh ScheduleManager
+    # The terminal failure lives in the DB (status='error'). A fresh ScheduleManager
     # (a restarted service) must treat an enabled+error+no-session row as
     # terminal, not a vanished session to relaunch — the crashloop-amnesia bug.
     _backend, launched = fake_session
@@ -315,44 +255,6 @@ def test_completed_and_disabled_schedules_do_not_stall_alert(
     assert cleared == (2,)
 
 
-def test_sync_clears_backoff(
-    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
-) -> None:
-    _backend, _launched = fake_session
-    sid = _insert(db_conn, "sync-b")
-    _set_backoff(db_conn, sid, sm._BREAKER_MAX, seconds_ahead=3600)  # pretend it tripped
-    from gateway.schedules import router
-
-    router._control_blocking(pool, sid, "restart", None)
-    assert _backoff_state(db_conn, sid) == (0, False)
-    sm.ScheduleManager(pool).sync_one(sid)
-    # One new intent resets the budget; its first launch then claims an attempt.
-    assert _backoff_state(db_conn, sid) == (1, True)
-
-
-def test_the_crash_backoff_survives_a_restart(
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    fake_session: tuple[_FakeBackend, list[int]],
-) -> None:
-    """A crash-looping schedule that has not tripped the breaker keeps its count and
-    its window across a restart of the service: no fresh counter, no immediate
-    relaunch."""
-    backend, launched = fake_session
-    sid = _insert(db_conn, "backoff-restart")
-    sm.ScheduleManager(pool).reconcile()  # launch #1
-    backend.live.clear()  # it crashed
-
-    sm.ScheduleManager(pool).reconcile()  # a restarted service: still backing off
-
-    assert launched == [sid]
-    assert _backoff_state(db_conn, sid) == (1, True)
-    _end_backoff(db_conn, sid)
-    sm.ScheduleManager(pool).reconcile()
-    assert launched == [sid, sid]
-    assert _backoff_state(db_conn, sid)[0] == 2
-
-
 def test_a_launch_is_claimed_once(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
@@ -363,31 +265,8 @@ def test_a_launch_is_claimed_once(
     mgr = sm.ScheduleManager(pool)
 
     assert mgr._claim_launch(sid, 0) is True
-    assert mgr._claim_launch(sid, 0) is False  # stale count
-    assert mgr._claim_launch(sid, 1) is False  # backing off
+    assert mgr._claim_launch(sid, 0) is False
     _end_backoff(db_conn, sid)
-    assert mgr._claim_launch(sid, 1) is True
-    assert _backoff_state(db_conn, sid) == (2, True)
-
-
-def test_a_schedule_that_stays_up_has_its_counter_reset(
-    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
-) -> None:
-    backend, launched = fake_session
-    sid = _insert(db_conn, "stays-up")
-    mgr = sm.ScheduleManager(pool)
-    mgr.reconcile()  # launch #1, session live
-    assert launched == [sid]
-    mgr.reconcile()  # live, but still inside the stable window
-    assert _backoff_state(db_conn, sid)[0] == 1
-
-    db_conn.execute(
-        "UPDATE schedules SET next_launch_at = clock_timestamp() - make_interval(secs => %s) "
-        "WHERE id = %s",
-        (sm._STABLE_S + 1, sid),
-    )
-    db_conn.commit()
-    mgr.reconcile()
-
-    assert backend.live  # still the same live session
-    assert _backoff_state(db_conn, sid) == (0, False)
+    assert mgr._claim_launch(sid, 0) is False
+    assert sm.ScheduleManager(pool)._claim_launch(sid, 0) is False
+    assert _backoff_state(db_conn, sid) == (1, False)

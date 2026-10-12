@@ -17,37 +17,32 @@ with the tool's named arguments."""
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import json
 import keyword
-import subprocess
 import time
 import types
-from collections.abc import Callable
-from contextlib import AsyncExitStack, suppress
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from ava.mcp_config import (
     MCPCallError,
     MCPConnectError,
-    MCPError,
     MCPServerNotFound,
-    MCPToolNotFound,
     ToolInfo,
-    assert_requirements,
-    is_transport_error,
     load_mcp_config,
-    server_cwd,
-    server_url,
+)
+from ava.mcp_config import (
+    MCPError as MCPError,
+)
+from ava.mcp_config import (
+    MCPToolNotFound as MCPToolNotFound,
 )
 from ava.sdk_surface.validation import coerce_str
 from ava.security import scan_content
-from base.log import logger
 
 from ._clients import McpClients
-from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 from ._remote import (
     _current_agent_id as _current_agent_id,
 )
@@ -156,315 +151,41 @@ def _write_cache(server: str, tools: list[ToolInfo]) -> None:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-# ─── sync↔async bridge + per-server session cache ───────────────────────
-#
-# MCP ClientSession / stdio_client are async-only. The Ava SDK is sync; it crosses over through
-# the `McpClients` of the bound context (`_clients.py`): a loop on a daemon thread whose sessions
-# live for the life of the context. Each session's stdio_client + ClientSession context enters an
-# AsyncExitStack; when the subprocess exits the loop dies with the process, the OS closes the stdin
-# pipe, and compliant servers see EOF and exit. No explicit close of the sessions at the end:
-# closing stdio subprocesses in parent-process-dying scenarios is prone to deadlock.
-#
-# Concurrency: a per-server asyncio.Lock prevents two callers from concurrently connecting to the
-# same server and spawning two subprocesses. Failure cleanup: _connect uses a local AsyncExitStack
-# for isolation; on failure aclose semi-initialized resources.
-
-
 def _clients() -> McpClients:
-    """The MCP clients of the bound context, built on first use."""
+    """The daemon client of the bound context, built on first use."""
     import ava
 
     return ava.context.clients.get(McpClients)
 
 
-def _get_remote_client() -> _RemoteMCPClient | None:
-    """The client of this machine's MCP daemon, or None to connect locally."""
+def _get_remote_client() -> _RemoteMCPClient:
+    """Require this machine's MCP daemon; the SDK never starts servers."""
     return _clients().remote()
 
 
-def _enabled_server_spec(server: str) -> dict[str, Any]:
-    """Require current enable admission before using a cached or new session."""
-    config = _load_config()
-    if server not in config:
-        raise MCPServerNotFound(f"no server {server!r} in `$AVA_HOME/mcp.json`")
-    return config[server]
-
-
-async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
-    """Connect to the server in the background loop, return ClientSession (cache reused).
-
-    errlog: stderr target passed to stdio_client.
-      Default None → use mcp SDK default (sys.stderr).
-      `subprocess.DEVNULL` → discard subprocess stderr (discovery scenario).
-    """
-    _enabled_server_spec(server)
-    if server in mcp.sessions:
-        return mcp.sessions[server]
-
-    lock = mcp.session_locks.get(server)
-    if lock is None:
-        lock = asyncio.Lock()
-        mcp.session_locks[server] = lock
-
-    async with lock:
-        spec = _enabled_server_spec(server)
-        if server in mcp.sessions:
-            return mcp.sessions[server]
-        assert_requirements(spec)
-        url = server_url(spec)
-        if url is not None:
-            session, stack = await _connect_http(
-                url, spec.get("headers"), timeout_seconds=mcp.timeout_seconds, server=server
-            )
-            mcp.session_stacks[server] = stack
-            mcp.sessions[server] = session
-            return session
-        cmd = spec.get("command")
-        if not isinstance(cmd, str) or not cmd:
-            raise MCPError(f"server {server!r} 'command' field missing or not str")
-        args_list = spec.get("args") or []
-        env_dict = spec.get("env") or {}
-
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
-
-        # Relative interpreter paths resolve against the child's cwd: installed
-        # packages from their own dir, built-ins from the repo root.
-        cwd = server_cwd(server)
-        params = StdioServerParameters(command=cmd, args=args_list, env=env_dict or None, cwd=cwd)
-
-        # errlog controls subprocess stderr destination:
-        #   - Not passed → mcp SDK default sys.stderr (may pollute agent output)
-        #   - DEVNULL → discard (discovery / _list_tools scenarios)
-        stdio_kwargs: dict[str, Any] = {}
-        if errlog is not None:
-            stdio_kwargs["errlog"] = errlog
-
-        # Failure path isolates cleanup via local stack; transfer only after full success
-        local_stack = AsyncExitStack()
-        try:
-            read, write = await asyncio.wait_for(
-                local_stack.enter_async_context(stdio_client(params, **stdio_kwargs)),
-                timeout=mcp.timeout_seconds(),
-            )
-            session: Any = await local_stack.enter_async_context(
-                ClientSession(
-                    read,
-                    write,
-                    # Bound every request (call_tool / list_tools): the SDK
-                    # default is no timeout, and a hung server would block the
-                    # calling agent forever. Same knob the connect phase uses
-                    # and the daemon request deadline applies.
-                    read_timeout_seconds=mcp.timeout_seconds(),
-                )
-            )
-            await asyncio.wait_for(session.initialize(), timeout=mcp.timeout_seconds())
-        except TimeoutError as e:
-            await local_stack.aclose()
-            raise MCPConnectError(
-                f"connecting to server {server!r} timed out (>{mcp.timeout_seconds()}s)"
-            ) from e
-        except Exception as e:
-            await local_stack.aclose()
-            raise MCPConnectError(
-                f"connecting to server {server!r} failed: {type(e).__name__}: {e}"
-            ) from e
-
-        # Keep the per-server stack so a dead session can be closed individually
-        # and rebuilt (the old global stack made selective teardown impossible).
-        mcp.session_stacks[server] = local_stack
-        mcp.sessions[server] = session
-        return session
-
-
-async def _connect_http(
-    url: str,
-    headers: dict[str, str] | None,
-    *,
-    timeout_seconds: Callable[[], float],
-    oauth: bool = False,
-    server: str = "",
-) -> tuple[Any, AsyncExitStack]:
-    """Connect to a remote Streamable HTTP server in the background loop.
-
-    Local-fallback counterpart of the daemon's `_connect_http`: dials the
-    endpoint directly (no child process), same stateless semantics; `oauth=True` builds the browser authorization flow instead of static headers. Returns the
-    ClientSession and the stack that owns its transport; the caller caches both.
-    """
-    from mcp import ClientSession
-    from mcp.client.streamable_http import (
-        create_mcp_http_client,  # pyright: ignore[reportPrivateImportUsage] — re-exported from mcp.shared._httpx_utils
-        streamable_http_client,
-    )
-
-    local_stack = AsyncExitStack()
-    timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else timeout_seconds()
-    try:
-        if oauth:
-            from ._oauth import oauth_http_client
-
-            # The per-server session lock `_connect` holds already serializes the flow.
-            http_client = await oauth_http_client(url, server, {})
-        else:
-            http_client = create_mcp_http_client(headers=headers) if headers else None
-        read, write = await asyncio.wait_for(
-            local_stack.enter_async_context(streamable_http_client(url, http_client=http_client)),
-            timeout=timeout,
-        )
-        session: Any = await local_stack.enter_async_context(
-            ClientSession(
-                read,
-                write,
-                read_timeout_seconds=timeout_seconds(),
-            )
-        )
-        await asyncio.wait_for(session.initialize(), timeout=timeout)
-    except TimeoutError as e:
-        await local_stack.aclose()
-        raise MCPConnectError(f"connecting to server {url!r} timed out (>{timeout}s)") from e
-    except Exception as e:
-        await local_stack.aclose()
-        raise MCPConnectError(
-            f"connecting to server {url!r} failed: {type(e).__name__}: {e}"
-        ) from e
-    return session, local_stack
-
-
-def _run_async(coro: Any) -> Any:
-    """Sync entry point — toss coro to the background loop and wait for result."""
-    return _clients().run(coro)
-
-
-async def _invalidate_session(mcp: McpClients, server: str) -> None:
-    """Close and drop `server`'s cached session — the stdio child died (server
-    process restarted, pipe broke) and the cached ClientSession can never
-    recover. Runs on the background loop; safe when uncached.
-
-    Closes the per-server transport stack, which terminates the child process
-    and frees its pipes, so the next `_connect` spawns a fresh one.
-    """
-    lock = mcp.session_locks.get(server)
-    if lock is None:
-        lock = asyncio.Lock()
-        mcp.session_locks[server] = lock
-    async with lock:
-        mcp.sessions.pop(server, None)
-        stack = mcp.session_stacks.pop(server, None)
-        if stack is not None:
-            try:
-                await stack.aclose()
-            except Exception:
-                logger.opt(exception=True).warning(
-                    "closing the transport stack of MCP server {} failed; "
-                    "the next connect spawns a fresh one anyway",
-                    server,
-                )
-
-
-async def _call_with_reconnect(
-    mcp: McpClients, server: str, call: Any, *, errlog: Any = None, retry_transport: bool
-) -> Any:
-    """Run `call(session)` against the cached session and invalidate it on
-    transport failure. Retry only for requests safe to repeat (tool listing).
-
-    A tool call may have run before its response was lost, so its transport
-    failure reports an unknown result without replaying. Tool-level errors
-    propagate untouched. At most one rebuild per safe call.
-    """
-    session = await _connect(mcp, server, errlog=errlog)
-    try:
-        return await call(session)
-    except Exception as e:
-        if not is_transport_error(e):
-            raise
-        await _invalidate_session(mcp, server)
-        if not retry_transport:
-            raise MCPCallError(
-                f"MCP tool result unknown for server {server!r}; request may have executed: "
-                f"{type(e).__name__}: {e}"
-            ) from e
-        session = await _connect(mcp, server, errlog=errlog)
-        return await call(session)
-
-
 def _list_tools(server: str) -> list[ToolInfo]:
-    """List the server's tools.
-
-    Prefer the remote daemon path (when this agent's daemon is running); on
-    failure fallback to cache/local. Next, disk cache (24h TTL). Finally,
-    local lazy connect (writes cache).
-    """
-    remote = _get_remote_client()
-    if remote is not None:
-        # Only a transport failure (daemon dead / unreachable) falls back to
-        # cache/local — a tool/server-level error (MCPCallError / MCPToolNotFound)
-        # must propagate, not be silently retried on a freshly-spawned local
-        # session, which would mask the error and double-run side effects.
-        with suppress(MCPConnectError, OSError):
-            return remote.list_tools(server, timeout_seconds=_clients().timeout_seconds())
-
-    cached = _read_cache(server)
-    if cached is not None:
-        return cached
-
-    mcp = _clients()
-
-    async def _do() -> list[ToolInfo]:
-        result = await _call_with_reconnect(
-            mcp, server, lambda s: s.list_tools(), errlog=subprocess.DEVNULL, retry_transport=True
+    """Load daemon metadata, using the disk cache on connection failure."""
+    try:
+        tools = _get_remote_client().list_tools(
+            server, timeout_seconds=_clients().timeout_seconds()
         )
-        return [
-            {
-                "name": t.name,
-                "description": t.description or "",
-                "input_schema": t.input_schema or {},
-            }
-            for t in result.tools
-        ]
-
-    tools = _run_async(_do())
+    except (MCPConnectError, OSError):
+        cached = _read_cache(server)
+        if cached is None:
+            raise
+        return cached
     _write_cache(server, tools)
     return tools
 
 
 def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
-    """Call tool, return the full result dict ({content, isError, structuredContent})."""
+    """Call through the daemon once; an unknown result is never replayed."""
     from ava.sdk_surface import agent_identity
 
     agent_identity.validate_external_identity()
-    remote = _get_remote_client()
-    if remote is not None:
-        # Only a transport failure falls back to local; a tool/server-level error
-        # (MCPCallError / MCPToolNotFound) propagates rather than being silently
-        # retried locally (which would double-run a side-effectful tool).
-        with suppress(MCPConnectError, OSError):
-            return remote.call_tool(
-                server, tool, args, timeout_seconds=_clients().timeout_seconds()
-            )
-        # The daemon attempt may have outlived the borrowed lease.
-        agent_identity.validate_external_identity()
-
-    mcp = _clients()
-
-    async def _do() -> dict[str, Any]:
-        try:
-            result = await _call_with_reconnect(
-                mcp, server, lambda s: s.call_tool(tool, args or None), retry_transport=False
-            )
-        except MCPCallError:
-            raise
-        except Exception as e:
-            msg = str(e)
-            if "tool" in msg.lower() and ("not found" in msg.lower() or "unknown" in msg.lower()):
-                raise MCPToolNotFound(f"server {server!r} has no tool {tool!r}: {msg}") from e
-            raise MCPCallError(f"calling {server}.{tool} failed: {type(e).__name__}: {e}") from e
-        return {
-            "content": [_dump_content(c) for c in (result.content or [])],
-            "isError": bool(result.is_error),
-            "structuredContent": result.structured_content,
-        }
-
-    return _run_async(_do())
+    return _get_remote_client().call_tool(
+        server, tool, args, timeout_seconds=_clients().timeout_seconds()
+    )
 
 
 def _call_text(server: str, tool: str, **args: Any) -> str:
@@ -503,18 +224,6 @@ def _call_text(server: str, tool: str, **args: Any) -> str:
     # A tool result (browser page text, fetched document, remote API payload) is
     # untrusted ingested content, so it is scanned before the agent reads it.
     return scan_content(text, source=f"mcps.{server}.{tool}")
-
-
-def _dump_content(c: Any) -> dict[str, Any]:
-    """Serialize an mcp.types ContentBlock into a plain dict.
-
-    All compliant MCP content blocks are pydantic models with model_dump.
-    Absence means SDK type change / we missed a new type — raise
-    immediately; do not silently swallow as 'unknown' (fail-fast).
-    """
-    if not hasattr(c, "model_dump"):
-        raise MCPError(f"Unrecognized MCP content block type: {type(c).__name__} ({c!r})")
-    return c.model_dump(mode="python", exclude_none=True, by_alias=True)
 
 
 # ─── Namespace proxy ──────────────────────────────────────────────────────

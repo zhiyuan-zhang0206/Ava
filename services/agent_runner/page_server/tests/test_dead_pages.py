@@ -54,7 +54,6 @@ def published(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         seen["wakes"].append((agent_id, inbound_id))
 
     monkeypatch.setattr(EventBus, "publish_best_effort", publish)
-    monkeypatch.setattr(dead_pages, "publish_inbound_wake", wake)
     monkeypatch.setattr(admission, "quiesced", lambda: False)
     return seen
 
@@ -167,40 +166,9 @@ async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
     await _round(pool, database_gate=database_gate)
 
     assert _closed(db_conn, agent, "dead-one") and _closed(db_conn, agent, "dead-two")
-    notices = _notices(db_conn, agent)
-    assert len(notices) == 1  # one notice naming both pages
-    assert "'dead-one'" in notices[0] and "'dead-two'" in notices[0]
-    assert len(published["events"]) == 2  # a PageClosed per page
-    assert published["wakes"] == [(agent, "0")]
-
-
-async def test_the_owner_is_not_told_again_within_the_dedupe_window(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    published: dict[str, list[Any]],
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    agent = spawn_agent(
-        spawner="user",
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    _page(db_conn, agent, "first", _free_port())
-    await _round(pool, database_gate=database_gate)
-    _page(db_conn, agent, "second", _free_port())
-
-    await _round(pool, database_gate=database_gate)
-
-    assert _closed(db_conn, agent, "second")  # still closed ...
-    assert len(_notices(db_conn, agent)) == 1  # ... but the agent is not nagged again
-    assert published["wakes"] == [(agent, "0")]
+    assert _notices(db_conn, agent) == []
+    assert len(published["events"]) == 2
+    assert published["wakes"] == []
 
 
 async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
@@ -267,39 +235,6 @@ async def test_a_quiesced_unit_skips_the_round(
     await _round(pool, database_gate=database_gate)
 
     assert not _closed(db_conn, agent, "dead")
-
-
-async def test_a_failed_close_rolls_back_the_close_and_the_notice(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    published: dict[str, list[Any]],
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """Close and notice are one transaction: when the notice cannot be written the row
-    stays open for the next round, so the agent is never told about an open row."""
-    agent = spawn_agent(
-        spawner="user",
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    _page(db_conn, agent, "dead", _free_port())
-    monkeypatch.setattr(
-        dead_pages.page_recovery, "NOTICE_INSERT_SQL", "INSERT INTO nowhere VALUES (%s, %s)"
-    )
-
-    with pytest.raises(psycopg.ProgrammingError):
-        await _round(pool, database_gate=database_gate)
-
-    assert not _closed(db_conn, agent, "dead")
-    assert published["events"] == []
 
 
 async def test_the_loop_scans_at_once_then_paces(
