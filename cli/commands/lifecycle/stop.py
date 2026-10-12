@@ -338,7 +338,7 @@ def _release_self_heal_pause(
         return
     if state is None or state.posture != "paused":
         return  # nothing paused this host; an operator's `ava restart` changes nothing
-    from ops.cluster.pause import unpause_local_cluster
+    from ops.cluster_status.pause import unpause_local_cluster
 
     unpause_local_cluster(database_factory(), EventBus.from_settings(), local_machine=machine)
     print("  · unpaused this host (nothing else owns the pause; nothing was stopped)")

@@ -10,7 +10,7 @@ tags: []
 ## What is it
 The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway resolves the local address from the `machines` table and directly connects to `POST /ops`; the daemon calls the ops op clusters (`ops.cluster.operations` / `ops.host_config` / `ops.inventory` / `ops.lifecycle`) in-process to execute cluster ops operations, returning results synchronously in the HTTP response. Compact request/response, non-streaming, no queue / no SSE / no reconnection.
 
-**Role affiliation**: agent-runner side (gateway does not run; instead it runs `gateway.ops_*` in-process) — `ServiceSpec.capabilities=_AGENT_RUNNER` in `ops/spec.py`.
+**Role affiliation**: agent-runner side (gateway does not run; instead it runs `gateway.ops_*` in-process) — `ServiceSpec.capabilities=AGENT_RUNNER` in `ops/spec.py`.
 
 ## Core Responsibilities
 - **Inbound HTTP endpoint**: binds `0.0.0.0:<ops_port>` when the host declares a reachable address (`AVA_MACHINE_HOST`), else `127.0.0.1`; serves `POST /ops`; `GET /healthz` (watchdog health check) on the same port, via localhost without auth. The health envelope reports active-op age and informational worker saturation; an operation held longer than 11 minutes (the no-progress bound plus margin) returns 503 so the watchdog restarts the daemon.
@@ -30,7 +30,7 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 - **Singleton**: pidfile ensures only one instance per agent-runner; before start, `assert_schema_current` (refuses service if DB is ahead).
 - **Boot self-registration**: the public `boot.register_boot` refreshes this unit's serving liveness after health starts. It retains its non-fatal registration behavior; see [[services/agent_runner/agent_ops/docs/process-composition.ava.okf.md]].
 
-`ops.cluster.pause` uses `ops.agent_pause` for the shared native drain;
+`ops.cluster_status.pause` uses `ops.agent_pause` for the shared native drain;
 `ops.agent_pause.probe` checks actual daemon identity and admitted work.
 Dependency APIs remain available until existing native actions finish.
 Local service teardown closes new API admission only after the drain; normal

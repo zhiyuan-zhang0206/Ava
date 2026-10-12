@@ -53,8 +53,8 @@ from gateway.cluster.schemas import (
 from gateway.cluster.snapshots import Snapshot, read_all
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as _cluster_rpc
-from ops.cluster.pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, check_pidfile
+from ops.cluster_status.pause import is_paused as cluster_is_paused
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 
 router = APIRouter()

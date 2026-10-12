@@ -8,7 +8,7 @@ plugin's. Its host-scoped `indexer_enabled` config controls the daemon separatel
 from whether agents inject the standing memory index into their prompts.
 
 Discovery keys on this plugin's code being PRESENT on the machine (see
-`ops.spec.plugin_services`), so the cluster-level on/off is the explicit gate
+`ops.roster.plugin_services.plugin_services`), so the cluster-level on/off is the explicit gate
 below rather than the presence check.
 
 Deliberately light, like `ava_fleet/services.py`: it imports the ops service
@@ -46,7 +46,7 @@ def services() -> tuple[ServiceSpec, ...]:
     """The ops services the memory plugin contributes to the roster.
 
     The gateway-side indexing daemon. Ordering against memory-search (which it
-    cold-start-connects to) is preserved by `ops.spec.plugin_services()` folding plugin
+    cold-start-connects to) is preserved by `ops.roster.plugin_services.plugin_services()` folding plugin
     services onto the tail of the roster, well after the gateway group.
     """
     config_path = disk_image_path("ava_memory")

@@ -278,7 +278,7 @@ def test_unpause_releases_the_hold(
 ) -> None:
     from unittest.mock import MagicMock
 
-    from ops.cluster.pause import unpause_local_cluster
+    from ops.cluster_status.pause import unpause_local_cluster
 
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())

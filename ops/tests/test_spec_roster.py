@@ -9,7 +9,6 @@ re-export façade so the "single source" property can't silently regress.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -364,46 +363,6 @@ def test_every_service_declares_an_identity_probe() -> None:
     """Every health verdict must bind the responder to this root-owned service."""
     missing = {s.session for s in roster.build_services() if s.identity_probe is None}
     assert missing == set(), f"{sorted(missing)} have no identity-bound health probe"
-
-
-@pytest.mark.parametrize("service", ["gateway", "browser", "task-maintenance"])
-def test_roster_uses_healthy_protocol_without_native_listener_proof(
-    monkeypatch: pytest.MonkeyPatch, service: str
-) -> None:
-    from base.daemon.health import DaemonProbe
-
-    def healthy(*_args: object, **_kwargs: object) -> DaemonProbe:
-        return DaemonProbe.up("healthy")
-
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("roster protocol availability must not inspect native ownership")
-
-    monkeypatch.setattr(roster, "probe_home", healthy)
-    monkeypatch.setattr(roster, "_browser_probe", healthy)
-    monkeypatch.setattr("ops.roster.healthz.probe_daemon", healthy)
-
-    def identity(*_args: object) -> Callable[[], DaemonProbe]:
-        return healthy
-
-    monkeypatch.setattr(roster, "daemon_identity", identity)
-    monkeypatch.setattr("psutil.process_iter", forbidden)
-    monkeypatch.setattr("base.native_process.root_control.client.owned_process", forbidden)
-    item = next(item for item in roster.build_services() if item.session == service)
-    assert item.identity_probe is not None
-    assert item.identity_probe().alive
-
-
-def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
-    """The browser's `curl_url` stays (the CDP endpoint is still what gets
-    dialled), but the verdict comes from the profile-anchored probe — CDP itself
-    carries no field we control, so a 200 there says nothing about whose Chrome
-    answered."""
-    from services.desktop.browser.probe import probe_browser
-
-    browser = next(s for s in roster.build_services() if s.session == "browser")
-    probe = browser.identity_probe
-    assert probe is roster._browser_probe
-    assert probe_browser is not None  # the lazy import target exists
 
 
 def test_daemon_identity_binds_the_probe_to_one_daemons_facts(

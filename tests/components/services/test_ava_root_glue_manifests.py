@@ -13,7 +13,7 @@ from base.config import settings
 # The capability constants are typed frozenset[MachineRole]; capability values
 # are irrelevant to the roster-driven assertions here (same precedent as
 # cli/commands/cluster/tests/test_cluster_health.py).
-from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
+from ops.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
 from services.supervision.ava_root.manifest import ManifestError, load_manifests
 from services.supervision.ava_root.supervisor import SupervisorConfig
 from services.supervision.ava_root_glue import manifests as gen
@@ -54,7 +54,7 @@ def _spec(session: str, capabilities: frozenset[MachineRole], cmd: str) -> Servi
         requires_db=True,
         # A both-capability database service must name its login class: construction
         # refuses the spec otherwise (the launcher could not deliver a credential).
-        db_access="gateway" if capabilities == _BOTH else None,
+        db_access="gateway" if capabilities == BOTH else None,
     )
 
 
@@ -118,9 +118,9 @@ def test_capability_tokens_validated() -> None:
 
 def test_specs_order_and_subset_are_preserved() -> None:
     specs = [
-        _spec("svc-b", _GATEWAY, ".venv/bin/python -m b"),
-        _spec("svc-a", _AGENT_RUNNER, ".venv/bin/python -m a"),
-        _spec("svc-c", _BOTH, ".venv/bin/python -m c"),
+        _spec("svc-b", GATEWAY, ".venv/bin/python -m b"),
+        _spec("svc-a", AGENT_RUNNER, ".venv/bin/python -m a"),
+        _spec("svc-c", BOTH, ".venv/bin/python -m c"),
     ]
     units = gen.build_units(specs, capabilities=["agent-runner"], repo_root=_REPO)
     assert [u["id"] for u in units] == ["svc-a", "svc-c"]
@@ -173,11 +173,11 @@ def test_declared_shutdown_ceiling_becomes_root_window_and_undeclared_keeps_the_
     declared = ServiceSpec(
         session="svc-a",
         cmd=".venv/bin/python -m a",
-        capabilities=_GATEWAY,
+        capabilities=GATEWAY,
         requires_db=False,
         stop_ceiling_s=30.0,
     )
-    undeclared = _spec("svc-b", _GATEWAY, ".venv/bin/python -m b")
+    undeclared = _spec("svc-b", GATEWAY, ".venv/bin/python -m b")
     units = {
         unit["id"]: unit
         for unit in gen.build_units(

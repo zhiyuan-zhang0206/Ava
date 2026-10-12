@@ -8,7 +8,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
-from ops.roster import observe
+from ops.cluster_status import observe
 from ops.roster.service_spec import ServiceSpec
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

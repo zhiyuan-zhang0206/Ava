@@ -15,31 +15,16 @@ from base.cluster import frontend_service_cmd
 from base.config import settings
 from base.daemon.health import DaemonProbe, probe_home
 from base.paths import ava_home, otel_collector_binary, otel_collector_config
+from ops.roster import plugin_services
 from ops.roster.healthz import daemon_identity as daemon_identity  # public: plugin services
 from ops.roster.healthz import healthz_daemon as healthz_daemon  # public: plugin services
-from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
+from ops.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
 
 # After uvicorn's connection drain the gateway runs its lifespan cleanup and the
 # interpreter exits. That tail waits on the lifespan teardown's in-flight work
 # (the schedule manager's stop, the flushers) plus the pool closes; this is its
 # declared bound.
 _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
-
-# The roster body moved verbatim and still resolves these policy helpers by
-# name. Lazy delegation keeps their definitions in ops.spec without introducing
-# a module-initialization cycle when either side is imported first.
-
-
-def _plugin_services() -> tuple[ServiceSpec, ...]:
-    from ops.spec import plugin_services
-
-    return plugin_services()
-
-
-def _assert_unique_sessions(core: tuple[ServiceSpec, ...], plugin: tuple[ServiceSpec, ...]) -> None:
-    from ops.spec import _assert_unique_sessions as assert_unique_sessions
-
-    assert_unique_sessions(core, plugin)
 
 
 def _frontend_probe() -> DaemonProbe:
@@ -101,12 +86,12 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # owner on any machine, so they belong to the single gateway, not each
     # runner. The gateway also owns the memory/vector stack.
     # The fleet task-maintenance nudger lives in the ava_fleet plugin — see
-    # `_plugin_services()`.
+    # `plugin_services.plugin_services()`.
     gateway_services = (
         ServiceSpec(
             session="gate",
             cmd=".venv/bin/python -m services.entrypoints.gate.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=False,
             curl_url=f"http://127.0.0.1:{entry_port()}/__ava/healthz",
             identity_probe=probe_gate,
@@ -118,7 +103,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="gateway",
             cmd=".venv/bin/python -m gateway",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # gateway/app.py lifespan: assert_schema_current
             # gateway runs uvicorn(reload=True); the live process after reload is a
             # supervisor child, so the pidfile is unreliable (atexit unlinks on
@@ -139,13 +124,13 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "im-bridge",
             module="services.entrypoints.im_bridge.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # R3 door ④: notice_bridge SELECT/UPDATEs agent_notices directly
         ),
         healthz_daemon(
             "labeler",
             module="services.derived.labeler.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # assert_schema_current at boot, then polls the DB
             # The labeler builds chat models (it generates labels), so it
             # consumes the agent-runner-capability LLM provider keys its own
@@ -158,7 +143,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "heartbeat",
             module="services.wake.heartbeat.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # assert_schema_current at boot; INSERTs inbound rows
         ),
         # delivery-watchdog: cluster-wide stale-pending-inbound tripwire. A
@@ -167,7 +152,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "delivery-watchdog",
             module="services.wake.delivery_watchdog.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # assert_schema_current at boot; polls inbound_messages
         ),
         # events-maintenance: gateway-owned maintenance daemon. ALWAYS runs (no
@@ -179,7 +164,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "events-maintenance",
             module="services.upkeep.events_maintenance.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # assert_schema_current at boot; checkpoint tables live in PG
         ),
         # ttl-reaper: enforces every wall-clock deadline (page / shell / browser
@@ -189,7 +174,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "ttl-reaper",
             module="services.upkeep.ttl_reaper.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # assert_schema_current at boot; every phase is a DB pass
         ),
         # schedule-manager: keeps one session per enabled `schedules` row alive
@@ -200,7 +185,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "schedule-manager",
             module="services.wake.schedule_manager.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # assert_schema_current at boot; every decision is a DB read
         ),
         # insights: the read models over agent history (the run timeline and the
@@ -210,7 +195,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="insights",
             cmd=".venv/bin/python -m services.derived.insights.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # assert_schema_current at boot; every read is a checkpoint or audit query
             # No TCP port, so no port slot: identity is the service's own `/healthz`
             # asked over its Unix socket (the browser-mcp / memory-search shape).
@@ -223,7 +208,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="memory-search",
             cmd=".venv/bin/python -m services.derived.memory_search.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             # The numpy backend's store: in-memory matrix + npz, no Postgres —
             # a pg outage is not its business.
             requires_db=False,
@@ -240,7 +225,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # and a dead frontend could never self-heal).
             # (NEXT_PUBLIC_* is build-time-inlined, so it must reach `npm run build`.)
             cmd=frontend_service_cmd(_fe_port),
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             # Next.js reaches data only through the gateway HTTP API — no pg client in
             # ui/web/package.json. Reviving it during a DB outage brings the
             # operator UI back to report the outage rather than leaving it dark.
@@ -252,7 +237,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "pg-backup",
             module="services.backup.scheduler.daemon",
-            capabilities=_GATEWAY,
+            capabilities=GATEWAY,
             requires_db=True,  # dumps that very database
         ),
     )
@@ -268,14 +253,14 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "page-server",
             module="services.agent_runner.page_server.daemon",
-            capabilities=_AGENT_RUNNER,
+            capabilities=AGENT_RUNNER,
             requires_db=True,  # the agent_pages table is its truth source
         ),
         # One agent host per runner owns every local agent's turn tasks.
         healthz_daemon(
             "agent-host",
             module="services.agent_runner.agent_host.daemon",
-            capabilities=_AGENT_RUNNER,
+            capabilities=AGENT_RUNNER,
             profile="agent",  # the host runs the agent kernel in-process; the runner-derived marker crashes it at import
             requires_db=True,  # assert_schema_current at boot; every turn reads/writes agents_meta
         ),
@@ -284,7 +269,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         healthz_daemon(
             "ops",
             module="services.agent_runner.agent_ops.daemon",
-            capabilities=_AGENT_RUNNER,
+            capabilities=AGENT_RUNNER,
             requires_db=True,  # assert_schema_current at boot; serves DB-backed ops calls
         ),
         # browser: config/capability-gated (AVA_BROWSER_ENABLED + display/Chrome/npx).
@@ -292,7 +277,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="browser",
             cmd=".venv/bin/python -m services.desktop.browser.daemon",
-            capabilities=_AGENT_RUNNER,
+            capabilities=AGENT_RUNNER,
             # A headed Chrome under a supervisor: no DB at boot, none at runtime, and
             # its healthcheck probes CDP + session liveness only. It must therefore
             # keep being revived while the DB is down — that outage is the moment a
@@ -310,7 +295,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="browser-mcp",
             cmd=".venv/bin/python -m services.desktop.browser.mcp_daemon",
-            capabilities=_AGENT_RUNNER,
+            capabilities=AGENT_RUNNER,
             # Same story: a Unix-socket multiplexer in front of chrome-devtools-mcp.
             # Its whole data plane is that socket plus CDP.
             requires_db=False,
@@ -327,7 +312,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="computer-mcp",
             cmd=".venv/bin/python -m services.desktop.computer.mcp_daemon",
-            capabilities=_AGENT_RUNNER,
+            capabilities=AGENT_RUNNER,
             requires_db=True,
             identity_probe=partial(probe_protocol_service, "computer-mcp"),
             healthcheck_module="services.supervision.healthchecks.computer_mcp",
@@ -339,7 +324,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="mcp-daemon",
             cmd=".venv/bin/python -m ava.mcps._daemon",
-            capabilities=_AGENT_RUNNER,
+            capabilities=AGENT_RUNNER,
             # Config is local files (mcp.json); no DB at boot or runtime.
             requires_db=False,
             identity_probe=partial(probe_protocol_service, "mcp-daemon"),
@@ -369,7 +354,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             session="pty-sessions",
             cmd=".venv/bin/python -m services.agent_runner.pty_sessions.daemon",
-            capabilities=_BOTH,
+            capabilities=BOTH,
             requires_db=False,
             identity_probe=partial(probe_protocol_service, "pty-sessions"),
             stop_ceiling_s=pty_sessions_budget.SHUTDOWN_CEILING_S,
@@ -380,7 +365,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
                 [str(otel_collector_binary()), "--config", str(otel_collector_config())]
             ),
             config_inputs=(otel_collector_config(),),
-            capabilities=_BOTH,
+            capabilities=BOTH,
             requires_db=False,
             # The healthcheck POSTs a valid empty ExportTraceServiceRequest; bare TCP is insufficient.
             # The port follows AVA_TELEMETRY_OTLP_PORT (single source, task #1945).
@@ -418,6 +403,6 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # so this stays THE single roster: a plugin declares a ServiceSpec, ops
     # discovers it. Session-name collisions fail fast — the roster's keys must be
     # unique for the watchdog/status derivations keyed on `session`.
-    plugin = _plugin_services()
-    _assert_unique_sessions(core, plugin)
+    plugin = plugin_services.plugin_services()
+    plugin_services.assert_unique_sessions(core, plugin)
     return core + plugin
