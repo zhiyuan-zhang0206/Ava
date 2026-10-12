@@ -190,6 +190,21 @@ def test_bootstrap_writes_a_mirror_that_passes_check_and_leaves_the_repo_alone(
     capsys.readouterr()
 
 
+def test_bootstrap_carries_external_declarations(make_repo: RepoFactory, tmp_path: Path) -> None:
+    root = make_repo(
+        {
+            "app/__init__.py": "",
+            "app/runner.py": "exec('x = 1')\n",
+            "app/meizel.toml": '[external]\n"runner.py" = "runs \\"user\\" code"\n',
+        }
+    )
+    out = tmp_path / "out"
+    assert run(root, "bootstrap", "--out", str(out)) == 0
+    assert (out / "app/meizel.toml").read_text() == (
+        '[external]\n"runner.py" = "runs \\"user\\" code"\n'
+    )
+
+
 CYCLE = {
     "pkg/__init__.py": "",
     "pkg/a.py": "from pkg import b\n",

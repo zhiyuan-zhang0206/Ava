@@ -14,7 +14,7 @@ from scripts.meizel.universe import MANIFEST, Universe
 
 __all__ = ["Manifest", "load_manifests", "manifest_path"]
 
-_TOP_KEYS = ("exports", "uses", "loads")
+_TOP_KEYS = ("exports", "uses", "loads", "external")
 _EdgeReader = Callable[[str, tuple[str, ...], int], tuple[str, ...]]
 
 
@@ -28,6 +28,7 @@ class Manifest:
     exports: tuple[str, ...] = ()
     uses: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     loads: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    external: dict[str, str] = field(default_factory=dict[str, str])
     lines: list[str] = field(default_factory=list[str])
 
     @property
@@ -89,7 +90,36 @@ class _Reader:
         self.read_exports(document.get("exports", []))
         self.manifest.uses = self.read_table(document.get("uses", {}), "uses", self.read_use)
         self.manifest.loads = self.read_table(document.get("loads", {}), "loads", self.read_load)
+        self.manifest.external = self.read_external(document.get("external", {}))
         self.check_cycles()
+
+    def read_external(self, table: object) -> dict[str, str]:
+        """`[external]`: files that run code from outside the repository, each with a reason."""
+        if not isinstance(table, dict):
+            self.report(
+                self.manifest.line_of("external"),
+                Code.MANIFEST_SYNTAX,
+                "[external] must be a table",
+            )
+            return {}
+        result: dict[str, str] = {}
+        for key, reason in cast("dict[str, object]", table).items():
+            line = self.manifest.line_of(key)
+            if not key.endswith(".py"):
+                self.report(
+                    line, Code.MANIFEST_CHILD, f"[external] key {key!r} must be a Python file"
+                )
+            elif not self.child(key, "[external]", line):
+                continue
+            elif not isinstance(reason, str) or not reason.strip():
+                self.report(
+                    line,
+                    Code.MANIFEST_SYNTAX,
+                    f"[external] {key!r} needs a non-empty reason string",
+                )
+            else:
+                result[key] = reason.strip()
+        return result
 
     def read_exports(self, value: object) -> None:
         line = self.manifest.line_of("exports")

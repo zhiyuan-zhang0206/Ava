@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.meizel.tests.synthetic import RepoFactory, diagnostics, verdict
+from scripts.meizel.tests.synthetic import (
+    RepoFactory,
+    analysis_of,
+    diagnostics,
+    edges,
+    verdict,
+)
 
 LIB = {"lib/__init__.py": "", "lib/m.py": ""}
 
@@ -174,7 +180,7 @@ def test_a_string_patch_target_that_cannot_be_read_is_restricted(make_repo: Repo
         "import sys\nsys.modules.setdefault('lib', object())\n",
         "import sys\nsys.modules.update({'lib.m': object()})\n",
         "import sys\nsys.modules.update(lib=object())\n",
-        "from sys import modules\nmodules['lib.m']\n",
+        "from sys import modules\nmodules['lib.m'] = object()\n",
         "import sys\n\ndef test_a(monkeypatch):\n    monkeypatch.setitem(sys.modules, 'lib.m', 1)\n",
         "import sys\n\ndef test_a(monkeypatch):\n    monkeypatch.delitem(sys.modules, 'lib')\n",
         "import sys\nfrom unittest import mock\nmock.patch.dict(sys.modules, {'lib.m': 1})\n",
@@ -182,7 +188,7 @@ def test_a_string_patch_target_that_cannot_be_read_is_restricted(make_repo: Repo
         "import sys\nfrom unittest import mock\nmock.patch.dict(sys.modules, lib=1)\n",
     ],
 )
-def test_faking_a_first_party_module_through_sys_modules_is_restricted(
+def test_writing_a_first_party_module_into_sys_modules_is_restricted(
     make_repo: RepoFactory, source: str
 ) -> None:
     assert restricted(make_repo, source), source
@@ -196,7 +202,76 @@ def test_faking_a_first_party_module_through_sys_modules_is_restricted(
         "import sys\n\ndef test_a(monkeypatch):\n    monkeypatch.setitem(sys.modules, 'numpy', 1)\n",
         "import sys\nfrom unittest import mock\nmock.patch.dict(sys.modules, {'yaml': 1})\n",
         "import sys\nclass Other:\n    modules = {}\nOther.modules['lib.m'] = 1\n",
+        "import sys\nmodule = sys.modules['lib.m']\n",
+        "import sys\nmodule = sys.modules.get('lib.m')\n",
+        "import sys\nloaded = 'lib.m' in sys.modules\n",
+        "from sys import modules\nmodule = modules['lib.m']\n",
     ],
 )
-def test_sys_modules_use_for_other_names_is_fine(make_repo: RepoFactory, source: str) -> None:
+def test_sys_modules_reads_and_other_names_are_fine(make_repo: RepoFactory, source: str) -> None:
     assert restricted(make_repo, source) == []
+
+
+EXTERNAL_RUNNER = "import runpy\nrunpy.run_path('x.py')\nexec('x = 1')\ncompile('x', 'f', 'exec')\n"
+
+
+def test_an_external_declaration_exempts_the_dynamic_forms_without_an_edge(
+    make_repo: RepoFactory,
+) -> None:
+    files = {
+        **LIB,
+        "app/__init__.py": "",
+        "app/runner.py": EXTERNAL_RUNNER
+        + "import importlib\nimportlib.import_module('x')\n__import__('y')\n",
+        "app/meizel.toml": '[external]\n"runner.py" = "runs user scripts"\n',
+    }
+    root = make_repo(files)
+    assert verdict(root) == set()
+    assert edges(root) == set()
+
+
+def test_an_external_declaration_does_not_exempt_other_restricted_forms(
+    make_repo: RepoFactory,
+) -> None:
+    files = {
+        **LIB,
+        "app/__init__.py": "",
+        "app/runner.py": EXTERNAL_RUNNER + "import sys\nsys.modules['lib.m'] = object()\n",
+        "app/meizel.toml": '[external]\n"runner.py" = "runs user scripts"\n',
+    }
+    assert [d.line for d in diagnostics(make_repo(files), "restricted-python")] == [6]
+
+
+def test_an_external_declaration_with_nothing_to_exempt_is_stale(make_repo: RepoFactory) -> None:
+    files = {
+        **LIB,
+        "app/__init__.py": "",
+        "app/runner.py": "x = 1\n",
+        "app/meizel.toml": '[external]\n"runner.py" = "runs user scripts"\n',
+    }
+    [found] = diagnostics(make_repo(files), "stale-external")
+    assert (found.path, found.line) == ("app/meizel.toml", 2)
+
+
+@pytest.mark.parametrize(
+    ("manifest", "code"),
+    [
+        ('[external]\n"runner.py" = ""\n', "manifest-syntax"),
+        ('[external]\n"runner.py" = "  "\n', "manifest-syntax"),
+        ('[external]\n"runner.py" = 3\n', "manifest-syntax"),
+        ('[external]\n"missing.py" = "why"\n', "manifest-unknown-child"),
+        ('[external]\n"notes.txt" = "why"\n', "manifest-unknown-child"),
+        ('external = "why"\n', "manifest-syntax"),
+    ],
+)
+def test_external_entries_need_a_python_child_and_a_reason(
+    make_repo: RepoFactory, manifest: str, code: str
+) -> None:
+    files = {
+        **LIB,
+        "app/__init__.py": "",
+        "app/runner.py": EXTERNAL_RUNNER,
+        "app/notes.txt": "",
+        "app/meizel.toml": manifest,
+    }
+    assert code in {d.code.value for d in analysis_of(make_repo(files)).diagnostics}

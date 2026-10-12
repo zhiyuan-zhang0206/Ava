@@ -29,6 +29,7 @@ class Code(StrEnum):
     UNRESOLVED_IMPORT = "unresolved-import"
     RESTRICTED = "restricted-python"
     STALE_LOAD = "stale-load"
+    STALE_EXTERNAL = "stale-external"
     MANIFEST_SYNTAX = "manifest-syntax"
     MANIFEST_KEY = "manifest-unknown-key"
     MANIFEST_CHILD = "manifest-unknown-child"
