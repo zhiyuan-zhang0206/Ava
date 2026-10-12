@@ -129,15 +129,13 @@ def register_logs_job(*, enabled_reader: Callable[[], bool]) -> None:
         return
     if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().register_logs_job()
+    base.host.system.cron.register_platform_job(
+        "logs-maintenance", macos=_register_macos, linux=_register_linux
+    )
 
 
 def unregister_logs_job() -> None:
     """Remove the daily logs-maintenance job (a no-op outside the default home)."""
     if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().unregister_logs_job()
+    base.host.system.cron.unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)

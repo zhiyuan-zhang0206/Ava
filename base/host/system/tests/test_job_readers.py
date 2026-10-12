@@ -7,8 +7,15 @@ from types import SimpleNamespace
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from base.host.system import autostart, backend, cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
 from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+
+def _refuse(message: str) -> Callable[..., None]:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        pytest.fail(message)
+
+    return refuse
 
 
 def _unexpected_read() -> int:
@@ -36,7 +43,7 @@ def test_packages_gates_do_not_read_tick(monkeypatch: pytest.MonkeyPatch, enable
     assert reads == (["enabled", "home"] if enabled else ["enabled"])
 
 
-def test_packages_refresh_gate_follows_home_and_precedes_backend(
+def test_packages_refresh_gate_follows_home_and_precedes_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reads: list[str] = []
@@ -50,7 +57,7 @@ def test_packages_refresh_gate_follows_home_and_precedes_backend(
         return False
 
     monkeypatch.setattr(cron, "owns_os_jobs", owns)
-    monkeypatch.setattr(backend, "get_backend", lambda: pytest.fail("backend reached"))
+    monkeypatch.setattr(cron, "register_platform_job", _refuse("platform registrar reached"))
     packages_job.register_packages_job(
         enabled_reader=lambda: True,
         refresh_enabled_reader=refresh_reader,
@@ -59,12 +66,12 @@ def test_packages_refresh_gate_follows_home_and_precedes_backend(
     assert reads == ["home", "refresh"]
 
 
-@pytest.mark.parametrize("platform", [backend.MacPlatformBackend, backend.LinuxPlatformBackend])
+@pytest.mark.parametrize("platform", ["mac", "linux"])
 @pytest.mark.parametrize("kind", ["packages", "walg"])
-def test_real_backend_keeps_reader_live_at_each_definition(
+def test_real_platform_job_keeps_reader_live_at_each_definition(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    platform: type[backend.PlatformBackend],
+    platform: str,
     kind: str,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -91,7 +98,8 @@ def test_real_backend_keeps_reader_live_at_each_definition(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(cron.subprocess, "run", run)
-    monkeypatch.setattr(backend, "get_backend", platform)
+    monkeypatch.setattr(cron, "is_macos", lambda: platform == "mac")
+    monkeypatch.setattr(cron, "is_linux", lambda: platform == "linux")
     state = {
         "first": 1200 if kind == "packages" else 21,
         "second": 1800 if kind == "packages" else 23,
@@ -116,7 +124,7 @@ def test_real_backend_keeps_reader_live_at_each_definition(
             walg_job.register_walg_job(
                 enabled_reader=lambda: True, backup_hour_reader=reader(owner)
             )
-        if platform is backend.LinuxPlatformBackend:
+        if platform == "linux":
             return tables[-1]
         label = "packages-refresh" if kind == "packages" else "walg"
         return (tmp_path / "Library" / "LaunchAgents" / f"com.ava.{label}.plist").read_text()
@@ -127,24 +135,22 @@ def test_real_backend_keeps_reader_live_at_each_definition(
     updated = register("first")
     assert first != second
     assert updated == second
-    expected_reads = 2 if platform is backend.MacPlatformBackend else 1
+    expected_reads = 2 if platform == "mac" else 1
     assert (
         reads
         == ["first"] * expected_reads + ["second"] * expected_reads + ["first"] * expected_reads
     )
-    assert operations == (
-        ["bootout", "bootstrap"] * 3 if platform is backend.MacPlatformBackend else ["-l", "-"] * 3
-    )
+    assert operations == (["bootout", "bootstrap"] * 3 if platform == "mac" else ["-l", "-"] * 3)
     if kind == "packages":
         assert (
             ("*/20 " in first and "*/30 " in second)
-            if platform is backend.LinuxPlatformBackend
+            if platform == "linux"
             else ("<integer>1200</integer>" in first and "<integer>1800</integer>" in second)
         )
     else:
         assert (
             ("25 0 " in first and "25 2 " in second)
-            if platform is backend.LinuxPlatformBackend
+            if platform == "linux"
             else ("<integer>0</integer>" in first and "<integer>2</integer>" in second)
         )
 

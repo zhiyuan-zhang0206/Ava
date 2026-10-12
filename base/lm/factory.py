@@ -237,7 +237,7 @@ def _reject_decision_model(model: str, *, catalog: ModelCatalog) -> None:
     if model in catalog.decision_models:
         raise ValueError(
             f"{model!r} is a decision model, not a chat model — it cannot be used as an agent "
-            "or chat model; call base.lm.catalog.decide.call.decide() instead"
+            "or chat model; call base.lm.decision.call.decide() instead"
         )
 
 

@@ -39,9 +39,7 @@ def prices(model_catalog: ModelCatalog) -> pricing.PriceBook:
 def _pricing_catalog_raw() -> dict[str, Any]:
     return cast(
         dict[str, Any],
-        json.loads(
-            (Path(__file__).resolve().parents[1] / "pricing_catalog_archive.json").read_text()
-        ),
+        json.loads(Path(pricing.__file__).with_name("pricing_catalog_archive.json").read_text()),
     )
 
 

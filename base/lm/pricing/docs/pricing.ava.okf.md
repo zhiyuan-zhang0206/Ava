@@ -14,7 +14,7 @@ tags:
 `base/lm/pricing/__init__.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `load_archive` reads `pricing_catalog_archive.json`.
 
 `billing.py` owns provider-call billing spans beside their price selection. Its
-contracts and cache-write/catalog tests live in `pricing/tests/`; usage accounting
+contracts and cache-write/catalog tests live in `tests/providers/`; usage accounting
 and syntax repair import this owner directly.
 
 ## Selection

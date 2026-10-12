@@ -16,7 +16,7 @@ _PLUGIN_SOURCE = """from langchain_core.language_models.fake_chat_models import 
 from base.lm.provider_api import PriceRates, ProviderBinding, ProviderContribution
 from base.packages.plugins.extensions import PluginContributions
 from base.lm.registry import ModelSpec, ModelTuning
-from base.lm.stop import StopSpec
+from base.lm.compat.stop import StopSpec
 
 def _build(ctx):
     return FakeListChatModel(responses=["hello"])

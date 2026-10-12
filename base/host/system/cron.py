@@ -33,6 +33,8 @@ from loguru import logger
 from base.native_process.os_platform import (
     crontab_lock,
     descends_from_launchd_job,
+    is_linux,
+    is_macos,
     launchd_job_label,
 )
 from base.paths import ava_home
@@ -238,10 +240,9 @@ def ava_binary_path() -> str:
     health probe against prod's home. Resolving from
     `repo_root()` makes binary, `$AVA_HOME` and label come from one checkout.
     """
-    from base.host.system.backend import get_backend
     from base.paths import repo_root
 
-    scripts = repo_root() / ".venv" / get_backend().venv_bin_dir_name()
+    scripts = repo_root() / ".venv" / "bin"
     candidate = scripts / "ava"
     if candidate.exists():
         return str(candidate)
@@ -508,6 +509,32 @@ def _unregister_linux() -> int:
     )
 
 
+def register_platform_job(what: str, *, macos: Callable[[], int], linux: Callable[[], int]) -> None:
+    """Run this host's registrar for an OS job; a non-zero return code is a failed registration.
+
+    Raises:
+        RuntimeError: on an unsupported platform or a failed registration.
+    """
+    if is_macos():
+        rc, platform = macos(), "macOS"
+    elif is_linux():
+        rc, platform = linux(), "Linux"
+    else:
+        raise RuntimeError("unsupported host platform for OS jobs")
+    if rc != 0:
+        raise RuntimeError(f"{what} registration failed on {platform}")
+
+
+def unregister_platform_job(*, macos: Callable[[], int], linux: Callable[[], int]) -> None:
+    """Run this host's remover for an OS job (the return code is not an error: removal is idempotent)."""
+    if is_macos():
+        macos()
+    elif is_linux():
+        linux()
+    else:
+        raise RuntimeError("unsupported host platform for OS jobs")
+
+
 def register_os_cron(
     interval_s: int = DEFAULT_INTERVAL_SECONDS,
     *,
@@ -515,7 +542,7 @@ def register_os_cron(
 ) -> None:
     """Register the OS cron job for the cluster health probe.
 
-    Platform-aware: delegates to ``PlatformBackend.register_cron``.
+    Platform-aware: dispatches to the macOS or Linux registrar.
     Idempotent — re-running updates the interval and reloads the job.
     A no-op when ``os_jobs_enabled()`` is off (the test suite) or when this
     process's home is not the default home (``owns_os_jobs``).
@@ -544,9 +571,11 @@ def register_os_cron(
     if refusal is not None:
         logger.error("health-probe registration refused: {}", refusal)
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().register_cron(interval_s=interval_s)
+    register_platform_job(
+        "cron",
+        macos=lambda: _register_macos(interval_s),
+        linux=lambda: _register_linux(interval_s),
+    )
 
 
 def unregister_os_cron() -> None:
@@ -557,6 +586,4 @@ def unregister_os_cron() -> None:
     """
     if not owns_os_jobs("health-probe"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().unregister_cron()
+    unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)

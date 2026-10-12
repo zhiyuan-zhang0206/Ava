@@ -20,8 +20,8 @@ import ava
 from ava import web
 from ava.tests.web._web_helpers import _FakeResp
 from base.config import settings
-from base.lm.catalog.decide import call as decide_call
 from base.lm.catalog.decide.types import Decision, DecisionRequestError, Question
+from base.lm.decision import call as decide_call
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 

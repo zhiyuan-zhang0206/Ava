@@ -21,9 +21,9 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.catalog.decide.types import AsyncTransport, DecisionBinding, DecisionModelSpec
+from base.lm.catalog.decide.types import DecisionBinding, DecisionBuildContext, DecisionModelSpec
+from base.lm.compat.stop import StopSpec
 from base.lm.registry import ModelSpec
-from base.lm.stop import StopSpec
 
 # Increment for breaking contract changes; additive optional fields stay on the
 # current version. A plugin written against an older shape keeps working —
@@ -198,17 +198,6 @@ class ProviderContribution:
     binding: ProviderBinding
     models: Mapping[str, ModelSpec]
     pricing: Mapping[str, PriceRates]
-
-
-@dataclass(frozen=True)
-class DecisionBuildContext:
-    """Construction inputs of a decision binding."""
-
-    model: str
-    spec: DecisionModelSpec
-    timeout: float | None
-    transport: AsyncTransport | None = None
-    """HTTP transport override; absent means the real network (tests inject a mock)."""
 
 
 @dataclass(frozen=True)

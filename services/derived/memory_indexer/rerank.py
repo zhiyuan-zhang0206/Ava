@@ -30,8 +30,8 @@ from loguru import logger
 from base.agents import IndexerUnavailable
 from base.api_contracts.memory_search import MemorySearchPurpose
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.call import decide
 from base.lm.catalog.decide.types import TRUE, DecisionError, YesNo
+from base.lm.decision.call import decide
 from base.packages.docs.notes import parse_note
 from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.chunking import chunk_text
@@ -131,7 +131,7 @@ class _Candidate:
     tags: list[str]
 
 
-# ── the decision-model contract (the only code that touches base.lm.catalog.decide.call) ──
+# ── the decision-model contract (the only code that touches base.lm.decision.call) ──
 
 
 async def ask_relevance(

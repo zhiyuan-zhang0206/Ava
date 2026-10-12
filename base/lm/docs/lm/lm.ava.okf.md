@@ -46,8 +46,8 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 ### stop classification (`stop.py`)
 - `classify_stop(..., stops=catalog.stops)` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; plugin bindings declare four client-class keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; an unregistered provider key fails.
 
-### billing (`pricing/billing.py` + `pricing/__init__.py` + `pricing_catalog_archive.json`) — [[pricing.ava.okf.md]]
-- `pricing/billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension. Agent and birth-lineage usage is queried independently of task records. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites provide the response, usage kind and their explicit catalog.
+### billing (`usage.py` + `pricing/__init__.py` + `pricing_catalog_archive.json`) — [[pricing.ava.okf.md]]
+- `usage.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension. Agent and birth-lineage usage is queried independently of task records. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites provide the response, usage kind and their explicit catalog.
 - Plugin `PriceRates` are the live chat source and carry full history, tiers, windows, and future periods. The archive is their reconciliation ledger, live only for catalog-only services. `quote()` returns rates and cost atomically; both sources share the child node's parser and selector.
 
 ### durable usage — [[usage.ava.okf.md]]

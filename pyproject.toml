@@ -1195,7 +1195,7 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "base/lm/pricing/tests"
+root = "base/lm/decision/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

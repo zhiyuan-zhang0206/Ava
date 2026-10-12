@@ -18,7 +18,6 @@ from ava.sdk_surface import settings as sdk_settings
 from ava.sdk_surface.injection_check import QUESTION, begin_check, page_probability, split_for_model
 from base.config import settings
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide import call as decide_call
 from base.lm.catalog.decide.types import (
     Decision,
     DecisionError,
@@ -30,6 +29,7 @@ from base.lm.catalog.decide.types import (
     estimate_tokens,
     question_text,
 )
+from base.lm.decision import call as decide_call
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 

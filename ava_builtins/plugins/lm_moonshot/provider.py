@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
+from base.lm.compat.stop import StopSpec
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
@@ -27,7 +28,6 @@ from base.lm.provider_api import (
     require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
-from base.lm.stop import StopSpec
 from base.packages.plugins.extensions import PluginContributions
 
 _KIMI_EFFORT_LEVELS = ("low", "high", "max")

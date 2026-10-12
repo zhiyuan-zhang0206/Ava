@@ -209,9 +209,9 @@ def register_pr_flow_job(
     if blocker is not None:
         logger.info("PR-flow sampler job not registered: {}", blocker)
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().register_pr_flow_job()
+    base.host.system.cron.register_platform_job(
+        "PR-flow", macos=_register_macos, linux=_register_linux
+    )
 
 
 def unregister_pr_flow_job() -> None:
@@ -219,6 +219,4 @@ def unregister_pr_flow_job() -> None:
     outside the default home."""
     if not base.host.system.cron.owns_os_jobs("pr flow"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().unregister_pr_flow_job()
+    base.host.system.cron.unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)

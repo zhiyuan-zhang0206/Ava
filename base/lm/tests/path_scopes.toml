@@ -5,6 +5,8 @@
     "test_llm_factory_new_models.py",
 ]
 "tests.fixtures.unit.sdk" = [
+    "providers/test_anthropic_fast.py",
+    "providers/test_openai_fast.py",
     "llm_factory/test_override_resolution.py",
     "llm_factory/test_provider_construction.py",
     "llm_factory/test_reasoning_effort_dispatch.py",

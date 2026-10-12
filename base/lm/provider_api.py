@@ -68,6 +68,7 @@ from base.lm.catalog.decide.types import (
 from base.lm.catalog.decide.types import (
     DecisionBinding as DecisionBinding,
 )
+from base.lm.catalog.decide.types import DecisionBuildContext as DecisionBuildContext
 from base.lm.catalog.decide.types import (
     DecisionModelSpec as DecisionModelSpec,
 )
@@ -97,9 +98,6 @@ from base.lm.catalog.provider_contract import (
 )
 from base.lm.catalog.provider_contract import (
     BuildContext as BuildContext,
-)
-from base.lm.catalog.provider_contract import (
-    DecisionBuildContext as DecisionBuildContext,
 )
 from base.lm.catalog.provider_contract import (
     DecisionProviderContribution as DecisionProviderContribution,

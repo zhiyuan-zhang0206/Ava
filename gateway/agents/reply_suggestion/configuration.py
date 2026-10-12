@@ -9,7 +9,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.call import decide
+from base.lm.decision.call import decide
 from base.lm.effort import ReasoningEffort
 from base.lm.factory import build_chat_model
 from gateway.agents.history.timeline import load_current_messages

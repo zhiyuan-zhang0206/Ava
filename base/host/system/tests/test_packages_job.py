@@ -4,12 +4,27 @@ from __future__ import annotations
 
 import types
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from base.host.system import cron
 from base.host.system import packages_job as job
+
+
+def _recorder(calls: list[str], label: str) -> Callable[..., None]:
+    def record(*_args: object, **_kwargs: object) -> None:
+        calls.append(label)
+
+    return record
+
+
+def _refuse(message: str) -> Callable[..., None]:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        pytest.fail(message)
+
+    return refuse
 
 
 @pytest.fixture(autouse=True)
@@ -190,8 +205,9 @@ def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     skipped: list[str] = []
     monkeypatch.setattr(cron, "skip_os_job", skipped.append)
     monkeypatch.setattr(
-        "base.host.system.backend.get_backend",
-        lambda: pytest.fail("registration reached the backend with the gate off"),
+        cron,
+        "register_platform_job",
+        _refuse("registration reached the platform with the gate off"),
     )
 
     job.register_packages_job(
@@ -207,8 +223,9 @@ def test_register_is_skipped_when_refresh_disabled(
 
     monkeypatch.setattr(settings.packages, "refresh_enabled", False)
     monkeypatch.setattr(
-        "base.host.system.backend.get_backend",
-        lambda: pytest.fail("registration reached the backend with refresh disabled"),
+        cron,
+        "register_platform_job",
+        _refuse("registration reached the platform with refresh disabled"),
     )
 
     job.register_packages_job(
@@ -218,38 +235,32 @@ def test_register_is_skipped_when_refresh_disabled(
     )
 
 
-def test_register_dispatches_to_the_backend(
+def test_register_dispatches_to_the_platform(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from base.config import settings
 
     calls: list[str] = []
 
-    class Backend:
-        def register_packages_job(self, *, tick_reader: object) -> None:
-            calls.append("register")
+    def register(what: str, **_platforms: object) -> None:
+        calls.append(f"register {what}")
 
     monkeypatch.setattr(settings.packages, "refresh_enabled", True)
-    monkeypatch.setattr("base.host.system.backend.get_backend", Backend)
+    monkeypatch.setattr(cron, "register_platform_job", register)
 
     job.register_packages_job(
         enabled_reader=lambda: True,
         refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
         tick_reader=lambda: 900,
     )
-    assert calls == ["register"]
+    assert calls == ["register packages-refresh"]
 
 
-def test_unregister_delegates_to_the_backend(
+def test_unregister_delegates_to_the_platform(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
-
-    class Backend:
-        def unregister_packages_job(self) -> None:
-            calls.append("unregister")
-
-    monkeypatch.setattr("base.host.system.backend.get_backend", Backend)
+    monkeypatch.setattr(cron, "unregister_platform_job", _recorder(calls, "unregister"))
 
     job.unregister_packages_job()
     assert calls == ["unregister"]
