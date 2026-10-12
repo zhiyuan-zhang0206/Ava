@@ -2,14 +2,12 @@
 
 The browser must wait in its supervised session until the logged-in GUI user
 and that user's login Keychain can serve Chrome's encryption material. These
-tests hold the checks to bounded, side-effect-free probes and pin the waiting
-marker used by the healthcheck to distinguish a deliberate wait from a crash.
+tests hold the checks to bounded, side-effect-free probes: the wait records no
+state, and the healthcheck names a wait from a direct probe.
 """
 
 from __future__ import annotations
 
-import json
-import time
 from pathlib import Path
 
 import pytest
@@ -111,7 +109,6 @@ def test_macos_refuses_start_outside_the_gui_login_session(
     calls = _macos_probes(monkeypatch, tmp_path, managername="Background")
     result = readiness.probe_startup_readiness()
     assert result.ready is False
-    assert result.context_missing is True
     assert result.reason is not None and "GUI login session" in result.reason
     assert not any(call[0] == "/usr/bin/security" for call in calls)
 
@@ -126,151 +123,51 @@ def test_macos_domain_probe_failure_falls_through_to_keychain(
     assert any(call[0] == "/usr/bin/security" for call in calls)
 
 
-def test_wait_loop_marks_degraded_then_clears_before_launch(
-    monkeypatch: pytest.MonkeyPatch,
+def test_wait_loop_returns_when_ready_and_records_no_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """The wait is only a loop on the read-only probe: it leaves nothing in the run dir."""
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     states = iter(
         [
             readiness.StartupReadiness(False, "no GUI login session"),
             readiness.StartupReadiness(True),
         ]
     )
-    marked: list[str] = []
     sleeps: list[float] = []
-
-    def _mark(reason: str, *, context_missing: bool = False) -> None:
-        marked.append(f"{reason} (context_missing={context_missing})")
-
     monkeypatch.setattr(readiness, "probe_startup_readiness", lambda: next(states))
-    monkeypatch.setattr(readiness, "mark_waiting", _mark)
-    monkeypatch.setattr(readiness, "clear_waiting", lambda: marked.append("cleared"))
     monkeypatch.setattr(readiness.time, "sleep", sleeps.append)
+
     readiness.wait_for_browser_startup_readiness()
-    assert marked == ["no GUI login session (context_missing=False)", "cleared"]
+
     assert sleeps == [readiness._READINESS_RETRY_S]
+    assert sorted(tmp_path.rglob("*")) == []
 
 
-def test_wait_loop_records_the_missing_gui_context_in_the_marker(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The wait loop is the one place a context-less daemon can tell its
-    healthcheck what is wrong, so the flag must survive into the marker."""
-    monkeypatch.setattr(
-        readiness,
-        "probe_startup_readiness",
-        lambda: readiness.StartupReadiness(
-            ready=False, reason="outside the GUI login session", context_missing=True
-        ),
-    )
-    recorded: list[tuple[str, bool]] = []
-
-    def _mark(reason: str, *, context_missing: bool = False) -> None:
-        recorded.append((reason, context_missing))
-
-    monkeypatch.setattr(readiness, "mark_waiting", _mark)
-
-    def _stop(_seconds: float) -> None:
-        raise KeyboardInterrupt  # end the infinite wait after the first tick
-
-    monkeypatch.setattr(readiness.time, "sleep", _stop)
-    with pytest.raises(KeyboardInterrupt):
-        readiness.wait_for_browser_startup_readiness()
-    assert recorded == [("outside the GUI login session", True)]
-
-
-def test_wait_marker_requires_the_recorded_owner_to_still_be_alive(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(readiness.base.paths, "run_dir", lambda: tmp_path)
-    monkeypatch.setattr(readiness.os, "getpid", lambda: 123)
-    monkeypatch.setattr(readiness, "_current_process_started_at", lambda: 1.0)
-
-    def _owner_alive(_pid: int, _started: float) -> bool:
-        return True
-
-    monkeypatch.setattr(readiness, "_owner_is_alive", _owner_alive)
-    readiness.mark_waiting("login Keychain is not ready")
-    marker = readiness.waiting_state()
-    assert marker is not None
-    assert marker.reason == "login Keychain is not ready"
-
-    def _owner_gone(_pid: int, _started: float) -> bool:
-        return False
-
-    monkeypatch.setattr(readiness, "_owner_is_alive", _owner_gone)
-    assert readiness.waiting_state() is None
-
-
-def test_wait_marker_carries_the_context_flag(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(readiness.base.paths, "run_dir", lambda: tmp_path)
-
-    def _owner_alive(_pid: int, _started: float) -> bool:
-        return True
-
-    monkeypatch.setattr(readiness, "_owner_is_alive", _owner_alive)
-
-    readiness.mark_waiting("login Keychain is not ready")
-    marker = readiness.waiting_state()
-    assert marker is not None and marker.context_missing is False
-
-    readiness.mark_waiting("this process is not in the GUI login session", context_missing=True)
-    marker = readiness.waiting_state()
-    assert marker is not None and marker.context_missing is True
-
-
-@pytest.mark.parametrize("value", [None, "yes", 1])
-def test_wait_marker_context_flag_fails_quiet_on_malformed_values(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: object
-) -> None:
-    """A marker without the field (older daemon) or with a non-boolean value
-    must not trigger the healthcheck's GUI-domain relaunch on its own."""
-    monkeypatch.setattr(readiness.base.paths, "run_dir", lambda: tmp_path)
-
-    def _owner_alive(_pid: int, _started: float) -> bool:
-        return True
-
-    monkeypatch.setattr(readiness, "_owner_is_alive", _owner_alive)
-    payload: dict[str, object] = {
-        "reason": "login Keychain is not ready",
-        "pid": 1,
-        "started_at": 1.0,
-        "observed_at": time.time(),
-    }
-    if value is not None:
-        payload["context_missing"] = value
-    (tmp_path / "browser-readiness-wait.json").write_text(json.dumps(payload))
-    marker = readiness.waiting_state()
-    assert marker is not None and marker.context_missing is False
-
-
-def test_degraded_wait_state_keeps_the_context_flag_from_the_marker(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        readiness,
-        "waiting_state",
-        lambda: readiness.BrowserWaitState(
-            "outside the GUI login session", 1, 0.0, context_missing=True
-        ),
-    )
-    state = readiness.degraded_wait_state()
-    assert state is not None
-    assert state.context_missing is True
-    assert state.reason == "outside the GUI login session"
-    assert readiness.degraded_wait_reason() == "outside the GUI login session"
-
-
-def test_degraded_wait_reason_falls_back_when_marker_cannot_be_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(readiness, "waiting_state", lambda: None)
+def test_degraded_wait_reason_probes_directly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         readiness,
         "probe_startup_readiness",
         lambda: readiness.StartupReadiness(ready=False, reason="login Keychain is not ready"),
     )
     assert readiness.degraded_wait_reason() == "login Keychain is not ready"
-    state = readiness.degraded_wait_state()
-    assert state is not None and state.context_missing is False
+
+
+def test_degraded_wait_reason_is_none_when_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        readiness, "probe_startup_readiness", lambda: readiness.StartupReadiness(ready=True)
+    )
+    assert readiness.degraded_wait_reason() is None
+
+
+def test_degraded_wait_reason_fails_safe_when_the_probe_raises_on_macos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom() -> readiness.StartupReadiness:
+        raise OSError("probe exploded")
+
+    monkeypatch.setattr(readiness, "probe_startup_readiness", boom)
+    monkeypatch.setattr(readiness, "is_macos", lambda: True)
+    assert readiness.degraded_wait_reason() == "macOS startup readiness could not be probed"
+    monkeypatch.setattr(readiness, "is_macos", lambda: False)
+    assert readiness.degraded_wait_reason() is None

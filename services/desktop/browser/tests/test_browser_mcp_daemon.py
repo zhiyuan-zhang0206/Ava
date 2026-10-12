@@ -22,8 +22,7 @@ from mcp import types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
-from services.desktop.browser import page_lifecycle
-from services.desktop.browser.gateway_session import GatewaySession
+from services.desktop.browser import gateway_session, page_lifecycle, session
 from services.desktop.browser.mcp_daemon import (
     ChromeMcpDaemon,
     _handle_client,
@@ -125,17 +124,9 @@ class NoTabGroups(AgentTabGroups):
         return None
 
 
-def _new_daemon(
-    upstream: Any, pages: PageRegistry | None = None, tab_groups: AgentTabGroups | None = None
-) -> ChromeMcpDaemon:
-    """A daemon the way ``run()`` builds one: its own registry unless the caller
-    passes the one an earlier daemon used (an upstream reconnect)."""
-    return ChromeMcpDaemon(
-        upstream,
-        pages or PageRegistry(),
-        GatewaySession(asyncio.TaskGroup()),
-        tab_groups or NoTabGroups(),
-    )
+def _new_daemon(upstream: Any, tab_groups: AgentTabGroups | None = None) -> ChromeMcpDaemon:
+    """A daemon the way ``run()`` builds one: its own registry."""
+    return ChromeMcpDaemon(upstream, PageRegistry(), tab_groups or NoTabGroups())
 
 
 def _daemon() -> tuple[ChromeMcpDaemon, FakeUpstream]:
@@ -326,7 +317,7 @@ class OtherMCPErrorUpstream:
 
 async def test_call_tool_flags_dead_on_timeout_upstream() -> None:
     """MCPError(REQUEST_TIMEOUT / CONNECTION_CLOSED) from the SDK counts as
-    upstream death: dead is set so run() reconnects a wedged upstream."""
+    upstream death: dead is set so run() ends the daemon on a wedged upstream."""
     d = _new_daemon(TimedOutUpstream())
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await d.call_tool("navigate_page", {"url": "https://x.com"}, None)
@@ -342,7 +333,7 @@ async def test_list_tools_flags_dead_on_timeout_upstream() -> None:
 
 async def test_other_mcp_error_does_not_flag_dead() -> None:
     """A tool-level MCP error (wrong params etc.) is a normal failure: it must
-    not kill the session or trigger a reconnect."""
+    not kill the session or end the daemon."""
     d = _new_daemon(OtherMCPErrorUpstream())
     with pytest.raises(MCPError):
         await d.call_tool("list_pages", {}, None)
@@ -399,7 +390,7 @@ async def test_agent_affinity_shares_page_across_connections() -> None:
     d, up = _daemon()
     # connection 1: the agent opens its tab
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
-    assert d.pages.get_agent_page(7, d.generation) == 1
+    assert d.pages.get_agent_page(7) == 1
     # connection 2 (fresh): a page-scoped call lands on the agent's page
     res = await d.call_tool_for_agent("take_snapshot", {}, 7)
     assert res.is_error is False
@@ -429,7 +420,7 @@ async def test_agent_affinity_repin_failure_drops_slot() -> None:
     up.selected = None
     res = await d.call_tool_for_agent("take_snapshot", {}, 7)
     assert res.is_error is True
-    assert d.pages.get_agent_page(7, d.generation) is None
+    assert d.pages.get_agent_page(7) is None
 
 
 async def test_agent_affinity_management_tools_update_slot() -> None:
@@ -438,11 +429,11 @@ async def test_agent_affinity_management_tools_update_slot() -> None:
     d, _up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # -> page 1
     await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # -> page 2
-    assert d.pages.get_agent_page(7, d.generation) == 2
+    assert d.pages.get_agent_page(7) == 2
     await d.call_tool_for_agent("select_page", {"pageId": 1}, 7)
-    assert d.pages.get_agent_page(7, d.generation) == 1
+    assert d.pages.get_agent_page(7) == 1
     await d.call_tool_for_agent("close_page", {"pageId": 1}, 7)
-    assert d.pages.get_agent_page(7, d.generation) is None
+    assert d.pages.get_agent_page(7) is None
 
 
 async def test_agent_affinity_accepts_integral_float_page_id() -> None:
@@ -453,7 +444,7 @@ async def test_agent_affinity_accepts_integral_float_page_id() -> None:
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
     await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # page 2
     await d.call_tool_for_agent("select_page", {"pageId": 1.0}, 7)
-    assert d.pages.get_agent_page(7, d.generation) == 1
+    assert d.pages.get_agent_page(7) == 1
 
 
 async def test_agent_affinity_isolated_context_suffix_registers_page() -> None:
@@ -464,9 +455,8 @@ async def test_agent_affinity_isolated_context_suffix_registers_page() -> None:
     await d.call_tool_for_agent(
         "new_page", {"url": "https://discord.com/app", "isolatedContext": "reg-7"}, 7
     )
-    assert d.pages.get_agent_page(7, d.generation) == 1
-    deadline, generation = d.pages.ttl_deadlines[1]
-    assert generation == d.generation and deadline > time.monotonic()
+    assert d.pages.get_agent_page(7) == 1
+    assert d.pages.ttl_deadlines[1] > time.monotonic()
 
 
 async def test_agent_close_with_integral_float_drops_ttl_slot() -> None:
@@ -551,8 +541,8 @@ async def test_release_agent_page_closes_only_that_agent() -> None:
     assert ("close_page", {"pageId": 1}, 2) in up.calls
     assert 1 not in up.pages
     assert up.pages == {2: "b"}  # the other agent's tab untouched
-    assert d.pages.get_agent_page(7, d.generation) is None
-    assert d.pages.get_agent_page(8, d.generation) == 2
+    assert d.pages.get_agent_page(7) is None
+    assert d.pages.get_agent_page(8) == 2
 
 
 async def test_release_agent_page_idempotent_and_no_slot() -> None:
@@ -570,13 +560,13 @@ async def test_release_agent_page_idempotent_and_no_slot() -> None:
 
 async def test_release_agent_page_keeps_slot_when_upstream_down() -> None:
     """The upstream dying mid-release must not clear the slot — the page is
-    still open and the reaper needs to find it after the reconnect."""
+    still open and the reaper needs to find it."""
     d = _new_daemon(DeadUpstream())
-    d.pages.set_agent_page(7, 1, d.generation)
-    d.pages.register_created_page(1, d.generation)
+    d.pages.set_agent_page(7, 1)
+    d.pages.register_created_page(1)
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await page_lifecycle.release_agent_page(d, 7)
-    assert d.pages.get_agent_page(7, d.generation) == 1  # slot survives for the reaper
+    assert d.pages.get_agent_page(7) == 1  # slot survives for the reaper
 
 
 async def test_release_agent_page_wire_method() -> None:
@@ -611,7 +601,7 @@ async def test_release_agent_page_wire_method() -> None:
     assert resp["result"]["page_id"] == 1
     released_daemon = daemon_ref[0]
     assert released_daemon is not None
-    assert released_daemon.pages.get_agent_page(7, released_daemon.generation) is None
+    assert released_daemon.pages.get_agent_page(7) is None
 
     bad = await roundtrip({"id": 3, "method": "release_agent_page"})
     assert bad["ok"] is False
@@ -636,9 +626,9 @@ def test_parse_page_listing_extracts_urls() -> None:
 
 
 def _expire(d: ChromeMcpDaemon, page_id: int) -> None:
-    """Force a page's TTL deadline into the past (generation preserved)."""
-    _deadline, generation = d.pages.ttl_deadlines[page_id]
-    d.pages.ttl_deadlines[page_id] = (time.monotonic() - 1.0, generation)
+    """Force a page's TTL deadline into the past."""
+    assert page_id in d.pages.ttl_deadlines
+    d.pages.ttl_deadlines[page_id] = time.monotonic() - 1.0
 
 
 def _record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
@@ -651,8 +641,7 @@ def _record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
 
 
 def _ttl_remaining(d: ChromeMcpDaemon, page_id: int) -> float:
-    deadline, _generation = d.pages.ttl_deadlines[page_id]
-    return deadline - time.monotonic()
+    return d.pages.ttl_deadlines[page_id] - time.monotonic()
 
 
 class _TitledListing(FakeUpstream):
@@ -676,23 +665,34 @@ class _TitledListing(FakeUpstream):
         return _ok("\n".join(lines))
 
 
-# ── Upstream reconnect: page ids are per-process (task #3048) ────────────────
+async def test_gateway_origin_navigation_is_an_ordinary_navigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opening a gateway page triggers no session check or cookie re-injection.
 
-
-def _restart_with_drift(pages: PageRegistry) -> tuple[ChromeMcpDaemon, FakeUpstream]:
-    """A replacement upstream whose numbering drifted: id 1 names a foreign tab.
-
-    Reconnecting chrome-devtools-mcp (Chrome restart / crash / OOM) starts a
-    fresh process that renumbers pages from 1, so a surviving pre-reconnect id
-    can point at any tab — here, a tab this stack never created. Any stale-slot
-    action (re-pin / close / renew) would land on it; the tests below are the
-    red side of that scenario. ``pages`` is the registry the pre-restart daemon
-    used — ``run()`` hands the same one to every daemon it builds.
+    The gateway cookie is refreshed only by the daemon's periodic loop; a revoked
+    session stays invalid until the next tick instead of being healed on the
+    navigation that surfaces it.
     """
-    up = FakeUpstream()
-    up.next_id = 2
-    up.pages = {1: "https://user.example.com/other-tab"}
-    return _new_daemon(up, pages), up
+    gateway = "http://gateway.example:8000"
+
+    async def forbidden(*_args: Any) -> Any:
+        pytest.fail("a gateway-origin navigation must not touch the session cookie")
+
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: gateway)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", forbidden)
+    monkeypatch.setattr(session, "gateway_session_login", forbidden)
+    d, up = _daemon()
+
+    opened = await d.call_tool_for_agent("navigate_page", {"url": f"{gateway}/pages/1"}, 7)
+    again = await d.call_tool_for_agent("navigate_page", {"url": f"{gateway}/pages/2"}, 7)
+    await asyncio.sleep(0)  # a spawned one-shot would run (and fail the test) here
+
+    assert not opened.is_error and not again.is_error
+    assert [call[0] for call in up.calls if call[0] != "select_page"] == [
+        "new_page",
+        "navigate_page",
+    ]
 
 
 __all__ = ["_TitledListing"]
