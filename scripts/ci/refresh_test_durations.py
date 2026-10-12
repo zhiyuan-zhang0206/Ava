@@ -18,10 +18,8 @@ same way CI runs them and rewrites the file:
   faster and the split under-estimates);
 * e2e: `pytest tests/e2e/ -v -n 2` (CI's e2e job carries no --cov).
 
-Successful main CI records timings during its existing runs. The refresh
-workflow reuses a complete run after 20 main changes; nightly fallback invokes
-`measure` once per CI-shaped shard (16 backend,
-four e2e), each on its own runner. A measurement retries its isolated shard
+Main runs no CI, so the daily refresh workflow invokes `measure` once per
+CI-shaped shard (16 backend, four e2e), each on its own runner. A measurement retries its isolated shard
 three times, reseeding its temporary duration input before every attempt, so a
 failed attempt cannot affect selection or leak partial measurements into its
 retry. Every successful measurement uses `--store-durations --clean-durations`;

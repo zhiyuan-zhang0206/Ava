@@ -5,9 +5,9 @@
 # make SHARDING the speed lever: the pytest suite dominates wall clock, so it
 # fans out over whole-file shards (pytest-split's LPT algorithm, balanced via the committed
 # .test_durations and least_duration — refreshes retain all measured tests;
-# unmeasured tests are costed at this run's average. Refreshed every 20 main changes
-# with existing CI timings, with nightly fallback measurements by
-# scripts/ci/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
+# unmeasured tests are costed at this run's average. Refreshed daily from isolated
+# shard measurements by scripts/ci/refresh_test_durations.py via
+# .github/workflows/refresh-test-durations.yml).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
@@ -51,6 +51,16 @@
 # supply-chain write into every run. .github/dependabot.yml keeps the pins fresh
 # via reviewable PRs.
 #
+# CI RUNS ON PULL REQUESTS ONLY. There is no push-to-main run: main only advances
+# through the Trunk merge queue, whose `trunk-merge/*` branch is a pull request that
+# runs this whole workflow on the exact tree that lands, so a second run of the
+# same tree after the merge proved nothing and held roughly a quarter of the
+# runner pool. What the main run used to produce moved to its own owners: shard
+# timings to refresh-test-durations.yml (daily measurement), the test-count
+# baseline to queue runs (see backend-test-counts), and warm dependency caches
+# to cache-warm.yml (hosted caches written by a PR ref are invisible to other PRs;
+# only the default branch's are shared).
+#
 # Artifact publishing is transport, not a gate: every `upload-artifact` step in
 # this workflow continues on error, so a 403/500 while finalizing an upload
 # cannot red a job whose tests passed when the required checks fan in those jobs.
@@ -61,11 +71,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'ava_builtins/skills/**'
-      - '**/*.md'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
@@ -89,9 +94,9 @@ env:
 
 concurrency:
   # PRs group by ref only, so a new push cancels the superseded run. Every
-  # other event keeps the SHA in the group: a group holds one pending run and
-  # a newer one replaces it, so a ref-only group would skip intermediate main
-  # commits that refresh-test-durations.yml relies on.
+  # other event (manual dispatch) keeps the SHA in the group and never cancels:
+  # a group holds one pending run and a newer one replaces it, so dispatches of
+  # different commits must not share one.
   # Residual race (a stale ci-rerun admitted just after a push cancels the new
   # head): the cancelled run is retried by ci-rerun.yml. See
   # docs/conventions/engineering/ci-rerun-safety.md.
@@ -101,8 +106,8 @@ concurrency:
 jobs:
   classify:
     # Which sides does this diff touch? Imports base/deploy/git/repo_change.py directly
-    # (stdlib-only — no venv) over the PR's changed paths. push/dispatch
-    # events always report both sides changed: main must always verify fully.
+    # (stdlib-only — no venv) over the PR's changed paths. A manual dispatch
+    # always reports both sides changed: it has no diff, so it verifies fully.
     # Trunk branches always verify the full backend, even for documentation.
     name: classify change
     runs-on: ubuntu-24.04
@@ -228,10 +233,9 @@ jobs:
           PY
   repo-language:
     # The no-CJK gate must fire on EVERY PR, including docs-only and
-    # skills-only diffs: classify skips everything for docs-only changes and
-    # push-to-main ignores **/*.md + ava_builtins/skills/**, so a CJK-only
-    # change would otherwise reach main with zero CI. The gate is stdlib-only
-    # (python3 + git ls-files) and scans the whole tree in seconds, so it runs
+    # skills-only diffs: classify skips the suites for docs-only changes, so a
+    # CJK-only change would otherwise reach main with no language gate. The
+    # gate is stdlib-only (python3 + git ls-files) and scans the whole tree in seconds, so it runs
     # as its own cheap job rather than being gated behind backend/frontend.
     name: repo language (no raw CJK)
     runs-on: ubuntu-24.04
@@ -386,7 +390,7 @@ jobs:
     # carries `Resurrects: <reason>` or reverts the deleting commit.
     # Classify-independent like repo-language above: a docs-only or
     # frontend-only PR can resurrect deleted lines too. PR-only: the
-    # comparison needs a base branch, which a push event does not have.
+    # comparison needs a base branch, which a manual dispatch does not have.
     name: no silent resurrection
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -610,13 +614,13 @@ jobs:
     # One structure job, two segments: A always runs structure lint via
     # pre-commit --all-files; B installs Node/npm and explicitly runs the four
     # freshness hooks only when the PR diff matches their configured files:
-    # regexes. Pushes and selector errors run B; a no-match PR logs STEP SKIPPED.
+    # regexes. Manual dispatch and selector errors run B; a no-match PR logs STEP SKIPPED.
     # Other CI jobs own ruff/pyright/migrations/clock, frontend gates and core
     # manifests. Pre-push-only pyright/tsc/eslint/vitest remain redundant SKIP entries.
     # Runs for every eligible change class, including documentation: directory
-    # structure is independent of test-suite classification. Main pushes run
-    # all four hooks as a safety net; the merge
-    # queue re-evaluates the same selector on the combined tree before landing.
+    # structure is independent of test-suite classification. Manual dispatch
+    # runs all four hooks; the merge queue re-evaluates the same selector on
+    # the combined tree before landing, and that tree is what main receives.
     name: backend structure (pre-commit lint + codegen freshness)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -743,7 +747,7 @@ jobs:
                   with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
                       output.write("run=false\n")
                   print("STEP SKIPPED: codegen freshness — no codegen inputs changed in this PR; "
-                        "main pushes always run it; the merge queue re-runs the combined tree.")
+                        "manual dispatch always runs it; the merge queue re-runs the combined tree.")
           except Exception as error:
               # A failed outcome overrides even a partially published skip.
               print(f"::warning::Codegen selector failed ({type(error).__name__}); "
@@ -895,12 +899,13 @@ jobs:
     # mode, FULL/SKIP decisions, selector failures (empty decision) and
     # non-PR events all run the full fan-out.
     needs: [classify, test-select]
-    # The status check prevents a skipped test-select on push-to-main from
-    # skipping the full suite, while allowing workflow cancellation to stop it.
+    # The status check prevents a skipped test-select (a manual dispatch runs no
+    # selector) from skipping the full suite, while allowing workflow
+    # cancellation to stop it.
     if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.test-select.outputs.mode != 'enforce' || needs.test-select.outputs.decision != 'SELECTED') }}
     strategy:
       fail-fast: false
-      # 16 shards (was 12): measured 2026-09-03 over 20 push-to-main runs, the
+      # 16 shards (was 12): measured 2026-09-03 over 20 main-branch runs, the
       # per-shard pytest step median was 213s at 12 shards x -n 4 (~113 min of
       # serial test time); 16 shards scale the fan-out to ~160s + ~30s fixed
       # toolchain per shard. Prior art dd2ab5c36 (8 -> 12) measured ~90s saved;
@@ -934,8 +939,6 @@ jobs:
       - name: Run pytest shard
         id: pytest-shard
         shell: bash
-        env:
-          RECORD_DURATIONS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         # Native pytest failure makes this job red; JUnit validation also
         # catches missing evidence and a success exit with recorded failures.
         # Hang forensics (task #3328): the canary shard has stalled silently
@@ -956,7 +959,7 @@ jobs:
         run: |
           set -e
           set -o pipefail
-          mkdir -p tmp/durations tmp/file-shards
+          mkdir -p tmp/file-shards
           timeout --kill-after=15s 4m uv run python -u - <<'PY' 2>&1 | tee tmp/file-shards/plan-collection.log
           from scripts.ci.collection_tracebacks import periodic_tracebacks
 
@@ -973,17 +976,11 @@ jobs:
                   ]))
           PY
           set +e
-          DURATION_ARGS=()
-          DURATION_FILE="tmp/durations/backend-${{ matrix.group }}.json"
-          if [ "$RECORD_DURATIONS" = true ]; then
-            cp .test_durations "$DURATION_FILE" || exit 1
-            DURATION_ARGS=(--store-durations --clean-durations --durations-path "$DURATION_FILE")
-          fi
           uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
             -p scripts.ci.file_shard_shadow --file-shard-execute \
             --file-shard-check=tmp/file-shards/plan.json --file-shard-group=${{ matrix.group }} \
             --file-shard-report=tmp/file-shards/collection-a1.json \
-            --file-shard-runtime-report=tmp/file-shards/runtime-a1.json "${DURATION_ARGS[@]}" \
+            --file-shard-runtime-report=tmp/file-shards/runtime-a1.json \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
             --cov=ops --cov=services --cov=ava_builtins \
             --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a1.xml -o junit_family=xunit1 \
@@ -1003,14 +1000,11 @@ jobs:
             # file (coverage.py appends by default) and flatten the combine;
             # drop it so the retry writes a clean per-shard file.
             rm -f "$COVERAGE_FILE"
-            if [ "$RECORD_DURATIONS" = true ]; then
-              cp .test_durations "$DURATION_FILE" || exit 1
-            fi
             uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
               -p scripts.ci.file_shard_shadow --file-shard-execute \
               --file-shard-check=tmp/file-shards/plan.json --file-shard-group=${{ matrix.group }} \
               --file-shard-report=tmp/file-shards/collection-a2.json \
-              --file-shard-runtime-report=tmp/file-shards/runtime-a2.json "${DURATION_ARGS[@]}" \
+              --file-shard-runtime-report=tmp/file-shards/runtime-a2.json \
               --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
               --cov=ops --cov=services --cov=ava_builtins \
               --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a2.xml -o junit_family=xunit1 \
@@ -1018,15 +1012,6 @@ jobs:
             status=$?
           fi
           exit "$status"
-
-      - name: Upload backend duration measurement
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: test-durations-backend-${{ matrix.group }}
-          path: tmp/durations/backend-${{ matrix.group }}.json
-          if-no-files-found: error
 
       - name: Report executed test counts
         # What this shard actually ran, from the JUnit report pytest already wrote
@@ -1715,7 +1700,7 @@ jobs:
 
   backend-test-counts:
     # How many tests CI executed, and how that moved. Adds the native shards, flaky
-    # bucket and static lane counts up and compares them with the previous main run's total, so a test
+    # bucket and static lane counts up and compares them with the previous queue run's total, so a test
     # that moved, or fell out of the suite, shows as a change in one line instead of
     # being proved by counting around every batch. Purely informational: the job cannot
     # fail the run, and nothing needs it. Same fan-out condition as backend-shard.
@@ -1743,24 +1728,20 @@ jobs:
           path: shard-counts
           merge-multiple: true
 
-      - name: Fetch the previous main total
-        # The total of the main run this change is based on (a PR names its base commit);
-        # else the latest main run that left one. None yet is not an error.
+      - name: Fetch the previous queue total
+        # The total of the latest green Trunk merge-queue run that left one: a
+        # queue branch tests the tree about to land on main, so it is the nearest
+        # thing to "the previous main run" now that main itself runs no CI. None
+        # yet is not an error.
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           mkdir -p baseline
-          runs() { gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push --status success --json databaseId --jq '.[].databaseId' "$@"; }
-          candidates=""
-          if [ -n "$BASE_SHA" ]; then
-            candidates="$(runs --commit "$BASE_SHA" --limit 1)"
-          fi
-          candidates="$candidates $(runs --limit 10)"
+          candidates="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event pull_request --status success --limit 100 --json databaseId,headBranch --jq '[.[] | select(.headBranch | startswith("trunk-merge/")) | .databaseId][:8][]')"
           for run_id in $candidates; do
             if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name test-count-baseline --dir baseline; then
-              echo "baseline: main run $run_id"
+              echo "baseline: queue run $run_id"
               break
             fi
           done
@@ -1787,8 +1768,8 @@ jobs:
           if-no-files-found: ignore
 
       - name: Record the total as the next baseline
-        # Only main's own totals are baselines; a PR reads them and leaves none.
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        # Only queue runs' totals are baselines; a PR reads them and leaves none.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && startsWith(github.head_ref, 'trunk-merge/') }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -2077,30 +2058,12 @@ jobs:
         # 40/93/157/83s per group under the count-based split, vs 93/93/93/93s
         # once e2e carries refreshed durations + LPT. Before any e2e entry
         # lands, absent tests cost the average = an even split by count.
-        env:
-          RECORD_DURATIONS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
-          mkdir -p tmp/durations
-          DURATION_ARGS=()
-          DURATION_FILE="tmp/durations/e2e-${{ matrix.group }}.json"
-          if [ "$RECORD_DURATIONS" = true ]; then
-            cp .test_durations "$DURATION_FILE"
-            DURATION_ARGS=(--store-durations --clean-durations --durations-path "$DURATION_FILE")
-          fi
           uv run pytest tests/e2e/ -v -n 2 \
             --splits 4 --group ${{ matrix.group }} \
-            --splitting-algorithm least_duration "${DURATION_ARGS[@]}" \
+            --splitting-algorithm least_duration \
             --junit-xml=tmp/junit-e2e-shard-${{ matrix.group }}.xml -o junit_family=xunit1
-
-      - name: Upload e2e duration measurement
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: test-durations-e2e-${{ matrix.group }}
-          path: tmp/durations/e2e-${{ matrix.group }}.json
-          if-no-files-found: error
 
       - name: Validate native test results
         if: ${{ !cancelled() }}

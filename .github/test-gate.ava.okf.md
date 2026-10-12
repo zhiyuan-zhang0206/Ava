@@ -44,8 +44,8 @@ The same step counts the tests from the JUnit report pytest already wrote
 (`scripts/ci/shard_counts.py`), per `tests/` directory, into the job log and
 summary. The informational `backend test counts (all shards)` job adds the 16
 shards and the flaky bucket up and prints the difference against the previous
-main run's total, which each push to main records as the `test-count-baseline`
-artifact, so a moved test that fell out of the suite shows as a changed count.
+queue run's total, which each green Trunk merge-queue run records as the
+`test-count-baseline` artifact (main itself runs no CI), so a moved test that fell out of the suite shows as a changed count.
 It is not required and cannot fail the run.
 
 ### Leak-guard findings

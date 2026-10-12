@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Plan duration refreshes from measured provenance, never successful no-op runs."""
+"""Plan duration refreshes from measured provenance, never successful no-op runs.
+
+Timings come from isolated shard measurements on schedule or manual dispatch; main runs no CI to
+borrow them from."""
 
 from __future__ import annotations
 
@@ -16,7 +19,6 @@ from base.deploy.git import gitenv
 from base.host import proc
 
 _SOURCE_FILE = ".test_durations.source.json"
-_CHANGE_INTERVAL = 20
 _BACKSTOP_WINDOW = timedelta(hours=5)
 _SHA = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 
@@ -26,7 +28,6 @@ class RefreshEvent(StrEnum):
 
     SCHEDULE = "schedule"
     MANUAL = "workflow_dispatch"
-    CI = "workflow_run"
 
 
 class RefreshMode(StrEnum):
@@ -34,7 +35,6 @@ class RefreshMode(StrEnum):
 
     SKIP = "skip"
     MEASURE = "measure"
-    REUSE = "reuse"
 
 
 class MeasurementSource(BaseModel):
@@ -45,31 +45,6 @@ class MeasurementSource(BaseModel):
     source_sha: _SHA
     run_id: Annotated[int, Field(gt=0)]
     measured_at: AwareDatetime
-
-
-class _Repository(BaseModel):
-    full_name: str
-
-
-class _SuccessfulMainCI(BaseModel):
-    """Accept only trusted main-push CI artifacts at the receiving boundary."""
-
-    model_config = ConfigDict(strict=True)
-    name: Literal["CI"]
-    path: Literal[".github/workflows/ci.yml"]
-    event: Literal["push"]
-    status: Literal["completed"]
-    conclusion: Literal["success"]
-    head_branch: Literal["main"]
-    head_repository: _Repository
-    head_sha: _SHA
-    id: Annotated[int, Field(gt=0)]
-    updated_at: AwareDatetime
-
-
-class _CompletedCIEvent(BaseModel):
-    action: Literal["completed"]
-    workflow_run: _SuccessfulMainCI
 
 
 def _git(*args: str) -> str:
@@ -104,24 +79,12 @@ def _source_at(ref: str) -> MeasurementSource | None:
 
 
 def _input_source(args: argparse.Namespace) -> MeasurementSource:
-    if args.event == RefreshEvent.CI:
-        event = _CompletedCIEvent.model_validate_json(args.event_path.read_text())
-        run = event.workflow_run
-        if run.head_repository.full_name != args.repository:
-            raise ValueError("duration artifacts must come from this repository's main CI")
-        source = MeasurementSource(
-            schema_version=1,
-            source_sha=run.head_sha,
-            run_id=run.id,
-            measured_at=run.updated_at,
-        )
-    else:
-        source = MeasurementSource(
-            schema_version=1,
-            source_sha=_git("rev-parse", "HEAD"),
-            run_id=args.run_id,
-            measured_at=datetime.now(UTC),
-        )
+    source = MeasurementSource(
+        schema_version=1,
+        source_sha=_git("rev-parse", "HEAD"),
+        run_id=args.run_id,
+        measured_at=datetime.now(UTC),
+    )
     if not _ancestor(source.source_sha, "HEAD"):
         raise ValueError("measurement source is outside the checked-out main history")
     return source
@@ -129,31 +92,15 @@ def _input_source(args: argparse.Namespace) -> MeasurementSource:
 
 def _decide(
     event: RefreshEvent,
-    source: MeasurementSource,
     baseline: MeasurementSource | None,
 ) -> tuple[RefreshMode, str]:
     if event == RefreshEvent.MANUAL:
         return RefreshMode.MEASURE, "manual measurement requested"
     if baseline is None:
-        mode = RefreshMode.REUSE if event == RefreshEvent.CI else RefreshMode.MEASURE
-        return mode, "bootstrap: no published measurement provenance"
-    if event == RefreshEvent.SCHEDULE:
-        if datetime.now(UTC) - baseline.measured_at < _BACKSTOP_WINDOW:
-            return RefreshMode.SKIP, "a complete measurement was published within five hours"
-        return RefreshMode.MEASURE, "daily fallback measurement"
-    if _ancestor(source.source_sha, baseline.source_sha):
-        return RefreshMode.SKIP, "this CI source has already been measured or superseded"
-    if not _ancestor(baseline.source_sha, source.source_sha):
-        raise ValueError("published measurement and CI source have diverged")
-    changes = int(
-        _git("rev-list", "--first-parent", "--count", f"{baseline.source_sha}..{source.source_sha}")
-    )
-    if changes < _CHANGE_INTERVAL:
-        return (
-            RefreshMode.SKIP,
-            f"{changes}/{_CHANGE_INTERVAL} main changes since the last measurement",
-        )
-    return RefreshMode.REUSE, f"{changes}/{_CHANGE_INTERVAL} main changes: reuse completed CI"
+        return RefreshMode.MEASURE, "bootstrap: no published measurement provenance"
+    if datetime.now(UTC) - baseline.measured_at < _BACKSTOP_WINDOW:
+        return RefreshMode.SKIP, "a complete measurement was published within five hours"
+    return RefreshMode.MEASURE, "daily measurement"
 
 
 def _latest_source(
@@ -181,7 +128,7 @@ def _plan(args: argparse.Namespace) -> None:
     baseline = _latest_source(applied, published)
     if baseline is not None and not _ancestor(baseline.source_sha, "HEAD"):
         raise ValueError("published measurement is outside main history")
-    mode, reason = _decide(event, source, baseline)
+    mode, reason = _decide(event, baseline)
     with args.output.open("a") as output:
         output.write(
             f"mode={mode}\nsource-sha={source.source_sha}\nsource-run-id={source.run_id}\n"
@@ -207,7 +154,6 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     plan = commands.add_parser("plan")
     plan.add_argument("--event", choices=list(RefreshEvent), required=True)
-    plan.add_argument("--event-path", type=Path, required=True)
     plan.add_argument("--repository", required=True)
     plan.add_argument("--run-id", type=int, required=True)
     plan.add_argument("--published-ref")
