@@ -97,7 +97,6 @@ def run_runner(root: Path, schedule_id: int, mode: str) -> None:
 
     ava.ensure_plugins_loaded = lambda **_inputs: None
     settings.gateway.schedule_stall_timeout_seconds = 0.15
-    settings.gateway.schedule_stall_check_interval_seconds = 0.02
     raise SystemExit(run(schedule_id))
 
 
@@ -105,7 +104,7 @@ def stall_exit(root: Path, blocked_write: str) -> None:
     database, _inputs = _schedule_inputs()
     from gateway.schedules import runner as r
 
-    r.settings.gateway.schedule_stall_exit_record_deadline_seconds = 1.0
+    r._FAILURE_RECORD_DEADLINE_S = 1.0
 
     def record_error(*_args: Any) -> None:
         (root / "started").write_text(str(time.monotonic()))
@@ -131,9 +130,8 @@ def completion_during_stall(root: Path) -> None:
     import ava
     from gateway.schedules import runner as r
 
-    r.settings.gateway.schedule_stall_check_interval_seconds = 0.01
-    r.settings.gateway.schedule_stall_timeout_seconds = 0.01
-    r.settings.gateway.schedule_stall_exit_record_deadline_seconds = 1.0
+    r.settings.gateway.schedule_stall_timeout_seconds = 0.04
+    r._FAILURE_RECORD_DEADLINE_S = 1.0
     r._schedule_dir = lambda _id: root
     r._load = lambda *_args: ("pass", "python script.py")
     r._record_run_start = lambda *_args: 1
