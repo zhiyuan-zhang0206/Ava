@@ -14,6 +14,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.authority.api import AcceptanceCache
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.lm.catalog import ModelCatalog
@@ -82,7 +83,14 @@ def _app_db(
     model_catalog: ModelCatalog,
     machine_identity: MachineIdentity,
 ) -> None:
-    # ASGITransport tests skip the lifespan; supply their existing root's inputs.
+    # ASGITransport tests skip the lifespan; supply their existing root's inputs. The
+    # machine-token acceptance cache is one of them: the bearer check reads it on every
+    # request, and without it these tests only pass in a worker where an earlier test's
+    # lifespan happened to leave one on the shared app.
+    machine_token_acceptance: AcceptanceCache = {}
+    monkeypatch.setattr(
+        app.state, "machine_token_acceptance", machine_token_acceptance, raising=False
+    )
     monkeypatch.setattr(app.state, "db", object(), raising=False)
     monkeypatch.setattr(app.state, "catalog", model_catalog, raising=False)
     monkeypatch.setattr(app.state, "machine", machine_identity, raising=False)
