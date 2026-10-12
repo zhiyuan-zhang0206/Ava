@@ -33,8 +33,10 @@ from agent.state import (
     ContextReset,
     MemoryState,
     SkillRecallState,
+    build_checkpoint_serde,
     checkpoint_msgpack_allowlist,
 )
+from base.agents.history.checkpoint_serializer import PreSplitCheckpointEnvelopeError
 
 _SERDE_LOGGER = "langgraph.checkpoint.serde.jsonplus"
 
@@ -150,18 +152,30 @@ def test_allowlist_static_entries_always_present() -> None:
         assert ("agent.state_channels", name) in allow
 
 
-def test_pre_split_agent_state_envelopes_are_blocked() -> None:
-    """A checkpoint naming `("agent.state", ...)` predates the channel split: it is not revived.
+def test_pre_split_agent_state_envelopes_fail_the_load() -> None:
+    """A checkpoint naming `("agent.state", ...)` predates the channel split and is refused.
 
     Simulated with a subclass whose `__module__` is the pre-split value (the
-    envelope writes `__class__.__module__`); the allowlist serde blocks it and
-    hands back the raw dict instead of the channel model.
+    envelope writes `__class__.__module__`). The stock allowlist serde would
+    silently hand back a raw dict; the framework serializer raises instead.
     """
-    serde = _allowlist_serde()
+    serde = build_checkpoint_serde()
     pre_split = type("CompactState", (CompactState,), {"__module__": "agent.state"})
-    restored = serde.loads_typed(serde.dumps_typed(pre_split(version=2)))
-    assert type(restored) is dict
+    blob = serde.dumps_typed(pre_split(version=2))
+    with pytest.raises(PreSplitCheckpointEnvelopeError, match="pre-split"):
+        serde.loads_typed(blob)
+    nested = serde.dumps_typed({"channel": pre_split(version=2), "other": [1, 2]})
+    with pytest.raises(PreSplitCheckpointEnvelopeError):
+        serde.loads_typed(nested)
     assert not {pair for pair in checkpoint_msgpack_allowlist() if pair[0] == "agent.state"}
+
+
+def test_current_envelopes_and_lookalike_text_load_normally() -> None:
+    serde = build_checkpoint_serde()
+    state = CompactState(version=2)
+    assert serde.loads_typed(serde.dumps_typed(state)) == state
+    # A string that happens to be exactly the legacy module name is data, not an envelope.
+    assert serde.loads_typed(serde.dumps_typed({"note": "agent.state"})) == {"note": "agent.state"}
 
 
 def test_static_allowlist_covers_all_nested_substates() -> None:

@@ -92,6 +92,7 @@ from agent.state_channels import (
 )
 from base.agents.compaction.models import CompactMarker
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.incarnation.native_work_models import NativeCancelMarker, NativeWorkTarget
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.packages.plugins.extensions import (
@@ -780,8 +781,8 @@ def checkpoint_msgpack_allowlist(
 def build_checkpoint_serde(
     plugin_state_classes: Iterable[type[BaseModel]] = (),
 ) -> JsonPlusSerializer:
-    """JsonPlusSerializer with the framework checkpoint allowlist — pass as
+    """CheckpointSerializer with the framework checkpoint allowlist — pass as
     `serde=` when constructing the hosted LangGraph checkpointer."""
-    return JsonPlusSerializer(
+    return CheckpointSerializer(
         allowed_msgpack_modules=checkpoint_msgpack_allowlist(plugin_state_classes)
     )

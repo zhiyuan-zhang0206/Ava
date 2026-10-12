@@ -102,9 +102,8 @@ def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
             (DB disconnect, msgpack error). The caller decides tolerance
             (see module docstring).
     """
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
     from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
+    from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     # Explicit serde allowlist — same types as the agent runner registers
@@ -113,7 +112,7 @@ def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
     # whole checkpoint (all channels, incl. the nested agent.state sub-states),
     # so every timeline/messages/token-usage cold load would warn once per
     # type per gateway process start.
-    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
         # Direct construction rather than `from_conn_string` — the classmethod
         # does not forward a `serde` argument, and the default permissive serde
@@ -291,12 +290,11 @@ def load_checkpoint_message_count(db: Database, agent_id: int) -> int:
 
 def _reconstructed_message_count(db: Database, agent_id: int) -> int:
     """Count a delta-written thread's messages via reconstruction (0 when not delta)."""
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
     from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
+    from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
-    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
         saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
         tuple_ = saver.get_tuple(config)
@@ -320,12 +318,11 @@ def load_checkpoint_messages_segment(
         CheckpointReadError: the boundary blob exists but could not be read or
             deserialized.
     """
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
     from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
+    from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
-    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
         with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
             boundary = conn.execute(
@@ -420,12 +417,11 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
     Raises:
         CheckpointReadError: the store read or blob deserialize failed.
     """
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
     from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
+    from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
-    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
         with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
@@ -518,14 +514,13 @@ def load_checkpoint_messages_by_trace(
         CheckpointReadError: store read or blob deserialize failed — same
             contract as load_checkpoint_messages.
     """
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
     from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
+    from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     # Explicit serde allowlist, same as load_checkpoint_messages — without it
     # the permissive default warns on every read.
-    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
         # The id lookup rides tuple rows; blob deserialization uses dict rows.
         # Both paths borrow the data-plane pool URL, which already names
