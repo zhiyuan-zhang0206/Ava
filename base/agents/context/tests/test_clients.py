@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -183,3 +184,38 @@ def test_building_a_context_imports_no_connection_stack() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip().endswith("[]")
+
+
+def test_a_built_event_pipeline_is_returned_while_another_thread_builds_a_client() -> None:
+    """The log sink's producer must not queue behind a client build that waits on config.
+
+    A thread logging from inside the eager config build is the one the SDK thread's gateway
+    build waits for; if the producer needed the set lock it held, both would wait on each other.
+    """
+    build_started = threading.Event()
+    release_build = threading.Event()
+    pipeline = object()
+
+    def slow_gateway(url: str) -> httpx.Client:
+        build_started.set()
+        assert release_build.wait(timeout=30)
+        return httpx.Client(base_url=url)
+
+    clients = ClientSet(
+        gateway_url="http://gateway.test", gateway=slow_gateway, pipeline_factory=lambda: pipeline
+    )
+    assert clients.event_pipeline() is pipeline
+    builder = threading.Thread(target=lambda: clients.gateway)
+    builder.start()
+    assert build_started.wait(timeout=10)
+    returned: list[Any] = []
+    reader = threading.Thread(target=lambda: returned.append(clients.event_pipeline()))
+    reader.start()
+    reader.join(timeout=5)
+    blocked = reader.is_alive()
+    release_build.set()
+    builder.join(timeout=10)
+    reader.join(timeout=10)
+
+    assert not blocked, "event_pipeline() waited for an unrelated client build"
+    assert returned == [pipeline]
