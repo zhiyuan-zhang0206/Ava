@@ -25,7 +25,7 @@ import pytest
 from websockets.sync.server import Server, ServerConnection, unix_serve
 
 from base.agents.impersonation import host_transport as codex_app_server
-from base.agents.impersonation.terminal_notices import deliver_pending_notice
+from base.agents.impersonation.terminal_notices import send_ended_notice
 from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -291,14 +291,10 @@ def test_ended_lease_reaches_actual_codex_host_without_a_relay(
     server = FakeAppServer()
     server.start(short_socket)
     try:
-        assert deliver_pending_notice(database, local_machine)
+        assert send_ended_notice(database, str(lease_id)) is None
     finally:
         server.stop()
     payload = server.received[-1]["params"]
     assert payload["threadId"] == str(THREAD_ID)
     assert str(lease_id) in payload["input"][0]["text"]
     assert "confirmed executor death" in payload["input"][0]["text"]
-    assert db_conn.execute(
-        "SELECT terminal_notice_accepted_at IS NOT NULL FROM agent_impersonations WHERE id=%s",
-        (lease_id,),
-    ).fetchone() == (True,)

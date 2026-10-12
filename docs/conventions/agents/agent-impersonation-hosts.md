@@ -12,8 +12,8 @@ All providers use the same relay process and delivery loop in
 `cli/commands/agents/impersonation_adapters.py` bind a destination and send the
 loop's envelopes: Codex uses its app-server socket, Claude flushes text to
 Monitor, and dsh emits one JSON string per stdout line. Adapters also declare
-terminal-notice ownership: Codex's durable native host scan sends its notices;
-controller-session adapters deliver theirs through stdout. The shared loop owns
+terminal-notice ownership: the Codex native host submits its notice once when it
+sees the lease end; controller-session adapters deliver theirs through stdout. The shared loop owns
 inbox reads, batching, delivery reservations, retry budgets and exit behavior;
 adapters do not acknowledge messages or renew leases. Process supervision stays
 with the existing owner for each provider, as described below.
@@ -216,7 +216,7 @@ plugin steers each into the session — an idle session starts a turn, a busy on
 takes it at its next step, the Steer semantics of the codex relay. There is
 nothing for the executor to arm; a missing heartbeat rejects the takeover like
 any controller-session relay at admission. Once active, a stale relay degrades
-delivery without re-provisioning; executor authority keeps its original TTL.
+delivery without replacement; executor authority keeps its original TTL.
 
 The executor's commands run from dsh's shell tool, a direct child of the `node`
 process, so the attestation anchor is always in reach. Under dsh's default
@@ -227,7 +227,7 @@ permission preset. A self-takeover launched by `spawn_dsh.py` runs with
 prompts in its PTY. dsh resolves its own model credential (environment,
 `$DSH_HOME/.credentials.yaml`, the working directory's `.env`, `$DSH_HOME/.env`).
 
-## Executor authority and relay recovery
+## Executor authority and relay degradation
 
 Confirmed executor death ends authority; relay failure only degrades delivery.
 The accepting runtime re-checks both on the held-controls pass, which the dispatcher's
@@ -238,13 +238,12 @@ the stale window plus one scan interval (≈75 s).
 - **Executor authority.** Confirmed death/reuse of every recorded provider
   anchor ends the lease. Unknown or absent evidence is visible degradation,
   never confirmed death; authority ends at its original TTL if no decision arrives.
-- **Relay transport.** A stale Codex relay is retired by its recorded process
-  birth before a locked generation CAS mints a replacement. Its private token
-  pipe stays closed until the new child's birth is persisted. No TTL renewal or
-  new takeover occurs. A legacy generation-zero relay without a recorded birth
-  cannot safely be adopted or retired after host restart: recovery is withheld
-  with explicit degradation until an operator ends that old lease. Controller-
-  session providers lack independent respawn support and remain visibly degraded.
+- **Relay transport.** A stale or exited relay, Codex or controller-session, is
+  recorded as degraded (`relay_degraded_reason`, a rate-limited failure stamp and
+  an error log) and never replaced. The lease keeps its first credential and its
+  original TTL; messages stay in the inbox until the controller re-requests or
+  releases. A host or native restart ends the lease, so a relay is never adopted
+  across incarnations.
 - **What stopping does.** The lease goes terminal (`expired`) with the cause
   recorded as `aborted: <detail>` in `rejection_reason` (the request's own
   `reason` is preserved), pending renewal reminders are dismissed, a relay

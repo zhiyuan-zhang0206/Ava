@@ -203,7 +203,7 @@ def _ended(
     if snapshot.status not in _TERMINAL:
         return False
     if snapshot.status == ImpersonationStatus.RELEASED:
-        return True  # The host-side durable notice owns release notification.
+        return True  # The releasing controller already knows; no notice is sent.
     terminal = snapshot.terminal_notice_snapshot
     if terminal is None:
         # Pre-migration/synthetic snapshots have no immutable terminal record.
@@ -382,7 +382,7 @@ class _InboxRelay:
         """The current snapshot, or None once the lease ended (the end was emitted)."""
         snapshot = await self.read_inbox()
         if snapshot.status in _TERMINAL and not self.notify_terminal:
-            return None  # The independent host scan owns Codex terminal injection.
+            return None  # The native host submits the Codex ended notice once.
         if _ended(snapshot, self.agent_id, self.lease_id, self.emit):
             return None
         return snapshot

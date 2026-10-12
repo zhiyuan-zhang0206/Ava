@@ -59,6 +59,9 @@ SIGNALS: dict[str, Signal] = {
     "ava-ops-impersonation-capture-failed": Signal(
         "impersonation_event_log_incomplete", "ava-ops", "0s", "warning"
     ),
+    "ava-ops-impersonation-notice-failed": Signal(
+        "impersonation_terminal_notice_failed", "ava-ops", "0m", "warning"
+    ),
     "ava-ops-im-push-failed": Signal("im_push_failed", "ava-ops", "0s", "warning"),
     "ava-ops-im-feishu-owner-seed-failed": Signal(
         "im_feishu_owner_seed_failed", "ava-ops", "0s", "warning"
