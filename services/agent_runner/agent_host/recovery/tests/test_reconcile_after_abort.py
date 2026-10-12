@@ -194,7 +194,6 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
     agent = incarnation.agent_id
     claimed = claimed_row(db_conn, agent, "claimed")
     unusable_saver = Mock()
-    monkeypatch.setattr(host_module, "repair_dangling_tool_use_at_startup", AsyncMock())
     monkeypatch.setattr(host_module, "build_runtime", AsyncMock())
     host = AgentHost(
         policy=configured_policy(),
