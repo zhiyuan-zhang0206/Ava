@@ -1,4 +1,4 @@
-"""`scripts/lint/no_script_sibling_imports.py` — the PYTHONSAFEPATH sibling-import guard.
+"""`meizel/language/no_script_sibling_imports.py` — the PYTHONSAFEPATH sibling-import guard.
 
 A script-mode file (main block or python/uv shebang) may not import a
 same-directory sibling unless a `sys.path.insert` / `sys.path.append` call
