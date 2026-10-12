@@ -288,7 +288,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests the scripts of the .agents/skills/inspect-a-trace skill",
     ),
-    "tests/skills/test_watcher_send_retry.py": (
+    "tests/skills/test_watcher_wake_delivery.py": (
         "contract",
         "tests the reference watcher scripts of the ava_builtins skills",
     ),
