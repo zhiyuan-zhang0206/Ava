@@ -27,8 +27,8 @@ from base.host.converge.accessibility import (
 )
 from base.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
 from base.host.converge.screen_capture import clear_status, write_status
-from base.host.env.dotenv_boot import resolve_ava_home
 from base.host.system.probes import browser_incapability
+from base.paths.home import resolve_ava_home
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge._brew_pin import ensure_brew_pin

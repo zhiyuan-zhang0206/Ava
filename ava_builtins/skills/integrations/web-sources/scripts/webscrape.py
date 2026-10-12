@@ -56,7 +56,7 @@ from typing import Any
 import trafilatura
 from loguru import logger
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 # An honest browser UA: a bare client UA is 403'd / timed out by many news and
 # forum sites that answer a normal browser request (verified against Chinese
@@ -115,7 +115,7 @@ def _default_root() -> Path:
     state doubling as the sync watermark; the per-content subdir is the stable
     URL slug, so a re-run reuses it (dedup).
 
-    Resolves `$AVA_HOME` via `base.host.env.dotenv_boot.resolve_ava_home` — the same
+    Resolves `$AVA_HOME` via `base.paths.home.resolve_ava_home` — the same
     resolution every other Ava process uses."""
     return resolve_ava_home() / "state" / "mirrors" / "web-scrape"
 

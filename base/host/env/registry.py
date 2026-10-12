@@ -123,7 +123,7 @@ PLUGIN_CLUSTER_CONFIG_ENV = "AVA_PLUGIN_CLUSTER_CONFIG"
 # runner database password. derive_env emits it and process isolation strips it.
 REDIS_PASSWORD_ENV = "AVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a credential
 
-# The home is not a Settings field (`base.host.env.dotenv_boot.resolve_ava_home`
+# The home is not a Settings field (`base.paths.home.resolve_ava_home`
 # reads it before Settings exists): it is the one variable every descendant
 # inherits, so a process tree that set it keeps every child on the same home.
 AVA_HOME_ENV = "AVA_HOME"

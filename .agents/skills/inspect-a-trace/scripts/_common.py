@@ -1,6 +1,6 @@
 """Bootstrap helper shared by `read_trace.py` / `fetch_trace.py`: locate the
 Ava source root so `base` is importable, before either script can import
-`base.host.env.dotenv_boot.resolve_ava_home` to resolve `$AVA_HOME` itself.
+`base.paths.home.resolve_ava_home` to resolve `$AVA_HOME` itself.
 
 Kept in its own file (rather than duplicated in both scripts, which is how
 this landed originally) so there is exactly one place that resolves this

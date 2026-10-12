@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypedDict, cast
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 _DEFAULT_MANIFEST = Path(__file__).with_name("manifest.json")
 _HASH_CHUNK_SIZE = 1024 * 1024

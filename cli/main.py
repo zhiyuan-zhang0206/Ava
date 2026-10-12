@@ -181,8 +181,9 @@ def _deliver_lite_api_token() -> None:
     missing; no source leaves the existing bearer behavior in place.
     """
     from base.host.env.bootstrap import config_source_is_local
-    from base.host.env.dotenv_boot import launcher_context, resolve_ava_home
+    from base.host.env.dotenv_boot import launcher_context
     from base.host.net.auth import API_TOKEN_ENV
+    from base.paths.home import resolve_ava_home
 
     if os.environ.get(API_TOKEN_ENV) or launcher_context() is not None:
         return
@@ -225,7 +226,7 @@ def main(
     if args_in[:1] == ["init"]:
         return args.func(args)
     if args_in[:1] == ["start"]:
-        from base.host.env.dotenv_boot import resolve_ava_home
+        from base.paths.home import resolve_ava_home
         from cli.start_identity import require_initialized
 
         try:

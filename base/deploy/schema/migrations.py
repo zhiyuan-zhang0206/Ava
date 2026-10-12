@@ -108,8 +108,8 @@ from base.deploy.schema.migration_layout import (
 from base.deploy.schema.migration_layout import (
     validate_migrations_at_ref as validate_migrations_at_ref,
 )
-from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
 from base.log import logger
+from base.paths.home import home_checkout_error, resolve_ava_home
 
 # Repo root = base/deploy/schema/../../.. = `<root>/`; migrations dir is under repo root.
 MIGRATIONS_DIR: Path = Path(__file__).resolve().parents[3] / "migrations"

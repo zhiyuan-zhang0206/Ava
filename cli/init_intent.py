@@ -21,8 +21,8 @@ from dotenv import dotenv_values
 
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.net.predicates import is_loopback_host
-from base.host.private_storage import ensure_private_dir
 from base.native_process.os_platform import file_lock
+from base.paths.private_dir import ensure_private_dir
 from cli import start_intent
 from cli.start_identity import (
     CAP_ARGS,

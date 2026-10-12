@@ -6,7 +6,7 @@ import pytest
 
 from base import cluster
 from base.config import settings
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 
 def cluster_record(ports: dict[str, int], *, created_at: str) -> cluster.ClusterRecord:

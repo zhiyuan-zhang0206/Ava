@@ -6,7 +6,7 @@ as `ava_builtins.plugins.ava_memory.pool_ops`, so a run needs the checkout's
 venv (`ava_builtins` importable) — `consolidation/SKILL.md` invokes them with
 a bare `python`, which an agent's shell resolves to that venv (the venv's
 `bin/` leads the PATH every agent process inherits). Stdlib + subprocess plus
-the leaf that resolves the home (`base.host.env.dotenv_boot.resolve_ava_home`:
+the leaf that resolves the home (`base.paths.home.resolve_ava_home`:
 `$AVA_HOME`, else `~/.ava`), which builds no Settings, and `dotenv_values` to
 read the home's `.env`.
 """
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 
 def pool_dir() -> Path:

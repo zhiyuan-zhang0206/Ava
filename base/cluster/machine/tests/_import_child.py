@@ -7,7 +7,9 @@ Settings or the home while importing the cluster value types.
 from __future__ import annotations
 
 import importlib.abc
+import os
 import sys
+from pathlib import Path
 
 
 def machine_value_imports() -> None:
@@ -31,10 +33,12 @@ def cluster_package_modules() -> None:
     import base.cluster.port_preflight  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     assert "base.cluster.machine" in sys.modules
-    loaded = [
-        n for n in ("base.config", "base.paths", "base.cluster.machine.boot") if n in sys.modules
-    ]
+    loaded = [n for n in ("base.config", "base.cluster.machine.boot") if n in sys.modules]
     assert not loaded, loaded
+    # `base.paths` may load (the private-directory primitive lives there), but the home it
+    # names must be neither resolved into existence nor created by the import.
+    home = os.environ["AVA_HOME"]
+    assert not Path(home).exists(), f"importing the cluster package created the home {home}"
 
 
 SCENARIOS = {

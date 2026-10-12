@@ -9,7 +9,7 @@ development home installs nothing and registers nothing.
 from __future__ import annotations
 
 from base.cluster.dataplane.walg_binary import ensure_walg_binary
-from base.host.private_storage import ensure_private_dir
+from base.paths.private_dir import ensure_private_dir
 from cli.commands.converge.spec import ConvergeCtx
 from services.backup.walg import config as walg_config
 

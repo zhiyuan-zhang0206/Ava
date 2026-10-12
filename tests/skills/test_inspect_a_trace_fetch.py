@@ -7,7 +7,7 @@ unpadded base64 ids (legacy OTLP JSON) must decode. Pure logic only — no
 network, no Tempo; the mirror walk uses tmp_path files.
 
 `_mirror_dir` / `_cluster_secret` / `_gateway_get` resolve `$AVA_HOME` via
-`base.host.env.dotenv_boot.resolve_ava_home` (the variable, else `~/.ava`), the
+`base.paths.home.resolve_ava_home` (the variable, else `~/.ava`), the
 same resolution every other Ava process uses.
 
 AVA_CLUSTER_SECRET is also a `base.config.Settings` field alias, but
@@ -19,7 +19,7 @@ stays meaningful for tests that DO exercise Settings.
 
 `_common.py::source_root` tests: `read_trace.py` / `fetch_trace.py` each need to
 locate the `base` package before they can import
-`base.host.env.dotenv_boot.resolve_ava_home` — a bootstrap problem
+`base.paths.home.resolve_ava_home` — a bootstrap problem
 `resolve_ava_home` itself cannot solve, so `_common.py` mirrors its rule. The
 walk-up-from-`__file__` branch (the dev checkout, or a converged
 `$AVA_HOME/skills/...` copy invoked with an interpreter that already carries

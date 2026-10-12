@@ -16,7 +16,7 @@ def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
     """Refuse every command from a checkout that is not the home's own.
 
     A home that carries its own `<home>/source` checkout is operated only by that
-    checkout's CLI (`base.host.env.dotenv_boot.home_checkout_error`); a home with
+    checkout's CLI (`base.paths.home.home_checkout_error`); a home with
     none (a test home) accepts any checkout. There is no read-only exemption: a
     development CLI that needs a home names a temporary `AVA_HOME`. The one pass is
     an argv of nothing or of a lone `-h`/`--help`, which only parses and never
@@ -27,7 +27,7 @@ def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
     anything loads the home's configuration. The refusal does not echo the argv: it
     can carry a secret (`ava config set KEY=...`).
     """
-    from base.host.env.dotenv_boot import home_checkout_error
+    from base.paths.home import home_checkout_error
 
     if args_in in ([], ["-h"], ["--help"]):
         return None
@@ -41,7 +41,7 @@ def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
 def unit_already_stopped() -> bool:
     """Allow an idempotent cold stop without fetching the offline gateway."""
     from base.deploy.maintenance.pause_owner import read_for_home
-    from base.host.env.dotenv_boot import resolve_ava_home
+    from base.paths.home import resolve_ava_home
 
     current = read_for_home(resolve_ava_home())
     return (

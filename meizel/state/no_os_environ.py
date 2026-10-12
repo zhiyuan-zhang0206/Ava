@@ -126,6 +126,7 @@ _ALLOWED_FILES = frozenset(
         "base/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
         "base/config/domains/storage/data_plane.py",  # self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
         "base/host/env/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import
+        "base/paths/home.py",  # resolve_ava_home reads AVA_HOME: the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged
         "base/host/env/runtime_config.py",  # path bootstrap; cannot import Settings (circular dep)
         "cli/commands/management/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first
         "base/host/env/bootstrap.py",  # fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing base.config here is the import cycle this module exists to break

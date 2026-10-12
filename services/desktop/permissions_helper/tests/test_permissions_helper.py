@@ -152,8 +152,9 @@ def test_unreachable_socket_raises() -> None:
 
 def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
     from base import paths
+    from base.config import settings
 
-    monkeypatch.setattr(paths.settings.services, "permissions_helper_port", 9999)
+    monkeypatch.setattr(settings.services, "permissions_helper_port", 9999)
     assert paths.permissions_helper_socket().name == "permissions-helper.9999.sock"
 
 

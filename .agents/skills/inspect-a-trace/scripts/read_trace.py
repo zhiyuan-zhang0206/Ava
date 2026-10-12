@@ -37,7 +37,7 @@ Gateway auth: `Authorization: Bearer <token>` — the process's machine API toke
 `AVA_CLUSTER_SECRET` from the environment or `$AVA_HOME/.env` (the gateway
 home). `$AVA_HOME` is
 resolved the way every other Ava process resolves it (see `_common.source_root`
-/ `base.host.env.dotenv_boot.resolve_ava_home`): the variable when set, else
+/ `base.paths.home.resolve_ava_home`): the variable when set, else
 `~/.ava`. The gateway listens on :8000.
 
 LLM span detection: span name ends with `.chat`, or attribute
@@ -60,7 +60,7 @@ from _common import source_root
 
 sys.path.insert(0, str(source_root()))
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 _AGENT_ATTR = "session.id"
 _CHECKPOINT_ATTR = "ava.checkpoint_id"

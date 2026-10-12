@@ -1,5 +1,5 @@
 """_unit_home() backs the default for path fields (pidfiles / memory / logs) so they live under THIS unit's home: the process's `$AVA_HOME`, else
-`~/.ava`, through the one resolver (`base.host.env.dotenv_boot.resolve_ava_home`)."""
+`~/.ava`, through the one resolver (`base.paths.home.resolve_ava_home`)."""
 
 from __future__ import annotations
 

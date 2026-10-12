@@ -33,7 +33,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import tuple_row
 
 from base.cluster.derive import home_slug
-from base.host.private_storage import ensure_private_dir
+from base.paths.private_dir import ensure_private_dir
 
 # The owner travels as a libpq startup option (`-c role=<owner>`), where spaces
 # and backslashes are syntax. Cluster identities are plain identifiers; anything

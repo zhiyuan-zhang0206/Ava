@@ -4,7 +4,7 @@
 scripts under `skills/scripts/` (`consolidate.py`, `steward.py`, `arbiter_merge.py`,
 `gen_indexes.py`, `rebuild_memory_index.py`) as
 `ava_builtins.plugins.ava_memory.pool_ops`, so a run needs the checkout's venv
-(`ava_builtins` importable). Its home is `base.host.env.dotenv_boot.resolve_ava_home`
+(`ava_builtins` importable). Its home is `base.paths.home.resolve_ava_home`
 (`$AVA_HOME`, else `~/.ava`), which builds no Settings. `pool_dir()` /
 `refresh_index()` are write paths (git commit + push to the pool, `ava memory
 refresh`), so the default-home cases run under a fake HOME: nothing here can touch

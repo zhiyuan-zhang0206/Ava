@@ -59,7 +59,7 @@ gateway metadata view and the local config CLI use it, preventing scope,
 sensitivity, and editability policy from diverging. `base/host/env/bootstrap.py`
 remains the authority for whether a unit's `.env` owns cluster configuration or
 a pure runner must fetch it from the gateway. The home is not configuration:
-`AVA_HOME` is read by `dotenv_boot.resolve_ava_home` before Settings exists (there
+`AVA_HOME` is read by `base.paths.home.resolve_ava_home` before Settings exists (there
 is no `ava_home` field), and a script a git hook launches that reaches application
 code calls `dotenv_boot.enter_scratch_home()` first (behind
 `if __name__ == "__main__":`, never at import; it refuses inside pytest), so its

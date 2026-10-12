@@ -17,6 +17,7 @@ from base.cluster.authority.tests.unit_capability_support import runner_boot as 
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
 from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
 from base.host.env import bootstrap, dotenv_boot
+from base.paths.home import resolve_ava_home
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -25,7 +26,7 @@ def _boot_with_bootstrap() -> dotenv_boot.EnvBootResult:
     """The runner's boot order: the authority pass, the unit delivery (which
     supplies the fetch's API token), then the bootstrap payload (the
     credential-free endpoint)."""
-    dotenv_boot._enforce_cluster_env_authority(dotenv_boot.resolve_ava_home())
+    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     result = dotenv_boot.deliver_unit_authority()
     bootstrap._apply_bootstrap_values(
         "http://gateway.invalid", {"AVA_DB_URL": _ENDPOINT, "AVA_EVENTS_CHANNEL": "ava:events"}

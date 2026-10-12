@@ -1,6 +1,6 @@
 """A home that carries its own `<home>/source` checkout is operated only by that checkout.
 
-The rule (`base.host.env.dotenv_boot.home_checkout_error`) is shared by the CLI's
+The rule (`base.paths.home.home_checkout_error`) is shared by the CLI's
 pre-Settings gate (`cli.preflight.require_own_checkout`), the identity
 boundaries of `ava init` and `ava start` (`cli.init_intent`, `cli.start_intent`) and the service-launch guard
 (`base.paths.prod_service_checkout_error`). A home with no `source` of its own (a
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from base.host.env.dotenv_boot import home_checkout_error
 from base.paths import ava_home
+from base.paths.home import home_checkout_error
 from cli import fleet_update, init_intent, preflight, start_intent
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime

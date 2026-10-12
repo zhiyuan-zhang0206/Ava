@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import ava.mcps._daemon as daemon_mod
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 
 class _FakeProc:

@@ -60,7 +60,7 @@ if sys.platform == "darwin":
 
 # ── The unit's home: redirected here, before anything can read it ──
 #
-# `base.host.env.dotenv_boot.resolve_ava_home` reads `AVA_HOME` (else `~/.ava`)
+# `base.paths.home.resolve_ava_home` reads `AVA_HOME` (else `~/.ava`)
 # every time it is asked; nothing captures it at import. What this block must
 # still precede is `Settings`: it reads about twenty-five other variables at
 # import, and its boot (`load_ava_env`) loads `$AVA_HOME/.env` and force-assigns
