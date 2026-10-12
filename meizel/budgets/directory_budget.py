@@ -5,9 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
+_MANIFEST = "meizel.toml"
+
 
 def tracked_children(listing: str) -> dict[str, set[str]]:
-    """Every directory's direct children from Git's NUL-delimited tracked paths."""
+    """Every directory's direct children from Git's NUL-delimited tracked paths.
+
+    A `meizel.toml` manifest describes its directory and is not one of its entries.
+    """
     if listing and not listing.endswith("\0"):
         raise ValueError("tracked Git paths are not NUL-terminated")
     children: dict[str, set[str]] = {}
@@ -15,6 +20,8 @@ def tracked_children(listing: str) -> dict[str, set[str]]:
         path = PurePosixPath(name)
         if not path.parts or path.is_absolute() or ".." in path.parts or path.as_posix() != name:
             raise ValueError(f"invalid tracked Git path: {name!r}")
+        if path.name == _MANIFEST:
+            continue
         for depth, child in enumerate(path.parts):
             directory = "/".join(path.parts[:depth])
             children.setdefault(directory, set()).add(child)

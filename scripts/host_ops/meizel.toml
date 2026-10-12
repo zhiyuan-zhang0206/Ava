@@ -1,0 +1,2 @@
+[external]
+"update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"

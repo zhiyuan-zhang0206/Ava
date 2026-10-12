@@ -1,0 +1,6 @@
+[loads]
+"runner.py" = ["schedules"]
+
+[external]
+"router.py" = "compiles a user-written schedule script to reject syntax errors"
+"runner.py" = "runs the schedule script materialized from the database under $AVA_HOME/schedules"
