@@ -16,6 +16,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import install
+from ava.sdk_surface.installation import Installation
 from base.packages.plugins.extensions import ExtensionRegistry
 
 
@@ -28,7 +29,7 @@ def _render_help(target: object) -> str:
 
 @pytest.fixture
 def _load_ava_code_plugin(
-    monkeypatch: pytest.MonkeyPatch, model_installation: install.Installation
+    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
 ) -> Iterator[None]:
     from ava_builtins.plugins.ava_code import plugin
     from base.agents.sdk import call_policy
@@ -51,7 +52,7 @@ def _load_ava_code_plugin(
 
 @pytest.fixture
 def _load_ava_fleet_plugin(
-    monkeypatch: pytest.MonkeyPatch, model_installation: install.Installation
+    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
 ) -> Iterator[None]:
     from ava_builtins.plugins.ava_fleet import plugin
     from base.agents.sdk import call_policy

@@ -26,6 +26,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import install
+from ava.sdk_surface.installation import installed
 from base.agents.sdk import call_policy
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
@@ -51,7 +52,7 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # installed in this process (ava.memory, ava.tasks, ava.cwd ...) is taken out
     # for the test and put back after, so the lazy loads below start from a surface
     # with no plugin namespaces and never wipe the others.
-    prior = install.installed()
+    prior = installed()
     install.uninstall()
     install.clear_load_attempt()  # a failed attempt from an earlier test is not ours
     yield
@@ -119,10 +120,10 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
                 clock_factory=clock_factory,
                 producer=producer,
             )
-            installed = install.installed()
-            assert installed is not None
-            assert installed.require_catalog() is catalog
-            assert installed.authority is authority
+            current = installed()
+            assert current is not None
+            assert current.require_catalog() is catalog
+            assert current.authority is authority
 
     monkeypatch.setattr(extensions, "load_extensions", fake)
     return calls
@@ -141,7 +142,7 @@ def test_lazy_load_fires_in_launched_child(monkeypatch: pytest.MonkeyPatch) -> N
         ava.lazytasks.ping() == "pong"
     )  # first access triggers the load  # type: ignore[attr-defined]
     assert calls == [1]
-    assert install.installed() is not None
+    assert installed() is not None
 
 
 def test_lazy_load_latches_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,7 +210,7 @@ def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> No
     ava.ensure_plugins_loaded()
 
     assert calls == [1]  # loads at most once per process
-    assert install.installed() is not None
+    assert installed() is not None
 
 
 @pytest.mark.parametrize(
@@ -248,7 +249,7 @@ def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
         assert caught.value is error
     assert calls == [1]
     assert install.load_attempted()
-    assert install.installed() is None
+    assert installed() is None
 
 
 def test_failed_lazy_lookup_repeats_the_original_boot_error(
@@ -283,7 +284,7 @@ def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
 
     calls = _spy_loader(monkeypatch, register="lazytasks")
     ava.ensure_plugins_loaded()
-    surface = install.installed()
+    surface = installed()
     assert surface is not None and not surface.faces
     error = RuntimeError("runtime faces boot failed")
     face_calls: list[int] = []
@@ -298,7 +299,7 @@ def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
             ava.ensure_plugins_loaded(surface=not full)
         assert caught.value is error
     assert face_calls == calls == [1]
-    assert install.installed() is surface and not surface.faces
+    assert installed() is surface and not surface.faces
     install.uninstall()
     assert not hasattr(ava, "lazytasks")
 
@@ -388,7 +389,7 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
 
     def during_import() -> None:
         ava.ensure_plugins_loaded()  # must not raise
-        assert install.installed() is None and not install.load_attempted()
+        assert installed() is None and not install.load_attempted()
         assert calls == []
         assert "plugin load failed" not in capsys.readouterr().err
         assert not any("failed in this launched child" in r["message"] for r in loguru_records)
@@ -444,13 +445,13 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
         with pytest.raises(AttributeError):
             _ = ava.deferrednsp  # type: ignore[attr-defined]
         assert calls == []
-        assert install.installed() is None and not install.load_attempted()
+        assert installed() is None and not install.load_attempted()
         assert "plugin load failed" not in capsys.readouterr().err
 
     with _partial_extensions(monkeypatch, during_import, fake):
         assert ava.deferrednsp.ping() == "pong"  # type: ignore[attr-defined]
         assert calls == [1]
-        assert install.installed() is not None
+        assert installed() is not None
 
 
 def _spy_member_loader(

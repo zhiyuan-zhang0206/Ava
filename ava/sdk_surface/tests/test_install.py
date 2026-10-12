@@ -23,6 +23,7 @@ import pytest
 import ava
 from ava.sdk_surface import install, metering, skill_sources, wraps
 from ava.sdk_surface import plugins as sdk_plugins
+from ava.sdk_surface.installation import installed
 from ava.sdk_surface.plugins import (
     FrameworkNamespaceConflictError,
     InvalidNamespaceNameError,
@@ -48,7 +49,7 @@ from base.telemetry import EventPipeline
 @pytest.fixture(autouse=True)
 def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Start from no installation and bare callables, and leave no installation behind."""
-    assert install.installed() is None
+    assert installed() is None
 
     def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
         return call_policy.SamplingPolicy()
@@ -96,12 +97,12 @@ def test_plugin_overlay_publishes_a_new_owned_image(unit_home: Path) -> None:
         marker: str = Field(default="disk", json_schema_extra={"per_agent": True})
 
     install.install(_registry(("owned", PluginContributions(config=Config))))
-    before = install.installed()
+    before = installed()
     assert before is not None
     assert sdk_settings.plugins.owned is before.configs["owned"]
 
     install.apply_config_overlay({"marker": "agent"})
-    after = install.installed()
+    after = installed()
     assert after is not None and after is not before
     assert before.configs["owned"].model_dump()["marker"] == "disk"
     assert after.configs["owned"].model_dump()["marker"] == "agent"
@@ -196,7 +197,7 @@ def test_a_one_plugin_install_is_fully_removed_by_uninstall(
     admitted = install.install(registry)
 
     assert admitted == registry
-    installation = install.installed()
+    installation = installed()
     assert installation is not None and installation.registry == registry
     _assert_namespaces_visible()
     _assert_wraps_and_roots(root)
@@ -204,7 +205,7 @@ def test_a_one_plugin_install_is_fully_removed_by_uninstall(
 
     install.uninstall()
 
-    assert install.installed() is None
+    assert installed() is None
     assert install.expansions() == ()
     assert not hasattr(ava, "install_ns")
     assert not hasattr(ava.self, "install_probe")
@@ -214,7 +215,7 @@ def test_a_one_plugin_install_is_fully_removed_by_uninstall(
 def test_uninstall_without_an_installation_is_a_no_op() -> None:
     before = _surface_snapshot()
     install.uninstall()
-    assert install.installed() is None
+    assert installed() is None
     assert _surface_snapshot() == before
 
 
@@ -227,7 +228,7 @@ def test_installing_twice_raises_until_uninstall() -> None:
     with pytest.raises(RuntimeError, match="already installed"):
         install.install(_registry())
 
-    installation = install.installed()
+    installation = installed()
     assert installation is not None and installation.registry == registry
     assert hasattr(ava, "install_ns")
 
@@ -257,7 +258,7 @@ def test_a_second_plugin_declaring_a_taken_namespace_is_refused_and_the_first_st
     assert "'first'" in str(exc)
     assert ava.install_ns.ping() == "pong"  # type: ignore[attr-defined]  # the first plugin's module
     assert not hasattr(ava.self, "second_member")
-    installation = install.installed()
+    installation = installed()
     assert installation is not None and installation.registry == admitted
 
     install.uninstall()
@@ -471,7 +472,7 @@ def test_install_keeps_core_dependencies_in_the_admitted_declaration() -> None:
     admitted = install.install(_registry(("declared", contribution)))
 
     assert admitted.plugins == (("declared", contribution),)
-    installation = install.installed()
+    installation = installed()
     assert installation is not None and installation.registry == admitted
     install.uninstall()
     assert contribution.flags == ("general.message_timestamps",)
@@ -539,7 +540,7 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
         install.install(_registry(("prior", prior), ("failed", failing), ("later", later)))
 
     assert caught.value is error
-    assert install.installed() is None
+    assert installed() is None
     assert load_failures == []
     assert _surface_snapshot() == before
     assert not hasattr(ava, "failed_ns") and not hasattr(ava, "prior_ns")
@@ -613,5 +614,5 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
     if not refused:
         assert "member cleanup failed" in notes
     assert load_failures == []
-    assert install.installed() is None
+    assert installed() is None
     assert _surface_snapshot() == before

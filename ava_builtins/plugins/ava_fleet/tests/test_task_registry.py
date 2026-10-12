@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import inspect
 import re
-from collections.abc import Iterator
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -20,54 +19,20 @@ import pytest
 
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.tests.task_registry.notes import record_notes
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
+    persisted_priority,
+    seed_agent,
+)
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import (
+    root_task_id as root_task_id,
+)
 from base.db import fetch_one
 from tests.fixtures.pin_agent import pin_agent
-
-
-def _seed_agent(db: psycopg.Connection, *, status: str = "running", spawner: str = "test") -> int:
-    with db.cursor() as cur:
-        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-        aid = cur.fetchone()[0]  # type: ignore[index]
-        cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, %s, %s)",
-            (aid, spawner, status),  # pyright: ignore[reportUnknownArgumentType]
-        )
-    db.commit()
-    return aid
-
-
-def _ignore_system_note(_agent_id: int, _content: str, **_kwargs: object) -> int:
-    """Keep task-registry tests on the database-side behavior under test."""
-    return 0
-
-
-@pytest.fixture(autouse=True)
-def root_task_id(db_conn: psycopg.Connection) -> Iterator[int]:
-    """Seed the system root task (is_root=TRUE, unowned) before each test and
-    yield its id. create() requires an explicit parent, so tests anchor their
-    tasks under this root (parent=root_task_id); the root itself stays
-    parentless."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-            "VALUES ('Root', 'root', 'in_progress', 'system', TRUE) RETURNING id"
-        )
-        rid = cur.fetchone()[0]  # type: ignore[index]
-    db_conn.commit()
-    yield rid
 
 
 def _persisted_remind_interval_seconds(db: psycopg.Connection, task_id: int) -> int | None:
     with db.cursor() as cur:
         cur.execute("SELECT remind_interval_seconds FROM agent_tasks WHERE id = %s", (task_id,))
-        row = cur.fetchone()
-    assert row is not None
-    return row[0]
-
-
-def _persisted_priority(db: psycopg.Connection, task_id: int) -> str:
-    with db.cursor() as cur:
-        cur.execute("SELECT priority FROM agent_tasks WHERE id = %s", (task_id,))
         row = cur.fetchone()
     assert row is not None
     return row[0]
@@ -110,20 +75,20 @@ def test_create_defaults_per_priority(
     redis_url: str, db_conn: psycopg.Connection, priority: str, expected: int, root_task_id: int
 ) -> None:
     """No explicit interval → the priority's default window (P0 30m .. P3 4h)."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "title", "detail", priority=priority, parent=root_task_id, operation_key=str(uuid4())
     )
     assert task.remind_interval_seconds == expected
     assert _persisted_remind_interval_seconds(db_conn, task.id) == expected
-    assert _persisted_priority(db_conn, task.id) == priority
+    assert persisted_priority(db_conn, task.id) == priority
 
 
 def test_create_default_priority_is_p2_with_2h_interval(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     assert task.remind_interval_seconds == 7200
@@ -134,7 +99,7 @@ def test_create_explicit_interval_beats_priority_default(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """An explicit interval wins over the priority's default (user override)."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "title",
@@ -151,7 +116,7 @@ def test_create_explicit_interval_beats_priority_default(
 def test_create_honours_explicit_value(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "title",
@@ -169,7 +134,7 @@ def test_create_none_falls_back_to_default(
 ) -> None:
     """Reminders cannot be disabled: create(remind_interval_seconds=None) uses the
     priority default rather than writing NULL."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "title",
@@ -185,7 +150,7 @@ def test_create_none_falls_back_to_default(
 def test_create_rejects_non_positive_interval(
     db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="positive number of seconds"):
         task_registry.create(
@@ -198,7 +163,7 @@ def test_create_rejects_non_positive_interval(
 
 
 def test_create_rejects_interval_over_24h(db_conn: psycopg.Connection, root_task_id: int) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="cannot be disabled"):
         task_registry.create(
@@ -214,7 +179,7 @@ def test_create_honours_24h_boundary(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """Exactly 24h (86400s) is the largest accepted interval."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "title",
@@ -229,7 +194,7 @@ def test_create_honours_24h_boundary(
 def test_update_changes_remind_interval_seconds(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     assert task.remind_interval_seconds == 7200  # P2 default -> 2h
@@ -242,7 +207,7 @@ def test_update_none_remind_interval_is_noop(
 ) -> None:
     """remind_interval_seconds=None means "no change" (reminders cannot be disabled),
     not "write NULL"; alongside a real change it leaves the interval intact."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     task_registry.update(
@@ -254,7 +219,7 @@ def test_update_none_remind_interval_is_noop(
 def test_update_rejects_interval_over_24h(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with pytest.raises(ValueError, match="cannot be disabled"):
@@ -264,7 +229,7 @@ def test_update_rejects_interval_over_24h(
 def test_update_resets_reminder_count(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     # Simulate some prior reminders and an escalation
@@ -287,7 +252,7 @@ def test_update_resets_reminder_count(
 
 
 def test_update_description(redis_url: str, db_conn: psycopg.Connection, root_task_id: int) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     task_registry.update(task.id, description="revised detail", operation_key=str(uuid4()))
@@ -297,7 +262,7 @@ def test_update_description(redis_url: str, db_conn: psycopg.Connection, root_ta
 def test_update_nothing_raises(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with pytest.raises(ValueError, match="at least one"):
@@ -311,7 +276,7 @@ def test_update_rejects_closing_parent_with_in_progress_child(
     """A child is born in_progress, so closing a parent while any child is
     active is rejected (post-2026-08-29 the 'open' status no longer exists —
     a task starts in_progress)."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     parent = task_registry.create(
         f"parent-{closing_status}", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -333,7 +298,7 @@ def test_update_rejects_closing_parent_with_in_progress_child(
 def test_update_closes_parent_when_all_children_are_closed(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     parent = task_registry.create(
         "parent-with-closed-children", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -356,7 +321,7 @@ def test_update_closes_parent_when_all_children_are_closed(
 def test_update_closes_parent_without_children(
     redis_url: str, db_conn: psycopg.Connection, closing_status: str, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         f"parent-without-children-{closing_status}",
@@ -373,7 +338,7 @@ def test_update_closes_parent_without_children(
 def test_update_starts_parent_with_in_progress_child(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     parent = task_registry.create(
         "parent-to-start", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -390,7 +355,7 @@ def test_update_starts_parent_with_in_progress_child(
 def test_update_title_and_note_on_parent_with_in_progress_child(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     parent = task_registry.create(
         "parent-to-edit", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -413,7 +378,7 @@ def test_update_title_and_note_on_parent_with_in_progress_child(
 def test_log_appends_timestamped_lines(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     task_registry.log(task.id, "first note", operation_key=str(uuid4()))
@@ -437,7 +402,7 @@ def test_log_stamps_in_the_cluster_timezone(
     inconsistent wall clocks in one column of text."""
     from base.config import settings
 
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     stamps: dict[str, str] = {}
     for tz in ("Asia/Shanghai", "Pacific/Honolulu"):
@@ -457,7 +422,7 @@ def test_log_stamps_in_the_cluster_timezone(
 def test_log_preserves_replaced_results(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     task_registry.update(task.id, results="prior log without newline", operation_key=str(uuid4()))
@@ -472,7 +437,7 @@ def test_log_preserves_replaced_results(
 def test_log_resets_reminder_count(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with db_conn.cursor() as cur:
@@ -498,7 +463,7 @@ def test_log_bumps_updated_at(
     """A note append is real task activity: updated_at moves, so the task
     graph's last-activity window (Task #1969) keeps a task that only received
     log notes."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "log-activity", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -520,7 +485,7 @@ def test_log_bumps_updated_at(
 
 
 def test_log_missing_task_raises(db_conn: psycopg.Connection) -> None:
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="does not exist"):
         task_registry.log(999999, "note", operation_key=str(uuid4()))
@@ -541,7 +506,7 @@ def test_create_default_owner_is_creator(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """When owner is not passed, the creating agent is the owner."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     assert task.owner == agent_id
@@ -552,8 +517,8 @@ def test_create_explicit_owner(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """When owner is explicitly set, that agent becomes the owner."""
-    agent_id = _seed_agent(db_conn)
-    other_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
+    other_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with record_notes(db_conn):
         task = task_registry.create(
@@ -567,8 +532,8 @@ def test_create_with_owner_notifies_target(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """When owner != creator, a notification message is sent to the owner."""
-    agent_id = _seed_agent(db_conn)
-    other_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
+    other_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with record_notes(db_conn) as mock_send:
         task = task_registry.create(
@@ -592,7 +557,7 @@ def test_create_with_owner_self_no_notification(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """When owner == creator, no notification is sent."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with record_notes(db_conn) as mock_send:
         task_registry.create(
@@ -605,7 +570,7 @@ def test_create_without_owner_no_notification(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """When owner is not passed (default = creator), no notification is sent."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with record_notes(db_conn) as mock_send:
         task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
@@ -620,8 +585,8 @@ def test_update_owner_reassign_notifies(
 ) -> None:
     """When owner changes to a different agent, the new owner is notified.
     The old owner is skipped when they are the actor performing the update."""
-    agent_id = _seed_agent(db_conn)
-    other_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
+    other_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with record_notes(db_conn) as mock_send:
@@ -640,7 +605,7 @@ def test_update_owner_none_is_noop(
 ) -> None:
     """owner=None means do not change, not release. Raises ValueError
     because nothing else is changing either."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with pytest.raises(ValueError, match="at least one"):
@@ -653,7 +618,7 @@ def test_update_owner_none_with_status_is_noop_for_owner(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """owner=None alongside a real change (status) only changes status, not owner."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     task_registry.update(task.id, status="in_progress", owner=None, operation_key=str(uuid4()))
@@ -666,7 +631,7 @@ def test_update_owner_self_no_notification(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     """Reassigning to yourself is a no-op notification-wise."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with record_notes(db_conn) as mock_send:
@@ -681,8 +646,8 @@ def test_update_owner_new_terminated_still_notified(
     """A terminated new owner IS notified — the system-note delivery is asked
     to auto-resurrect it (resurrect=True), so an assigned task never strands
     on a dead agent."""
-    agent_id = _seed_agent(db_conn)
-    dead_id = _seed_agent(db_conn, status="terminated")
+    agent_id = seed_agent(db_conn)
+    dead_id = seed_agent(db_conn, status="terminated")
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with record_notes(db_conn) as mock_send:
@@ -698,9 +663,9 @@ def test_update_owner_old_terminated_leg_skipped(
 ) -> None:
     """The previous-owner leg is the one deliberate terminated skip: reassigning
     a task away from a terminated owner tells only the new (live) owner."""
-    actor_id = _seed_agent(db_conn)
-    dead_old = _seed_agent(db_conn, status="terminated")
-    new_owner = _seed_agent(db_conn)
+    actor_id = seed_agent(db_conn)
+    dead_old = seed_agent(db_conn, status="terminated")
+    new_owner = seed_agent(db_conn)
     pin_agent(actor_id)
     # Seed a task already owned by the terminated agent (bypass create's
     # notify path) so the update's old_owner is the terminated one.
@@ -723,9 +688,9 @@ def test_failed_notification_policy_lookup_rolls_back_assignment(
     db_conn: psycopg.Connection,
 ) -> None:
     """A failed notification policy lookup cannot commit a task without its notes."""
-    actor_id = _seed_agent(db_conn)
-    old_owner = _seed_agent(db_conn)
-    new_owner = _seed_agent(db_conn)
+    actor_id = seed_agent(db_conn)
+    old_owner = seed_agent(db_conn)
+    new_owner = seed_agent(db_conn)
     pin_agent(actor_id)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -749,22 +714,6 @@ def test_failed_notification_policy_lookup_rolls_back_assignment(
         assert cur.fetchone() == (old_owner,)
 
 
-def _fake_no_duplicate_precheck(real_execute):
-    """Cursor.execute stand-in that lies to the app-level duplicate-title
-    pre-check (reports no match) and delegates everything else. Lets a test
-    drive the code past the friendly check into the database backstop."""
-
-    def fake_execute(cur, query, *args, **kwargs):
-        if isinstance(query, str) and query.startswith(
-            "SELECT id, status FROM agent_tasks WHERE title"
-        ):  # pyright: ignore[reportUnknownMemberType]
-            real_execute(cur, "SELECT 1 WHERE FALSE")
-            return None
-        return real_execute(cur, query, *args, **kwargs)
-
-    return fake_execute
-
-
 # ── update() — title rename ────────────────────────────────────────────────
 
 
@@ -772,19 +721,3 @@ def _fake_no_duplicate_precheck(real_execute):
 
 
 # ── parent requirement & tree anchoring ──────────────────────────────────────
-
-
-def _parent_of(db: psycopg.Connection, task_id: int) -> int | None:
-    with db.cursor() as cur:
-        cur.execute("SELECT parent_id FROM agent_tasks WHERE id = %s", (task_id,))
-        row = cur.fetchone()
-    assert row is not None
-    return row[0]
-
-
-def _persisted_parent(db: psycopg.Connection, task_id: int) -> int | None:
-    with db.cursor() as cur:
-        cur.execute("SELECT parent_id FROM agent_tasks WHERE id = %s", (task_id,))
-        row = cur.fetchone()
-    assert row is not None
-    return row[0]

@@ -166,7 +166,7 @@ def launched_imports_share_boot() -> None:
     import ava
     from ava.agents import spawn
     from ava.memory import search  # pyright: ignore[reportMissingImports]
-    from ava.sdk_surface import install
+    from ava.sdk_surface.installation import installed
     from ava.tasks import create  # pyright: ignore[reportMissingImports]
 
     assert "label" in inspect.signature(spawn).parameters
@@ -174,14 +174,14 @@ def launched_imports_share_boot() -> None:
     assert create is ava.tasks.create
     assert search is ava.memory.search
     context = ava.context
-    installation = install.installed()
+    installation = installed()
     assert installation is not None
     _assert_shared_boot(context, installation, reads)
     _assert_runtime_resources_cold(context, installation)
     assert installation.sampling.worker is None
     importlib.reload(ava)
     assert ava.context is context
-    assert install.installed() is installation
+    assert installed() is installation
     assert ava.agents.spawn is spawn
     assert len(reads) == 1
 
@@ -193,10 +193,10 @@ def non_agent_import_unbound_context() -> None:
 
     os.environ.pop("AVA_AGENT_ID", None)
     import ava
-    from ava.sdk_surface import install
+    from ava.sdk_surface import install, installation
 
     assert getattr(ava, "context", None) is None
-    assert install.installed() is None
+    assert installation.installed() is None
     from base.agents.context import AvaContext
     from base.agents.context.clients import ClientSet
 
@@ -204,15 +204,15 @@ def non_agent_import_unbound_context() -> None:
     ava.bind_context(manual)
     importlib.reload(ava)
     assert ava.context is manual
-    assert install.installed() is None
+    assert installation.installed() is None
     ava.unbind_context()
     ava.bind_host_process()
-    installed = install.installed
-    install.installed = lambda: SimpleNamespace(faces=True)  # pyright: ignore[reportAttributeAccessIssue]
+    installed = installation.installed
+    installation.installed = lambda: SimpleNamespace(faces=True)  # pyright: ignore[reportAttributeAccessIssue]
     ava.ensure_plugins_loaded()
     assert ava.is_host_process()
     assert getattr(ava, "context", None) is None
-    install.installed = installed
+    installation.installed = installed
     error = ValueError("retained explicit load failure")
     install.mark_load_failed(error)
     importlib.reload(ava)

@@ -18,7 +18,7 @@ import psycopg
 import pytest
 
 import ava
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.config import set_field, settings

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import ava
 import ava.sdk_surface.agent_identity
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
     from base.telemetry import Event
 
+from ._task_assignment import TaskAssignment, create_and_assign_guarded
 from ._task_update import (
     _DEFAULT_PRIORITY,
     _STATUSES,
@@ -53,18 +54,6 @@ __all_for_ava__ = [
     "log",
     "update",
 ]
-
-
-class TaskAssignment(NamedTuple):
-    """The accepted task and the agent born to work on it.
-
-    Fields:
-        task: the task as accepted.
-        agent_id: id of the agent assigned to it.
-    """
-
-    task: Task
-    agent_id: int
 
 
 def create(
@@ -192,8 +181,6 @@ def create_and_assign(
         A TaskAssignment; it unpacks as `task, agent_id`.
     """
     from base.api_contracts.idempotency import validate_idempotency_key
-
-    from ._task_assignment import create_and_assign_guarded
 
     operation_key = validate_idempotency_key(operation_key)
     title = coerce_str(title, "title")

@@ -18,7 +18,7 @@ from agent.graph.exec.protocol import (
     write_request,
 )
 from agent.tests.execution.test_exec_child import _AGENT_ID, _child_env
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from tests.fixtures.pin_agent import exec_context
 
 

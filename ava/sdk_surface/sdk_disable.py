@@ -18,6 +18,7 @@ import types as _types
 from typing import Any
 
 from . import ava_module
+from .installation import installed, record_disabled
 
 
 # AVA_SDK_DISABLE removes pieces of the agent-facing SDK after the regular
@@ -103,9 +104,7 @@ def apply_sdk_disable(entries: list[str]) -> None:
     Raises:
         RuntimeError: no SDK surface is installed in this process.
     """
-    from . import install as _install
-
-    installation = _install.installed()
+    installation = installed()
     if installation is None:
         raise RuntimeError(
             "apply_sdk_disable requires an installed SDK surface; the env entries are "
@@ -115,7 +114,7 @@ def apply_sdk_disable(entries: list[str]) -> None:
     if not new_entries:
         return
     apply_entries(new_entries)
-    _install.record_disabled(installation.disabled | set(new_entries))
+    record_disabled(installation.disabled | set(new_entries))
 
 
 def applied_entries() -> frozenset[str]:
@@ -124,9 +123,7 @@ def applied_entries() -> frozenset[str]:
     The runtime answer beside the agent's configured list
     (`agent/graph/prompt/capabilities.py`): entries recorded on the installation,
     including removals applied at runtime without touching settings."""
-    from . import install as _install
-
-    current = _install.installed()
+    current = installed()
     return frozenset() if current is None else current.disabled
 
 

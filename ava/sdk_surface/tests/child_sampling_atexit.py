@@ -2,6 +2,7 @@
 
 import ava  # noqa: F401  # pyright: ignore[reportUnusedImport] (importing the SDK is under test)
 from ava.sdk_surface import install
+from ava.sdk_surface.installation import installed
 from base.agents.sdk import call_policy
 from base.packages.plugins.extensions import ExtensionRegistry
 
@@ -14,7 +15,7 @@ def read() -> object:
 
 
 call_policy._read_policy = read  # pyright: ignore[reportAttributeAccessIssue]
-installation = install.installed()
+installation = installed()
 assert installation is not None
 owner = installation.sampling
 try:

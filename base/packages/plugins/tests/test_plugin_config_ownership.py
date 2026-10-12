@@ -57,6 +57,7 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
 
     import ava
     from ava.sdk_surface import install
+    from ava.sdk_surface.installation import installed
     from base.packages.plugins.extensions import (
         ExtensionRegistry,
         PluginContributions,
@@ -101,14 +102,14 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
         )
         assert not hasattr(ava, "drifted_ns")
         assert hasattr(ava, "healthy_ns")
-        current = install.installed()
+        current = installed()
         assert current is not None
         assert "drifted" not in current.configs
         assert "healthy" in current.configs
     finally:
         install.uninstall()
     assert not hasattr(ava, "healthy_ns")
-    assert install.installed() is None
+    assert installed() is None
 
 
 def test_authority_path_canonicalizes_a_symlink_home_without_creating_it(

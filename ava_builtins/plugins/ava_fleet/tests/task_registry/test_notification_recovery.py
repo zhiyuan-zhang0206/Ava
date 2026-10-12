@@ -6,8 +6,8 @@ import psycopg
 import pytest
 
 from ava_builtins.plugins.ava_fleet import task_registry
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
 from base import telemetry
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
@@ -27,8 +27,8 @@ def test_sdk_commit_survives_producer_loss(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    actor = _seed_agent(db_conn)
-    owner = _seed_agent(db_conn, status="terminated")
+    actor = seed_agent(db_conn)
+    owner = seed_agent(db_conn, status="terminated")
     pin_agent(actor)
 
     def lost_after_commit(*args: object) -> None:
@@ -61,9 +61,9 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
-    actor = _seed_agent(db_conn)
-    old_owner = _seed_agent(db_conn)
-    new_owner = _seed_agent(db_conn)
+    actor = seed_agent(db_conn)
+    old_owner = seed_agent(db_conn)
+    new_owner = seed_agent(db_conn)
     pin_agent(actor)
     task = task_registry.create(
         "atomic", "work", parent=root_task_id, owner=old_owner, operation_key=str(uuid4())
@@ -104,9 +104,9 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
 def test_aba_assignment_supersedes_old_directions(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
-    actor = _seed_agent(db_conn)
-    owner_a = _seed_agent(db_conn, status="terminated")
-    owner_b = _seed_agent(db_conn, status="terminated")
+    actor = seed_agent(db_conn)
+    owner_a = seed_agent(db_conn, status="terminated")
+    owner_b = seed_agent(db_conn, status="terminated")
     pin_agent(actor)
     task = task_registry.create(
         "aba", "work", parent=root_task_id, owner=owner_a, operation_key=str(uuid4())

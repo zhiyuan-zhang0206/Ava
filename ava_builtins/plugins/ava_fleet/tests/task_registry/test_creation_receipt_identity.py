@@ -8,8 +8,8 @@ import psycopg
 import pytest
 
 from ava_builtins.plugins.ava_fleet import task_registry
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import _seed_agent
-from ava_builtins.plugins.ava_fleet.tests.test_task_registry import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import root_task_id as root_task_id
+from ava_builtins.plugins.ava_fleet.tests.task_registry.seeds import seed_agent
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
@@ -21,7 +21,7 @@ from tests.fixtures.pin_agent import pin_agent
 def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    actor, owner = _seed_agent(db_conn), _seed_agent(db_conn)
+    actor, owner = seed_agent(db_conn), seed_agent(db_conn)
     pin_agent(actor)
     original = task_registry.create("once", "work", parent=root_task_id, operation_key="native")
     active = Event()
@@ -48,7 +48,7 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
 def test_lease_expiring_during_operation_lock_wait_cannot_write(
     db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
-    actor, owner = _seed_agent(db_conn), _seed_agent(db_conn)
+    actor, owner = seed_agent(db_conn), seed_agent(db_conn)
     pin_agent(actor)
     active, validated = Event(), Event()
     active.set()

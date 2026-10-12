@@ -35,7 +35,7 @@ def root_complete_read(later_home: str) -> None:
     boot = c.ConfigBoot()
     boot.boot()
     ava.ensure_plugins_loaded(surface=True, config=boot)
-    from ava.sdk_surface.install import installed
+    from ava.sdk_surface.installation import installed
 
     installation = installed()
     assert installation is not None

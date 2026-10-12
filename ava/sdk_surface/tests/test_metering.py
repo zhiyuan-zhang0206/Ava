@@ -24,6 +24,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import install, metering
+from ava.sdk_surface.installation import Installation
 from base.agents.context import AvaContext
 from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
@@ -116,7 +117,7 @@ def _installed(sampling_owner: call_policy.SamplingPolicyOwner) -> Iterator[None
 
 def test_help_is_byte_identical_across_install(
     monkeypatch: pytest.MonkeyPatch,
-    model_installation: install.Installation,
+    model_installation: Installation,
     sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     """Acceptance for the transparency contract: metering must not change a single

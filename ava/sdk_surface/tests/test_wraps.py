@@ -28,6 +28,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import wraps
+from ava.sdk_surface.installation import WrapLayer
 from base.agents.sdk import call_policy
 from base.packages.plugins import activation
 
@@ -64,7 +65,7 @@ class Probe:
     """
 
     def __init__(self) -> None:
-        self.layers: dict[str, list[wraps.WrapLayer]] = {}
+        self.layers: dict[str, list[WrapLayer]] = {}
         self._undos: list[Callable[[], None]] = []
 
     def __call__(

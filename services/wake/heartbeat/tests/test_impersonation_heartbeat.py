@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.cluster.machine import MachineIdentity
 from base.config import settings

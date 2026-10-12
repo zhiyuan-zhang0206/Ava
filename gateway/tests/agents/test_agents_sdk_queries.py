@@ -12,7 +12,7 @@ import pytest
 import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate

@@ -22,6 +22,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     import ava.mcps
     from agent.extensions import load_extensions
     from ava.sdk_surface import install
+    from ava.sdk_surface.installation import installed
     from ava.sdk_surface.metering import is_recorder
 
     assert "_restore_metering" in request.fixturenames
@@ -34,7 +35,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     assert metered, "the leak this guards is gone"
     assert is_recorder(ava.mcps._call_raw)
 
-    installation = install.installed()
+    installation = installed()
     assert installation is not None
     metering.uninstall(installation.metered)  # the fixture's action, made observable
     assert ava.mcps._call_raw is bare_funnel
@@ -55,7 +56,7 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     removed together.
     """
     from agent.extensions import load_extensions
-    from ava.sdk_surface import install
+    from ava.sdk_surface.installation import installed
     from tests.fixtures.plugin_registrations import (
         drop_plugin_registrations,
         plugin_registrations_present,
@@ -66,7 +67,7 @@ def test_a_plugin_load_leaves_no_namespace_behind(
 
     load_extensions()
     assert plugin_registrations_present()
-    installation = install.installed()
+    installation = installed()
     assert installation is not None
     names = [ns.name for _p, c in installation.registry.plugins for ns in c.sdk_namespaces]
     assert "cwd" in names, "the leak this guards is gone"
@@ -76,6 +77,6 @@ def test_a_plugin_load_leaves_no_namespace_behind(
 
     drop_plugin_registrations()  # the guard's action, made observable
     assert not plugin_registrations_present()
-    assert install.installed() is None
+    assert installed() is None
     assert not any(hasattr(ava, name) for name in names)
     assert not any("_qualname" in vars(module) for module in stamped)

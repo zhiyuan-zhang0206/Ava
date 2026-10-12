@@ -25,8 +25,8 @@ import pytest
 
 def plugin_registrations_present() -> bool:
     """Whether a plugin SDK surface is installed in this process."""
-    install = sys.modules.get("ava.sdk_surface.install")
-    return install is not None and install.installed() is not None
+    installation = sys.modules.get("ava.sdk_surface.installation")
+    return installation is not None and installation.installed() is not None
 
 
 def drop_plugin_registrations() -> None:

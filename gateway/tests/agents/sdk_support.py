@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 import ava
 from ava.gateway_client.transport import use_client
-from ava.sdk_surface.install import Installation
+from ava.sdk_surface.installation import Installation
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
