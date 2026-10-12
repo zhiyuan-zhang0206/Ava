@@ -350,14 +350,34 @@ def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
 
 
 def test_real_repository_map_is_fast_and_has_broad_static_coverage() -> None:
-    """The production checkout must keep the selector map usable in CI."""
+    """The production checkout must keep the selector map usable in CI.
+
+    The map is an AST pass over every tracked source file: CPU-bound Python that the
+    coverage tracer slows down (7 s untraced against 16 s traced on a laptop; 47 s in
+    `.test_durations` and 60-63 s in three evicted queue runs on a loaded CI runner), which
+    left the 60 s budget flaking. The budget guards the selector as the classify job runs
+    it, with no tracer, so it is measured in a child interpreter; the repository does not
+    enable coverage's subprocess measurement, so the child runs untraced.
+    """
+    probe = (
+        "import json, sys; from pathlib import Path; from scripts.ci import test_selector;"
+        "r = test_selector.select_tests(['scripts/ci/test_selector.py'], repo_root=Path(sys.argv[1]));"
+        "print(json.dumps([r.map_source_count, r.full_est_seconds]))"
+    )
     started = perf_counter()
+    completed = subprocess.run(  # noqa: S603 -- fixed interpreter and in-repo code
+        [sys.executable, "-c", probe, str(_REPO_ROOT)],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    elapsed = perf_counter() - started
 
-    result = test_selector.select_tests(["scripts/ci/test_selector.py"], repo_root=_REPO_ROOT)
-
-    assert result.map_source_count > 500
-    assert result.full_est_seconds > 0
-    assert perf_counter() - started < 60
+    map_source_count, full_est_seconds = json.loads(completed.stdout.splitlines()[-1])
+    assert map_source_count > 500
+    assert full_est_seconds > 0
+    assert elapsed < 60
 
 
 def test_cli_reports_an_unreadable_changed_file_as_an_invocation_error(
