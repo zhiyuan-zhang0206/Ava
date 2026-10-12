@@ -248,7 +248,7 @@ time deterministically with fake timers; never assume a machine will reach a
 state by a fixed wall-clock instant.
 
 **Lintability — lintable now.** The
-[clock-lattice lint](../../../scripts/lint/clock_lattice.py) rejects
+[clock-lattice lint](../../../meizel/owners/clock_lattice.py) rejects
 lattice-vocabulary constants outside approved lattice modules, while
 `base/deploy/tests/test_timing_topology.py` verifies the declared relations.
 Pinned-count gates remain a review heuristic.

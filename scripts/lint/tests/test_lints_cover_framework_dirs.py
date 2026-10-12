@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from meizel import lint_common
-from scripts.lint import clock_lattice, termination_source
+from meizel.owners import clock_lattice
+from scripts.lint import termination_source
 from scripts.lint.diagnostics import logger_add_diagnose, loguru_format, no_emoji, time_bomb
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]

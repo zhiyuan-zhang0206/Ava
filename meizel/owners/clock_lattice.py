@@ -1,6 +1,6 @@
 """Forbid lattice-vocabulary timing constants outside the clock-lattice modules.
 
-Run: `.venv/bin/python scripts/lint/clock_lattice.py [path ...]` (defaults to
+Run: `.venv/bin/python -m meizel.owners.clock_lattice [path ...]` (defaults to
 scanning the non-test source dirs; an explicit path that does not exist is an
 error (stderr + exit 1) rather than a bare traceback). Also run automatically
 via pre-commit hook.
@@ -58,10 +58,9 @@ import re
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(_REPO_ROOT))
+from meizel import lint_common
 
-from meizel import lint_common  # noqa: E402 - standalone script
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 

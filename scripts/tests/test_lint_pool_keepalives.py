@@ -123,7 +123,7 @@ def test_default_scope_is_what_rule_5_does_not_see() -> None:
     """In the governed packages the structure gate's `postgres-dial` rule rejects
     any pool outside its owner, so a bare run scans only the rest: `scripts/`
     (not governed) and the modules that decision allows to dial directly."""
-    from scripts.structure.locality import DECISIONS
+    from meizel.owners.decisions import DECISIONS
 
     root = Path(__file__).resolve().parents[2]
     scanned = {path.relative_to(root).as_posix() for path in _lint.default_targets()}
