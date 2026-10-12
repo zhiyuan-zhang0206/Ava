@@ -29,7 +29,11 @@ def test_helper_native_reaping_cannot_race_owned_signal_delivery(tmp_path: Path)
     scaled = source.replace(f"baseBackoffS = {base}", "baseBackoffS = 0.5").replace(
         f"maxBackoffS = {cap}", "maxBackoffS = 1.0"
     )
-    keeper = scaled.split("// MARK: - Root keeper", 1)[1].split("// MARK: - Dispatch", 1)[0]
+    keeper = (
+        scaled.split("// MARK: - Root keeper", 1)[1]
+        .split("// MARK: - Capture indicator", 1)[0]
+        .split("// MARK: - Dispatch", 1)[0]
+    )
     implementation = (children + keeper).replace("waitpid(", "observedWaitpid(")
     implementation = implementation.replace(
         "kill(child, SIGTERM)", "pausedRootSignal(child, SIGTERM)"
