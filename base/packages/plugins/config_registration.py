@@ -19,7 +19,7 @@ from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
 from base.host.env.agent_slices import AgentSlices
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 
 class PluginConfigError(Exception):

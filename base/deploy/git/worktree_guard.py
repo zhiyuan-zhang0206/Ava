@@ -33,7 +33,7 @@ from typing import cast
 
 import psutil
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 from base.sessions.pty import client
 from base.sessions.pty.paths import service_socket_path
 

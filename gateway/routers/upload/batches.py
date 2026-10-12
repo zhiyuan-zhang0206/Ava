@@ -22,7 +22,8 @@ from base.agents import AgentNotFound
 from base.agents.upload_delivery.paths import upload_url
 from base.db import agent_exists
 from base.db.transaction import write_transaction
-from base.host.private_storage import create_private_bytes, ensure_private_dir
+from base.host.private_storage import create_private_bytes
+from base.paths.private_dir import ensure_private_dir
 from gateway.schemas.uploads import UploadedBatch, UploadedFile
 
 RESERVED_PREFIX = "ava-upload-"

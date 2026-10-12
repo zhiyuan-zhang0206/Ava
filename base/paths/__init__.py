@@ -1,7 +1,7 @@
 """$AVA_HOME path resolution — single-point entry shared by gateway /
 agent / subprocess.
 
-`base.host.env.dotenv_boot.resolve_ava_home` is the path source (`$AVA_HOME`,
+`base.paths.home.resolve_ava_home` is the path source (`$AVA_HOME`,
 else `~/.ava`, read on every call); this door adds first-access mkdir side
 effects, so calling a helper means "the directory is ready and writable". The
 three process classes inherit the same variable, no manual passing required.
@@ -11,10 +11,8 @@ The package holds only this door; its doc nodes (`docs/paths.ava.okf.md`,
 
 from pathlib import Path
 
-from base.cluster.machine import MachineRoles
-from base.config import settings
-from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
-from base.host.private_storage import ensure_private_dir
+from base.paths.home import home_checkout_error, resolve_ava_home
+from base.paths.private_dir import ensure_private_dir
 
 
 def ava_home() -> Path:
@@ -59,7 +57,7 @@ def prod_service_checkout_error(repo: Path) -> str | None:
     code loses its floor when that checkout is deleted — routine worktree
     cleanup. A home that carries its own `<home>/source` checkout (the prod home
     `~/.ava`) may only launch services from that checkout; a home with none (a
-    test home) accepts any. The rule is `dotenv_boot.home_checkout_error`, shared
+    test home) accepts any. The rule is `base.paths.home.home_checkout_error`, shared
     with the CLI's pre-Settings gate.
     """
     return home_checkout_error(repo)
@@ -82,6 +80,8 @@ def chrome_mcp_socket() -> Path:
     ($AVA_HOME/run/chrome-mcp.<cdp_port>.sock). Keyed by the CDP port so
     co-hosted clusters (each with its own browser_cdp_port) get distinct
     sockets; the per-agent chrome bridge dials this, the daemon listens on it."""
+    from base.config import settings
+
     return run_dir() / f"chrome-mcp.{settings.services.browser_cdp_port}.sock"
 
 
@@ -92,6 +92,8 @@ def permissions_helper_socket() -> Path:
     dials this, the signed launchd helper listens on it. (The TCC grant the
     helper relies on is shared machine-wide via a fixed bundle id, but the
     process and socket are per-cluster.)"""
+    from base.config import settings
+
     return run_dir() / f"permissions-helper.{settings.services.permissions_helper_port}.sock"
 
 
@@ -150,7 +152,7 @@ def memory_dir() -> Path:
     return ava_home() / "memory"
 
 
-def gateway_memory_dir(*, roles: MachineRoles) -> Path:
+def gateway_memory_dir(*, roles: frozenset[str]) -> Path:
     """Gateway's consolidated memory checkout path. On a combined unit
     (gateway+agent-runner on one host) this is $AVA_HOME/gateway/memory to
     keep the gateway's index source (main branch) separate from the

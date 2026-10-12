@@ -429,7 +429,7 @@ def cmd_db_authority_install_unit(*, bundle: str) -> int:
     """
     from base.cluster.authority import AuthorityRefusedError
     from base.host.env.bootstrap import BootstrapFetchError
-    from base.host.env.dotenv_boot import resolve_ava_home
+    from base.paths.home import resolve_ava_home
     from cli.start_identity import require_initialized, stored_values
     from cli.unit_join import join_gateway
 

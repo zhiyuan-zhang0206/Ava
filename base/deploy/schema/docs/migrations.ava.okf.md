@@ -60,7 +60,7 @@ then boots into `CodeBehindSchema` and rejects every agent.
 `apply_pending_migrations` therefore reads the cluster's identity from the DB
 (`machine_units` rows with `serve_gateway`) and refuses unless the executing
 checkout claims the same `(machine_name, home)`. The claim is the process's home
-(`base.host.env.dotenv_boot.resolve_ava_home()`) together with the rule that a
+(`base.paths.home.resolve_ava_home()`) together with the rule that a
 home carrying its own `<home>/source` checkout is changed only by that checkout
 (`home_checkout_error`): a process that inherited `AVA_HOME` from another cluster's
 environment has that cluster's DB URL *and* its home, while still carrying its own

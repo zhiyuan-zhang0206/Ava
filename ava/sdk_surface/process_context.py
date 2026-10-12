@@ -112,7 +112,7 @@ def process_clients(
     )
 
     def pipeline() -> Any:
-        from base.host.env.dotenv_boot import resolve_ava_home
+        from base.paths.home import resolve_ava_home
         from base.telemetry import build_pipeline
 
         read_config()

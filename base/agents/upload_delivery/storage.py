@@ -17,7 +17,8 @@ from base.agents.upload_delivery.models import (
     UploadDeliveryConflictError,
     UploadQuotaExceededError,
 )
-from base.host.private_storage import create_private_bytes, ensure_private_dir
+from base.host.private_storage import create_private_bytes
+from base.paths.private_dir import ensure_private_dir
 
 
 def lock_agent(conn: Connection[Any], agent_id: int) -> None:

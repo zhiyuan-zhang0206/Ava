@@ -10,7 +10,7 @@ the one-shot close (a finished ask closes its tab; keep_tab / wait=False keep
 it). The chrome MCP seam is mocked so nothing drives a browser.
 
 The `_utils._cluster` tests below lock its home-derived download label to the
-shared resolver (`base.host.env.dotenv_boot.resolve_ava_home`) rather than a
+shared resolver (`base.paths.home.resolve_ava_home`) rather than a
 private `os.environ` read.
 """
 

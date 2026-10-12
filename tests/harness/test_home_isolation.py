@@ -43,7 +43,7 @@ from pathlib import Path
 
 import pytest
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 _E2E_CONFTEST = Path(__file__).parents[1] / "e2e" / "conftest.py"
 

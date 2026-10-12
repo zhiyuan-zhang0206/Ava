@@ -1,6 +1,6 @@
 """The home is `$AVA_HOME` when set, else `~/.ava`, read every time it is asked.
 
-`base.host.env.dotenv_boot.resolve_ava_home` is the one resolver; `base.paths.ava_home()`
+`base.paths.home.resolve_ava_home` is the one resolver; `base.paths.ava_home()`
 is the in-process door built on it. Nothing captures the home at import, there is no
 pointer file and no in-process injection channel: a process that changes the variable
 is followed by every later call.
@@ -22,7 +22,7 @@ import pytest
 from base import config, paths
 from base.config.base import _unit_home
 from base.host.env import bootstrap, runtime_config
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 _REPO = Path(__file__).resolve().parents[3]
 _CHILD = Path(__file__).with_name("_config_child.py")

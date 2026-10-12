@@ -14,9 +14,9 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.deploy.maintenance import admission
-from base.host.env.dotenv_boot import resolve_ava_home
 from base.log.process import init_gateway_process
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths.home import resolve_ava_home
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
 __all__ = [

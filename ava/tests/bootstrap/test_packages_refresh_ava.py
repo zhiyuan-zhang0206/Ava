@@ -11,8 +11,8 @@ from typing import cast
 
 import pytest
 
-from base.host.env.dotenv_boot import resolve_ava_home
 from base.packages.extensions import install_registry as reg
+from base.paths.home import resolve_ava_home
 
 
 @pytest.fixture(autouse=True)

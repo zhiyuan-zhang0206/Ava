@@ -49,11 +49,11 @@ _log = logging.getLogger(__name__)
 def _ava_home() -> Path:
     """$AVA_HOME directory, created if missing.
 
-    Routed through `dotenv_boot.resolve_ava_home()`: this module's callers run
+    Routed through `base.paths.home.resolve_ava_home()`: this module's callers run
     before `load_ava_env` pins `AVA_HOME` into the environment (the
     Settings-lite maintenance commands defer it — see
     `base.host.env.bootstrap._serve_flag`)."""
-    from base.host.env.dotenv_boot import resolve_ava_home
+    from base.paths.home import resolve_ava_home
 
     root = resolve_ava_home()
     root.mkdir(parents=True, exist_ok=True)

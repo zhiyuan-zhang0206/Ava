@@ -55,9 +55,10 @@ from base.clock import Clock
 from base.cluster.dataplane.pg_admin import local_owner_authority
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import Database, connect_url
-from base.host.private_storage import ensure_private_dir, ensure_private_file
+from base.host.private_storage import ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths import ava_home
+from base.paths.private_dir import ensure_private_dir
 from services.backup.artifact import passphrase as backup_passphrase
 from services.backup.artifact.intermediates import sweep_closed_partials
 from services.backup.artifact.names import DUMP_NAME_RE, REMOTE_ROOT, TS_FORMAT, stamp_utc

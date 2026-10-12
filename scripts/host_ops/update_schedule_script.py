@@ -43,7 +43,8 @@ def load_installed_runtime(home: Path, source: Path) -> None:
         raise RuntimeError("run this tool with the source checkout's own .venv interpreter")
     # A copied operator script must not import its containing development tree.
     sys.path.insert(0, str(source))
-    from base.host.env.dotenv_boot import launcher_context, resolve_ava_home, skip_config_fetch
+    from base.host.env.dotenv_boot import launcher_context, skip_config_fetch
+    from base.paths.home import resolve_ava_home
 
     if resolve_ava_home().expanduser().resolve() != home:
         raise RuntimeError("--home must match this operator's AVA_HOME")

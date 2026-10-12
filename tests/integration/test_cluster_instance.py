@@ -32,7 +32,7 @@ from base import cluster
 from base.cluster import provision_database
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.pgbouncer import stop_pgbouncer

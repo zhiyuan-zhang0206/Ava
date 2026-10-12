@@ -151,7 +151,7 @@ def _serve_flag(env_key: str) -> bool:
     later, so the config-source decision can never silently disagree with the
     machine role.
 
-    The `.env` read resolves `$AVA_HOME` through `dotenv_boot.resolve_ava_home()`: at
+    The `.env` read resolves `$AVA_HOME` through `base.paths.home.resolve_ava_home()`: at
     this point in boot the env var may not be pinned yet (see above).
     """
     raw = os.environ.get(env_key)
@@ -308,7 +308,7 @@ def fetch_bootstrap_config(
 
 def _snapshot_path() -> Path:
     """The unit's config snapshot path, under this process's home."""
-    from base.host.env.dotenv_boot import resolve_ava_home
+    from base.paths.home import resolve_ava_home
 
     return resolve_ava_home() / "run" / _SNAPSHOT_NAME
 

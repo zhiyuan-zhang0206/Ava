@@ -23,7 +23,8 @@ from base import cluster
 from base.host.atomic_io import write_text_atomic
 from base.host.env.dotenv_file import upsert_env
 from base.host.net.auth import require_cluster_secret
-from base.host.private_storage import ensure_private_dir, ensure_private_file
+from base.host.private_storage import ensure_private_file
+from base.paths.private_dir import ensure_private_dir
 
 INTENT_NAME = cluster.INTENT_NAME
 _CAPS = ("gateway", "agent-runner", "observability-station")

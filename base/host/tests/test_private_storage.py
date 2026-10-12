@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import socket
 import stat
@@ -49,30 +48,6 @@ class _Captured:
         self.warnings.append((message, kwargs))
 
 
-def test_private_dir_rejects_symlink(tmp_path: Path) -> None:
-    """A pre-placed symlink must never become a private storage directory."""
-    target = tmp_path / "private"
-    destination = tmp_path / "elsewhere"
-    target.symlink_to(destination, target_is_directory=True)
-
-    with pytest.raises(RuntimeError, match=rf"{re.escape(str(target))}.*symlink"):
-        private_storage.ensure_private_dir(target)
-    assert not destination.exists()
-
-
-def test_private_dir_rejects_foreign_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A directory owned by another account cannot hold this process's secrets."""
-    target = tmp_path / "private"
-    target.mkdir()
-    owner = os.geteuid()
-    monkeypatch.setattr(private_storage.os, "geteuid", lambda: owner + 1)
-
-    with pytest.raises(
-        RuntimeError, match=rf"{re.escape(str(target))}.*not owned by the current user"
-    ):
-        private_storage.ensure_private_dir(target)
-
-
 def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Foreign-owned nodes are debug-logged, summarized, and left unchanged."""
     target = tmp_path / "tree"
@@ -89,7 +64,7 @@ def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path:
     def _foreign(stat_result: os.stat_result) -> bool:
         return stat_result.st_mode & 0o777 in (0o400, 0o500)
 
-    with patch.object(private_storage, "_is_foreign_owned", side_effect=_foreign):
+    with patch.object(private_storage, "is_foreign_owned", side_effect=_foreign):
         private_storage.converge_private_tree(target)
 
     # foreign nodes left untouched, ours dir converged to owner-only mode
@@ -111,29 +86,6 @@ def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert kwargs["node_modules"] == 0
     examples = str(kwargs["examples"])
     assert str(foreign_file) in examples and str(foreign_dir) in examples
-
-
-def test_is_foreign_owned_is_uid_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ownership follows the uid alone; a foreign gid does not make a path foreign."""
-
-    def _stat(uid: int, gid: int) -> os.stat_result:
-        return os.stat_result((0o100644, 0, 0, 1, uid, gid, 0, 0, 0, 0))
-
-    ours = _stat(os.geteuid(), os.geteuid() + 1)
-    assert private_storage._is_foreign_owned(ours) is False
-
-    theirs = _stat(os.geteuid() + 1, os.geteuid())
-    assert private_storage._is_foreign_owned(theirs) is True
-
-
-def test_private_dir_repairs_mode_drift(tmp_path: Path) -> None:
-    """A lax directory from an older umask is tightened before reuse."""
-    target = tmp_path / "private"
-    target.mkdir()
-    target.chmod(0o755)
-
-    assert private_storage.ensure_private_dir(target) == target
-    assert _mode(target) == 0o700
 
 
 def test_private_file_repairs_mode_drift(tmp_path: Path) -> None:
@@ -286,7 +238,7 @@ def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_
     def _foreign(_stat_result: os.stat_result) -> bool:
         return True
 
-    monkeypatch.setattr(private_storage, "_is_foreign_owned", _foreign)
+    monkeypatch.setattr(private_storage, "is_foreign_owned", _foreign)
 
     assert private_storage.converge_private_tree(root) == root
 

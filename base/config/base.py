@@ -14,7 +14,7 @@ from typing import Any, Self
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import EnvSettingsSource
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 
 def _unit_home() -> Path:
