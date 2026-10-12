@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 
-from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S, UNIT_BUNDLE_TTL_S
+from base.deploy.progress_timeout import UNIT_BUNDLE_TTL_S
 
 
 def _h_cluster_status(_args: argparse.Namespace) -> int:
@@ -104,8 +104,8 @@ def _add_db_authority_parser(
         "--ttl-hours",
         type=float,
         default=UNIT_BUNDLE_TTL_S / 3600,
-        help=f"bundle lifetime in hours (default: {UNIT_BUNDLE_TTL_S / 3600:g}, "
-        f"at most {UNIT_BUNDLE_MAX_TTL_S / 3600:g})",
+        help=f"bundle lifetime in hours (default: {UNIT_BUNDLE_TTL_S / 3600:g}; "
+        "the authority refuses a lifetime past its cap)",
     )
     issue_unit_p.set_defaults(func=_h_cluster_db_authority_issue_unit)
     install_unit_p = db_authority_sub.add_parser(

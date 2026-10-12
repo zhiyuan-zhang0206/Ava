@@ -23,6 +23,7 @@ from dotenv import dotenv_values
 
 from base.host.env.config_lite_table import FIELD_DOMAINS
 from base.host.env.config_registry import DOMAIN_MODELS, field_alias, fields, schema_extra
+from base.host.net.url_secret import credential_free, url_with_host
 
 __all__ = [
     "ConfigAuthority",
@@ -206,8 +207,6 @@ class ConfigAuthority:
 
     def served_db_endpoint(self, aliases: dict[str, str] | None = None) -> str:
         """Read this gateway's required fresh endpoint and strip its password."""
-        from base.cluster.authority.unit import credential_free
-
         if aliases is None:
             aliases = self.read_env_aliases()
         db_url = aliases.get("AVA_DB_URL")
@@ -222,8 +221,6 @@ class ConfigAuthority:
 
     def _gateway_otlp_projection(self, aliases: dict[str, str]) -> str:
         """Project gateway ingress without distributing local listener settings."""
-        from base.host.net.url_secret import url_with_host
-
         port = int(
             aliases.get(
                 "AVA_TELEMETRY_OTLP_PORT", str(self.service_field_value("telemetry_otlp_port"))
@@ -238,7 +235,6 @@ class ConfigAuthority:
 def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> None:
     """Rewrite served loopback endpoints to the root's reachable address."""
     from base.host.net.predicates import is_loopback_host
-    from base.host.net.url_secret import url_with_host
 
     if is_loopback_host(reachable):
         return

@@ -13,9 +13,10 @@ Sub-packages:
 
 The top-level modules are the deploy clock family: ``timing`` (the clock lattice
 every ordered timing constant registers in), ``progress_timeout`` (the one
-"stopped making progress" timeout and the deploy-family readiness and agent-lease clocks), ``stop_timing``
-(host cancellation diagnostics) and ``transition`` (time-graded severity for bounded
-transition windows).
+"stopped making progress" timeout and the deploy-family readiness and agent-lease clocks),
+``schedule_timing`` (the schedule-stall alert threshold) and ``transition`` (time-graded
+severity for bounded transition windows). The stop family (host cancellation diagnostics)
+is ``base.native_process.stop_timing``.
 
 This door is docstring-only; import the member module you need.
 """

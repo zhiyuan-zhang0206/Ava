@@ -9,10 +9,10 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import settle_and_stamp_turn
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import consume_claimed_inbounds
-from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.native_process.turn_identity import (
     HostedTurnResources,
     hosted_resources_settled,

@@ -13,6 +13,7 @@ from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.deploy.maintenance import admission
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.log.process import init_gateway_process
 from base.native_process.loaded_commit import LoadedCommit
@@ -69,6 +70,7 @@ def understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
         corrections=lambda: config.view.agent.understanding_group_corrections,
         clock_factory=lambda: Clock(clock_config_from_boot(config)),
         timestamps_enabled=lambda: config.view.general.message_timestamps,
+        quiesced=admission.quiesced,
     )
 
 

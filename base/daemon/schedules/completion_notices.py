@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from base.config.service_read import ConfigAuthority
-from base.daemon.schedules.completion_policy import (
+from base.config.domains.agent.completion_policy import (
     CompletionNoticePolicy,
     validate_completion_notice_policy,
 )
+from base.config.service_read import ConfigAuthority
 
 _MAX_DIGEST_LOGS = 20
 

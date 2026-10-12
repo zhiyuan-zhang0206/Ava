@@ -82,7 +82,8 @@ class UnderstandingReadInputs:
     """One consumer's operation-time configuration and clock readers.
 
     Construction performs no reads. Grouping and chunk operations call these
-    inputs at their original decision and generation points.
+    inputs at their original decision and generation points. `quiesced` is the
+    host's stop-window signal: while it holds, the live consumer claims nothing.
     """
 
     enabled: Callable[[], bool]
@@ -95,6 +96,7 @@ class UnderstandingReadInputs:
     corrections: Callable[[], int]
     clock_factory: Callable[[], Clock]
     timestamps_enabled: Callable[[], bool]
+    quiesced: Callable[[], bool]
 
 
 class GroupingModels(Protocol):

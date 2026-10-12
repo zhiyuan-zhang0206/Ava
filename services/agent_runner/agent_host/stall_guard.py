@@ -32,8 +32,8 @@ from agent.state import BaseAgentState
 from agent.turn.runloop import emit_error_event
 from base.agents.context import AvaContext
 from base.config import settings
-from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.log import logger
+from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 
 _Graph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 

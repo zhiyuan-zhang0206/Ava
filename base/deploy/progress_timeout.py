@@ -97,11 +97,7 @@ CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-hos
 NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 
 # How long a unit capability bundle (`ava cluster db-authority issue-unit`,
-# `base.cluster.authority.unit.issue_bundle`) stays installable: the default
-# `--ttl-hours`, and the most it may ask for. A bundle is carried by hand to one
-# unit (a join, an emergency), so a day covers the trip and three cover a
-# weekend. The expiry is the installer's check, not the cipher's: it bounds how
-# long an old bundle can be installed, not what a stolen bundle and its
-# transport key disclose.
+# `base.cluster.authority.unit.issue_bundle`) stays installable by default
+# (`--ttl-hours`): a day covers the trip to one unit. The most it may ask for is
+# `base.cluster.authority.unit.UNIT_BUNDLE_MAX_TTL_S`.
 UNIT_BUNDLE_TTL_S = 24 * 3600.0
-UNIT_BUNDLE_MAX_TTL_S = 72 * 3600.0
