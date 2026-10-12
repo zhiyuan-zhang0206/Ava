@@ -42,7 +42,13 @@ separate release identity checked through the existing exact-session cleanup.
 A PostgreSQL advisory transaction gives one manager ownership of a schedule's process effects, including across manager processes; conditional revision
 writes prevent it acknowledging a later desired revision. A matching live revision is adopted and marked `applied_revision`; a predecessor
 is officially reaped before replacement. Missing provenance for a versioned
-live session leaves the request queued. Failed reap stays queued. Before creating a process, the manager commits
+live session leaves the request queued, as does a failed reap, but only for a
+bounded window: after ten minutes of one failure streak the manager records the
+schedule as an error, emits `schedule_convergence_abandoned`, consumes the request
+and leaves the process alone until a new desired revision (start, stop, restart,
+edit, delete) authorizes another attempt; the give-up is in memory, so a
+restarted service starts one new bounded streak. A maintenance hold is not a
+failure and does not count. Before creating a process, the manager commits
 `launch_count=1`, `applied_revision=desired_revision`, and an inspectable unknown-outcome
 error. A failed or uncertain launch consumes that revision; it is acknowledged
 without automatic replay. One failed schedule does not
@@ -60,8 +66,9 @@ creates a new revision and can intentionally execute the script again.
 
 Reconcile also discovers pending revisions. It always reads current desired
 state rather than replaying an old request's enabled/config payload. Maintenance
-holds defer execution; stops/deletes retain exact PTY cleanup and orphan run
-closure. Deletion enqueues cleanup in the deletion transaction. The existing
+holds defer execution; stops/deletes retain exact PTY cleanup and close the
+in-progress run rows of the process they reaped (as does a launch), with no
+periodic orphan-run sweep. Deletion enqueues cleanup in the deletion transaction. The existing
 `schedules/catchup.py` at-most-once cron slot claims and accepted callback-loss
 window are unchanged.
 
