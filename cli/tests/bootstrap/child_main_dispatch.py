@@ -7,7 +7,9 @@ is checking.
 """
 
 import importlib.abc
+import socket
 import sys
+from typing import Any
 
 
 def _defer_logging() -> None:
@@ -104,6 +106,83 @@ def _import_boundary(entry: str) -> None:
     assert "base.config" not in sys.modules
 
 
+class _DenySettings(importlib.abc.MetaPathFinder):
+    admitted = False
+
+    def find_spec(self, fullname: str, path: object = None, target: object = None) -> None:
+        if not self.admitted and (fullname == "base.config" or fullname.startswith("base.config.")):
+            raise AssertionError("premature runtime Settings import")
+
+
+def _forbid_network() -> None:
+    def no_network(*args: object, **kwargs: object) -> None:
+        raise AssertionError("initialization performed a network dial")
+
+    socket.socket.connect = no_network  # pyright: ignore[reportAttributeAccessIssue]
+    socket.create_connection = no_network  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def _init_and_start_settings_free() -> None:
+    """`init` and `start` stay settings-free until the home is admitted; delivery stays lazy."""
+    import os
+    from pathlib import Path
+
+    sys.path.insert(0, sys.argv[2])
+
+    guard = _DenySettings()
+    sys.meta_path.insert(0, guard)
+    _forbid_network()
+    from base import cluster
+    from cli import main, start_intent
+
+    home = Path(os.environ["AVA_HOME"])
+    checkout = home.parent / "checkout"
+    checkout.mkdir()
+    start_intent._checkout = lambda: checkout
+    cluster.port_free = lambda _port: True
+    calls: list[str] = []
+
+    def configured() -> None:
+        assert (home / "start-intent.json").is_file()
+        assert (home / ".env").is_file()
+        assert not (home.parent / "clusters.json").exists()
+
+    def log(args: list[str], *, initialize: object) -> None:
+        assert args == ["start"]
+        configured()
+        calls.append("logging")
+
+    main._init_cli_logging = log
+
+    def start(**kwargs: Any) -> int:
+        assert not kwargs["command"].config.prepared
+        configured()
+        calls.append("runtime")
+        return 0
+
+    start_intent.run_start_command = start
+    start_intent.complete_start = lambda: calls.append("boot-complete")
+    start_intent.release_serving = lambda: calls.append("clear-serving")
+    assert main.main(["start"]) == 1 and not home.exists()  # nothing to start yet, and nothing made
+    assert (
+        main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"])
+        == 0
+    )
+    configured()
+    assert calls == []  # init started nothing
+    assert "base.config" not in sys.modules
+    guard.admitted = True
+    from base.config import ConfigBoot
+
+    def no_prepare(self):
+        raise AssertionError("typed root prepared configuration before runtime delivery")
+
+    ConfigBoot.prepare = no_prepare
+    assert main.main(["start"]) == 0
+    assert calls == ["logging", "runtime", "boot-complete"]
+    assert "base.config" in sys.modules  # admitted root types are allowed; delivery stayed lazy
+
+
 def _help_admission() -> None:
     """Help preserves the service database gate and the operator handle's admission."""
     from cli import main
@@ -151,6 +230,8 @@ if __name__ == "__main__":
         _defer_logging()
     elif sys.argv[1] == "import_boundary":
         _import_boundary(sys.argv[2])
+    elif sys.argv[1] == "init_and_start_settings_free":
+        _init_and_start_settings_free()
     elif sys.argv[1] == "help_admission":
         _help_admission()
     else:

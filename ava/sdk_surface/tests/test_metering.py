@@ -13,9 +13,11 @@ import contextlib
 import inspect
 import io
 import os
+import subprocess
 import sys
 from collections.abc import Callable, Generator, Iterator, Mapping
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
@@ -35,7 +37,6 @@ from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
     SdkMember,
-    SdkNamespace,
     SdkWrap,
 )
 from tests.fixtures.pin_agent import pin_agent
@@ -319,28 +320,18 @@ def test_mcp_recorder_derives_fq_from_runtime_args(
     assert calls[0][0] == "mcps.chrome.navigate"
 
 
+_GATE_CHILD = Path(__file__).with_name("child_gate_without_agent_layer.py")
+
+
 def test_a_surface_installed_without_the_agent_layer_is_seen() -> None:
     """A plugin load that never imports `agent.state` (the schedule runner's in-process script)
     still installs namespaces and members on the SDK surface. The gate must see them, or the
-    fixture never drops them and they stay for the rest of the worker."""
-    from tests.fixtures.plugin_registrations import plugin_registrations_present
-
-    assert not plugin_registrations_present()
-    registry = ExtensionRegistry(
-        (
-            (
-                "probe",
-                PluginContributions(
-                    sdk_namespaces=(SdkNamespace("gate_probe", SimpleNamespace()),)
-                ),
-            ),
-        )
+    fixture never drops them and they stay for the rest of the worker. A fresh interpreter
+    guarantees the agent layer is absent."""
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and child script
+        [sys.executable, str(_GATE_CHILD)], capture_output=True, text=True, timeout=60, check=False
     )
-    install.install(registry)  # the autouse teardown drops it
-    with patch.dict(sys.modules):
-        sys.modules.pop("agent.state", None)
-        assert plugin_registrations_present()
-        assert "agent.state" not in sys.modules, "asking must not load the agent layer"
+    assert result.returncode == 0, result.stderr
 
 
 def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(

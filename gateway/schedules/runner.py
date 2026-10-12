@@ -35,6 +35,7 @@ it. A deliberate kill (SIGTERM/SIGHUP) writes nothing and is not counted a crash
 from __future__ import annotations
 
 import os
+import runpy
 import selectors
 import shlex
 import subprocess
@@ -507,8 +508,6 @@ def _run_python_script(
     inputs: ScheduleInputs,
 ) -> None:
     """Run with isolated argv and collect the watchdog before any terminal write."""
-    import runpy
-
     # Load plugin namespaces (ava.tasks etc.) into this process before the
     # in-process script runs. This runner never builds the agent graph, so
     # nothing else loads plugins here; without this, a schedule script that

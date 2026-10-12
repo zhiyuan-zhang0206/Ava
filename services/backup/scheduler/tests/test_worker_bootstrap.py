@@ -23,10 +23,10 @@ _ROOT = Path(__file__).resolve().parents[4]
 _NO_REQUEST_USAGE = "usage: python -m <operation worker> REQUEST RESULT"
 
 
-def _bootstrap(bootstrap: str, root: Path, module: str) -> subprocess.CompletedProcess[str]:
-    """Run `module` under `bootstrap` with no request: it can only print its usage."""
+def _bootstrap(bootstrap: Path, root: Path, module: str) -> subprocess.CompletedProcess[str]:
+    """Run `module` under the `bootstrap` script with no request: it can only print its usage."""
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-I", "-B", "-c", bootstrap, str(root), module],
+        [sys.executable, "-I", "-B", str(bootstrap), str(root), module],
         capture_output=True,
         text=True,
         check=False,
@@ -37,7 +37,7 @@ def _bootstrap(bootstrap: str, root: Path, module: str) -> subprocess.CompletedP
 
 
 def _required_names() -> list[str]:
-    match = re.search(r"for name in \((.*?)\):", worker_process._BOOTSTRAP)
+    match = re.search(r"for name in \((.*?)\):", worker_process._BOOTSTRAP.read_text())
     assert match is not None, "the bootstrap no longer names the packages it requires"
     return [item.strip().strip("\"'") for item in match.group(1).split(",")]
 
@@ -63,12 +63,13 @@ def test_every_required_name_is_a_package_of_this_checkout() -> None:
         ).is_file(), f"the bootstrap requires {name}, which this checkout does not carry"
 
 
-def test_a_required_name_that_resolves_nowhere_stops_the_worker_at_start() -> None:
+def test_a_required_name_that_resolves_nowhere_stops_the_worker_at_start(tmp_path: Path) -> None:
     """The failure R1 describes: a stale name makes the bootstrap refuse the worker."""
-    stale = worker_process._BOOTSTRAP.replace(
-        '"services.backup.scheduler.operation"', '"services.retired_package"'
-    )
-    assert stale != worker_process._BOOTSTRAP
+    source = worker_process._BOOTSTRAP.read_text()
+    changed = source.replace('"services.backup.scheduler.operation"', '"services.retired_package"')
+    assert changed != source
+    stale = tmp_path / "stale_bootstrap.py"
+    stale.write_text(changed)
 
     proc = _bootstrap(stale, _ROOT, "services.backup.scheduler.worker")
 

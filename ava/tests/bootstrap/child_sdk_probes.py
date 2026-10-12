@@ -5,6 +5,7 @@ order of the environment edits against the first `import ava` is part of what is
 """
 
 import sys
+from collections.abc import Callable
 from typing import Any, cast
 
 
@@ -226,6 +227,66 @@ def non_agent_import_unbound_context() -> None:
         raise AssertionError("explicit loading hid its prior failure")
 
 
+def _expect_refusal(action: Callable[[], object], fragment: str) -> None:
+    try:
+        action()
+    except RuntimeError as exc:
+        assert fragment in str(exc)
+    else:
+        raise AssertionError(f"the host did not refuse: {fragment}")
+
+
+def host_refuses_env_context_and_attachment() -> None:
+    import os
+    import runpy
+
+    os.environ.pop("AVA_AGENT_ID", None)
+    import ava
+    from base import config
+
+    class BootStoppedError(RuntimeError):
+        pass
+
+    def stop_boot(self: object) -> None:
+        raise BootStoppedError("after SDK posture")
+
+    config.ConfigBoot.ensure_eager = stop_boot  # pyright: ignore[reportAttributeAccessIssue]
+    try:
+        runpy.run_module("services.agent_runner.agent_host.daemon", run_name="__main__")
+    except BootStoppedError:
+        stopped = True
+    else:
+        stopped = False
+    assert stopped, "boot did not stop"
+    from ava.sdk_surface import agent_identity, process_context
+
+    os.environ["AVA_AGENT_ID"] = "5"
+    ava.bind_host_process()
+    assert ava.is_host_process()
+    assert agent_identity.is_launched_child() is False
+    assert getattr(ava, "context", None) is None
+    _expect_refusal(lambda: ava.external.attach("must-not-be-read"), "native agent runtime")
+    _expect_refusal(
+        lambda: ava.bind_context(process_context.launched_context()),  # pyright: ignore[reportArgumentType]
+        "shared agent host",
+    )
+    _expect_refusal(ava.unbind_context, "startup posture")
+
+
+def host_rejects_inherited_child_identity() -> None:
+    import os
+    import runpy
+
+    os.environ["AVA_AGENT_ID"] = "5"
+    try:
+        runpy.run_module("services.agent_runner.agent_host.daemon", run_name="__main__")
+    except RuntimeError as exc:
+        assert "cannot inherit a launched-agent identity" in str(exc)
+    else:
+        raise AssertionError("host accepted inherited child identity")
+    assert "ava" not in sys.modules
+
+
 SCENARIOS = {
     "config_lite": config_lite,
     "no_context_for_bare_script": no_context_for_bare_script,
@@ -234,6 +295,8 @@ SCENARIOS = {
     "agent_profile_owner_url_guard": agent_profile_owner_url_guard,
     "launched_imports_share_boot": launched_imports_share_boot,
     "non_agent_import_unbound_context": non_agent_import_unbound_context,
+    "host_refuses_env_context_and_attachment": host_refuses_env_context_and_attachment,
+    "host_rejects_inherited_child_identity": host_rejects_inherited_child_identity,
 }
 
 SCENARIOS[sys.argv[1]](*sys.argv[2:])  # pyright: ignore[reportCallIssue]

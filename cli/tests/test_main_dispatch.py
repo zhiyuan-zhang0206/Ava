@@ -595,68 +595,6 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
 def test_init_and_start_are_settings_free_until_the_home_is_admitted(tmp_path: Path) -> None:
     """Keep config imports before admission and lazy runtime delivery separate."""
     repo = Path(__file__).resolve().parents[2]
-    code = r"""
-import importlib.abc
-import os
-import socket
-import sys
-import types
-from pathlib import Path
-sys.path.insert(0, sys.argv[1])
-class DenySettings(importlib.abc.MetaPathFinder):
-    admitted = False
-    def find_spec(self, fullname, path=None, target=None):
-        if not self.admitted and (fullname == "base.config" or fullname.startswith("base.config.")):
-            raise AssertionError("premature runtime Settings import")
-guard = DenySettings()
-sys.meta_path.insert(0, guard)
-def no_network(*args, **kwargs):
-    raise AssertionError("initialization performed a network dial")
-socket.socket.connect = no_network
-socket.create_connection = no_network
-from cli import main, start_intent
-from base import cluster
-home = Path(os.environ["AVA_HOME"])
-checkout = home.parent / "checkout"
-checkout.mkdir()
-start_intent._checkout = lambda: checkout
-cluster.port_free = lambda _port: True
-calls = []
-def configured():
-    assert (home / "start-intent.json").is_file()
-    assert (home / ".env").is_file()
-    assert not (home.parent / "clusters.json").exists()
-def log(args, *, initialize):
-    assert args == ["start"]
-    configured()
-    calls.append("logging")
-main._init_cli_logging = log
-def start(**kwargs):
-    assert not kwargs["command"].config.prepared
-    configured()
-    calls.append("runtime")
-    return 0
-sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=start)
-sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(
-    complete_boot_start=lambda: calls.append("boot-complete")
-)
-sys.modules["base.deploy.lifecycle.start_serving"] = types.SimpleNamespace(
-    clear_serving=lambda: calls.append("clear-serving")
-)
-assert main.main(["start"]) == 1 and not home.exists()  # nothing to start yet, and nothing made
-assert main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
-configured()
-assert calls == []  # init started nothing
-assert "base.config" not in sys.modules
-guard.admitted = True
-from base.config import ConfigBoot
-def no_prepare(self):
-    raise AssertionError("typed root prepared configuration before runtime delivery")
-ConfigBoot.prepare = no_prepare
-assert main.main(["start"]) == 0
-assert calls == ["logging", "runtime", "boot-complete"]
-assert "base.config" in sys.modules  # admitted root types are allowed; delivery stayed lazy
-"""
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(
         AVA_HOME=str(tmp_path / "home"),
@@ -664,7 +602,7 @@ assert "base.config" in sys.modules  # admitted root types are allowed; delivery
         AVA_GATEWAY_URL="http://foreign.invalid",
     )
     result = subprocess.run(  # noqa: S603 — fixed interpreter and literal probe
-        [sys.executable, "-I", "-B", "-c", code, str(repo)],
+        [sys.executable, "-I", "-B", str(_CHILD), "init_and_start_settings_free", str(repo)],
         cwd=tmp_path,
         env=env,
         capture_output=True,

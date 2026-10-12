@@ -35,6 +35,7 @@ from typing import Any
 
 import pytest
 
+import ava
 from base.paths import workspace_dir
 from base.sessions.coding_session_owner import CodingSessionKey, CodingSessionOwner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -444,10 +445,10 @@ def _exec_prefix_through(path: Path, target: str, namespace: dict[str, Any]) -> 
 
 @pytest.fixture
 def _fake_ava_module(monkeypatch: pytest.MonkeyPatch) -> _FakeAva:
-    """`_FakeAva().self.AGENT_ID` (42) doubles as the top-level `import ava`
-    these reference scripts do — no need for a second fake."""
+    """The real `ava` module with `ava.self` answering as `_FakeAva().self` (agent 42): the
+    reference scripts do a top-level `import ava` and read only `ava.self.AGENT_ID`."""
     fake = _FakeAva()
-    monkeypatch.setitem(sys.modules, "ava", fake)
+    monkeypatch.setattr(ava, "self", fake.self, raising=False)
     return fake
 
 

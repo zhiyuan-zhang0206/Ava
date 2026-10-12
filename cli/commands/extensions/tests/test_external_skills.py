@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -12,6 +11,8 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.commands.converge import spec as converge_host
+from cli.commands.extensions import external_skills as external_skills_module
+from cli.commands.extensions.external_skill_host import filesystem as filesystem_module
 from cli.tests.bootstrap.command_inputs import command_config_machine as command_config_machine
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -22,8 +23,9 @@ SKILL_NAME = "operating-ava-cluster"
 
 @pytest.fixture(autouse=True)
 def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = importlib.import_module("cli.commands.extensions.external_skills")
-    monkeypatch.setattr(module, "_SKILL_NAMES", ("operating-ava-cluster",), raising=False)
+    monkeypatch.setattr(
+        external_skills_module, "_SKILL_NAMES", ("operating-ava-cluster",), raising=False
+    )
 
 
 MARKER_NAME = ".ava-managed.json"
@@ -38,11 +40,11 @@ def home(tmp_path: Path) -> Path:
 
 
 def _bridge_module():
-    return importlib.import_module("cli.commands.extensions.external_skills")
+    return external_skills_module
 
 
 def _filesystem_module():
-    return importlib.import_module("cli.commands.extensions.external_skill_host.filesystem")
+    return filesystem_module
 
 
 def _write_source(repo: Path, *, body: str = "operator v1\n") -> Path:

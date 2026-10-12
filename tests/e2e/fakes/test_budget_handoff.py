@@ -16,54 +16,7 @@ from tests.components.base.poll_until import poll_until
 from tests.e2e.fakes.scenarios import budget_handoff
 from tests.fixtures.model_catalog import model_catalog as model_catalog
 
-_WRITER = """
-import os
-import sys
-import time
-from datetime import UTC, datetime
-from pathlib import Path
-import ava
-from base.agents.context import AvaContext
-from base.agents.context.identity import AgentIdentity
-
-root = Path(sys.argv[1])
-publication = 0
-
-def hold_publication(previous):
-    global publication
-    publication += 1
-    (root / f'previous-{publication}').write_text(previous)
-    (root / f'ready-{publication}').touch()
-    deadline = time.monotonic() + 10
-    while not (root / f'release-{publication}').exists():
-        if time.monotonic() > deadline:
-            raise TimeoutError('Reader did not release publication')
-        time.sleep(0.01)
-
-original_open = Path.open
-def held_open(path, mode='r', *args, **kwargs):
-    is_snapshot = path.name == '1.json' and mode == 'w'
-    previous = (root / '1.json').read_text() if is_snapshot else None
-    stream = original_open(path, mode, *args, **kwargs)
-    if is_snapshot:
-        hold_publication(previous)
-    return stream
-
-original_fdopen = os.fdopen
-def held_fdopen(fd, mode='r', *args, **kwargs):
-    previous = (root / '1.json').read_text() if mode == 'w' else None
-    stream = original_fdopen(fd, mode, *args, **kwargs)
-    if mode == 'w':
-        hold_publication(previous)
-    return stream
-
-Path.open = held_open
-os.fdopen = held_fdopen
-ava.context = AvaContext(identity=AgentIdentity(agent_id=1, owns_loop=False))
-ava.agents.spawn = lambda **kwargs: 2
-ava.agents.send_message = lambda *args, **kwargs: None
-exec(sys.argv[2])
-"""
+_WRITER = Path(__file__).with_name("child_budget_writer.py")
 
 
 @pytest.mark.parametrize(
@@ -93,7 +46,7 @@ def test_readers_keep_the_previous_snapshot_until_publication(
         else budget_handoff._prepare_code(transition, 1)
     )
     process = subprocess.Popen(  # noqa: S603 — fixed interpreter and generated fixture code
-        [sys.executable, "-c", _WRITER, str(tmp_path), code],
+        [sys.executable, str(_WRITER), str(tmp_path), code],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
