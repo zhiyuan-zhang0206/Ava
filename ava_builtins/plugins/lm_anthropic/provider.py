@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
+from base.lm.compat.stop import StopSpec
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     AttachPolicy,
@@ -27,7 +28,6 @@ from base.lm.provider_api import (
     with_fast_variants,
 )
 from base.lm.registry import ModelSpec, ModelTuning
-from base.lm.stop import StopSpec
 from base.packages.plugins.extensions import PluginContributions
 
 # Budget used when AVA_REASONING_EFFORT enables an extended-thinking-only Claude

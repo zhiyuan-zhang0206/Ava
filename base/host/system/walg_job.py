@@ -167,9 +167,11 @@ def register_walg_job(
         return
     if not base.host.system.cron.owns_os_jobs("WAL-G tick"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().register_walg_job(backup_hour_reader=backup_hour_reader)
+    base.host.system.cron.register_platform_job(
+        "WAL-G tick",
+        macos=lambda: _register_macos(backup_hour_reader=backup_hour_reader),
+        linux=lambda: _register_linux(backup_hour_reader=backup_hour_reader),
+    )
 
 
 def unregister_walg_job() -> None:
@@ -177,6 +179,4 @@ def unregister_walg_job() -> None:
     outside the default home."""
     if not base.host.system.cron.owns_os_jobs("WAL-G tick"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().unregister_walg_job()
+    base.host.system.cron.unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)

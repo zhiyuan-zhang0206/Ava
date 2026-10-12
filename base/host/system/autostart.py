@@ -50,13 +50,16 @@ from pathlib import Path
 from loguru import logger
 
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
+from base.host.system.boot_unit import install, uninstall
 from base.host.system.cron import (
     LAUNCHD_LABEL_PREFIX,
     ava_binary_path,
     launchd_env_block,
     os_jobs_enabled,
     owns_os_jobs,
+    register_platform_job,
     skip_os_job,
+    unregister_platform_job,
 )
 from base.paths import ava_home
 
@@ -151,10 +154,20 @@ def _unregister_macos() -> int:
     return 0
 
 
+def _register_linux() -> int:
+    install()
+    return 0
+
+
+def _unregister_linux() -> int:
+    uninstall()
+    return 0
+
+
 def register_autostart(*, enabled_reader: Callable[[], bool]) -> None:
     """Register the host's boot-time autostart job.
 
-    Platform-aware: delegates to ``PlatformBackend.register_autostart``.
+    Platform-aware: dispatches to the macOS plist or the Linux boot unit.
     Idempotent. On macOS the plist is written but not loaded into the running
     session (see module docstring); it takes effect on the next reboot.
     A no-op when ``os_jobs_enabled()`` is off (the test suite) or when this
@@ -168,9 +181,7 @@ def register_autostart(*, enabled_reader: Callable[[], bool]) -> None:
         return
     if not owns_os_jobs("autostart"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().register_autostart()
+    register_platform_job("autostart", macos=_register_macos, linux=_register_linux)
 
 
 def unregister_autostart() -> None:
@@ -181,6 +192,4 @@ def unregister_autostart() -> None:
     """
     if not owns_os_jobs("autostart"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().unregister_autostart()
+    unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)

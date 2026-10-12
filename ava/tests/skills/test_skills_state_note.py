@@ -185,7 +185,7 @@ import ava.skills
 
 before = set(sys.modules)
 ava.skills.alpha.__doc__
-forbidden = ("httpx", "langchain", "langgraph", "agent", "base.lm.catalog.decide.call")
+forbidden = ("httpx", "langchain", "langgraph", "agent", "base.lm.decision.call")
 print(json.dumps({
     "update": ava.state_update,
     "new": sorted(m for m in set(sys.modules) - before if m.startswith(forbidden)),

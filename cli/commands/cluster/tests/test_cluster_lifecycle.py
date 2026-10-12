@@ -363,11 +363,11 @@ def test_destroying_a_scratch_home_never_reaches_the_hosts_scheduler(
 ) -> None:
     """Labels name a job, not a home: only the default home may remove one."""
 
-    class _Backend:
-        def __getattr__(self, name: str) -> object:
-            raise AssertionError(f"{name} reached the scheduler from a scratch home")
+    def reached(*_a: object, **_k: object) -> None:
+        raise AssertionError("the host scheduler was reached from a scratch home")
 
-    monkeypatch.setattr("base.host.system.backend.get_backend", _Backend)
+    monkeypatch.setattr("base.host.system.cron.unregister_platform_job", reached)
+    monkeypatch.setattr("base.host.system.autostart.unregister_platform_job", reached)
 
     lifecycle._unregister_scheduled_jobs()  # no AssertionError == nothing was touched
 

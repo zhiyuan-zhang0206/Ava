@@ -74,7 +74,7 @@ from base.db.transaction import async_write_transaction
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
-from base.lm.content import content_blocks
+from base.lm.reasoning import content_blocks
 from base.log import logger
 
 from ._cancel import race_stream_vs_cancel

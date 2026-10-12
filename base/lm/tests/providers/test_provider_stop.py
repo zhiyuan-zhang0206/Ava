@@ -4,7 +4,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from base.lm.catalog import ModelCatalog
-from base.lm.stop import StopCategory, classify_stop
+from base.lm.compat.stop import StopCategory, classify_stop
 
 
 def _msg(metadata: dict) -> AIMessage:
@@ -109,7 +109,7 @@ def test_anthropic_ignores_openai_responses_status(model_catalog: ModelCatalog):
 
 
 def test_core_stop_classifier_has_no_openai_provider_branch():
-    source = (Path(__file__).resolve().parents[4] / "base/lm/stop.py").read_text()
+    source = (Path(__file__).resolve().parents[4] / "base/lm/compat/stop.py").read_text()
     assert 'provider == "openai"' not in source
 
 

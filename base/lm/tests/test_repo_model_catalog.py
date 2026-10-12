@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from base.lm import pricing, stop
+from base.lm import pricing
 from base.lm.catalog import ModelCatalog
+from base.lm.compat import stop
 from base.packages.plugins import enable_config
 
 

@@ -59,10 +59,10 @@ primitive from chat models, not a kind of chat model.
   re-raises that as `DecisionKeyMissingError` so callers can catch it without catching every
   `RuntimeError`.
 
-## Calling it (`base/lm/catalog/decide/call.py`)
+## Calling it (`base/lm/decision/call.py`)
 
 ```python
-from base.lm.catalog.decide.call import decide
+from base.lm.decision.call import decide
 from base.lm.catalog.decide.types import YesNo
 
 decisions = await decide(

@@ -10,7 +10,6 @@ import httpx
 import pytest
 
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.call import decide
 from base.lm.catalog.decide.types import (
     Choice,
     DecisionKeyMissingError,
@@ -19,6 +18,7 @@ from base.lm.catalog.decide.types import (
     Score,
     YesNo,
 )
+from base.lm.decision.call import decide
 from base.lm.plugin_providers import build_model_catalog
 
 _MODEL = "jev-1.13.0"

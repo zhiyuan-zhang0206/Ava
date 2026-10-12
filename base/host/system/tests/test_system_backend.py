@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 import base.host.system.backend as backend_module
+from base.host.system import autostart
 from base.host.system.backend import (
     LinuxPlatformBackend,
     MacPlatformBackend,
@@ -53,8 +54,6 @@ def test_venv_python_path() -> None:
 
 
 def test_linux_autostart_has_one_native_manager(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.host.system import boot_unit
-
     calls: list[str] = []
 
     def install() -> list[str]:
@@ -65,11 +64,10 @@ def test_linux_autostart_has_one_native_manager(monkeypatch: pytest.MonkeyPatch)
         calls.append("uninstall")
         return []
 
-    monkeypatch.setattr(boot_unit, "install", install)
-    monkeypatch.setattr(boot_unit, "uninstall", uninstall)
-    backend = LinuxPlatformBackend()
-    backend.register_autostart()
-    backend.unregister_autostart()
+    monkeypatch.setattr(autostart, "install", install)
+    monkeypatch.setattr(autostart, "uninstall", uninstall)
+    autostart._register_linux()
+    autostart._unregister_linux()
     assert calls == ["install", "uninstall"]
 
 
@@ -78,4 +76,4 @@ def test_linux_autostart_propagates_unavailable_systemd(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
     with pytest.raises(RuntimeError, match="systemd"):
-        LinuxPlatformBackend().register_autostart()
+        autostart._register_linux()

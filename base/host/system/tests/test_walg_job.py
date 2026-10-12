@@ -15,6 +15,13 @@ from base.host.system import cron
 from base.host.system import walg_job as job
 
 
+def _recorder(calls: list[str], label: str) -> Callable[..., None]:
+    def record(*_args: object, **_kwargs: object) -> None:
+        calls.append(label)
+
+    return record
+
+
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -178,10 +185,10 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
     skipped: list[str] = []
     monkeypatch.setattr(cron, "skip_os_job", skipped.append)
 
-    def no_backend() -> None:
-        raise AssertionError("backend must not be touched with OS jobs off")
+    def no_platform(*_a: object, **_k: object) -> None:
+        raise AssertionError("the platform must not be touched with OS jobs off")
 
-    monkeypatch.setattr("base.host.system.backend.get_backend", no_backend)
+    monkeypatch.setattr(cron, "register_platform_job", no_platform)
 
     job.register_walg_job(
         enabled_reader=lambda: False, backup_hour_reader=lambda: settings.services.backup_hour
@@ -195,14 +202,8 @@ def test_register_and_unregister_delegate_in_the_default_home(
 ) -> None:
     calls: list[str] = []
 
-    def register(*, backup_hour_reader: Callable[[], int]) -> None:
-        calls.append("register")
-
-    fake_backend = types.SimpleNamespace(
-        register_walg_job=register,
-        unregister_walg_job=lambda: calls.append("unregister"),
-    )
-    monkeypatch.setattr("base.host.system.backend.get_backend", lambda: fake_backend)
+    monkeypatch.setattr(cron, "register_platform_job", _recorder(calls, "register"))
+    monkeypatch.setattr(cron, "unregister_platform_job", _recorder(calls, "unregister"))
 
     job.register_walg_job(
         enabled_reader=lambda: True, backup_hour_reader=lambda: settings.services.backup_hour

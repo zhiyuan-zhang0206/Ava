@@ -7,8 +7,6 @@ from typing import Any
 import pytest
 
 from base.lm.catalog import CatalogBuilder
-from base.lm.catalog.decide.call import decide
-from base.lm.catalog.decide.tests.support import MODEL, FakeBinding, catalog_with, provider
 from base.lm.catalog.decide.types import (
     Choice,
     Decision,
@@ -20,6 +18,8 @@ from base.lm.catalog.decide.types import (
     UnknownDecisionModelError,
     YesNo,
 )
+from base.lm.decision.call import decide
+from base.lm.decision.tests.support import MODEL, FakeBinding, catalog_with, provider
 from base.lm.provider_api import require_key
 
 _YES_NO = YesNo("Is it spam?", "it is spam", "it is not spam")

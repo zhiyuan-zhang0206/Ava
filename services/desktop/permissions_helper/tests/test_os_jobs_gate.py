@@ -26,91 +26,36 @@ def _allow_pr_flow(*, machine: MachineIdentity, home: Path) -> None:
     _ = machine, home
 
 
-class _ExplodingBackend:
-    """A backend whose every registration path is a test failure."""
+def _exploding_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every registration or removal that reaches the host scheduler is a test failure."""
 
-    def register_cron(self, **_kw: object) -> None:
-        raise AssertionError("register_cron reached the OS with the gate off")
+    def reached(*_a: object, **_k: object) -> None:
+        raise AssertionError("a job reached the host scheduler")
 
-    def register_autostart(self) -> None:
-        raise AssertionError("register_autostart reached the OS with the gate off")
-
-    def register_logs_job(self) -> None:
-        raise AssertionError("register_logs_job reached the OS with the gate off")
-
-    def register_packages_job(self, *, tick_reader: Callable[[], int]) -> None:
-        raise AssertionError("register_packages_job reached the OS with the gate off")
-
-    def register_pr_flow_job(self) -> None:
-        raise AssertionError("register_pr_flow_job reached the OS with the gate off")
-
-    def register_walg_job(self, *, backup_hour_reader: Callable[[], int]) -> None:
-        raise AssertionError("register_walg_job reached the OS with the gate off")
-
-    def unregister_cron(self) -> None:
-        raise AssertionError("unregister_cron reached the OS outside the default home")
-
-    def unregister_autostart(self) -> None:
-        raise AssertionError("unregister_autostart reached the OS outside the default home")
-
-    def unregister_logs_job(self) -> None:
-        raise AssertionError("unregister_logs_job reached the OS outside the default home")
-
-    def unregister_packages_job(self) -> None:
-        raise AssertionError("unregister_packages_job reached the OS outside the default home")
-
-    def unregister_pr_flow_job(self) -> None:
-        raise AssertionError("unregister_pr_flow_job reached the OS outside the default home")
-
-    def unregister_walg_job(self) -> None:
-        raise AssertionError("unregister_walg_job reached the OS outside the default home")
+    for module in (cron, autostart):
+        monkeypatch.setattr(module, "register_platform_job", reached)
+        monkeypatch.setattr(module, "unregister_platform_job", reached)
 
 
-class _RecordingBackend:
+class _RecordedPlatform:
+    """The platform dispatch of every OS job, recorded instead of run."""
+
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def register_cron(self, **_kw: object) -> None:
-        self.calls.append("cron")
+    def register(self, what: str, **_platforms: object) -> None:
+        self.calls.append(what)
 
-    def register_autostart(self) -> None:
-        self.calls.append("autostart")
-
-    def register_logs_job(self) -> None:
-        self.calls.append("logs-maintenance")
-
-    def register_packages_job(self, *, tick_reader: Callable[[], int]) -> None:
-        self.calls.append("packages-refresh")
-
-    def register_pr_flow_job(self) -> None:
-        self.calls.append("pr-flow")
-
-    def register_walg_job(self, *, backup_hour_reader: Callable[[], int]) -> None:
-        self.calls.append("walg")
-
-    def unregister_cron(self) -> None:
-        self.calls.append("unregister-cron")
-
-    def unregister_autostart(self) -> None:
-        self.calls.append("unregister-autostart")
-
-    def unregister_logs_job(self) -> None:
-        self.calls.append("unregister-logs-maintenance")
-
-    def unregister_packages_job(self) -> None:
-        self.calls.append("unregister-packages-refresh")
-
-    def unregister_pr_flow_job(self) -> None:
-        self.calls.append("unregister-pr-flow")
-
-    def unregister_walg_job(self) -> None:
-        self.calls.append("unregister-walg")
+    def unregister(self, *, macos: Callable[[], int], **_platforms: object) -> None:
+        self.calls.append(f"unregister-{macos.__module__.rpartition('.')[2]}")
 
 
 @pytest.fixture()
-def backend(monkeypatch: pytest.MonkeyPatch) -> _RecordingBackend:
-    rec = _RecordingBackend()
-    monkeypatch.setattr("base.host.system.backend.get_backend", lambda: rec)
+def backend(monkeypatch: pytest.MonkeyPatch) -> _RecordedPlatform:
+    rec = _RecordedPlatform()
+    for module in (cron, autostart):
+        monkeypatch.setattr(module, "register_platform_job", rec.register)
+        monkeypatch.setattr(module, "unregister_platform_job", rec.unregister)
     return rec
 
 
@@ -193,7 +138,7 @@ def test_registration_never_reaches_the_backend_when_gated(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr("base.host.system.backend.get_backend", _ExplodingBackend)
+    _exploding_platform(monkeypatch)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
         call(machine=machine_identity, home=default_home / ".ava")
@@ -204,7 +149,7 @@ def test_registration_never_reaches_the_backend_when_gated(
 def test_registration_dispatches_when_enabled(
     gate_on: None,
     default_home: Path,
-    backend: _RecordingBackend,
+    backend: _RecordedPlatform,
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -231,13 +176,13 @@ def test_registration_dispatches_when_enabled(
         "autostart",
         "logs-maintenance",
         "packages-refresh",
-        "pr-flow",
-        "walg",
+        "PR-flow",
+        "WAL-G tick",
     ]
 
 
 def test_deregistration_is_not_gated_by_the_os_jobs_switch(
-    default_home: Path, backend: _RecordingBackend
+    default_home: Path, backend: _RecordedPlatform
 ) -> None:
     """Cleanup has to work wherever registration is switched off (the suite runs
     with it off) — otherwise a leak under an older build can never be swept."""
@@ -246,10 +191,10 @@ def test_deregistration_is_not_gated_by_the_os_jobs_switch(
     assert backend.calls == [
         "unregister-cron",
         "unregister-autostart",
-        "unregister-logs-maintenance",
-        "unregister-packages-refresh",
-        "unregister-pr-flow",
-        "unregister-walg",
+        "unregister-logs_job",
+        "unregister-packages_job",
+        "unregister-pr_flow_job",
+        "unregister-walg_job",
     ]
 
 
@@ -271,7 +216,7 @@ def test_a_scratch_home_registers_nothing(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr("base.host.system.backend.get_backend", _ExplodingBackend)
+    _exploding_platform(monkeypatch)
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
@@ -284,7 +229,7 @@ def test_a_scratch_home_registers_nothing(
 def test_a_scratch_home_removes_nothing(
     call: object, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.host.system.backend.get_backend", _ExplodingBackend)
+    _exploding_platform(monkeypatch)
     assert callable(call)
     call()
 
