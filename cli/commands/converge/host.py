@@ -64,7 +64,7 @@ from cli.commands.converge.firewall import ensure_firewall_allowlist
 from cli.commands.converge.health_preflight import (
     ensure_health_preflight as _ensure_health_preflight,
 )
-from cli.commands.converge.redis_bridge import ensure_redis_bridge
+from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands.converge.walg import converge_walg
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
@@ -343,16 +343,14 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         ensure_pgbouncer_step,
         roles=frozenset({"gateway"}),
     ),
-    # Redis itself stays loopback-only. The host-global launchd relay is the
-    # authenticated off-box ingress for a split macOS gateway; converge owns
-    # both its installed source and job so a fresh host and an upgraded host
-    # receive the same implementation.
+    # Redis itself stays loopback-only. The off-box relay is the root-supervised
+    # `redis-bridge` unit; this step only removes the standalone launchd job and
+    # installed copy an earlier layout left, so one supervisor owns the listener.
     ConvergeStep(
-        "Redis private-network bridge",
-        ensure_redis_bridge,
+        "retire the standalone Redis bridge LaunchAgent",
+        retire_launchd_redis_bridge,
         roles=frozenset({"gateway"}),
         host_global=True,
-        requires_unit_config=True,
     ),
     # The frontend session (and its `npm run build`) runs on gateway hosts, so
     # the guard gates exactly the hosts whose bundle could go stale.

@@ -34,6 +34,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.host.system.probes import (
@@ -63,6 +64,23 @@ def _computer_mcp_gate_reason() -> str | None:
     if permissions_helper_incapability() is not None:
         return permissions_helper_incapability()
     return None
+
+
+def _redis_bridge_gate_reason(*, machine: MachineIdentity) -> str | None:
+    """Why redis-bridge is gated out, or None when this host needs the relay.
+
+    The relay exists only on a macOS gateway with a local data plane and a declared
+    non-loopback address; the same answer drives `ava status` and the cluster health probe.
+    """
+    try:
+        endpoint = redis_bridge_endpoint(
+            ava_home(),
+            machine_host=machine.host,
+            remote_data_plane=lambda: settings.data_plane.is_remote,
+        )
+    except RedisBridgeUnconfiguredError as exc:
+        return str(exc)
+    return None if endpoint is not None else "no off-box Redis ingress on this host"
 
 
 def _otel_collector_gate_reason(*, machine: MachineIdentity) -> str | None:
@@ -146,6 +164,8 @@ def _core_gate_reason(session: str, *, machine: MachineIdentity) -> str | None:
         )
     if session == "otel-collector":
         return _otel_collector_gate_reason(machine=machine)
+    if session == "redis-bridge":
+        return _redis_bridge_gate_reason(machine=machine)
     return _flag_gate_reason(session)
 
 

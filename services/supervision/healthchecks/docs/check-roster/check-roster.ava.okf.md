@@ -33,6 +33,7 @@ file to this directory and no row to this table.
 | `insights.py` | Service protocol probe | `GET /healthz` over the Unix socket: this service, this home, the recorded pid |
 | `memory_search.py` | Service protocol probe | Real exact-search POST |
 | `otel_collector.py` | Service protocol probe | Valid OTLP request accepted |
+| `redis_bridge.py` | Service protocol probe | RESP command through the relay gets a Redis reply |
 | `protocol_probe.py` | Read-only diagnostic helper | Protocol result adapter and bounded Unix ping |
 | `permissions_helper.py` | Read-only diagnostic helper | Parent helper ping and launchd failure classification |
 | `prod_venv.py` | Read-only diagnostic helper | Bounded dependency check and isolated import smoke |

@@ -57,8 +57,7 @@ Remote-managed data planes skip local server and extension preparation entirely.
   checkout's Git hook installation is missing or drifted (via
   `provision/check_git_hooks.py --scan-machine`); warn-only, it never blocks a
   start or update. See the runbook's Git hooks section.
-- `redis_bridge.py` installs the repo-owned pure-stdlib relay into
-  `$AVA_HOME`, converges or retires its macOS KeepAlive job as the cluster shape
-  changes, and exposes the authenticated Redis PING used by `ava status` and the
-  alert-only cluster health check. The listener recreates its socket after an
-  interface or descriptor failure; Redis itself never widens beyond loopback.
+- `redis_bridge.py` retires the standalone launchd job and installed relay copy an
+  earlier layout left (the relay now runs as the root-supervised `redis-bridge` unit)
+  and exposes the authenticated Redis PING used by `ava status` and the alert-only
+  cluster health check. Redis itself never widens beyond loopback.
