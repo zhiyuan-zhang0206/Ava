@@ -43,6 +43,8 @@ explicit region snapshot `frame`, converting local pixels with its origin and
 scale. They do not replace whole-screen scale or tracked pointer state. Window
 frames explicitly refuse global pointer input: [[observation-frames.ava.okf.md]].
 
+The clipboard tools are in [[clipboard.ava.okf.md]].
+
 Extended options on existing methods require ping.native_input_v1 from the
 helper. An older running helper fails explicitly before a right button or
 modifier request can be silently ignored. New method names already fail when
@@ -62,12 +64,12 @@ token or resident poller; it runs only while a desktop action is executing.
   whole quadrant. Only the main display's corner counts; there is no hot-zone
   size or dwell time. The pointer is not attributed, so an agent move onto the
   corner also trips it.
-- Checked: before `click`, `drag`, `move`, `focus_app`, `type`, `key`, `scroll`
-  and `ax_act` (in `dispatch`, after the Accessibility grant gate); inside
+- Checked: before `click`, `drag`, `move`, `focus_app`, `type`, `key`, `scroll`,
+  `clipboard_write` and `ax_act` (in `dispatch`, after the Accessibility grant gate); inside
   `drag` before each of its 12 movements; and in 20 ms slices of every click or
   key hold and of the gap between clicks. Not checked: observation (`snapshot`,
   `cursor_position`, `screen_size`, `ax_tree`, `ax_window_info`, `list_*`,
-  `window_info`, `frontmost_app`, `session_info`, `ping`), so the model can still
+  `window_info`, `frontmost_app`, `session_info`, `clipboard_read`, `ping`), so the model can still
   look at the screen while the pointer is parked.
 - Cleanup bypasses the check. A stopped action still posts the mouse-up,
   key-up and modifier releases it pressed, and nothing else. A stopped drag or

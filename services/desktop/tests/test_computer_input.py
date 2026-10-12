@@ -27,6 +27,8 @@ class Desktop:
         self.requests: list[dict[str, Any]] = []
         self.events: list[Any] = []
         self.capable = True
+        self.clipboard_capable = True
+        self.clipboard: str | None = None
         self.denied: str | None = None
         self.daemon = ComputerMcpDaemon(
             ComputerUseConfig(30, 0.01, 30, 60, 1),
@@ -39,7 +41,11 @@ class Desktop:
         self.requests.append(req)
         method = req["method"]
         if method == "ping":
-            result: dict[str, Any] = {"pong": True, "native_input_v1": self.capable}
+            result: dict[str, Any] = {
+                "pong": True,
+                "native_input_v1": self.capable,
+                "clipboard_v1": self.clipboard_capable,
+            }
         elif method == "frontmost_app":
             result = {"app": "InertTarget"}
         elif method == "screen_size":
@@ -48,7 +54,13 @@ class Desktop:
             result = {"x": -8, "y": 33}
         elif self.denied:
             return {"ok": False, "error": self.denied}
-        elif method in {
+        else:
+            result = self.act(method, req)
+        return {"ok": True, "result": result}
+
+    def act(self, method: str, req: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any]
+        if method in {
             "list_apps",
             "list_windows",
             "focus_app",
@@ -64,6 +76,8 @@ class Desktop:
                 "button": req.get("button", "left"),
                 "click_count": count,
             }
+        elif method in {"clipboard_read", "clipboard_write"}:
+            result = self.clipboard_result(method, req)
         elif method == "move":
             result = {"moved": {"x": req["x"], "y": req["y"]}}
         elif method == "scroll":
@@ -80,7 +94,19 @@ class Desktop:
             }
         else:
             raise AssertionError(method)
-        return {"ok": True, "result": result}
+        return result
+
+    def clipboard_result(self, method: str, req: dict[str, Any]) -> dict[str, Any]:
+        if method == "clipboard_write":
+            self.clipboard = req["text"]
+            return {"length": len(req["text"])}
+        text = self.clipboard
+        return {
+            "text": text,
+            "types": [] if text is None else ["public.utf8-plain-text"],
+            "length": 0 if text is None else len(text),
+            "truncated": False,
+        }
 
     def observe(self, req: dict[str, Any]) -> dict[str, Any]:
         method = req["method"]

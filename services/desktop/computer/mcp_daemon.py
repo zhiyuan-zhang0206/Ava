@@ -112,26 +112,77 @@ def _hide_badge() -> None:
         logger.warning(f"[computer-mcp] capture indicator not stopped, its lease will expire: {e}")
 
 
+_AuditArgs = dict[str, Any]
+_AuditResult = dict[str, Any] | None
+
+
+def _coords_point(args: _AuditArgs, result: _AuditResult) -> str | None:
+    del result
+    return f"{args['x']},{args['y']}" if "x" in args else None
+
+
+def _coords_drag(args: _AuditArgs, result: _AuditResult) -> str | None:
+    del result
+    return f"{args.get('start_x')},{args.get('start_y')}->{args.get('end_x')},{args.get('end_y')}"
+
+
+def _coords_click_text(args: _AuditArgs, result: _AuditResult) -> str | None:
+    # click_text resolves its own target via OCR: audit the center it
+    # clicked (physical pixels), not an argument coordinate.
+    del args
+    return None if result is None else f"{result.get('x')},{result.get('y')}"
+
+
+def _coords_ax_act(args: _AuditArgs, result: _AuditResult) -> str | None:
+    # The element's center and the action - never the value written.
+    del args
+    if result is None:
+        return None
+    return (
+        f"{result.get('x')},{result.get('y')},{result.get('native_action', result.get('action'))}"
+    )
+
+
+def _coords_scroll(args: _AuditArgs, result: _AuditResult) -> str | None:
+    del result
+    return f"{args.get('x')},{args.get('y')},{args.get('dy')}"
+
+
+def _coords_key(args: _AuditArgs, result: _AuditResult) -> str | None:
+    del result
+    return str(args.get("key") or args.get("keycode") or "")
+
+
+def _coords_clipboard_write(args: _AuditArgs, result: _AuditResult) -> str | None:
+    # The clipboard may hold a secret: only a length is ever recorded, never the text.
+    del args
+    return None if result is None else f"{result.get('written')} chars"
+
+
+def _coords_clipboard_read(args: _AuditArgs, result: _AuditResult) -> str | None:
+    del args
+    if result is None:
+        return None
+    return f"{result['length']} chars" if result.get("text") is not None else "no text"
+
+
+_AUDIT_COORDS: dict[str, Callable[[_AuditArgs, _AuditResult], str | None]] = {
+    "click": _coords_point,
+    "move": _coords_point,
+    "drag": _coords_drag,
+    "click_text": _coords_click_text,
+    "ax_act": _coords_ax_act,
+    "scroll": _coords_scroll,
+    "key": _coords_key,
+    "clipboard_write": _coords_clipboard_write,
+    "clipboard_read": _coords_clipboard_read,
+}
+
+
 def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None) -> str | None:
     """The compact "where / what" string of a computer_action audit row."""
-    if tool in {"click", "move"} and "x" in args:
-        return f"{args['x']},{args['y']}"
-    if tool == "drag":
-        return (
-            f"{args.get('start_x')},{args.get('start_y')}->{args.get('end_x')},{args.get('end_y')}"
-        )
-    if tool == "click_text" and result is not None:
-        # click_text resolves its own target via OCR: audit the center it
-        # clicked (physical pixels), not an argument coordinate.
-        return f"{result.get('x')},{result.get('y')}"
-    if tool == "ax_act" and result is not None:
-        # The element's center and the action — never the value written.
-        return f"{result.get('x')},{result.get('y')},{result.get('native_action', result.get('action'))}"
-    if tool == "scroll":
-        return f"{args.get('x')},{args.get('y')},{args.get('dy')}"
-    if tool == "key":
-        return str(args.get("key") or args.get("keycode") or "")
-    return None
+    describe = _AUDIT_COORDS.get(tool)
+    return None if describe is None else describe(args, result)
 
 
 def computer_use_config() -> ComputerUseConfig:

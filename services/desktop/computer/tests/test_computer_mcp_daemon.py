@@ -219,6 +219,8 @@ async def test_list_tools_and_ping(*, database_gate: ProcessDbGate) -> None:
         "frontmost_app",
         "ax_tree",
         "ax_act",
+        "clipboard_read",
+        "clipboard_write",
     }
     ping = await d._dispatch(_req("ping"))
     assert ping["ok"] is True

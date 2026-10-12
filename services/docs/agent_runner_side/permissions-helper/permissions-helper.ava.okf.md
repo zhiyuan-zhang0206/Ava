@@ -76,7 +76,7 @@ Mouse buttons/counts/modifier chords and bounded holds are advertised as
 methods stop with `error_code: "user_abort"` while the pointer is parked at the main
 display's top-left corner (`ping.corner_failsafe_v1`, same document). The helper marks the window each input
 lands on with the system capture badge (`ping.capture_indicator_v1`; `indicator_stop`
-ends it):
+ends it). Clipboard methods (`ping.clipboard_v1`): [[../computer-mcp/clipboard.ava.okf.md]].
 [[../computer-mcp/observation-frames.ava.okf.md]]. The new
 `move`, `cursor_position`, `list_apps`, `list_windows`, `focus_app` and
 `screencapture_window` methods use the same single-call JSON transport.

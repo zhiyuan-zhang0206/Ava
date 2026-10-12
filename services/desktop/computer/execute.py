@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from ..permissions_helper import client as helper
@@ -12,6 +13,7 @@ from .ax_ids import AxSession
 from .errors import ComputerUseError
 from .input import (
     ClickInput,
+    ClipboardWriteInput,
     DragInput,
     KeyInput,
     MoveInput,
@@ -293,6 +295,11 @@ def _scroll_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
     return dict(helper.scroll(lx, ly, request.dy, **options))
 
 
+def _clipboard_write_tool(args: dict[str, Any]) -> dict[str, Any]:
+    request = validate_input(ClipboardWriteInput, args)
+    return {"written": helper.clipboard_write(request.text)["length"]}
+
+
 def _window_info_tool(args: dict[str, Any]) -> dict[str, Any]:
     # owner is optional — the caller usually wants the focused window, and
     # defaulting here saves a frontmost_app round trip.
@@ -322,6 +329,27 @@ def _application_tool(tool: str, args: dict[str, Any]) -> dict[str, Any]:
     raise ComputerUseError(f"unknown application tool {tool!r}")
 
 
+def _clipboard_read_tool(args: dict[str, Any]) -> dict[str, Any]:
+    if args.keys() - {"task_id", "priority"}:
+        raise ComputerUseError("clipboard_read takes no arguments")
+    return dict(helper.clipboard_read())
+
+
+# Tools whose pointer arguments are physical pixels converted with the measured scale.
+_SCALED_TOOLS: dict[str, Callable[[dict[str, Any], float | None], dict[str, Any]]] = {
+    "click": _click_tool,
+    "drag": _drag_tool,
+    "scroll": _scroll_tool,
+    "move": _move_tool,
+}
+# Tools that depend on nothing but their own arguments.
+_ARGS_ONLY_TOOLS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    "key": _key_tool,
+    "clipboard_read": _clipboard_read_tool,
+    "clipboard_write": _clipboard_write_tool,
+}
+
+
 def _execute(
     tool: str,
     args: dict[str, Any],
@@ -343,20 +371,14 @@ def _execute(
         return _snapshot_tool(args, agent_id, ocr_cache)
     if tool == "find_text":
         return _find_text_tool(args, agent_id, ocr_cache)
-    if tool == "click":
-        return _click_tool(args, scale)
-    if tool == "drag":
-        return _drag_tool(args, scale)
+    if tool in _SCALED_TOOLS:
+        return _SCALED_TOOLS[tool](args, scale)
+    if tool in _ARGS_ONLY_TOOLS:
+        return _ARGS_ONLY_TOOLS[tool](args)
     if tool == "click_text":
         return _click_text_tool(args, agent_id, ocr_cache)
     if tool == "type_text":
         return {"typed": helper.type_text(str(args["text"]))["typed"]}
-    if tool == "key":
-        return _key_tool(args)
-    if tool == "scroll":
-        return _scroll_tool(args, scale)
-    if tool == "move":
-        return _move_tool(args, scale)
     if tool == "cursor_position":
         position = helper.cursor_position()
         current = _current_scale(scale)
@@ -554,6 +576,37 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "move",
         "description": "Move the pointer without clicking; physical pixels or local region frame pixels.",
         "input_schema": tool_schema(MoveInput),
+    },
+    {
+        "name": "clipboard_read",
+        "description": (
+            "Read the system clipboard: returns text (the plain text, or null when the clipboard "
+            "holds none), types (every type currently on the clipboard), length (characters of "
+            "the full text) and truncated (true when text was cut at 1,000,000 characters). "
+            "Observation only: it never changes the clipboard. The clipboard may hold a "
+            "password or other private data: read it only when the task needs it, and do not "
+            "copy it anywhere the task does not call for. Its content is not recorded in the "
+            "audit log, only its length."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer"},
+                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "clipboard_write",
+        "description": (
+            "Replace the system clipboard with plain text (at most 1,000,000 characters); any "
+            "other type on it is discarded. This overwrites what the user had copied, so use it "
+            "only when the task needs it. Returns written (characters). The text is never echoed "
+            "and never recorded in the audit log, only its length. To paste, write the text and "
+            "press cmd+v with the key tool."
+        ),
+        "input_schema": tool_schema(ClipboardWriteInput),
     },
     {
         "name": "cursor_position",

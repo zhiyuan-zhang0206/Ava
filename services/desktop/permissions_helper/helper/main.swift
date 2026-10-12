@@ -1045,8 +1045,9 @@ func screenSize(_ req: [String: Any]) throws -> [String: Any] {
 }
 
 /// Report the frontmost application's display name, or "" when none is focused.
-/// The computer-use gate matches this against its denied-app keywords before
-/// letting a click/type/key/scroll through.
+/// Read-only: the `frontmost_app` tool returns it, `window_info`, `ax_tree` and snapshot
+/// `include_ax` default to it when the caller names no app, and the daemon records it as
+/// the `app` field of every `computer_action` audit row. Nothing is gated on it.
 func frontmostApp() -> [String: Any] {
     refreshAppKit()
     let app = NSWorkspace.shared.frontmostApplication
@@ -1067,6 +1068,47 @@ func typeText(_ req: [String: Any]) throws -> [String: Any] {
     down.post(tap: .cghidEventTap)
     up.post(tap: .cghidEventTap)
     return ["typed": text.count]
+}
+
+// MARK: - Clipboard
+
+/// Longest clipboard text the helper reads or writes, in Unicode code points (what Python's
+/// `len` counts). The Python input contract carries the same bound.
+let clipboardMaxCharacters = 1_000_000
+
+/// Read the clipboard's plain text and the types it holds. `text` is null when it holds no plain
+/// text (never a made-up empty string); a text beyond the bound is cut and flagged `truncated`,
+/// with `length` still counting the whole. Observation only: it changes nothing, and neither the
+/// text nor any part of it is logged or put into an error here.
+func clipboardRead(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: [])
+    let board = NSPasteboard.general
+    let types = (board.types ?? []).map { $0.rawValue }
+    guard let full = board.string(forType: .string) else {
+        return ["text": NSNull(), "types": types, "length": 0, "truncated": false]
+    }
+    let scalars = full.unicodeScalars
+    let length = scalars.count
+    if length <= clipboardMaxCharacters {
+        return ["text": full, "types": types, "length": length, "truncated": false]
+    }
+    var kept = String.UnicodeScalarView()
+    kept.append(contentsOf: scalars.prefix(clipboardMaxCharacters))
+    return ["text": String(kept), "types": types, "length": length, "truncated": true]
+}
+
+/// Replace the clipboard with plain text (`public.utf8-plain-text`) and nothing else. The reply
+/// carries the length only, and no error here carries the text: it may be a secret.
+func clipboardWrite(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: ["text"])
+    guard let text = req["text"] as? String else { throw OpError.bad("clipboard_write needs string text") }
+    let length = text.unicodeScalars.count
+    guard length <= clipboardMaxCharacters
+    else { throw OpError.bad("clipboard text exceeds \(clipboardMaxCharacters) characters") }
+    let board = NSPasteboard.general
+    board.clearContents()
+    guard board.setString(text, forType: .string) else { throw OpError.bad("the clipboard did not accept the text") }
+    return ["length": length]
 }
 
 /// Report the on-screen geometry of an application's frontmost window via the
@@ -2458,7 +2500,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
     let method = req["method"] as? String ?? ""
     // Methods that change desktop state; each is refused while the corner fail-safe holds.
     let cornerFailsafeMethods: Set<String> = [
-        "click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_act",
+        "click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_act", "clipboard_write",
     ]
     let indicatorInputMethods: Set<String> = ["click", "drag", "move", "scroll", "type", "key"]
     let axGatedMethods: Set<String> = ["click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
@@ -2475,7 +2517,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true, "capture_indicator_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true, "capture_indicator_v1": true, "clipboard_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
@@ -2495,6 +2537,8 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "ax_window_info": result = try axWindowInfo(req)
         case "ax_tree": result = try axTree(req)
         case "ax_act": result = try axAct(req)
+        case "clipboard_read": result = try clipboardRead(req)
+        case "clipboard_write": result = try clipboardWrite(req)
         case "indicator_stop": result = try indicatorStop(req)
         case "window_info": result = try windowInfo(req)
         case "session_info": result = sessionInfo()

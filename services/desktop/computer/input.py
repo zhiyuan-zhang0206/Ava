@@ -12,6 +12,9 @@ from .targets import ObservationFrame
 Coordinate = Annotated[float, Field(strict=True, allow_inf_nan=False)]
 Modifier = Literal["shift", "ctrl", "alt", "cmd"]
 MouseButton = Literal["left", "right", "middle"]
+# Longest clipboard text either direction carries, in Unicode code points. The helper enforces
+# the same bound on its side of the wire.
+CLIPBOARD_MAX_CHARS = 1_000_000
 WheelDelta = Annotated[int, Field(strict=True, ge=-(2**31), le=2**31 - 1)]
 
 
@@ -73,6 +76,13 @@ class ScrollInput(PositionedInput):
         if not self.model_fields_set.intersection({"dx", "dy"}):
             raise ValueError("scroll requires dx or dy")
         return self
+
+
+class ClipboardWriteInput(BaseModel):
+    """Plain text for the clipboard. Validation errors never echo the value: it may be a secret."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", hide_input_in_errors=True)
+    text: str = Field(max_length=CLIPBOARD_MAX_CHARS)
 
 
 class MoveInput(PositionedInput):

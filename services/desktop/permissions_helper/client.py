@@ -53,6 +53,12 @@ from .wire import (
     ClickResult as ClickResult,
 )
 from .wire import (
+    ClipboardReadResult as ClipboardReadResult,
+)
+from .wire import (
+    ClipboardWriteResult as ClipboardWriteResult,
+)
+from .wire import (
     DragResult as DragResult,
 )
 from .wire import (
@@ -418,6 +424,30 @@ def indicator_stop(*, sock_path: str | Path | None = None) -> IndicatorStopResul
     """
     _require_capture_indicator(sock_path)
     return _call("indicator_stop", sock_path=sock_path)
+
+
+def _require_clipboard(sock_path: str | Path | None) -> None:
+    if ping(sock_path=sock_path).get("clipboard_v1") is not True:
+        raise PermissionsHelperError(
+            "permissions helper lacks clipboard_v1; update it before using the clipboard"
+        )
+
+
+def clipboard_read(*, sock_path: str | Path | None = None) -> ClipboardReadResult:
+    """Read the clipboard's plain text and the list of types it currently holds.
+
+    `text` is None when no plain text is on the clipboard. The content is returned to the
+    caller only; nothing in this layer logs it."""
+    _require_clipboard(sock_path)
+    return _call("clipboard_read", sock_path=sock_path)
+
+
+def clipboard_write(text: str, *, sock_path: str | Path | None = None) -> ClipboardWriteResult:
+    """Replace the clipboard with plain text (`public.utf8-plain-text`) and nothing else.
+
+    The reply carries the length only, so the text is never echoed into a log or an audit row."""
+    _require_clipboard(sock_path)
+    return _call("clipboard_write", text=text, sock_path=sock_path)
 
 
 def list_apps(*, sock_path: str | Path | None = None) -> AppsResult:
