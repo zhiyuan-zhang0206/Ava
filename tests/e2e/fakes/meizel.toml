@@ -1,0 +1,2 @@
+[external]
+"child_budget_writer.py" = "executes the generated scenario program passed on its command line"

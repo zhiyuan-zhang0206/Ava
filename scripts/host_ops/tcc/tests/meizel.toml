@@ -1,0 +1,2 @@
+[loads]
+"test_tcc_onboard_helper_grants.py" = ["scripts/host_ops/tcc"]

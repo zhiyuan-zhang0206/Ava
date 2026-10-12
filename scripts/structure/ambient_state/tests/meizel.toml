@@ -1,0 +1,3 @@
+[external]
+"test_task_owner.py" = "executes sample source the lint rule is exercised on"
+"test_thread_owner.py" = "executes sample source the lint rule is exercised on"
