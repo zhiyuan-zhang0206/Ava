@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Pure-stdlib TCP relay from a private-network address to loopback Redis.
 
-The installed copy runs under ``/usr/bin/python3`` so macOS's application
+The root supervisor runs it under ``/usr/bin/python3`` so macOS's application
 firewall recognizes the serving binary. Redis itself remains loopback-only.
+
+A listener that cannot be bound or kept accepting is rebuilt with a growing delay, but
+only ``_MAX_LISTENER_FAILURES`` times in a row: the process then exits non-zero and the
+root supervisor's bounded restart budget decides what happens next.
 """
 
 from __future__ import annotations
@@ -23,6 +27,13 @@ _BUFFER_SIZE = 65536
 _INITIAL_REBIND_DELAY_S = 1.0
 _MAX_REBIND_DELAY_S = 30.0
 _STOP_TIMEOUT_S = 5.0
+# Consecutive listener failures (bind or accept) without one admitted connection before the
+# relay gives up. With the delays above the five failures span about half a minute.
+_MAX_LISTENER_FAILURES = 5
+
+
+class ListenerExhaustedError(RuntimeError):
+    """The listener failed `_MAX_LISTENER_FAILURES` times in a row without admitting a connection."""
 
 
 def _log(message: str) -> None:
@@ -242,6 +253,7 @@ class RelayService:
         self._listener: socket.socket | None = None
         self._connections: list[_Connection] = []
         self._errors: list[BaseException] = []
+        self._listener_failures = 0
 
     def _observe_error(self, error: BaseException) -> None:
         with self._lock:
@@ -319,7 +331,12 @@ class RelayService:
         return unfinished == 0
 
     def serve_forever(self) -> None:
-        """Rebind a failed listener while established connections keep forwarding."""
+        """Rebind a failed listener while established connections keep forwarding.
+
+        Raises:
+            ListenerExhaustedError: the listener failed `_MAX_LISTENER_FAILURES` times in a
+                row; an admitted connection clears the count.
+        """
         delay_s = _INITIAL_REBIND_DELAY_S
         # quiesce-exempt: a TCP relay; no database
         while not self._stopped.is_set():
@@ -336,15 +353,22 @@ class RelayService:
                 self._accept(listener)
             except OSError as exc:
                 _log(f"listener bind failed: {exc}; retrying in {delay_s:g}s")
+                self._listener_failures += 1
             finally:
                 if listener is not None:
                     with suppress(OSError):
                         listener.close()
                 with self._lock:
                     self._listener = None
-            if not self._stopped.is_set():
-                self._sleep(delay_s)
-                delay_s = min(delay_s * 2.0, _MAX_REBIND_DELAY_S)
+            if self._stopped.is_set():
+                continue
+            if self._listener_failures >= _MAX_LISTENER_FAILURES:
+                raise ListenerExhaustedError(
+                    f"listener on {self._listen_address[0]}:{self._listen_address[1]} failed "
+                    f"{self._listener_failures} times in a row"
+                )
+            self._sleep(delay_s)
+            delay_s = min(delay_s * 2.0, _MAX_REBIND_DELAY_S)
 
     def _accept(self, listener: socket.socket) -> None:
         while not self._stopped.is_set():
@@ -357,8 +381,10 @@ class RelayService:
                     continue
                 if not self._stopped.is_set():
                     _log(f"listener accept failed: {exc}; rebuilding listener")
+                    self._listener_failures += 1
                 return
             self._admit(client, peer)
+            self._listener_failures = 0
 
 
 def _run_service(service: RelayService) -> None:
@@ -411,6 +437,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     previous_term = signal.signal(signal.SIGTERM, stop_handler)
     try:
         _run_service(service)
+    except ListenerExhaustedError as exc:
+        _log(f"giving up: {exc}")
+        raise SystemExit(1) from exc
     finally:
         signal.signal(signal.SIGINT, previous_int)
         signal.signal(signal.SIGTERM, previous_term)

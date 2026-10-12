@@ -118,6 +118,7 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "computer-mcp",
         "page-server",
         "pg-backup",
+        "redis-bridge",
         "ttl-reaper",
         "schedule-manager",
         "insights",

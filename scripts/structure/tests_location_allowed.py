@@ -176,10 +176,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "the rendered LGTM configs equal the repository's deploy/lgtm provisioning files (loki.yaml, datasources.yml) and the native Loki template ships the noise-reducing log level",
     ),
-    "tests/components/cli/test_converge_redis_bridge.py": (
-        "integration",
-        "cli converge drives the redis bridge service end to end: spans cli, services.redis_bridge, no one of which may import all the others",
-    ),
     "tests/components/cli/test_main_dispatch_contract.py": (
         "contract",
         "scans the repository root for entry points that declare the database gate exemption",

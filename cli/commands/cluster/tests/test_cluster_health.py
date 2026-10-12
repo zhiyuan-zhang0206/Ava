@@ -503,7 +503,7 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A loaded launchd job cannot hide a relay whose PING path is dead."""
+    """A relay whose PING path is dead is reported even when its process is up."""
 
     def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
         del machine
