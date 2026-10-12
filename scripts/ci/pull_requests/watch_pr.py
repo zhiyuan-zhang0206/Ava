@@ -17,7 +17,7 @@ error stops after one attempt. Exit codes: 0 the wake was delivered, 1 the CI
 probe raised, 2 delivery failed — the absolute verdict path and cause are in
 the log and exit notice, and the persisted file is the fallback record.
 
-Uses `scripts/ci/cli.py:check_ci` — the repo-provided, correct CI polling
+Uses `scripts/ci/pull_requests/status.py:check_ci` — the repo-provided, correct CI polling
 logic.  Do NOT write ad-hoc `gh pr checks` + exit-code checks: `gh pr checks`
 exits non-zero when a check FAILS, so a `returncode == 0` condition silently
 drops the red case and the watcher only wakes on the timeout — exactly the bug
@@ -82,7 +82,7 @@ VERDICT_PATH = (workspace_dir(WATCHER_ID) / VERDICT_FILE).resolve()
 
 os.chdir(REPO_ROOT)
 sys.path.insert(0, CI_UTILS)
-from scripts.ci.cli import CIStatus, check_ci  # noqa: E402
+from scripts.ci.pull_requests.status import CIStatus, check_ci  # noqa: E402
 
 
 def persistent_config_cause(exc: Exception) -> str | None:

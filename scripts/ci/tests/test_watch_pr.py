@@ -142,7 +142,7 @@ def _run_watcher(
         # sys.modules: a stub left there leaks into fixture teardown, which
         # re-imports `ava` (same substitution the generated-watcher tests use).
         ("import ava\n", ""),
-        ("from scripts.ci.cli import CIStatus, check_ci  # noqa: E402\n", ""),
+        ("from scripts.ci.pull_requests.status import CIStatus, check_ci  # noqa: E402\n", ""),
     )
     for old, new in substitutions:
         assert old in code, f"template no longer contains {old!r} — update this test"
