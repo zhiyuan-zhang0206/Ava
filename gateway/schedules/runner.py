@@ -18,9 +18,9 @@ starts, closed with the outcome when it exits. This is process-level history —
 one row per process lifetime, not per fire — and it is severable observability:
 a run-record write failure never affects the schedule itself. A run the runner
 cannot close (a SIGTERM/SIGHUP kill, a manager SIGKILL on stop/restart/
-edited-script save) stays ``ok = NULL`` until the ScheduleManager's reconcile
-sweep closes it as ``interrupted`` — a NULL row is legitimate only while the
-schedule has a live session. A stall-guard hard exit reaps owned descendants,
+edited-script save) stays ``ok = NULL`` until the ScheduleManager next
+launches or reaps that schedule's session and closes it as ``interrupted``; no
+periodic sweep closes it. A stall-guard hard exit reaps owned descendants,
 then attempts to close it ``ok = false`` within a bounded record deadline.
 
 The ScheduleManager launches this inside a session named
@@ -518,8 +518,8 @@ def _run(
     # stall guard, which receives run_id and closes the row ok=false within its
     # bounded record deadline before hard exit; a deadline that expires abandons
     # the write. Both an abandoned write and a kill that leaves no code path to
-    # close (SIGTERM/SIGHUP/SIGKILL) leave the row in-progress; the manager's
-    # reconcile sweep closes it as 'interrupted' once the process is gone.
+    # close (SIGTERM/SIGHUP/SIGKILL) leave the row in-progress; the manager closes
+    # it as 'interrupted' when it next launches or reaps the schedule.
     run_id = _record_run_start(database, schedule_id)
 
     try:

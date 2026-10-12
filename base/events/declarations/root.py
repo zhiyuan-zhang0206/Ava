@@ -98,6 +98,20 @@ class ScheduleStalled(TypedDict):
     stalled_seconds: float
 
 
+class ScheduleConvergenceAbandoned(TypedDict):
+    """`schedule_convergence_abandoned` payload — services/wake/schedule_manager/manager.py.
+
+    Emitted once when the schedule manager stops retrying a schedule whose
+    session survives its reap (or whose live session's launch provenance cannot
+    be read) for ``blocked_seconds``. ``reason`` names the blocked step. The
+    schedule is recorded as an error; an explicit new revision lifts the stop.
+    """
+
+    schedule_id: int
+    reason: str
+    blocked_seconds: float
+
+
 class RecoveryDrillFailed(TypedDict):
     """`recovery_drill_failed` payload — the scheduled logical restore drill.
 
@@ -279,6 +293,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=ScheduleStalled,
         tier="anomaly",
         site=("services/wake/schedule_manager/manager.py:_report_stalled_schedules telemetry.emit"),
+    ),
+    "schedule_convergence_abandoned": telemetry_event(
+        "schedule_convergence_abandoned",
+        "the schedule manager stopped retrying a schedule whose session survives its reap or whose live session's launch provenance is unreadable, and recorded the schedule as an error; an explicit new revision lifts the stop",
+        payload=ScheduleConvergenceAbandoned,
+        tier="anomaly",
+        site="services/wake/schedule_manager/manager.py:_give_up telemetry.emit",
     ),
     "root_health_expected": telemetry_event(
         "root_health_expected",

@@ -10,7 +10,10 @@ A request is deleted only after its sync ran, and only if it is still the row
 that was read (a newer request for the same schedule survives), so a crash
 between the sync and the delete runs convergence again: matching persisted
 revision/session provenance is adopted instead of kill/relaunch. While a maintenance hold is up nothing is consumed and the requests
-stay queued.
+stay queued. A request that stays blocked (a session that survives its reap,
+unreadable launch provenance) is retried for a bounded window; when the manager
+gives up it reports success, so the request is consumed (the schedule is then an
+error with an alert, see ``manager.py``).
 
 Synchronous psycopg; the loop calls it through `asyncio.to_thread`.
 """
