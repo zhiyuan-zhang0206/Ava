@@ -44,8 +44,9 @@ from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
-from base.sessions.backend import SessionBackend, get_shell_backend
+from base.sessions.backend import get_shell_backend
 from base.sessions.page_session import page_session_name
+from base.sessions.protocol import SessionBackend
 from base.sessions.pty import client as pty_client
 from base.sessions.record import SessionRecord
 from base.telemetry import build_pipeline

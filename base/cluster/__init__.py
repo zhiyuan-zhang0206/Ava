@@ -96,6 +96,9 @@ from base.cluster.derive import (
 from base.cluster.derive import (
     session_name as session_name,
 )
+from base.cluster.derive import (
+    swap_db as swap_db,
+)
 from base.cluster.ports import (
     ClusterPorts as ClusterPorts,
 )
@@ -104,15 +107,6 @@ from base.cluster.ports import (
 )
 from base.cluster.ports import (
     port_free as port_free,
-)
-from base.cluster.provision import (
-    _adopt_database as _adopt_database,
-)
-from base.cluster.provision import (
-    _schema_applied as _schema_applied,
-)
-from base.cluster.provision import (
-    _swap_db as _swap_db,
 )
 from base.cluster.provision import (
     assert_checkpoint_dependency_pinned as assert_checkpoint_dependency_pinned,

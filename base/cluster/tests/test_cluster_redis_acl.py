@@ -17,8 +17,9 @@ import pytest
 import redis
 from redis.exceptions import AuthenticationError, NoPermissionError
 
-from base.cluster import ensure_cluster_redis_acl, ownership
+from base.cluster import ensure_cluster_redis_acl, port_preflight
 from base.host.net.url_secret import url_with_userinfo
+from base.native_process.ownership import OwnedProcess
 from tests._containers import redis_server
 
 _SECRET = "redisacltestsecret"  # noqa: S105 — test fixture, not a real credential
@@ -71,9 +72,9 @@ def test_owned_acl_refuses_reconnect_before_mutation(
             clients.append(client)
             return client
 
-        observe = ownership.require_listener
+        observe = port_preflight.require_listener
 
-        def disconnect_after_observation(owner: ownership.OwnedProcess, port: int) -> None:
+        def disconnect_after_observation(owner: OwnedProcess, port: int) -> None:
             observe(owner, port)
             connection = clients[-1].connection
             assert connection is not None
@@ -81,7 +82,7 @@ def test_owned_acl_refuses_reconnect_before_mutation(
 
         with monkeypatch.context() as patch:
             patch.setattr(redis.Redis, "from_url", capture_client)
-            patch.setattr(ownership, "require_listener", disconnect_after_observation)
+            patch.setattr(port_preflight, "require_listener", disconnect_after_observation)
             with pytest.raises(RuntimeError, match="connection changed"):
                 ensure_cluster_redis_acl(
                     "ava_unverified",

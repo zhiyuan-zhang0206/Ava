@@ -150,6 +150,7 @@ def owned_pg(
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
+    monkeypatch.setattr("base.cluster.dataplane.pg_admin.get_record", _record)
     children: list[subprocess.Popen[bytes]] = []
     try:
         assert (
@@ -473,6 +474,7 @@ def test_local_owner_authority_reads_record_and_url_as_data(
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
+    monkeypatch.setattr("base.cluster.dataplane.pg_admin.get_record", _record)
     # A delivered generation login replaces the URL's username; the owner is the
     # database's same-named identity.
     monkeypatch.setattr(

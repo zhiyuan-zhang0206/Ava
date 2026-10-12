@@ -12,9 +12,10 @@ import pytest
 import redis
 from redis.asyncio import Redis as AsyncRedis
 
-from base.cluster import ownership
+from base.cluster import ownership, port_preflight
 from base.cluster import postgres as pg
 from base.cluster.dataplane import pooler as base_pooler
+from base.cluster.dataplane.pg_admin import pg_socket_dir
 from base.cluster.machine import MachineIdentity
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
@@ -78,7 +79,7 @@ def test_foreign_postgres_listener_refuses_before_hba_or_initdb(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(instance, "pg_data_dir", lambda: pg_data)
-    monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(port_preflight, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(instance, "_ensure_pg_data", lambda: pytest.fail("must not initialize"))
     with pytest.raises(RuntimeError, match="no owned data-plane process"):
         instance._start_pg(15433, retained_children=retained_children, machine=command_machine)
@@ -93,7 +94,7 @@ def test_foreign_pooler_listener_refuses_before_config_or_signal(
 ) -> None:
     monkeypatch.setattr(base_pooler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(pooler, "pgbouncer_bin", lambda: __file__)
-    monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(port_preflight, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(pooler, "_write_config", lambda **_kw: pytest.fail("must not write"))  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     with pytest.raises(RuntimeError, match="no owned data-plane process"):
         pooler.ensure_pgbouncer(
@@ -119,7 +120,7 @@ def test_pooler_birth_change_prevents_reload(
         "pooler",
         lambda *_a: SimpleNamespace(pid=123, live=lambda: False),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
-    monkeypatch.setattr(ownership, "require_listener", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(port_preflight, "require_listener", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(pooler, "_write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
 
     def listener_reachable(_listen_port: int, _role: str, *, machine: MachineIdentity) -> bool:
@@ -265,7 +266,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
         )
         first, persisted = _assert_pg_birth(data, port)
         with psycopg.connect(instance.pg_admin_url(port), autocommit=True) as conn:
-            ownership.require_postgres_connection(conn, data)
+            ownership.require_postgres_connection(conn, data, pg_socket_dir(home=data.parent))
             row = conn.execute("SELECT system_identifier FROM pg_control_system()").fetchone()
             assert row is not None
             system_id = row[0]
@@ -287,7 +288,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
         second, _receipt = _assert_pg_birth(data, port)
         assert not first.same_birth(second)
         with psycopg.connect(instance.pg_admin_url(port), autocommit=True) as conn:
-            ownership.require_postgres_connection(conn, data)
+            ownership.require_postgres_connection(conn, data, pg_socket_dir(home=data.parent))
             assert conn.execute("SELECT system_identifier FROM pg_control_system()").fetchone() == (
                 system_id,
             )
@@ -297,7 +298,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
     finally:
         pg.stop(data, timeout=10, retained_children=retained_children)
     assert ownership.postgres(data) is None
-    ownership.require_listener(None, port, required=False)
+    port_preflight.require_listener(None, port, required=False)
 
 
 def test_pg_native_signal_failure_is_not_reported_as_stopped(

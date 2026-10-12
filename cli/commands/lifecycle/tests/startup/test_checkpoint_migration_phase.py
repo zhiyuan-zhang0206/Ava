@@ -73,7 +73,6 @@ class _FakeAdminConnection:
 def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     import base.deploy.schema.migrations
     from base import cluster
-    from base.cluster import ownership
     from base.cluster.dataplane import pg_admin
 
     calls: list[str] = []
@@ -113,11 +112,11 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def fake_checkpoint_assertion(url: str, **kwargs: object) -> None:
         calls.append(f"checkpoint:{url}:{kwargs}")
 
-    def record_ownership(_conn: object, data: Path) -> None:
+    def record_ownership(_conn: object, data: Path, _socket_dir: Path) -> None:
         assert data == authority.data_dir
         calls.append("ownership")
 
-    monkeypatch.setattr(ownership, "require_postgres_connection", record_ownership)
+    monkeypatch.setattr(pg_admin, "require_postgres_connection", record_ownership)
     patch_database(monkeypatch, connect=fake_connect)
     patch_database(monkeypatch, direct_url=lambda: "postgresql://direct/ava")
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
@@ -167,13 +166,13 @@ def test_foreign_connected_postgres_refuses_before_migration_ddl(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    from base.cluster import ownership
+    from base.cluster.dataplane import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
-    def refuse(_conn: object, _data: Path) -> None:
+    def refuse(_conn: object, _data: Path, _socket_dir: Path) -> None:
         raise RuntimeError("foreign connected backend")
 
-    monkeypatch.setattr(ownership, "require_postgres_connection", refuse)
+    monkeypatch.setattr(pg_admin, "require_postgres_connection", refuse)
     with pytest.raises(RuntimeError, match="foreign connected backend"):
         cmd_migrations_apply(
             database_factory=operator_database, machine_name=command_runtime.machine.name
@@ -243,7 +242,6 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
     native custody proof is replaced by a same-instance check: the admin dial
     must reach the data directory the authority names.
     """
-    from base.cluster import ownership
     from base.cluster.dataplane import pg_admin
     from base.config import settings
 
@@ -253,14 +251,14 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
     assert row is not None
     directory, database, owner = Path(row[0]), row[1], row[2]
 
-    def guard(actual: psycopg.Connection, data: Path) -> None:
+    def guard(actual: psycopg.Connection, data: Path, _socket_dir: Path) -> None:
         reached = actual.execute("SELECT current_setting('data_directory')").fetchone()
         assert data == directory and reached == (str(directory),)
 
     authority = pg_admin.OwnerAuthority(
         admin_url=settings.data_plane.db_url, database=database, owner=owner, data_dir=directory
     )
-    monkeypatch.setattr(ownership, "require_postgres_connection", guard)
+    monkeypatch.setattr(pg_admin, "require_postgres_connection", guard)
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
 
 
@@ -389,7 +387,6 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
     write_up: bool,
 ) -> None:
     from base.cluster import provision
-    from base.deploy.schema import migrations
     from base.deploy.schema.migration_layout import required_migration_set
     from base.deploy.tests.migration_support import _git, _init_repo
 
@@ -398,7 +395,7 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
     if write_up:
         (tmp_path / f"{name}.sql").write_text("SELECT 1;\n")
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
-    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     if tracked:
         _git(tmp_path, "add", "-A")
 
@@ -412,7 +409,6 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
     from langgraph.checkpoint.postgres import PostgresSaver
 
     from base.cluster import provision
-    from base.deploy.schema import migrations
     from base.deploy.schema.migration_layout import required_migration_set
     from base.deploy.tests.migration_support import _init_repo
 
@@ -422,7 +418,7 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
     (hour / f"{name}.sql").write_text("SELECT 1;\n")
     _init_repo(tmp_path)
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
-    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1;"])
 
     provision.assert_checkpoint_dependency_pinned(required_migration_set())

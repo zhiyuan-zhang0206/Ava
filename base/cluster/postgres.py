@@ -23,6 +23,7 @@ from typing import Any, Literal, cast
 import psutil
 from pydantic import Field, model_validator
 
+from base.cluster.port_preflight import require_listener
 from base.host.atomic_io import write_text_atomic
 from base.host.verified_file import regular_bytes
 from base.log import logger
@@ -270,8 +271,6 @@ def _complete_start(
     timeout: float,
 ) -> OwnedProcess:
     """One readiness and durable admission boundary for fresh and retained births."""
-    from base.cluster.ownership import require_listener
-
     owner = receipt.process()
     deadline = time.monotonic() + timeout
     while owner.live():
@@ -334,8 +333,6 @@ def start(
             return _complete_start(data, retained, ready, timeout)
         if observe(data) is not None:
             raise RuntimeError("PostgreSQL is already running; startup cannot replace its birth")
-        from base.cluster.ownership import require_listener
-
         require_listener(None, port, required=False)
         captured = _spawn(
             data,
@@ -436,8 +433,6 @@ def stop(
     with file_lock(path.with_suffix(".lock"), timeout_s=timeout):
         owner = observe(data)
         receipt = _read(data)
-        from base.cluster.ownership import require_listener
-
         if owner is None:
             if receipt is not None:
                 require_listener(None, receipt.port, required=False)

@@ -17,6 +17,7 @@ import shutil
 
 import base.host.proc
 from base.cluster.machine import MachineIdentity
+from base.native_process.ownership import OwnedProcess, capture_tree
 
 
 class ListenerDiscoveryError(RuntimeError):
@@ -230,3 +231,20 @@ def bind_addrs(*, machine: MachineIdentity) -> list[str]:
     if host not in LOOPBACK_ALIASES:
         out.append(host)
     return out
+
+
+def require_listener(
+    identity: OwnedProcess | None, port: int, *, required: bool = True
+) -> frozenset[int]:
+    """Return the observed listeners only after validating their native owner."""
+    listeners = frozenset(strict_listeners_on(port))
+    if identity is None:
+        if listeners or required:
+            raise RuntimeError(f"no owned data-plane process for listener :{port}")
+        return listeners
+    if required and not listeners:
+        raise RuntimeError(f"recorded data-plane process has no listener :{port}; custody retained")
+    owned = {process.pid for process in capture_tree(identity)}
+    if not identity.live() or not listeners <= owned:
+        raise RuntimeError(f"data-plane listener :{port} does not belong to the recorded process")
+    return listeners

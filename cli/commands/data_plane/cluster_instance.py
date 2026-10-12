@@ -464,7 +464,7 @@ def start_redis(
             _write_redis_conf(ownership.redis_data_dir(), redis_admin_password)
             print(f"  ✓ redis already running ({dial_host}:{redis_port})")
         return result
-    ownership.require_listener(None, redis_port, required=False)
+    port_preflight.require_listener(None, redis_port, required=False)
     bind_addrs = ["127.0.0.1"] if is_macos() else port_preflight.bind_addrs(machine=machine)
     if not is_macos() and not wait_for_reachable_bind(machine=machine):
         return 1

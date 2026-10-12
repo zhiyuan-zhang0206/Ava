@@ -32,7 +32,9 @@ import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import tuple_row
 
-from base.cluster.derive import home_slug
+from base.cluster.derive import db_identity, home_slug
+from base.cluster.ownership import require_postgres_connection
+from base.cluster.record import get_record
 from base.paths.private_dir import ensure_private_dir
 
 # The owner travels as a libpq startup option (`-c role=<owner>`), where spaces
@@ -82,9 +84,9 @@ def connect(
     """
     with psycopg.connect(url, **kwargs) as conn:
         if expected_data_dir is not None:
-            from base.cluster.ownership import require_postgres_connection
-
-            require_postgres_connection(conn, expected_data_dir)
+            require_postgres_connection(
+                conn, expected_data_dir, pg_socket_dir(home=expected_data_dir.parent)
+            )
         yield conn
 
 
@@ -198,7 +200,6 @@ def local_owner_authority() -> OwnerAuthority:
         RuntimeError: the data plane is remote-managed (its provider URL is
             the only authority), or this home has no registry record.
     """
-    from base.cluster import db_identity, get_record
     from base.config import settings
     from base.paths import ava_home
 
