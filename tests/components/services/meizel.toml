@@ -1,0 +1,2 @@
+[loads]
+"daemon_shutdown_test_support.py" = ["services/backup/scheduler"]

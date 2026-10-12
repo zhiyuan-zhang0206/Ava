@@ -1,0 +1,5 @@
+[loads]
+"test_path_scopes.py" = ["tests/path_scoped"]
+
+[external]
+"test_structure_codegen.py" = "executes the selector script embedded in the CI workflow"

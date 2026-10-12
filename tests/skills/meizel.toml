@@ -1,0 +1,8 @@
+[loads]
+"__init__.py" = ["ava_builtins/skills"]
+"test_impersonation_launch.py" = ["ava_builtins/skills"]
+"test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]
+"test_watcher_send_retry.py" = ["ava_builtins/skills"]
+
+[external]
+"test_watcher_send_retry.py" = "executes skill reference scripts up to a marker assignment"

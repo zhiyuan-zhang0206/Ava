@@ -1,0 +1,2 @@
+[external]
+"test_sdk_telemetry.py" = "wraps builtins.__import__ so one import raises"
