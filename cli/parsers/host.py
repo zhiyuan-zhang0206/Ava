@@ -214,6 +214,16 @@ def _add_start_parser(
         "--disable-service frontend). Pass the bare service name. Bare `ava start` preserves "
         "this selection; use `--all-services` to reset it or `--only-service` to replace it.",
     )
+    start_p.add_argument(
+        # Internal: the OS boot job (launchd plist / systemd unit) passes it. A boot
+        # start is retried by its scheduler, so it counts its attempts and stops
+        # asking for a retry once the boot budget is spent
+        # (`base.host.system.boot_policy`); it also never re-ups a unit whose ava-root
+        # restart budget is spent. Operators never pass it.
+        "--boot",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     selection.add_argument(
         "--all-services", action="store_true", help="explicitly select the entire roster"
     )

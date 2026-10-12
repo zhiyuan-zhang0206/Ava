@@ -49,6 +49,14 @@ seeding root. The LaunchAgent uses `KeepAlive.SuccessfulExit = false`: failures
 restart it, but explicit acknowledged shutdown does not. External signals are
 failures, not implicit stop requests.
 
+The root keeper restarts an unexpectedly exited root (or a failed spawn) with
+backoff (20 s, then 40 s), but only through three consecutive unstable failures — an exit
+before the root has been up for ten seconds counts, a longer run resets the
+count. The third failure leaves the keeper in `exited`: no restart is pending, the
+last exit stays in `root_status`, and the seed wait of `ava start` reports it. The
+keeper does not restart root again until an operator's `ava start` seeds it, which
+gives a fresh budget; `ava stop` records the stop intent as for any idle keeper.
+
 The daemon dispatches socket requests serially. Its screen-capture child is a
 Foundation `Process`, and the request waits for that child to exit before
 returning. Shutdown therefore cannot acknowledge while a GUI child is in flight;

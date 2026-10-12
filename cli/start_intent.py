@@ -58,6 +58,68 @@ def run_start(
 ) -> int:
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
+
+    def start(*, boot: bool) -> int:
+        return _start_once(
+            args,
+            runtime,
+            retained_children,
+            database_factory=database_factory,
+            producer=producer,
+            boot=boot,
+        )
+
+    if not args.boot:
+        return start(boot=False)
+    try:
+        home = _home()
+    except ValueError as exc:
+        print(f"ava start: {exc}", file=sys.stderr)
+        return 1
+    return _run_boot_attempt(home, lambda: start(boot=True))
+
+
+def _run_boot_attempt(home: Path, start: Callable[[], int]) -> int:
+    """One boot-job start: a failed attempt asks to be retried until the budget is spent.
+
+    The count never refuses a start (see `base.host.system.boot_policy`); it only
+    decides what a *failed* attempt tells its scheduler.
+    """
+    from base.host.system import boot_policy
+
+    attempt = boot_policy.begin_attempt(home)
+    code = start()
+    if code == 0:
+        boot_policy.clear_attempts(home)
+        return 0
+    if not boot_policy.budget_spent(attempt):
+        return code
+    from base import telemetry
+
+    print(
+        f"ava start --boot: attempt {attempt} of {boot_policy.BOOT_MAX_ATTEMPTS} failed "
+        f"(exit {code}); not retrying until an operator runs `ava start`",
+        file=sys.stderr,
+    )
+    telemetry.emit(
+        "telemetry",
+        "boot_retries_exhausted",
+        level="error",
+        source="start",
+        attributes={"attempts": attempt, "exit_code": code},
+    )
+    return boot_policy.exit_code_after_budget(code)
+
+
+def _start_once(
+    args: argparse.Namespace,
+    runtime: StartRuntime | None,
+    retained_children: list[subprocess.Popen[bytes]],
+    *,
+    database_factory: Callable[[], Any],
+    producer: Callable[[], EventPipeline],
+    boot: bool = False,
+) -> int:
     try:
         if runtime is None:
             runtime = StartRuntime.development(_checkout())
@@ -90,6 +152,7 @@ def run_start(
                 database_factory=database_factory,
                 producer=producer,
                 command=args.runtime,
+                boot_attempt=boot,
             )
             if result == 0:
                 from base.deploy.lifecycle.start_serving import clear_serving

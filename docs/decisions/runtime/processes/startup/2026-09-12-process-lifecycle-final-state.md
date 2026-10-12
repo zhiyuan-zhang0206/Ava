@@ -33,7 +33,8 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
    per unit type.
 4. **Availability fallback: lose attribution, not service.** On a root/helper
    crash, existing units keep running while spawn/management pauses
-   (degraded); the OS adapter restarts root; recovery reseeds the
+   (degraded); the OS adapter restarts root (amended 2026-10-12: boundedly — see
+   item 5); recovery reseeds the
    attribution-requiring subchains. Adoption (management takeover without
    re-parenting) is documented as the design's exception state — POSIX
    cannot re-attach chains to existing processes; and (F1/F2, 2026-09-12)
@@ -43,7 +44,11 @@ ruled the open decision points on 2026-09-12 17:40–17:41. Design record:
    (helper death/restart; F12 to measure).
 5. **Supervision collapses from 4–5 layers to 2**: the OS adapter keeps root
    alive; root keeps the whole tree alive (parallel pull-up + startup gating,
-   self-healing units; no declarative dependency DAG).
+   self-healing units; no declarative dependency DAG). *Amended 2026-10-12: the
+   OS adapter keeps root alive within a finite budget, like root's own units —
+   the macOS keeper stops after three consecutive unstable failures spanning about a minute, systemd
+   after its start limit, and the boot job after ten attempts per boot; each
+   leaves an observable failure and an operator's `ava start` re-arms it.*
 6. **One-shot (big-bang) migration** per the 2026-08-07 precedent; the
    per-Mac user touchpoint is one ~1–2 minute authorization click, not
    repeated by any canary-then-final sequence.

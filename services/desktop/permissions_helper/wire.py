@@ -252,7 +252,8 @@ class RootConflictInfo(TypedDict):
 class RootStatus(TypedDict):
     """The root keeper's state (wire `root_status`, and every mutating reply)."""
 
-    state: str  # unseeded | running | backoff | conflict | stopping | stopped
+    # unseeded | running | backoff | conflict | stopping | stopped | exited (restart budget spent)
+    state: str
     seeded: bool
     restarts: int
     stop_requested: bool

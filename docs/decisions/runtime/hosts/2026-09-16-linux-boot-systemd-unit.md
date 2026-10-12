@@ -13,7 +13,8 @@ distro-level restart loop after an aborted rollout (investigation continues
 under task #3593). Whatever the convergence root causes, the boot path itself
 exposed no supervised retry and no operator-visible state. The policy every
 platform must state is in `shared/boot_policy.py`: retry every
-`BOOT_RETRY_INTERVAL_S`, no attempt cap.
+`BOOT_RETRY_INTERVAL_S`, no attempt cap (amended 2026-10-12: at most
+`BOOT_MAX_ATTEMPTS` per boot, so a permanent error ends as an observable failure).
 
 ## Decision
 
@@ -25,7 +26,8 @@ On a host whose service manager is systemd, the boot path is a **system**
   convergence script (`ava start --no-readiness-gate`); exit 0 means converged,
   non-zero means the unit retries — the exit code IS the retry contract.
 - The retry is systemd's: `Restart=on-failure`, `RestartSec=60`,
-  `StartLimitIntervalSec=0` (no attempt cap), with `RuntimeMaxSec=900` killing
+  `StartLimitIntervalSec=0` (no attempt cap; amended 2026-10-12 to
+`StartLimitBurst=BOOT_MAX_ATTEMPTS`), with `RuntimeMaxSec=900` killing
   a wedged attempt so a hang cannot block the next one.
 - A system unit, not `systemctl --user`: no login-session or linger dependency,
   observable in `systemctl` / journald without a session, still running as the

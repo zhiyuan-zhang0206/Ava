@@ -261,6 +261,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `ava-ops-health-probe-warning` / `-error` | `health_probe_failing` per `attributes_check` | 3m / 10m | warning / error | the probe's time-graded owner alert |
 | `ava-ops-health-probe-silent` | absent `health_probe_ran` for 15m | 0m | error | nothing: a stopped probe was silent (routes to Telegram too) |
 | `ava-ops-service-start-unready` | `service_start_unready` | 0m | warning | start-readiness alert rows |
+| `ava-ops-boot-retries-exhausted` | `boot_retries_exhausted` | 0m | error | nothing: the boot job's endless retry never reported a permanent failure |
 | `ava-ops-schedule-verify-failed` | `schedule_verify_failed` | 0m | error | the verify sweep's direct post |
 | `ava-ops-agent-continuation-lost` | `agent_continuation_lost` per agent | 0m | error | `ava start`'s direct owner alert for a lost restart pointer |
 | `ava-ops-schedule-stalled` | `schedule_stalled` (24h) | 0m | warning | the event had no rule |

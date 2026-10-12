@@ -185,7 +185,7 @@ def test_start_refuses_a_foreign_checkout_before_reading_the_home(
         raise AssertionError("a refused start must not reach the home's admission")
 
     monkeypatch.setattr(start_intent, "require_initialized", _never_reached)
-    args = argparse.Namespace(runtime=command_runtime)
+    args = argparse.Namespace(runtime=command_runtime, boot=False)
 
     assert (
         start_intent.run_start(

@@ -68,6 +68,40 @@ func exitWithoutReaping(_ pid: pid_t) throws {
                 "could not observe the fixture child's retained exit")
 }
 
+// A root that keeps exiting is restarted only until the keeper's consecutive-failure
+// budget is spent; a fresh seed (the operator's `ava start`) gets a new budget.
+func runBoundedRestartTest(_ directory: String) throws {
+    let seed = RootSeed(
+        argv: ["/bin/sh", "-c", "exit 1"], cwd: directory, runDir: directory,
+        stdoutPath: directory + "/root.out", stderrPath: directory + "/root.err",
+        environment: [:]
+    )
+    func state() -> String? { rootKeeper.status()["state"] as? String }
+    func waitForExited() throws {
+        let deadline = Date().addingTimeInterval(10)
+        while state() != "exited" && Date() < deadline {
+            reapExitedChildren()
+            usleep(20_000)
+        }
+        try require(state() == "exited", "a root that keeps exiting was restarted without bound")
+    }
+    try rootKeeper.configure(seed)
+    try waitForExited()
+    let spent = rootKeeper.status()
+    try require(spent["restarts"] as? Int == 2, "keeper restarted \(String(describing: spent["restarts"])) times")
+    try require(spent["pid"] == nil && spent["next_restart_in_s"] == nil, "exited keeper kept a restart pending")
+    // Past the longest backoff the budget would have used: nothing spawns again.
+    sleep(3)
+    reapExitedChildren()
+    try require(state() == "exited" && rootKeeper.status()["pid"] == nil, "exited keeper spawned again")
+    try rootKeeper.configure(seed)
+    let respawn = Date().addingTimeInterval(5)
+    while rootKeeper.status()["pid"] == nil && Date() < respawn { usleep(1_000) }
+    try require(rootKeeper.status()["pid"] != nil, "a fresh seed did not get a fresh restart budget")
+    try waitForExited()
+    print("bounded root restart passed")
+}
+
 func runCustodyTests() throws {
     let directory = CommandLine.arguments[1]
     setenv("AVA_PERMISSIONS_HELPER_ROOT_SEED", directory + "/seed.json", 1)
@@ -80,6 +114,10 @@ func runCustodyTests() throws {
         try require(retained, "restart lost durable helper stop")
         try require(rootKeeper.status()["state"] as? String == "unseeded", "startup ran root")
         print("helper stopped before native startup")
+        return
+    }
+    if fixtureMode == "bounded-restart" {
+        try runBoundedRestartTest(directory)
         return
     }
     let seed = RootSeed(

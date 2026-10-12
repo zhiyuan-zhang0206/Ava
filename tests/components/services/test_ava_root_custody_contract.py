@@ -21,7 +21,19 @@ def test_helper_native_reaping_cannot_race_owned_signal_delivery(tmp_path: Path)
     # Compile the actual spawn/session and root-keeper implementations without
     # the GUI server. Test barriers widen the old race, without runtime hooks.
     children = source.split("/// Resolve an allowed path", 1)[0]
-    keeper = source.split("// MARK: - Root keeper", 1)[1].split("// MARK: - Dispatch", 1)[0]
+    # The keeper's production backoff spans a minute; the fixture runs it scaled down.
+    base, cap = 20.0, 40.0
+    assert f"static let baseBackoffS = {base}" in source
+    assert f"static let maxBackoffS = {cap}" in source
+    assert base + min(cap, base * 2) == 60.0  # waits before the 2nd and 3rd attempts
+    scaled = source.replace(f"baseBackoffS = {base}", "baseBackoffS = 0.5").replace(
+        f"maxBackoffS = {cap}", "maxBackoffS = 1.0"
+    )
+    keeper = (
+        scaled.split("// MARK: - Root keeper", 1)[1]
+        .split("// MARK: - Capture indicator", 1)[0]
+        .split("// MARK: - Dispatch", 1)[0]
+    )
     implementation = (children + keeper).replace("waitpid(", "observedWaitpid(")
     implementation = implementation.replace(
         "kill(child, SIGTERM)", "pausedRootSignal(child, SIGTERM)"
@@ -55,3 +67,15 @@ def test_helper_native_reaping_cannot_race_owned_signal_delivery(tmp_path: Path)
             check=False,
         )
         assert crash.returncode == expected, crash.stdout + crash.stderr
+    # A root that keeps exiting is restarted a bounded number of times.
+    bounded_home = tmp_path / "bounded-home"
+    bounded_home.mkdir()
+    bounded = subprocess.run(  # noqa: S603 — same private native fixture
+        ["swift", str(program), str(bounded_home), "bounded-restart"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert bounded.returncode == 0, bounded.stdout + bounded.stderr
+    assert "bounded root restart passed" in bounded.stdout

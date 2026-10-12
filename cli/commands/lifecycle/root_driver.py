@@ -331,6 +331,10 @@ def _seed_via_helper(
                 f"another ava-root owns {run_dir}; the keeper rests in conflict and will not "
                 "spawn (resolve the conflict first)"
             )
+        if state == "exited":
+            raise _RootDriverError(
+                f"the keeper stopped restarting a root that keeps exiting ({wire.get('last_exit')})"
+            )
         seed_error = wire.get("seed_error")
         if seed_error:
             raise _RootDriverError(f"the root keeper rejected the seed: {seed_error}")
@@ -423,19 +427,29 @@ def _stop_root_process(
 
 
 def _reconcile_units(
-    roster: tuple[ServiceSpec, ...], client: Any, status: dict[str, Any]
+    roster: tuple[ServiceSpec, ...],
+    client: Any,
+    status: dict[str, Any],
+    *,
+    honor_restart_budget: bool = False,
 ) -> dict[str, Any]:
     """Resume stopped units within the same immutable root generation.
 
     This command is an explicit operator start, so it also resumes a unit
     whose recorded intent is stopped: `intent` is the supervisor's policy fact
-    and `state` its observed process state (task #4872).
+    and `state` its observed process state (task #4872). The OS boot job's
+    retried start is not an operator: with ``honor_restart_budget`` it leaves a
+    unit down whose ava-root restart budget is spent.
     """
     units = _root_units(status)
+    health = cast("dict[str, dict[str, Any]]", status.get("health") or {})
     from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
     for spec in roster:
         unit = units[spec.session]
+        if honor_restart_budget and health.get(spec.session, {}).get("restart_limit_reached"):
+            print(f"  · {session_name(spec.session)} spent its restart budget — left down")
+            continue
         if unit.get("state") != "running" or unit.get("intent") != "running":
             reason = unit.get("last_error") or unit.get("last_exit") or unit.get("state")
             print(f"  ↑ ava-root unit {session_name(spec.session)} ({reason}) — bringing it up")
@@ -517,6 +531,7 @@ def _ensure_root_service_tree(
     reconcile: bool,
     retained_children: list[subprocess.Popen[bytes]],
     runtime: StartRuntime | None = None,
+    honor_restart_budget: bool = False,
 ) -> LaunchOutcome:
     """Reuse an identical generation; changing its inputs requires prior stop."""
     from base.paths import ava_home, root_manifests_path, root_run_dir
@@ -554,7 +569,7 @@ def _ensure_root_service_tree(
             )
             _require_root_owner(status)
             _require_same_generation(manifest, status, roster, reconcile=reconcile)
-        status = _reconcile_units(roster, client, status)
+        status = _reconcile_units(roster, client, status, honor_restart_budget=honor_restart_budget)
     except _RootDriverError as exc:
         print(f"  ✗ ava-root tree bring-up failed: {exc}", file=sys.stderr)
         return LaunchOutcome(roster, tuple(session_name(spec.session) for spec in roster))
@@ -576,6 +591,7 @@ def _launch_service_tree(
     reconcile: bool,
     retained_children: list[subprocess.Popen[bytes]],
     runtime: StartRuntime | None = None,
+    honor_restart_budget: bool = False,
 ) -> LaunchOutcome:
     """Start the requested services through their root owner."""
     return _ensure_root_service_tree(
@@ -585,6 +601,7 @@ def _launch_service_tree(
         reconcile=reconcile,
         retained_children=retained_children,
         runtime=runtime,
+        honor_restart_budget=honor_restart_budget,
     )
 
 

@@ -366,6 +366,15 @@ so the independent data plane survives while root closes its own application
 tree. Failed closure retains custody; systemd cannot prove orphan closure after
 abrupt root death. There is no convergence shell script or duplicate proxy probe.
 
+Boot retry is bounded on both platforms: the boot job runs `ava start --boot` and a
+failed attempt is retried (launchd `KeepAlive`, systemd `Restart=on-failure`) for
+`BOOT_MAX_ATTEMPTS` (10) attempts per boot, about ten minutes
+(`base/host/system/boot_policy.py`). The attempt that spends the budget emits
+`boot_retries_exhausted` (alert `ava-ops-boot-retries-exhausted`); on Linux the unit
+then sits in systemd's `failed` state, on macOS the job exits 0. Fix the cause in the
+boot log, then run `ava start`. A boot attempt never re-ups a unit whose ava-root
+restart budget is spent.
+
 **OS-scheduled jobs.** The platform scheduler runs the health probe
 (`base/host/system/cron.py`), boot autostart (`base/host/system/autostart.py`),
 daily rotate-then-retain log maintenance (`base/host/system/logs_job.py`), and the
