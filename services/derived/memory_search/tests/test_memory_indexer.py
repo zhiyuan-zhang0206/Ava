@@ -1,6 +1,6 @@
 """Memory indexer unit tests — daemon reconcile + chunk commit logic.
 
-The embedding provider is mocked (a `_FakeProvider`); storage is the real
+The embedding provider is mocked (a `FakeProvider`); storage is the real
 `MemoryStore` behind an in-process adapter (`store_backend.StoreBackend`), so
 the daemon's reconcile, tail-cleanup and provider-switch behavior runs against
 the production numpy storage core without the HTTP hop. The store's own
@@ -41,11 +41,13 @@ from services.derived.memory_indexer.backends.base import (
 )
 from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
-from services.derived.memory_indexer.tests.store_backend import StoreBackend
+from services.derived.memory_indexer.tests.fake_provider import (
+    DIM,
+    FINGERPRINT,
+    FakeProvider,
+)
+from services.derived.memory_search.tests.store_backend import StoreBackend
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-
-_DIM = 8
-_FP = "test:gemini:dim=8"
 
 
 def _liveness_timeout() -> float:
@@ -58,34 +60,12 @@ def _liveness_timeout() -> float:
 @pytest.fixture
 def store_backend(tmp_path: Path) -> StoreBackend:
     """A fresh in-process backend over a real `MemoryStore` (npz under tmp_path)."""
-    return StoreBackend(tmp_path / "index" / "vectors.npz", dim=_DIM, fingerprint=_FP)
+    return StoreBackend(tmp_path / "index" / "vectors.npz", dim=DIM, fingerprint=FINGERPRINT)
 
 
 def _vec(seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    return rng.standard_normal(_DIM).astype(np.float32)
-
-
-class _FakeProvider:
-    """Stand-in for `EmbeddingProvider` — records embed calls, returns
-    constant vectors; `fingerprint` is settable so tests can simulate a
-    provider switch."""
-
-    def __init__(self, *, fingerprint: str = _FP, dim: int = _DIM) -> None:
-        self.name = "fake"
-        self.dim = dim
-        self.fingerprint = fingerprint
-        self.embed_batch_count = 0
-
-    def embed_batch(self, texts: list[str]) -> np.ndarray:
-        self.embed_batch_count += 1
-        return np.array([[float(len(t))] * self.dim for t in texts], dtype=np.float32)
-
-    def embed_query(self, text: str) -> np.ndarray:
-        return np.zeros(self.dim, dtype=np.float32)
-
-    async def embed_query_async(self, text: str) -> np.ndarray:
-        return np.zeros(self.dim, dtype=np.float32)
+    return rng.standard_normal(DIM).astype(np.float32)
 
 
 @pytest.fixture(autouse=True)
@@ -153,7 +133,7 @@ def test_process_paths_embeds_new_files(
     f2 = tmp_path / "b.md"
     f2.write_text("content B")
 
-    provider = _FakeProvider()
+    provider = FakeProvider()
     daemon._process_paths(
         store_backend,
         {f1.resolve(), f2.resolve()},
@@ -177,7 +157,7 @@ def test_process_paths_skips_unchanged_hash(
     f = tmp_path / "a.md"
     f.write_text("content")
 
-    provider = _FakeProvider()
+    provider = FakeProvider()
     daemon._process_paths(
         store_backend,
         {f.resolve()},
@@ -210,7 +190,7 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
     f = tmp_path / "a.md"
     f.write_text("content")
 
-    first = _FakeProvider()
+    first = FakeProvider()
     daemon._process_paths(
         store_backend, {f.resolve()}, first, Liveness(_liveness_timeout()), machine=machine_identity
     )
@@ -218,7 +198,7 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
 
     # Simulate the switch: same content, same mtime, new provider fingerprint —
     # a fresh daemon run would build the backend for the new provider too.
-    switched = _FakeProvider(fingerprint="another-provider:dim=8")
+    switched = FakeProvider(fingerprint="another-provider:dim=8")
     switched_backend = store_backend.reopen("another-provider:dim=8")
     daemon._process_paths(
         switched_backend,
@@ -243,7 +223,7 @@ def test_process_paths_deletes_missing_files(
     daemon._process_paths(
         store_backend,
         {Path(ghost)},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -314,7 +294,7 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     daemon._process_paths(
         store_backend,
         {foreign},
-        _FakeProvider(),
+        FakeProvider(),
         Liveness(_liveness_timeout()),
         machine=machine_identity,
     )
@@ -349,7 +329,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
 
     daemon._reconcile(
-        backend, _FakeProvider(), Liveness(_liveness_timeout()), machine=machine_identity
+        backend, FakeProvider(), Liveness(_liveness_timeout()), machine=machine_identity
     )
     meta = store_backend.all_meta()
     assert str(foreign.resolve()) not in meta
@@ -380,9 +360,9 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
     watched_mtime = watched.stat().st_mtime
     backend.upsert(str(watched.resolve()), watched_mtime, "h", _vec(0), kind="body", chunk_idx=0)
     # mtime matches disk, hash matches — but the fingerprint is the old provider's.
-    assert backend.all_meta() == {str(watched.resolve()): (watched_mtime, "h", _FP)}
+    assert backend.all_meta() == {str(watched.resolve()): (watched_mtime, "h", FINGERPRINT)}
 
-    switched = _FakeProvider(fingerprint="other:provider")
+    switched = FakeProvider(fingerprint="other:provider")
     switched_backend = store_backend.reopen("other:provider")
     daemon._reconcile(
         switched_backend, switched, Liveness(_liveness_timeout()), machine=machine_identity
@@ -451,7 +431,7 @@ class _RecordingBackend(MemorySearchBackend):
         self.calls.append("upsert_many")
         self.spend("upsert_many")
         for path, mtime, hash_, _, kind, idx in rows:
-            self.rows[path, kind, idx] = (mtime, hash_, _FP)
+            self.rows[path, kind, idx] = (mtime, hash_, FINGERPRINT)
 
 
 def test_process_paths_beats_per_embed_batch(
@@ -469,7 +449,7 @@ def test_process_paths_beats_per_embed_batch(
         note.write_text(f"content {i}", encoding="utf-8")
         paths.add(note.resolve())
 
-    class SlowProvider(_FakeProvider):
+    class SlowProvider(FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
             nonlocal now
             now += batch_duration
@@ -507,7 +487,7 @@ def test_process_paths_beats_during_commit(
         assert liveness.is_alive(), f"liveness stale during {op}"
         assert liveness.stale_for() == durations[op], f"previous call compounded with {op}"
 
-    class SlowFinalProvider(_FakeProvider):
+    class SlowFinalProvider(FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
             nonlocal now
             now += factory.worst_case_batch_seconds(
@@ -551,8 +531,8 @@ def test_process_paths_beats_per_delete(
 
     backend = _RecordingBackend(spend)
     paths = {tmp_path / f"deleted-{i}.md" for i in range(400)}
-    backend.rows = {(str(path), "body", 0): (0.0, "old", _FP) for path in paths}
-    provider = _FakeProvider()
+    backend.rows = {(str(path), "body", 0): (0.0, "old", FINGERPRINT) for path in paths}
+    provider = FakeProvider()
     daemon._process_paths(backend, paths, provider, liveness, machine=machine_identity)
     assert now > _liveness_timeout()
     assert backend.all_meta() == {}
@@ -651,8 +631,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
     liveness = Liveness(0.4)
     started = time.monotonic()
     assert (
-        daemon._reconcile(store_backend, _FakeProvider(), liveness, machine=machine_identity)
-        is True
+        daemon._reconcile(store_backend, FakeProvider(), liveness, machine=machine_identity) is True
     )
     elapsed = time.monotonic() - started
 
@@ -699,7 +678,7 @@ def _assert_one_ladder_rung(
     assert retry.retry_in_s() == 0.0
 
 
-class _FlakyProvider(_FakeProvider):
+class _FlakyProvider(FakeProvider):
     def __init__(self, failures: int) -> None:
         super().__init__()
         self.failures = failures

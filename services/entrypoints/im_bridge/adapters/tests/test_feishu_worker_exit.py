@@ -120,12 +120,9 @@ def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(
     proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [
             sys.executable,
-            str(
-                Path(__file__).resolve().parents[1]
-                / "adapters/tests/feishu_adapter/child_blocked_ws.py"
-            ),
+            str(Path(__file__).resolve().parent / "feishu_adapter/child_blocked_ws.py"),
         ],
-        cwd=Path(__file__).resolve().parents[4],
+        cwd=Path(__file__).resolve().parents[5],
         env=env,
         stdout=log_file,
         stderr=subprocess.STDOUT,

@@ -37,12 +37,12 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement as settlement_mod
-from services.agent_runner.agent_host.recovery.tests.checkpoint_inputs import (
+from services.agent_runner.agent_host.tests.history.checkpoint_inputs import (
     insert_checkpoint,
     insert_write,
 )
-from services.agent_runner.agent_host.recovery.tests.helpers import admit as _admit
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit as _admit
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
