@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -101,7 +101,7 @@ def test_run_start_hands_the_boot_flag_to_the_start_and_wraps_it(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    def once(args: Any, runtime: Any, retained: Any, *, boot: bool = False) -> int:
+    def once(args: Any, runtime: Any, retained: Any, *, boot: bool = False, **_owners: Any) -> int:
         seen["boot"] = boot
         return 0
 
@@ -112,10 +112,19 @@ def test_run_start_hands_the_boot_flag_to_the_start_and_wraps_it(
     monkeypatch.setattr(start_intent, "_start_once", once)
     monkeypatch.setattr(start_intent, "_run_boot_attempt", wrapped)
     monkeypatch.setattr(start_intent, "_home", lambda: tmp_path)
+
+    def run(args: Any) -> int:
+        return start_intent.run_start(
+            args,
+            retained_children=[],
+            database_factory=object,
+            producer=cast(Any, object),
+        )
+
     args = build_parser().parse_args(["start", "--boot"])
-    assert start_intent.run_start(args, retained_children=[]) == 0
+    assert run(args) == 0
     assert seen == {"boot": True, "home": tmp_path}
     args = build_parser().parse_args(["start"])
     seen.clear()
-    assert start_intent.run_start(args, retained_children=[]) == 0
+    assert run(args) == 0
     assert seen == {"boot": False}
