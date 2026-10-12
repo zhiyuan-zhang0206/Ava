@@ -50,17 +50,15 @@ class FleetGraphEdge(BaseModel):
 class FleetGraphResponse(BaseModel):
     """GET /api/fleet/graph response.
 
-    `stale` identifies data-level degradation: a fallback snapshot or a failed
-    source response. `telemetry_stale` separately says
-    the heartbeat guard was old or missing while this otherwise fresh graph was
-    read. `snapshot_at` records when a successful graph snapshot was produced;
-    a fallback retains that timestamp so clients can show its age.
+    `telemetry_stale` says the heartbeat guard was old or missing while this
+    otherwise complete graph was read. `snapshot_at` records when the graph
+    snapshot was produced; a response served from the short poll cache keeps
+    that timestamp so clients can show its age.
     """
 
     model_config = ConfigDict(frozen=True)
 
     nodes: list[FleetGraphNode]
     edges: list[FleetGraphEdge]
-    stale: bool = False
     telemetry_stale: bool = False
     snapshot_at: datetime | None = None

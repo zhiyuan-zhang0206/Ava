@@ -163,7 +163,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events | — |
 | `upload_delivery_held` | a delivered upload batch was held after a permanent copy failure or its last copy attempt; nothing retries it and the person has to upload again | anomaly | agent_id, batch_id, reason | — | events | — |
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
-| `fleet_graph_stale` | the fleet-graph route served the stale/last-good graph after a degraded upstream read — one event per degradation episode, not per poll | anomaly | route, reason | — | events | — |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |
 | `native_compact_proof_gap` | the actual serialized host could not establish compact source or uncertainty closure; pending intent remains held, carrying agent_id and bounded error_type without payload | anomaly | — | — | events | — |
 | `impersonation_event_log_incomplete` | an impersonation event log cannot complete on its own (ended lease with an open source, or a failed capture source); re-emitted every reaper pass while it holds | anomaly | condition, lease_id, lease_machine, pending_reason, session | — | events | — |
@@ -294,6 +293,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `root_diagnostic` | root diagnostic sampled non-alive (every sample while it persists, WARNING) or recovered (once, INFO); observation only, no recovery authority | anomaly | diagnostic, verdict, detail, consecutive_failures | — | events | — |
 | `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events | — |
 | `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events | — |
+| `backup_dump_failed` | the scheduled daily logical dump failed; it is not attempted again before the next backup hour | anomaly | detail | — | events | — |
 | `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events | — |
 | `health_probe_failing` | the cluster health probe found a failing check; repeated on every unhealthy run | anomaly | check, failure_class, message | — | events | — |
 | `health_probe_ran` | the cluster health probe completed a run, healthy or not (its own heartbeat) | observation | unhealthy_checks | — | events | — |

@@ -144,21 +144,19 @@ function richGraph(): FleetGraph {
   return {
     nodes,
     edges,
-    stale: false,
     telemetry_stale: false,
     snapshot_at: null,
   };
 }
 
 function ok(
-  graph: Omit<FleetGraph, "stale" | "telemetry_stale" | "snapshot_at"> & {
-    stale?: boolean;
+  graph: Omit<FleetGraph, "telemetry_stale" | "snapshot_at"> & {
     telemetry_stale?: boolean;
     snapshot_at?: string | null;
   },
 ): FleetGraphResult {
   return {
-    graph: { stale: false, telemetry_stale: false, snapshot_at: null, ...graph },
+    graph: { telemetry_stale: false, snapshot_at: null, ...graph },
     loading: false,
     error: false,
   };
@@ -505,30 +503,11 @@ describe("GraphView", () => {
     expect(screen.getByText("2 nodes · 1 edges")).toBeTruthy();
   });
 
-  it("renders no stale copy for a stale fallback graph (task #3893)", () => {
-    const snapshotAt = new Date(Date.now() - 12 * 60 * 1000).toISOString();
+  it("renders no degradation marker for a fresh graph", () => {
     useFleetGraph.mockReturnValue(
       ok({
         nodes: [node(1), node(2)],
         edges: [edge(1, 2, "spawn")],
-        stale: true,
-        snapshot_at: snapshotAt,
-      }),
-    );
-
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
-
-    // Degradation markers are internal: no chip, no age, no "stale" wording.
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(screen.queryByText(/stale/i)).toBeNull();
-  });
-
-  it("does not flag a fresh graph as stale", () => {
-    useFleetGraph.mockReturnValue(
-      ok({
-        nodes: [node(1), node(2)],
-        edges: [edge(1, 2, "spawn")],
-        stale: false,
       }),
     );
 
@@ -635,7 +614,6 @@ describe("GraphView", () => {
       graph: {
         nodes: [],
         edges: [],
-        stale: false,
         telemetry_stale: false,
         snapshot_at: null,
       },
@@ -654,7 +632,6 @@ describe("GraphView", () => {
       graph: {
         nodes: [],
         edges: [],
-        stale: false,
         telemetry_stale: false,
         snapshot_at: null,
       },
@@ -672,7 +649,6 @@ describe("GraphView", () => {
       graph: {
         nodes: [],
         edges: [],
-        stale: false,
         telemetry_stale: false,
         snapshot_at: null,
       },

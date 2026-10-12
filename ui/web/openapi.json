@@ -11697,11 +11697,6 @@
             "type": "array",
             "title": "Edges"
           },
-          "stale": {
-            "type": "boolean",
-            "title": "Stale",
-            "default": false
-          },
           "telemetry_stale": {
             "type": "boolean",
             "title": "Telemetry Stale",
@@ -11726,7 +11721,7 @@
           "edges"
         ],
         "title": "FleetGraphResponse",
-        "description": "GET /api/fleet/graph response.\n\n`stale` identifies data-level degradation: a fallback snapshot or a failed\nsource response. `telemetry_stale` separately says\nthe heartbeat guard was old or missing while this otherwise fresh graph was\nread. `snapshot_at` records when a successful graph snapshot was produced;\na fallback retains that timestamp so clients can show its age."
+        "description": "GET /api/fleet/graph response.\n\n`telemetry_stale` says the heartbeat guard was old or missing while this\notherwise complete graph was read. `snapshot_at` records when the graph\nsnapshot was produced; a response served from the short poll cache keeps\nthat timestamp so clients can show its age."
       },
       "ForceExpireImpersonationRequest": {
         "properties": {

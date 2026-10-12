@@ -130,30 +130,6 @@ class InspectMetricsCoverageGap(TypedDict):
     availability: str
 
 
-# The closed reason vocabulary of `fleet_graph_stale` (task #3925): every
-# stale-serving fallback on GET /api/fleet/graph names WHY it degraded — a
-# canceled database read or a phase crossing the route budget. Keep the set closed: the alert rule and dashboards rely on
-# it.
-FleetGraphStaleReason = Literal[
-    "pg_timeout",
-    "pg_budget",
-]
-
-
-class FleetGraphStale(TypedDict):
-    """`fleet_graph_stale` payload — one degraded fleet-graph serving episode.
-
-    Emitted when GET /api/fleet/graph serves the stale/last-good graph
-    because an upstream read (Postgres / Prometheus) failed, was refused, or
-    crossed the route budget. One event per degradation episode, not per poll:
-    a per-reason emission rate cap bounds retry-storm floods (task #3925, user
-    ruling 2026-09-18).
-    """
-
-    route: str
-    reason: FleetGraphStaleReason
-
-
 class PageServeDirMissing(TypedDict):
     """`page_serve_dir_missing` payload — page-server daemon degradation alert.
 
@@ -318,14 +294,6 @@ EVENTS: dict[str, EventSpec] = {
         "gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape",
         payload=GateAuthProbeFailed,
         tier="anomaly",
-    ),
-    "fleet_graph_stale": telemetry_event(
-        "fleet_graph_stale",
-        "the fleet-graph route served the stale/last-good graph after a degraded "
-        "upstream read — one event per degradation episode, not per poll",
-        payload=FleetGraphStale,
-        tier="anomaly",
-        site="gateway/routers/fleet_graph.py:_emit_stale (positional emit)",
     ),
     "page_serve_dir_missing": EventSpec(
         name="page_serve_dir_missing",
