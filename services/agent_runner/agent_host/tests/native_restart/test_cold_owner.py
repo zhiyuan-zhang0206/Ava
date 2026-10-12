@@ -13,14 +13,14 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
 from agent.tests.claim.test_inbound_ownership import agent_row
-from base.agents.incarnation.native_restart_models import NativeRestartRequest
-from base.agents.incarnation.native_work_models import NativeWorkTarget
-from base.agents.incarnation.resources import ResourceBirth
-from base.agents.messages.native_restart import (
+from base.agents.inbox.native_restart import (
     accept_native_restart,
     lookup_native_restart,
     native_restart_progress,
 )
+from base.agents.incarnation.native_restart_models import NativeRestartRequest
+from base.agents.incarnation.native_work_models import NativeWorkTarget
+from base.agents.incarnation.resources import ResourceBirth
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate

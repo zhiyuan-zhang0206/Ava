@@ -4,7 +4,7 @@ from typing import Literal, cast
 
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.messages.native_restart import completed_guarded_restart
+from base.agents.inbox.native_restart import completed_guarded_restart
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 

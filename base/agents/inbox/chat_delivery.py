@@ -17,6 +17,7 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from base import telemetry
+from base.agents.impersonation.manifest import record_central_event
 from base.agents.messages.caller_identity import caller_payload
 from base.agents.messages.inbound_provenance import (
     InboundProvenance,
@@ -24,6 +25,7 @@ from base.agents.messages.inbound_provenance import (
     source_assertion_match,
 )
 from base.db import fetch_one
+from base.telemetry.audit_events import record_audit
 
 
 class ClientMessageConflictError(ValueError):
@@ -140,7 +142,7 @@ def insert_chat_inbound_once(
     """Insert one logical chat, or return its existing same-key inbound id.
 
     `publish_wake(agent_id, payload)` is the best-effort wake for a newly inserted inbound
-    (`base.agents.inbox.wake.publish_inbound_wake` bound to the caller's handles)."""
+    (`base.agents.impersonation.wake.publish_inbound_wake` bound to the caller's handles)."""
     with db.transaction():
         receipt, prepared_event = insert_chat_inbound_in_transaction(
             db,
@@ -244,9 +246,6 @@ def insert_chat_inbound_in_transaction(
                 target_agent_id=sender_id,
                 attributes={"inbound_id": receipt.inbound_id, "content": content},
             )
-            from base.agents.impersonation.manifest import record_central_event
-            from base.telemetry.audit_events import record_audit
-
             prepared_event = record_audit(db, record_central_event(db, prepared_event))
 
     return receipt, prepared_event

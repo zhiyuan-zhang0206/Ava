@@ -196,7 +196,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
     machine_identity: MachineIdentity,
 ) -> None:
     import base.db
-    from base.agents.messages.chat_delivery import ChatInboundCommittedError
+    from base.agents.inbox.chat_delivery import ChatInboundCommittedError
     from ops import lifecycle
 
     agent_id = _agent(db_conn)

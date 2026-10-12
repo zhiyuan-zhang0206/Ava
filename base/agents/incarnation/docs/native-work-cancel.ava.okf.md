@@ -12,7 +12,7 @@ includes agent, home machine, generation, host owner and protocol 1.
 commands prevent a replacement from treating unknown execution as stopped.
 
 `base/agents/incarnation/native_work.py` owns admission; the dedicated cancel
-command owner is `base/agents/messages/native_cancel.py`. HTTP observation and
+command owner is `base/agents/inbox/native_cancel.py`. HTTP observation and
 acceptance remain exact-target, validated and idempotent; SDK transport retries
 reuse the same key and replay the original command. Acceptance is a receipt for
 the request, not a promise that execution stopped. See

@@ -2,9 +2,39 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, cast
 
-from base.agents.upload_delivery.paths import image_mime_for, parse_upload_url
+# Suffix -> MIME for image uploads that can be inlined as native model content.
+# Mirrors the image row of `ava._understand`'s media map; a suffix not listed
+# here is not treated as an inlineable image (the message endpoint 422s a
+# reference to it, the claim node never base64-inlines it).
+IMAGE_MIME: dict[str, str] = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
+
+def parse_upload_url(url: str) -> tuple[int, str] | None:
+    """Split an upload url into (agent_id, name), or None if it is not the
+    ``/api/agents/<int>/uploads/<name>`` shape. Does not check the file exists
+    or that `name` is safe — callers pair this with `resolve_upload_path`."""
+    prefix = "/api/agents/"
+    if not url.startswith(prefix):
+        return None
+    rest = url[len(prefix) :]
+    agent_part, sep, name = rest.partition("/uploads/")
+    if not sep or not name or not agent_part.isdigit():
+        return None
+    return int(agent_part), name
+
+
+def image_mime_for(name: str) -> str | None:
+    """MIME type for an image upload name, or None if the suffix is not an image."""
+    return IMAGE_MIME.get(Path(name).suffix.lower())
 
 
 def inbound_image_urls(agent_id: int, payload: dict[str, Any] | None) -> list[str] | None:

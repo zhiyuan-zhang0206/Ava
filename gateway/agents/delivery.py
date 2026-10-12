@@ -18,8 +18,8 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentStatus
-from base.agents.inbox.wake import publish_inbound_wake
-from base.agents.messages.chat_delivery import (
+from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.chat_delivery import (
     ChatInboundCommittedError,
     ChatInboundReceipt,
     insert_chat_inbound_once,

@@ -12,7 +12,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentity
 from base.config import settings

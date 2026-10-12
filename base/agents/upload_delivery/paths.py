@@ -18,19 +18,8 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
+from base.agents.messages.inbound_images import image_mime_for
 from base.paths.private_dir import ensure_private_dir
-
-# Suffix -> MIME for image uploads that can be inlined as native model content.
-# Mirrors the image row of `ava._understand`'s media map; a suffix not listed
-# here is not treated as an inlineable image (the message endpoint 422s a
-# reference to it, the claim node never base64-inlines it).
-IMAGE_MIME: dict[str, str] = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-}
 
 
 def agent_upload_dir(agent_id: int, *, create: bool = True) -> Path:
@@ -49,20 +38,6 @@ def upload_url(agent_id: int, name: str) -> str:
     return f"/api/agents/{agent_id}/uploads/{name}"
 
 
-def parse_upload_url(url: str) -> tuple[int, str] | None:
-    """Split an upload url into (agent_id, name), or None if it is not the
-    ``/api/agents/<int>/uploads/<name>`` shape. Does not check the file exists
-    or that `name` is safe — callers pair this with `resolve_upload_path`."""
-    prefix = "/api/agents/"
-    if not url.startswith(prefix):
-        return None
-    rest = url[len(prefix) :]
-    agent_part, sep, name = rest.partition("/uploads/")
-    if not sep or not name or not agent_part.isdigit():
-        return None
-    return int(agent_part), name
-
-
 def resolve_upload_path(agent_id: int, name: str) -> Path:
     """Resolve an upload name to its on-disk path, guarding against traversal.
 
@@ -75,11 +50,6 @@ def resolve_upload_path(agent_id: int, name: str) -> Path:
     if target == base or not target.is_relative_to(base):
         raise ValueError(f"upload name {name!r} escapes agent {agent_id} upload dir")
     return target
-
-
-def image_mime_for(name: str) -> str | None:
-    """MIME type for an image upload name, or None if the suffix is not an image."""
-    return IMAGE_MIME.get(Path(name).suffix.lower())
 
 
 def fetch_upload_b64(agent_id: int, name: str) -> tuple[str, str]:

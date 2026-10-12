@@ -8,13 +8,13 @@ import pytest
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from base.agents.incarnation.native_restart_models import NativeRestartRequest
-from base.agents.messages.native_restart import (
+from base.agents.inbox.native_restart import (
     NativeRestartConflictError,
     accept_native_restart,
     lookup_native_restart,
     native_restart_progress,
 )
+from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog

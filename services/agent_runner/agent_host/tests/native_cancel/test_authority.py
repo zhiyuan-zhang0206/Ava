@@ -9,8 +9,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
+from base.agents.inbox.native_cancel import accept_native_cancel
 from base.agents.incarnation.native_work_models import NativeWorkUncertainError
-from base.agents.messages.native_cancel import accept_native_cancel
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate

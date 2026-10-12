@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.tests.claim.test_inbound_ownership import _insert
+from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
+from base.agents.inbox.native_restart import accept_native_restart, native_restart_progress
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
-from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
-from base.agents.messages.native_restart import accept_native_restart, native_restart_progress
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog

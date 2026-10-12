@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from base import telemetry
 from base.agents import AgentNotFound
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import (

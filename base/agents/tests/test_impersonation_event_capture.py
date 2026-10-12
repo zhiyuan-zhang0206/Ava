@@ -20,10 +20,10 @@ from base.agents.impersonation.manifest import (
     capture_local_event,
     close_local_participant_admission,
     emit_recorded_central_event,
-    pending_reason,
     record_central_event,
     seal_local_participant,
 )
+from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.agents.sdk import call_policy

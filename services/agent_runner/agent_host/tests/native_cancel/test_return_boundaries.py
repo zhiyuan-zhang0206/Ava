@@ -21,7 +21,7 @@ from agent.state import AgentState
 from agent.tests.claim.test_inbound_ownership import _insert
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
+from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate

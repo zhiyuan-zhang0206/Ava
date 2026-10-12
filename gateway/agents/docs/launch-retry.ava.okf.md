@@ -34,7 +34,7 @@ later operator configuration. Native host configuration/admission remains owned
 by the existing host path.
 
 `ops.lifecycle.launch_reconcile` reads the committed receipt and locks the
-metadata row through `base.agents.inbox.wake.publish_inbound_wake`: only matching local machine,
+metadata row through `base.agents.impersonation.wake.publish_inbound_wake`: only matching local machine,
 current attempt, idling status and null admission may publish. Missing,
 terminated, admitted, moved or superseded targets produce no wake. The publisher
 uses existing Redis pub/sub; its impersonation alert

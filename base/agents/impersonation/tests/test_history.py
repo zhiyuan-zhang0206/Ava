@@ -12,7 +12,6 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
-from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -208,9 +207,14 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     lease = start(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
-    inbound = insert_inbound_message(
-        db_conn, owner.agent_id, "Please fix login", source="user", bus=event_bus, database=database
-    )
+    # The plain chat row `insert_inbound_message` writes; the inbox owner sits above this package.
+    inbound_row = db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, %s, 'chat', 'user') RETURNING id",
+        (owner.agent_id, "Please fix login"),
+    ).fetchone()
+    assert inbound_row is not None
+    inbound = inbound_row[0]
     db_conn.commit()
     read = leases.inbox(
         database, str(lease["id"]), attested_caller(lease), local_machine=local_machine

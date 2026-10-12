@@ -8,7 +8,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.impersonation._store import expire, lock_lease
 from base.agents.impersonation.status import ImpersonationStatus, parse_lease
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import (
@@ -81,13 +81,13 @@ def force_expire_impersonation(
     from psycopg.rows import dict_row
 
     from base.agents.impersonation._store import (
+        close_event_admission,
         dismiss_reminders,
         insert_handoff,
         lock_agent,
     )
-    from base.agents.impersonation.event_log import is_log_native
     from base.agents.impersonation.history import set_actor
-    from base.agents.impersonation.manifest import close_event_admission
+    from base.agents.impersonation.status import is_log_native
     from base.log import logger
 
     with write_transaction(pool) as conn:

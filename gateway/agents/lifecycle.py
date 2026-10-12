@@ -34,7 +34,17 @@ from base.agents.compaction.models import (
 )
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.native_cancel import (
+    NativeCancelConflictError,
+    accept_native_cancel,
+    observe_native_work,
+)
+from base.agents.inbox.native_restart import (
+    NativeRestartConflictError,
+    lookup_native_restart,
+    native_restart_progress,
+)
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAcceptance,
     NativeRestartAccepted,
@@ -44,16 +54,6 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartRequest,
 )
 from base.agents.incarnation.native_work_models import NativeCancelAcceptance, NativeWorkTarget
-from base.agents.messages.native_cancel import (
-    NativeCancelConflictError,
-    accept_native_cancel,
-    observe_native_work,
-)
-from base.agents.messages.native_restart import (
-    NativeRestartConflictError,
-    lookup_native_restart,
-    native_restart_progress,
-)
 from base.db import Database
 from base.db.transaction import write_transaction
 from gateway.agents.forward import forward_to_home_machine

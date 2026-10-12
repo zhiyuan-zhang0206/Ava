@@ -18,7 +18,7 @@ acceptance, not remote readiness or agent execution.
   per-agent xact quota gate, create-only publication and fsync before ready receipt.
 - `base/host/private_storage.py:create_private_bytes`: complete, fsynced,
   non-overwriting publication; a duplicate verifies the existing object.
-- `base/agents/messages/chat_delivery.py:insert_chat_inbound_in_transaction`:
+- `base/agents/inbox/chat_delivery.py:insert_chat_inbound_in_transaction`:
   native chat identity/provenance/audit writer without commit or wake. Its own
   inbound-row identity disappears on deletion; upload needs retained evidence.
 - `gateway/app.py:lifespan`: owns background tasks and closes pools after task

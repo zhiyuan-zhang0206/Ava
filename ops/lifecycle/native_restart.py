@@ -6,18 +6,18 @@ from functools import partial
 from psycopg_pool import ConnectionPool
 
 from base.agents import InvalidModelConfig
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.native_restart import (
+    NativeRestartConflictError,
+    accept_native_restart,
+    native_restart_progress,
+)
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAccepted,
     NativeRestartOperation,
     NativeRestartOutcome,
     NativeRestartRefused,
     NativeRestartRequest,
-)
-from base.agents.messages.native_restart import (
-    NativeRestartConflictError,
-    accept_native_restart,
-    native_restart_progress,
 )
 from base.config import settings
 from base.db import Database

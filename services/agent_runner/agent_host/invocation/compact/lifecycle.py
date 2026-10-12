@@ -9,7 +9,7 @@ from agent.ownership.hosted import apply_hosted_lifecycle
 from base.agents.compaction.closed import closed_original
 from base.agents.compaction.execution import require_receiver
 from base.agents.compaction.models import CompactHeldError
-from base.agents.messages.native_restart import (
+from base.agents.inbox.native_restart import (
     completed_guarded_restart,
     original_guarded_restart_id,
     superseded_guarded_restart,

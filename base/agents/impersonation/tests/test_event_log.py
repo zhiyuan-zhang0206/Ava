@@ -21,10 +21,10 @@ from base.agents.impersonation.manifest import (
     LocalParticipant,
     capture_local_event,
     open_local_participant,
-    pending_reason,
     record_central_event,
     seal_local_participant,
 )
+from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority

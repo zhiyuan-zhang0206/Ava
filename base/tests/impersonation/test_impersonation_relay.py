@@ -8,6 +8,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.impersonation import wake
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
@@ -624,8 +625,8 @@ def test_relay_liveness_alert_logs_only_for_stale_active_leases(
         def exception(self, message: str, **fields: object) -> None:
             errors.append((message, fields))
 
-    monkeypatch.setattr(leases, "logger", FakeLogger())
-    leases.relay_liveness_alert(database, owner.agent_id)
+    monkeypatch.setattr(wake, "logger", FakeLogger())
+    wake.relay_liveness_alert(database, owner.agent_id)
     assert len(errors) == 1
     assert "relay heartbeat is stale" in errors[0][0]
     # A fresh heartbeat suppresses the alert.
@@ -635,7 +636,7 @@ def test_relay_liveness_alert_logs_only_for_stale_active_leases(
     )
     db_conn.commit()
     errors.clear()
-    leases.relay_liveness_alert(database, owner.agent_id)
+    wake.relay_liveness_alert(database, owner.agent_id)
     assert errors == []
-    leases.relay_liveness_alert(database, owner.agent_id + 1)
+    wake.relay_liveness_alert(database, owner.agent_id + 1)
     assert errors == []
