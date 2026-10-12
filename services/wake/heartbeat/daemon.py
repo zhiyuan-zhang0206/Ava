@@ -33,7 +33,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -300,7 +300,7 @@ def _send_heartbeat_checkin(
     # The inbound is committed on `with` exit (the emit above is enqueued and
     # lands on the emitter's next batch — best-effort, JSONL-mirrored). The wake
     # is published after the inbound row is durable. Best-effort wake (see
-    # base.agents.inbox.wake.publish_inbound_wake); heartbeat carries no user-facing inbound
+    # base.agents.impersonation.wake.publish_inbound_wake); heartbeat carries no user-facing inbound
     # id, so "0".
     publish_inbound_wake(db, bus, agent_id, "0")
 

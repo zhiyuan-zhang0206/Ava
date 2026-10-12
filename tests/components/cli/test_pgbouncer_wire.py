@@ -679,7 +679,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     single-backend pooler."""
     import base.db as base_db
     from base import config
-    from base.agents.messages.chat_delivery import insert_chat_inbound_once
+    from base.agents.inbox.chat_delivery import insert_chat_inbound_once
     from gateway.schedules.router import _update_blocking
 
     with (

@@ -10,7 +10,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.agents.upload_delivery.paths import image_mime_for, parse_upload_url
+from base.agents.messages.inbound_images import image_mime_for, parse_upload_url
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.routers.upload import batches as upload_batches

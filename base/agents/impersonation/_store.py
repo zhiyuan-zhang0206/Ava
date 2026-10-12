@@ -16,7 +16,13 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from base.agents import AgentStatus
-from base.agents.impersonation.status import OPEN, ImpersonationStatus, LeaseRecord, parse_lease
+from base.agents.impersonation.status import (
+    OPEN,
+    ImpersonationStatus,
+    LeaseRecord,
+    is_log_native,
+    parse_lease,
+)
 from base.agents.messages.caller_identity import caller_payload
 from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
@@ -402,9 +408,6 @@ def expire(conn: psycopg.Connection, lease: LeaseRecord) -> LeaseRecord:
             )
             lease["relay_degraded_reason"] = reason
         return lease
-    from base.agents.impersonation.event_log import is_log_native
-    from base.agents.impersonation.manifest import close_event_admission
-
     if is_log_native(lease):
         close_event_admission(conn, str(lease["id"]))
     detail = None
@@ -548,3 +551,12 @@ def require_relay_active_locked(
         AgentStatus.IDLING,
     ):
         raise ImpersonationError("Agent placement or lifecycle changed")
+
+
+def close_event_admission(conn: psycopg.Connection, lease_id: str) -> bool:
+    """Close a log-native lease's admission gate through its narrow SQL door."""
+    row = conn.execute(
+        "SELECT close_impersonation_event_admission(%s)",
+        (lease_id,),
+    ).fetchone()
+    return row is not None and row[0] is True

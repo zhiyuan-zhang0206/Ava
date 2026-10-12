@@ -15,7 +15,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
+from base.agents.impersonation.status import LOG_PROTOCOL_VERSION
 from base.log import logger
 
 _INCOMPLETE_LEASES = """

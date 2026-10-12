@@ -17,7 +17,7 @@ compatibility prerequisite below still applies.
 
 ## Acceptance owner
 
-`base/agents/messages/native_restart.py` owns one immutable operation receipt in
+`base/agents/inbox/native_restart.py` owns one immutable operation receipt in
 `native_restart_commands`. Receipt lookup precedes mutable source, home-machine,
 work and configuration reads. Its raw JSON comparison digest preserves boolean
 and numeric representations; it compares requests and is not operation identity.

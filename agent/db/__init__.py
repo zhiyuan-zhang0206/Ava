@@ -14,9 +14,9 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent.ownership.inbound import lock_inbound_owner
 from agent.ownership.native_cancel import bound_native_cancel
 from base.agents.compaction.models import CompactHeldError
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.live import ALIVE_STATUSES
 from base.agents.inbox.rows import InboundRow
-from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.incarnation.native_work_models import NativeCancelPendingError, NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.config import settings

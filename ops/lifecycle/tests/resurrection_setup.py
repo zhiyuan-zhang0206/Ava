@@ -8,7 +8,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.incarnation.resources import IncarnationResources
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority

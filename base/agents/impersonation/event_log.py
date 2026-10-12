@@ -26,20 +26,11 @@ from base.telemetry import Event, event_id, event_line, event_line_digest
 from base.telemetry.audit_events import audit_event_uid, record_audit
 from base.telemetry.serialization import event_payload
 
-LOG_PROTOCOL_VERSION = 2
 # Cap on one lease's entries; reaching it fails capture rather than dropping a
 # tail (about 1280 times the measured 78-event session maximum).
 MAX_LOG_ENTRIES = 100_000
 # Source key of rows appended by transaction-owning central producers.
 CENTRAL_SOURCE = "central"
-
-
-def is_log_native(lease: Mapping[str, Any]) -> bool:
-    """Whether this lease records its events in its own entries (protocol v2)."""
-    return (
-        lease["automatic"] is True
-        and lease["event_delivery_protocol_version"] == LOG_PROTOCOL_VERSION
-    )
 
 
 def event_item(event: Event) -> tuple[str, str, str, object]:

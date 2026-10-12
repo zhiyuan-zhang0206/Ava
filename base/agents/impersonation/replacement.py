@@ -12,7 +12,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from base.agents.impersonation.event_log import is_log_native
+from base.agents.impersonation.status import is_log_native
 from base.agents.messages.caller_identity import caller_payload
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 

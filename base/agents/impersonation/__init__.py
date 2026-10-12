@@ -15,6 +15,7 @@ from base.agents.impersonation._store import (
 from base.agents.impersonation._store import (
     SESSION_RELAY_PROVIDERS,
     authenticate,
+    close_event_admission,
     dismiss_reminders,
     expire,
     insert_handoff,
@@ -38,20 +39,14 @@ from base.agents.impersonation._store import (
 from base.agents.impersonation._store import (
     require_native as require_native,
 )
-from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
 from base.agents.impersonation.history import append, capture_pending, set_actor
-from base.agents.impersonation.status import ImpersonationStatus, parse_lease
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, ImpersonationStatus, parse_lease
+from base.agents.impersonation.wake import wake_agent as wake_agent
 from base.agents.messages.caller_identity import CallerIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
-from base.events.live.announce import (
-    publish_agent_updated_sync,
-    publish_impersonation_changed_sync,
-)
 from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
-from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -59,13 +54,6 @@ def _ttl(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 86400:
         raise ValueError("TTL must be an integer from 1 through 86400 seconds")
     return value
-
-
-def wake_agent(db: Database, bus: EventBus, agent_id: int, *, roster_changed: bool = False) -> None:
-    publish_inbound_wake(db, bus, agent_id, "impersonation")
-    publish_impersonation_changed_sync(bus, agent_id)
-    if roster_changed:
-        publish_agent_updated_sync(bus, agent_id)
 
 
 def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
@@ -470,7 +458,7 @@ def release(
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
     from base.agents.impersonation import manifest as capture
-    from base.agents.impersonation.event_log import is_log_native
+    from base.agents.impersonation.status import is_log_native
 
     # Keep the admission fence durable when a live participant delays release.
     with db.write_transaction() as conn:
@@ -490,7 +478,7 @@ def release(
         )
         set_actor(conn, lease["source"])
         if is_log_native(lease):
-            capture.close_event_admission(conn, lease_id)
+            close_event_admission(conn, lease_id)
 
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
@@ -672,49 +660,10 @@ def mark_plugin_applied(
         )
 
 
-def relay_liveness_alert(db: Database, agent_id: int) -> None:
-    """Loud, best-effort signal when a wake lands for an agent whose active
-    lease has a stale relay heartbeat. Never raises: the wake itself must not
-    be held hostage to this diagnostic. Logged at most once per stamp interval.
-    """
-    from datetime import UTC, datetime, timedelta
-
-    try:
-        with db.connect() as conn:
-            row = conn.execute(
-                "SELECT relay_provider,relay_heartbeat_at,relay_last_failure_at "
-                "FROM agent_impersonations WHERE agent_id=%s AND status='active' "
-                "ORDER BY created_at DESC LIMIT 1",
-                (agent_id,),
-            ).fetchone()
-        if row is None:
-            return
-        provider, heartbeat, last_failure = row
-        stale = heartbeat is None or heartbeat < datetime.now(UTC) - timedelta(
-            seconds=RELAY_HEARTBEAT_STALE_SECONDS
-        )
-        recently_stamped = last_failure is not None and last_failure >= datetime.now(UTC) - (
-            timedelta(seconds=_RELAY_FAILURE_STAMP_SECONDS)
-        )
-        if stale and not recently_stamped:
-            logger.error(
-                "inbound wake for an impersonated agent whose relay heartbeat is stale; "
-                "messages may sit unread in the inbox",
-                agent_id=agent_id,
-                relay_provider=provider,
-                relay_heartbeat_at=str(heartbeat),
-            )
-    except Exception:
-        logger.exception("impersonation relay liveness check failed", agent_id=agent_id)
-
-
 # The relay binding and its failure paths live in base/agents/impersonation/relay.py;
 # re-exported here so every base.agents.impersonation.<name> caller keeps resolving.
 from base.agents.impersonation.relay import (  # noqa: E402, I001
-    RELAY_HEARTBEAT_SECONDS as RELAY_HEARTBEAT_SECONDS,
-    RELAY_HEARTBEAT_STALE_SECONDS as RELAY_HEARTBEAT_STALE_SECONDS,
     _ABORTED_REASON_PREFIX as _ABORTED_REASON_PREFIX,
-    _RELAY_FAILURE_STAMP_SECONDS as _RELAY_FAILURE_STAMP_SECONDS,
     abort_lease as abort_lease,
     aborted_detail as aborted_detail,
     fail_acceptance as fail_acceptance,
@@ -723,4 +672,9 @@ from base.agents.impersonation.relay import (  # noqa: E402, I001
     relay_get as relay_get,
     relay_heartbeat as relay_heartbeat,
     relay_inbox as relay_inbox,
+)
+from base.agents.impersonation.status import (  # noqa: E402
+    RELAY_HEARTBEAT_SECONDS as RELAY_HEARTBEAT_SECONDS,
+    RELAY_HEARTBEAT_STALE_SECONDS as RELAY_HEARTBEAT_STALE_SECONDS,
+    RELAY_FAILURE_STAMP_SECONDS as RELAY_FAILURE_STAMP_SECONDS,
 )

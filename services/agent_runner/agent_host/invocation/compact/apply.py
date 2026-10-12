@@ -14,7 +14,7 @@ from base.agents.compaction.application import authorize
 from base.agents.compaction.execution import CompactCommand, require_receiver, settle
 from base.agents.compaction.models import CompactHeldError, CompactOutcome
 from base.agents.context import AvaContext
-from base.agents.history.checkpoint import latest_checkpoint_id_in_transaction
+from base.agents.incarnation.native_work import latest_checkpoint_id_in_transaction
 from base.agents.messages.kwargs import AvaMsgType
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation

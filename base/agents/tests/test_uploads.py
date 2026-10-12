@@ -11,21 +11,22 @@ from pathlib import Path
 
 import pytest
 
+from base.agents.messages.inbound_images import image_mime_for, parse_upload_url
 from base.agents.upload_delivery import paths
 
 
 class TestParseUploadUrl:
     def test_valid(self) -> None:
-        assert paths.parse_upload_url("/api/agents/7/uploads/foo.png") == (7, "foo.png")
+        assert parse_upload_url("/api/agents/7/uploads/foo.png") == (7, "foo.png")
 
     def test_rejects_foreign_url(self) -> None:
-        assert paths.parse_upload_url("http://evil.example/x.png") is None
-        assert paths.parse_upload_url("/api/agents/7/timeline") is None
-        assert paths.parse_upload_url("/api/agents/abc/uploads/x.png") is None
+        assert parse_upload_url("http://evil.example/x.png") is None
+        assert parse_upload_url("/api/agents/7/timeline") is None
+        assert parse_upload_url("/api/agents/abc/uploads/x.png") is None
 
     def test_keeps_nested_name_for_resolver_to_reject(self) -> None:
         # parse does not itself sanitize; it hands the raw name to the resolver.
-        assert paths.parse_upload_url("/api/agents/7/uploads/../secret") == (7, "../secret")
+        assert parse_upload_url("/api/agents/7/uploads/../secret") == (7, "../secret")
 
 
 class TestResolveUploadPath:
@@ -61,14 +62,14 @@ class TestResolveUploadPath:
 
 class TestImageMime:
     def test_known_image_suffixes(self) -> None:
-        assert paths.image_mime_for("a.png") == "image/png"
-        assert paths.image_mime_for("a.JPG") == "image/jpeg"
-        assert paths.image_mime_for("a.webp") == "image/webp"
+        assert image_mime_for("a.png") == "image/png"
+        assert image_mime_for("a.JPG") == "image/jpeg"
+        assert image_mime_for("a.webp") == "image/webp"
 
     def test_non_image_returns_none(self) -> None:
-        assert paths.image_mime_for("a.pdf") is None
-        assert paths.image_mime_for("a.txt") is None
-        assert paths.image_mime_for("noext") is None
+        assert image_mime_for("a.pdf") is None
+        assert image_mime_for("a.txt") is None
+        assert image_mime_for("noext") is None
 
 
 class _FakeResp:
@@ -132,4 +133,4 @@ class TestFetchUploadB64:
 
 
 def test_upload_url_roundtrips() -> None:
-    assert paths.parse_upload_url(paths.upload_url(3, "a.png")) == (3, "a.png")
+    assert parse_upload_url(paths.upload_url(3, "a.png")) == (3, "a.png")

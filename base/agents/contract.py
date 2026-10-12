@@ -25,7 +25,7 @@ Error wire protocol:
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import ClassVar
+from typing import Any, ClassVar, Protocol
 
 
 class AgentStatus(StrEnum):
@@ -438,3 +438,19 @@ if (
         f"subclasses without a row: "
         f"{_wire_subclasses(AvaAgentError) - set(EXCEPTION_BY_REASON.values())}"
     )
+
+
+class SdkCaptureAdmission(Protocol):
+    """One call's retained receipt admission, released after its final event."""
+
+    def capture(self, event: Any) -> Any:
+        """Append an eligible event to this call's original receipt."""
+        ...
+
+    def capture_failed(self) -> None:
+        """Fence the original receipt after an event could not be captured."""
+        ...
+
+    def release(self) -> None:
+        """Release admitted work and seal only when its original owner drains."""
+        ...

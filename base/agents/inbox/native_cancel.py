@@ -6,10 +6,10 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.agents.history.checkpoint import latest_checkpoint_id_in_transaction
 from base.agents.incarnation.native_work import (
     NativeWorkRecord,
     decode_work,
+    latest_checkpoint_id_in_transaction,
     load_work,
     managed_resources,
     receiver,

@@ -42,5 +42,5 @@ the database layer imports none of them.
 ## Entry points
 
 - `base/agents/inbox/insert.py:insert_inbound_message`
-- `base/agents/inbox/wake.py:publish_inbound_wake`
+- `base/agents/impersonation/wake.py:publish_inbound_wake`
 - `base/agents/inbox/live.py:signal_live_agents_restart`

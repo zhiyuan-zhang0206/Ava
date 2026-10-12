@@ -29,12 +29,12 @@ from base.agents.history.context_response import (
     context_breakdown_response,
     resolve_agent_model,
 )
+from base.agents.inbox.chat_delivery import ClientMessageConflictError
 from base.agents.inbox.rows import list_pending_inbounds
-from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
-from base.agents.messages.inbound_images import inbound_image_urls
+from base.agents.messages.inbound_images import image_mime_for, inbound_image_urls, parse_upload_url
 from base.agents.model.model_overrides import agent_overrides
-from base.agents.upload_delivery.paths import image_mime_for, parse_upload_url, resolve_upload_path
+from base.agents.upload_delivery.paths import resolve_upload_path
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (

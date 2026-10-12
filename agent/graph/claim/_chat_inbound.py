@@ -18,7 +18,8 @@ from agent.messages import inbound_message
 from ava.security import SecurityFindingEntry, scan_inbound_content
 from ava.skills.composer_commands import expand_command
 from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
-from base.agents.upload_delivery.paths import fetch_upload_b64, parse_upload_url
+from base.agents.messages.inbound_images import parse_upload_url
+from base.agents.upload_delivery.paths import fetch_upload_b64
 from base.log import logger
 
 

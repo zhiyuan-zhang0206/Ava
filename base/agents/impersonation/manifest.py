@@ -17,17 +17,16 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from base.agents.impersonation import lock_lease
+from base.agents.contract import SdkCaptureAdmission
+from base.agents.impersonation._store import lock_lease
 from base.agents.impersonation.event_log import (
     CENTRAL_SOURCE,
-    LOG_PROTOCOL_VERSION,
     append_source_event,
-    is_log_native,
     locked_receipt_state,
     refresh_completed_export,
 )
+from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, is_log_native
 from base.agents.messages.delivery.retry import retryable_database_error
-from base.agents.sdk.capture import SdkCaptureAdmission
 from base.db import Database
 from base.log import logger
 from base.telemetry import Event
@@ -107,20 +106,6 @@ class LocalCaptureAdmission:
 def session_tag(agent_id: int, session_id: int) -> str:
     """Return the immutable correlation value shared by receipts and Loki."""
     return f"{agent_id}:{session_id}"
-
-
-def pending_reason(lease: Mapping[str, Any]) -> str | None:
-    """Classify a handoff's current delivery uncertainty without inventing state."""
-    if lease["events_completed_at"] is not None:
-        return None
-    if lease["automatic"] is not True:
-        return "manual"
-    if lease["event_delivery_protocol_version"] != LOG_PROTOCOL_VERSION:
-        return "legacy"
-    stored = lease["event_delivery_pending_reason"]
-    if stored is not None:
-        return str(stored)
-    return "awaiting_session_end" if lease["ended_at"] is None else "awaiting_participant_seal"
 
 
 def open_local_participant(db: Database, lease_id: str, *, agent_id: int, source_key: str) -> bool:
@@ -438,12 +423,3 @@ def require_participants_sealed(conn: psycopg.Connection, lease: Mapping[str, An
         raise EventSourceNotSealedError("Impersonation event capture failed")
     if "open" in states:
         raise EventSourceNotSealedError("Impersonation event participants have not sealed")
-
-
-def close_event_admission(conn: psycopg.Connection, lease_id: str) -> bool:
-    """Close a log-native lease's admission gate through its narrow SQL door."""
-    row = conn.execute(
-        "SELECT close_impersonation_event_admission(%s)",
-        (lease_id,),
-    ).fetchone()
-    return row is not None and row[0] is True

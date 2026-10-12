@@ -32,10 +32,10 @@ _INVENTORY: dict[str, str] = {
     "ops/lifecycle/termination.py::_stage_termination_event": "central",
     "services/desktop/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": "central",
     "services/desktop/computer/mcp_daemon.py::ComputerMcpDaemon._emit_session_event": "central",
-    "base/agents/messages/chat_delivery.py::insert_chat_inbound_in_transaction": "central",
+    "base/agents/inbox/chat_delivery.py::insert_chat_inbound_in_transaction": "central",
     "base/agents/inbox/insert.py::insert_inbound_message_in_transaction": "central",
     "base/agents/inbox/insert.py::insert_spawn_prompt_in_transaction": "central",
-    "base/agents/messages/control_delivery.py::insert_compact_in_transaction": "ineligible",
+    "base/agents/inbox/control_delivery.py::insert_compact_in_transaction": "ineligible",
     # Verified HTTP control acceptance records source=user, not a borrowed agent caller.
     "base/agents/compaction/commands.py::accept": "ineligible",
     "base/host/env/audit.py::_emit_audit_event": "ineligible",

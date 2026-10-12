@@ -10,7 +10,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
-from base.agents.messages.chat_delivery import insert_chat_inbound_once
+from base.agents.inbox.chat_delivery import insert_chat_inbound_once
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent

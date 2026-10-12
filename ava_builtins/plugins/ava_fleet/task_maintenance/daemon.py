@@ -51,8 +51,8 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base import telemetry
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
-from base.agents.inbox.wake import publish_inbound_wake
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot

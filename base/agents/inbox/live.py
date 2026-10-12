@@ -4,7 +4,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 
 from base.agents.contract import AgentStatus
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.db import Database
 from base.events.live.bus import EventBus
 

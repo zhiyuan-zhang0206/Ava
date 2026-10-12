@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 import psycopg
+from psycopg import AsyncConnection
 from psycopg.sql import SQL
 
 from base.agents.incarnation.native_work_models import (
@@ -161,3 +162,15 @@ async def activate_work(conn: psycopg.AsyncConnection, target: NativeWorkTarget)
 def receiver(work: NativeWorkRecord) -> tuple[str, UUID, UUID]:
     """The only machine, generation and owner allowed to settle this work."""
     return (work.target.machine, work.target.generation, work.target.owner)
+
+
+async def latest_checkpoint_id_in_transaction(conn: AsyncConnection, agent_id: int) -> str | None:
+    """Read the root checkpoint head for an owner-fenced evidence transaction."""
+    row = await (
+        await conn.execute(
+            "SELECT checkpoint_id FROM checkpoints WHERE thread_id=%s AND checkpoint_ns='' "
+            "ORDER BY checkpoint_id DESC LIMIT 1",
+            (str(agent_id),),
+        )
+    ).fetchone()
+    return None if row is None else row[0]

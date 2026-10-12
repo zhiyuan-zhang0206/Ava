@@ -42,8 +42,8 @@ from starlette.responses import JSONResponse
 
 from base.agents import AvaAgentError
 from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
+from base.agents.inbox.chat_delivery import ClientMessageConflictError
 from base.agents.messages.caller_identity import CallerIdentity
-from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module

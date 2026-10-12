@@ -4,9 +4,9 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.inbound import lock_inbound_owner
+from base.agents.inbox.native_cancel import pending_native_cancel
 from base.agents.incarnation.native_work import activate_work, load_work
 from base.agents.incarnation.native_work_models import NativeCancelMarker, NativeWorkTarget
-from base.agents.messages.native_cancel import pending_native_cancel
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 

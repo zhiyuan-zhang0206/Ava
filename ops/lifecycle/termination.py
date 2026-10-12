@@ -8,7 +8,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents import AgentNotFound, AgentStatus
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.incarnation.lifecycle_acceptance import (
     KILL_ALL_SHELL_SESSIONS,
 )
