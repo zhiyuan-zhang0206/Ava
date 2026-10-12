@@ -33,8 +33,8 @@ would expire before a healthy 60-second heartbeat.
 
 ## Consumers and alerts
 
-- `GET /api/fleet/graph` returns the fetched graph with `telemetry_stale=true` (its
-  `stale` flag stays for fallback data) when the guard is stale; the graph is still cached.
+- `GET /api/fleet/graph` returns the fetched graph with `telemetry_stale=true` when
+  the guard is stale; the graph is still cached.
 - `ava-ops-gateway-metrics-silent` independently watches the Prometheus metric
   with `absent_over_time(...[5m])`; it does not depend on gateway events reaching
   Loki.

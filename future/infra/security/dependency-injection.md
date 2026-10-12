@@ -275,7 +275,7 @@ Two more gateway-side daemons, one root each, no reader outside the package.
   components read too and so appear in this slice as well. `LabelerConfig`
   (`services/derived/labeler/config.py`): `labeler_model`, `labeler_max_chars`.
 - Each `daemon.py` builds its slice (`events_maintenance_config()`, `labeler_config()`)
-  and passes it down: loops, `compute_rollup`, `recover_observations`/`replay_loki`,
+  and passes it down: loops, `compute_rollup`, `replay_loki`,
   `run_resolution_slice`, `run_blob_vacuum(timezone=)`, `generate_label_async`. The
   Loki readers and the I/O seams take the slice instead of reading `settings`. The
   operator CLI `observed_metrics.main()` gets its slice from the daemon's builder, so

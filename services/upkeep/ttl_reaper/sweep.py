@@ -18,8 +18,7 @@ phase is a bounded batch, and a backlog drains over successive rounds:
   leases still waiting for an open event source (or with a failed one) emit the
   ``impersonation_event_log_incomplete`` signal.
 - **Schedule fire log** — ``schedule_fire_log`` claims older than the configured
-  retention window (30 days by default) are deleted once per day, keeping the
-  newest claim per schedule so the catch-up baseline never regresses.
+  retention window (30 days by default) are deleted once per day.
 - **Lifecycle pointers** — the hourly torn-pointer scan and absent-machine
   fence settle (``lifecycle_fences``).
 
@@ -197,14 +196,11 @@ def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
 def _prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
     """Delete ``schedule_fire_log`` claims older than the retention window.
 
-    The table is the at-most-once claim ledger for schedule catch-up
-    (``schedules/catchup.py``): the catch-up baseline is MAX(slot_fire_at) over
-    the remaining rows. The newest claim PER SCHEDULE is always kept, so a
-    sparse-cron schedule whose whole log is older than the window never
-    regresses its baseline to ``created_at`` — a regressed baseline would let
-    ``catch_up`` refire a slot the schedule already claimed. One bounded
-    DELETE per pass: a backlog (long gateway outage, many schedules) drains
-    over successive passes instead of one long transaction.
+    The table is the at-most-once claim ledger of ``fire_slot_once``
+    (``schedules/catchup.py``); a claim only matters while its slot can still be
+    fired, so every row past the window is deleted. One bounded DELETE per pass:
+    a backlog (long gateway outage, many schedules) drains over successive passes
+    instead of one long transaction.
     """
     cutoff = datetime.now(UTC) - timedelta(days=settings.daemon.schedule_fire_log_retention_days)
     with pool.connection() as conn, conn.cursor() as cur:
@@ -212,15 +208,10 @@ def _prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
             """
             DELETE FROM schedule_fire_log
             WHERE id IN (
-                SELECT f.id
-                FROM schedule_fire_log f
-                WHERE f.slot_fire_at < %s
-                  AND f.id NOT IN (
-                    SELECT DISTINCT ON (schedule_id) id
-                    FROM schedule_fire_log
-                    ORDER BY schedule_id, slot_fire_at DESC
-                  )
-                ORDER BY f.id
+                SELECT id
+                FROM schedule_fire_log
+                WHERE slot_fire_at < %s
+                ORDER BY id
                 LIMIT %s
             )
             """,
