@@ -13,7 +13,6 @@ from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
@@ -101,77 +100,3 @@ async def _publish_reaped_corpses(bus: EventBus, reaped: list[int]) -> None:
                 event="corpse_reaper_publish_failed",
                 agent_id=agent_id,
             )
-
-
-# The confirmed crash count a prompt reap attests: the mark's first stamp and
-# the crash being settled. The mechanism fires at the first confirmed
-# re-crash, when the retry under the mark has already failed.
-RECRASH_CONFIRMED_CRASHES = 2
-
-
-async def reap_recrashed_corpse(
-    pool: AsyncConnectionPool,
-    incarnation: RuntimeIncarnation,
-    *,
-    bus: EventBus,
-) -> list[ReapedCorpse]:
-    """Terminate the corpse this incarnation just re-crashed (task #3616).
-
-    The mark's first stamp already bought the corpse its grace window — the
-    one chance to self-heal. A turn that dies AGAIN under the same mark is the
-    retry failing, and the rest of the grace can only be spent by a zombie
-    that keeps claiming and re-dying (the #3602 window). The corpse reaper's
-    termination therefore runs now, from the settle point that witnessed the
-    crash: same semantics and events as `reap_crash_corpses` — idling-only,
-    `termination_source='reaper'`, the `corpse_reaper` status change and the
-    `corpse_reaper_terminated` beat entry — with the confirmed crash count on
-    both.
-
-    The owner/generation pin is this path's lease qualification: only the
-    exact incarnation that crashed can reap its row, so a row that moved on
-    (a concurrent admission or replacement took it) matches nothing and is
-    left alone — fail-closed against the concurrent transition.
-    """
-    async with async_write_transaction(pool) as conn:
-        rows = await (
-            await conn.execute(
-                "UPDATE agents_meta SET status = 'terminated', "
-                "termination_source = 'reaper', lease_expires_at = NULL "
-                "WHERE id = %s AND status = 'idling' AND runtime_kind = 'hosted' "
-                "AND last_turn_fatal_at IS NOT NULL "
-                "AND runtime_generation = %s AND runtime_owner = %s "
-                "RETURNING id",
-                (incarnation.agent_id, incarnation.generation, incarnation.owner),
-            )
-        ).fetchall()
-        reaped: list[ReapedCorpse] = []
-        recorded: list[telemetry.Event] = []
-        for (agent_id,) in rows:
-            event = prepare_event_log(
-                event_type="status_change",
-                agent_id=agent_id,
-                source="system",
-                payload={
-                    "from": "idling",
-                    "to": "terminated",
-                    "reason": "corpse_reaper",
-                    "crash_count": RECRASH_CONFIRMED_CRASHES,
-                },
-            )
-            recorded.append(await record_audit_async(conn, event))
-            reaped.append(
-                ReapedCorpse(
-                    agent_id,
-                )
-            )
-    for event in recorded:
-        telemetry.emit_prepared(event)
-    if reaped:
-        logger.info(
-            "corpse reaper: prompt-reaped {n} re-crashed corpse(s) — the mark's grace was spent",
-            event="corpse_reaper_terminated",
-            n=len(reaped),
-            crash_count=RECRASH_CONFIRMED_CRASHES,
-        )
-    await _publish_reaped_corpses(bus, [corpse.agent_id for corpse in reaped])
-    return reaped

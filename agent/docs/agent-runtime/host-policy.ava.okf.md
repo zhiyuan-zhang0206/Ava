@@ -27,9 +27,9 @@ The daemon supplies `HostPolicy` (`agent_host/runtime.py`) explicitly: admission
 capacity is read at construction, cache limits at each eviction, and the model
 and override readers at the existing admission, slice and runtime-build boundaries.
 The same process `ConfigBoot` supplies the live default reader, operation-time
-clock factory, handoff note inputs, and corpse recovery policy. Cold build,
-database recovery and final reconciliation retain the same `ReconcileReadInputs`;
-they do not create another configuration owner or reset their read ordering.
+clock factory and handoff note inputs. Cold build, database recovery and turn
+settlement consume claimed chat rows through `consume_claimed_inbounds` without
+reading history.
 The process entry owns one captured code image and one `ProcessDbGate` for its
 database factory, workload pool and control pool. Host logging and the plugin
 installation capture that same ClientSet producer; the heartbeat alert and

@@ -656,11 +656,9 @@ async def renew_hosted_owner(pool: AsyncConnectionPool, machine: str, owner: UUI
 
 @dataclass(frozen=True)
 class TurnFatalStamp:
-    """One crash's stamp outcome: `applied` is the CAS result, `recrash` says
-    the mark already existed — a retry that died again, not a first death."""
+    """One crash's stamp outcome: `applied` is the CAS result."""
 
     applied: bool
-    recrash: bool
 
 
 async def stamp_turn_fatal(
@@ -678,40 +676,31 @@ async def stamp_turn_fatal(
     Best-effort and settle-independent: a settlement blocked by unsettled
     resources must not lose the death evidence (the 5858 corpse settled 3m52s
     after its last turn ended; the stamp landed regardless).
-
-    Returns both facts the settlement boundary needs: whether the stamp
-    applied, and whether the mark pre-existed — read in the same atomic
-    statement that casts the stamp, so "this crash is a re-crash" cannot race
-    a concurrent marker write (task #3616).
     """
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
-            "WITH target AS (SELECT id, last_turn_fatal_at AS previous_mark FROM agents_meta "
-            "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
-            "AND runtime_generation = %s AND runtime_owner = %s FOR UPDATE) "
             "UPDATE agents_meta SET last_turn_fatal_at = "
             "COALESCE(last_turn_fatal_at, clock_timestamp()) "
-            "FROM target WHERE agents_meta.id = target.id RETURNING target.previous_mark",
+            "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
+            "AND runtime_generation = %s AND runtime_owner = %s RETURNING id",
             (incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
-        row = await cur.fetchone()
-    stamp = TurnFatalStamp(applied=row is not None, recrash=row is not None and row[0] is not None)
-    if stamp.applied:
+        applied = await cur.fetchone() is not None
+    if applied:
         logger.info(
             "hosted turn crashed — corpse marked for the reaper",
             event="host_turn_corpse_marked",
             agent_id=incarnation.agent_id,
-            recrash=stamp.recrash,
         )
-    return stamp
+    return TurnFatalStamp(applied=applied)
 
 
 @dataclass(frozen=True)
 class TurnSettlement:
     """The settle boundary's facts about one closed turn: `stamp` is the crash
     stamp (None when the turn did not crash or its stamp failed), and `settled`
-    says the settle wrote the row idling — the reapable state, gated on fully
-    discharged turn resources."""
+    says the settle wrote the row idling, gated on fully discharged turn
+    resources."""
 
     stamp: TurnFatalStamp | None
     settled: bool
@@ -733,9 +722,8 @@ async def settle_and_stamp_turn(
     the idling write could not. It must also run BEFORE the settle — its CAS
     matches `status='running'`, so a settled row would refuse the stamp.
 
-    Returns both halves to the settlement boundary: whether this crash is a
-    re-crash under an existing mark, and whether the settle reached idling —
-    the prompt-reap decision reads exactly these facts (task #3616).
+    Returns both halves to the settlement boundary: the crash stamp and
+    whether the settle reached idling.
     """
     stamp: TurnFatalStamp | None = None
     if crashed:
