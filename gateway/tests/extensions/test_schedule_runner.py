@@ -579,6 +579,9 @@ def test_stall_verdict_closes_run_row(
     exited: list[int] = []
     monkeypatch.setattr(sr.os, "_exit", exited.append)
     monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", Mock())
+    # The deadline timer would exit this test process for real; its contract is
+    # covered by the lifecycle test and the real-process integration test.
+    monkeypatch.setattr(sr.faulthandler, "dump_traceback_later", Mock())
 
     sr._stall_action(Database.from_settings(gate=database_gate), sid, "stalled in foo", run_id)
 
