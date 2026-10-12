@@ -1,5 +1,8 @@
 """Checkpoint-compatible plugin delta codec for external SDK attachments.
 
+The agent layer owns it; `ava.external.attach` receives this module as its `state` argument
+(`ava.external.state.ExternalState`).
+
 The existing serializer preserves reducer inputs exactly, including partial
 mappings, sets, nested models and message objects. The JSON envelope fits the
 lease's ordered delta journal; only the native graph writes checkpoints.
@@ -8,7 +11,6 @@ lease's ordered delta journal; only the native graph writes checkpoints.
 from __future__ import annotations
 
 import base64
-import importlib
 from typing import Any, cast
 
 from langchain_core.messages import RemoveMessage, convert_to_messages
@@ -17,19 +19,19 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
+from pydantic.fields import FieldInfo
 
+from agent import state as agent_state
+from agent.extensions import registry as extensions_registry
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.db import Database
 
 
-def _state_module() -> Any:
-    return importlib.import_module("agent.state")
-
-
 def _serializer() -> JsonPlusSerializer:
-    loaded_state_classes = importlib.import_module("agent.extensions.registry").loaded_state_classes
     return JsonPlusSerializer(
-        allowed_msgpack_modules=_state_module().checkpoint_msgpack_allowlist(loaded_state_classes())
+        allowed_msgpack_modules=agent_state.checkpoint_msgpack_allowlist(
+            extensions_registry.loaded_state_classes()
+        )
     )
 
 
@@ -48,7 +50,7 @@ def _validate_messages_delta(delta: dict[str, Any]) -> None:
 
 def encode_plugin_delta(delta: dict[str, Any], state_cls: type[Any]) -> dict[str, str]:
     """Serialize a reducer input validated against `state_cls`, without coercing it to a field value."""
-    checked = _state_module()._validate_plugin_state_keys(delta, state_cls)
+    checked = agent_state._validate_plugin_state_keys(delta, state_cls)
     _validate_messages_delta(checked)
     encoding, payload = _serializer().dumps_typed(checked)
     return {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
@@ -61,18 +63,18 @@ def decode_plugin_delta(encoded: dict[str, Any], state_cls: type[Any]) -> dict[s
     )
     if not isinstance(payload, dict):
         raise TypeError("external plugin delta must decode to a dict")
-    checked = cast(dict[str, Any], _state_module()._validate_plugin_state_keys(payload, state_cls))
+    checked = agent_state._validate_plugin_state_keys(cast(dict[str, Any], payload), state_cls)
     _validate_messages_delta(checked)
     return checked
 
 
 def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
     """Replay one journal entry through the registered field reducers."""
-    state_module = _state_module()
-    state_module._validate_plugin_state_keys(delta, type(state))
+    agent_state._validate_plugin_state_keys(delta, cast("type[Any]", type(state)))
     _validate_messages_delta(delta)
     for name, value in delta.items():
-        reducer = state_module._resolve_reducer(state.__class__.model_fields[name])
+        field = cast(FieldInfo, state.__class__.model_fields[name])
+        reducer = agent_state._resolve_reducer(field)
         setattr(state, name, reducer(getattr(state, name), value))
 
 
@@ -82,8 +84,8 @@ def load_snapshot(
     """Read native state and pinned config; never create or update a checkpoint."""
     # What the plugins this attachment loaded declare; the checkpoint decode's allowlist is the state
     # classes of the faces it loaded (`loaded_state_classes`).
-    registry = importlib.import_module("agent.extensions.registry").build_registry()
-    state_cls = _state_module().build_agent_state(registry)
+    registry = extensions_registry.build_registry()
+    state_cls = agent_state.build_agent_state(registry)
     with database.connect(autocommit=True) as conn:
         conn.row_factory = cast(Any, dict_row)
         typed_conn = cast(Connection[DictRow], conn)

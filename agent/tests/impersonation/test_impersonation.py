@@ -17,11 +17,11 @@ from pydantic import BaseModel, Field
 
 import base.agents.impersonation as agents_impersonation
 from agent import impersonation, impersonation_handoff, impersonation_process
+from agent.extensions import plugin_state_codec
 from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
 from agent.state import BaseAgentState
 from agent.tests._fakes import placeholder_runtime
-from ava.external import state
 from base.agents.context import AvaContext
 from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
@@ -162,7 +162,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
         assert state_cls is State  # the class the graph runs on
         return delta
 
-    monkeypatch.setattr(state, "decode_plugin_delta", decode)
+    monkeypatch.setattr(plugin_state_codec, "decode_plugin_delta", decode)
     receipt = Mock(side_effect=RuntimeError("receipt commit lost"))
     monkeypatch.setattr(agents_impersonation, "mark_plugin_applied", receipt)
     with pytest.raises(RuntimeError, match="receipt commit lost"):

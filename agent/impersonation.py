@@ -238,7 +238,7 @@ async def _apply_plugin_deltas(
     incarnation: RuntimeIncarnation,
 ) -> None:
     """Apply each unapplied plugin delta exactly once, recording its receipt."""
-    from ava.external.state import decode_plugin_delta
+    from agent.extensions.plugin_state_codec import decode_plugin_delta
     from base.agents.impersonation import mark_plugin_applied
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}

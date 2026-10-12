@@ -16,9 +16,9 @@ from pydantic import BaseModel, Field
 import agent.extensions.registry as extensions_registry
 import ava
 from agent import state as state_module
+from agent.extensions.plugin_state_codec import decode_plugin_delta, load_snapshot
 from agent.messages import NoteTag, system_note_message
 from ava import external
-from ava.external.state import decode_plugin_delta, load_snapshot
 from ava.sdk_surface import agent_identity
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
