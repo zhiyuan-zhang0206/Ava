@@ -26,7 +26,10 @@ def is_test_path(path: str) -> bool:
 
 
 def render_manifest(
-    exports: set[str], uses: dict[str, set[str]], loads: dict[str, tuple[str, ...]]
+    exports: set[str],
+    uses: dict[str, set[str]],
+    loads: dict[str, tuple[str, ...]],
+    external: dict[str, str],
 ) -> str:
     def listing(items: list[str]) -> str:
         return "[" + ", ".join(f'"{item}"' for item in items) + "]"
@@ -40,6 +43,9 @@ def render_manifest(
     if loads:
         rows = "\n".join(f'"{src}" = {listing(sorted(loads[src]))}' for src in sorted(loads))
         blocks.append(f"[loads]\n{rows}")
+    if external:
+        rows = "\n".join(f'"{src}" = {json.dumps(external[src])}' for src in sorted(external))
+        blocks.append(f"[external]\n{rows}")
     return "\n\n".join(blocks) + "\n"
 
 
@@ -158,15 +164,21 @@ def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
     grouped = _edges_by_directory(analysis.projections)
     exports, _ = _exports(analysis.projections)
     carried = {d: m.loads for d, m in analysis.manifests.items() if m.loads}
+    externals = {d: m.external for d, m in analysis.manifests.items() if m.external}
     written = 0
-    for directory in sorted(set(grouped) | set(exports) | set(carried)):
+    for directory in sorted(set(grouped) | set(exports) | set(carried) | set(externals)):
         uses: dict[str, set[str]] = defaultdict(set)
         for cf, ct in grouped.get(directory, {}):
             uses[cf].add(ct)
         target = out / manifest_path(directory)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
-            render_manifest(exports.get(directory, set()), uses, carried.get(directory, {})),
+            render_manifest(
+                exports.get(directory, set()),
+                uses,
+                carried.get(directory, {}),
+                externals.get(directory, {}),
+            ),
             encoding="utf-8",
         )
         written += 1
