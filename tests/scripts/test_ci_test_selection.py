@@ -49,8 +49,10 @@ def _backend_verdict(
     *,
     mode: str = "enforce",
     decision: str = "FULL",
+    selector: str = "success",
 ) -> subprocess.CompletedProcess[str]:
     script = script.replace("${{ needs.classify.outputs.backend }}", backend)
+    script = script.replace("${{ needs.classify.outputs.selector }}", selector)
     for job, result in results.items():
         script = script.replace("${{ needs." + job + ".result }}", result)
     assert "${{" not in script
@@ -64,7 +66,7 @@ def _backend_verdict(
 
 
 def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
-    results = dict.fromkeys(["classify", "test-select", *dependencies], "success")
+    results = dict.fromkeys(["classify", *dependencies], "success")
     non_backend = dict.fromkeys(results, "skipped") | {"classify": "success"}
     for outcome in ("success", "failure", "cancelled", "skipped"):
         actual = _backend_verdict(script, "false", non_backend | {"backend-structure": outcome})
@@ -92,41 +94,59 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
         for outcome in ("failure", "cancelled", "skipped"):
             actual = _backend_verdict(script, "true", results | {job: outcome})
             # FULL has no enforced subset; every required dependency must succeed.
-            assert actual.returncode == (
-                0
-                if job == "backend-selected" or (job == "test-select" and outcome == "skipped")
-                else 1
-            ), actual.stdout
+            assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
+    # The selector step is continue-on-error inside classify; its outcome is an output.
+    # A failed or cancelled selector keeps the full net but fails the required check;
+    # a skipped one (no PR, or no backend side) is not a failure.
+    for selector, expected in (("success", 0), ("skipped", 0), ("failure", 1), ("cancelled", 1)):
+        actual = _backend_verdict(script, "true", results, selector=selector)
+        assert actual.returncode == expected, (selector, actual.stdout)
 
 
-def test_enforce_is_the_default_and_test_select_republishes_the_mode() -> None:
+def test_enforce_is_the_default_and_classify_republishes_the_mode() -> None:
     """The revert switch is one value; job-level routing cannot read env, so
-    test-select republishes it as an output before anything can fail."""
+    the classify job republishes it as an output before anything can fail."""
     document = _workflow()
     assert document["env"]["TEST_SELECTION_MODE"] == "enforce"
 
-    selector = _workflow_jobs()["test-select"]
-    # A parser failure retains the full net and fails the required backend gate.
-    assert selector.get("continue-on-error", False) is False
-    assert selector["outputs"]["mode"] == "${{ steps.selector.outputs.mode }}"
-    selector_step = _step(selector, "Select runtime-impact test subset")
+    jobs = _workflow_jobs()
+    # The selector shares classify's checkout; there is no separate selection job (and no
+    # extra runner-queue hop between classify and the shards).
+    assert "test-select" not in jobs
+    classify = jobs["classify"]
+    assert classify["name"] == "classify change"  # a required check name
+    assert classify.get("continue-on-error", False) is False
+    assert classify["outputs"]["mode"] == "${{ steps.selector.outputs.mode }}"
+    assert classify["outputs"]["decision"] == "${{ steps.selector.outputs.decision }}"
+    assert classify["outputs"]["selector"] == "${{ steps.selector.outcome }}"
+    assert classify["steps"][0]["with"]["fetch-depth"] == 0
+
+
+def test_selector_step_is_non_fatal_and_computes_its_own_diff() -> None:
+    selector_step = _step(_workflow_jobs()["classify"], "Select runtime-impact test subset")
+    # A parser failure retains the full net and fails the required backend gate, not
+    # the required classify check: the step is non-fatal and its outcome is an output.
+    assert selector_step["continue-on-error"] is True
+    assert selector_step["id"] == "selector"
+    assert selector_step["if"] == (
+        "${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}"
+    )
     assert 'echo "mode=$TEST_SELECTION_MODE" >> "$GITHUB_OUTPUT"' in selector_step["run"]
-    assert '--base-ref "$(cat /tmp/test-selection-base.txt)"' in selector_step["run"]
-    changes = _step(selector, "List changed PR paths")["run"]
-    assert 'git merge-base "$BASE_SHA" HEAD > /tmp/test-selection-base.txt' in changes
-    assert '"$(cat /tmp/test-selection-base.txt)"...HEAD' in changes
+    assert '--base-ref "$(cat "$SELECTION_TMP/base.txt")"' in selector_step["run"]
+    assert 'git merge-base "$BASE_SHA" HEAD > "$SELECTION_TMP/base.txt"' in selector_step["run"]
+    assert '"$(cat "$SELECTION_TMP/base.txt")"...HEAD' in selector_step["run"]
 
 
 def test_shards_are_skipped_only_on_the_enforced_subset_path(tmp_path: Path) -> None:
     """Everything except enforce+SELECTED runs the full fan-out: shadow, FULL,
     SKIP, and a selector failure (empty decision) all keep the gate."""
     shard = _workflow_jobs()["backend-shard"]
-    assert shard["needs"] == ["classify", "test-select"]
+    assert shard["needs"] == ["classify"]
     condition = shard["if"]
     # A status function admits skipped needs on main, but respects run cancellation.
     assert "!cancelled()" in condition
-    assert "needs.test-select.outputs.mode != 'enforce'" in condition
-    assert "needs.test-select.outputs.decision != 'SELECTED'" in condition
+    assert "needs.classify.outputs.mode != 'enforce'" in condition
+    assert "needs.classify.outputs.decision != 'SELECTED'" in condition
     run = _step(shard, "Run pytest shard")["run"]
     assert '"--collect-only", "-qq"' in run
     assert '"--file-shard-plan=tmp/file-shards/plan.json"' in run
@@ -205,11 +225,11 @@ def _assert_shard_failure_verdicts(root: Path, script: str) -> None:
 
 def test_subset_job_gates_only_in_enforce() -> None:
     subset = _workflow_jobs()["backend-selected"]
-    assert subset["needs"] == ["classify", "test-select"]
-    assert subset["continue-on-error"] == "${{ needs.test-select.outputs.mode != 'enforce' }}"
+    assert subset["needs"] == ["classify"]
+    assert subset["continue-on-error"] == "${{ needs.classify.outputs.mode != 'enforce' }}"
     assert subset["if"] == (
         "${{ github.event_name == 'pull_request' && needs.classify.outputs.backend == 'true' "
-        "&& needs.test-select.outputs.decision == 'SELECTED' }}"
+        "&& needs.classify.outputs.decision == 'SELECTED' }}"
     )
     assert subset["outputs"]["subset_status"] == "${{ steps.run-subset.outputs.subset_status }}"
     run_step = _step(subset, "Run selected pytest subset")
@@ -242,7 +262,6 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
     aggregator = _workflow_jobs()["backend"]
     assert aggregator["needs"] == [
         "classify",
-        "test-select",
         "backend-static",
         "backend-structure",
         "backend-shard",
@@ -264,7 +283,7 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
     assert verify.index('check backend-structure "${{ needs.backend-structure.result }}"') < (
         verify.index('if [ "$TEST_SELECTION_MODE" = "enforce" ]')
     )
-    _assert_backend_verdicts(verify, aggregator["needs"][2:])
+    _assert_backend_verdicts(verify, aggregator["needs"][1:])
 
 
 def test_backend_admission_preserves_draft_skip_and_propagates_classify_failure() -> None:
@@ -320,7 +339,7 @@ def test_coverage_gate_stays_on_the_full_fanout() -> None:
     coverage = _step(_workflow_jobs()["backend"], "Combine coverage + gate")
     assert coverage["if"] == (
         "${{ !(env.TEST_SELECTION_MODE == 'enforce'"
-        " && needs.test-select.outputs.decision == 'SELECTED') }}"
+        " && needs.classify.outputs.decision == 'SELECTED') }}"
     )
 
 
@@ -329,23 +348,22 @@ def test_shadow_report_stands_down_under_enforce() -> None:
     SELECTED PR has none, so the report only runs in shadow mode."""
     jobs = _workflow_jobs()
     report = jobs["test-selection-shadow-report"]
-    assert "needs.test-select.outputs.mode != 'enforce'" in report["if"]
+    assert "needs.classify.outputs.mode != 'enforce'" in report["if"]
     assert report["needs"] == [
         "classify",
         "backend",
         "backend-shard",
         "backend-selected",
-        "test-select",
     ]
     report_step = report["steps"][0]
     assert report_step["env"] == {
         "FULL_BACKEND_RESULT": "${{ needs.backend.result }}",
         "FULL_PYTEST_RESULT": "${{ needs.backend-shard.result }}",
         "SUBSET_STATUS": "${{ needs.backend-selected.outputs.subset_status }}",
-        "DECISION": "${{ needs.test-select.outputs.decision }}",
-        "REASON": "${{ needs.test-select.outputs.reason }}",
-        "EST_SECONDS": "${{ needs.test-select.outputs.est_seconds }}",
-        "FULL_EST_SECONDS": "${{ needs.test-select.outputs.full_est_seconds }}",
+        "DECISION": "${{ needs.classify.outputs.decision }}",
+        "REASON": "${{ needs.classify.outputs.reason }}",
+        "EST_SECONDS": "${{ needs.classify.outputs.est_seconds }}",
+        "FULL_EST_SECONDS": "${{ needs.classify.outputs.full_est_seconds }}",
         "PR_NUMBER": "${{ github.event.pull_request.number }}",
         "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
     }

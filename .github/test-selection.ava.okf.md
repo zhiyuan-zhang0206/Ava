@@ -21,10 +21,13 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 
 ## Job data flow
 
-1. `test-select` computes an owner-rule subset from the merge-base
-   diff, publishes the active mode and an audited JSON decision
-   (FULL / SKIP / SELECTED), and stays non-gating: a selector or setup failure
-   leaves the routing outputs empty, which degrades to the full fan-out.
+1. The `classify change` job's selector step computes an owner-rule subset from
+   the merge-base diff, publishes the active mode and an audited JSON decision
+   (FULL / SKIP / SELECTED) as job outputs, and is non-fatal there
+   (`continue-on-error`): a selector or setup failure leaves the routing outputs
+   empty, which degrades to the full fan-out, and the step's outcome (the
+   `selector` output) fails the backend aggregator rather than the classify check.
+   It lives in classify so the shards wait on one job, not two.
 2. `backend-selected` runs only a SELECTED list and is informational in shadow.
    In enforce it is the gate: the native pytest result and shared JUnit
    validator reject failed, missing, malformed or unexecuted reports, just
