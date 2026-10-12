@@ -25,7 +25,9 @@ from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
 from ava.tests.understand.provider_support import mock_gemini as mock_gemini
 from ava.tests.understand.provider_support import understand_clock as understand_clock
 from ava.understand import UnderstandError, understand
+from base import paths
 from base.config import settings
+from base.lm import factory
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from tests.fixtures.unit.workspace import workspace as workspace
 
@@ -299,7 +301,7 @@ def test_media_wraps_missing_gemini_key(monkeypatch: pytest.MonkeyPatch, fake_im
     def _raise(model: str, **kwargs: object):
         raise RuntimeError("GEMINI_API_KEY not set")
 
-    monkeypatch.setattr("base.lm.factory.build_chat_model", _raise)
+    monkeypatch.setattr(factory, "build_chat_model", _raise)
     with pytest.raises(UnderstandError, match="GEMINI_API_KEY"):
         understand([{"prompt": "x", "paths": [str(fake_image)]}])
 
@@ -311,7 +313,7 @@ def test_text_wraps_missing_deepseek_key(monkeypatch: pytest.MonkeyPatch) -> Non
     def _raise(model: str, **kwargs: object):
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
-    monkeypatch.setattr("base.lm.factory.build_chat_model", _raise)
+    monkeypatch.setattr(factory, "build_chat_model", _raise)
     with pytest.raises(UnderstandError, match="DEEPSEEK_API_KEY"):
         understand([{"prompt": "x", "text": "some text"}])
 
@@ -493,7 +495,7 @@ def test_paths_auto_save_source_labels_list(
     def _fake_workspace(aid: int) -> Path:
         return ws
 
-    monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
+    monkeypatch.setattr(paths, "workspace_dir", _fake_workspace)
     shot = tmp_path / "shot.png"
     shot.write_bytes(b"\x89PNG\r\n\x1a\n")
     understand([{"prompt": "compare", "paths": [str(fake_image), str(shot)]}])

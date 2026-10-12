@@ -17,6 +17,7 @@ from base import telemetry
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.agents.tasks import model
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from tests.fixtures.pin_agent import pin_agent
@@ -120,7 +121,7 @@ def test_default_intention_replays_original_and_owner_alias(
     def fail_render(*_args: object) -> tuple[object, ...]:
         raise RuntimeError("replay must not render timestamps again")
 
-    monkeypatch.setattr("base.agents.tasks.model.render_task_timestamps", fail_render)
+    monkeypatch.setattr(model, "render_task_timestamps", fail_render)
     assert (
         task_registry.create(
             "default", "work", parent=root_task_id, owner=actor, operation_key="defaults"

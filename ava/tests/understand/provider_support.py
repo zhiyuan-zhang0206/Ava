@@ -10,6 +10,7 @@ import pytest
 from pydantic import SecretStr
 
 from base.config import settings
+from base.lm import factory
 
 __all__ = [
     "ProviderCapture",
@@ -76,7 +77,7 @@ def fake_pdf(tmp_path: Path) -> Path:
 def mock_deepseek(monkeypatch: pytest.MonkeyPatch) -> ProviderCapture:
     """Replace the shared provider factory for text routing tests."""
     capture = ProviderCapture()
-    monkeypatch.setattr("base.lm.factory.build_chat_model", capture.build)
+    monkeypatch.setattr(factory, "build_chat_model", capture.build)
     return capture
 
 
@@ -85,7 +86,7 @@ def mock_gemini(monkeypatch: pytest.MonkeyPatch) -> ProviderCapture:
     """Replace the shared provider factory with media credentials available."""
     monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("fake-key-for-test"))
     capture = ProviderCapture()
-    monkeypatch.setattr("base.lm.factory.build_chat_model", capture.build)
+    monkeypatch.setattr(factory, "build_chat_model", capture.build)
     return capture
 
 

@@ -19,6 +19,7 @@ from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import (
 from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.lm.catalog import ModelCatalog
+from ops import lifecycle
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -91,8 +92,8 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     monkeypatch.setattr(
         notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
     )
-    monkeypatch.setattr("ops.lifecycle.publish_notice_posted", _capture_posted)
-    monkeypatch.setattr("ops.lifecycle.publish_notice_resolved", _capture_resolved)
+    monkeypatch.setattr(lifecycle, "publish_notice_posted", _capture_posted)
+    monkeypatch.setattr(lifecycle, "publish_notice_resolved", _capture_resolved)
 
     agent_id = _seed_agent(db_conn)
     pin_agent(agent_id)

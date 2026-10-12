@@ -11,6 +11,7 @@ from ava.tests.understand.provider_support import ProviderCapture
 from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
 from ava.tests.understand.provider_support import understand_clock as understand_clock
 from ava.understand import understand
+from base import paths
 from base.clock import Clock
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
@@ -35,7 +36,7 @@ def test_single_result_saved_to_exec_output(
     def _fake_workspace(aid: int) -> Path:
         return ws
 
-    monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
+    monkeypatch.setattr(paths, "workspace_dir", _fake_workspace)
 
     understand([{"prompt": "summarize please", "text": "hello world"}])
 
@@ -62,7 +63,7 @@ def test_batch_results_saved_to_exec_output(
     def _fake_workspace(aid: int) -> Path:
         return ws
 
-    monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
+    monkeypatch.setattr(paths, "workspace_dir", _fake_workspace)
 
     targets = [
         {"prompt": "question one", "text": "material one"},
@@ -90,7 +91,7 @@ def test_auto_save_prunes_old_files(
     def _fake_workspace(aid: int) -> Path:
         return ws
 
-    monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
+    monkeypatch.setattr(paths, "workspace_dir", _fake_workspace)
 
     # Pre-create many old files, then force every mtime to the same value.
     # This is the condition the pruner has to be right under: files written in

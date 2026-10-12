@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+import ava.sdk_surface.settings as sdk_surface_settings
 import ava.security as sec
 import ava.shell as sh
 from ava.shell import sessions
@@ -85,7 +86,7 @@ def _install_sessions(monkeypatch: pytest.MonkeyPatch, backend: Any) -> None:
     """This agent's sessions over `backend`, which holds one session: id 1."""
     handle = sessions.ShellSessions(backend=backend, database=None, agent_id=1)
     backend.list_sessions = lambda: [f"{handle._shell_prefix()}1"]
-    monkeypatch.setattr("ava.sdk_surface.settings.shell_sessions", lambda: handle)
+    monkeypatch.setattr(sdk_surface_settings, "shell_sessions", lambda: handle)
 
 
 def test_capture_is_scanned(monkeypatch: pytest.MonkeyPatch, findings: list[Any]) -> None:

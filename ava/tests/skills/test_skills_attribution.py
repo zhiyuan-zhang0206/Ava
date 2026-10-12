@@ -7,6 +7,7 @@ import psycopg
 import pytest
 
 import ava.skills as skills_mod
+from ava.sdk_surface import agent_identity
 from ava.sdk_surface.installation import Installation
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import _write_skill
@@ -19,6 +20,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.log import logger
+from base.telemetry import audit_events
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -113,8 +115,8 @@ def test_resolution_is_not_consumption(
     def capture(_db: Database, event: telemetry.Event) -> None:
         recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
 
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
+    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
+    monkeypatch.setattr(audit_events, "record_audit_reported", capture)
 
     # Resolution and metadata reads — no body enters the conversation.
     leaf = ava.skills.alpha
@@ -179,8 +181,8 @@ def test_index_render_records_no_loaded_attribution(
     def capture(_db: Database, event: telemetry.Event) -> None:
         recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
 
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
+    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
+    monkeypatch.setattr(audit_events, "record_audit_reported", capture)
 
     ava.help(ava.skills)  # walks the leaf, the plain namespace AND the root skill
     assert recorded == []
@@ -216,8 +218,8 @@ def test_files_read_skill_md_records_consumption(
     def capture(_db: Database, event: telemetry.Event) -> None:
         recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
 
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
+    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
+    monkeypatch.setattr(audit_events, "record_audit_reported", capture)
 
     # The exact agent pattern: proxy.path + read of SKILL.md.
     out = ava.files.read(ava.skills.alpha.path + "/SKILL.md")
@@ -251,8 +253,8 @@ def test_files_read_other_files_do_not_record(
     def capture(_db: Database, event: telemetry.Event) -> None:
         recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
 
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
+    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
+    monkeypatch.setattr(audit_events, "record_audit_reported", capture)
 
     # Sibling file inside the skill dir — skill art, not the body.
     ava.files.read(str(skill_dir / "notes.md"))
@@ -286,14 +288,14 @@ def test_every_consumption_records_one_event_and_nothing_is_remembered(
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
+    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
 
     written: list[Any] = []
 
     def _capture(_db: object, event: Any) -> None:
         written.append(event)
 
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", _capture)
+    monkeypatch.setattr(audit_events, "record_audit_reported", _capture)
 
     path = ava.skills.alpha.path + "/SKILL.md"
     ava.files.read(path)
@@ -334,8 +336,8 @@ def test_proxy_doc_consumes_and_records(
     def capture(_db: Database, event: telemetry.Event) -> None:
         recorded.append((event.attributes["skill"], event.attributes["invocation_depth"]))
 
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
+    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
+    monkeypatch.setattr(audit_events, "record_audit_reported", capture)
 
     out = ava.skills.alpha.__doc__
     assert out is not None
@@ -380,7 +382,7 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
     def resolve_agent(_context: AvaContext | None = None) -> int:
         return agent_id
 
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", resolve_agent)
+    monkeypatch.setattr(agent_identity, "require_agent_id", resolve_agent)
 
     import ava
 
@@ -408,12 +410,12 @@ def test_a_failed_write_is_reported_and_does_not_fail_the_read(
     import ava
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
+    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
 
     def _boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("database down")
 
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone", _boom)
+    monkeypatch.setattr(audit_events, "record_audit_standalone", _boom)
 
     errors: list[str] = []
     sink = logger.add(lambda m: errors.append(str(m)), level="ERROR")

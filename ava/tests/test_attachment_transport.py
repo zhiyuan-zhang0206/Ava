@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 
 import ava
+from ava import files
 from ava.sdk_surface.attachment_transport import attach
 from ava.sdk_surface.installation import Installation
 from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
@@ -100,7 +101,7 @@ def test_uses_workspace_relative_path_semantics(
 ) -> None:
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr("ava.files.agent_identity.agent_id", lambda: None)
+    monkeypatch.setattr(files.agent_identity, "agent_id", lambda: None)
     image = tmp_path / "relative.png"
     image.write_bytes(b"png")
 
