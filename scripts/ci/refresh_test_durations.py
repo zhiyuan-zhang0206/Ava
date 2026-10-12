@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Refresh .test_durations for pytest-split duration-balanced sharding.
 
-CI fans the backend pytest suite over 16 shards (see ci.yml backend-shard matrix)
+CI fans the backend pytest suite over 8 shards (see ci.yml backend-shard matrix)
 and tests/e2e over 4 shards;
 pytest-split uses its least_duration (LPT) algorithm to balance them by per-test
 durations loaded from the repo-root `.test_durations`. That file goes stale as
@@ -19,12 +19,12 @@ same way CI runs them and rewrites the file:
 * e2e: `pytest tests/e2e/ -v -n 2` (CI's e2e job carries no --cov).
 
 Main runs no CI, so the daily refresh workflow invokes `measure` once per
-CI-shaped shard (16 backend, four e2e), each on its own runner. A measurement retries its isolated shard
+CI-shaped shard (8 backend, four e2e), each on its own runner. A measurement retries its isolated shard
 three times, reseeding its temporary duration input before every attempt, so a
 failed attempt cannot affect selection or leak partial measurements into its
 retry. Every successful measurement uses `--store-durations --clean-durations`;
 therefore its artifact contains only the tests that ran in that shard.
-`merge` requires all 20 artifacts, combines every measured entry (including
+`merge` requires all 12 artifacts, combines every measured entry (including
 fast tests), rounds values to three decimals, and atomically rewrites
 `.test_durations` in the committed compact format (sorted keys, no indent,
 trailing newline). An
@@ -57,7 +57,7 @@ from pathlib import Path
 
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)
 _E2E_WORKERS = 2  # mirrors the e2e-shard job (-n 2)
-_BACKEND_SHARDS = 16
+_BACKEND_SHARDS = 8
 _E2E_SHARDS = 4
 _MEASUREMENT_ATTEMPTS = 3
 # The exact --cov module list of the backend-shard job (ci.yml): the refresh

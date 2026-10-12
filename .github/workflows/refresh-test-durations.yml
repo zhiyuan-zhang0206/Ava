@@ -76,13 +76,13 @@ jobs:
   measure-backend:
     needs: check-refresh
     if: needs.check-refresh.outputs.mode == 'measure'
-    name: Measure backend durations (${{ matrix.group }}/16)
+    name: Measure backend durations (${{ matrix.group }}/8)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       # Sentinel data planes: the suite must provision its own throwaway
       # cluster; a sentinel turns a leaked real-data-plane access into a
@@ -316,7 +316,7 @@ jobs:
         run: |
           BODY="$RUNNER_TEMP/durations-pr.md"
           cat > "$BODY" <<EOF
-          Refresh pytest-split timings from all 16 backend and four e2e shards
+          Refresh pytest-split timings from all 8 backend and four e2e shards
           at source commit $SOURCE_SHA, measured by Actions run $SOURCE_RUN_ID.
           Complete clean artifacts retain fast and zero timings.
 

@@ -33,7 +33,7 @@
 #
 # TEST SELECTION (TEST_SELECTION_MODE, default enforce): when the runtime-impact
 # selector returns SELECTED for a real PR, backend-selected runs that
-# subset as the backend pytest gate and backend-shard (the 16-way fan-out) is
+# subset as the backend pytest gate and backend-shard (the 8-way fan-out) is
 # skipped. Every other decision — FULL, SKIP, selector failure — keeps the
 # full fan-out, and Trunk merge-tree branches (trunk-merge/*, trunk-temp/*)
 # always choose FULL by the selector's first rule, so branch protection, the
@@ -82,7 +82,7 @@ env:
   # Test-selection mode for PR CI — the single revert switch for the
   # enforcement decision (2026-09-11). enforce (default): a real PR whose
   # selector decision is SELECTED runs its selected backend subset as the
-  # backend pytest gate, and the 16-shard fan-out is skipped; every other
+  # backend pytest gate, and the 8-shard fan-out is skipped; every other
   # decision and every Trunk merge-tree branch keeps the full suite. shadow:
   # no PR gates on the subset — the full fan-out gates and the subset plus its
   # comparison report run informational beside it. Set back to "shadow" to
@@ -891,7 +891,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   backend-shard:
-    name: backend shard (${{ matrix.group }}/16)
+    name: backend shard (${{ matrix.group }}/8)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Skipped only on the enforced-subset path (mode==enforce and the selector
@@ -905,14 +905,16 @@ jobs:
     if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.test-select.outputs.mode != 'enforce' || needs.test-select.outputs.decision != 'SELECTED') }}
     strategy:
       fail-fast: false
-      # 16 shards (was 12): measured 2026-09-03 over 20 main-branch runs, the
-      # per-shard pytest step median was 213s at 12 shards x -n 4 (~113 min of
-      # serial test time); 16 shards scale the fan-out to ~160s + ~30s fixed
-      # toolchain per shard. Prior art dd2ab5c36 (8 -> 12) measured ~90s saved;
-      # observed peak repo concurrency was 47 jobs (2026-08-30), leaving
-      # headroom for the 4 extra jobs.
+      # 8 shards (was 16): the hosted pool is capped near 40 concurrent jobs
+      # repo-wide, so when it is saturated a shard's wall time is mostly queue
+      # wait (median 6.7 min waiting vs 4.1 min running, 2026-10-12). Every shard
+      # also pays a fixed ~100 s (toolchain ~40 s plus a ~60 s whole-repo
+      # collection that builds the file plan), so 16 shards spend ~66 runner-minutes
+      # per run on ~28 minutes of test work and 8 spend ~47. The price is a longer
+      # shard (~5.9 min vs ~4.1) when the pool is idle. Estimated per-shard
+      # load is ~700 s of test time (summed .test_durations / 8) at -n 4.
       matrix:
-        group: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -971,7 +973,7 @@ jobs:
                       "-c", "pyproject.toml", "--rootdir=.", "--collect-only", "-qq",
                       "--ignore=tests/e2e", "-m", "not flaky", "--omit-static-tests",
                       "-o", "junit_family=xunit1", "-o", "faulthandler_timeout=300",
-                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=16",
+                      "-p", "scripts.ci.file_shard_shadow", "--file-shard-count=8",
                       "--file-shard-plan=tmp/file-shards/plan.json",
                   ]))
           PY
@@ -1572,7 +1574,7 @@ jobs:
     # With a backend side, green iff the
     # static and native smoke jobs are green and the enforced pytest path is
     # green — the selected subset when mode==enforce and the selector returned
-    # SELECTED (shards skipped), the 16-shard fan-out in every other case.
+    # SELECTED (shards skipped), the 8-shard fan-out in every other case.
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -1582,7 +1584,7 @@ jobs:
       # Every coverage-data file the combine expects: all backend-shard matrix
       # groups plus the serial and static buckets. tests/scripts/test_ci_artifact_policy.py
       # pins this against the matrix.
-      COVERAGE_DATA_GROUPS: "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 serial static"
+      COVERAGE_DATA_GROUPS: "1 2 3 4 5 6 7 8 serial static"
     steps:
       - name: Verify backend job results
         env:
@@ -1716,7 +1718,7 @@ jobs:
     env:
       # Every count file the total expects: the backend-shard matrix groups and the
       # serial and static buckets. tests/ci/test_shard_counts.py pins this against the matrix.
-      COUNT_GROUPS: "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 serial static"
+      COUNT_GROUPS: "1 2 3 4 5 6 7 8 serial static"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

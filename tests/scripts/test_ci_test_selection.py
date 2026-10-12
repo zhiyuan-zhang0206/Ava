@@ -1,6 +1,6 @@
 """CI wiring contracts for backend test selection (enforce + shadow fallback).
 
-Enforce (the default) replaces the 16-shard fan-out with the selected subset on
+Enforce (the default) replaces the 8-shard fan-out with the selected subset on
 a SELECTED pull request; shadow keeps the fan-out as the only gate and runs the
 subset informationally. The one revert switch is the workflow-level
 TEST_SELECTION_MODE value — these tests pin every routing expression that

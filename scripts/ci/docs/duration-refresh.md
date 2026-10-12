@@ -7,7 +7,7 @@ membership. Unknown nodes use pytest-split's average estimate.
 `duration_refresh_policy.py` owns the cadence. Main runs no CI (CI runs on pull
 requests only; the Trunk queue branch tests the tree that lands), so there is no
 completed main run whose timings could be reused. Instead, the refresh workflow
-measures every CI-shaped shard on its own runner (16 backend, four e2e) daily at
+measures every CI-shaped shard on its own runner (8 backend, four e2e) daily at
 19:30 UTC, with a 21:30 backstop. GitHub may delay cron execution. A complete
 measurement published in the preceding five hours suppresses another scheduled
 measurement; successful no-op runs never reset freshness. Manual dispatch always

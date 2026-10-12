@@ -172,7 +172,7 @@ see the [hook runbook](../docs/conventions/runbook.md#git-hooks-pre-commit--pre-
 
 ## `.test_durations` — pytest-split duration data
 
-The backend shards (`--splits 16`) and the e2e shards (`--splits 4`) are
+The backend shards (8 whole-file groups) and the e2e shards (`--splits 4`) are
 balanced by per-test durations from the repo-root `.test_durations`; a test
 without an entry is costed at the average of this run's known durations, so a
 stale file skews the shards (measured ~20% skew as of 2026-08-30, after the
