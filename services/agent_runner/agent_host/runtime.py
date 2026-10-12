@@ -17,7 +17,6 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
-from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.impersonation.notes import HandoffNotes
 from base.clock import Clock
 from base.host.env.agent_slices import AgentBrain, AgentSlices
@@ -56,8 +55,6 @@ class HostPolicy:
     default_reader: Callable[[str, str], Any]
     clock_factory: Callable[[], Clock]
     handoff_notes: HandoffNotes
-    recrash_reap_enabled: Callable[[], bool]
-    reconcile_inputs: ReconcileReadInputs
 
     def resolve_slices(
         self,

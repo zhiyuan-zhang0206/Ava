@@ -18,7 +18,6 @@ _INVENTORY: dict[str, str] = {
     "agent/turn/runloop.py::_record_permanent_reject_outcome": "ineligible",
     "agent/turn/runloop.py::_open_breaker": "ineligible",
     "agent/ownership/corpse_reap.py::reap_crash_corpses": "ineligible",
-    "agent/ownership/corpse_reap.py::reap_recrashed_corpse": "ineligible",
     "agent/hooks/compact.py::auto_compact_for_llm": "ineligible",
     "agent/ownership/hosted.py::admit_hosted_runtime": "ineligible",
     "agent/ownership/hosted.py::_record_legacy_adoption": "ineligible",

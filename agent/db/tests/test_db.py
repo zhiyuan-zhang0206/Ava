@@ -22,6 +22,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import db as agent_db
+from agent.db import finalize_claimed_inbounds
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, agent_exists, create_agent, list_agents
@@ -164,15 +165,37 @@ def test_inbound_messages_table_exists(db_conn):
     db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
 
 
-class TestReconcileClaimedInbounds:
-    """Startup reconciliation closes the gap between agent process death and
-    LangGraph commit confirmation: claim marks 'claimed', but only the next
-    process's startup can flip 'claimed' → 'done' (commit confirmed via
-    ava_inbound_id in state.messages) or 'claimed' → 'pending' (commit lost,
-    re-deliver). See agent/db/__init__.py:reconcile_claimed_inbounds (agent 57
+class TestFinalizeClaimedInbounds:
+    """A claimed chat row left behind by interrupted work is consumed, never
+    redelivered: its result is unknown, so the queue's `done` only means
+    consumed. See agent/db/__init__.py:finalize_claimed_inbounds (agent 57
     incident)."""
 
-    async def test_committed_rows_become_done(
+    @staticmethod
+    def _insert_claimed(
+        db_conn: psycopg.Connection, agent_id: int, content: str, age: str = "60 seconds"
+    ) -> int:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages "
+                "(agent_id, content, kind, source, status, claimed_at, created_at) "
+                "VALUES (%s, %s, 'chat', 'user', 'claimed', "
+                "now() - %s::interval, now() - %s::interval) RETURNING id",
+                (agent_id, content, age, age),
+            )
+            row_id = cur.fetchone()[0]  # type: ignore[index]
+        db_conn.commit()
+        return row_id
+
+    @staticmethod
+    def _statuses(db_conn: psycopg.Connection, ids: list[int]) -> dict[int, str]:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, status FROM inbound_messages WHERE id = ANY(%s) ORDER BY id", (ids,)
+            )
+            return dict(cur.fetchall())
+
+    async def test_every_claimed_row_is_consumed_without_redelivery(
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
@@ -183,118 +206,21 @@ class TestReconcileClaimedInbounds:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        from agent.db import reconcile_claimed_inbounds
-
+        """Young and ancient claims alike go to done: a message lost in transit
+        is not re-delivered, and neither is mail from a long-dead agent."""
         tid = spawn_agent(
             catalog=model_catalog,
             authority=config_authority,
             database_gate=database_gate,
             machine=machine_identity,
         )
-        # Manually create a 'claimed' row to mirror what the previous
-        # process's claim_inbound_batch would have left behind
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
-                "VALUES (%s, 'committed msg', 'chat', 'user', 'claimed') RETURNING id",
-                (tid,),
-            )
-            iid = cur.fetchone()[0]  # type: ignore[index]
-        db_conn.commit()
+        young = self._insert_claimed(db_conn, tid, "young", "60 seconds")
+        ancient = self._insert_claimed(db_conn, tid, "ancient", "2 days")
 
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids={iid}, incarnation=None
-        )
-        assert (committed, reset, dead_lettered) == (1, 0, 0)
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))  # pyright: ignore[reportUnknownArgumentType]
-            assert cur.fetchone() == ("done",)
+        consumed = await finalize_claimed_inbounds(aops_pool, tid, incarnation=None)
 
-    async def test_orphan_rows_are_consumed_without_redelivery(
-        self,
-        redis_url: str,
-        db_conn: psycopg.Connection,
-        aops_pool: AsyncConnectionPool,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        from agent.db import reconcile_claimed_inbounds
-
-        tid = spawn_agent(
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
-                "VALUES (%s, 'lost msg', 'chat', 'user', 'claimed') RETURNING id",
-                (tid,),
-            )
-            iid = cur.fetchone()[0]  # type: ignore[index]
-        db_conn.commit()
-
-        # Empty committed set = simulating "no prior checkpoint" or "this id
-        # wasn't in state.messages" — orphan path. Either way it gets reset.
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids=set(), incarnation=None
-        )
-        assert (committed, reset, dead_lettered) == (0, 0, 1)
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))  # pyright: ignore[reportUnknownArgumentType]
-            assert cur.fetchone() == ("done",)
-
-    async def test_mixed_claimed_rows_split_correctly(
-        self,
-        redis_url: str,
-        db_conn: psycopg.Connection,
-        aops_pool: AsyncConnectionPool,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        """Two claimed rows; one in committed_set, one not — first → done,
-        second → pending."""
-        from agent.db import reconcile_claimed_inbounds
-
-        tid = spawn_agent(
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
-                "VALUES (%s, 'a', 'chat', 'user', 'claimed') RETURNING id",
-                (tid,),
-            )
-            iid_a = cur.fetchone()[0]  # type: ignore[index]
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
-                "VALUES (%s, 'b', 'chat', 'user', 'claimed') RETURNING id",
-                (tid,),
-            )
-            iid_b = cur.fetchone()[0]  # type: ignore[index]
-        db_conn.commit()
-
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids={iid_a}, incarnation=None
-        )
-        assert (committed, reset, dead_lettered) == (1, 0, 1)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, status FROM inbound_messages WHERE id IN (%s, %s) ORDER BY id",
-                (iid_a, iid_b),  # pyright: ignore[reportUnknownArgumentType]
-            )
-            rows = dict(cur.fetchall())
-        assert rows == {iid_a: "done", iid_b: "done"}
+        assert consumed == 2
+        assert self._statuses(db_conn, [young, ancient]) == {young: "done", ancient: "done"}
 
     async def test_no_claimed_rows_is_noop(
         self,
@@ -308,18 +234,47 @@ class TestReconcileClaimedInbounds:
         machine_identity: MachineIdentity,
     ) -> None:
         """Common boot path: no prior process left claimed rows behind."""
-        from agent.db import reconcile_claimed_inbounds
-
         tid = spawn_agent(
             catalog=model_catalog,
             authority=config_authority,
             database_gate=database_gate,
             machine=machine_identity,
         )
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids={42, 43}, incarnation=None
+        assert await finalize_claimed_inbounds(aops_pool, tid, incarnation=None) == 0
+
+    async def test_pending_rows_stay_pending(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        """New messages are separate inputs: only claims are consumed."""
+        tid = spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
         )
-        assert (committed, reset, dead_lettered) == (0, 0, 0)
+        claimed = self._insert_claimed(db_conn, tid, "claimed")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+                "VALUES (%s, 'new', 'chat', 'user', 'pending') RETURNING id",
+                (tid,),
+            )
+            pending = cur.fetchone()[0]  # type: ignore[index]
+        db_conn.commit()
+
+        assert await finalize_claimed_inbounds(aops_pool, tid, incarnation=None) == 1
+        assert self._statuses(db_conn, [claimed, pending]) == {
+            claimed: "done",
+            pending: "pending",
+        }
 
     async def test_scope_limited_to_agent_id(
         self,
@@ -333,9 +288,7 @@ class TestReconcileClaimedInbounds:
         machine_identity: MachineIdentity,
     ) -> None:
         """Claimed row for another agent must not be touched — each process
-        only reconciles its own agent_id."""
-        from agent.db import reconcile_claimed_inbounds
-
+        only consumes its own agent_id."""
         mine = spawn_agent(
             catalog=model_catalog,
             authority=config_authority,
@@ -348,166 +301,10 @@ class TestReconcileClaimedInbounds:
             database_gate=database_gate,
             machine=machine_identity,
         )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
-                "VALUES (%s, 'theirs', 'chat', 'user', 'claimed') RETURNING id",
-                (other,),
-            )
-            other_iid = cur.fetchone()[0]  # type: ignore[index]
-        db_conn.commit()
+        other_iid = self._insert_claimed(db_conn, other, "theirs")
 
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, mine, committed_inbound_ids=set(), incarnation=None
-        )
-        assert (committed, reset, dead_lettered) == (0, 0, 0)
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (other_iid,))  # pyright: ignore[reportUnknownArgumentType]
-            assert cur.fetchone() == ("claimed",)
-
-    async def test_stale_orphan_rows_dead_lettered_not_redelivered(
-        self,
-        redis_url: str,
-        db_conn: psycopg.Connection,
-        aops_pool: AsyncConnectionPool,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        """A claimed row older than the stale threshold is dead-lettered
-        (done), not reset to pending — a resurrect of a long-terminated agent
-        must not re-deliver ancient mail as fresh messages (Task #654)."""
-        from agent.db import reconcile_claimed_inbounds
-
-        tid = spawn_agent(
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, 'ancient', 'chat', 'user', 'claimed', "
-                "now() - interval '2 days', now() - interval '2 days') RETURNING id",
-                (tid,),
-            )
-            iid = cur.fetchone()[0]  # type: ignore[index]
-        db_conn.commit()
-
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids=set(), incarnation=None
-        )
-        assert (committed, reset, dead_lettered) == (0, 0, 1)
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))  # pyright: ignore[reportUnknownArgumentType]
-            assert cur.fetchone() == ("done",)
-
-    async def test_fresh_orphan_rows_are_also_consumed(
-        self,
-        redis_url: str,
-        db_conn: psycopg.Connection,
-        aops_pool: AsyncConnectionPool,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        """Young claims keep the crash-recovery contract: a message lost in
-        transit (crash mid-handling) is re-delivered on the next boot."""
-        from agent.db import reconcile_claimed_inbounds
-
-        tid = spawn_agent(
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, 'recent', 'chat', 'user', 'claimed', "
-                "now() - interval '60 seconds', now() - interval '2 minutes') RETURNING id",
-                (tid,),
-            )
-            iid = cur.fetchone()[0]  # type: ignore[index]
-        db_conn.commit()
-
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids=set(), incarnation=None
-        )
-        assert (committed, reset, dead_lettered) == (0, 0, 1)
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))  # pyright: ignore[reportUnknownArgumentType]
-            assert cur.fetchone() == ("done",)
-
-    async def test_stale_uncommitted_row_dead_lettered_beside_committed(
-        self,
-        redis_url: str,
-        db_conn: psycopg.Connection,
-        aops_pool: AsyncConnectionPool,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        """Committed set wins regardless of age; among the uncommitted, only
-        stale rows dead-letter — young ones still reset to pending."""
-        from agent.db import reconcile_claimed_inbounds
-
-        tid = spawn_agent(
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, 'committed', 'chat', 'user', 'claimed', "
-                "now() - interval '3 days', now() - interval '3 days') RETURNING id",
-                (tid,),
-            )
-            committed_iid = cur.fetchone()[0]  # type: ignore[index]
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, 'stale orphan', 'chat', 'user', 'claimed', "
-                "now() - interval '2 days', now() - interval '2 days') RETURNING id",
-                (tid,),
-            )
-            stale_iid = cur.fetchone()[0]  # type: ignore[index]
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, 'young orphan', 'chat', 'user', 'claimed', "
-                "now() - interval '60 seconds', now() - interval '2 minutes') RETURNING id",
-                (tid,),
-            )
-            young_iid = cur.fetchone()[0]  # type: ignore[index]
-        db_conn.commit()
-
-        committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-            aops_pool, tid, committed_inbound_ids={committed_iid}, incarnation=None
-        )
-        assert (committed, reset, dead_lettered) == (1, 0, 2)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, status FROM inbound_messages WHERE id = ANY(%s) ORDER BY id",
-                ([committed_iid, stale_iid, young_iid],),
-            )
-            assert dict(cur.fetchall()) == {
-                committed_iid: "done",
-                stale_iid: "done",
-                young_iid: "done",
-            }
+        assert await finalize_claimed_inbounds(aops_pool, mine, incarnation=None) == 0
+        assert self._statuses(db_conn, [other_iid]) == {other_iid: "claimed"}
 
 
 def test_claimed_inbound_from_row_keeps_created_at_and_claimed_at():

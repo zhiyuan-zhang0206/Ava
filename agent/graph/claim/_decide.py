@@ -137,12 +137,8 @@ async def _compact_outcome(
         st.new_msgs = _markers_only(st.new_msgs)
         st.committed_chat_ids = []
     # Finalize every remaining claimed inbound before the wipe: their
-    # HumanMessages live in state.messages (about to be REMOVE_ALL'd) and
-    # carry the ava_inbound_id startup reconcile matches on. Without this,
-    # the next restart sees every claimed row missing from the checkpoint,
-    # resets them to 'pending', and re-delivers already-answered messages
-    # — a run of consecutive user messages with the compacted replies
-    # gone (Task #823).
+    # HumanMessages live in state.messages (about to be REMOVE_ALL'd), so the
+    # rows are consumed here rather than left 'claimed' for a later pass.
     await finalize_claimed_inbounds(ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
     # Pre-compact history dump: snapshot the full conversation before the

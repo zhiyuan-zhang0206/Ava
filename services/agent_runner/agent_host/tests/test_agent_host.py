@@ -364,9 +364,7 @@ def _stub_host_transitions(
             stamps.append(incarnation.agent_id)
         if not exited:
             await flip(pool, incarnation.agent_id, "idling", expected_from="running")
-        return TurnSettlement(
-            stamp=TurnFatalStamp(applied=crashed, recrash=False), settled=not exited
-        )
+        return TurnSettlement(stamp=TurnFatalStamp(applied=crashed), settled=not exited)
 
     monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
     # These orchestration fixtures expose no managed native-work capability.
@@ -409,8 +407,8 @@ def wired(
     async def _noop_reconcile(*_a: object, **_k: object) -> None:
         return None
 
-    monkeypatch.setattr(host_mod, "reconcile_claimed_inbounds_at_startup", _noop_reconcile)
-    monkeypatch.setattr(settlement, "reconcile_claimed_inbounds_at_startup", _noop_reconcile)
+    monkeypatch.setattr(host_mod, "consume_claimed_inbounds", _noop_reconcile)
+    monkeypatch.setattr(settlement, "consume_claimed_inbounds", _noop_reconcile)
     monkeypatch.setattr(host_mod, "repair_dangling_tool_use_at_startup", _noop_reconcile)
     monkeypatch.setattr(host_mod, "publish_agent_updated", _noop_reconcile)
 
@@ -595,28 +593,12 @@ class TestSettlementReconciles:
             resources: object,
         ) -> TurnSettlement:
             order.append("settle")
-            return TurnSettlement(
-                stamp=TurnFatalStamp(applied=crashed, recrash=False), settled=not exited
-            )
+            return TurnSettlement(stamp=TurnFatalStamp(applied=crashed), settled=not exited)
 
-        async def reconcile(
-            _pool: object,
-            _checkpointer: object,
-            _incarnation: object,
-            *,
-            resources: object,
-            inputs: object,
-        ) -> None:
+        async def reconcile(_pool: object, _incarnation: object, *, resources: object) -> None:
             order.append("reconcile")
 
-        async def reconcile_turn(
-            _pool: object,
-            _checkpointer: object,
-            _incarnation: object,
-            *,
-            resources: object,
-            inputs: object,
-        ) -> None:
+        async def reconcile_turn(_pool: object, _incarnation: object, *, resources: object) -> None:
             order.append("reconcile-turn")
 
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
