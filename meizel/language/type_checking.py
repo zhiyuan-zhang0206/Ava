@@ -38,7 +38,7 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # LangChain message-stack trim on the same registration path: message
         # types appear in annotations only, or (pricing) import at the call
         # site of a runtime isinstance (task #3633).
-        "base/lm/stop.py",
+        "base/lm/compat/stop.py",
         "base/lm/pricing/__init__.py",
         "base/agents/messages/kwargs.py",
         "base/lm/content.py",

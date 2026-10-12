@@ -239,7 +239,7 @@ import ava_builtins.plugins.ava_memory.plugin  # the exec subprocess's face of t
 import ava_builtins.plugins.ava_memory.written_notes
 
 # Absolute: the decision call stack, services, the agent runtime and langchain/langgraph never load.
-absolute = ("base.lm.catalog.decide.call", "base.lm.catalog.decide.http", "services.", "agent.",
+absolute = ("base.lm.decision.call", "base.lm.catalog.decide.http", "services.", "agent.",
             "langchain", "langgraph")
 # Relative: `import ava` itself already loads httpx (the gateway client's transport), so the
 # plugin's face may add nothing on top of that.

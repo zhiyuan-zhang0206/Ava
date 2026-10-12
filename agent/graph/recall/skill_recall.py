@@ -34,8 +34,8 @@ from agent.graph.recall.conversation_query import build_conversation_query
 from agent.messages import NoteTag, system_note_message
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.call import decide
 from base.lm.catalog.decide.types import DecisionError, DecisionInputTooLargeError, YesNo
+from base.lm.decision.call import decide
 from base.log import logger
 
 _LABEL = "skill-recall"

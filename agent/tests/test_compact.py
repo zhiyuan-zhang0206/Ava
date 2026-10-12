@@ -232,7 +232,7 @@ async def test_generate_summary_emits_agent_billing_span(
         assert catalog is model_catalog
         return "deepseek"
 
-    monkeypatch.setattr("base.lm.pricing.billing.vendor_of_model", vendor_of_model)
+    monkeypatch.setattr("base.lm.usage.vendor_of_model", vendor_of_model)
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]

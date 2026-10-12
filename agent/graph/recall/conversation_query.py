@@ -13,7 +13,7 @@ from typing import Any, cast
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.lm.content import content_blocks
+from base.lm.reasoning import content_blocks
 
 # How many recent conversation messages form the query.
 QUERY_MESSAGES = 6

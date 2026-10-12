@@ -7,5 +7,6 @@ provider quirk the upstream LangChain client discards — Anthropic's
 `reasoning_content` field — survives into the message the rest of the
 framework sees. Import the submodule you need directly
 (`from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic`);
-this init keeps no facade.
+this init keeps no facade. `stop.py` is the provider-neutral stop-reason normalizer that
+sits beside them.
 """

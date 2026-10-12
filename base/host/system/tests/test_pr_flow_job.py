@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import types
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,13 @@ from base.cluster.machine import MachineIdentity
 from base.host.system import cron
 from base.host.system import pr_flow_job as job
 from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+
+def _recorder(calls: list[str], label: str) -> Callable[..., None]:
+    def record(*_args: object, **_kwargs: object) -> None:
+        calls.append(label)
+
+    return record
 
 
 @pytest.fixture(autouse=True)
@@ -254,10 +262,10 @@ def test_register_skips_when_os_jobs_are_disabled(
     skipped: list[str] = []
     monkeypatch.setattr(cron, "skip_os_job", skipped.append)
 
-    def no_backend():
-        raise AssertionError("backend must not be touched with OS jobs off")
+    def no_platform(*_a: object, **_k: object) -> None:
+        raise AssertionError("the platform must not be touched with OS jobs off")
 
-    monkeypatch.setattr("base.host.system.backend.get_backend", no_backend)
+    monkeypatch.setattr(cron, "register_platform_job", no_platform)
     job.register_pr_flow_job(enabled_reader=lambda: False, machine=machine_identity, home=tmp_path)
     assert skipped == ["pr flow"]
 
@@ -272,10 +280,10 @@ def test_register_skips_without_credentials(
     monkeypatch.setattr("base.telemetry.observability.production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_missing)  # no gh
 
-    def no_backend():
-        raise AssertionError("backend must not be touched without credentials")
+    def no_platform(*_a: object, **_k: object) -> None:
+        raise AssertionError("the platform must not be touched without credentials")
 
-    monkeypatch.setattr("base.host.system.backend.get_backend", no_backend)
+    monkeypatch.setattr(cron, "register_platform_job", no_platform)
     job.register_pr_flow_job(enabled_reader=lambda: True, machine=machine_identity, home=tmp_path)
 
 
@@ -288,11 +296,8 @@ def test_register_delegates_when_credentials_pass(
 ) -> None:
     _passing_credentials(monkeypatch, default_home)
     calls: list[str] = []
-    fake_backend = types.SimpleNamespace(
-        register_pr_flow_job=lambda: calls.append("register"),
-        unregister_pr_flow_job=lambda: calls.append("unregister"),
-    )
-    monkeypatch.setattr("base.host.system.backend.get_backend", lambda: fake_backend)
+    monkeypatch.setattr(cron, "register_platform_job", _recorder(calls, "register"))
+    monkeypatch.setattr(cron, "unregister_platform_job", _recorder(calls, "unregister"))
 
     job.register_pr_flow_job(enabled_reader=lambda: True, machine=machine_identity, home=tmp_path)
     assert calls == ["register"]

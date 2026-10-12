@@ -103,7 +103,7 @@ async def _repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) 
             err=f"{type(exc).__name__}: {exc}",
         )
         return None
-    from base.lm.pricing.billing import emit_billing_from_message
+    from base.lm.usage import emit_billing_from_message
 
     emit_billing_from_message(
         resp,

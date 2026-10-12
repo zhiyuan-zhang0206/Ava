@@ -22,7 +22,7 @@ from typing import Any, cast
 
 from langchain_core.messages import AIMessage, BaseMessage
 
-from base.lm.content import content_blocks
+from base.lm.reasoning import content_blocks
 
 # Tokens per CJK character (kana, hangul, CJK ideographs, full-width forms).
 CJK_TOKENS_PER_CHAR = 0.95

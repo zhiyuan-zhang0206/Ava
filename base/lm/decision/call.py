@@ -17,6 +17,7 @@ from base.lm.catalog.decide.types import (
     AsyncTransport,
     Choice,
     Decision,
+    DecisionBuildContext,
     DecisionInputTooLargeError,
     DecisionKeyMissingError,
     DecisionModelSpec,
@@ -28,7 +29,6 @@ from base.lm.catalog.decide.types import (
     estimate_tokens,
     question_text,
 )
-from base.lm.catalog.provider_contract import DecisionBuildContext
 from base.lm.provider_api import provider_key_present
 from base.lm.usage import log_usage_fields
 

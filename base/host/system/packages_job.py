@@ -162,9 +162,11 @@ def register_packages_job(
             "packages refresh disabled (AVA_PACKAGES_REFRESH_ENABLED=false) — not registering"
         )
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().register_packages_job(tick_reader=tick_reader)
+    base.host.system.cron.register_platform_job(
+        "packages-refresh",
+        macos=lambda: _register_macos(tick_reader=tick_reader),
+        linux=lambda: _register_linux(tick_reader=tick_reader),
+    )
 
 
 def unregister_packages_job() -> None:
@@ -172,6 +174,4 @@ def unregister_packages_job() -> None:
     outside the default home."""
     if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
-    from base.host.system.backend import get_backend
-
-    get_backend().unregister_packages_job()
+    base.host.system.cron.unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)

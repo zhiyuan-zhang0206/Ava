@@ -21,8 +21,9 @@ from langchain_core.messages import AIMessage
 
 from base import paths
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import pricing, provider_api, stop
+from base.lm import pricing, provider_api
 from base.lm.catalog import CatalogBuilder, ModelCatalog
+from base.lm.compat import stop
 from base.lm.factory import (
     build_chat_model,
     model_supports_vision,
@@ -700,7 +701,7 @@ def test_stop_spec_registration_reaches_classify_stop(provider_plugin: Callable[
         stop_spec='StopSpec("testsdk", "finish_reason", frozenset({"stop"}), frozenset({"length"}))',
     )
     catalog = build_model_catalog()
-    from base.lm.stop import classify_stop
+    from base.lm.compat.stop import classify_stop
 
     category, raw = classify_stop(
         AIMessage(

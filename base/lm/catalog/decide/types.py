@@ -3,7 +3,7 @@
 A decision model answers a fixed set of questions about a piece of text with a probability
 distribution and never generates text. It is deliberately separate from chat models: it has no
 ``ModelSpec``, no ``build_chat_model`` path and no spawn-dropdown entry. Providers implement
-``DecisionBinding``; callers use ``base.lm.catalog.decide.call.decide``.
+``DecisionBinding``; callers use ``base.lm.decision.call.decide``.
 """
 
 from __future__ import annotations
@@ -234,3 +234,14 @@ def question_text(question: Question) -> str:
             return "\n".join(parts)
         case Score():
             return "\n".join((question.question, *question.scale, *question.rubric))
+
+
+@dataclass(frozen=True)
+class DecisionBuildContext:
+    """Construction inputs of a decision binding."""
+
+    model: str
+    spec: DecisionModelSpec
+    timeout: float | None
+    transport: AsyncTransport | None = None
+    """HTTP transport override; absent means the real network (tests inject a mock)."""

@@ -362,14 +362,15 @@ def test_unregister_macos_removes_only_the_probe_plist(
 
 
 def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Stub the platform backend's register_cron to record calls."""
+    """Stub the host's cron registrar to record the interval it is asked for."""
     calls: list[str] = []
 
-    class _FakeBackend:
-        def register_cron(self, interval_s: int) -> None:  # type: ignore[no-untyped-def]
-            calls.append(str(interval_s))
+    def register(interval_s: int) -> int:
+        calls.append(str(interval_s))
+        return 0
 
-    monkeypatch.setattr("base.host.system.backend.get_backend", _FakeBackend)
+    monkeypatch.setattr(cron, "is_macos", lambda: True)
+    monkeypatch.setattr(cron, "_register_macos", register)
     return calls
 
 
@@ -387,7 +388,7 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
 
     cron.register_os_cron(enabled_reader=lambda: True)
 
-    assert calls == []  # backend never called; registration refused
+    assert calls == []  # registrar never called; registration refused
 
 
 def test_register_allowed_from_the_homes_own_source_checkout(

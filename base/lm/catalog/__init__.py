@@ -32,9 +32,9 @@ from base.lm.catalog.provider_contract import (
     ProviderContribution,
     ProviderRegistrationError,
 )
+from base.lm.compat.stop import StopSpec
 from base.lm.pricing import ModelPrice, PriceBook, load_archive, plugin_model_price
 from base.lm.registry import ModelSpec, validate_models, validate_spec
-from base.lm.stop import StopSpec
 
 
 @dataclass(frozen=True)

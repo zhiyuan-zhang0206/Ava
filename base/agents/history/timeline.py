@@ -104,7 +104,7 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
     thumbnails from ava_image_urls instead). Any non-text block a future writer
     adds is ignored here rather than str()-d in.
     """
-    from base.lm.content import content_blocks
+    from base.lm.reasoning import content_blocks
 
     if isinstance(content, str):
         return content
@@ -387,7 +387,7 @@ def _inbound_item(
 
 def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | None:
     """Data-URI image urls from attach ``image_url`` blocks; other media ignored."""
-    from base.lm.content import content_blocks
+    from base.lm.reasoning import content_blocks
 
     if not isinstance(content, list):
         return None
@@ -418,7 +418,7 @@ def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[st
     indistinguishable), so this returns None and the frontend falls back to the
     legacy all-text-then-all-images layout.
     """
-    from base.lm.content import content_blocks
+    from base.lm.reasoning import content_blocks
 
     if not isinstance(content, list):
         return None
@@ -574,7 +574,7 @@ def _fold_addl_reasoning_into_content(
     (ReasoningContentChatModel produces canonical blocks — no double-render).
     Non-string / empty / whitespace-only reasoning is silently skipped.
     """
-    from base.lm.content import ContentBlock
+    from base.lm.reasoning import ContentBlock
 
     addl_reasoning = additional_kwargs.get("reasoning_content")
     if not (addl_reasoning and isinstance(addl_reasoning, str) and addl_reasoning.strip()):
@@ -709,7 +709,7 @@ def _content_block_item(
     instead); ``reasoning_attached`` is the caller's flag advanced by one when
     this block claimed the turn-level reasoning_tokens.
     """
-    from base.lm.content import ContentBlock
+    from base.lm.reasoning import ContentBlock
 
     if not isinstance(block, dict):
         return None, None, reasoning_attached

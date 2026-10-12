@@ -6,9 +6,9 @@ import pytest
 
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import CatalogBuilder, ModelCatalog
-from base.lm.catalog.decide.call import decide
-from base.lm.catalog.decide.tests.support import MODEL, FakeBinding, provider
 from base.lm.catalog.decide.types import DecisionModelSpec, UnknownDecisionModelError, YesNo
+from base.lm.decision.call import decide
+from base.lm.decision.tests.support import MODEL, FakeBinding, provider
 from base.lm.factory import build_chat_model, validate_model_config
 from base.lm.plugin_providers import build_model_catalog
 from base.lm.provider_api import (

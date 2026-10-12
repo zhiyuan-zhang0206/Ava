@@ -156,8 +156,6 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
 ) -> None:
     from types import SimpleNamespace
 
-    from base.host.system import backend
-
     owner = ConfigBoot()
     for name, value in [
         ("os_jobs_enabled", True),
@@ -176,11 +174,8 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
         producer=operator_pipeline,
         machine=machine_from_boot(owner),
     )
-    monkeypatch.setattr(
-        backend,
-        "get_backend",
-        backend.MacPlatformBackend if platform == "macos" else backend.LinuxPlatformBackend,
-    )
+    monkeypatch.setattr(cron, "is_macos", lambda: platform == "macos")
+    monkeypatch.setattr(cron, "is_linux", lambda: platform != "macos")
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/isolated/.venv/bin/ava")
     monkeypatch.setattr(cron, "launchd_path_env", lambda: "/usr/bin")
     tables: list[str] = []

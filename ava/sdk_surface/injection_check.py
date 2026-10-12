@@ -92,7 +92,7 @@ def split_for_model(text: str, max_tokens: int) -> list[str]:
 async def _chunk_probability(
     model: str, chunk: str, *, catalog: ModelCatalog, for_agent_id: int | None
 ) -> float:
-    from base.lm.catalog.decide.call import decide  # deferred: keep import ava off the LM stack
+    from base.lm.decision.call import decide  # deferred: keep import ava off the LM stack
 
     decisions = await decide(
         model,

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from ava_builtins.plugins.lm_openai.decision import DecisionsBinding
+from base.lm.compat.stop import StopCategory, StopSpec
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
@@ -31,7 +32,6 @@ from base.lm.provider_api import (
     with_fast_variants,
 )
 from base.lm.registry import ModelSpec, ModelTuning, ReferenceTps
-from base.lm.stop import StopCategory, StopSpec
 from base.packages.plugins.extensions import PluginContributions
 
 # Effort vocabulary shared by GPT-5.6 and GPT-6 Sol/Luna; Astra differs.

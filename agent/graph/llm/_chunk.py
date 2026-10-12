@@ -21,7 +21,7 @@ from agent.graph.llm_errors import (
     LLMStreamUnexpectedStopReasonError,
 )
 from base.lm.catalog import ModelCatalog
-from base.lm.content import content_blocks
+from base.lm.reasoning import content_blocks
 from base.log import logger
 
 
@@ -83,7 +83,7 @@ def _validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> Non
     fail-fast contract: a missing terminal reason cannot be silently treated as
     idle (would let `if not final_msg.tool_calls` misjudge a lost final frame).
     """
-    from base.lm.stop import StopCategory, classify_stop
+    from base.lm.compat.stop import StopCategory, classify_stop
 
     category, raw = classify_stop(final_msg, stops=catalog.stops)
     output_tokens = (final_msg.usage_metadata or {}).get("output_tokens", 0)  # pyright: ignore[reportUnknownMemberType]
