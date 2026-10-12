@@ -127,7 +127,7 @@ def test_default_scope_is_what_rule_5_does_not_see() -> None:
 
     root = Path(__file__).resolve().parents[2]
     scanned = {path.relative_to(root).as_posix() for path in _lint.default_targets()}
-    assert scanned == {"scripts", *DECISIONS["postgres-dial"].allowed}
+    assert scanned == {"scripts", "meizel", *DECISIONS["postgres-dial"].allowed}
 
 
 def test_explicit_missing_target_is_an_error(

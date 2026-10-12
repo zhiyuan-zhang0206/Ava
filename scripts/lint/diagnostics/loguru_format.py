@@ -114,7 +114,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
 
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel")
 
 _LOGURU_MODULES = frozenset({"base.log", "loguru"})
 _LEVEL_METHODS = frozenset(

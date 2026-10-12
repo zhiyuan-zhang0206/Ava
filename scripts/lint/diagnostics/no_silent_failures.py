@@ -72,7 +72,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
 
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "schedules", ".agents")
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "schedules", ".agents")
 
 _BROAD = frozenset({"Exception", "BaseException"})
 _LOUD_LOG_METHODS = frozenset({"warning", "warn", "error", "critical", "exception", "fatal"})

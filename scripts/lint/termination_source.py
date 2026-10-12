@@ -75,7 +75,7 @@ from meizel import lint_common  # noqa: E402 - standalone script
 # Every tree that could reach agents_meta is covered, not just the ones that write it
 # today — `ava_builtins` currently only READS the table, and this is
 # what keeps a future write there from being the one site nobody was checking.
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),

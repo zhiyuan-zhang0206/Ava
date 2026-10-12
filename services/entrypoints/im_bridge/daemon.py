@@ -98,7 +98,7 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
 
 # -- composition root --------------------------------------------------------
 # This module is the only one of the package that reads `settings`
-# (scripts/structure/ambient_state: SLICED_PACKAGES). It builds the configuration
+# (meizel/state/ambient_state: SLICED_PACKAGES). It builds the configuration
 # slices from the flat field values and hands each to the component that uses it.
 
 

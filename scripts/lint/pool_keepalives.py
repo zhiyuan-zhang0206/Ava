@@ -66,7 +66,7 @@ _DIAL = DECISIONS["postgres-dial"]
 
 # The default scope: what Rule 5 does not see. `scripts/` is not a governed
 # package, and a module the decision allows is exempt from Rule 5 as a whole.
-_SCAN_DIRS = ("scripts",)
+_SCAN_DIRS = ("scripts", "meizel")
 _SCAN_FILES = tuple(sorted(_DIAL.allowed))
 
 # The decision's owner builds the merged kwargs dict every other site routes

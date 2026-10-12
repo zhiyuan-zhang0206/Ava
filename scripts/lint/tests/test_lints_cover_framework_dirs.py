@@ -29,11 +29,11 @@ def test_framework_scoped_lints_cover_every_framework_dir(scan_dirs: tuple[str, 
     lint_common.scan_roots(_REPO_ROOT, scan_dirs)
 
 
-@pytest.mark.parametrize("directory", (*lint_common.FRAMEWORK_DIRS, "scripts"))
+@pytest.mark.parametrize("directory", (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel"))
 def test_time_bomb_default_scan_covers_every_framework_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], directory: str
 ) -> None:
-    for name in (*lint_common.FRAMEWORK_DIRS, "scripts", "tests"):
+    for name in (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
         (tmp_path / name).mkdir()
     target = tmp_path / directory / "tests" / "test_window.py"
     target.parent.mkdir()

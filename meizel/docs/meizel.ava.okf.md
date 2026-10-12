@@ -30,6 +30,15 @@ application package. `scripts/` may import `meizel`; `meizel` never imports
   site is a bypass, and a listed exemption that goes stale fails) and
   `clock_lattice.py` keeps lattice-vocabulary timing constants in the
   clock-lattice family modules or as aliases of a registered clock.
+- `state/` — dependency injection rules: `ambient_state/` (Rule 9, module-level
+  state read to decide and free-floating background work, with the library
+  handle ratchet; see [[meizel/docs/ambient-state.ava.okf.md|ambient state]]),
+  `machine_role.py` (Rule 3, the retired ambient machine-role reader),
+  `no_os_environ.py` (runtime config goes through `Settings`) and
+  `turn_scoped_config.py` (no per-agent config through a process global). The two
+  config rules take the application's config registry as an injected argument;
+  their launchers in `scripts/lint/` bind it, because `meizel` imports no
+  application package.
 - `language/` — restrictions on how Python is written:
   `type_checking.py` (no `if TYPE_CHECKING:` import folding outside a listed
   file), `path_imports.py` (code under `ava_builtins/` reaches other code

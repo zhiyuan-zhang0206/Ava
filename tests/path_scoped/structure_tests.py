@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from meizel.owners import decisions
-from scripts.structure.ambient_state import allowlist as ambient_allowlist
+from meizel.state.ambient_state import allowlist as ambient_allowlist
 
 
 @pytest.fixture(autouse=True)
