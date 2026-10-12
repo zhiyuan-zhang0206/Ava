@@ -531,3 +531,69 @@ def test_connect_failure_cleanup_preserves_primary_and_retains_secondary(
         with suppress(LookupError, ValueError):
             service.stop(2.0)
         _close(client, accepted)
+
+
+def test_listener_that_never_binds_gives_up_after_the_failure_limit() -> None:
+    """A private address that never appears must end the process, not rebind forever."""
+    attempts: list[tuple[str, int]] = []
+    delays: list[float] = []
+
+    def never_binds(address: tuple[str, int]) -> socket.socket:
+        attempts.append(address)
+        raise OSError("can't assign requested address")
+
+    with pytest.raises(relay.ListenerExhaustedError, match="5 times in a row"):
+        relay.serve_forever(
+            ("10.0.0.9", 6380),
+            ("127.0.0.1", 6380),
+            open_listener=never_binds,
+            sleep=delays.append,
+        )
+
+    assert len(attempts) == relay._MAX_LISTENER_FAILURES
+    # The delay still grows between attempts and no sleep follows the last failure.
+    assert delays == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
+    """Failures separated by a working listener never add up to the limit."""
+    results: list[object] = []
+
+    class OneClient(_AcceptOnce):
+        def accept(self) -> tuple[socket.socket, tuple[str, int]]:
+            if self.accepted:
+                raise OSError("descriptor went bad")
+            return super().accept()
+
+    clients = [socket.socketpair() for _ in range(relay._MAX_LISTENER_FAILURES + 2)]
+    plan: list[object] = []
+    for client, _peer in clients:
+        # Each round: a bind failure, then a listener that admits one client and fails.
+        plan.append(OSError("not yet"))
+        plan.append(OneClient(client))
+    served = iter(plan)
+
+    def open_listener(_address: tuple[str, int]) -> socket.socket:
+        try:
+            item = next(served)
+        except StopIteration:
+            service.request_stop()
+            raise OSError("done") from None
+        results.append(item)
+        if isinstance(item, OSError):
+            raise item
+        return cast(socket.socket, item)
+
+    service = relay.RelayService(
+        ("10.0.0.9", 6380),
+        ("127.0.0.1", 1),
+        open_listener=open_listener,
+        sleep=lambda _delay: None,
+    )
+    try:
+        service.serve_forever()  # would raise ListenerExhaustedError if the count were not cleared
+    finally:
+        service.request_stop()
+        for client, peer in clients:
+            _close(client, peer)
+    assert len(results) == len(plan)

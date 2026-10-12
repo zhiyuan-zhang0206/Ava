@@ -38,6 +38,7 @@ _GATEWAY_SESSIONS = {
     "otel-collector",
     "pty-sessions",
     "pg-backup",
+    "redis-bridge",
     "ttl-reaper",
     "schedule-manager",
     "insights",
