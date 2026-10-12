@@ -143,8 +143,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events | ✓ |
 | `text` | LLM text output | noise | — | — | events | — |
 | `syntax_fix` | syntax repair executed | noise | fixes | — | events | ✓ |
-| `editable_pth_repaired` | poisoned editable-install pointer repaired to the prod source root | anomaly | — | — | events | — |
-| `editable_direct_url_repaired` | poisoned editable-install direct_url repaired to the prod source root | anomaly | — | — | events | — |
 | `inspect_metrics_coverage_gap` | inspector statistics read shows a live recorder gap (turns without durations inside the collection era); re-emitted on every read while it holds | anomaly | family, condition, availability | — | events | — |
 | `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | events | — |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events | ✓ |

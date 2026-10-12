@@ -53,8 +53,6 @@ _EXPECTED_UIDS = {
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
     "ava-ops-events-low-water",
-    "ava-ops-llm-stall-pair",
-    "ava-ops-llm-stall-burst",
     "ava-ops-gateway-metrics-silent",
     "ava-ops-root-health-stale",
     "ava-ops-checkpoint-blobs-warning",
@@ -116,7 +114,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [52, 12]
+    assert [len(group["rules"]) for group in groups] == [50, 12]
     return groups
 
 
@@ -247,8 +245,6 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
         ("ava-ops-trace-disk-watermark", 'event_name="trace"'),
         ("ava-ops-llm-rate-limit", 'event_name="llm_provider_error"'),
         ("ava-ops-llm-billing-quota", 'event_name="llm_provider_error"'),
-        ("ava-ops-llm-stall-pair", 'event_name="stream_stall_pair_terminated"'),
-        ("ava-ops-llm-stall-burst", 'event_name="stream_stalled_retry"'),
     ],
 )
 def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> None:
