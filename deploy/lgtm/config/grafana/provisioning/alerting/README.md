@@ -250,6 +250,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `ava-ops-schedule-verify-failed` | `schedule_verify_failed` | 0m | error | the verify sweep's direct post |
 | `ava-ops-agent-continuation-lost` | `agent_continuation_lost` per agent | 0m | error | the agent host's alert for a turn that failed while its continuation was owed to a maintenance hold |
 | `ava-ops-schedule-stalled` | `schedule_stalled` (24h) | 0m | warning | the event had no rule |
+| `ava-ops-schedule-convergence-abandoned` | `schedule_convergence_abandoned` (24h) | 0m | warning | nothing: the manager's reap and sync retries had no bound and no report |
 | `ava-ops-machine-offline-warning` / `-error` | `machine_probe_failed` per machine | 3m / 10m | warning / error | the machine-offline rows and their clock |
 | `ava-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |
 | `ava-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |

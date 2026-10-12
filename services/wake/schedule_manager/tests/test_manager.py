@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -135,13 +136,13 @@ def _run_row(conn: psycopg.Connection, rid: int) -> tuple[bool | None, str | Non
     return row[0], row[1]
 
 
-def test_reconcile_closes_orphan_null_rows(
+def test_reconcile_does_not_sweep_orphan_null_rows(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:
-    # QA P2-2: a run row left in-progress by a dead process (SIGKILLed stop /
-    # external kill / gateway-restart reap) must be closed, or the run drawer
-    # shows a permanent in-progress "…". A disabled schedule with no session
-    # and a NULL row is swept on the next reconcile.
+    # A run row left in-progress by a process something else killed is closed
+    # only when the manager next launches or reaps that schedule (the tests
+    # below), not by a periodic sweep: a disabled schedule with no session and a
+    # NULL row keeps showing in-progress until then.
     _backend, launched = fake_session
     sid = _insert(db_conn, "orphan-a", enabled=False)
     rid = _insert_null_run(db_conn, sid)
@@ -149,7 +150,7 @@ def test_reconcile_closes_orphan_null_rows(
     sm.ScheduleManager(pool).reconcile()
 
     assert launched == []
-    assert _run_row(db_conn, rid) == (False, "interrupted")
+    assert _run_row(db_conn, rid) == (None, None)
 
 
 def test_reconcile_keeps_null_row_for_live_session(
@@ -612,3 +613,128 @@ def test_successful_launch_clears_stale_last_error(
     status, last_error = row
     assert status == "running"
     assert last_error is None, "stale breaker text must be cleared on successful launch"
+
+
+def _clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(sm.time, "monotonic", lambda: clock["t"])
+    return clock
+
+
+def _tick(manager: sm.ScheduleManager, clock: dict[str, float], seconds: float) -> None:
+    """Reconcile every 30s for `seconds`: well inside one failure streak's gap."""
+    end = clock["t"] + seconds
+    while clock["t"] < end:
+        manager.reconcile()
+        clock["t"] += 30
+
+
+def _capture_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object]]]:
+    emitted: list[tuple[str, dict[str, object]]] = []
+
+    def capture(_category: object, event_name: str, **kwargs: Any) -> None:
+        emitted.append((event_name, kwargs["attributes"]))
+
+    monkeypatch.setattr(sm.telemetry, "emit", capture)
+    return emitted
+
+
+def _last_error(conn: psycopg.Connection, sid: int) -> str | None:
+    row = conn.execute("SELECT last_error FROM schedules WHERE id = %s", (sid,)).fetchone()
+    assert row is not None
+    return row[0]
+
+
+def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The retry of a surviving session is bounded by time, not by another layer.
+
+    A stop whose session never dies is retried every reconcile for the window,
+    then the manager records an error, alerts once, consumes the request and
+    stops calling the backend until the desired revision changes."""
+    backend, launched = fake_session
+    clock = _clock(monkeypatch)
+    emitted = _capture_events(monkeypatch)
+    sid = _insert(db_conn, "survivor", enabled=False)
+    name = session_name(f"schedule-{sid}")
+    backend.live.append(name)
+    backend.kill_results = [False] * 10_000
+    manager = sm.ScheduleManager(pool)
+
+    _tick(manager, clock, sm._BLOCKED_GIVE_UP_AFTER_S - 30)
+    retried = len(backend.killed)
+    assert retried == sm._BLOCKED_GIVE_UP_AFTER_S // 30 - 1  # every tick retried the reap
+    assert emitted == []
+    assert _status(db_conn, sid) == "running"
+
+    clock["t"] += 30
+    manager.reconcile()  # the attempt that crosses the window
+    assert len(backend.killed) == retried + 1
+    assert _status(db_conn, sid) == "error"
+    assert "gave up" in (_last_error(db_conn, sid) or "")
+    assert [(event, attrs["schedule_id"]) for event, attrs in emitted] == [
+        ("schedule_convergence_abandoned", sid)
+    ]
+
+    for _ in range(3):
+        clock["t"] += 30
+        manager.reconcile()
+        assert manager.sync_one(sid) is True  # the request is consumed, not requeued
+    assert len(backend.killed) == retried + 1
+    assert len(emitted) == 1
+    assert name in backend.live  # the process is left alone
+    assert launched == []
+
+
+def test_an_explicit_new_revision_lifts_the_give_up(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _launched = fake_session
+    clock = _clock(monkeypatch)
+    _capture_events(monkeypatch)
+    sid = _insert(db_conn, "survivor-lifted", enabled=False)
+    backend.live.append(session_name(f"schedule-{sid}"))
+    backend.kill_results = [False] * 10_000
+    manager = sm.ScheduleManager(pool)
+    _tick(manager, clock, sm._BLOCKED_GIVE_UP_AFTER_S + 30)
+    assert _status(db_conn, sid) == "error"
+    attempts = len(backend.killed)
+
+    # A new desired revision (an explicit stop/start/restart); the process now yields.
+    backend.kill_results = []
+    db_conn.execute(
+        "UPDATE schedules SET desired_revision = desired_revision + 1 WHERE id = %s", (sid,)
+    )
+    db_conn.commit()
+    assert manager.sync_one(sid) is True
+
+    assert len(backend.killed) == attempts + 1
+    assert _status(db_conn, sid) == "stopped"
+    assert sid not in manager._abandoned
+
+
+def test_a_failure_streak_is_broken_by_a_gap(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failures separated by a hold or a paused service are not one streak."""
+    clock = _clock(monkeypatch)
+    emitted = _capture_events(monkeypatch)
+    sid = _insert(db_conn, "gappy")
+    manager = sm.ScheduleManager(pool)
+
+    for _ in range(4):
+        manager._note_blocked(sid, "x")
+        clock["t"] += sm._BLOCKED_STREAK_GAP_S + 1
+
+    assert emitted == []
+    assert sid not in manager._abandoned

@@ -213,6 +213,59 @@ def test_an_uncertain_live_revision_is_never_blindly_replaced(
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
 
 
+@pytest.mark.parametrize("blocked_by", ["surviving-session", "unreadable-provenance"])
+def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an_alert(
+    db_conn: psycopg.Connection,
+    backend: Backend,
+    monkeypatch: pytest.MonkeyPatch,
+    blocked_by: str,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    """The one-second retry of a blocked sync request ends: error, one alert, request gone."""
+    sid = _insert(db_conn)
+    name = session_name(f"schedule-{sid}")
+    backend.commands[name] = (
+        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 0; exit $?"
+    )
+    if blocked_by == "surviving-session":
+        backend.fail_reap = True
+    else:
+
+        def unavailable(_prefix: str = "", **_kw: object) -> list[SessionInfo]:
+            return []
+
+        monkeypatch.setattr(revisions.client, "list_sessions", unavailable)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(manager.time, "monotonic", lambda: clock["t"])
+    events: list[tuple[str, object]] = []
+
+    def capture(_category: object, event_name: str, **kwargs: object) -> None:
+        events.append((event_name, kwargs["attributes"]))
+
+    monkeypatch.setattr(manager.telemetry, "emit", capture)
+    with base.db.pool(gate=database_gate) as pool:
+        mgr = manager.ScheduleManager(pool)
+        session_control.enqueue_blocking(pool, sid)
+        while clock["t"] < 1000.0 + manager._BLOCKED_GIVE_UP_AFTER_S:
+            assert requests.consume_requests(pool, mgr) == 0  # still blocked: requeued
+            clock["t"] += 30
+        assert events == []
+        assert requests.consume_requests(pool, mgr) == 1  # the window ended: consumed
+        killed = list(backend.killed)
+        for _ in range(3):
+            clock["t"] += 1
+            assert requests.consume_requests(pool, mgr) == 0  # nothing left to retry
+    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
+    assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
+        "error",
+    )
+    assert [event for event, _attrs in events] == ["schedule_convergence_abandoned"]
+    assert backend.killed == killed
+    assert backend.launches == 0
+    assert name in backend.commands  # the process is left alone
+
+
 def test_a_failed_schedule_does_not_block_other_queued_revisions(
     db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:

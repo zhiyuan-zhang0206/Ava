@@ -4,13 +4,13 @@ Two resident sequential loops under one `TaskGroup` (`_run_loops`):
 
 - `reconcile` (`ScheduleManager.reconcile`): every few seconds, desired (enabled
   `schedules` rows) against actual (live `ava-schedule-<id>` sessions) — launch
-  the missing ones under the crash backoff and breaker, reap the unwanted, close
-  orphaned run rows, alert on a schedule sessionless for two hours.
+  the missing ones once per explicit revision, reap the unwanted, alert on a
+  schedule sessionless for two hours.
 - `requests` (`services.wake.schedule_manager.requests`): every second, converge the
   schedules the API asked for (start / stop / restart / edit / delete).
 
-The crash backoff, the launch counter and the stall-alert clock are columns of
-the schedule row, so a restart of this service resumes them. A loop that raises
+The launch latch and the stall-alert clock are columns of the schedule row, so a
+restart of this service resumes them. A loop that raises
 cancels its sibling and the exception leaves `run`: the process exits and the
 supervisor restarts it; the schedule sessions themselves survive the service.
 An unreachable database skips a round. Each loop reports its own progress to

@@ -5,7 +5,15 @@ identity-checked backend and consumes schedule_sync_requests. It commits a
 one-attempt launch latch before creating the process. Lost or ambiguous starts
 are errors requiring explicit start/restart; no crash retry or breaker remains.
 The latch and the two-hour absence alert clock survive service restart.
-Dead sessions also have their unfinished run-history rows closed.
+Run-history rows left open by a dead process are closed when the manager next
+launches or reaps that schedule's session, not by a periodic sweep.
+
+Convergence that keeps failing is bounded: a reap that survives, or a live
+session whose launch provenance cannot be read, is retried for at most
+``_BLOCKED_GIVE_UP_AFTER_S`` of one failure streak. The manager then stops,
+records the schedule as an error, emits ``schedule_convergence_abandoned`` and
+leaves the process alone until an explicit new revision (start, stop, restart,
+edit, delete) authorizes another attempt.
 """
 
 from __future__ import annotations
@@ -39,6 +47,12 @@ POLL_INTERVAL_S = 5.0
 _PTY_FAILURE_LOG_INTERVAL_S = 60.0
 _STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 
+# One streak of failed convergence attempts for a schedule ends in a give-up after
+# this long. Two failures further apart than the gap (a maintenance hold or a
+# paused service sits between them) are not one streak.
+_BLOCKED_GIVE_UP_AFTER_S = 600.0
+_BLOCKED_STREAK_GAP_S = 60.0
+
 # Repo root (services/wake/schedule_manager/../../.. == <repo>/) — the cwd the runner launches from, so its
 # relative `.venv/bin/python` resolves into this checkout's venv.
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -63,6 +77,14 @@ class ScheduleManager:
         # A D-state survivor can resist each five-second reconcile forever; log
         # the first failure and periodic summaries rather than flooding ERROR.
         self._reap_failure_logs: dict[int, tuple[float, int]] = {}
+        # schedule id -> (first, latest) monotonic time of the current streak of
+        # failed convergence attempts.
+        self._blocked: dict[int, tuple[float, float]] = {}
+        # schedule id -> desired revision at the moment the manager gave up. The
+        # process is left alone until the desired revision changes (an explicit
+        # start, stop, restart, edit or delete); in memory, so a restarted service
+        # starts one new bounded streak.
+        self._abandoned: dict[int, int | None] = {}
         # Serializes the reconcile tick against the sync requests, which run on
         # separate threads and both touch the backend and launch-admission columns.
         self._lock = threading.Lock()
@@ -72,17 +94,24 @@ class ScheduleManager:
     def sync_one(self, schedule_id: int) -> bool:
         """Converge the current durable desired revision, preserving an applied run.
 
-        Return False while held or missing safe session provenance;
-        the durable request stays queued for recovery.
+        Return False while held or while the attempt is blocked (a surviving
+        session, missing safe session provenance); the durable request stays
+        queued for the next try. A blocked streak is bounded: once the manager
+        gives up it returns True, so the request is consumed and not retried.
         """
         from base.deploy.maintenance import admission
 
         if admission.held():
             return False
         with self._lock:
-            return self._sync_revision(schedule_id)
+            converged = self._sync_revision(schedule_id)
+            if converged:
+                self._blocked.pop(schedule_id, None)
+            return converged or schedule_id in self._abandoned
 
     def _sync_revision(self, schedule_id: int) -> bool:
+        if self._is_abandoned(schedule_id):
+            return False
         with revisions.claim_convergence(self._pool, schedule_id) as owned:
             if not owned:
                 return False
@@ -102,7 +131,12 @@ class ScheduleManager:
                 # Existing legacy sessions at revision zero are adopted. For a
                 # pending versioned command missing provenance means uncertain,
                 # not permission to kill a possibly already-applied execution.
-                return wanted.revision == wanted.applied == 0
+                legacy = wanted.revision == wanted.applied == 0
+                if not legacy:
+                    self._note_blocked(
+                        schedule_id, "launch provenance of the live session is unreadable"
+                    )
+                return legacy
             if observed == wanted.revision:
                 self._mark_running(schedule_id, wanted.revision)
                 return True
@@ -140,20 +174,17 @@ class ScheduleManager:
 
         if admission.held():
             return
+        # A given-up schedule is not retried: only a new revision lifts that.
+        self._reap_retries.difference_update(self._abandoned)
+        retrying = self._reap_retries.copy()
         # Read liveness before status: on a clean exit the runner commits
         # status='completed' before its process exits (and the session dies), so a
         # session seen dead here is guaranteed to already carry its terminal status.
-        retrying = self._reap_retries.copy()
         live = self._live_ids()  # {id}
         enabled_rows = self._load_enabled()
         enabled = set(enabled_rows)
         known = live | enabled
-        self._reap_retries.intersection_update(known)
-        self._reap_failure_logs = {
-            schedule_id: state
-            for schedule_id, state in self._reap_failure_logs.items()
-            if schedule_id in known
-        }
+        self._forget_unknown(known)
         self._report_stalled_schedules(enabled_rows, live)
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
@@ -179,12 +210,14 @@ class ScheduleManager:
         enabled_rows = self._load_enabled()
         self._launch_missing(enabled_rows, sorted(set(enabled_rows) - live))
 
-        # Close run rows the runner could not close: a NULL row is legitimate
-        # only while the schedule has a live session (QA P2-2). Launches above
-        # already closed their dead predecessors; this catches every other
-        # orphan (disabled/terminal schedules, failed admissions, legacy
-        # rows from before this sweep existed).
-        self._close_orphan_runs()
+    def _forget_unknown(self, known: set[int]) -> None:
+        """Drop per-schedule retry state of schedules that are neither live nor enabled."""
+        self._reap_retries.intersection_update(known)
+        self._reap_failure_logs = {
+            sid: state for sid, state in self._reap_failure_logs.items() if sid in known
+        }
+        self._blocked = {sid: span for sid, span in self._blocked.items() if sid in known}
+        self._abandoned = {sid: rev for sid, rev in self._abandoned.items() if sid in known}
 
     def _launch_missing(self, enabled_rows: dict[int, str], missing: list[int]) -> None:
         """Apply explicit revisions; an admitted missing execution is never relaunched."""
@@ -288,7 +321,7 @@ class ScheduleManager:
                 if owned_id is not None and owned_id != schedule_id:
                     live.add(schedule_id)
                     continue
-                if schedule_id in self._reap_retries:
+                if schedule_id in self._reap_retries or schedule_id in self._abandoned:
                     live.add(schedule_id)
                     continue
                 _log.warning(
@@ -312,35 +345,16 @@ class ScheduleManager:
         """Close a schedule's in-progress run-history rows (ok IS NULL) as
         'interrupted' — the runner that opened them is gone. Best-effort (run
         history is severable observability) and idempotent (WHERE ok IS NULL):
-        a row the runner closed itself, or one already swept, is untouched."""
+        a row the runner closed itself is untouched. Called when the manager
+        launches or reaps the schedule, the only moments it knows the process
+        is gone; a process killed by something else leaves its row open until
+        then."""
         with write_transaction(self._pool) as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE schedule_runs SET ok = false, note = 'interrupted' "
                 "WHERE schedule_id = %s AND ok IS NULL",
                 (schedule_id,),
             )
-
-    def _close_orphan_runs(self) -> None:
-        """Close every in-progress run row whose schedule has no live session.
-
-        The runner closes its row on every exit path it can reach; a row still
-        NULL after its process died — the manager's own stop/restart/edited-
-        script save kills with SIGKILL, an external kill, a gateway restart's
-        stale-session reap, a crash between the row open and any close — would
-        otherwise render as in-progress forever (QA P2-2). The manager owns
-        session liveness, so it closes them: history is preserved as a visible
-        ✗ interrupted row instead of an eternal "…". Schedules launched in
-        this tick already had their rows closed at launch; this catches the
-        rest (disabled, terminal, never launched)."""
-        with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT schedule_id FROM schedule_runs WHERE ok IS NULL")
-            ids = [r[0] for r in cur.fetchall()]
-        if not ids:
-            return
-        live = self._live_ids()
-        for sid in ids:
-            if sid not in live:
-                self._close_null_runs(sid)
 
     def _launch(self, schedule_id: int) -> None:
         from base.deploy.maintenance import admission
@@ -458,6 +472,58 @@ class ScheduleManager:
             return False
         return True
 
+    def _is_abandoned(self, schedule_id: int) -> bool:
+        """Whether the manager gave up on this schedule at its current revision.
+
+        A changed desired revision (or a deleted row) is a new explicit request:
+        it clears the give-up and authorizes a fresh bounded streak."""
+        if schedule_id not in self._abandoned:
+            return False
+        wanted = revisions.desired(self._pool, schedule_id)
+        if (None if wanted is None else wanted.revision) != self._abandoned[schedule_id]:
+            del self._abandoned[schedule_id]
+            self._blocked.pop(schedule_id, None)
+            return False
+        return True
+
+    def _note_blocked(self, schedule_id: int, why: str) -> None:
+        """Count one failed convergence attempt; give up when the streak is old enough."""
+        now = time.monotonic()
+        first, latest = self._blocked.get(schedule_id, (now, now))
+        if now - latest > _BLOCKED_STREAK_GAP_S:
+            first = now
+        self._blocked[schedule_id] = (first, now)
+        if now - first >= _BLOCKED_GIVE_UP_AFTER_S:
+            self._give_up(schedule_id, why, now - first)
+
+    def _give_up(self, schedule_id: int, why: str, blocked_s: float) -> None:
+        """Stop retrying: record the schedule as an error, alert, leave the process alone."""
+        wanted = revisions.desired(self._pool, schedule_id)
+        self._abandoned[schedule_id] = None if wanted is None else wanted.revision
+        self._reap_retries.discard(schedule_id)
+        self._blocked.pop(schedule_id, None)
+        message = (
+            f"Convergence gave up after {blocked_s:.0f}s: {why}; inspect the process, "
+            "stop it by hand if needed, then explicitly restart"
+        )
+        with write_transaction(self._pool) as conn:
+            conn.execute(
+                "UPDATE schedules SET status = 'error', last_error = %s, updated_at = now() "
+                "WHERE id = %s",
+                (message, schedule_id),
+            )
+        _log.error("schedule %s: %s", schedule_id, message)
+        telemetry.emit(
+            "telemetry",
+            event_name="schedule_convergence_abandoned",
+            level="warning",
+            attributes={
+                "schedule_id": schedule_id,
+                "reason": why,
+                "blocked_seconds": round(blocked_s, 3),
+            },
+        )
+
     def _log_reap_failure(
         self, schedule_id: int, name: str, failure: str, *, exc: BaseException | None = None
     ) -> None:
@@ -512,6 +578,8 @@ class ScheduleManager:
         reconcile set and receive another official reap attempt next tick.
         """
         name = session_name(f"schedule-{schedule_id}")
+        if self._is_abandoned(schedule_id):
+            return False
         if (
             expected_generation is not None
             and get_shell_backend().session_generation(name) != expected_generation
@@ -521,22 +589,25 @@ class ScheduleManager:
             reaped, mode = get_shell_backend().kill_session(name)
         except Exception as exc:
             self._log_reap_failure(schedule_id, name, "raised", exc=exc)
+            self._note_blocked(schedule_id, f"the session {name} could not be reaped")
             return False
         if not reaped:
             # SessionBackend's false verdict means the session survived its
-            # own identity-aware kill. Keep metadata truthful until reconcile
-            # can try the same official path again.
+            # own identity-aware kill. Keep metadata truthful until the next
+            # bounded retry of the same official path.
             self._set_status(schedule_id, "running")
             self._log_reap_failure(schedule_id, name, "survived")
+            self._note_blocked(schedule_id, f"the session {name} survived its reap")
             return False
         self._reap_retries.discard(schedule_id)
         self._reap_failure_logs.pop(schedule_id, None)
+        self._blocked.pop(schedule_id, None)
         self._set_status(schedule_id, "stopped")
         # The killed process can never close its own run rows (the kill chain
         # is SIGKILL — no handler runs); close them now so a stop/restart/
         # edited-script save does not leave an in-progress "…" row behind (QA
-        # P2-2). The next reconcile sweep is the backstop for kills that do
-        # not route through here.
+        # P2-2). A kill that does not route through here leaves its row open
+        # until the manager next launches or reaps this schedule.
         self._close_null_runs(schedule_id)
         _log.info("schedule %s: PTY session %s reaped (%s)", schedule_id, name, mode)
         return True
