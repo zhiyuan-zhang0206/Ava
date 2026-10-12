@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.impersonation import native_status
+from agent.ownership import hosted, hosted_cleanup
 from agent.ownership.hosted import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
@@ -64,8 +65,8 @@ async def test_hosted_status_changes_publish_agent_updated(
     event_bus: EventBus,
 ) -> None:
     publish = AsyncMock()
-    monkeypatch.setattr("agent.ownership.hosted.publish_agent_updated", publish)
-    monkeypatch.setattr("agent.ownership.hosted_cleanup.publish_agent_updated", publish)
+    monkeypatch.setattr(hosted, "publish_agent_updated", publish)
+    monkeypatch.setattr(hosted_cleanup, "publish_agent_updated", publish)
     agent_id, owner = _agent(db_conn), uuid4()
 
     incarnation = await admit_hosted_runtime(

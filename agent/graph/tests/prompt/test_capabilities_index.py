@@ -32,10 +32,12 @@ from agent.graph.prompt.capabilities import (
     indexed_skill_identifiers,
 )
 from agent.graph.prompt.system_prompt import _delegation_check_section, build_system_prompt
-from ava.sdk_surface import sdk_disable
+from ava import mcps
+from ava.sdk_surface import agent_identity, sdk_disable
 from base.config import FIELD_INFOS, settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from base.packages.extensions import install_registry
 from base.packages.plugins.extensions import EMPTY
 from base.paths import skills_dir
 from base.telemetry import audit_events
@@ -47,9 +49,7 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         d = skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
-    )
+    monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
 
 
 @pytest.fixture
@@ -213,7 +213,7 @@ def test_header_only_promises_the_halves_that_rendered(
     index hides entries from this listing only, and `ava.help(ava.skills)` still
     enumerates the whole catalog."""
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["alpha"])
-    monkeypatch.setattr("ava.mcps.servers", list)
+    monkeypatch.setattr(mcps, "servers", list)
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
     _write_skill(fake_skills_dir, "gamma", "gamma", "Gamma desc")
 
@@ -290,7 +290,7 @@ def test_match_first_instruction_follows_the_rebuild_nudge(
 def test_empty_index_omits_the_match_first_instruction(monkeypatch: pytest.MonkeyPatch) -> None:
     """No standalone task instruction remains when neither capabilities half renders."""
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
-    monkeypatch.setattr("ava.mcps.servers", list)
+    monkeypatch.setattr(mcps, "servers", list)
 
     text = capabilities_section(
         AgentSlices.resolve(
@@ -363,7 +363,7 @@ def test_delegation_check_drops_the_index_step_when_there_is_no_index(
     renumbered, back-reference included."""
     monkeypatch.setattr(settings.agent, "prompt_delegation_check_enabled", True)
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
-    monkeypatch.setattr("ava.mcps.servers", list)
+    monkeypatch.setattr(mcps, "servers", list)
 
     text = _delegation_check_section(
         AgentSlices.resolve(
@@ -402,7 +402,7 @@ def test_building_the_prompt_records_no_skill_attribution(
     # audit-event writer — so any regression that routes prompt assembly (or an
     # index render) into a skill_invoked write fails this test.
     monkeypatch.setattr(audit_events, "record_audit_reported", _record)
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 1)
+    monkeypatch.setattr(agent_identity, "require_agent_id", lambda: 1)
 
     prompt = build_system_prompt(
         EMPTY,

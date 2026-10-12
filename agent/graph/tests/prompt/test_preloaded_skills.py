@@ -27,6 +27,7 @@ from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import build_model_catalog
+from base.packages.extensions import install_registry
 from base.paths import skills_dir
 
 
@@ -39,9 +40,7 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         d = skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
-    )
+    monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
 
 
 @pytest.fixture

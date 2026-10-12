@@ -28,6 +28,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.prompt import context_notes
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
@@ -292,7 +293,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     def fork_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
         return [system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)]
 
-    monkeypatch.setattr("agent.graph.prompt.context_notes.fork_notes", fork_notes)
+    monkeypatch.setattr(context_notes, "fork_notes", fork_notes)
     try:
         cmd = await claim_node(
             AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited")]),
@@ -371,7 +372,7 @@ async def test_claim_fork_strips_inherited_source_notes(
             system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY),
         ]
 
-    monkeypatch.setattr("agent.graph.prompt.context_notes.fork_notes", fork_notes)
+    monkeypatch.setattr(context_notes, "fork_notes", fork_notes)
     try:
         cmd = await claim_node(
             AgentState(messages=list(inherited)),

@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.graph.exec import node
 from agent.graph.exec._result import _ExecDone
 from agent.graph.exec.node import _exec_node_impl
 from agent.graph.interrupt import InterruptEvent
@@ -65,7 +66,7 @@ async def test_calls_execute_separately_without_rewriting_assistant(
             (_ExecDone(output="second result"), {}, 2, None, []),
         ]
     )
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
+    monkeypatch.setattr(node, "_run_agent_code", run)
     runtime = Runtime(
         context=AvaContext(
             hosted_resources=hosted_resources,
@@ -199,7 +200,7 @@ async def test_plugin_reducers_commit_between_calls(
         snapshots.append(state.total)
         return _ExecDone(output="ok"), {"total": 1}, 0, None, None
 
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
+    monkeypatch.setattr(node, "_run_agent_code", run)
     result = await _run_calls(
         state,
         _node_runtime(
@@ -229,10 +230,8 @@ async def test_notes_and_media_follow_all_results_and_stream_ids_match(
             (_ExecDone(output="second"), {}, 2, None, []),
         ]
     )
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
-    monkeypatch.setattr(
-        "agent.graph.exec.node.build_attach_message", MagicMock(side_effect=[media, None])
-    )
+    monkeypatch.setattr(node, "_run_agent_code", run)
+    monkeypatch.setattr(node, "build_attach_message", MagicMock(side_effect=[media, None]))
     runtime = _node_runtime(
         hosted_resources=hosted_resources,
     )
@@ -271,7 +270,7 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
             (_ExecDone(output="second"), {}, 2, None, []),
         ]
     )
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
+    monkeypatch.setattr(node, "_run_agent_code", run)
     result = await _run_calls(
         _state("first()", "second()"),
         _node_runtime(
@@ -351,7 +350,7 @@ async def test_unknown_tool_does_not_consume_sibling_code(
     assert isinstance(ai, AIMessage)
     ai.tool_calls[0]["name"] = "ava.files.edit"
     run = AsyncMock(return_value=(_ExecDone(output="runs"), {}, 0, None, []))
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
+    monkeypatch.setattr(node, "_run_agent_code", run)
     result = await _run_calls(
         state,
         _node_runtime(
@@ -523,7 +522,7 @@ async def test_langgraph_owns_each_call_state_transition(
         snapshots.append(state.total)
         return _ExecDone(output="ok"), {"total": len(snapshots)}, 0, None, None
 
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
+    monkeypatch.setattr(node, "_run_agent_code", run)
     state = DecimalState(total=7, messages=_state("first()", "second()").messages)
     result = await _run_calls(
         state,
@@ -550,7 +549,7 @@ async def test_checkpoint_resume_keeps_results_and_deferred_notes(
             (_ExecDone(output="second"), {}, 0, None, []),
         ]
     )
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
+    monkeypatch.setattr(node, "_run_agent_code", run)
     graph = _graph(AgentState, checkpointer=InMemorySaver(), interrupt_after=["exec"])
     config = _config()
     runtime = _node_runtime(

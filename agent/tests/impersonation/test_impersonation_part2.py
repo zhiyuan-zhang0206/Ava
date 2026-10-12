@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+import base.agents.impersonation as agents_impersonation
 from agent import impersonation
 from agent.tests.impersonation.test_impersonation import _notes
 from base.agents.context import AvaContext
@@ -186,7 +187,7 @@ async def test_activation_waits_for_resource_closure(
         impersonation, "native_status", AsyncMock(return_value=_session("accepted"))
     )
     activate = Mock(return_value=_session())
-    monkeypatch.setattr("base.agents.impersonation.activate", activate)
+    monkeypatch.setattr(agents_impersonation, "activate", activate)
     read_local_machine = Mock(side_effect=AssertionError("identity read before resource closure"))
     resources = HostedTurnResources(unresolved={Path("request"): object()})
     with pytest.raises(RuntimeError, match="unresolved native exec"):

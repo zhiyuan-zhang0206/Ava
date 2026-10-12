@@ -13,6 +13,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.llm.usage import log_llm_usage
+from base import config
 from base.lm.plugin_providers import build_model_catalog
 
 
@@ -220,7 +221,7 @@ def test_log_llm_usage_emits_agent_billing_span(
         "deepseek-v4-pro", 1_000, 100, 800, at=priced_at, prices=build_model_catalog().prices
     )
     assert expected is not None
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("time.time_ns", lambda: 5_000_000_000)
@@ -284,7 +285,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
             return span
 
     tracer = _Tracer()
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     message = AIMessage(

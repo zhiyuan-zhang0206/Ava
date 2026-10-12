@@ -17,6 +17,7 @@ from langchain_core.messages import AnyMessage
 import agent.graph.recall.memory_recall as recall
 from agent.messages import inbound_message
 from ava.gateway_client import MemorySearchResult
+from base import config
 from base.agents import IndexerUnavailable
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
@@ -29,7 +30,7 @@ from base.lm.plugin_providers import build_model_catalog
 @pytest.fixture
 def memory_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Enable the feature and point the on-disk sync check at a temp pool."""
-    monkeypatch.setattr("base.config.settings.agent.passive_memory_recall_enabled", True)
+    monkeypatch.setattr(config.settings.agent, "passive_memory_recall_enabled", True)
     monkeypatch.setattr(recall, "memory_dir", lambda: tmp_path)
     return tmp_path
 
@@ -189,7 +190,7 @@ async def test_description_and_passage_are_not_truncated(
 async def test_only_results_reaching_the_threshold_are_injected(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_threshold", 0.7)
+    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_threshold", 0.7)
     for name in ("hi", "edge", "lo"):
         _write_note(memory_root, f"{name}.md", name)
     _set_search(
@@ -217,7 +218,7 @@ async def test_nothing_is_injected_when_no_result_reaches_the_threshold(
 async def test_the_cap_keeps_the_best_scores_whatever_order_search_returned(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 2)
+    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 2)
     scores = {"a": 0.75, "b": 0.99, "c": 0.8, "d": 0.9}
     for name in scores:
         _write_note(memory_root, f"{name}.md", name)
@@ -234,7 +235,7 @@ async def test_the_cap_keeps_the_best_scores_whatever_order_search_returned(
 async def test_zero_cap_disables_injection_without_searching(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 0)
+    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 0)
     asked = _set_search(monkeypatch, [])
 
     assert await _recall() is None
@@ -246,7 +247,7 @@ async def test_already_injected_notes_are_set_aside_before_the_cap(
 ) -> None:
     """A note surfaced earlier this session does not use up a slot: the cap fills with the
     next-best qualifying notes."""
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 2)
+    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 2)
     for name in ("a", "b", "c", "d"):
         _write_note(memory_root, f"{name}.md", name)
     _set_search(
@@ -280,7 +281,7 @@ async def test_skips_path_not_synced_to_this_machine(
 ) -> None:
     """Search can return a path this machine has not synced yet; the missing file is skipped
     rather than crashing on read, and does not use up a slot."""
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 1)
+    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 1)
     _write_note(memory_root, "here.md", "present")
     _set_search(monkeypatch, [_result("not-yet.md", score=0.99), _result("here.md", score=0.8)])
 
@@ -298,7 +299,7 @@ async def test_search_asks_for_the_cap_plus_the_notes_already_injected(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Already-injected notes still rank, so the request leaves room for them."""
-    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_max", 5)
+    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 5)
     asked = _set_search(monkeypatch, [])
 
     await _recall()
@@ -413,14 +414,14 @@ async def test_programming_error_in_search_still_propagates(
 
 
 async def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.config.settings.agent.passive_memory_recall_enabled", False)
+    monkeypatch.setattr(config.settings.agent, "passive_memory_recall_enabled", False)
 
     assert await _recall() is None
 
 
 async def test_returns_none_when_eval_isolated(monkeypatch: pytest.MonkeyPatch) -> None:
     """Eval isolation must stop the direct index call that passive recall bypasses."""
-    monkeypatch.setattr("base.config.settings.agent.eval_isolation", True)
+    monkeypatch.setattr(config.settings.agent, "eval_isolation", True)
     asked = _set_search(monkeypatch, [])
 
     assert await _recall() is None

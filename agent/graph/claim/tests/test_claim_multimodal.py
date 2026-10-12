@@ -22,6 +22,7 @@ from agent.db import ClaimedInbound
 from agent.graph.claim._chat_inbound import build_chat_inbound
 from base.agents.messages.envelope import EnvelopeReadInputs
 from base.clock import Clock
+from base.cluster import machine
 from base.config import settings
 
 _ENVELOPE_INPUTS = EnvelopeReadInputs(
@@ -68,7 +69,7 @@ def _stub_upload_fetch(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str,
         return _Resp()
 
     monkeypatch.setattr(http_dial, "get", _fake_get)
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw.test:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw.test:8000")
     return seen
 
 
@@ -160,7 +161,7 @@ def test_missing_image_degrades_to_text_note(monkeypatch: pytest.MonkeyPatch) ->
         return _Resp()
 
     monkeypatch.setattr(http_dial, "get", _fake_get)
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw.test:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw.test:8000")
     payload = {
         "content_blocks": [
             {"type": "text", "text": "see this"},

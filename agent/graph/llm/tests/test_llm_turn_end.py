@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.runnables import RunnableConfig
 
+from agent.graph.llm import node
 from agent.graph.llm._retry import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
 from agent.graph.llm_errors import LlmLedger
@@ -68,7 +69,7 @@ async def test_turn_end_ok_false_record_carries_exception(
     async def _boom(*_a, **_k):
         raise RuntimeError("simulated LLM timeout 39s")
 
-    monkeypatch.setattr("agent.graph.llm.node._llm_node_impl", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "_llm_node_impl", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(RuntimeError, match="simulated LLM timeout"):
         await llm_attempt(
@@ -106,7 +107,7 @@ async def test_turn_end_ok_true_record_no_exception(
     async def _ok(*_a, **_k):
         return sentinel
 
-    monkeypatch.setattr("agent.graph.llm.node._llm_node_impl", _ok)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "_llm_node_impl", _ok)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await llm_node(
         state=MagicMock(),

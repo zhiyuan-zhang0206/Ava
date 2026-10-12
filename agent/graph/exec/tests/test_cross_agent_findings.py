@@ -24,6 +24,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+import agent.graph.exec.node as agent_graph_exec_node
 from agent.graph import claim_node, exec_node
 from agent.graph.exec._result import _ExecDone
 from agent.messages import NoteTag
@@ -62,7 +63,7 @@ def _scan_on_with_exec_child_stubbed(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> tuple[_ExecDone, dict[str, Any], int, None, None]:
         return _ExecDone(output="ok"), {}, 5, None, None
 
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", _child_that_prints_ok)
+    monkeypatch.setattr(agent_graph_exec_node, "_run_agent_code", _child_that_prints_ok)
 
 
 class _Turn:

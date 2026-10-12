@@ -19,6 +19,7 @@ from agent.extensions import catalog as catalog_mod
 from agent.extensions import load_extensions
 from agent.extensions.registry import declarations
 from base import paths
+from base.lm import plugin_providers
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
@@ -28,7 +29,7 @@ from base.packages.plugins.manifest import ManifestError
 
 @pytest.fixture(autouse=True)
 def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog):
-    monkeypatch.setattr("base.lm.plugin_providers.build_model_catalog", lambda: model_catalog)
+    monkeypatch.setattr(plugin_providers, "build_model_catalog", lambda: model_catalog)
     repo = tmp_path / "repo_plugins"
     user = tmp_path / "user_plugins"
     repo.mkdir()
