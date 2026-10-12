@@ -64,7 +64,7 @@ def main() -> int:
 
 def _run() -> int:
     service = PtyService()
-    service.swept = ledger.sweep(ledger_path())
+    ledger.sweep(ledger_path())
     path = service_socket_path()
     if path.parent == fallback_dir() and not _own_fallback_dir(path.parent):
         return 1

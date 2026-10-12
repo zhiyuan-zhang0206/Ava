@@ -1,18 +1,15 @@
-"""Settings-free browser dependency detection, repair, and operator guidance."""
+"""Settings-free browser dependency operator guidance."""
 
 from __future__ import annotations
 
 import ast
 import inspect
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from base.host.converge import browser_deps
 from base.host.system import probes
-
-_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 @pytest.mark.parametrize(
@@ -41,92 +38,6 @@ def test_node_install_command_explains_the_macos_keg_only_fallback(
     assert browser_deps.node_install_command() == (
         "brew install node  (or: brew install node@22 && brew link --force node@22)"
     )
-
-
-def test_install_nodejs_short_circuits_when_npx_is_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An already-capable host never reruns the provisioner."""
-    monkeypatch.setattr(browser_deps.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        browser_deps.subprocess,
-        "run",
-        lambda *_args, **_kwargs: pytest.fail("provisioner ran despite npx on PATH"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert browser_deps.install_nodejs() is True
-
-
-@pytest.mark.parametrize("platform", ["darwin", "linux"])
-def test_install_nodejs_runs_the_shared_provisioner_and_rechecks_npx(
-    monkeypatch: pytest.MonkeyPatch, platform: str
-) -> None:
-    """POSIX repair runs `scripts/provision/node.sh`, then reports the real PATH state."""
-    npx_available = False
-    calls: list[tuple[list[str], dict[str, object]]] = []
-    monkeypatch.setattr(browser_deps, "sys", SimpleNamespace(platform=platform))
-    monkeypatch.setattr(
-        browser_deps.shutil,
-        "which",
-        lambda _name: "/usr/bin/npx" if npx_available else None,  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    def run(argv: list[str], **kwargs: object) -> None:
-        nonlocal npx_available
-        calls.append((argv, kwargs))
-        npx_available = True
-
-    monkeypatch.setattr(browser_deps.subprocess, "run", run)
-    assert browser_deps.install_nodejs() is True
-    assert calls == [
-        (
-            ["bash", str(_REPO_ROOT / "scripts" / "provision" / "node.sh")],
-            {"capture_output": True, "text": True, "timeout": 900, "check": False},
-        )
-    ]
-
-
-def test_ensure_browser_deps_returns_none_when_host_is_already_capable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No repair is attempted when the settings-free probe is already clear."""
-    monkeypatch.setattr(browser_deps, "browser_deps_incapability", lambda: None)
-    monkeypatch.setattr(
-        browser_deps,
-        "install_nodejs",
-        lambda: pytest.fail("repair attempted on a capable host"),
-    )
-    assert browser_deps.ensure_browser_deps() is None
-
-
-def test_ensure_browser_deps_rechecks_after_repair(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A successful repair is confirmed by the same capability probe, not assumed."""
-    reasons = iter([probes.NPX_INCAPABILITY_REASON, None])
-    monkeypatch.setattr(browser_deps, "browser_deps_incapability", lambda: next(reasons))
-    monkeypatch.setattr(browser_deps, "install_nodejs", lambda: True)
-    assert browser_deps.ensure_browser_deps() is None
-
-
-def test_ensure_browser_deps_returns_npx_reason_when_repair_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A failed best-effort repair keeps the actionable missing-npx reason."""
-    monkeypatch.setattr(
-        browser_deps, "browser_deps_incapability", lambda: probes.NPX_INCAPABILITY_REASON
-    )
-    monkeypatch.setattr(browser_deps, "install_nodejs", lambda: False)
-    assert browser_deps.ensure_browser_deps() == probes.NPX_INCAPABILITY_REASON
-
-
-def test_ensure_browser_deps_does_not_install_node_for_missing_display(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Display and Chrome are host properties, so only a missing npx triggers repair."""
-    reason = "no display (headless server)"
-    monkeypatch.setattr(browser_deps, "browser_deps_incapability", lambda: reason)
-    monkeypatch.setattr(
-        browser_deps,
-        "install_nodejs",
-        lambda: pytest.fail("Node repair attempted for a non-Node dependency"),
-    )
-    assert browser_deps.ensure_browser_deps() == reason
 
 
 def test_browser_deps_warning_names_the_npx_reason_and_platform_fix(

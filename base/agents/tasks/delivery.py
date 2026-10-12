@@ -2,7 +2,6 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import LiteralString
 
 import psycopg
 
@@ -10,15 +9,6 @@ from base import telemetry
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.owner_notifications import TaskOwnerNotification
-
-# Watchdog eligibility; the resurrection transaction locks the same task. Alias m is
-# the inbound row; integer ids compare as text to reject malformed JSON safely.
-TASK_ASSIGNMENT_CURRENT: LiteralString = (
-    "(m.kind='system_note' AND m.payload->'task_notification'='true'::jsonb "
-    "AND m.payload->'delivery_resurrect'='true'::jsonb "
-    "AND EXISTS(SELECT 1 FROM agent_tasks task "
-    "WHERE task.id::text=m.payload->>'task_id' AND task.owner=m.agent_id))"
-)
 
 
 @dataclass(frozen=True)

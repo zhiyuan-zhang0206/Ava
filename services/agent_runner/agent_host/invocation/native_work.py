@@ -167,7 +167,7 @@ async def settle_native_invocation(
     if command is None:
         return False
     marker, outcome = command
-    if outcome in (NativeCancelOutcome.APPLIED, NativeCancelOutcome.RECOVERED_STOPPED):
+    if outcome is NativeCancelOutcome.APPLIED:
         return True
     if not hosted_resources_settled(resources):
         raise NativeWorkUncertainError("native continuation has unresolved owned resources")
@@ -193,7 +193,6 @@ async def settle_native_invocation(
             conn,
             incarnation,
             marker,
-            outcome=NativeCancelOutcome.APPLIED,
             checkpoint_id=checkpoint_id,
         )
     return True

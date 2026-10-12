@@ -8,16 +8,12 @@ pre-commit hook.
 
 ## Why
 
-`ops/controllers/resurrect.py` documents an invariant: `termination_source` is
-stamped by EVERY code path that writes `status='terminated'`. It is load-bearing,
-not decorative. `CrashResurrectController`'s claim UPDATE filters
-`AND termination_source = ANY(_RESURRECTABLE_SOURCES)`, so a corpse whose source is
-NULL is **permanently** unresurrectable: a write site that forgets to stamp leaves a
-row that nothing will ever bring back, silently stranding whatever inbound work that
-agent still had queued. The failure is invisible — no error, no log, just an agent
-that never comes back — which is exactly the kind of hole a doc comment does not
-hold. A prior pre-claim termination path violated it undetected from the day the
-column landed.
+`termination_source` is stamped by EVERY code path that writes
+`status='terminated'`, so a corpse always records how it died and "nobody stamped
+this" stays distinguishable from a legacy NULL row. A write site that forgets to
+stamp leaves a row whose cause of death is unknowable — no error, no log — which
+is exactly the kind of hole a doc comment does not hold. A prior pre-claim
+termination path violated it undetected from the day the column landed.
 
 So the invariant is a property of the CODE PATHS, not of the stored data, and this
 is a code-level check. A DB `CHECK (status <> 'terminated' OR termination_source IS
@@ -51,10 +47,9 @@ Scope: non-test code only. Tests park rows in arbitrary states on purpose (that 
 how the resurrect suite builds a NULL-source corpse to assert it is NOT claimed), so
 linting them would forbid the fixtures that prove this behavior.
 
-No inline exemption mechanism, and no allowlist: a terminated-write that genuinely
-must not be resurrectable stamps a non-resurrectable source (`'user'`, `'exit'`,
-`'integrity'`) rather than leaving NULL. "Not eligible" and "nobody stamped this" must
-stay distinguishable — collapsing them back into NULL is the bug this lint prevents.
+No inline exemption mechanism, and no allowlist: every terminated-write stamps a
+source rather than leaving NULL. "Legacy row" and "nobody stamped this" must stay
+distinguishable — collapsing them back into NULL is the bug this lint prevents.
 
 Error format `file:line: <reason>` + non-zero exit.
 """
@@ -183,10 +178,8 @@ def _check_statement(
         if not _SET_SOURCE.search(set_clause):
             return (
                 "UPDATE agents_meta sets status='terminated' without stamping "
-                "termination_source in the same statement — the corpse would be "
-                "permanently unresurrectable (CrashResurrectController's claim filters "
-                "on termination_source, so NULL is never picked up and any queued "
-                "inbound work is silently stranded). Add `termination_source = "
+                "termination_source in the same statement — the corpse would record "
+                "no cause of death (NULL means a pre-column legacy row). Add `termination_source = "
                 "'<source>'` to this SET clause; pick the value from "
                 "base.agents.TerminationSource"
             )
@@ -226,9 +219,8 @@ def _source_violation(
     if value_match.group("null") is not None:
         return (
             "UPDATE agents_meta sets status='terminated' with "
-            "termination_source = NULL — NULL means 'pre-column legacy row' and is "
-            "never resurrectable. A death that must not be auto-resurrected stamps "
-            "'user' / 'exit' / 'integrity' instead, so 'not eligible' stays "
+            "termination_source = NULL — NULL means 'pre-column legacy row'. "
+            "Stamp the canonical source instead, so a legacy row stays "
             "distinguishable from 'nobody stamped this'"
         )
     literal = value_match.group("lit")
