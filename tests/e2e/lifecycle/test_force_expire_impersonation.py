@@ -12,9 +12,10 @@ import pytest
 from base.agents.impersonation._store import token_hash
 from base.agents.impersonation.delivery import reserve_delivery
 from base.agents.impersonation.relay import relay_get, relay_inbox
+from base.agents.inbox.wake import publish_inbound_wake
 from base.cluster.machine import validate_machine_name
 from base.config import settings
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.announce import (
     publish_agent_updated_sync,

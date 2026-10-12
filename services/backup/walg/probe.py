@@ -42,7 +42,7 @@ from typing import Any
 
 import psycopg
 
-from base.db import pg_admin
+from base.cluster.dataplane import pg_admin
 from base.log import logger
 from services.backup.walg import config as walg_config
 from services.backup.walg import state as walg_state

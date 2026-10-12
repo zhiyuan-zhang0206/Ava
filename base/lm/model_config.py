@@ -5,7 +5,7 @@ from collections.abc import Mapping
 import psycopg
 
 from base.agents import AgentNotFound, InvalidModelConfig
-from base.agents.birth_config import resolve_birth_config
+from base.agents.model.birth_config import resolve_birth_config
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.lm import factory

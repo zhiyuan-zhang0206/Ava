@@ -29,10 +29,10 @@ from base.agents.history.delta_read_compat import (
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.inbox.rows import InboundRow
 from base.agents.messages.identity import normalize_stored_message_ids
 from base.clock import Clock
 from base.config import settings
-from base.db import InboundRow
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps

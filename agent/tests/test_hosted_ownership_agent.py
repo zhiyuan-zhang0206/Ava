@@ -18,8 +18,9 @@ from agent.ownership.hosted import (
     settle_hosted_runtime,
 )
 from base.agents.impersonation import ImpersonationError
+from base.agents.inbox.insert import insert_inbound_message
 from base.agents.incarnation.resources import IncarnationResources, ResourceProcess
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 

@@ -24,8 +24,9 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from base.cluster.dataplane import pg_admin
 from base.config import settings
-from base.db import Database, pg_admin
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 from base.native_process.code_version import CodeVersion

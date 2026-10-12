@@ -2,7 +2,7 @@
 
 The one value in `cluster_defaults`: which model a NEW agent is born on. It is a
 spawn-time input, not a config layer — nothing reads it into `settings`, and no
-running process consults it for its own behavior (see `base/agents/birth_config.py`).
+running process consults it for its own behavior (see `base/agents/model/birth_config.py`).
 An agent already alive carries its own frozen choice on its row, so editing this
 never moves anyone who already exists.
 
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from base.agents.birth_config import resolve_default_model, set_cluster_default_model
+from base.agents.model.birth_config import resolve_default_model, set_cluster_default_model
 from gateway.schemas.models import DefaultModelView, DefaultModelWrite
 
 router = APIRouter()

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, field_domain, settings
 from base.db import Database
@@ -63,10 +64,10 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(
 
     class Store:
         def __init__(
-            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+            self, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
         ) -> None:
             gates.append(gate)
-            readers.append(local_host)
+            readers.append(direct_url.local_host)
 
     def capture() -> LoadedCommit:
         stages.append("capture")

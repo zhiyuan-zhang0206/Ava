@@ -14,7 +14,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
 from base.agents.history.context_breakdown import RequestBreakdown, SectionNode
-from base.agents.model_overrides import read_agent_overrides
+from base.agents.model.model_overrides import read_agent_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
 from base.lm.registry import resolve_available_model

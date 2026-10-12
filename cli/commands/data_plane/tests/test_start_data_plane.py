@@ -212,7 +212,7 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
 ) -> None:
     """The pgvector table is start-time DDL through the owner authority at the
     provider's dimension; any other backend dials nothing."""
-    from base.db import pg_admin
+    from base.cluster.dataplane import pg_admin
     from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.derived.memory_indexer.backends import pgvector
     from services.derived.memory_indexer.embeddings import factory
@@ -249,7 +249,7 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
 ) -> None:
     """A remote-managed plane has no local owner authority; its provider URL
     carries the table DDL, exactly as it carries the plane's migrations."""
-    from base.db import pg_admin
+    from base.cluster.dataplane import pg_admin
     from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.derived.memory_indexer.backends import pgvector
     from services.derived.memory_indexer.embeddings import factory

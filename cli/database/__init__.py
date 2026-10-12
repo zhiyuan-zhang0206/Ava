@@ -36,20 +36,24 @@ class OperatorDatabaseFactory:
         return self._gate
 
     def __call__(self) -> Any:
+        from base.cluster.dataplane.direct_url import ClusterDirectUrl
         from base.db import Database
 
-        return Database.from_settings(gate=self._admission_gate(), local_host=self._local_host)
+        return Database.from_settings(
+            gate=self._admission_gate(), direct_url=ClusterDirectUrl(self._local_host)
+        )
 
     def for_url(self, url: str) -> Any:
         from dataclasses import replace
 
+        from base.cluster.dataplane.direct_url import ClusterDirectUrl
         from base.db import Database
         from base.db.config import db_config_from_settings
 
         return Database(
             replace(db_config_from_settings(), db_url=url),
             gate=self._admission_gate(),
-            local_host=self._local_host,
+            direct_url=ClusterDirectUrl(self._local_host),
         )
 
 

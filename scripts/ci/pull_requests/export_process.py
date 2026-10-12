@@ -3,6 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.db import Database
@@ -25,7 +26,7 @@ def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generat
     gate = ProcessDbGate(process=process, version=version.get)
 
     def database() -> Database:
-        return Database.from_settings(gate=gate, local_host=machine.host)
+        return Database.from_settings(gate=gate, direct_url=ClusterDirectUrl(machine.host))
 
     config = ConfigBoot()
     machine = machine_from_boot(config)

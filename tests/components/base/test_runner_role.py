@@ -31,9 +31,9 @@ from base.cluster import (
     provision_database,
 )
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+from base.cluster.dataplane.pg_admin import owner_conninfo
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.db.code_version_gate import ProcessDbGate
-from base.db.pg_admin import owner_conninfo
 from base.host.net.url_secret import url_with_userinfo
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 

@@ -6,6 +6,7 @@ from functools import partial
 from psycopg_pool import ConnectionPool
 
 from base.agents import InvalidModelConfig
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAccepted,
     NativeRestartOperation,
@@ -19,7 +20,7 @@ from base.agents.messages.native_restart import (
     native_restart_progress,
 )
 from base.config import settings
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model

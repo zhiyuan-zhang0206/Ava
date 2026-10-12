@@ -36,7 +36,7 @@ def _sites(source: str, rel: str = f"{_PACKAGE}/core.py") -> dict[str, int]:
         ("from base.db.connections import async_pool", "async_pool(X)", "async_pool"),
         ("import base.db", "base.db.pool()", "pool"),
         ("import base.db as dbm", "dbm.connect(direct=True)", "connect"),
-        ("from base import db", "db.direct_db_url()", "direct_db_url"),
+        ("from base import db", "db.async_pool(X)", "async_pool"),
         ("from base.db import Database", "Database.from_settings()", "Database.from_settings"),
     ],
 )

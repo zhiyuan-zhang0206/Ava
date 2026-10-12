@@ -645,13 +645,16 @@ def test_direct_exemption_dials_postgres_as_the_delivered_login(
     """With pooling on, the admin-plane `direct=True` dial swaps only the port to
     the real Postgres (this home's own record) and keeps the delivered login."""
     import base.db
+    from base.cluster.dataplane.direct_url import ClusterDirectUrl, direct_db_url
 
-    direct = base.db.direct_db_url(local_host=command_runtime.machine.host)
+    direct = direct_db_url(local_host=command_runtime.machine.host)
     assert direct == url_with_userinfo(
         born.endpoint().replace(str(born.pooler_port), str(born.pg_port)), *born.login("gateway")
     )
     with base.db.connect(
-        direct=True, gate=database_gate, local_host=command_runtime.machine.host
+        direct=True,
+        gate=database_gate,
+        direct_url=ClusterDirectUrl(command_runtime.machine.host),
     ) as conn:
         assert conn.execute("SELECT inet_server_port(), session_user").fetchone() == (
             born.pg_port,

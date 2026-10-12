@@ -52,9 +52,9 @@ import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from base.clock import Clock
+from base.cluster.dataplane.pg_admin import local_owner_authority
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import Database, connect_url
-from base.db.pg_admin import local_owner_authority
 from base.host.private_storage import ensure_private_dir, ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths import ava_home
@@ -166,7 +166,7 @@ def dump_source(db: Database, *, is_remote_reader: Callable[[], bool]) -> str:
     """The dial `pg_dump` reads this cluster's whole database through.
 
     A locally owned plane dumps as the administrator acting as the schema owner
-    over the home's owner-only socket (`base.db.pg_admin`): password-free,
+    over the home's owner-only socket (`base.cluster.dataplane.pg_admin`): password-free,
     custody-checked against this home's postmaster, and independent of the
     write generation, so a dump never needs, and never dies with, a delivered
     login. A remote-managed plane's provider URL

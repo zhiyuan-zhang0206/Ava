@@ -9,10 +9,10 @@ from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentStatus, LivenessState
+from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
 from base.config import settings
-from base.db import NOTICE_FYI_TTL_DAYS
 from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 

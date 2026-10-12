@@ -202,8 +202,9 @@ def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
 ) -> None:
     agent = spawned_agent
     _start_long_exec(agent)
+    from base.agents.inbox.wake import publish_inbound_wake
     from base.agents.messages.native_cancel import accept_native_cancel, observe_native_work
-    from base.db import Database, pool, publish_inbound_wake
+    from base.db import Database, pool
     from base.events.live.bus import EventBus
 
     # This stack disables HTTP auth; drive the canonical native admission owner

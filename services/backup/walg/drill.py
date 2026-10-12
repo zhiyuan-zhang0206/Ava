@@ -42,8 +42,9 @@ from urllib.parse import urlsplit
 
 import psycopg
 
+from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_throwaway_base import select_throwaway_base
-from base.db import Database, connect_url, pg_admin
+from base.db import Database, connect_url
 from base.log import logger
 from services.backup.walg.backups import Backup
 from services.backup.walg.config import WalgConfigError

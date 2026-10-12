@@ -56,6 +56,7 @@ from base import paths
 from base.agents import AvaAgentError, ResurrectRefused
 from base.agents.context.clients import ClientSet
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.transport_encryption import verify_transport_encryption
@@ -675,7 +676,9 @@ def main(*, argv: list[str] | None = None) -> None:
     gate = ProcessDbGate(version=version.get, process="ops", exempt=False)
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     clients = ClientSet(
         database=database,

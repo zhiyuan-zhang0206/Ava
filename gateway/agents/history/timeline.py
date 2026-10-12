@@ -36,7 +36,8 @@ from base.agents.history.timeline import (
     timeline_default_limit,
 )
 from base.agents.impersonation.timeline import hydrate
-from base.db import ChatAnchor, Database, agent_exists, list_chat_anchors
+from base.agents.inbox.rows import ChatAnchor, list_chat_anchors
+from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.read_inputs import TimelineReadPolicy
 

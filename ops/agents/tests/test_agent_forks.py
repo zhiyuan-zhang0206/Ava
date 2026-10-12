@@ -553,7 +553,7 @@ class TestSpawnFork:
                 )
                 seen.append(cur.fetchall())  # pyright: ignore[reportUnknownMemberType]
 
-        monkeypatch.setattr(base.db, "publish_inbound_wake", _spy_wake)
+        monkeypatch.setattr("base.agents.inbox.insert.publish_inbound_wake", _spy_wake)
         _spawn_agent(
             fork_from=source,
             fork_checkpoint="ck",

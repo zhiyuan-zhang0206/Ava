@@ -22,6 +22,7 @@ import argparse
 import builtins
 import sys
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -101,7 +102,7 @@ def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentity) -> Databa
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
-    return Database(db_config_from_boot(boot), gate=gate, local_host=machine.host)
+    return Database(db_config_from_boot(boot), gate=gate, direct_url=ClusterDirectUrl(machine.host))
 
 
 def _arguments() -> argparse.Namespace:

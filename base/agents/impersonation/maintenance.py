@@ -8,7 +8,8 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.impersonation._store import expire, lock_lease
 from base.agents.impersonation.status import ImpersonationStatus, parse_lease
-from base.db import Database, publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import (
     publish_agent_updated_sync,

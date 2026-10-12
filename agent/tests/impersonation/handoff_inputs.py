@@ -35,13 +35,14 @@ from base.agents.history.checkpoint_postgres_walks import (
 )
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.impersonation.notes import HandoffNotes
+from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.caller_identity import CallerIdentity
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices

@@ -15,6 +15,7 @@ from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -59,7 +60,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            local_host=machine.host,
+            direct_url=ClusterDirectUrl(machine.host),
         )
 
     def clock_factory() -> Clock:

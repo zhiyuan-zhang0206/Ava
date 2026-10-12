@@ -94,7 +94,7 @@ def get_models(request: Request) -> ModelsResponse:
     the versioned pricing catalog. The default uses the same DB/config
     resolution as the birth stamp and spawn preflight.
     """
-    from base.agents.birth_config import resolve_default_model
+    from base.agents.model.birth_config import resolve_default_model
     from base.lm.pricing import rates_at
     from base.lm.registry import explain_setting
     from gateway.schemas.models import ModelInfo, ModelPricing

@@ -162,7 +162,7 @@ def test_end_of_input_changes_nothing(home: Path, monkeypatch: pytest.MonkeyPatc
 def test_the_prompt_says_what_happens_and_what_is_deleted(
     home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from base.db.pg_admin import pg_socket_path
+    from base.cluster.dataplane.pg_admin import pg_socket_path
 
     _at_a_terminal(monkeypatch, str(home))
     assert lifecycle.cmd_cluster_destroy(drop_db=True) == 0

@@ -11,10 +11,11 @@ from langchain_core.messages import HumanMessage
 
 from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.kwargs import ExecStatus
 from base.clock import Clock
 from base.config import settings
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.agents.history.tests.test_timeline import (

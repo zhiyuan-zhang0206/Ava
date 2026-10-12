@@ -578,15 +578,19 @@ def database_gate(database_version: CodeVersion):
 @pytest.fixture
 def database(db_url: str, database_gate):
     """The native test handle, sharing its test's explicit admission owner."""
+    from base.cluster.dataplane.direct_url import ClusterDirectUrl
     from base.db import Database
 
-    return Database.from_settings(gate=database_gate)
+    # The test cluster is loopback, so the direct (admin-plane) dials tests make need no host reader.
+    return Database.from_settings(
+        gate=database_gate, direct_url=ClusterDirectUrl(lambda: "127.0.0.1")
+    )
 
 
 @pytest.fixture
 def publish_wake(database, event_bus) -> Callable[[int, str], bool]:
     """`publish_inbound_wake` bound to the session's handles, the wake callable a delivery takes."""
-    from base.db import publish_inbound_wake
+    from base.agents.inbox.wake import publish_inbound_wake
 
     return functools.partial(publish_inbound_wake, database, event_bus)
 
@@ -594,7 +598,7 @@ def publish_wake(database, event_bus) -> Callable[[int, str], bool]:
 @pytest.fixture
 def insert_inbound(database, event_bus) -> Callable[..., int]:
     """`insert_inbound_message` bound to the session's handles."""
-    from base.db import insert_inbound_message
+    from base.agents.inbox.insert import insert_inbound_message
 
     return functools.partial(insert_inbound_message, database=database, bus=event_bus)
 

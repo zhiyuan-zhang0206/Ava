@@ -467,7 +467,8 @@ class TestResurrectIfTerminatedNotificationGuard:
         is a fail-closed carve-out: only the exact JSON boolean `true` lets a
         system-family chat through — a missing key, null, or any other value
         (even the string "true") stays a notice (task #3687 review, Ava #3242)."""
-        from base.db import create_agent, insert_inbound_message
+        from base.agents.inbox.insert import insert_inbound_message
+        from base.db import create_agent
 
         aid = create_agent(db_conn)
         db_conn.commit()
@@ -562,7 +563,8 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
 ) -> None:
     """A successful spawn is a durable recovery, not only an in-memory result."""
     from base.agents import AgentStatus
-    from base.db import create_agent, insert_inbound_message
+    from base.agents.inbox.insert import insert_inbound_message
+    from base.db import create_agent
 
     agent_id = create_agent(db_conn)
     db_conn.execute(

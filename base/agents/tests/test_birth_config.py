@@ -1,4 +1,4 @@
-"""`base/agents/birth_config.py` — what a frozen field resolves to at the spawn boundary.
+"""`base/agents/model/birth_config.py` — what a frozen field resolves to at the spawn boundary.
 
 The resolution chain proper (`config_overlay > birth_config > current config`) is
 enforced in two halves that meet nowhere else: this module decides WHAT gets
@@ -16,7 +16,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
-from base.agents.birth_config import (
+from base.agents.model.birth_config import (
     cluster_default_model,
     resolve_birth_config,
     resolve_default_model,

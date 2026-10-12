@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -47,11 +48,11 @@ def test_entry_keeps_the_config_owner_and_captured_image(
 
     class Store:
         def __init__(
-            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+            self, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
         ) -> None:
             slices.append(config)
             gates.append(gate)
-            readers.append(local_host)
+            readers.append(direct_url.local_host)
 
     def capture() -> LoadedCommit:
         stages.append("capture")

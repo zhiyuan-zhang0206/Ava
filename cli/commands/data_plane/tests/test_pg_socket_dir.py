@@ -6,8 +6,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+from base.cluster.dataplane import pg_admin
 from base.cluster.machine import MachineIdentity
-from base.db import pg_admin
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine

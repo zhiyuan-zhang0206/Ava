@@ -32,6 +32,7 @@ import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import tuple_row
 
+from base.cluster.derive import home_slug
 from base.host.private_storage import ensure_private_dir
 
 # The owner travels as a libpq startup option (`-c role=<owner>`), where spaces
@@ -60,11 +61,6 @@ def pg_socket_dir(socket_root: Path | None = None, *, home: Path | None = None) 
 def pg_socket_path(home: Path, socket_root: Path | None = None) -> Path:
     """`pg_socket_dir`'s path for `home`, computed without touching the filesystem
     (for renderers that only name the socket, such as the collector config)."""
-    # Lazy: `base.cluster` imports this module (provisioning dials through
-    # it), so a module-level import would make `base.db.pg_admin` unimportable
-    # before `base.cluster`.
-    from base.cluster.derive import home_slug
-
     root = Path("/tmp") if socket_root is None else socket_root  # noqa: S108 — OS-fixed production socket root
     return root / f"ava-pg-{home_slug(home)}"
 

@@ -17,7 +17,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.agents.birth_config import set_cluster_default_model
+from base.agents.model.birth_config import set_cluster_default_model
 from base.cluster.machine import MachineIdentity
 from base.config import frozen_field_names
 from base.config.service_read import ConfigAuthority
