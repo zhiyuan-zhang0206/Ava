@@ -7,9 +7,9 @@
 - `wrap_saver_writes_with_nstep_interval` — throttle checkpoint writes to
   every Nth super-step while keeping aput_writes in lockstep and exposing a
   final-state flush
-- `reconcile_claimed_inbounds_at_startup` — the inbound reconcile: finalize
-  any 'claimed' inbound rows the agent's last settled runtime step left
-  behind (cold admission, database recovery, or a hosted abort settlement)
+- `consume_claimed_inbounds` — consume any 'claimed' chat inbound rows the
+  agent's last runtime step left behind (cold admission, database recovery,
+  or a hosted turn's end or abort); never redelivered
 - `notify_desktop_permissions_at_startup` — surface broken Screen Recording
   or Accessibility permission (detected at converge) to the user, exactly once
 - `reconcile_open_pages` — probe every open page's server and restore it
@@ -57,7 +57,6 @@ from agent.startup._page_reconcile import (
 from agent.startup._page_reconcile import (
     _recent_page_recovery_notice as _recent_page_recovery_notice,
 )
-from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -387,55 +386,30 @@ def wrap_saver_writes_with_nstep_interval(
     checkpointer._ava_nstep_flush = _flush_final  # type: ignore[attr-defined]
 
 
-async def reconcile_claimed_inbounds_at_startup(
+async def consume_claimed_inbounds(
     ops_pool: AsyncConnectionPool,
-    checkpointer: AsyncPostgresSaver,
     agent_id: int,
     *,
     incarnation: RuntimeIncarnation | None,
-    inputs: ReconcileReadInputs,
 ) -> None:
-    """Hand `reconcile_claimed_inbounds` the set of committed `ava_inbound_id`s
-    so it can finalize any `'claimed'` chat rows left behind by interrupted
-    work.
+    """Consume the `'claimed'` chat rows an interrupted turn left behind.
 
-    The name is historical: this is the inbound reconcile, not a startup-only
-    step. The host calls it under the admitted incarnation's single-flight on
-    cold runtime construction, on database recovery, and at a hosted turn's
-    settled abort — in the last case the flushed checkpoint the abort wrote is
-    exactly what the read (or its side-load) must observe. The inbound owner
-    lock fences concurrent control decisions; the caller must retain that
+    The host calls it under the admitted incarnation's single-flight on cold
+    runtime construction, on database recovery, and at a hosted turn's settled
+    end or abort. A claim is consumed whether or not its work reached the
+    checkpoint: its result is unknown, and it is never redelivered. The inbound
+    owner lock fences concurrent control decisions; the caller must retain that
     identity.
-
-    The committed-id source strategy (task #4788) lives in
-    `base/agents/history/inbound_sideload.py::committed_ids_for_reconcile`:
-    a guard read, then the claim-window side-load, with the full checkpoint
-    read as the fallback.
-
-    No prior checkpoint (brand-new agent) → no commits to confirm; reconcile
-    is still called with an empty set so any unlikely stray `'claimed'`
-    rows (e.g. from a previous run that we shouldn't have lost track of)
-    are consumed as unknown rather than redelivered.
     """
-    from agent.db import reconcile_claimed_inbounds
-    from base.agents.history.inbound_sideload import committed_ids_for_reconcile
+    from agent.db import finalize_claimed_inbounds
 
-    committed_inbound_ids = await committed_ids_for_reconcile(
-        ops_pool, checkpointer, agent_id, inputs=inputs
-    )
-
-    committed, reset, dead_lettered = await reconcile_claimed_inbounds(
-        ops_pool, agent_id, committed_inbound_ids, incarnation=incarnation
-    )
-    if committed or reset or dead_lettered:
+    consumed = await finalize_claimed_inbounds(ops_pool, agent_id, incarnation=incarnation)
+    if consumed:
         logger.info(
-            "inbound reconcile: {committed} committed → done, {reset} interrupted → consumed, "
-            "{dead_lettered} stale → dead-lettered",
+            "consumed {consumed} claimed inbound(s) with unknown results; no redelivery",
             event="inbound_reconcile",
             agent_id=agent_id,
-            committed=committed,
-            reset=reset,
-            dead_lettered=dead_lettered,
+            consumed=consumed,
         )
 
 
