@@ -38,6 +38,7 @@ class Code(StrEnum):
     MANIFEST_CYCLE = "manifest-cycle"
     MANIFEST_EXPORT_PRIVATE = "manifest-export-private"
     MANIFEST_STALE_EDGE = "manifest-stale-edge"
+    MANIFEST_ROLES = "manifest-roles"
 
 
 @dataclass(frozen=True, slots=True)

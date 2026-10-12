@@ -1,4 +1,4 @@
-"""Command line: check, explain, sync --prune and bootstrap."""
+"""Command line: check, explain, sync --prune, bootstrap and roles."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from meizel import roles as role_api
+from meizel.contracts import enumerations, generated
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
 from meizel.contracts.explain import explain
@@ -80,7 +82,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     seed = commands.add_parser("bootstrap", help="generate manifests from current facts")
     seed.add_argument("--out", type=Path, required=True, help="directory to mirror manifests into")
+    declared = commands.add_parser("roles", help="the declared top-level packages and their copies")
+    modes = declared.add_subparsers(dest="mode", required=True)
+    listing = modes.add_parser("list", help="print the top-level directories of the given roles")
+    listing.add_argument("role_names", nargs="+", metavar="role")
+    modes.add_parser("check", help="fail on a stale generated region or a copy of a role's list")
+    modes.add_parser("write", help="regenerate every generated region")
     return parser
+
+
+def run_roles(root: Path, args: argparse.Namespace) -> int:
+    if args.mode == "list":
+        for name in role_api.packages(*args.role_names, root=root):
+            print(name)
+        return 0
+    if args.mode == "write":
+        for path in generated.write(root):
+            print(f"meizel: regenerated {path}")
+        return 0
+    problems = [*generated.stale(root), *enumerations.violations(root)]
+    for problem in problems:
+        print(problem)
+    if problems:
+        print(f"meizel: {len(problems)} role problems", file=sys.stderr)
+        return 1
+    print("meizel: roles ok")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "explain":
             print(explain(analyze(root, jobs=args.jobs), relative_target(root, base, args.path)))
             return 0
+        if args.command == "roles":
+            return run_roles(root, args)
         if args.command == "sync":
             for line in prune(root, args.jobs):
                 print(line)

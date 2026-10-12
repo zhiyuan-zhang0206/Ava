@@ -98,7 +98,18 @@ build-backend = "hatchling.build"
 # Include the application kernel, not only its SDK and CLI. A non-editable
 # installation must resolve exec children and service modules without a checkout.
 # This packaging step does not activate wheel-based production deployments.
-packages = ["ava", "cli", "agent", "base", "ops", "gateway", "services", "ava_builtins"]
+packages = [
+    # meizel:roles BEGIN names application
+    "agent",
+    "ava",
+    "ava_builtins",
+    "base",
+    "cli",
+    "gateway",
+    "ops",
+    "services",
+    # meizel:roles END
+]
 # Tests live beside the code they prove (`<pkg>/**/tests/`); a runtime image ships none of them.
 exclude = ["**/tests/**"]
 
@@ -655,6 +666,7 @@ exclude = ["*.md"]
 # keeps them complete (a tests directory outside every glob is never collected,
 # and pytest does not warn about it).
 testpaths = [
+    # meizel:roles BEGIN testpaths tests application tooling templates
     "tests",
     "agent/**/tests",
     "ava/**/tests",
@@ -662,11 +674,12 @@ testpaths = [
     "base/**/tests",
     "cli/**/tests",
     "gateway/**/tests",
-    "meizel/**/tests",
     "ops/**/tests",
+    "services/**/tests",
+    "meizel/**/tests",
     "scripts/**/tests",
     "schedules/**/tests",
-    "services/**/tests",
+    # meizel:roles END
 ]
 # A test module is a `test_*.py` file inside a `tests/` directory. Location, not
 # just the file name, makes it a test: `base/db/test_db_guard.py` and
@@ -729,7 +742,19 @@ filterwarnings = [
 # standalone scripts the test suite mostly never imports (installed skill
 # copies), so measuring them would drag the ava_builtins floor toward dead
 # lines instead of executable ones.
-source = ["agent", "ava", "cli", "gateway", "base", "ui", "ops", "services", "ava_builtins"]
+source = [
+    # meizel:roles BEGIN names application frontend
+    "agent",
+    "ava",
+    "ava_builtins",
+    "base",
+    "cli",
+    "gateway",
+    "ops",
+    "services",
+    "ui",
+    # meizel:roles END
+]
 # Package `__init__.py` files are measured: a module that becomes a package
 # keeps its code in the package door (`x.py` -> `x/__init__.py`), and omitting
 # doors would drop that code from its domain's floor. An empty or re-export-only
@@ -786,17 +811,19 @@ pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
 include = [
-    "ava",
+    # meizel:roles BEGIN names application tooling tests
     "agent",
+    "ava",
+    "ava_builtins",
+    "base",
     "cli",
     "gateway",
     "ops",
-    "ava_builtins",
     "services",
-    "base",
     "meizel",
     "scripts",
     "tests",
+    # meizel:roles END
 ]
 exclude = [
     "**/__pycache__",

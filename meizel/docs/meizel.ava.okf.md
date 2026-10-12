@@ -16,6 +16,21 @@ application code: it depends on the standard library only and never imports an
 application package. `scripts/` may import `meizel`; `meizel` never imports
 `scripts`.
 
+## Top-level packages and their roles
+
+The root `meizel.toml` declares which top-level directories exist and what each is,
+once: `[roles]` maps `application`, `templates`, `examples`, `tooling`, `tests` and
+`frontend` to directories. Every top-level directory that holds Python (hidden
+directories aside) must be listed under exactly one role, and every listed name must
+exist; the manifest parser enforces both, and `[roles]` is accepted in the root manifest
+only. Python code reads the declaration through `meizel.roles` (`packages(*roles)`,
+`roles()`, `all_packages()`); the lists that other files must keep as text (the pytest
+`testpaths`, the pyright `include`, the wheel packages, the coverage source and the
+package alternations of the pre-commit `files` patterns) sit in marked regions that
+`python -m meizel roles write` regenerates and `roles check` verifies. `roles check`
+also fails on any other Python or TOML literal that lists every package of a role of
+three or more, so a new package is declared in one place or the check says where.
+
 ## Contents
 
 - `graph/`, `language/` and `contracts/` are the checker, documented in
