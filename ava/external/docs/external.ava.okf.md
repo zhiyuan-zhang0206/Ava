@@ -65,8 +65,10 @@ Plugins load through the existing extension loader after the identity is bound
 and before reading native state. The installed model catalog then binds to that
 context.
 Framework and plugin config
-views bind the agent's stored configuration, while `ava.external.state.load_snapshot`
-reads its checkpoint without writing it. Pending journal entries are replayed
+views bind the agent's stored configuration, while the agent layer's plugin-state codec
+(`agent/extensions/plugin_state_codec.py`, supplied through the SDK installation's
+`external_state`) reads its checkpoint without writing it; `Attachment.native_snapshot()`
+exposes that read. Pending journal entries are replayed
 through their registered reducers after the checkpoint's applied receipt.
 
 Plugin updates use the checkpoint serializer and its registered type allowlist,

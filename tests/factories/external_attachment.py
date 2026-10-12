@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
+from agent.extensions import plugin_state_codec
 from ava import external
 from ava.sdk_surface.installation import Installation
 from base.cluster.machine.boot import machine_from_boot
@@ -96,6 +97,7 @@ def attached_runtime(
         undo=(),
         catalog=model_catalog,
         authority=config_authority,
+        external_state=lambda: plugin_state_codec,
     )
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
 
@@ -107,7 +109,7 @@ def attached_runtime(
     def load(_agent_id: int, *, database: Database) -> tuple[ExampleState, dict[str, Any], None]:
         return snapshot.model_copy(deep=True), {"llm_model": "external-test"}, None
 
-    monkeypatch.setattr(external, "load_snapshot", load)
+    monkeypatch.setattr(plugin_state_codec, "load_snapshot", load)
 
     def require(
         _db: Database, lease_id: str, attesting: dict[str, Any], *, local_machine: str

@@ -6,8 +6,6 @@ from collections.abc import Sequence
 from langchain_core.messages import BaseMessage, SystemMessage
 
 from ava import external
-from ava.external import state as snapshots
-from ava.sdk_surface.settings import database
 from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 
 
@@ -31,13 +29,12 @@ def instruction_text(messages: Sequence[BaseMessage]) -> str:
 
 def read_instructions(session_id: int, agent_id: int) -> str:
     """Read native guidance under the existing attachment's authority checks."""
-    with external.attach(session_id, agent_id=agent_id):
+    with external.attach(session_id, agent_id=agent_id) as attachment:
         # ava.state also includes external journal replay. Read the native
         # snapshot separately so a controller's staged messages cannot replace
         # the inherited instructions. Attachment close revalidates the lease
         # before this function returns any text to the executor.
-        snapshot, _, _ = snapshots.load_snapshot(agent_id, database=database())
-        return instruction_text(snapshot.messages)
+        return instruction_text(attachment.native_snapshot().messages)
 
 
 def main() -> None:
