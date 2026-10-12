@@ -2,7 +2,7 @@
 
 Policy (user ruling 2026-08-11, pre-open-source): product schedules
 (self-evolution, memory) are built in AND start by default; cluster-operator
-schedules (e.g. trace-ship-tempo) are built in but start disabled. The manifest
+schedules are built in but start disabled (none ships today). The manifest
 lives at ``<repo>/schedules/manifest.json`` next to the schedule script
 templates — it is the single expression of that policy.
 

@@ -78,8 +78,9 @@ single-box unit POSTs straight to loopback
 `{AVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces` without auth; a pure runner POSTs
 to the gateway collector's configured private OTLP port with its telemetry token. The
 remote trace pipeline writes Tempo only and never the gateway mirror, avoiding
-a second copy and replay ambiguity. Needed only for gaps the queue could not
-hold (backend down longer than the queue, offline machines, past windows).
+a second copy and replay ambiguity. Needed only for gaps the in-memory queue
+could not hold (backend down longer than the queue, a collector restart, offline
+machines, past windows). It is run by an operator; no schedule ships it.
 Gated by `AVA_TELEMETRY_OTLP_ENABLED` (refuses while off — one kill switch
 for the whole OTLP surface).
 - **incremental** (no args): a per-file byte-offset watermark

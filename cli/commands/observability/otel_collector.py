@@ -11,7 +11,7 @@ config is regenerated on every converge so fan-out/retention setting changes
 propagate on the next `ava start`.
 
 The CONTRIB distribution is required, not core: the file exporter (JSONL
-mirror) and the file_storage extension (persistent sending queue) live in
+mirror) and the file_storage extension (filelog read offsets) live in
 contrib. The version is pinned to the collector release the LGTM stack
 (deploy/lgtm) was validated with, and each platform's release tarball is
 SHA256-pinned.
