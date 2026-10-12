@@ -46,6 +46,30 @@ def deepseek_wire_effort(effort: str, levels: tuple[str, ...], *, target: str) -
     return validate_effort(effort, levels, target=target)
 
 
+def _require_deepseek_key() -> str:
+    """The provider key from the process env, else this unit's `.env` file.
+
+    The gateway profile deliberately pops agent-runner capability keys from
+    ``os.environ`` at boot (Task #856) while the unit's `.env` file still
+    declares them. The gateway-side draft model (reply-suggestion, model
+    ``deepseek-flash``) builds inside that process and must still find its
+    key, so the build consumes the same fallback channel spawn validation
+    already reads (``base/lm/factory.py::_ensure_provider_key``, Task #1562):
+    ``os.environ`` first, then ``read_env_aliases()``. Consume-only — the
+    value is never written back into ``os.environ``.
+    """
+    try:
+        return require_key("DEEPSEEK_API_KEY")
+    except RuntimeError:
+        from base.config import field_alias
+        from base.host.env.runtime_config import read_env_aliases
+
+        key = read_env_aliases().get(field_alias("deepseek_api_key"))
+        if key:
+            return key
+        raise
+
+
 def build(ctx: BuildContext) -> BaseChatModel:
     """deepseek-* branch: ChatAnthropic on the anthropic-compatible
     endpoint, pinned max_tokens. Reasoning effort rides
@@ -59,7 +83,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # api_key comes from DEEPSEEK_API_KEY; if missing, RuntimeError fail-fast
     # immediately — don't silently use the wrong key and only find out from a
     # server 401.
-    api_key = require_key("DEEPSEEK_API_KEY")
+    api_key = _require_deepseek_key()
 
     extra_kwargs: dict[str, Any] = {}
     if ctx.thinking is not None:
