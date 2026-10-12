@@ -1,4 +1,4 @@
-"""`scripts/lint/clock_lattice.py` — the lattice-vocabulary placement invariant.
+"""`meizel/owners/clock_lattice.py` — the lattice-vocabulary placement invariant.
 
 A module-level constant whose name carries lattice vocabulary (STALL / GRACE /
 REAP / BUDGET / WEDGED / NO_PROGRESS / LAUNCH_CONFIRM / LEASE_TTL / LEASE_RENEW /
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.lint import clock_lattice as _lint
+from meizel.owners import clock_lattice as _lint
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning

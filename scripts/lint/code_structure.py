@@ -51,7 +51,7 @@ Test files (any `tests/` directory: the top-level one or a package's own, see
 
 ### Rule 5: single decision owners (locality)
 
-`scripts/structure/locality.py:DECISIONS` names design decisions that have exactly
+`meizel/owners/decisions.py:DECISIONS` names design decisions that have exactly
 one owning module; any other module making that decision is a bypass. Today:
 `postgres-dial` — a psycopg connect (module, class, or `from psycopg import
 connect`) or a construction of a psycopg_pool pool or of this repo's own
@@ -61,8 +61,8 @@ decision's `allowed` map with a one-line reason; an allowed module that stops
 bypassing, or no longer exists, fails as stale.
 
 Rules 4 and 5 have no baseline allowances. Every measured reach-in or decision-owner
-bypass fails directly. The owner resolution and decision contracts remain in
-scripts/structure/locality.py; see docs/conventions/python-conventions.md.
+bypass fails directly. Owner resolution stays in scripts/structure/locality.py and
+the decision contracts live in meizel/owners/decisions.py; see docs/conventions/python-conventions.md.
 
 ### Rule 6: no path imports under ava_builtins/ (package doors)
 
@@ -115,6 +115,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from meizel import lint_common  # noqa: E402 — standalone script
 from meizel.budgets import limits  # noqa: E402 — standalone script
 from meizel.language import path_imports, type_checking  # noqa: E402 — standalone script
+from meizel.owners import decisions  # noqa: E402 — standalone script
 from scripts.structure import (  # noqa: E402 — standalone script
     ambient_state,
     baseline_shards,
@@ -171,7 +172,7 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
             )
         )
 
-    out.extend(locality.allowlist_errors(tree, rel_path, _SCAN_DIRS))
+    out.extend(decisions.allowlist_errors(tree, rel_path, _SCAN_DIRS))
     return out
 
 
@@ -418,7 +419,7 @@ def _check_ast_and_quality(
     errors.extend(
         locality.site_errors(sites, baseline, scanned=scanned, repo_root=repo_root, renames=renames)
     )
-    errors.extend(locality.missing_allowlist_errors(repo_root))
+    errors.extend(decisions.missing_allowlist_errors(repo_root))
     errors.extend(ambient_state.missing_allowlist_errors(repo_root))
     quality_budget.render_warnings(measurements["complexity"], full=full)
     return errors

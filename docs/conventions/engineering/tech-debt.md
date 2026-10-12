@@ -86,7 +86,7 @@ Spread metrics and file pairs identify where to read. Confirm a locality
 finding in at least two commits, recording support/confidence, the commit SHAs
 and the particular decision both sides must agree on. Use fingerprint
 `locality:<file-a>:<file-b>`. After establishing one owner, register that decision
-in `scripts/structure/locality.py` so the existing gate protects it; only then
+in `meizel/owners/decisions.py` so the existing gate protects it; only then
 resolve the ledger item.
 
 ### Skill descriptions and SDK docstrings

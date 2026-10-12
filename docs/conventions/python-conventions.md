@@ -105,7 +105,7 @@ layering and single-owner checks remain enforced during this migration.
   skill, `ava_builtins/skills/` itself, or `ava_builtins/plugins/`), or any
   file-loader call regardless of its argument, is still a violation. The
   Every measured path-import site fails directly, with no baseline allowance.
-- **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
+- **Rule 5 — single decision owners.** `meizel/owners/decisions.py:DECISIONS`
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`base/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that

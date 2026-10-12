@@ -25,6 +25,11 @@ application package. `scripts/` may import `meizel`; `meizel` never imports
 - `budgets/` — the 800-line file ceiling and the 20-entry directory cap
   (`limits.py`) and what counts as a direct entry of a directory
   (`directory_budget.py`). `scripts/lint/code_structure.py` drives them.
+- `owners/` — one owner per external capability: `decisions.py` holds Rule 5
+  (`DECISIONS`: each design decision has exactly one owning module, every other
+  site is a bypass, and a listed exemption that goes stale fails) and
+  `clock_lattice.py` keeps lattice-vocabulary timing constants in the
+  clock-lattice family modules or as aliases of a registered clock.
 - `language/` — restrictions on how Python is written:
   `type_checking.py` (no `if TYPE_CHECKING:` import folding outside a listed
   file), `path_imports.py` (code under `ava_builtins/` reaches other code

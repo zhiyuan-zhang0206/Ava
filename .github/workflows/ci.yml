@@ -493,7 +493,7 @@ jobs:
           fi
           uv run python scripts/content_lint/lint_migrations.py "${args[@]}"
       - name: Lint clock lattice
-        run: uv run python scripts/lint/clock_lattice.py
+        run: uv run python -m meizel.owners.clock_lattice
       - name: Apply migrations to fresh DB + trigger smoke
         run: uv run python scripts/ci/migration_smoke.py
       - name: Run pyright
