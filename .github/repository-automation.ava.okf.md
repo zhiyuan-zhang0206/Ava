@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Repository Automation"
-description: "GitHub-hosted maintenance loops outside the primary CI/release gates: one-shot failed-job reruns, reviewed model-price proposals, nightly full-history secret scanning, and branch-protection drift auditing."
+description: "GitHub-hosted maintenance loops outside the primary CI/release gates: one-shot failed-job reruns, default-branch cache warming, reviewed model-price proposals, nightly full-history secret scanning, and branch-protection drift auditing."
 tags:
   - ci
   - ops
@@ -32,6 +32,17 @@ maintainer triage.
 
 The trigger whitelist is per-workflow: only `CI` is retried; every other workflow is
 left to manual triage.
+
+## `workflows/cache-warm.yml`
+
+CI runs on pull requests only, and a hosted cache written by a PR run is visible
+to that PR alone; only the default branch's caches are shared. This workflow runs
+on pushes to main that touch a cache-key input (`uv.lock`, `.python-version`,
+`.pre-commit-config.yaml`, `ui/web/package-lock.json`, the Postgres runtime pin,
+or `.github/actions/`) and on manual dispatch. It runs the same install steps as
+`ci.yml` with the same keys (uv, pre-commit environments, npm, Postgres/Redis
+packages, the vendored Postgres runtime, Playwright), so the next PRs restore
+warm caches instead of each building its own. It runs no tests.
 
 ## `workflows/update-model-pricing.yml`
 

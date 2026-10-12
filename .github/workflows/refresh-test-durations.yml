@@ -1,8 +1,8 @@
 name: Refresh test durations
 
-# Refresh after 20 main changes using a successful main CI's existing timings.
-# Nightly isolated measurements remain the fallback, with a two-hour backstop.
-# Only a complete published measurement resets either guard; successful no-ops
+# Refresh from daily isolated shard measurements, with a two-hour backstop run.
+# (Main runs no CI to borrow timings from: CI runs on pull requests only.)
+# Only a complete published measurement resets the guard; successful no-ops
 # do not. All shards and the publisher share one immutable source SHA. Results
 # go to one generated bot PR, submitted to Trunk after publication. Normal CI
 # and merge-queue readiness remain required before merging.
@@ -12,10 +12,6 @@ on:
     - cron: '30 19 * * *'  # UTC — GitHub Actions schedule cron is always UTC
     - cron: '30 21 * * *'  # UTC — two-hour backstop for a missed primary run
   workflow_dispatch:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
 
 permissions:
   actions: read
@@ -31,13 +27,7 @@ concurrency:
 
 jobs:
   check-refresh:
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      (github.event_name != 'workflow_run' ||
-       (github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_branch == 'main' &&
-        github.event.workflow_run.head_repository.full_name == github.repository))
+    if: github.ref == 'refs/heads/main'
     name: Plan duration refresh
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -78,7 +68,7 @@ jobs:
           fi
           AVA_HOME="$RUNNER_TEMP/duration-policy-home" AVA_CONFIG_FETCH=skip \
             uv run python scripts/ci/duration_refresh_policy.py plan \
-              --event "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" \
+              --event "$GITHUB_EVENT_NAME" \
               --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
               --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY" \
               "${PUBLISHED_ARGS[@]}"
@@ -216,9 +206,8 @@ jobs:
       pull-requests: write
     if: >-
       always() && !cancelled() && needs.check-refresh.result == 'success' &&
-      (needs.check-refresh.outputs.mode == 'reuse' ||
-       (needs.check-refresh.outputs.mode == 'measure' &&
-        needs.measure-backend.result == 'success' && needs.measure-e2e.result == 'success'))
+      needs.check-refresh.outputs.mode == 'measure' &&
+      needs.measure-backend.result == 'success' && needs.measure-e2e.result == 'success'
     needs: [check-refresh, measure-backend, measure-e2e]
     name: Refresh .test_durations
     runs-on: ubuntu-24.04
@@ -324,18 +313,16 @@ jobs:
           BRANCH: ava-bot/test-durations
           SOURCE_SHA: ${{ needs.check-refresh.outputs.source-sha }}
           SOURCE_RUN_ID: ${{ needs.check-refresh.outputs.source-run-id }}
-          MODE: ${{ needs.check-refresh.outputs.mode }}
         run: |
           BODY="$RUNNER_TEMP/durations-pr.md"
           cat > "$BODY" <<EOF
           Refresh pytest-split timings from all 16 backend and four e2e shards
-          at source commit $SOURCE_SHA, measured by Actions run $SOURCE_RUN_ID
-          ($MODE). Complete clean artifacts retain fast and zero timings.
+          at source commit $SOURCE_SHA, measured by Actions run $SOURCE_RUN_ID.
+          Complete clean artifacts retain fast and zero timings.
 
           The provenance file records the measured generation. Main uses these
-          weights only after this PR merges. Future refreshes reuse successful
-          main CI after 20 first-parent changes; nightly measurements are the
-          fallback. This generated-data PR is submitted to the Trunk merge
+          weights only after this PR merges. Future refreshes are daily
+          isolated measurements. This generated-data PR is submitted to the Trunk merge
           queue automatically. A maintainer must approve the bot-created PR's
           workflow before required CI can run. Required CI and queue checks
           still gate merging.
