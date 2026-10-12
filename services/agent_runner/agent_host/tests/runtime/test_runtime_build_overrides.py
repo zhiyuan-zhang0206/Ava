@@ -87,7 +87,7 @@ async def test_runtime_build_does_not_repair_a_dangling_history(
     async def _boot(*_args: object, **_kwargs: object) -> tuple[object, None]:
         return object(), None
 
-    monkeypatch.setattr(host_module, "reconcile_claimed_inbounds_at_startup", AsyncMock())
+    monkeypatch.setattr(host_module, "consume_claimed_inbounds", AsyncMock())
     monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
     host = AgentHost(
         policy=configured_policy(),
