@@ -28,10 +28,10 @@ The gate succeeds only when all four read-only observations agree:
 - `launchctl managername` answers `Aqua`, proving THIS process chain runs
   inside that GUI session — a daemon launched or respawned from an agent/SSH
   chain inherits launchd's `Background` domain, where the Keychain is
-  unreachable however ready and unlocked it is. That state is recorded as
-  `context_missing` and the Keychain probe is skipped there, since it could
-  only mislabel the symptom as a locked Keychain. An empty or failed
-  `managername` answer is not evidence either way and falls through.
+  unreachable however ready and unlocked it is. The reason names that case and
+  the Keychain probe is skipped there, since it could only mislabel the
+  symptom as a locked Keychain. An empty or failed `managername` answer is not
+  evidence either way and falls through.
 - `security show-keychain-info` succeeds for that account's login Keychain.
 
 A missing console user, unavailable GUI namespace, wrong launch domain, locked
@@ -44,8 +44,9 @@ its encryption material.
 ## Root ancestry and observation
 
 The macOS permissions helper is the permission-carrying parent of root. Browser
-launch occurs under that established ancestry. The readiness marker remains
-read-only diagnostic evidence; no probe can kickstart a GUI-domain job, stop a
+launch occurs under that established ancestry. The daemon records no readiness
+state: the browser healthcheck runs the same bounded read-only probe to name a
+wait in its verdict, and no probe can kickstart a GUI-domain job, stop a
 session, or replace the helper. Unavailable GUI or Keychain prerequisites remain
 visible as degraded readiness until an authorized external transition or changed
 host state resolves them.

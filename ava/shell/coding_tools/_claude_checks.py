@@ -212,7 +212,6 @@ def _bootstrap_count(claude_session: str) -> int:
 
 def _verify_start_receipt(
     sid: int,
-    rebuild_bootstrap: Callable[[], str],
     submitted: Callable[[], bool],
     timeout: float = 45.0,
 ) -> None:
@@ -222,16 +221,14 @@ def _verify_start_receipt(
     executor that never learned it replaced the agent (F1 class — do not infer
     receipt from a zero exit code). Submission evidence is ``submitted()``:
     the session's own transcript records one more bootstrap than it did before
-    the send (``_bootstrap_count``). When it stays absent,
-    press Enter once (a stale composer entry submits there) and re-check. If
-    that still lacks evidence, rebuild and resend the formal bootstrap once.
-    The final evidence re-check immediately before rebuilding avoids a duplicate
-    during delayed transcript writes; the straight-line recovery branch invokes
-    the factory at most once. Evidence is counted in this session's own
-    transcript, so another launch in the same workspace cannot pass for it.
-    Kept loud but not fatal: the
-    session may still be rendering; the operator sees the warning. A dead
-    session's send_keys()/send()/capture() refusal is reported the same way.
+    the send (``_bootstrap_count``). When it stays absent, press Enter once (a
+    stale composer entry submits there) and re-check. If that still lacks
+    evidence the bootstrap is NOT sent again: a second send could deliver the
+    takeover twice, so the launcher warns and the operator checks the session.
+    Evidence is counted in this session's own transcript, so another launch in
+    the same workspace cannot pass for it. Loud but not fatal: the session may
+    still be rendering. A dead session's send_keys() refusal is reported the
+    same way.
     """
     print("verifying the takeover bootstrap was submitted...")
     deadline = time.time() + timeout
@@ -254,39 +251,9 @@ def _verify_start_receipt(
     if submitted():
         print("  -> start-receipt=submitted after Enter retry")
         return
-    if submitted():
-        print("  -> start-receipt=submitted before rebuild resend")
-        return
-    print("  -> no submission evidence after Enter; rebuilding and resending once")
-    message = rebuild_bootstrap()
-    try:
-        _send_bootstrap(sid, message)
-    except ValueError as exc:
-        print(
-            "  -> WARNING: start-receipt=not-submitted "
-            f"(rebuild resend failed: {exc}); the session may have ended. "
-            "Check the session before relying on it."
-        )
-        return
-    time.sleep(5)
-    if submitted():
-        print("  -> start-receipt=submitted after rebuild resend")
-        return
-    try:
-        visible = _BOOTSTRAP_MARKER in ava.shell.sessions.capture(sid)
-    except ValueError as exc:
-        # capture() refuses a dead session with ValueError; that refusal must
-        # not bypass this checkpoint's loud-not-fatal contract (the caller kills
-        # the session and rolls the launch back on exceptions).
-        print(
-            "  -> WARNING: start-receipt=not-submitted "
-            f"(rebuild resend completed; capture failed: {exc}); the takeover bootstrap "
-            "may be parked, or the session may have ended. Check the session before "
-            "relying on it."
-        )
-        return
     print(
         "  -> WARNING: start-receipt=not-submitted "
-        f"(after one rebuild resend; visible={visible}); the takeover bootstrap may be "
-        "parked or missing. Check the session before relying on it."
+        "(no submission evidence after one Enter; the bootstrap is not resent); "
+        "the takeover bootstrap may be parked or missing. Check the session before "
+        "relying on it."
     )

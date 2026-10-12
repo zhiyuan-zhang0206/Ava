@@ -288,17 +288,7 @@ def _run_takeover_launch(
         )
         baseline = _bootstrap_count(claude_session)
         _send_bootstrap(sid, message)
-        _verify_start_receipt(
-            sid,
-            lambda: _takeover_bootstrap_message(
-                owner_agent_id,
-                takeover_name,
-                takeover_brief,
-                guide,
-                relay_resident=plugin_dir is not None,
-            ),
-            lambda: _bootstrap_count(claude_session) > baseline,
-        )
+        _verify_start_receipt(sid, lambda: _bootstrap_count(claude_session) > baseline)
     except BaseException:
         # Another launch's sweep may have reclaimed this generation's record by
         # now, so its CAS cannot reclaim this PTY. The launcher still owns the

@@ -89,8 +89,8 @@ async def test_reap_expired_pages_closes_only_expired_stack_pages() -> None:
     assert [(c[0], c[1]) for c in up.calls if c[0] == "close_page"] == [
         ("close_page", {"pageId": 1})
     ]
-    assert d.pages.get_agent_page(7, d.generation) is None
-    assert d.pages.get_agent_page(8, d.generation) == 2
+    assert d.pages.get_agent_page(7) is None
+    assert d.pages.get_agent_page(8) == 2
     assert 1 not in d.pages.ttl_deadlines
     assert 2 in d.pages.ttl_deadlines
 
@@ -116,7 +116,7 @@ async def test_reap_expired_pages_closes_titled_isolated_page() -> None:
         ("close_page", {"pageId": 1})
     ]
     assert 1 not in d.pages.ttl_deadlines
-    assert d.pages.get_agent_page(7, d.generation) is None
+    assert d.pages.get_agent_page(7) is None
 
 
 async def test_reap_expired_pages_never_touches_unregistered_page() -> None:
@@ -164,8 +164,8 @@ async def test_renew_page_extends_deadline_and_sweep_keeps_it() -> None:
     renewed before its old deadline survives the next sweep."""
     d, up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
-    # near deadline, same generation (a renewal under this daemon must see it)
-    d.pages.ttl_deadlines[1] = (time.monotonic() + 1.0, d.generation)
+    # near deadline (a renewal must see it)
+    d.pages.ttl_deadlines[1] = time.monotonic() + 1.0
     up.calls.clear()
 
     res = await d.call_tool_for_agent("renew_page", {"ttl": 3600}, 7)
@@ -230,7 +230,7 @@ async def test_renew_page_rejects_unmanaged_page() -> None:
     has no TTL slot and no renewal path."""
     d, up = _daemon()
     up.pages[99] = "https://user.example.com/mine"
-    d.pages.set_agent_page(7, 99, d.generation)  # as if select_page had adopted the user's tab
+    d.pages.set_agent_page(7, 99)  # as if select_page had adopted the user's tab
 
     res = await d.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
 
@@ -259,7 +259,7 @@ async def test_ttl_expiry_surfaces_native_no_page_red_green() -> None:
     nav = await d.call_tool_for_agent("navigate_page", {"url": "https://example.com/app"}, 7)
     assert not nav.is_error
     assert up.pages == {2: "https://example.com/app"}  # the expired tab is gone
-    assert d.pages.get_agent_page(7, d.generation) == 2
+    assert d.pages.get_agent_page(7) == 2
     assert 2 in d.pages.ttl_deadlines  # the new page has its own TTL
     assert 1 not in d.pages.ttl_deadlines
 

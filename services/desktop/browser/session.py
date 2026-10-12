@@ -109,13 +109,11 @@ async def _cdp_call(
     return resp.get("result") or {}
 
 
-async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) -> tuple[str, str]:
+async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) -> None:
     """Log in to the gateway and set its session cookie in managed Chrome.
 
     The cookie is host-only for ``gateway_url`` with the same flags the login
-    flow sets (HttpOnly, SameSite=Lax, Path=/, expiry from Max-Age). Returns the
-    injected ``(name, value)`` so the caller can later check it against the
-    gateway.
+    flow sets (HttpOnly, SameSite=Lax, Path=/, expiry from Max-Age).
 
     Raises RuntimeError when Chrome is unreachable or rejects the cookie.
     """
@@ -158,22 +156,3 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
 
     if not result.get("success"):
         raise RuntimeError(f"Chrome rejected the gateway session cookie: {result}")
-    return name, value
-
-
-async def gateway_session_is_valid(gateway_url: str, cookie_value: str) -> bool:
-    """Whether the gateway still accepts ``cookie_value`` as a live session.
-
-    Calls the auth-check endpoint (itself exempt from auth) with the cookie.
-    Any non-200 answer or an unauthenticated body counts as invalid; network
-    errors propagate to the caller, which retries on its next trigger.
-    """
-    url = f"{gateway_url.rstrip('/')}/api/auth/check"
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
-        response = await client.get(
-            url,
-            headers={"Cookie": f"{cookie_name()}={cookie_value}"},
-        )
-    if response.status_code != 200:
-        return False
-    return bool(response.json().get("authenticated"))
