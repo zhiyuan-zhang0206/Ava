@@ -46,17 +46,13 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import urlsplit
 
-from base.agents.context.clients import DatabaseFactory
 from base.cluster import ensure_cluster_redis_acl, ownership, port_preflight
 from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
-from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_admin import pg_admin_url as _base_pg_admin_url
-from base.cluster.dataplane.pg_admin import pg_socket_dir
+from base.cluster.dataplane.pg_admin import pg_socket_dir as _base_pg_socket_dir
 from base.cluster.dataplane.pg_tools import (
     PG_BIN_LINUX,
     brew_prefix,
@@ -72,12 +68,11 @@ from base.host.private_storage import write_private_bytes
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.native_process.os_platform import is_macos
 from base.paths import ava_home
-from base.telemetry import EventPipeline
 from cli.commands.data_plane.walg import warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args
 
 
-def _pg_dial_host() -> str:
+def pg_dial_host() -> str:
     """The host this cluster's own Postgres is dialed at — read from this
     cluster's AVA_DB_URL (the URL is the one dial source every consumer uses;
     DataPlaneSettings rewrites a self-host URL to loopback before anything
@@ -87,9 +82,9 @@ def _pg_dial_host() -> str:
     return url_host(settings.data_plane.db_url)
 
 
-def _redis_dial_host() -> str:
+def redis_dial_host() -> str:
     """The host this cluster's own Redis is dialed at — read from this
-    cluster's AVA_REDIS_URL (see `_pg_dial_host`)."""
+    cluster's AVA_REDIS_URL (see `pg_dial_host`)."""
     return url_host(settings.data_plane.redis_url)
 
 
@@ -104,11 +99,11 @@ _PG_PROBE_TIMEOUT_S = 3.0
 # appear on a local interface before the Postgres data plane binds to it. On
 # reboot brew / launchd can start `ava` before the private network has assigned
 # the address, so binding it fails and the whole autostart dies.
-_BIND_WAIT_TIMEOUT_S = 60.0
+BIND_WAIT_TIMEOUT_S = 60.0
 _BIND_WAIT_INTERVAL_S = 2.0
 
 
-def _pg_data_dir() -> Path:
+def pg_data_dir() -> Path:
     return ava_home() / "pg"
 
 
@@ -135,7 +130,7 @@ def _redis_server_bin() -> str:
     return _redis_bin("redis-server")
 
 
-def _redis_cli_bin() -> str:
+def redis_cli_bin() -> str:
     return _redis_bin("redis-cli")
 
 
@@ -157,7 +152,7 @@ def _addr_assigned(addr: str) -> bool:
         return False
 
 
-def _wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
+def wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
     """Block (bounded) until this host's non-loopback bind address is assigned to a
     local interface. Returns True immediately on a loopback-only (single-box) host —
     loopback is always present. Returns False on timeout so the caller fails fast
@@ -165,7 +160,7 @@ def _wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
     host = machine.host()
     if host in port_preflight.LOOPBACK_ALIASES:
         return True
-    deadline = time.monotonic() + _BIND_WAIT_TIMEOUT_S
+    deadline = time.monotonic() + BIND_WAIT_TIMEOUT_S
     while True:
         if _addr_assigned(host):
             return True
@@ -233,11 +228,11 @@ def require_authenticated_hba(pg_port: int, dial_host: str) -> None:
 
     probe = f"ava_hba_probe_{secrets.token_hex(4)}"
     # A path that never exists: no ~/.pgpass entry can answer the challenge.
-    passfile = str(_pg_socket_dir() / "no-passfile")
+    passfile = str(pg_socket_dir() / "no-passfile")
     deadline = time.monotonic() + _HBA_PROOF_TIMEOUT_S
     while True:
         unproven: list[str] = []
-        for host in (dial_host, str(_pg_socket_dir())):
+        for host in (dial_host, str(pg_socket_dir())):
             try:
                 psycopg.connect(
                     host=host,
@@ -287,7 +282,7 @@ def _initdb(target: Path) -> None:
 def _ensure_pg_data() -> Path:
     """Ensure this cluster's pg data dir exists and is initialized, via the cached
     template (initdb once host-wide, then copy). Returns the data dir."""
-    data = _pg_data_dir()
+    data = pg_data_dir()
     if (data / "PG_VERSION").exists():
         return data
     template = _pg_template_dir()
@@ -299,11 +294,11 @@ def _ensure_pg_data() -> Path:
 
 # Thin shells over the shared admin-plane dial (moved to base.cluster.dataplane.pg_admin,
 # 2026-08-31 — services layer reaches it without importing up into cli). The
-# underscore names stay for existing cli callers and their monkeypatches.
-def _pg_socket_dir(socket_root: Path | None = None) -> Path:
+# names stay for existing cli callers and their monkeypatches.
+def pg_socket_dir(socket_root: Path | None = None) -> Path:
     """Thin shell over base.cluster.dataplane.pg_admin.pg_socket_dir — the home resolution stays
     in the cli namespace so tests steering `ava_home` keep steering this probe."""
-    return pg_socket_dir(socket_root, home=ava_home())
+    return _base_pg_socket_dir(socket_root, home=ava_home())
 
 
 def pg_admin_url(pg_port: int) -> str:
@@ -312,7 +307,7 @@ def pg_admin_url(pg_port: int) -> str:
     return _base_pg_admin_url(pg_port)
 
 
-def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
+def pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
     try:
         out = subprocess.run(
             [_pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
@@ -340,17 +335,17 @@ def _start_pg(
             config.read_process_environment()
         return config.view.walg.walg_config_file
 
-    owner = ownership.require_postgres(_pg_data_dir(), pg_port, required=False)
+    owner = ownership.require_postgres(pg_data_dir(), pg_port, required=False)
     data = _ensure_pg_data()
     (data / "pg_ident.conf").write_text(_pg_ident_body())
     (data / "pg_hba.conf").write_text(_pg_hba_body(machine=machine))
-    dial_host = _pg_dial_host()
+    dial_host = pg_dial_host()
     # The wait applies only when this cluster binds a non-loopback reachable address
     # (`port_preflight.bind_addrs`); a loopback host returns immediately.
-    if owner is None and not _wait_for_reachable_bind(machine=machine):
+    if owner is None and not wait_for_reachable_bind(machine=machine):
         print(
             f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
-            f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
+            f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
             f"it. On reboot this means the private network has not come "
             f"up yet; retry `ava start` once it is.",
             file=sys.stderr,
@@ -369,7 +364,7 @@ def _start_pg(
             "-c",
             f"listen_addresses={listen}",
             "-c",
-            f"unix_socket_directories={_pg_socket_dir()}",
+            f"unix_socket_directories={pg_socket_dir()}",
             "-c",
             "unix_socket_permissions=0700",
             "-c",
@@ -379,7 +374,7 @@ def _start_pg(
             *archive_pg_args(path_reader=path_reader),
         ],
         pg_start_env(),
-        ready=lambda: _pg_running(pg_port, dial_host),
+        ready=lambda: pg_running(pg_port, dial_host),
         timeout=_PG_START_TIMEOUT_S,
         expected=owner,
         retained_children=retained_children,
@@ -391,7 +386,7 @@ def _start_pg(
     return 0
 
 
-def _redis_cli_env(redis_admin_password: str) -> dict[str, str]:
+def redis_cli_env(redis_admin_password: str) -> dict[str, str]:
     """Child env that authenticates `redis-cli` without putting the secret on its
     command line — `-a <secret>` is argv, which `ps` shows to any local user
     (issue #974). `$REDISCLI_AUTH` is redis-cli's own answer to exactly this
@@ -407,8 +402,8 @@ def _redis_cli_env(redis_admin_password: str) -> dict[str, str]:
 
 def _redis_running(redis_port: int, redis_admin_password: str, host: str = "127.0.0.1") -> bool:
     out = subprocess.run(
-        [_redis_cli_bin(), "-h", host, "-p", str(redis_port), "ping"],
-        env=_redis_cli_env(redis_admin_password),
+        [redis_cli_bin(), "-h", host, "-p", str(redis_port), "ping"],
+        env=redis_cli_env(redis_admin_password),
         capture_output=True,
         text=True,
         check=False,
@@ -458,7 +453,7 @@ def start_redis(
 ) -> int:
     if not (redis_admin_password and runtime_password):
         raise ValueError("Redis always authenticates: its admin and runtime passwords are required")
-    dial_host = _redis_dial_host()
+    dial_host = redis_dial_host()
     if _redis_running(redis_port, redis_admin_password, dial_host):
         # Re-affirm the ACL user on every start (survives a restart that drops
         # the in-memory ACL).
@@ -471,7 +466,7 @@ def start_redis(
         return result
     ownership.require_listener(None, redis_port, required=False)
     bind_addrs = ["127.0.0.1"] if is_macos() else port_preflight.bind_addrs(machine=machine)
-    if not is_macos() and not _wait_for_reachable_bind(machine=machine):
+    if not is_macos() and not wait_for_reachable_bind(machine=machine):
         return 1
     data = ownership.redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
@@ -585,7 +580,7 @@ def ensure_cluster_storage(
     return 0
 
 
-def _redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
+def redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
     """True if this cluster's Redis answers PING as its `default` user (using
     the gateway-only Redis admin password). Used by `ava status`; degrades to
     False on any error, including a home without its admin password."""
@@ -604,136 +599,3 @@ def _redis_reachable(redis_port: int, redis_host: str = "127.0.0.1") -> bool:
         return False
     finally:
         client.close()
-
-
-def print_data_plane_status(*, database_factory: DatabaseFactory) -> None:
-    """Print this cluster's own pg/redis reachability for `ava status`.
-
-    Postgres is probed in two stages: `pg_isready` (the server accepts connections)
-    then an authenticated `SELECT 1` over the cluster's POOLED front door
-    (`connect()` — PgBouncer when enabled, the direct URL when not; the same swap
-    every consumer dials) as this process's delivered gateway login. A server that
-    is up but refuses that login reports `✗ ... connect failed` rather than a
-    false `✓`: `pg_isready` alone answers without authenticating. Redis pings with
-    its admin password. Both ports come from this cluster's own db_url / redis_url
-    (its per-cluster instance). The pooler line authenticates to its admin console
-    with the operator entry from the home's database authority store.
-
-    The probe goes POOLED, never `direct=True` (user ruling 2026-08: every consumer
-    sits behind PgBouncer): the pooled `SELECT 1` proves the path consumers
-    actually use — client SCRAM against the userlist plus the SCRAM pass-through
-    backend hop. With PgBouncer disabled `pooled_db_url == db_url` and the probe
-    is direct anyway."""
-
-    if settings.data_plane.is_remote:
-        # A remote-managed plane has no local instance to manage — probe the
-        # URLs themselves (the switch) and skip the local pooler line.
-        from .bringup import remote_pg_reachable, remote_redis_reachable
-
-        print("  · data plane remote-managed — probing the URLs (no local instance)")
-        pg_ok, pg_line = remote_pg_reachable(database_factory=database_factory)
-        print(f"  {'✓' if pg_ok else '✗'} {pg_line}")
-        redis_ok, redis_line = remote_redis_reachable()
-        print(f"  {'✓' if redis_ok else '✗'} {redis_line}")
-        return
-
-    # Both probes dial the host their own URL names (self-host URLs are
-    # loopback-rewritten by DataPlaneSettings). The remote branch above returns
-    # before this local probe runs.
-    pg_host = _pg_dial_host()
-    redis_host = _redis_dial_host()
-    pg_port = urlsplit(settings.data_plane.db_url).port or 5432
-    redis_port = urlsplit(settings.data_plane.redis_url).port or 6379
-    if not _pg_running(pg_port, pg_host):
-        print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
-    else:
-        try:
-            with database_factory().connect() as conn:  # pooled front door (PgBouncer when enabled)
-                conn.execute("select 1")
-            print(f"  ✓ postgres ({pg_host}:{pg_port})")
-        except Exception as exc:
-            lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
-            detail = lines[-1] if lines else "connection failed"
-            print(f"  ✗ postgres ({pg_host}:{pg_port}) reachable but connect failed: {detail}")
-    print(
-        f"  {'✓' if _redis_reachable(redis_port, redis_host) else '✗'} "
-        f"redis ({redis_host}:{redis_port})"
-    )
-    if settings.data_plane.pgbouncer_enabled:
-        _print_pooler_status()
-
-
-def _print_pooler_status() -> None:
-    """The pooler line: its registry-derived listen port, probed through the
-    admin console as the operator entry from the home's authority store. No
-    registry record means the port is unknowable — say so instead of a false `:0`."""
-    from base.cluster import get_record
-    from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
-
-    rec = get_record(ava_home())
-    if rec is None:
-        print("  - pgbouncer: no registry record — cannot resolve its port")
-        return
-    port = rec.ports["pgbouncer"]
-    try:
-        ok = pooler.pgbouncer_listener_reachable(port, read_pooler_admin(ava_home()).password)
-    except AuthorityRefusedError as exc:
-        print(f"  ✗ pgbouncer (127.0.0.1:{port}): {exc}")
-        return
-    print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
-
-
-def stop_cluster_instance(
-    *,
-    retained_children: list[subprocess.Popen[bytes]] | None = None,
-    producer: Callable[[], EventPipeline],
-) -> int:
-    """Stop this cluster's own Postgres + Redis (data preserved on disk). The
-    counterpart of ensure_cluster_storage for `ava stop` of a cluster running its
-    own instance. Best-effort: a not-running instance is a
-    no-op success only after native custody closes."""
-    if settings.data_plane.is_remote:
-        # A remote-managed plane has no local instance to stop — nothing on this
-        # box to tear down, and the provider owns the service lifecycle. But a
-        # cluster that SWITCHED local→remote may still have its old local
-        # instance running; warn so it is torn down deliberately.
-        from .bringup import remote_plane_host, warn_orphaned_local_instance
-
-        print(f"\n→ data plane remote-managed ({remote_plane_host()}) — nothing to stop locally")
-        warn_orphaned_local_instance()
-        return 0
-    data = _pg_data_dir()
-    port = ownership.configured_redis_port()
-    # Resolve the admin credential before any stop effect: the runtime URL's
-    # ACL user can neither AUTH as `default` nor SHUTDOWN (`-@dangerous`).
-    redis_env = None if port is None else _redis_cli_env(settings.data_plane.redis_admin_password)
-    print("\n→ stopping per-cluster data plane")
-    # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
-    # are disconnected before Postgres goes down.
-    from .pgbouncer import stop_pgbouncer
-
-    stop_pgbouncer()
-    from cli.commands.lifecycle.service_stop import (
-        PROCESS_CLEANUP_WAIT_S,
-        PROCESS_KILL_WAIT_S,
-        report_postgres_stop_escalation,
-    )
-
-    escalation = owned_postgres.stop(
-        data,
-        immediate_wait=PROCESS_CLEANUP_WAIT_S,
-        kill_wait=PROCESS_KILL_WAIT_S,
-        retained_children=retained_children,
-    )
-    if escalation is not None:
-        report_postgres_stop_escalation(escalation, producer=producer)
-    print("  ✓ postgres stopped")
-    if port is not None:
-        subprocess.run(
-            [_redis_cli_bin(), "-p", str(port), "shutdown", "nosave"],
-            env=redis_env,
-            check=False,
-            capture_output=True,
-        )
-        print("  ✓ redis stopped")
-    return 0

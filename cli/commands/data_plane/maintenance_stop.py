@@ -56,7 +56,7 @@ from cli.commands.lifecycle.service_stop import (
 
 
 def capture_postgres() -> OwnedProcess | None:
-    return ownership.postgres(instance._pg_data_dir())
+    return ownership.postgres(instance.pg_data_dir())
 
 
 def _capture_pooler() -> OwnedProcess | None:
@@ -66,7 +66,7 @@ def _capture_pooler() -> OwnedProcess | None:
 def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
     """A missing pidfile or refused port is not evidence of no local process."""
     directories = {
-        "postgres": instance._pg_data_dir().resolve(),
+        "postgres": instance.pg_data_dir().resolve(),
         "redis-server": ownership.redis_data_dir().resolve(),
     }
     for process in psutil.process_iter(["pid", "name"]):
@@ -166,7 +166,7 @@ async def _request_stop(
         # SIGINT requests PostgreSQL's fast, checkpointed shutdown; a fast shutdown stuck
         # past its budget (an archive command that never returns) is ended by SIGQUIT.
         escalation = owned_postgres.stop(
-            instance._pg_data_dir(),
+            instance.pg_data_dir(),
             expected=identity,
             timeout=_postgres_fast_budget(deadline),
             immediate_wait=PROCESS_CLEANUP_WAIT_S,
