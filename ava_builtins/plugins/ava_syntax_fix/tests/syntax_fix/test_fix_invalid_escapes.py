@@ -10,6 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.state import AgentState
+from ava_builtins.plugins.ava_syntax_fix import agent_runtime
 from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
     fix_bracket_matching,
     fix_fstring_expressions,
@@ -34,6 +35,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm import factory
 
 
 class TestFixInvalidEscapes:
@@ -300,8 +302,9 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        with patch(
-            "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
+        with patch.object(
+            agent_runtime,
+            "_llm_repair_syntax",
             new=AsyncMock(return_value=None),
         ):
             result = await syntax_fix_before_exec(
@@ -330,8 +333,9 @@ class TestSyntaxFixBeforeExec:
         """LLM repair returns compilable code → silently replace with same ID, no ToolMessage, no goto."""
         broken = "x = 'unterminated\nprint(x)"
         repaired = "x = 'fixed'\nprint(x)"
-        with patch(
-            "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
+        with patch.object(
+            agent_runtime,
+            "_llm_repair_syntax",
             new=AsyncMock(return_value=repaired),
         ):
             result = await syntax_fix_before_exec(
@@ -347,8 +351,9 @@ class TestSyntaxFixBeforeExec:
     async def test_llm_repair_unavailable_falls_back(self, database_gate: ProcessDbGate):
         """LLM repair unavailable / retries exhausted (returns None) → fall back to ToolMessage fallback path."""
         broken = "if True print('x')"
-        with patch(
-            "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
+        with patch.object(
+            agent_runtime,
+            "_llm_repair_syntax",
             new=AsyncMock(return_value=None),
         ):
             result = await syntax_fix_before_exec(
@@ -450,7 +455,7 @@ class TestLlmRepairSyntax:
 
         fake = MagicMock()
         fake.ainvoke = AsyncMock(return_value=MagicMock(content="x = 1"))
-        with patch("base.lm.factory.build_chat_model", return_value=fake):
+        with patch.object(factory, "build_chat_model", return_value=fake):
             from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
@@ -459,7 +464,7 @@ class TestLlmRepairSyntax:
     async def test_model_unavailable_returns_none(self):
         from unittest.mock import patch
 
-        with patch("base.lm.factory.build_chat_model", side_effect=RuntimeError("no key")):
+        with patch.object(factory, "build_chat_model", side_effect=RuntimeError("no key")):
             from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
@@ -470,7 +475,7 @@ class TestLlmRepairSyntax:
 
         fake = MagicMock()
         fake.ainvoke = AsyncMock(return_value=MagicMock(content="   "))
-        with patch("base.lm.factory.build_chat_model", return_value=fake):
+        with patch.object(factory, "build_chat_model", return_value=fake):
             from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")

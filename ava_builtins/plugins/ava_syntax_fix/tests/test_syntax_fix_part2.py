@@ -16,6 +16,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.state import AgentState
+from ava_builtins.plugins.ava_syntax_fix import agent_runtime
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     syntax_fix_before_exec,
 )
@@ -185,8 +186,9 @@ class TestSyntaxFixEvents:
         monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         broken = "x = 'unterminated\nprint(x)"
         repaired = "x = 'fixed'\nprint(x)"
-        with patch(
-            "ava_builtins.plugins.ava_syntax_fix.agent_runtime._llm_repair_syntax",
+        with patch.object(
+            agent_runtime,
+            "_llm_repair_syntax",
             new=AsyncMock(return_value=repaired),
         ):
             result = await syntax_fix_before_exec(

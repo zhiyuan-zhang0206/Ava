@@ -17,6 +17,8 @@ from uuid import UUID
 
 import pytest
 
+from ava.sdk_surface import agent_identity, settings
+from ava.shell import sessions
 from ava.shell.coding_tools import _common, codex
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -162,12 +164,12 @@ def test_codex_supervisor_uses_projected_session_environment(
     service = PtyServiceProcess(unit_home, {"VIRTUAL_ENV": str(unit_home / "foreign" / ".venv")})
     service.start()
     pin_agent(41)
-    monkeypatch.setattr("ava.sdk_surface.settings.database", lambda: FakeDatabase(next_index=7))
+    monkeypatch.setattr(settings, "database", lambda: FakeDatabase(next_index=7))
 
     def workspace_for_owner(_agent_id: int) -> Path:
         return workspace
 
-    monkeypatch.setattr("ava.shell.sessions.workspace_dir", workspace_for_owner)
+    monkeypatch.setattr(sessions, "workspace_dir", workspace_for_owner)
 
     # Execute a probe in place of the long-running supervisor; session birth,
     # env transport, the service's shell spawn, and command delivery remain real.
@@ -421,7 +423,7 @@ def test_codex_takeover_cli_rejects_files_and_requires_a_brief(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 41)
+    monkeypatch.setattr(agent_identity, "require_agent_id", lambda: 41)
     monkeypatch.setattr(
         sys,
         "argv",

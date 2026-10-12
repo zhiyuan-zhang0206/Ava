@@ -8,6 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from base.lm.catalog import ModelCatalog
+from base.lm.pricing import billing
 
 
 async def test_successful_syntax_repair_call_emits_chat_billing(
@@ -33,7 +34,7 @@ async def test_successful_syntax_repair_call_emits_chat_billing(
     def _emit(message: AIMessage, **kwargs: Any) -> None:
         emitted.append((message, kwargs))
 
-    monkeypatch.setattr("base.lm.pricing.billing.emit_billing_from_message", _emit)
+    monkeypatch.setattr(billing, "emit_billing_from_message", _emit)
 
     assert await _repair_once(_LLM(), [], catalog=model_catalog) == "fixed = True"
     assert len(emitted) == 1

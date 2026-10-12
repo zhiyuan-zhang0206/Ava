@@ -101,7 +101,7 @@ class _FakeHost:
 class TestUiEntries:
     def test_show_unwraps_name_and_title(self, monkeypatch: pytest.MonkeyPatch) -> None:
         host = _FakeHost()
-        monkeypatch.setattr("ava.ui.page_host", lambda: host)
+        monkeypatch.setattr(_ui, "page_host", lambda: host)
 
         _ui.show(("mypage",), 9999, title=("My Page",))  # pyright: ignore[reportArgumentType]
         assert host.seen["name"] == "mypage"
@@ -112,7 +112,7 @@ class TestUiEntries:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         host = _FakeHost()
-        monkeypatch.setattr("ava.ui.page_host", lambda: host)
+        monkeypatch.setattr(_ui, "page_host", lambda: host)
 
         _ui.serve((str(tmp_path),), ("served",), 9998)  # pyright: ignore[reportArgumentType]
         assert host.seen["name"] == "served"
@@ -121,7 +121,7 @@ class TestUiEntries:
 
     def test_close_unwraps_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         host = _FakeHost()
-        monkeypatch.setattr("ava.ui.page_host", lambda: host)
+        monkeypatch.setattr(_ui, "page_host", lambda: host)
 
         _ui.close(("mypage",))  # pyright: ignore[reportArgumentType]
         assert host.seen["name"] == "mypage"
