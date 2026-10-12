@@ -4,7 +4,7 @@ Components take an `EventBus` (or a client it opened), never the Redis URL or th
 the URL carries the login. A composition root builds the handle once (`EventBus.from_settings()`)
 and passes it down. The module-level `get_async_redis()` / `sync_redis()` / `publish_best_effort*`
 in `base.events.live.redis_client` remain as the process default that reads the live settings at
-each call, a shim that the `ambient-bus` rule (scripts/structure/ambient_state) bans package by
+each call, a shim that the `ambient-bus` rule (meizel/state/ambient_state) bans package by
 package.
 
 The transport decisions (resilience kwargs, auth-retry, the best-effort publish discipline) stay

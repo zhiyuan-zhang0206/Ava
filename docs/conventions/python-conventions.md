@@ -156,10 +156,10 @@ A Thread
 requires an explicit service/process owner with admission, stop, retained handles
 and completion/error collection; free-floating `create_task` or thread work is
 forbidden. Rule 9 of `scripts/lint/code_structure.py`
-(`scripts/structure/ambient_state/`) enforces both: new sites fail, today's are
+(`meizel/state/ambient_state/`) enforces both: new sites fail, today's are
 frozen in the `ambient_state` baseline section as `path::rule:name -> site count`
 (exact, shrink-only), and the only things let through are the closed, reasoned lists
-in `scripts/structure/ambient_state/allowlist.py` — write-only facades, framework wiring
+in `meizel/state/ambient_state/allowlist.py` — write-only facades, framework wiring
 (`FastAPI()`, routers, argparse/Typer, `StateGraph`, locks), pure constants
 (`re.compile`, `TypeVar`, `timedelta`, `Path`) and memoized pure functions. There is
 no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts

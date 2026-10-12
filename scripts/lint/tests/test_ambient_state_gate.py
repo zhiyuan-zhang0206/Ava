@@ -1,7 +1,7 @@
 """End-to-end coverage of the ambient-state rule (Rule 9) through lcs.main(): a new site fails,
 the frozen baseline must match reality in both directions, the base-revision guard is
 shrink-only, a new lint cannot introduce baseline exemptions, and a stale list
-entry fails. Rule semantics live in scripts/structure/ambient_state/tests/test_ambient_state.py."""
+entry fails. Rule semantics live in meizel/state/ambient_state/tests/test_ambient_state.py."""
 
 from __future__ import annotations
 
@@ -10,8 +10,9 @@ import subprocess
 
 import pytest
 
+from meizel.state import ambient_state
 from scripts.lint import code_structure as lcs
-from scripts.structure import ambient_state, baseline_shards
+from scripts.structure import baseline_shards
 
 LINT_STUB = ambient_state.LINT
 

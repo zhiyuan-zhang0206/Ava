@@ -62,7 +62,7 @@ from meizel import lint_common
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
