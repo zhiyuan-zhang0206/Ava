@@ -13,6 +13,7 @@ import pytest
 import ava
 from base.agents.context.identity import AgentIdentity
 from base.log.process import _message_to_params
+from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 
@@ -116,7 +117,7 @@ def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
         mock.patch.object(slog, "add_event_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
         mock.patch.object(
-            slog.loaded_commit, "capture_commit", side_effect=AssertionError("no recapture")
+            loaded_commit, "capture_commit", side_effect=AssertionError("no recapture")
         ) as read_late_version,
         mock.patch.object(slog.logger, "info") as boot_log,
     ):

@@ -55,10 +55,10 @@ from typing import Protocol, cast
 
 from base.cluster import redis_channel_prefix
 from base.deploy.maintenance import admission
-from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
+from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 from services.agent_runner.agent_host.scheduling.turn_gates import raise_if_cancellation_pending
 from services.agent_runner.agent_host.stall_guard import (
     HostRestartRequiredError,

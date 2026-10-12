@@ -6,13 +6,13 @@ from datetime import UTC, datetime
 
 import psycopg
 
+from base.config.domains.agent.completion_policy import CompletionNoticePolicy
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
     delivery_required_for_agent,
     format_digest,
     immediate_delivery_required,
 )
-from base.daemon.schedules.completion_policy import CompletionNoticePolicy
 
 
 def test_hourly_buffers_every_notice_and_digest_counts_them() -> None:

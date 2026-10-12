@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 import base.deploy.progress_timeout as deploy
+from base.cluster.authority import unit
 from base.deploy.timing import CLOCKS, CONSTRAINTS, assert_clock_lattice, validate_clock_lattice
 
 
@@ -54,7 +55,7 @@ def test_a_default_bundle_lifetime_past_the_cap_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`issue-unit` without `--ttl-hours` must issue a bundle it accepts."""
-    monkeypatch.setattr(deploy, "UNIT_BUNDLE_TTL_S", deploy.UNIT_BUNDLE_MAX_TTL_S + 1)
+    monkeypatch.setattr(deploy, "UNIT_BUNDLE_TTL_S", unit.UNIT_BUNDLE_MAX_TTL_S + 1)
     failures = validate_clock_lattice()
     assert any("UNIT_BUNDLE_TTL_S <= UNIT_BUNDLE_MAX_TTL_S" in f for f in failures)
 

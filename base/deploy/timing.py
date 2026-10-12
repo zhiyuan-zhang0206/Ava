@@ -18,12 +18,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import base.deploy.progress_timeout as deploy
-import base.deploy.stop_timing as stop
+import base.native_process.stop_timing as stop
+from base.cluster.authority import unit
 from base.config import settings
-from base.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
+from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 
 # --- schedule supervision family ---------------------------------------------
-# Value lives in base/daemon/schedules/timing.py: the gateway's schedule manager
+# Value lives in base/deploy/schedule_timing.py: the gateway's schedule manager
 # imports it from there directly, without the lattice module's agent/sandbox
 # settings reads. The NO_PROGRESS_TIMEOUT_S ordering is declared in
 # CONSTRAINTS below.
@@ -89,7 +90,8 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
         "the root health monitor startup grace for optional services",
     ),
-    # --- unit-bundle family (values in base/deploy/progress_timeout.py) ---
+    # --- unit-bundle family (default in base/deploy/progress_timeout.py, cap in
+    # base/cluster/authority/unit.py) ---
     "UNIT_BUNDLE_TTL_S": Clock(
         "unit-bundle",
         lambda: deploy.UNIT_BUNDLE_TTL_S,
@@ -97,7 +99,7 @@ CLOCKS: dict[str, Clock] = {
     ),
     "UNIT_BUNDLE_MAX_TTL_S": Clock(
         "unit-bundle",
-        lambda: deploy.UNIT_BUNDLE_MAX_TTL_S,
+        lambda: unit.UNIT_BUNDLE_MAX_TTL_S,
         "the longest lifetime `issue-unit` seals into a unit capability bundle",
     ),
     # --- agent-lease family (values in base/deploy/progress_timeout.py) ---
@@ -139,7 +141,7 @@ CLOCKS: dict[str, Clock] = {
         LLM_RETRY_BUDGET_ESTIMATE_S,
         "historical estimate of the LLM retry budget (wedged derivation component)",
     ),
-    # --- stop family (values in base/deploy/stop_timing.py) ---
+    # --- stop family (values in base/native_process/stop_timing.py) ---
     "CANCEL_UNWIND_TIMEOUT_S": Clock(
         "stop",
         lambda: stop.CANCEL_UNWIND_TIMEOUT_S,

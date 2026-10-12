@@ -18,4 +18,5 @@ def read_inputs() -> UnderstandingReadInputs:
         corrections=lambda: settings.agent.understanding_group_corrections,
         clock_factory=Clock.from_settings,
         timestamps_enabled=lambda: settings.general.message_timestamps,
+        quiesced=lambda: False,
     )

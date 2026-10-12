@@ -26,8 +26,8 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 `LEASE_RENEW`, `SCAN_INTERVAL`, `REAP_INTERVAL`) must be one of:
 
 1. **Defined in a lattice family module** — `base/deploy/timing.py`,
-   `base/deploy/progress_timeout.py`, `base/deploy/stop_timing.py`,
-   `base/daemon/schedules/timing.py`. These are the lattice's homes; registering
+   `base/deploy/progress_timeout.py`, `base/native_process/stop_timing.py`,
+   `base/deploy/schedule_timing.py`. These are the lattice's homes; registering
    a new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
    reference to a clock registered in `base.deploy.timing.CLOCKS`
@@ -92,8 +92,8 @@ _LATTICE_TERMS = (
 _FAMILY_MODULES = (
     "base/deploy/timing.py",
     "base/deploy/progress_timeout.py",
-    "base/deploy/stop_timing.py",
-    "base/daemon/schedules/timing.py",
+    "base/native_process/stop_timing.py",
+    "base/deploy/schedule_timing.py",
 )
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")

@@ -10,8 +10,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.log import logger
+from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 
 
 @dataclass

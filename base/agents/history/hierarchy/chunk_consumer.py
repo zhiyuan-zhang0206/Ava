@@ -92,7 +92,6 @@ from base.agents.history.hierarchy.units import divide_units
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.observation.snapshot import agent_model_target
 from base.db import Database
-from base.deploy.maintenance import admission
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.log import logger
@@ -585,7 +584,7 @@ class _Consumer:
             last_sample = 0.0
             while True:
                 # A held unit claims nothing: the stop window is database-quiet.
-                if not admission.quiesced():
+                if not self.inputs.quiesced():
                     try:
                         now = time.monotonic()
                         if now - last_sample >= POLL_SECONDS:

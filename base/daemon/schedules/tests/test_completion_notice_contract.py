@@ -11,14 +11,14 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import DotEnvSettingsSource
 
+from base.config.domains.agent.completion_policy import (
+    CompletionNoticePolicy,
+    validate_completion_notice_policy,
+)
 from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.daemon.schedules.completion_notices import (
     effective_completion_notice_policy,
     pending_digests,
-)
-from base.daemon.schedules.completion_policy import (
-    CompletionNoticePolicy,
-    validate_completion_notice_policy,
 )
 from base.host.env.config_registry import field_editor_type
 

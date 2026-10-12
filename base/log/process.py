@@ -8,16 +8,16 @@ import sys
 import traceback as _traceback
 from collections.abc import Callable
 from functools import partial
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import loguru
 
 from base.log import logger
 from base.log.sinks import _HUMAN_FORMAT, _add_file_sink, _install_stdlib_intercept, add_sink
-from base.native_process import loaded_commit
 from base.telemetry.delivery.pipeline import EventPipeline
 
 __all__ = [
+    "LoadedImage",
     "add_event_sink",
     "init_cli_process",
     "init_gateway_process",
@@ -34,6 +34,17 @@ __all__ = [
 # record names neither the library nor a category, and the prefix is the one
 # stable handle.
 _COMPANION_MSG_PREFIXES = ("query cancellation failed",)
+
+
+class LoadedImage(Protocol):
+    """What a gateway-style process boot stamps on its events: the loaded source commit.
+
+    `base.native_process.loaded_commit.LoadedCommit` is the production capture;
+    `log` is below `native_process` and reads only the `sha`.
+    """
+
+    @property
+    def sha(self) -> str | None: ...
 
 
 def _message_to_params(
@@ -305,7 +316,7 @@ def init_gateway_process(
     *,
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
-    image: loaded_commit.LoadedCommit,
+    image: LoadedImage,
 ) -> None:
     """Called once at a gateway-style process startup — the gateway itself
     and every long-running service daemon (agent-host / watchdog / labeler /
