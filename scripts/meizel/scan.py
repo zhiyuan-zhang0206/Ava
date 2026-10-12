@@ -19,7 +19,7 @@ from scripts.meizel.scopes import (
 )
 from scripts.meizel.universe import Universe
 
-__all__ = ["FileScan", "scan_file"]
+__all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file"]
 
 _RESTRICTED_REFS = {
     "importlib.import_module": "importlib.import_module",
@@ -30,6 +30,18 @@ _RESTRICTED_REFS = {
     "builtins.exec": "exec of source text",
     "builtins.compile": "compile of source text",
 }
+# The forms a file may use once `[external]` declares that it runs code from outside the repository.
+EXTERNAL_FORMS = frozenset(
+    {
+        "importlib.import_module",
+        "runpy.run_module",
+        "runpy.run_path",
+        "importlib.util.spec_from_file_location",
+        "__import__",
+        "exec of source text",
+        "compile of source text",
+    }
+)
 _BUILTIN_REFS = frozenset({"__import__", "exec", "compile"})
 _PATCH_CALLS = {
     "unittest.mock.patch": "patch",
@@ -38,7 +50,7 @@ _PATCH_CALLS = {
     "unittest.mock.patch.dict": "dict",
 }
 _MONKEYPATCH_METHODS = frozenset({"setattr", "delattr", "setitem", "delitem"})
-_SYS_MODULES_METHODS = frozenset({"setdefault", "pop", "update", "get"})
+_SYS_MODULES_METHODS = frozenset({"setdefault", "pop", "update"})
 _PATCH_OPTIONS = frozenset({"spec", "create", "spec_set", "autospec", "new_callable"})
 _SHELL_CALLS = frozenset(
     {
@@ -429,10 +441,10 @@ class Scanner:
         )
 
     def fake_module(self, key: ast.expr, line: int) -> None:
-        """Reaching a first-party module through `sys.modules` by a literal name."""
+        """Writing a first-party module into `sys.modules` by a literal name. Reads are fine."""
         text = _const_str(key)
         if text is not None and self.u.is_first_party_name(text):
-            self.restrict(line, "sys.modules access to a first-party module", text)
+            self.restrict(line, "sys.modules write of a first-party module", text)
 
     def sys_modules_call(self, node: ast.Call) -> None:
         if not node.args:
@@ -448,7 +460,7 @@ class Scanner:
             self.fake_module(first, node.lineno)
 
     def visit_subscript(self, node: ast.Subscript) -> None:
-        if self.is_sys_modules(node.value):
+        if isinstance(node.ctx, ast.Store | ast.Del) and self.is_sys_modules(node.value):
             self.fake_module(node.slice, node.lineno)
         self.children(node)
 

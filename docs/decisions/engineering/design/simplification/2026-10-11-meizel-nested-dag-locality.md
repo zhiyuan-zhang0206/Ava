@@ -105,6 +105,9 @@ static fact. Meizel reports these forms as errors:
 - string patch targets: `mock.patch("a.b.c")` and
   `monkeypatch.setattr("a.b.c", value)`. Tests inject collaborators or patch
   through the object form.
+- writing a first-party module into `sys.modules` by name (assignment, `del`,
+  `pop`, `setdefault`, `update`, `monkeypatch.setitem/delitem`,
+  `patch.dict`). Reading `sys.modules` is allowed.
 
 Dynamic loading that a component genuinely owns, such as plugin and skill
 discovery, is **declared** rather than exempted. The manifest of the directory
@@ -118,6 +121,12 @@ containing the loading file lists the directories that file may load from:
 Meizel turns each declaration into a fact edge from the loading file to the
 loaded directory, and checks that edge under the same rule. A dynamic form in a
 file without a `loads` entry is an error.
+
+A file that runs code from outside the repository (user scripts, agent code,
+a module named by operator configuration) is declared under `[external]` with
+a reason instead: `"runner.py" = "executes the user's schedule script"`.
+`exec`, `compile` and the dynamic-import forms are then allowed in that file and
+make no edge. An `[external]` entry whose file has none of those forms is stale.
 
 ### Manifest
 
