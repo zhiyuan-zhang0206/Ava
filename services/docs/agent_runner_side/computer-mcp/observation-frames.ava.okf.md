@@ -76,7 +76,7 @@ nothing when it cannot establish one.
   `CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements])`
   in its front-to-back order, in the same global coordinates as input:
   - `click`, `move`, `scroll`: the first window whose bounds contain the point;
-    `drag`: the same for its start point. If that topmost window is not layer 0
+    `drag`: the same for its start point; `mouse_down`: its position, or the pointer's when it names none (a half-given position marks nothing; `mouse_up` marks nothing). If that topmost window is not layer 0
     (a menu, popup or system UI), the click lands on it, so nothing is marked and
     the ordinary window behind it is not.
   - `type`, `key`: the frontmost application's PID (after `refreshAppKit`, so the

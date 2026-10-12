@@ -30,7 +30,8 @@ returns it) and the agent's own execute_code source, which this layer does not
 govern. `clipboard_write` changes user state, so the corner fail-safe refuses it
 like other desktop-changing methods; `clipboard_read` is observation and is not
 stopped. Neither requests a capture badge. The helper advertises
-`ping.clipboard_v1`; the client refuses both calls on a helper without it.
+`ping.clipboard_v1`; the client (`permissions_helper/client_stateful.py`) refuses both calls
+on a helper without it.
 Whether macOS prompts the user to allow a background program to read another
 app's clipboard (a privacy gate newer macOS releases are introducing) is not
 established by the harness and needs a real-desktop check.
