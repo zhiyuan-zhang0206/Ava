@@ -55,9 +55,9 @@ async def release_completed(
                 (original.execution.work_id,),
             )
         ).fetchone()
-        if cancelled is not None and NativeCancelOutcome(cancelled[0]) not in (
-            NativeCancelOutcome.APPLIED,
-            NativeCancelOutcome.RECOVERED_STOPPED,
+        if (
+            cancelled is not None
+            and NativeCancelOutcome(cancelled[0]) is not NativeCancelOutcome.APPLIED
         ):
             raise CompactHeldError("compact original native cancellation remains unresolved")
         await conn.execute(

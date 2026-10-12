@@ -13,7 +13,6 @@ from agent.impersonation_handoff import flush_checkpoint
 from agent.state import checkpoint_msgpack_allowlist
 from base.agents.incarnation.native_work_models import (
     NativeCancelMarker,
-    NativeCancelOutcome,
     NativeWorkUncertainError,
 )
 from base.agents.messages.native_cancel import accept_native_cancel, finish_native_cancel
@@ -70,7 +69,6 @@ async def test_checkpoint_flush_ack_and_retained_terminal_receipt(
             conn,
             incarnation,
             marker,
-            outcome=NativeCancelOutcome.APPLIED,
             checkpoint_id=checkpoint_id,
         )
 
@@ -101,7 +99,6 @@ async def test_superseded_checkpoint_cannot_ack_old_marker(
                 conn,
                 incarnation,
                 marker,
-                outcome=NativeCancelOutcome.APPLIED,
                 checkpoint_id=checkpoint_id,
             )
     assert db_conn.execute(

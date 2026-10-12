@@ -102,9 +102,6 @@ async def test_force_observation_waits_for_actual_projection_continuation(
                 resurrected_by="user",
                 local_machine=machine_identity.name(),
             )
-        assert db_conn.execute(
-            "SELECT transfer_chain FROM native_graph_work WHERE id=%s", (target.work_id,)
-        ).fetchone() == ([],)
         release.set()
         # The original owner cannot ACK after force changed its authority, but
         # the pump only records actual force observation after its writer drains.

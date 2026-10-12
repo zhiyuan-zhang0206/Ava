@@ -115,19 +115,10 @@ def require_persisted_end(conn: psycopg.Connection[Any], agent_id: int) -> str:
     checkpoint versions refuse rather than guessing the dependency's format.
     """
     meta = conn.execute(
-        "SELECT lifecycle_command_id,runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
-        (agent_id,),
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone()
     if meta is None or meta[0] is not None:
         raise RuntimeError(f"cold agent {agent_id} still owns a lifecycle command")
-    failure = conn.execute(
-        "SELECT 1 FROM inbound_messages WHERE agent_id=%s AND kind IN ('restart','terminate') "
-        "AND payload->'lifecycle_result'->>'outcome'='failed' "
-        "AND target_generation=%s AND target_owner=%s LIMIT 1",
-        (agent_id, meta[1], meta[2]),
-    ).fetchone()
-    if failure is not None:
-        raise RuntimeError(f"cold agent {agent_id} has a failed lifecycle command")
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     saved = PostgresSaver(conn, serde=serde).get_tuple(
         {"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}}

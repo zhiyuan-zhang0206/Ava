@@ -1,4 +1,4 @@
-"""Settings-free browser dependency detection, repair, and operator guidance.
+"""Settings-free browser dependency operator guidance.
 
 This is the settings-free half of the browser-deps contract, used by converge's
 browser step. It imports only the standard library plus settings-free probes
@@ -8,12 +8,9 @@ from ``base.host.system.probes``; it must never import ``base.config`` or a
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import sys
-from pathlib import Path
 
-from base.host.system.probes import NPX_INCAPABILITY_REASON, browser_deps_incapability
+from base.host.system.probes import NPX_INCAPABILITY_REASON
 
 
 def node_install_command() -> str:
@@ -23,35 +20,6 @@ def node_install_command() -> str:
     if sys.platform.startswith("linux"):
         return "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs"
     return "install Node.js >= 20.9 (see https://nodejs.org)"
-
-
-def install_nodejs() -> bool:
-    """Best-effort Node.js install; return True only when npx is on PATH afterwards."""
-    if shutil.which("npx") is not None:
-        return True
-    if sys.platform == "darwin" or sys.platform.startswith("linux"):
-        # base/host/converge/browser_deps.py -> repo root is three parents up.
-        provisioner = Path(__file__).resolve().parents[3] / "scripts" / "provision" / "node.sh"
-        try:
-            subprocess.run(  # noqa: S603 — fixed repo-owned provisioner path
-                ["bash", str(provisioner)],
-                capture_output=True,
-                text=True,
-                timeout=900,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-    return shutil.which("npx") is not None
-
-
-def ensure_browser_deps() -> str | None:
-    """Detect and repair browser dependencies, returning a remaining reason if any."""
-    reason = browser_deps_incapability()
-    if reason is None or reason != NPX_INCAPABILITY_REASON:
-        return reason
-    install_nodejs()
-    return browser_deps_incapability()
 
 
 def browser_deps_notice(reason: str) -> str:

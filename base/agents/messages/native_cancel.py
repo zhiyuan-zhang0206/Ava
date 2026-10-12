@@ -41,7 +41,7 @@ def observe_native_work_in_transaction(
 ) -> NativeWorkTarget | None:
     """Read the same qualification on a caller-owned connection/metadata lock."""
     row = conn.execute(
-        "SELECT w.id,w.agent_id,w.machine,w.generation,w.owner,w.protocol,w.phase,w.transfer_chain,"
+        "SELECT w.id,w.agent_id,w.machine,w.generation,w.owner,w.protocol,w.phase,"
         "m.incarnation_resources FROM agents_meta m "
         "JOIN native_graph_work w ON w.id=m.native_work_id WHERE m.id=%s "
         "AND w.phase='active' AND w.machine=m.machine AND w.generation=m.runtime_generation "
@@ -52,8 +52,8 @@ def observe_native_work_in_transaction(
     ).fetchone()
     if row is None:
         return None
-    work = decode_work(row[:8])
-    return work.target if managed_resources(row[8], work.target) else None
+    work = decode_work(row[:7])
+    return work.target if managed_resources(row[7], work.target) else None
 
 
 def accept_native_cancel(
@@ -74,7 +74,7 @@ def accept_native_cancel(
                 raise NativeCancelConflictError("native cancel key was used for another target")
             return NativeCancelAcceptance.model_validate(previous[1])
         row = conn.execute(
-            "SELECT w.id,w.agent_id,w.machine,w.generation,w.owner,w.protocol,w.phase,w.transfer_chain,"
+            "SELECT w.id,w.agent_id,w.machine,w.generation,w.owner,w.protocol,w.phase,"
             "m.incarnation_resources FROM agents_meta m "
             "JOIN native_graph_work w ON w.id=m.native_work_id WHERE m.id=%s "
             "AND w.id=%s AND w.phase='active' AND w.machine=m.machine "
@@ -85,8 +85,8 @@ def accept_native_cancel(
         ).fetchone()
         if (
             row is None
-            or decode_work(row[:8]).target != target
-            or not managed_resources(row[8], target)
+            or decode_work(row[:7]).target != target
+            or not managed_resources(row[7], target)
         ):
             raise NativeCancelConflictError("observed native work is not eligible")
         lease = conn.execute(
@@ -139,7 +139,7 @@ async def pending_native_cancel(
 async def require_cancel_receiver(
     conn: psycopg.AsyncConnection, work: NativeWorkRecord, incarnation: RuntimeIncarnation
 ) -> None:
-    """Fence ACK to the original owner or the complete certified transfer chain."""
+    """Fence ACK to the original owner of the work."""
     row = await (
         await conn.execute(
             "SELECT machine,runtime_generation,runtime_owner,incarnation_resources FROM agents_meta "
@@ -164,30 +164,13 @@ async def require_cancel_receiver(
 
 
 async def _require_completion_checkpoint(
-    conn: psycopg.AsyncConnection,
-    work: NativeWorkRecord,
-    outcome: NativeCancelOutcome,
-    checkpoint_id: str | None,
-    recovery_checkpoint_id: str | None,
+    conn: psycopg.AsyncConnection, work: NativeWorkRecord, checkpoint_id: str | None
 ) -> None:
-    """Match execution or recovery proof to the latest head under the owner lock."""
-    if outcome is NativeCancelOutcome.APPLIED and not checkpoint_id:
+    """Match execution proof to the latest head under the owner lock."""
+    if not checkpoint_id:
         raise NativeWorkUncertainError("native cancel has no committed checkpoint identity")
-    if (
-        outcome is NativeCancelOutcome.APPLIED
-        and await latest_checkpoint_id_in_transaction(conn, work.target.agent_id) != checkpoint_id
-    ):
+    if await latest_checkpoint_id_in_transaction(conn, work.target.agent_id) != checkpoint_id:
         raise NativeWorkUncertainError("native cancel checkpoint evidence was superseded")
-    if outcome is NativeCancelOutcome.RECOVERED_STOPPED:
-        if not work.transfers:
-            raise NativeWorkUncertainError("native cancel has no certified predecessor stop")
-        if checkpoint_id is not None or not recovery_checkpoint_id:
-            raise NativeWorkUncertainError("native recovery has no committed consumer pause")
-        if (
-            await latest_checkpoint_id_in_transaction(conn, work.target.agent_id)
-            != recovery_checkpoint_id
-        ):
-            raise NativeWorkUncertainError("native recovery pause evidence was superseded")
 
 
 async def finish_native_cancel(
@@ -195,13 +178,9 @@ async def finish_native_cancel(
     incarnation: RuntimeIncarnation,
     marker: NativeCancelMarker,
     *,
-    outcome: NativeCancelOutcome,
     checkpoint_id: str | None,
-    recovery_checkpoint_id: str | None = None,
 ) -> None:
     """CAS execution evidence only after cold checkpoint/actual-resource proof."""
-    if outcome not in (NativeCancelOutcome.APPLIED, NativeCancelOutcome.RECOVERED_STOPPED):
-        raise ValueError("native cancel completion requires a terminal evidence outcome")
     original = await (
         await conn.execute(
             "SELECT acceptance,outcome FROM native_cancel_commands WHERE id=%s AND work_id=%s",
@@ -212,24 +191,20 @@ async def finish_native_cancel(
         original[0]
     ) != NativeCancelAcceptance(command_id=marker.command_id, target=marker.target):
         raise NativeWorkUncertainError("native cancel original command evidence is missing")
-    if NativeCancelOutcome(original[1]) in (
-        NativeCancelOutcome.APPLIED,
-        NativeCancelOutcome.RECOVERED_STOPPED,
-    ):
+    if NativeCancelOutcome(original[1]) is NativeCancelOutcome.APPLIED:
         return
     await conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (incarnation.agent_id,))
     work = await load_work(conn, marker.target.work_id, lock=True)
     if work is None or work.target != marker.target:
         raise NativeWorkUncertainError("native cancel original work evidence is missing")
     await require_cancel_receiver(conn, work, incarnation)
-    await _require_completion_checkpoint(conn, work, outcome, checkpoint_id, recovery_checkpoint_id)
+    await _require_completion_checkpoint(conn, work, checkpoint_id)
     cursor = await conn.execute(
-        "UPDATE native_cancel_commands SET outcome=%s,checkpoint_id=%s,recovery_checkpoint_id=%s,settled_at=now() "
+        "UPDATE native_cancel_commands SET outcome=%s,checkpoint_id=%s,settled_at=now() "
         "WHERE id=%s AND work_id=%s AND outcome IN ('accepted','uncertain') RETURNING id",
         (
-            outcome.value,
+            NativeCancelOutcome.APPLIED.value,
             checkpoint_id,
-            recovery_checkpoint_id,
             marker.command_id,
             marker.target.work_id,
         ),
@@ -241,12 +216,9 @@ async def finish_native_cancel(
                 (marker.command_id, marker.target.work_id),
             )
         ).fetchone()
-        if row is None or NativeCancelOutcome(row[0]) not in (
-            NativeCancelOutcome.APPLIED,
-            NativeCancelOutcome.RECOVERED_STOPPED,
-        ):
+        if row is None or NativeCancelOutcome(row[0]) is not NativeCancelOutcome.APPLIED:
             raise NativeWorkUncertainError("native cancel original command evidence is missing")
     await conn.execute(
         "UPDATE native_graph_work SET phase='settled',settled_checkpoint_id=%s,ended_at=now() WHERE id=%s",
-        (checkpoint_id or recovery_checkpoint_id, marker.target.work_id),
+        (checkpoint_id, marker.target.work_id),
     )
