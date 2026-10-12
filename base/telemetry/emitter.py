@@ -22,7 +22,7 @@ Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
 Import discipline: this module imports `base.log`, `base.db`, and `base.paths` lazily
-(inside functions) — `base/db/__init__.py` imports `base/log/__init__.py` at module scope
+(inside functions) — `base/db/connections.py` imports `base/log/__init__.py` at module scope
 for `logger`, so a top-level import of log or DB from here is a circular-import
 failure for any process that reaches `base.db` first. Mirror path resolution stays
 inside its write/prune operations so entry inputs can be typed before Settings admission.

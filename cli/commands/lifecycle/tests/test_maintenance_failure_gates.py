@@ -20,8 +20,9 @@ import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase

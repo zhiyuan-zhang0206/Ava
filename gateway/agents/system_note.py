@@ -8,14 +8,12 @@ from psycopg.errors import UniqueViolation
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents.inbox.insert import insert_inbound_message_in_transaction
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.caller_identity import caller_payload
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.db import (
-    Database,
-    insert_inbound_message_in_transaction,
-    publish_inbound_wake,
-)
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 

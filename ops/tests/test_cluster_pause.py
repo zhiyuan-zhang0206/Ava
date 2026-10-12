@@ -14,8 +14,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.deploy.state.host_deploy_state import HostDeployState

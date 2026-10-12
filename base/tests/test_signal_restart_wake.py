@@ -7,7 +7,7 @@ import time
 
 import psycopg
 
-from base import db
+from base.agents.inbox.live import signal_live_agents_restart
 from base.config import settings
 from base.db import Database
 from base.db.tests.live_agents import seed_agent
@@ -32,7 +32,7 @@ async def test_signal_live_agents_restart_publishes_redis_wake(
         await asyncio.sleep(0.2)  # let the subscribe take effect before the publish
         t0 = time.monotonic()
         ids = await asyncio.to_thread(
-            db.signal_live_agents_restart, database, event_bus, source="system:update"
+            signal_live_agents_restart, database, event_bus, source="system:update"
         )
         assert tid in ids
         await asyncio.wait_for(wait_task, timeout=5.0)

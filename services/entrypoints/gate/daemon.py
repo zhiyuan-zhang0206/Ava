@@ -45,6 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.log import logger
@@ -412,7 +413,7 @@ def main() -> None:
     config.boot()
     machine = machine_from_boot(config)
     gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
-    database = partial(Database.from_settings, gate=gate, local_host=machine.host)
+    database = partial(Database.from_settings, gate=gate, direct_url=ClusterDirectUrl(machine.host))
     pipeline = build_pipeline(database=database, machine=machine, home=ava_home().resolve())
     primary: BaseException | None = None
     try:

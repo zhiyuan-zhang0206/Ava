@@ -433,7 +433,7 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     over the home's owner-only socket as the password-less monitoring role,
     never as the write-generation login the start process adopted; Redis with its admin password."""
     from base.cluster.authority import MONITOR_ROLE
-    from base.db.pg_admin import pg_socket_path
+    from base.cluster.dataplane.pg_admin import pg_socket_path
 
     monkeypatch.setattr("base.config.settings.data_plane.db_url", _DELIVERED)
     cfg = _render_real_template(

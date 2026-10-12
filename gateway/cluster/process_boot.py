@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from base.agents.context.clients import ClientSet
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -46,7 +47,9 @@ class GatewayProcess:
     def database(self) -> Database:
         """Read the current root config, retaining this entry's original gate."""
         return Database(
-            db_config_from_boot(self.config), gate=self.gate, local_host=self.machine.host
+            db_config_from_boot(self.config),
+            gate=self.gate,
+            direct_url=ClusterDirectUrl(self.machine.host),
         )
 
     def event_pipeline(self) -> EventPipeline:

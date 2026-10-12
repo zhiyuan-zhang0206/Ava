@@ -15,7 +15,9 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from base.db import ChatAnchor, Database, create_agent, insert_inbound_message, list_chat_anchors
+from base.agents.inbox.insert import insert_inbound_message
+from base.agents.inbox.rows import ChatAnchor, list_chat_anchors
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.history import timeline as gateway_timeline
 from gateway.agents.history.tests.test_timeline import CompactHistoryCases

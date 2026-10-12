@@ -411,7 +411,7 @@ class RedisInboundListener:
         """Whether a durable wake breadcrumb exists for this agent; consume it.
 
         The inbound publisher SETEXes `wake_key(agent_id)` alongside every
-        pub/sub publish (see `base.db.publish_inbound_wake`). GETDEL it here
+        pub/sub publish (see `base.agents.inbox.wake.publish_inbound_wake`). GETDEL it here
         so a wake lost to pub/sub's fire-and-forget semantics (the publish
         landed while this connection was down or not yet subscribed) still
         makes the caller's SELECT recheck run immediately instead of after the

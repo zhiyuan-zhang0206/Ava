@@ -140,7 +140,7 @@ def insert_chat_inbound_once(
     """Insert one logical chat, or return its existing same-key inbound id.
 
     `publish_wake(agent_id, payload)` is the best-effort wake for a newly inserted inbound
-    (`base.db.publish_inbound_wake` bound to the caller's handles)."""
+    (`base.agents.inbox.wake.publish_inbound_wake` bound to the caller's handles)."""
     with db.transaction():
         receipt, prepared_event = insert_chat_inbound_in_transaction(
             db,

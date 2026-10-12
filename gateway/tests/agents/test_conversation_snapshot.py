@@ -12,7 +12,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.db import Database, create_agent, insert_inbound_message
+from base.agents.inbox.insert import insert_inbound_message
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.app import app
 

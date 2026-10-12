@@ -112,8 +112,8 @@ def resolved_pool_size(
 def gateway_url_host() -> str:
     """The host this process dials as its gateway (`AVA_GATEWAY_URL`), lowercased
     and unbracketed; "" when the gateway domain is not constructed in this
-    process's profile (or unset). Used by `base.db.direct_db_url` to tell a
-    split agent-runner's URL — which names the GATEWAY's pooler, a foreign host
+    process's profile (or unset). Used by `base.cluster.dataplane.direct_url.direct_db_url`
+    to tell a split agent-runner's URL — which names the GATEWAY's pooler, a foreign host
     whose direct-exemption warning is meaningful — apart from a remote/SaaS
     plane URL, which is direct by definition and must dial silently
     (Task #1752)."""

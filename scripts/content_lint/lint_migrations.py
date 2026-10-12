@@ -53,7 +53,7 @@ Checks:
    convention, not a SQL parser.
 8. **no role switching** — neither `db/schema.sql` nor any migration may
    `SET ROLE`, `RESET ROLE` or change the session authorization. Both run as
-   the OS-user administrator acting as the schema owner (`base.db.pg_admin`);
+   the OS-user administrator acting as the schema owner (`base.cluster.dataplane.pg_admin`);
    switching away would create admin-owned objects or run with superuser
    rights the owner never had. Comments and quoted text are ignored.
 

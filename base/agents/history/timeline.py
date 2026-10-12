@@ -31,6 +31,10 @@ from langchain_core.messages import (
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.impersonation.history import ImpersonationMetadata
+
+# Re-export: TimelineItem's home is base/agents/history/timeline_item.py (file line budget);
+# callers keep importing it from here.
+from base.agents.inbox.rows import ChatAnchor, InboundRow
 from base.agents.messages.kwargs import (
     AvaMessageKwargs,
     AvaMsgType,
@@ -42,10 +46,6 @@ from base.agents.messages.kwargs import (
     read_ava_kwargs,
 )
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
-
-# Re-export: TimelineItem's home is base/agents/history/timeline_item.py (file line budget);
-# callers keep importing it from here.
-from base.db import ChatAnchor, InboundRow
 
 __all__ = [
     "build_timeline_items",

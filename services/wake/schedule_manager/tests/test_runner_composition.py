@@ -12,6 +12,7 @@ import pytest
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.clock import Clock
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
@@ -105,10 +106,10 @@ def test_process_owns_one_gate_and_closes_its_pipeline(
         return version_type(loaded)
 
     def database(
-        config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
     ) -> Database:
         gates.append(gate)
-        return Database(config, gate=gate, local_host=local_host)
+        return Database(config, gate=gate, direct_url=direct_url)
 
     def execute(
         schedule_id: int,

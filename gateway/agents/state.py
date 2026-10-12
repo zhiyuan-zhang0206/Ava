@@ -29,10 +29,11 @@ from base.agents.history.context_response import (
     context_breakdown_response,
     resolve_agent_model,
 )
+from base.agents.inbox.rows import list_pending_inbounds
 from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls
-from base.agents.model_overrides import agent_overrides
+from base.agents.model.model_overrides import agent_overrides
 from base.agents.upload_delivery.paths import image_mime_for, parse_upload_url, resolve_upload_path
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -41,7 +42,7 @@ from base.daemon.schedules.completion_notices import (
     current_default_completion_notice_policy,
     delivery_required_for_agent,
 )
-from base.db import agent_exists, list_pending_inbounds
+from base.db import agent_exists
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance

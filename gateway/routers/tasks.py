@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.delivery import (
     TaskNoteReceipt,
@@ -28,7 +29,6 @@ from base.agents.tasks.owner_notifications import (
 )
 from base.agents.tasks.reparent import resolve_reparent
 from base.agents.tasks.rules import first_open_child, is_closed, open_title_holder
-from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key

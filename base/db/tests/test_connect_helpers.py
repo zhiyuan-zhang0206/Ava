@@ -35,7 +35,6 @@ from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.config import settings
 from base.db import Database, connections
 from base.db import code_version_gate as gate
-from base.telemetry import process_name
 
 
 def _session_direct_url(_config: object = None, **_kwargs: object) -> str:
@@ -91,6 +90,7 @@ def test_pool_hands_out_working_connections(
 # ── the code-version gate ────────────────────────────────────────────────────
 
 _VERSION = 500
+_PROCESS = "db-test"
 
 
 class _Exited(BaseException):
@@ -128,7 +128,7 @@ def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 @pytest.fixture
 def process_gate(_gated_process: list[int]) -> gate.ProcessDbGate:
     """The test process's explicit budget, with the original fixed version and identity."""
-    return gate.ProcessDbGate(version=lambda: _VERSION, process=process_name())
+    return gate.ProcessDbGate(version=lambda: _VERSION, process=_PROCESS)
 
 
 # Every test retains the original observable hard-exit instrumentation.
@@ -196,7 +196,7 @@ def test_a_process_below_the_minimum_logs_critical_and_exits(
     assert exited.value.code == CODE_BEHIND_MINIMUM_EXIT_CODE
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
     (line,) = rendered
-    assert f"process {process_name()} runs code version {_VERSION}" in line
+    assert f"process {_PROCESS} runs code version {_VERSION}" in line
     assert f"below the cluster minimum {_VERSION + 1}" in line
     assert f"exiting with code {CODE_BEHIND_MINIMUM_EXIT_CODE}" in line
 
@@ -468,7 +468,7 @@ def test_a_pooled_dial_at_the_stored_minimum_works_and_keeps_the_ceiling(
         row = conn.execute("SHOW statement_timeout").fetchone()
         assert row is not None and row[0] == "1min"
         row = conn.execute("SHOW application_name").fetchone()
-        assert row is not None and row[0] == f"ava:{process_name()}:v{_VERSION}"
+        assert row is not None and row[0] == f"ava:{_PROCESS}:v{_VERSION}"
     assert _gated_process == []
 
 
@@ -522,8 +522,7 @@ def test_direct_dials_are_not_gated_and_carry_no_process_name(
     _gated_process: list[int],
 ) -> None:
     _set_minimum(_VERSION + 1)
-    monkeypatch.setattr(connections, "direct_db_url", _session_direct_url)
-    with db.connect(direct=True, gate=process_gate) as conn:
+    with db.connect(direct=True, gate=process_gate, direct_url=_session_direct_url) as conn:
         params = conn.info.get_parameters()
         assert not params.get("application_name", "").startswith("ava:")
     assert _gated_process == []

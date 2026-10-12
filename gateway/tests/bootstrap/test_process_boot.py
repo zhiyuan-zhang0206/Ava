@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -54,10 +54,10 @@ def test_gateway_handles_retain_the_same_entry_gate(
     original = Database.__init__
 
     def build(
-        handle: Database, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        handle: Database, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
     ) -> None:
         gates.append(gate)
-        original(handle, config, gate=gate, local_host=local_host)
+        original(handle, config, gate=gate, direct_url=direct_url)
 
     process = GatewayProcess(
         config=snapshot_process_config(), image=LOADED_IMAGE, machine=machine_identity

@@ -8,6 +8,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.incarnation.lifecycle_acceptance import accept_lifecycle_command
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAcceptance,
@@ -18,7 +19,6 @@ from base.agents.incarnation.native_restart_models import (
 )
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.native_cancel import observe_native_work_in_transaction
-from base.db import insert_inbound_message_in_transaction
 from base.db.transaction import write_transaction
 from base.lm.catalog import ModelCatalog
 from base.lm.model_config import validate_restart_model_config

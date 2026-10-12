@@ -5,7 +5,7 @@ owner, write generation 0, a credential-free `AVA_DB_URL`. The maintenance
 process here holds NO write-generation login: its `AVA_DB_URL` is the
 credential-free endpoint and no `AVA_DB_ADMIN_PASSWORD` exists anywhere. The
 scheduled dump must still work, because it dials the home's own authority
-(`base.db.pg_admin`): the OS-user administrator over the owner-only socket,
+(`base.cluster.dataplane.pg_admin`): the OS-user administrator over the owner-only socket,
 acting as the schema owner.
 """
 

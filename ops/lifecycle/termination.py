@@ -8,11 +8,12 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents import AgentNotFound, AgentStatus
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.incarnation.lifecycle_acceptance import (
     KILL_ALL_SHELL_SESSIONS,
 )
 from base.agents.messages.envelope import validate_source
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger

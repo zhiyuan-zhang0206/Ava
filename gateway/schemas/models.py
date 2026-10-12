@@ -9,7 +9,7 @@ from pydantic import (
     BaseModel,
 )
 
-from base.agents.birth_config import DefaultModelSource
+from base.agents.model.birth_config import DefaultModelSource
 from base.lm.registry import ReferenceTps
 
 

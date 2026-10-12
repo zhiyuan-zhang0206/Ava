@@ -16,9 +16,10 @@ from datetime import UTC, datetime
 from typing import NamedTuple
 from uuid import UUID, uuid4
 
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.cluster.machine import MachineIdentity
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.hold_driver import HoldDriver
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase

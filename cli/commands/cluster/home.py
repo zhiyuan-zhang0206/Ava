@@ -17,7 +17,7 @@ def _drop_dirs(home: Path) -> list[Path]:
     """What `--drop-db` deletes: the cluster's own data directories and the short
     Postgres socket directory under /tmp. One list for the prompt and the removal,
     so the prompt names exactly what goes."""
-    from base.db.pg_admin import pg_socket_path
+    from base.cluster.dataplane.pg_admin import pg_socket_path
 
     return [home / "pg", home / "redis", pg_socket_path(home)]
 

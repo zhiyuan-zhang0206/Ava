@@ -5,15 +5,16 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from base.agents.inbox.insert import insert_inbound_message
 from base.cluster import wake_key
 from base.config import settings
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 
 
 async def test_publish_sets_wake_key_too(database: Database, event_bus: EventBus) -> None:
     """The publisher writes the key alongside the pub/sub message (pinned
-    at the `base.db.publish_inbound_wake` boundary via
+    at the `base.agents.inbox.wake.publish_inbound_wake` boundary via
     `insert_inbound_message`), so a wake that the listener DOES receive
     leaves a breadcrumb for the next reconnect window too."""
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
@@ -32,7 +33,7 @@ async def test_publish_sets_wake_key_too(database: Database, event_bus: EventBus
 def test_unknown_wake_error_propagates(
     database: Database, event_bus: EventBus, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base.db import publish_inbound_wake
+    from base.agents.inbox.wake import publish_inbound_wake
     from base.events.live.tests.fakes import patch_sync_redis
 
     bug = AttributeError("wake bug")

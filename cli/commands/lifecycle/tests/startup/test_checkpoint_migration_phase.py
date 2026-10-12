@@ -74,7 +74,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     import base.deploy.schema.migrations
     from base import cluster
     from base.cluster import ownership
-    from base.db import pg_admin
+    from base.cluster.dataplane import pg_admin
 
     calls: list[str] = []
     owner = threading.current_thread()
@@ -141,7 +141,7 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
 ) -> None:
     """A locally owned plane migrates as the admin acting as the owner, then
     every capability shares the read-only post-migration checkpoint gate."""
-    from base.db import pg_admin
+    from base.cluster.dataplane import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
     authority = pg_admin.local_owner_authority()
@@ -189,7 +189,7 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 ) -> None:
     """A dial that dropped the startup role (a pooler) would create
     superuser-owned objects; the owner check refuses before any DDL."""
-    from base.db import pg_admin
+    from base.cluster.dataplane import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
     owner = threading.current_thread()
@@ -215,8 +215,8 @@ def test_remote_managed_migration_preserves_explicit_provider_authority(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
+    from base.cluster.dataplane import pg_admin
     from base.config import settings
-    from base.db import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
@@ -243,8 +243,8 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
     must reach the data directory the authority names.
     """
     from base.cluster import ownership
+    from base.cluster.dataplane import pg_admin
     from base.config import settings
-    from base.db import pg_admin
 
     row = conn.execute(
         "SELECT current_setting('data_directory'), current_database(), current_user"

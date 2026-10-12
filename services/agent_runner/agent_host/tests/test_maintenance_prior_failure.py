@@ -17,9 +17,10 @@ from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from base.db import Database, insert_inbound_message
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.events.live.bus import EventBus

@@ -261,7 +261,7 @@ def prepare_memory_vectors(*, database_factory: DatabaseFactory) -> None:
 
     if settings.services.memory_search_backend != "pgvector":
         return
-    from base.db.pg_admin import local_owner_authority
+    from base.cluster.dataplane.pg_admin import local_owner_authority
     from services.derived.memory_indexer.backends.pgvector import prepare_table
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
@@ -295,7 +295,7 @@ def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connec
     autocommit, custody-checked against the home's own postmaster."""
     from psycopg.conninfo import make_conninfo
 
-    from base.db import pg_admin
+    from base.cluster.dataplane import pg_admin
     from base.paths import ava_home
     from cli.commands.data_plane.cluster_instance import pg_admin_url
 

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from base import telemetry
 from base.clock import Clock, clock_config_from_boot
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -267,7 +268,9 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="pg_backup")
 
     def database() -> Database:
-        return Database(db_config_from_boot(config), gate=gate, local_host=machine.host)
+        return Database(
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(

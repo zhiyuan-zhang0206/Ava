@@ -12,9 +12,10 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
+from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
-from base.db import Database, create_agent, insert_inbound_message
+from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation

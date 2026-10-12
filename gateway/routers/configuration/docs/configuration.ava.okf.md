@@ -14,7 +14,7 @@ cluster and agent fields use the gateway's configuration owner. GET also exposes
 the resolved model configuration and its field sources.
 
 `default_model.py` serves `/api/config/default-model`. It reads or updates the
-cluster default for new agent births through `base.agents.birth_config`. The
+cluster default for new agent births through `base.agents.model.birth_config`. The
 model registry validates writes; existing agents retain their frozen model.
 
 `gateway/app.py` mounts both routers at their existing API paths. Runtime

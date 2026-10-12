@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -74,11 +75,11 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
         return image
 
     def build_database(
-        value: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+        value: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
     ) -> Database:
         assert value == db_config_from_boot(process_config)
         gates.append(gate)
-        readers.append(local_host)
+        readers.append(direct_url.local_host)
         return database
 
     def build_pipeline(

@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, Settings, get_field, settings
 from base.config.domains.lm import LmSettings
@@ -191,9 +192,9 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
 
     class Store:
         def __init__(
-            self, config: DbConfig, *, gate: ProcessDbGate, local_host: Callable[[], str]
+            self, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
         ) -> None:
-            assert local_host == machines[0].host
+            assert direct_url.local_host == machines[0].host
             gates.append(gate)
 
     def capture() -> LoadedCommit:

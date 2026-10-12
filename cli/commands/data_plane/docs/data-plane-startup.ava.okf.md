@@ -56,7 +56,7 @@ observed connection; a reconnect loses authority and fails. PostgreSQL admin
 and pooler dials use only the home's canonical Unix socket directory. Owned
 provisioning, checkpoint, grant and migration dials verify their native
 backend against the home's postmaster before DDL, which acts as the schema
-owner (`base.db.pg_admin`).
+owner (`base.cluster.dataplane.pg_admin`).
 
 The layout and bind facts the cli and the root diagnostics must agree on live in
 `base.cluster`, not in the cli: the Redis data directory and port

@@ -27,12 +27,13 @@ from agent.graph import node_log as _node_log
 from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import AvaContext
+from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.db import Database, insert_inbound_message
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices

@@ -12,14 +12,15 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from base import telemetry
-from base.agents.birth_config import resolve_birth_config
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation.manifest import record_central_event
+from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
 from base.agents.incarnation.resources import ResourceBirth
 from base.agents.labels import spawn_prompt_with_label
+from base.agents.model.birth_config import resolve_birth_config
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.db import fetch_one, insert_spawn_prompt_in_transaction
+from base.db import fetch_one
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger

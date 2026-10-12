@@ -9,8 +9,9 @@ from langchain_core.messages import HumanMessage
 from agent.messages import system_note_message
 from base.agents.impersonation.history import export_handoff, metadata
 from base.agents.impersonation.notes import HandoffNotes
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.kwargs import NoteTag
-from base.db import Database, publish_inbound_wake
+from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 

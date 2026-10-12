@@ -12,7 +12,7 @@ class only binds one `DbConfig` to them.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -22,6 +22,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.db import connections
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_settings
+from base.db.connections import DirectUrlResolver
 
 
 class Database:
@@ -32,21 +33,21 @@ class Database:
         config: DbConfig,
         *,
         gate: ProcessDbGate,
-        local_host: Callable[[], str] | None = None,
+        direct_url: DirectUrlResolver | None = None,
     ) -> None:
         self._config = config
         self._gate = gate
-        self._local_host = local_host
+        self._direct_url = direct_url
 
     @classmethod
     def from_settings(
         cls,
         *,
         gate: ProcessDbGate,
-        local_host: Callable[[], str] | None = None,
+        direct_url: DirectUrlResolver | None = None,
     ) -> Database:
         """The composition-root constructor: the config as the live settings hold it now."""
-        return cls(db_config_from_settings(), gate=gate, local_host=local_host)
+        return cls(db_config_from_settings(), gate=gate, direct_url=direct_url)
 
     def connect(
         self, *, autocommit: bool = False, direct: bool = False, unbounded: bool = False
@@ -58,7 +59,7 @@ class Database:
             unbounded=unbounded,
             config=self._config,
             gate=self._gate,
-            local_host=self._local_host,
+            direct_url=self._direct_url,
         )
 
     def pool(
@@ -83,7 +84,7 @@ class Database:
             row_factory=row_factory,
             config=self._config,
             gate=self._gate,
-            local_host=self._local_host,
+            direct_url=self._direct_url,
         )
 
     def async_pool(
@@ -108,7 +109,7 @@ class Database:
 
     def direct_url(self) -> str:
         """The admin-plane URL of this handle's cluster (never through the pooler)."""
-        return connections.direct_db_url(self._config, local_host=self._local_host)
+        return connections.require_direct_url(self._direct_url)(self._config)
 
     @contextmanager
     def write_transaction(self) -> Generator[psycopg.Connection, None, None]:
