@@ -1,0 +1,2 @@
+[external]
+"schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"

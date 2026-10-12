@@ -1,0 +1,5 @@
+[loads]
+"plugin_loader.py" = ["ava_builtins/plugins"]
+
+[external]
+"plugin_loader.py" = "also loads operator-installed plugins from $AVA_HOME/plugins, outside the repository"

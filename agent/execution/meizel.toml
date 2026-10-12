@@ -1,0 +1,2 @@
+[external]
+"child.py" = "executes the agent-authored code of one execute_code call"

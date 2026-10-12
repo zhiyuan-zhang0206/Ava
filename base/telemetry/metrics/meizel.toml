@@ -1,0 +1,2 @@
+[loads]
+"grafana_dashboard_supply.py" = ["ava_builtins/plugins"]
