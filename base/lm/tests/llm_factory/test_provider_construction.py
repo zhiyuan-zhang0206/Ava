@@ -10,6 +10,7 @@ deepseek-* uses ChatAnthropic + DeepSeek anthropic-compatible endpoint
 
 from __future__ import annotations
 
+import os
 from dataclasses import fields
 
 import pytest
@@ -527,6 +528,77 @@ class TestProviderConstruction:
         )
         assert isinstance(m, ChatAnthropic)
         assert m.disable_streaming is False
+
+    def test_deepseek_gateway_popped_key_falls_back_to_env_file(
+        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    ) -> None:
+        """A gateway profile pops DEEPSEEK_API_KEY from os.environ (Task #856).
+
+        The gateway-side draft model (reply-suggestion, deepseek-flash) builds in
+        that process; the build must consume the unit's `.env` file fallback — the
+        same channel spawn validation reads (Task #1562) — and must not write the
+        key back into os.environ. Regression for #5079.
+        """
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "base.host.env.runtime_config.read_env_aliases",
+            lambda: {"DEEPSEEK_API_KEY": "sk-file-value"},
+        )
+
+        m = build_chat_model(
+            "deepseek-flash",
+            catalog=model_catalog,
+            llm_override=settings.lm.llm_override,
+            overrides=ModelOverrides.from_pins(
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
+            ),
+        )
+
+        assert isinstance(m, ChatAnthropic)
+        assert m.anthropic_api_key.get_secret_value() == "sk-file-value"
+        assert "DEEPSEEK_API_KEY" not in os.environ
+
+    def test_deepseek_env_var_still_wins_over_env_file(
+        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    ) -> None:
+        """os.environ stays first in the channel: a set env var is used as-is."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env-value")
+        monkeypatch.setattr(
+            "base.host.env.runtime_config.read_env_aliases",
+            lambda: {"DEEPSEEK_API_KEY": "sk-file-value"},
+        )
+
+        m = build_chat_model(
+            "deepseek-flash",
+            catalog=model_catalog,
+            llm_override=settings.lm.llm_override,
+            overrides=ModelOverrides.from_pins(
+                {field.name: get_field(field.name) for field in fields(ModelOverrides)}
+            ),
+        )
+
+        assert isinstance(m, ChatAnthropic)
+        assert m.anthropic_api_key.get_secret_value() == "sk-env-value"
+
+    def test_deepseek_missing_key_in_both_channels_still_raises(
+        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    ) -> None:
+        """Neither channel carries the key → the fail-fast RuntimeError holds."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
+
+        with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
+            build_chat_model(
+                "deepseek-flash",
+                catalog=model_catalog,
+                llm_override=settings.lm.llm_override,
+                overrides=ModelOverrides.from_pins(
+                    {field.name: get_field(field.name) for field in fields(ModelOverrides)}
+                ),
+            )
 
     def test_gemini_defaults_to_streaming(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
