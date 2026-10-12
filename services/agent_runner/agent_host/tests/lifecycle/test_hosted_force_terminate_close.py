@@ -159,12 +159,9 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
             aops_pool,
             aops_pool,
             event_bus,
-            Mock(),
             incarnation,
             outcome,
             resources=None,
-            prompt_reap_enabled=configured_policy().recrash_reap_enabled,
-            reconcile_inputs=configured_policy().reconcile_inputs,
         )
         assert db_conn.execute(
             "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)

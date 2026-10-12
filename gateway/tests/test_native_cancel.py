@@ -17,7 +17,6 @@ from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.settlement import close_hosted_turn
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
     blocked_host,
@@ -170,7 +169,7 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
     async def unexpected(_state: object) -> None:
         raise original_error
 
-    _graph, saver, host, context = await blocked_host(
+    _graph, _saver, host, context = await blocked_host(
         aops_pool,
         unexpected,
         model_catalog=model_catalog,
@@ -186,12 +185,9 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
             aops_pool,
             aops_pool,
             host._bus,
-            saver,
             incarnation,
             TurnOutcome(exited=False, crashed=True),
             resources=resources,
-            prompt_reap_enabled=configured_policy().recrash_reap_enabled,
-            reconcile_inputs=configured_policy().reconcile_inputs,
         )
         assert resources.require_service().failures == [(resources, original_error)]
     row = db_conn.execute(

@@ -33,7 +33,7 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
         built.append((llm_model, overrides))
         return object(), None
 
-    monkeypatch.setattr(host_module, "reconcile_claimed_inbounds_at_startup", AsyncMock())
+    monkeypatch.setattr(host_module, "consume_claimed_inbounds", AsyncMock())
     monkeypatch.setattr(host_module, "repair_dangling_tool_use_at_startup", AsyncMock())
     monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
     host = AgentHost(

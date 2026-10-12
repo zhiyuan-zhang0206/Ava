@@ -10,7 +10,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import (
     claim_inbound_batch,
     finalize_claimed_inbounds,
-    reconcile_claimed_inbounds,
 )
 from agent.graph.claim._batch import _defer_chats_to_pending
 from agent.ownership.hosted import admit_hosted_runtime
@@ -288,8 +287,8 @@ async def test_missing_redis_publish_recovers_from_durable_pg(
     ] == [inbound]
 
 
-@pytest.mark.parametrize("action", ["reconcile_empty", "reconcile_committed", "finalize", "defer"])
-async def test_old_owner_cannot_reconcile_finalize_or_defer_successor_work(
+@pytest.mark.parametrize("action", ["finalize", "defer"])
+async def test_old_owner_cannot_finalize_or_defer_successor_work(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     action: str,
@@ -301,11 +300,7 @@ async def test_old_owner_cannot_reconcile_finalize_or_defer_successor_work(
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     stale = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     with pytest.raises(RuntimeOwnershipLostError):
-        if action == "reconcile_empty":
-            await reconcile_claimed_inbounds(aops_pool, agent_id, set(), incarnation=stale)
-        elif action == "reconcile_committed":
-            await reconcile_claimed_inbounds(aops_pool, agent_id, {inbound}, incarnation=stale)
-        elif action == "finalize":
+        if action == "finalize":
             await finalize_claimed_inbounds(aops_pool, agent_id, incarnation=stale)
         else:
             await _defer_chats_to_pending(aops_pool, agent_id, [inbound], incarnation=stale)
@@ -327,9 +322,7 @@ async def test_chat_finalization_does_not_ack_lifecycle_intent(
     db_conn.commit()
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     assert await finalize_claimed_inbounds(aops_pool, agent_id, incarnation=owner) == 1
-    assert await reconcile_claimed_inbounds(
-        aops_pool, agent_id, {lifecycle}, incarnation=owner
-    ) == (0, 0, 0)
+    assert await finalize_claimed_inbounds(aops_pool, agent_id, incarnation=owner) == 0
     assert db_conn.execute(
         "SELECT id,status FROM inbound_messages WHERE id=ANY(%s) ORDER BY id", ([chat, lifecycle],)
     ).fetchall() == [(chat, "done"), (lifecycle, "claimed")]

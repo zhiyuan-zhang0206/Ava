@@ -21,7 +21,6 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 from agent.messages.guard import guarded_delta_reducer
-from agent.startup import reconcile_claimed_inbounds_at_startup
 from base.agents.history.checkpoint import (
     load_checkpoint_message_count,
     load_checkpoint_messages_full,
@@ -466,72 +465,3 @@ async def test_fork_at_a_boundary_replicates_the_source_state(
     vanilla = _vanilla_app(saver)
     assert _ids((await vanilla.aget_state(_config(str(t_b1)))).values["messages"]) == src_b1
     assert _ids((await vanilla.aget_state(_config(str(t_b2)))).values["messages"]) == src_b2
-
-
-async def test_startup_reconcile_reads_reconstructed_delta_state(
-    aops_pool: AsyncConnectionPool, db_conn: psycopg.Connection
-) -> None:
-    """Review #6143 x8: a claimed inbound whose HumanMessage already committed
-    into a delta-written thread must be flipped to `done`, not reset to
-    `pending` (which would re-deliver it)."""
-    agent_id = create_agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO agents_meta (id,status,machine) VALUES (%s,'idling','drc-test') "
-        "ON CONFLICT (id) DO UPDATE SET status='idling',machine='drc-test'",
-        (agent_id,),
-    )
-    row = db_conn.execute(
-        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-        "VALUES (%s, 'durable', 'chat', 'user') RETURNING id",
-        (agent_id,),
-    ).fetchone()
-    assert row is not None
-    inbound = row[0]
-    db_conn.execute(
-        "UPDATE inbound_messages SET status = 'claimed', claimed_at = now() WHERE id = %s",
-        (inbound,),
-    )
-    db_conn.commit()
-
-    saver = _saver(aops_pool)
-    delta = _delta_app(saver)
-    cfg = _config(str(agent_id))
-    await delta.ainvoke(  # pyright: ignore[reportUnknownMemberType]
-        {
-            "messages": [
-                HumanMessage(
-                    id="inb0",
-                    content="committed request",
-                    additional_kwargs={"ava_inbound_id": inbound},
-                )
-            ],
-            "n": 0,
-            "target": 2,
-        },
-        cfg,
-        recursion_limit=40,
-    )
-
-    wrap_saver_reads_with_delta_reconstruction(saver)
-    from base.agents.history.inbound_sideload import ReconcileReadInputs
-    from base.config import settings
-
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent_id,
-        incarnation=None,
-        inputs=ReconcileReadInputs(
-            stale_claimed_seconds=lambda: (
-                settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
-            ),
-            clock_pad_seconds=lambda: settings.daemon.inbound_reconcile_clock_pad_seconds,
-            boundary_scan_limit=lambda: settings.daemon.inbound_reconcile_boundary_scan_limit,
-            window_row_cap=lambda: settings.daemon.inbound_reconcile_window_row_cap,
-        ),
-    )
-
-    status = db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE id = %s", (inbound,)
-    ).fetchone()
-    assert status == ("done",), "committed delta-thread inbound must not be re-delivered"

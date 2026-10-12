@@ -410,51 +410,17 @@ async def list_chat_inbound_anchors(pool: AsyncConnectionPool, agent_id: int) ->
     return [InboundRow(*r) for r in rows]
 
 
-async def reconcile_claimed_inbounds(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    committed_inbound_ids: set[int],
-    *,
-    incarnation: RuntimeIncarnation | None,
-) -> tuple[int, int, int]:
-    """Consume claimed chat after interruption; never automatically redeliver.
-
-    Returns (confirmed, redelivered, interrupted). The queue's done status means
-    consumed, not successful execution. Unconfirmed rows have unknown results;
-    new messages are separate inputs and pending rows remain available.
-    The caller must hold the admitted identity and serialize against claims.
-    """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
-        await cur.execute(
-            "UPDATE inbound_messages SET status='done' WHERE status='claimed' "
-            "AND kind='chat' AND agent_id=%s AND id=ANY(%s)",
-            (agent_id, sorted(committed_inbound_ids)),
-        )
-        committed = cur.rowcount
-        await cur.execute(
-            "UPDATE inbound_messages SET status='done' WHERE status='claimed' "
-            "AND kind='chat' AND agent_id=%s",
-            (agent_id,),
-        )
-        interrupted = cur.rowcount
-    if interrupted:
-        logger.warning(
-            "consumed {count} interrupted inbound(s) with unknown results; no redelivery",
-            agent_id=agent_id,
-            count=interrupted,
-        )
-    return committed, 0, interrupted
-
-
 async def finalize_claimed_inbounds(
     pool: AsyncConnectionPool | None, agent_id: int, *, incarnation: RuntimeIncarnation | None
 ) -> int:
-    """Consume claimed chats at the compaction boundary under the owner lock.
+    """Consume every claimed chat of this agent under the owner lock.
 
-    Co-batched chats deferred before any execution remain pending for the fresh
-    context. Other claims stay consumed even when compaction removes their history.
-    A missing pool in container/eval mode is a no-op.
+    The queue's done status means consumed, not successfully executed: a claim
+    whose execution was interrupted has an unknown result and is never
+    redelivered. Used at the compaction boundary and when a turn ends, aborts or
+    a runtime is rebuilt. Co-batched chats deferred before any execution remain
+    pending for the fresh context. The caller must hold the admitted identity. A
+    missing pool in container/eval mode is a no-op.
     """
     if pool is None:
         return 0

@@ -9,15 +9,11 @@ from __future__ import annotations
 from pydantic import Field
 
 from base.config.base import EnvSettings
-from base.config.domains.daemon.delivery_watchdog_fields import (
-    DeliveryWatchdogFields,
-    InboundReconcileFields,
-)
+from base.config.domains.daemon.delivery_watchdog_fields import DeliveryWatchdogFields
 
 
 class DaemonSettings(
     DeliveryWatchdogFields,
-    InboundReconcileFields,
     EnvSettings,
 ):
     host_max_concurrent_turns: int = Field(
@@ -125,48 +121,6 @@ class DaemonSettings(
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
-        },
-    )
-
-    host_abort_reconcile_enabled: bool = Field(
-        default=True,
-        alias="AVA_HOST_ABORT_RECONCILE_ENABLED",
-        description="Hosted agent-runner: at a settled turn abort, dispose the turn's claimed 'chat' inbounds immediately (committed to the flushed checkpoint -> done, uncommitted -> pending for the next claim, past the stale threshold -> dead-lettered) instead of waiting for a cold admission or boot that may never come. Off restores the deferred behavior; every non-abort crash keeps deferring to the next cold admission's reconcile.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    host_turn_reconcile_enabled: bool = Field(
-        default=True,
-        alias="AVA_HOST_TURN_RECONCILE_ENABLED",
-        description="Hosted agent-runner: at every finished non-crashed turn, dispose the turn's claimed 'chat' inbounds immediately (committed to the flushed checkpoint -> done, uncommitted -> pending for the next claim, past the stale threshold -> dead-lettered) instead of leaving them claimed until the next cold admission or abort. The throttled checkpoint tail is flushed first; off restores the deferred behavior.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    hosted_recrash_prompt_reap_enabled: bool = Field(
-        default=False,
-        alias="AVA_HOSTED_RECRASH_PROMPT_REAP_ENABLED",
-        description="Hosted agent-runner: terminate a crash-marked corpse immediately when a second turn crash settles under the same mark (task #3616) — the first grace window is kept whole; a retry that died again has spent its chance, and only a zombie spending the rest claiming and re-dying is left otherwise. Off keeps today's grace-only semantics; gray release off->on, flipped per host after observing the first enable.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
         },
     )
 

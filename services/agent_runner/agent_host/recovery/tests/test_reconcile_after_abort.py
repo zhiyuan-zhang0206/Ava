@@ -1,47 +1,35 @@
-"""Real-row abort settlement and claim-window side-load contracts.
+"""Real-row abort settlement: every claimed chat is consumed, none is redelivered.
 
-The same startup reconcile disposes rows left claimed after a hosted abort.
-Coverage includes ownership fences, idempotency and committed-row suppression.
-Committed IDs come from claim-window message writes; normal paths do not read
-settled checkpoints. Interrupted claims are consumed even without commit proof,
-so an abort cannot cause execution to replay.
+The same `consume_claimed_inbounds` pass disposes rows left claimed after a
+hosted abort, at turn end and on cold admission. Coverage includes ownership
+fences and idempotency. The pass never reads checkpoint history: an interrupted
+claim has an unknown result whether or not its message reached the checkpoint,
+so it is consumed and an abort cannot cause execution to replay.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
-from uuid import uuid4
+from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import psycopg
-from langchain_core.messages import HumanMessage, RemoveMessage
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.graph import START, StateGraph
-from langgraph.graph.message import REMOVE_ALL_MESSAGES
+import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent import state as states
 from agent.db import claim_inbound_batch
-from agent.startup import reconcile_claimed_inbounds_at_startup
-from base.agents.context import AvaContext
-from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from base.agents.history.inbound_sideload import (
-    _claim_window_start,
-    _messages_writes_in_window,
-    committed_ids_for_reconcile,
-    sideload_committed_ids,
-)
-from base.agents.history.tests.test_inbound_sideload_failures import _read_inputs
+from agent.startup import consume_claimed_inbounds
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import settlement as settlement_mod
-from services.agent_runner.agent_host.tests.history.checkpoint_inputs import (
-    insert_checkpoint,
-    insert_write,
-)
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit as _admit
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -67,56 +55,7 @@ def row_statuses(conn: psycopg.Connection[Any], ids: list[int]) -> dict[int, str
     return {int(r[0]): str(r[1]) for r in rows}
 
 
-class _CountingSaver(AsyncPostgresSaver):
-    """Saver that counts full-checkpoint reads — the path the side-load removes."""
-
-    aget_calls: int = 0
-
-    async def aget(self, config: Any) -> Any:
-        self.aget_calls += 1
-        return await super().aget(config)
-
-
-def _build_graph(saver: AsyncPostgresSaver) -> Any:
-    async def work(_state: states.BaseAgentState) -> dict[str, object]:
-        return {}
-
-    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
-    builder.add_node("work", work)
-    builder.add_edge(START, "work")
-    builder.add_edge("work", "__end__")
-    return builder.compile(checkpointer=saver)
-
-
-async def seed_checkpoint(
-    pool: AsyncConnectionPool[Any],
-    agent: int,
-    committed_id: int,
-    *,
-    saver_cls: type[AsyncPostgresSaver] = AsyncPostgresSaver,
-) -> AsyncPostgresSaver:
-    """A settled checkpoint holding `committed_id` as a committed message."""
-
-    saver = saver_cls(pool)
-    await saver.setup()
-    # Delta write model (#3180): fold delta-written messages on read (daemon parity).
-    wrap_saver_reads_with_delta_reconstruction(saver)
-    graph = _build_graph(saver)
-    await graph.aupdate_state(
-        {"configurable": {"thread_id": str(agent)}},
-        {
-            "messages": [
-                HumanMessage(
-                    content="committed", additional_kwargs={"ava_inbound_id": committed_id}
-                )
-            ]
-        },
-        as_node="work",
-    )
-    return saver
-
-
-async def test_settled_abort_splits_committed_orphan_and_stale_rows(
+async def test_settled_abort_consumes_every_claimed_row(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -127,7 +66,7 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Abort settlement consumes committed, orphaned and stale claims."""
+    """Abort settlement consumes young and stale claims alike, with no history read."""
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
@@ -136,27 +75,17 @@ async def test_settled_abort_splits_committed_orphan_and_stale_rows(
         local_machine=machine_identity,
     )
     agent = incarnation.agent_id
-    committed = claimed_row(db_conn, agent, "committed")
-    orphan = claimed_row(db_conn, agent, "orphan")
+    young = claimed_row(db_conn, agent, "young")
     stale = claimed_row(db_conn, agent, "stale", age=timedelta(days=2))
-    saver = await seed_checkpoint(aops_pool, agent, committed)
 
-    await settlement_mod.reconcile_inbounds_after_abort(
-        aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
-    )
+    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, incarnation, resources=None)
 
-    assert row_statuses(db_conn, [committed, orphan, stale]) == {
-        committed: "done",
-        orphan: "done",
-        stale: "done",
-    }
+    assert row_statuses(db_conn, [young, stale]) == {young: "done", stale: "done"}
     records = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
-    assert len(records) == 1
-    extra = records[0]["extra"]
-    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 0, 2)
+    assert [r["extra"]["consumed"] for r in records] == [2]
 
 
-async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
+async def test_boot_consume_after_the_abort_pass_changes_nothing(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -177,26 +106,37 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
         local_machine=machine_identity,
     )
     agent = incarnation.agent_id
-    committed = claimed_row(db_conn, agent, "committed")
-    orphan = claimed_row(db_conn, agent, "orphan")
-    saver = await seed_checkpoint(aops_pool, agent, committed)
+    claimed = claimed_row(db_conn, agent, "claimed")
 
-    await settlement_mod.reconcile_inbounds_after_abort(
-        aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
-    )
-    settled = {committed: "done", orphan: "done"}
-    assert row_statuses(db_conn, [committed, orphan]) == settled
+    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, incarnation, resources=None)
+    assert row_statuses(db_conn, [claimed]) == {claimed: "done"}
     logged = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
+    await consume_claimed_inbounds(aops_pool, agent, incarnation=incarnation)
 
-    assert row_statuses(db_conn, [committed, orphan]) == settled
+    assert row_statuses(db_conn, [claimed]) == {claimed: "done"}
     assert [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"] == logged
+
+
+async def test_no_claimed_rows_is_silent(
+    redis_url: str,
+    aops_pool: AsyncConnectionPool[Any],
+    loguru_records: list[dict[str, Any]],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    incarnation = await _admit(
+        aops_pool,
+        model_catalog=model_catalog,
+        config_authority=config_authority,
+        database_gate=database_gate,
+        local_machine=machine_identity,
+    )
+    await consume_claimed_inbounds(aops_pool, incarnation.agent_id, incarnation=incarnation)
+
+    assert not [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
 
 
 async def test_next_claim_does_not_re_deliver_any_interrupted_row(
@@ -209,7 +149,7 @@ async def test_next_claim_does_not_re_deliver_any_interrupted_row(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Neither committed input nor an unproven orphan is retried after abort."""
+    """No interrupted claim is retried after abort."""
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
@@ -218,88 +158,32 @@ async def test_next_claim_does_not_re_deliver_any_interrupted_row(
         local_machine=machine_identity,
     )
     agent = incarnation.agent_id
-    committed = claimed_row(db_conn, agent, "committed")
-    orphan = claimed_row(db_conn, agent, "orphan")
-    saver = await seed_checkpoint(aops_pool, agent, committed)
+    first = claimed_row(db_conn, agent, "first")
+    second = claimed_row(db_conn, agent, "second")
 
-    await settlement_mod.reconcile_inbounds_after_abort(
-        aops_pool, saver, incarnation, resources=None, inputs=configured_policy().reconcile_inputs
-    )
+    await settlement_mod.reconcile_inbounds_after_abort(aops_pool, incarnation, resources=None)
     claimed = await claim_inbound_batch(aops_pool, agent, incarnation=incarnation, work=None)
 
     assert claimed == []
-    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
+    assert row_statuses(db_conn, [first, second]) == {first: "done", second: "done"}
 
 
-async def _seed_counting_checkpoint(
-    pool: AsyncConnectionPool[Any], agent: int, committed_id: int
-) -> _CountingSaver:
-    """`seed_checkpoint` on a read-counting saver — the side-load's no-read proof."""
-    return cast(
-        _CountingSaver,
-        await seed_checkpoint(pool, agent, committed_id, saver_cls=_CountingSaver),
-    )
-
-
-async def _seed_delta_written_checkpoint(
-    pool: AsyncConnectionPool[Any],
-    agent: int,
-    committed_id: int,
+async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
     *,
-    message_id: str = "m-1",
-    remove_after: bool = False,
-) -> _CountingSaver:
-    """A delta-written thread: the committed message as a `messages` write row.
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    """The cold runtime build consumes claims whatever the checkpoint holds.
 
-    Runs the graph so the write is actually applied by a successor checkpoint.
-    ``aput_writes`` alone only stores a pending write, not a settled message.
-    ``remove_after`` runs a later full wipe through the same graph.
+    The checkpointer handed to the host is unusable: any read of it raises, so
+    consumption cannot depend on history evidence of what was committed.
     """
-
-    saver = _CountingSaver(pool)
-    await saver.setup()
-    wrap_saver_reads_with_delta_reconstruction(saver)
-    graph = _build_graph(saver)
-    config = {"configurable": {"thread_id": str(agent)}}
-    await graph.ainvoke(
-        {
-            "messages": [
-                HumanMessage(
-                    id=message_id,
-                    content="committed",
-                    additional_kwargs={"ava_inbound_id": committed_id},
-                )
-            ]
-        },
-        config,
-    )
-    if remove_after:
-        await graph.ainvoke({"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}, config)
-    settled = await saver.aget(config)
-    settled_state = cast("dict[str, Any]", settled or {})
-    messages = cast(
-        "list[HumanMessage]", settled_state.get("channel_values", {}).get("messages", [])
-    )
-    settled_ids = {
-        msg.additional_kwargs["ava_inbound_id"]
-        for msg in messages
-        if "ava_inbound_id" in msg.additional_kwargs
-    }
-    assert settled_ids == (set() if remove_after else {committed_id})
-    saver.aget_calls = 0
-    return saver
-
-
-async def test_no_claimed_rows_never_reads_the_checkpoint(
-    redis_url: str,
-    aops_pool: AsyncConnectionPool[Any],
-    loguru_records: list[dict[str, Any]],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
     incarnation = await _admit(
         aops_pool,
         model_catalog=model_catalog,
@@ -308,490 +192,23 @@ async def test_no_claimed_rows_never_reads_the_checkpoint(
         local_machine=machine_identity,
     )
     agent = incarnation.agent_id
-    saver = _CountingSaver(aops_pool)
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
+    claimed = claimed_row(db_conn, agent, "claimed")
+    unusable_saver = Mock()
+    monkeypatch.setattr(host_module, "repair_dangling_tool_use_at_startup", AsyncMock())
+    monkeypatch.setattr(host_module, "build_runtime", AsyncMock())
+    host = AgentHost(
+        policy=configured_policy(),
+        pool=aops_pool,
+        checkpointer=unusable_saver,
+        graph=Mock(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(gate=database_gate),
+        catalog=model_catalog,
+        machine=configured_machine(),
     )
+    slices = AgentSlices.resolve(default_reader=configured_policy().default_reader)
 
-    assert saver.aget_calls == 0
-    assert not [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
-
-
-async def test_only_stale_claims_skip_the_read_and_dead_letter(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    loguru_records: list[dict[str, Any]],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    stale = claimed_row(db_conn, agent, "stale", age=timedelta(days=2))
-    saver = _CountingSaver(aops_pool)
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
-
-    assert saver.aget_calls == 0
-    assert row_statuses(db_conn, [stale]) == {stale: "done"}
-    records = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
-    extra = records[0]["extra"]
-    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (0, 0, 1)
-
-
-async def test_mixed_claims_fall_back_for_unproven_orphan(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    loguru_records: list[dict[str, Any]],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    committed = claimed_row(db_conn, agent, "committed")
-    orphan = claimed_row(db_conn, agent, "orphan")
-    saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed)
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
-
-    assert saver.aget_calls == 1
-    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
-    records = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
-    extra = records[0]["extra"]
-    assert (extra["committed"], extra["reset"], extra["dead_lettered"]) == (1, 0, 1)
-
-
-async def test_committed_and_later_removed_is_finalized_not_reset(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """The window proof finalizes a commit the list-presence check would reset."""
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    committed = claimed_row(db_conn, agent, "committed")
-    saver = await _seed_delta_written_checkpoint(aops_pool, agent, committed, remove_after=True)
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
-
-    assert saver.aget_calls == 0
-    assert row_statuses(db_conn, [committed]) == {committed: "done"}
-
-
-async def test_pending_write_without_successor_is_consumed(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A pending write cannot prove a commit or authorize execution replay."""
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    claimed = claimed_row(db_conn, agent, "pending write")
-    saver = _CountingSaver(aops_pool)
-    await saver.setup()
-    graph = _build_graph(saver)
-    base = await graph.aupdate_state(
-        {"configurable": {"thread_id": str(agent)}}, {"halted": False}, as_node="work"
-    )
-    await saver.aput_writes(
-        base,
-        [
-            (
-                "messages",
-                [HumanMessage(content="pending", additional_kwargs={"ava_inbound_id": claimed})],
-            )
-        ],
-        str(uuid4()),
-    )
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
+    await host._build_runtime(agent, "fingerprint", slices, incarnation=incarnation)
 
     assert row_statuses(db_conn, [claimed]) == {claimed: "done"}
-
-
-async def test_pending_write_with_unrelated_successor_is_consumed(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """An unrelated successor cannot authorize replay of an interrupted claim."""
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    claimed = claimed_row(db_conn, agent, "unapplied write")
-    saver = _CountingSaver(aops_pool)
-    await saver.setup()
-    graph = _build_graph(saver)
-    config = {"configurable": {"thread_id": str(agent)}}
-    base = await graph.aupdate_state(config, {"halted": False}, as_node="work")
-    await saver.aput_writes(
-        base,
-        [
-            (
-                "messages",
-                [HumanMessage(content="unapplied", additional_kwargs={"ava_inbound_id": claimed})],
-            )
-        ],
-        str(uuid4()),
-    )
-    await graph.aupdate_state(config, {"halted": True}, as_node="work")
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
-
-    assert row_statuses(db_conn, [claimed]) == {claimed: "done"}
-
-
-async def test_unresolved_window_falls_back_to_the_full_read(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: Any,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    committed = claimed_row(db_conn, agent, "committed")
-    orphan = claimed_row(db_conn, agent, "orphan")
-    saver = await _seed_counting_checkpoint(aops_pool, agent, committed)
-
-    import base.agents.history.inbound_sideload as sideload_mod
-
-    async def _unresolved(*args: Any, **kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr(sideload_mod, "sideload_committed_ids", _unresolved)
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
-
-    assert saver.aget_calls == 1
-    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
-
-
-async def test_thread_without_messages_writes_falls_back_to_the_full_read(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A materialized thread (no write rows) must not read as "nothing committed"."""
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    committed = claimed_row(db_conn, agent, "committed")
-    orphan = claimed_row(db_conn, agent, "orphan")
-    saver = await _seed_counting_checkpoint(aops_pool, agent, committed)
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
-
-    assert saver.aget_calls == 1
-    assert row_statuses(db_conn, [committed, orphan]) == {committed: "done", orphan: "done"}
-
-
-async def test_materialized_thread_with_only_pending_write_falls_back(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A pending write does not prove the thread uses settled message deltas."""
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    committed = claimed_row(db_conn, agent, "materialized")
-    saver = await _seed_counting_checkpoint(aops_pool, agent, committed)
-    tuple_ = await saver.aget_tuple({"configurable": {"thread_id": str(agent)}})
-    assert tuple_ is not None
-    await saver.aput_writes(
-        tuple_.config,
-        [("messages", [HumanMessage(content="pending")])],
-        str(uuid4()),
-    )
-    await reconcile_claimed_inbounds_at_startup(
-        aops_pool,
-        saver,
-        agent,
-        incarnation=incarnation,
-        inputs=configured_policy().reconcile_inputs,
-    )
-
-    assert saver.aget_calls == 1
-    assert row_statuses(db_conn, [committed]) == {committed: "done"}
-
-
-async def test_boundary_scan_resolves_the_first_older_checkpoint(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    agent = 879000001
-    cutoff = datetime.now(UTC) - timedelta(seconds=2)
-    insert_checkpoint(
-        db_conn,
-        agent,
-        "ffffffff-0000-6000-8000-000000000001",
-        (cutoff + timedelta(seconds=5)).isoformat(),
-    )
-    insert_checkpoint(
-        db_conn,
-        agent,
-        "eeeeeeee-0000-6000-8000-000000000002",
-        (cutoff + timedelta(seconds=1)).isoformat(),
-    )
-    insert_checkpoint(
-        db_conn,
-        agent,
-        "dddddddd-0000-6000-8000-000000000003",
-        (cutoff - timedelta(seconds=1)).isoformat(),
-    )
-
-    resolved, boundary = await _claim_window_start(aops_pool, agent, cutoff, scan_limit=10)
-    assert resolved is True
-    assert boundary == "dddddddd-0000-6000-8000-000000000003"
-
-
-async def test_boundary_scan_gives_up_past_its_limit(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    agent = 879000002
-    cutoff = datetime.now(UTC) - timedelta(seconds=5)
-    for i in range(3):
-        insert_checkpoint(
-            db_conn,
-            agent,
-            f"f0000000-0000-6000-8000-00000000000{i}",
-            (cutoff + timedelta(seconds=i + 1)).isoformat(),
-        )
-
-    assert await _claim_window_start(aops_pool, agent, cutoff, scan_limit=2) == (False, None)
-    assert await _claim_window_start(aops_pool, agent, cutoff, scan_limit=5) == (True, None)
-
-
-async def test_window_fetch_cap_never_truncates(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    agent = 879000003
-    checkpoint_id = "e0000000-0000-6000-8000-000000000009"
-    insert_checkpoint(
-        db_conn, agent, checkpoint_id, datetime.now(UTC).isoformat(), messages_version="v0"
-    )
-    insert_checkpoint(
-        db_conn,
-        agent,
-        "f0000000-0000-6000-8000-000000000009",
-        datetime.now(UTC).isoformat(),
-        parent_id=checkpoint_id,
-        messages_version="v1",
-    )
-    for idx in range(3):
-        insert_write(db_conn, agent, checkpoint_id, idx=idx, type_tag="msgpack", blob=b"\x80")
-
-    assert await _messages_writes_in_window(aops_pool, agent, None, row_cap=2) is None
-    rows = await _messages_writes_in_window(aops_pool, agent, None, row_cap=3)
-    assert rows is not None and len(rows) == 3
-
-
-async def test_sideload_decodes_inbound_ids_from_write_rows(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    agent = 879000004
-    saver = AsyncPostgresSaver(aops_pool)
-    type_tag, blob = saver.serde.dumps_typed(
-        [HumanMessage(content="x", additional_kwargs={"ava_inbound_id": 7})]
-    )
-    checkpoint_id = "e0000000-0000-6000-8000-00000000000a"
-    insert_checkpoint(
-        db_conn, agent, checkpoint_id, datetime.now(UTC).isoformat(), messages_version="v0"
-    )
-    insert_checkpoint(
-        db_conn,
-        agent,
-        "f0000000-0000-6000-8000-00000000000a",
-        datetime.now(UTC).isoformat(),
-        parent_id=checkpoint_id,
-        messages_version="v1",
-    )
-    insert_write(
-        db_conn,
-        agent,
-        checkpoint_id,
-        idx=0,
-        type_tag=str(type_tag),
-        blob=bytes(blob),
-    )
-
-    ids = await sideload_committed_ids(
-        aops_pool, saver, agent, since=datetime.now(UTC), inputs=_read_inputs()
-    )
-    assert ids == {7}
-
-
-async def test_reclaimed_row_keeps_its_first_claim_window(
-    redis_url: str,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A new claimed_at must not hide a commit from an earlier claim."""
-    incarnation = await _admit(
-        aops_pool,
-        model_catalog=model_catalog,
-        config_authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity,
-    )
-    agent = incarnation.agent_id
-    claimed = claimed_row(db_conn, agent, "reclaimed")
-    db_conn.execute(
-        "UPDATE inbound_messages SET created_at = now() - interval '20 minutes' WHERE id = %s",
-        (claimed,),
-    )
-    db_conn.commit()
-    saver = AsyncPostgresSaver(aops_pool)
-    parent_id = "e0000000-0000-6000-8000-00000000000b"
-    insert_checkpoint(
-        db_conn,
-        agent,
-        parent_id,
-        (datetime.now(UTC) - timedelta(minutes=10)).isoformat(),
-        messages_version="v0",
-    )
-    insert_checkpoint(
-        db_conn,
-        agent,
-        "f0000000-0000-6000-8000-00000000000b",
-        datetime.now(UTC).isoformat(),
-        parent_id=parent_id,
-        messages_version="v1",
-    )
-    type_tag, blob = saver.serde.dumps_typed(
-        [HumanMessage(content="reclaimed", additional_kwargs={"ava_inbound_id": claimed})]
-    )
-    insert_write(db_conn, agent, parent_id, idx=0, type_tag=str(type_tag), blob=bytes(blob))
-
-    assert await committed_ids_for_reconcile(aops_pool, saver, agent, inputs=_read_inputs()) == {
-        claimed
-    }
+    assert unusable_saver.method_calls == []
