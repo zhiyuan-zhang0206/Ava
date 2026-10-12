@@ -2,7 +2,7 @@
 
 CI's shards run `pytest -q`, so nothing in a job log says which tests ran. The shard
 step counts the JUnit report pytest already wrote, per tests/ directory; one light job adds
-the shards up and compares the total with the previous main run's. These tests pin the
+the shards up and compares the total with the previous queue run's. These tests pin the
 counting, the comparison and the wiring, and lock the assumption everything rests on:
 with `-o junit_family=xunit1`, pytest writes each testcase's rootdir-relative `file`.
 """
@@ -238,16 +238,16 @@ def test_the_total_adds_the_shards_up_and_shows_what_moved_against_the_baseline(
     assert shard_counts.main([*argv, "--out", str(out), *identity]) == 0
     log = capsys.readouterr().out
     assert "CI executed 160 backend tests (2 skipped), from 2/2 count files" in log
-    assert "against main aaaaaaaaa (run 77): 260 -> 160 (-100)" in log
+    assert "against queue aaaaaaaaa (run 77): 260 -> 160 (-100)" in log
     assert "tests/components/base" in log
     assert "-100" in log
     assert (
-        "tests/components/agent" not in log.split("against main")[1]
+        "tests/components/agent" not in log.split("against queue")[1]
     )  # unchanged directories are silent
     recorded = json.loads(out.read_text())
     assert recorded["buckets"] == {"tests/components/base": 110, "tests/components/agent": 50}
     assert (recorded["sha"], recorded["run_id"]) == ("b" * 40, "88")
-    assert "against main aaaaaaaaa" in summary.read_text()
+    assert "against queue aaaaaaaaa" in summary.read_text()
     assert "| tests/components/base | 110 |" in summary.read_text()
 
 
@@ -297,7 +297,7 @@ def test_a_missing_count_file_marks_the_total_incomplete_and_records_no_baseline
     assert shard_counts.main([*argv, "--out", str(out)]) == 0  # informational: never a failure
     log = capsys.readouterr().out
     assert "INCOMPLETE: no count file for 2" in log
-    assert "against main" not in log
+    assert "against queue" not in log
     assert not out.exists()
 
 
@@ -388,16 +388,17 @@ def test_the_total_job_is_informational_and_needs_only_read_access() -> None:
         assert step.get("continue-on-error") is True or step["uses"].startswith("actions/checkout")
 
 
-def test_only_a_push_to_main_records_the_baseline() -> None:
+def test_only_a_queue_run_records_the_baseline() -> None:
     steps = _steps("backend-test-counts")
     record = steps[_index(steps, "Record the total as the next baseline")]
     assert record["if"] == (
-        "${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
+        "${{ !cancelled() && github.event_name == 'pull_request' "
+        "&& startsWith(github.head_ref, 'trunk-merge/') }}"
     )
     assert record["with"]["name"] == "test-count-baseline"
-    fetch = steps[_index(steps, "Fetch the previous main total")]["run"]
+    fetch = steps[_index(steps, "Fetch the previous queue total")]["run"]
     assert "--name test-count-baseline" in fetch
-    assert "--branch main" in fetch
+    assert 'startswith("trunk-merge/")' in fetch
 
 
 # ── the leak guard's findings ───────────────────────────────────────────────

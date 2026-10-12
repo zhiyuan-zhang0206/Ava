@@ -1,8 +1,8 @@
 # CI retry and concurrency safety
 
 Automatic failed-job retries require an open PR whose current head and base/head
-repository identities match the completed run. Push retries require the current
-branch tip. Missing identity or API errors do not authorize a retry. Only the
+repository identities match the completed run. CI runs on pull requests only
+(main has no push run), so no other event is retried. Missing identity or API errors do not authorize a retry. Only the
 first failed attempt is retried; a cap-cancelled run (`cancelled`) follows the
 same single-attempt policy as a failure, never a second rerun (task #3239). The
 trigger whitelist is per-workflow: only CI is retried; every other workflow is
@@ -25,10 +25,10 @@ runs. `ci.yml` therefore groups native concurrency as follows:
 - `pull_request` runs group by ref only (`ci-refs/pull/N/merge`) with
   `cancel-in-progress`, so a new push cancels the run of the head it replaces
   instead of letting it finish and consume runner capacity.
-- Every other event (`push` to main, `workflow_dispatch`) keeps the SHA in the
-  group and never cancels. A group holds one running and one pending run, and a
-  newer pending run replaces the older one, so a ref-only group on main would
-  skip intermediate commits whose CI `refresh-test-durations.yml` consumes.
+- Every other event (`workflow_dispatch`) keeps the SHA in the group and never
+  cancels. A group holds one running and one pending run, and a newer pending
+  run replaces the older one, so a ref-only group would drop a dispatch of a
+  different commit.
 - Trunk merge-queue branches (`trunk-merge/...`) also run as `pull_request`,
   but each has its own ref, so they never share a group with a PR.
 
@@ -48,7 +48,7 @@ and cancels the new head's running run. This heals itself through the existing
 retry path, with no extra mechanism:
 
 1. The cancelled new-head run completes as `cancelled`, which `ci-rerun.yml`
-   treats like a failure (attempt 1, `pull_request` or `push` event).
+   treats like a failure (attempt 1, `pull_request` event).
 2. The head check now passes for it (it is the current head), and it is the
    newest CI run for that SHA, so the guards admit it.
 3. `rerun-failed-jobs` re-runs its cancelled and failed jobs and their

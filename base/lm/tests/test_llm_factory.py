@@ -418,8 +418,14 @@ class TestBuildChatModel:
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
         """Missing DEEPSEEK_API_KEY raises RuntimeError fail-fast, rather than silently falling
-        back to ANTHROPIC_API_KEY and only discovering the issue through a 401."""
+        back to ANTHROPIC_API_KEY and only discovering the issue through a 401.
+
+        Both channels are cut: the env var is deleted here, and the unit `.env`
+        fallback (Task #5079) is stubbed empty — the suite fixture seeds the test
+        home's `.env`, so leaving it live would hide the fail-fast contract.
+        """
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
             build_chat_model(
                 "deepseek-flash",
