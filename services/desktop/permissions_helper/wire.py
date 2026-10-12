@@ -26,6 +26,10 @@ class PingResult(TypedDict):
     capture_indicator_v1: NotRequired[
         bool
     ]  # marks the window each input lands on; serves `indicator_stop`
+    clipboard_v1: NotRequired[bool]  # serves `clipboard_read` / `clipboard_write`
+    mouse_hold_v1: NotRequired[
+        bool
+    ]  # serves `mouse_down` / `mouse_up` / `mouse_release_all`; `drag` takes button + modifiers
 
 
 class IndicatorStopResult(TypedDict):
@@ -37,9 +41,31 @@ class ScreencaptureResult(TypedDict):
     bytes: int  # PNG size on disk, or -1 if it could not be stat'd
 
 
+class ClipboardReadResult(TypedDict):
+    text: str | None  # None when the clipboard holds no plain text
+    types: list[str]  # every type currently on the clipboard
+    length: int  # code points in the full text; 0 when there is none
+    truncated: bool  # `text` was cut at the helper's length bound
+
+
+class ClipboardWriteResult(TypedDict):
+    length: int  # code points written; the text itself is never echoed
+
+
 class ClickPoint(TypedDict):
     x: float
     y: float
+
+
+class AutoRelease(TypedDict):
+    """A held button the helper let go of by itself; reported once, on the next mouse call."""
+
+    button: str
+    reason: str  # "idle_timeout" or "failsafe"
+    x: float  # where the button came up, logical points
+    y: float
+    held_seconds: float
+    message: str
 
 
 class ClickResult(TypedDict):
@@ -47,15 +73,37 @@ class ClickResult(TypedDict):
     double: bool
     button: NotRequired[str]
     click_count: NotRequired[int]
+    auto_released: NotRequired[list[AutoRelease]]
 
 
 class MoveResult(TypedDict):
     moved: ClickPoint
+    auto_released: NotRequired[list[AutoRelease]]
 
 
 class DragResult(TypedDict):
     start: ClickPoint
     end: ClickPoint
+    button: NotRequired[str]
+    auto_released: NotRequired[list[AutoRelease]]
+
+
+class MouseDownResult(TypedDict):
+    pressed: ClickPoint
+    button: str
+    modifiers: list[str]
+    auto_released: NotRequired[list[AutoRelease]]
+
+
+class MouseUpResult(TypedDict):
+    released: ClickPoint
+    button: str
+    held_ms: int
+    auto_released: NotRequired[list[AutoRelease]]
+
+
+class MouseReleaseAllResult(TypedDict):
+    released: list[str]  # the buttons that were held; empty when none was
 
 
 class TypeResult(TypedDict):
@@ -70,6 +118,7 @@ class KeyResult(TypedDict):
 class ScrollResult(TypedDict):
     scrolled: int  # dy pixels applied
     dx: NotRequired[int]
+    auto_released: NotRequired[list[AutoRelease]]
 
 
 class AppInfo(TypedDict):

@@ -734,6 +734,43 @@ func inputModifiers(_ req: [String: Any], legacyCmd: Bool = false) throws -> CGE
     return flags
 }
 
+/// A mouse button by name, with the event kinds that press, drag and release it.
+struct MouseButtonKinds {
+    let name: String
+    let button: CGMouseButton
+    let down: CGEventType
+    let up: CGEventType
+    let dragged: CGEventType
+}
+
+/// The request's `button` (default left): left, right or middle.
+func inputMouseButton(_ req: [String: Any]) throws -> MouseButtonKinds {
+    let name: String
+    if let raw = req["button"] {
+        guard let value = raw as? String else { throw OpError.bad("button must be left/right/middle") }
+        name = value
+    } else { name = "left" }
+    switch name {
+    case "left":
+        return MouseButtonKinds(name: name, button: .left, down: .leftMouseDown, up: .leftMouseUp,
+                                dragged: .leftMouseDragged)
+    case "right":
+        return MouseButtonKinds(name: name, button: .right, down: .rightMouseDown, up: .rightMouseUp,
+                                dragged: .rightMouseDragged)
+    case "middle":
+        return MouseButtonKinds(name: name, button: .center, down: .otherMouseDown, up: .otherMouseUp,
+                                dragged: .otherMouseDragged)
+    default: throw OpError.bad("unknown mouse button: \(name)")
+    }
+}
+
+/// The request's optional pointer position: both `x` and `y`, or neither.
+func inputOptionalPoint(_ req: [String: Any]) throws -> CGPoint? {
+    if req["x"] == nil && req["y"] == nil { return nil }
+    guard req["x"] != nil, req["y"] != nil else { throw OpError.bad("x and y must be given together") }
+    return CGPoint(x: try inputNumber(req, "x"), y: try inputNumber(req, "y"))
+}
+
 func inputMouseEvent(_ kind: CGEventType, _ point: CGPoint, _ button: CGMouseButton,
                      _ flags: CGEventFlags, count: Int64 = 0) throws -> CGEvent {
     guard let event = CGEvent(mouseEventSource: nil, mouseType: kind,
@@ -823,6 +860,127 @@ func failsafeHold(_ seconds: Double, releasing up: CGEvent? = nil) throws {
     }
 }
 
+// MARK: - Held mouse buttons
+
+/// How long a button Ava holds may go without a mouse call before the helper releases it.
+let heldIdleTimeoutSeconds = 30.0
+
+/// How often the monitor looks at a held button while one is held.
+let heldMonitorSeconds = 0.1
+
+/// The one button Ava pressed with `mouse_down` and has not released. Everything needed to
+/// release it is allocated at the press, so a release can never fail for lack of an event.
+final class HeldMouse {
+    let kinds: MouseButtonKinds
+    let flags: CGEventFlags
+    let modifiers: [(CGEvent, CGEvent)]
+    let up: CGEvent
+    let pressedAt: Date
+    var position: CGPoint
+    var lastActivity: Date
+    init(kinds: MouseButtonKinds, flags: CGEventFlags, modifiers: [(CGEvent, CGEvent)], up: CGEvent,
+         position: CGPoint, now: Date) {
+        self.kinds = kinds; self.flags = flags; self.modifiers = modifiers; self.up = up
+        self.position = position; self.pressedAt = now; self.lastActivity = now
+    }
+}
+
+/// Guards `heldMouse` and `heldNotices`: the socket thread presses and releases, the monitor
+/// timer releases on a stop gesture or an idle hold.
+private let heldMouseLock = NSLock()
+private var heldMouse: HeldMouse?
+private var heldNotices: [[String: Any]] = []
+
+func heldMouseLog(_ message: String) {
+    FileHandle.standardError.write(Data("AvaPermissionsHelper: held mouse \(message)\n".utf8))
+}
+
+/// The pointer's live position in CG global coordinates, or nil when it cannot be read.
+func liveCursorPosition() -> CGPoint? { CGEvent(source: nil)?.location }
+
+/// Refuse an action that cannot share the pointer with a button Ava holds.
+func requireNoHeldMouse(_ action: String) throws {
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    if let held = heldMouse {
+        throw OpError.bad("\(action) refused: mouse button \(held.kinds.name) is held by Ava; call mouse_up first")
+    }
+}
+
+/// End the hold now (caller holds the lock): the button comes up at `point`, or where Ava last
+/// put the pointer, then the modifiers the press brought down.
+@discardableResult
+private func endHoldLocked(at point: CGPoint?) -> HeldMouse? {
+    guard let held = heldMouse else { return nil }
+    heldMouse = nil
+    held.up.location = point ?? held.position
+    postInputEvent(held.up)
+    releaseModifiers(held.modifiers)
+    stopHeldMouseMonitor()
+    return held
+}
+
+/// End the hold because the helper, not the model, decided to, and leave a notice for the next
+/// mouse call to report. Caller holds the lock.
+private func autoReleaseLocked(reason: String, why: String, at point: CGPoint?, now: Date) {
+    guard let held = endHoldLocked(at: point) else { return }
+    let at = point ?? held.position
+    let seconds = (now.timeIntervalSince(held.pressedAt) * 10).rounded() / 10
+    let message = "mouse button \(held.kinds.name) was released automatically after \(seconds) s (\(why)) at "
+        + "(\(Int(at.x)), \(Int(at.y))); the press you made with mouse_down is over"
+    heldNotices.append(["button": held.kinds.name, "reason": reason, "x": Double(at.x), "y": Double(at.y),
+                        "held_seconds": seconds, "message": message])
+    heldMouseLog("\(held.kinds.name) button released: \(why)")
+}
+
+/// A stop gesture or an unattended hold ends the press. The user's stop gesture releases the
+/// button where the pointer is parked, so the drop lands under their hand.
+func releaseHeldMouseForStop(at point: CGPoint) {
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    autoReleaseLocked(reason: "failsafe", why: "the mouse was parked at the top-left corner", at: point,
+                      now: Date())
+}
+
+/// The monitor's step while a button is held: a parked pointer ends the hold at once, an idle
+/// hold ends after `heldIdleTimeoutSeconds`. An unreadable pointer never ends a hold by itself.
+func heldMouseTick(now: Date = Date()) {
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    guard let held = heldMouse else { return }
+    do { try cornerFailsafe() } catch let abort as UserAbort {
+        // The badge goes with the stop, as it does for a refused action.
+        stopCaptureIndicator()
+        autoReleaseLocked(reason: "failsafe", why: "the mouse was parked at the top-left corner",
+                          at: abort.position, now: now)
+        return
+    } catch { }
+    if now.timeIntervalSince(held.lastActivity) >= heldIdleTimeoutSeconds {
+        autoReleaseLocked(reason: "idle_timeout",
+                          why: "no mouse call for \(Int(heldIdleTimeoutSeconds)) s",
+                          at: liveCursorPosition(), now: now)
+    }
+}
+
+/// Hand the pending auto-release notices to the caller, once.
+func takeHeldNotices() -> [[String: Any]] {
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    let notices = heldNotices
+    heldNotices = []
+    return notices
+}
+
+/// The pointer-movement event for `point`: a drag of the held button while Ava holds one, a plain
+/// move otherwise, carrying the held modifiers either way. Caller holds the lock.
+private func pointerMovementLocked(_ point: CGPoint, _ flags: CGEventFlags) throws -> CGEvent {
+    let held = heldMouse
+    return try inputMouseEvent(held?.kinds.dragged ?? .mouseMoved, point, held?.kinds.button ?? .left,
+                               flags.union(held?.flags ?? []))
+}
+
+/// Record that the held button's pointer moved: it stays held while the model keeps working.
+private func noteHeldPointerLocked(_ point: CGPoint) {
+    heldMouse?.position = point
+    heldMouse?.lastActivity = Date()
+}
+
 /// Post a synthetic mouse click at a global screen coordinate (move + down + up).
 /// Pass "double": true for a second click. Dispatch refuses it without the
 /// Accessibility grant instead of posting events macOS would silently drop.
@@ -833,18 +991,9 @@ func click(_ req: [String: Any]) throws -> [String: Any] {
     if double && count != 2 { throw OpError.bad("double=true requires click_count=2") }
     let duration = try inputDuration(req, maximum: 5000)
     let flags = try inputModifiers(req)
-    let name: String
-    if let raw = req["button"] {
-        guard let value = raw as? String else { throw OpError.bad("button must be left/right/middle") }
-        name = value
-    } else { name = "left" }
-    let button: CGMouseButton, downKind: CGEventType, upKind: CGEventType
-    switch name {
-    case "left": button = .left; downKind = .leftMouseDown; upKind = .leftMouseUp
-    case "right": button = .right; downKind = .rightMouseDown; upKind = .rightMouseUp
-    case "middle": button = .center; downKind = .otherMouseDown; upKind = .otherMouseUp
-    default: throw OpError.bad("unknown mouse button: \(name)")
-    }
+    let kinds = try inputMouseButton(req)
+    let name = kinds.name, button = kinds.button, downKind = kinds.down, upKind = kinds.up
+    try requireNoHeldMouse("click")
     let point = CGPoint(x: x, y: y)
     let move = try inputMouseEvent(.mouseMoved, point, button, flags)
     let pairs = try (1...count).map { index in
@@ -867,10 +1016,11 @@ func click(_ req: [String: Any]) throws -> [String: Any] {
     return ["clicked": ["x": x, "y": y], "double": count == 2, "button": name, "click_count": count]
 }
 
-/// A bounded straight-line drag. Prepare every event before pressing, so allocation
-/// failures cannot leave the button down. The release remains local to this call
-/// even if the requesting socket disconnects while the synchronous action runs.
-/// The corner fail-safe is checked before every movement; see `cornerFailsafe`.
+/// A bounded straight-line drag with `button` (default left) and `modifiers` held from before the
+/// press until after the release, which is the reverse order of their pressing. Prepare every
+/// event before pressing, so allocation failures cannot leave the button down. The release
+/// remains local to this call even if the requesting socket disconnects while the synchronous
+/// action runs. The corner fail-safe is checked before every movement; see `cornerFailsafe`.
 func drag(_ req: [String: Any]) throws -> [String: Any] {
     func coordinate(_ key: String) throws -> Double {
         guard let number = req[key] as? NSNumber,
@@ -880,26 +1030,33 @@ func drag(_ req: [String: Any]) throws -> [String: Any] {
     }
     let sx = try coordinate("start_x"), sy = try coordinate("start_y")
     let ex = try coordinate("end_x"), ey = try coordinate("end_y")
+    let kinds = try inputMouseButton(req)
+    let flags = try inputModifiers(req)
+    try requireNoHeldMouse("drag")
     func event(_ kind: CGEventType, _ x: Double, _ y: Double) throws -> CGEvent {
         guard let ev = CGEvent(mouseEventSource: nil, mouseType: kind,
-                               mouseCursorPosition: CGPoint(x: x, y: y), mouseButton: .left)
+                               mouseCursorPosition: CGPoint(x: x, y: y), mouseButton: kinds.button)
         else { throw OpError.bad("could not create drag mouse event") }
-        ev.flags = []
+        ev.flags = flags
         return ev
     }
     let move = try event(.mouseMoved, sx, sy)
-    let down = try event(.leftMouseDown, sx, sy)
-    let up = try event(.leftMouseUp, ex, ey)
+    let down = try event(kinds.down, sx, sy)
+    let up = try event(kinds.up, ex, ey)
     let steps = 12
     let movements = try (1...steps).map { step in
         let fraction = Double(step) / Double(steps)
-        return try event(.leftMouseDragged,
+        return try event(kinds.dragged,
                          sx * (1 - fraction) + ex * fraction,
                          sy * (1 - fraction) + ey * fraction)
     }
-    move.post(tap: .cghidEventTap)
-    down.post(tap: .cghidEventTap)
-    defer { up.post(tap: .cghidEventTap) }
+    let modifiers = try inputModifierPairs(flags)
+    pressModifiers(modifiers)
+    // Deferred in this order so the button comes up before the modifiers do, also on a stop.
+    defer { releaseModifiers(modifiers) }
+    postInputEvent(move)
+    postInputEvent(down)
+    defer { postInputEvent(up) }
     var last = CGPoint(x: sx, y: sy)
     for movement in movements {
         Thread.sleep(forTimeInterval: 0.01)
@@ -909,10 +1066,78 @@ func drag(_ req: [String: Any]) throws -> [String: Any] {
             up.location = (error as? UserAbort)?.position ?? last
             throw error
         }
-        movement.post(tap: .cghidEventTap)
+        postInputEvent(movement)
         last = movement.location
     }
-    return ["start": ["x": sx, "y": sy], "end": ["x": ex, "y": ey]]
+    return ["start": ["x": sx, "y": sy], "end": ["x": ex, "y": ey], "button": kinds.name]
+}
+
+/// Press a button and keep it down across calls (until `mouse_up`, a stop gesture, the idle
+/// bound or `mouse_release_all`). `x`/`y` are optional, both or neither: without them the press
+/// is where the pointer is. `modifiers` come down first and stay down until the release. Only
+/// one button can be held at a time; a second press, or one with a button already held, is an
+/// error, and no event is posted. The events that release it are allocated here.
+func mouseDown(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: ["x", "y", "button", "modifiers"])
+    let kinds = try inputMouseButton(req)
+    let flags = try inputModifiers(req)
+    let requested = try inputOptionalPoint(req)
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    if let current = heldMouse {
+        throw OpError.bad("mouse button \(current.kinds.name) is already held by Ava; call mouse_up first")
+    }
+    guard let point = requested ?? liveCursorPosition()
+    else { throw OpError.bad("could not read cursor position for mouse_down") }
+    let move = try inputMouseEvent(.mouseMoved, point, kinds.button, flags)
+    let down = try inputMouseEvent(kinds.down, point, kinds.button, flags, count: 1)
+    let up = try inputMouseEvent(kinds.up, point, kinds.button, flags, count: 1)
+    let modifiers = try inputModifierPairs(flags)
+    pressModifiers(modifiers)
+    if requested != nil { postInputEvent(move) }
+    postInputEvent(down)
+    heldMouse = HeldMouse(kinds: kinds, flags: flags, modifiers: modifiers, up: up, position: point,
+                          now: Date())
+    startHeldMouseMonitor()
+    return ["pressed": ["x": Double(point.x), "y": Double(point.y)], "button": kinds.name,
+            "modifiers": req["modifiers"] as? [String] ?? []]
+}
+
+/// Release the button `mouse_down` pressed, at `x`/`y` when given (the pointer is dragged there
+/// first, as a hand would) and otherwise where the pointer is. A button Ava does not hold is an
+/// error that says so, and names an automatic release when that is why. The modifiers the press
+/// brought down come up after the button, in reverse order.
+func mouseUp(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: ["x", "y", "button"])
+    let kinds = try inputMouseButton(req)
+    let requested = try inputOptionalPoint(req)
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    guard let held = heldMouse, held.kinds.name == kinds.name else {
+        var message = "mouse button \(kinds.name) is not held by Ava; mouse_up needs an earlier mouse_down"
+        if let index = heldNotices.firstIndex(where: { ($0["button"] as? String) == kinds.name }) {
+            message += ". " + (heldNotices.remove(at: index)["message"] as? String ?? "")
+        } else if let other = heldMouse {
+            message += ", and button \(other.kinds.name) is the one held"
+        }
+        throw OpError.bad(message)
+    }
+    let target = requested ?? liveCursorPosition() ?? held.position
+    var dragged: CGEvent?
+    if requested != nil && target != held.position {
+        dragged = try inputMouseEvent(held.kinds.dragged, target, held.kinds.button, held.flags)
+    }
+    if let dragged = dragged { postInputEvent(dragged) }
+    endHoldLocked(at: target)
+    return ["released": ["x": Double(target.x), "y": Double(target.y)], "button": kinds.name,
+            "held_ms": Int(Date().timeIntervalSince(held.pressedAt) * 1000)]
+}
+
+/// Release whatever Ava holds, quietly: the daemon's cleanup when the screen is handed over. Not
+/// stoppable by the fail-safe and no notice is left, because the caller asked for it.
+func mouseReleaseAll(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: [])
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    guard let held = endHoldLocked(at: liveCursorPosition()) else { return ["released": []] }
+    return ["released": [held.kinds.name]]
 }
 
 /// Post a single key down/up by virtual keycode, optionally with Command held.
@@ -959,27 +1184,35 @@ func scroll(_ req: [String: Any]) throws -> [String: Any] {
     let dy = try inputInteger(req, "dy", lower: Int(Int32.min), upper: Int(Int32.max))
     let dx = try inputInteger(req, "dx", lower: Int(Int32.min), upper: Int(Int32.max), defaultValue: 0)
     let flags = try inputModifiers(req)
-    let move = try inputMouseEvent(.mouseMoved, CGPoint(x: x, y: y), .left, flags)
+    let point = CGPoint(x: x, y: y)
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    let move = try pointerMovementLocked(point, flags)
     guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
                              wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
     else { throw OpError.bad("could not create scroll event") }
-    event.flags = flags
-    let modifiers = try inputModifierPairs(flags)
+    event.flags = flags.union(heldMouse?.flags ?? [])
+    let modifiers = try inputModifierPairs(flags.subtracting(heldMouse?.flags ?? []))
     pressModifiers(modifiers)
     defer { releaseModifiers(modifiers) }
     postInputEvent(move)
     postInputEvent(event)
+    noteHeldPointerLocked(point)
     return ["scrolled": dy, "dx": dx]
 }
 
+/// Move the pointer. While Ava holds a button this is a drag of that button, so the target app
+/// sees a drag and not a plain move; the held modifiers ride along.
 func mouseMove(_ req: [String: Any]) throws -> [String: Any] {
     let x = try inputNumber(req, "x"), y = try inputNumber(req, "y")
     let flags = try inputModifiers(req)
-    let event = try inputMouseEvent(.mouseMoved, CGPoint(x: x, y: y), .left, flags)
-    let modifiers = try inputModifierPairs(flags)
+    let point = CGPoint(x: x, y: y)
+    heldMouseLock.lock(); defer { heldMouseLock.unlock() }
+    let event = try pointerMovementLocked(point, flags)
+    let modifiers = try inputModifierPairs(flags.subtracting(heldMouse?.flags ?? []))
     pressModifiers(modifiers)
     defer { releaseModifiers(modifiers) }
     postInputEvent(event)
+    noteHeldPointerLocked(point)
     return ["moved": ["x": x, "y": y]]
 }
 
@@ -1045,8 +1278,9 @@ func screenSize(_ req: [String: Any]) throws -> [String: Any] {
 }
 
 /// Report the frontmost application's display name, or "" when none is focused.
-/// The computer-use gate matches this against its denied-app keywords before
-/// letting a click/type/key/scroll through.
+/// Read-only: the `frontmost_app` tool returns it, `window_info`, `ax_tree` and snapshot
+/// `include_ax` default to it when the caller names no app, and the daemon records it as
+/// the `app` field of every `computer_action` audit row. Nothing is gated on it.
 func frontmostApp() -> [String: Any] {
     refreshAppKit()
     let app = NSWorkspace.shared.frontmostApplication
@@ -1067,6 +1301,47 @@ func typeText(_ req: [String: Any]) throws -> [String: Any] {
     down.post(tap: .cghidEventTap)
     up.post(tap: .cghidEventTap)
     return ["typed": text.count]
+}
+
+// MARK: - Clipboard
+
+/// Longest clipboard text the helper reads or writes, in Unicode code points (what Python's
+/// `len` counts). The Python input contract carries the same bound.
+let clipboardMaxCharacters = 1_000_000
+
+/// Read the clipboard's plain text and the types it holds. `text` is null when it holds no plain
+/// text (never a made-up empty string); a text beyond the bound is cut and flagged `truncated`,
+/// with `length` still counting the whole. Observation only: it changes nothing, and neither the
+/// text nor any part of it is logged or put into an error here.
+func clipboardRead(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: [])
+    let board = NSPasteboard.general
+    let types = (board.types ?? []).map { $0.rawValue }
+    guard let full = board.string(forType: .string) else {
+        return ["text": NSNull(), "types": types, "length": 0, "truncated": false]
+    }
+    let scalars = full.unicodeScalars
+    let length = scalars.count
+    if length <= clipboardMaxCharacters {
+        return ["text": full, "types": types, "length": length, "truncated": false]
+    }
+    var kept = String.UnicodeScalarView()
+    kept.append(contentsOf: scalars.prefix(clipboardMaxCharacters))
+    return ["text": String(kept), "types": types, "length": length, "truncated": true]
+}
+
+/// Replace the clipboard with plain text (`public.utf8-plain-text`) and nothing else. The reply
+/// carries the length only, and no error here carries the text: it may be a secret.
+func clipboardWrite(_ req: [String: Any]) throws -> [String: Any] {
+    try rejectUnknownFields(req, allowed: ["text"])
+    guard let text = req["text"] as? String else { throw OpError.bad("clipboard_write needs string text") }
+    let length = text.unicodeScalars.count
+    guard length <= clipboardMaxCharacters
+    else { throw OpError.bad("clipboard text exceeds \(clipboardMaxCharacters) characters") }
+    let board = NSPasteboard.general
+    board.clearContents()
+    guard board.setString(text, forType: .string) else { throw OpError.bad("the clipboard did not accept the text") }
+    return ["length": length]
 }
 
 /// Report the on-screen geometry of an application's frontmost window via the
@@ -2274,6 +2549,11 @@ func indicatorWindow(forInput method: String, _ req: [String: Any]) -> Indicator
         return point("x", "y").flatMap { indicatorWindow(atPoint: $0) }
     case "drag":
         return point("start_x", "start_y").flatMap { indicatorWindow(atPoint: $0) }
+    case "mouse_down":
+        // Without a position the press lands where the pointer is; a half-given or invalid one
+        // marks nothing, because the press will be refused.
+        if req["x"] == nil && req["y"] == nil { return liveCursorPosition().flatMap { indicatorWindow(atPoint: $0) } }
+        return point("x", "y").flatMap { indicatorWindow(atPoint: $0) }
     case "type", "key":
         refreshAppKit()
         return NSWorkspace.shared.frontmostApplication
@@ -2482,10 +2762,13 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
     let method = req["method"] as? String ?? ""
     // Methods that change desktop state; each is refused while the corner fail-safe holds.
     let cornerFailsafeMethods: Set<String> = [
-        "click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_act",
+        "click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_act", "clipboard_write",
+        "mouse_down", "mouse_up",
     ]
-    let indicatorInputMethods: Set<String> = ["click", "drag", "move", "scroll", "type", "key"]
-    let axGatedMethods: Set<String> = ["click", "drag", "move", "focus_app", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
+    let indicatorInputMethods: Set<String> = ["click", "drag", "move", "scroll", "type", "key", "mouse_down"]
+    let axGatedMethods: Set<String> = ["click", "drag", "move", "focus_app", "type", "key", "scroll", "mouse_down", "mouse_up", "ax_window_info", "ax_tree", "ax_act"]
+    // Mouse calls report a hold the helper ended by itself, once, in their result.
+    let heldAwareMethods: Set<String> = ["click", "drag", "move", "scroll", "mouse_down", "mouse_up"]
     if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
         return ["id": id as Any, "ok": false, "error": axGrantError]
     }
@@ -2499,7 +2782,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true, "capture_indicator_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true, "ax_act_v2": true, "ax_target_v1": true, "native_input_v1": true, "corner_failsafe_v1": true, "capture_indicator_v1": true, "clipboard_v1": true, "mouse_hold_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
@@ -2515,10 +2798,15 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "key": result = try key(req)
         case "scroll": result = try scroll(req)
         case "move": result = try mouseMove(req)
+        case "mouse_down": result = try mouseDown(req)
+        case "mouse_up": result = try mouseUp(req)
+        case "mouse_release_all": result = try mouseReleaseAll(req)
         case "cursor_position": result = try cursorPosition()
         case "ax_window_info": result = try axWindowInfo(req)
         case "ax_tree": result = try axTree(req)
         case "ax_act": result = try axAct(req)
+        case "clipboard_read": result = try clipboardRead(req)
+        case "clipboard_write": result = try clipboardWrite(req)
         case "indicator_stop": result = try indicatorStop(req)
         case "window_info": result = try windowInfo(req)
         case "session_info": result = sessionInfo()
@@ -2546,10 +2834,17 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         default:
             return ["id": id as Any, "ok": false, "error": "unknown method: \(method)"]
         }
+        if heldAwareMethods.contains(method), var reply = result as? [String: Any] {
+            let notices = takeHeldNotices()
+            if !notices.isEmpty { reply["auto_released"] = notices }
+            return ["id": id as Any, "ok": true, "result": reply]
+        }
         return ["id": id as Any, "ok": true, "result": result]
-    } catch is UserAbort {
-        // The user stopped Ava: the capture badge goes before the refusal is reported.
+    } catch let abort as UserAbort {
+        // The user stopped Ava: the capture badge goes before the refusal is reported, and a
+        // button Ava holds comes up under the parked pointer.
         stopCaptureIndicator()
+        releaseHeldMouseForStop(at: abort.position)
         return ["id": id as Any, "ok": false, "error": userAbortMessage, "error_code": "user_abort"]
     } catch let OpError.bad(msg) {
         return ["id": id as Any, "ok": false, "error": msg]
@@ -2950,6 +3245,26 @@ func runPanelMode() -> Never {
     app.delegate = delegate
     app.run()
     exit(0)
+}
+
+// MARK: - Held mouse monitor
+
+private var heldMonitor: DispatchSourceTimer?
+
+/// Start the timer that watches a held button (caller holds the lock). It exists only while a
+/// button is held: it looks for the stop gesture and for an unattended hold.
+func startHeldMouseMonitor() {
+    guard heldMonitor == nil else { return }
+    let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "ava.held-mouse"))
+    timer.schedule(deadline: .now() + heldMonitorSeconds, repeating: heldMonitorSeconds)
+    timer.setEventHandler { heldMouseTick() }
+    timer.resume()
+    heldMonitor = timer
+}
+
+func stopHeldMouseMonitor() {
+    heldMonitor?.cancel()
+    heldMonitor = nil
 }
 
 // MARK: - Socket server

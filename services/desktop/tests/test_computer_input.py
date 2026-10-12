@@ -27,6 +27,12 @@ class Desktop:
         self.requests: list[dict[str, Any]] = []
         self.events: list[Any] = []
         self.capable = True
+        self.clipboard_capable = True
+        self.clipboard: str | None = None
+        self.hold_capable = True
+        self.held: str | None = None  # the button the fake helper reports as down
+        self.notices: list[dict[str, Any]] = []  # auto-release notices for the next mouse reply
+        self.refusals: dict[str, str] = {}  # helper method -> error it answers with
         self.denied: str | None = None
         self.daemon = ComputerMcpDaemon(
             ComputerUseConfig(30, 0.01, 30, 60, 1),
@@ -39,16 +45,34 @@ class Desktop:
         self.requests.append(req)
         method = req["method"]
         if method == "ping":
-            result: dict[str, Any] = {"pong": True, "native_input_v1": self.capable}
+            result: dict[str, Any] = {
+                "pong": True,
+                "native_input_v1": self.capable,
+                "clipboard_v1": self.clipboard_capable,
+                "mouse_hold_v1": self.hold_capable,
+            }
         elif method == "frontmost_app":
             result = {"app": "InertTarget"}
         elif method == "screen_size":
             result = {"x": 0, "y": 0, "w": 1000, "h": 800, "scale": 2}
         elif method == "cursor_position":
             result = {"x": -8, "y": 33}
-        elif self.denied:
-            return {"ok": False, "error": self.denied}
-        elif method in {
+        elif self.denied or method in self.refusals:
+            return {"ok": False, "error": self.denied or self.refusals[method]}
+        else:
+            result = self.reply(method, req)
+        return {"ok": True, "result": result}
+
+    def reply(self, method: str, req: dict[str, Any]) -> dict[str, Any]:
+        """The helper's answer, carrying a pending auto-release notice on a mouse call."""
+        result = self.act(method, req)
+        if self.notices and method in {"click", "move", "scroll", "drag", "mouse_down", "mouse_up"}:
+            result["auto_released"], self.notices = self.notices, []
+        return result
+
+    def act(self, method: str, req: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any]
+        if method in {
             "list_apps",
             "list_windows",
             "focus_app",
@@ -64,6 +88,10 @@ class Desktop:
                 "button": req.get("button", "left"),
                 "click_count": count,
             }
+        elif method in {"clipboard_read", "clipboard_write"}:
+            result = self.clipboard_result(method, req)
+        elif method in {"mouse_down", "mouse_up", "mouse_release_all"}:
+            result = self.mouse_result(method, req)
         elif method == "move":
             result = {"moved": {"x": req["x"], "y": req["y"]}}
         elif method == "scroll":
@@ -77,10 +105,36 @@ class Desktop:
             result = {
                 "start": {"x": req["start_x"], "y": req["start_y"]},
                 "end": {"x": req["end_x"], "y": req["end_y"]},
+                "button": req.get("button", "left"),
             }
         else:
             raise AssertionError(method)
-        return {"ok": True, "result": result}
+        return result
+
+    def mouse_result(self, method: str, req: dict[str, Any]) -> dict[str, Any]:
+        button = req.get("button", "left")
+        point = {"x": req.get("x", 300), "y": req.get("y", 300)}
+        if method == "mouse_down":
+            self.held = button
+            return {"pressed": point, "button": button, "modifiers": req.get("modifiers", [])}
+        if method == "mouse_up":
+            self.held = None
+            return {"released": point, "button": button, "held_ms": 5}
+        released = [] if self.held is None else [self.held]
+        self.held = None
+        return {"released": released}
+
+    def clipboard_result(self, method: str, req: dict[str, Any]) -> dict[str, Any]:
+        if method == "clipboard_write":
+            self.clipboard = req["text"]
+            return {"length": len(req["text"])}
+        text = self.clipboard
+        return {
+            "text": text,
+            "types": [] if text is None else ["public.utf8-plain-text"],
+            "length": 0 if text is None else len(text),
+            "truncated": False,
+        }
 
     def observe(self, req: dict[str, Any]) -> dict[str, Any]:
         method = req["method"]

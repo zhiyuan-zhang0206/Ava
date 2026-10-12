@@ -45,6 +45,15 @@ Selectors are mutually exclusive. Whole-screen calls retain the existing
 screen/pixels result and include_ax behavior; include_ax is refused for local
 captures because it would combine different coordinate spaces.
 
+Zoom is a region capture, not a separate tool: `region` crops at the display's
+native pixels (a Retina point is two pixels) and the returned frame maps crop pixels
+back to the screen. Nothing in Ava resizes an image: a PNG reaches the model through
+`ava.self.attach` as the file's own bytes, and the only repository limits are skips
+(image over the provider's pixel or byte cap, `base/lm/attach/packing.py`), never
+shrinking. Any downscale happens inside the provider, so a small crop is read at full
+detail while a whole-screen capture may not be. Upscaling a crop would add no pixels
+the display did not have, so there is no `upscale` option.
+
 `list_apps()` lists running processes with nullable display name and bundle ID.
 `list_windows(app=...)` returns layer-zero, nonempty windows, including small
 dialogs and off-screen windows. It requires Screen Recording for metadata and
@@ -76,7 +85,7 @@ nothing when it cannot establish one.
   `CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements])`
   in its front-to-back order, in the same global coordinates as input:
   - `click`, `move`, `scroll`: the first window whose bounds contain the point;
-    `drag`: the same for its start point. If that topmost window is not layer 0
+    `drag`: the same for its start point; `mouse_down`: its position, or the pointer's when it names none (a half-given position marks nothing; `mouse_up` marks nothing). If that topmost window is not layer 0
     (a menu, popup or system UI), the click lands on it, so nothing is marked and
     the ordinary window behind it is not.
   - `type`, `key`: the frontmost application's PID (after `refreshAppKit`, so the

@@ -18,6 +18,9 @@ import CoreGraphics
 import CoreMedia
 enum OpError: Error { case bad(String) }
 var screenGranted = true
+/// Where the held-button state would read the live pointer (nil: unreadable).
+var livePointer: CGPoint? = nil
+func liveCursorPosition() -> CGPoint? { livePointer }
 func CGPreflightScreenCaptureAccess() -> Bool { screenGranted }
 func CGMainDisplayID() -> CGDirectDisplayID { 1 }
 func refreshAppKit() { }
@@ -165,6 +168,21 @@ for bad: Any in ["1", true, NSNull(), Double.nan] {
     precondition(indicatorWindow(forInput: "click", ["x": bad, "y": 10]) == nil)
 }
 precondition(indicatorWindow(forInput: "click", ["y": 10]) == nil)
+// A press is decided by its position, or by the pointer when it names none.
+precondition(point("mouse_down", 10, 10) == window(77, 42) && point("mouse_down", 700, 100) == window(88, 50))
+precondition(point("mouse_down", 120, 120) == nil)
+precondition(indicatorWindow(forInput: "mouse_down", [:]) == nil, "unreadable pointer")
+livePointer = CGPoint(x: 700, y: 100)
+precondition(indicatorWindow(forInput: "mouse_down", ["button": "right"]) == window(88, 50))
+livePointer = CGPoint(x: 120, y: 120)
+precondition(indicatorWindow(forInput: "mouse_down", [:]) == nil, "a popup on top takes the press")
+// A half-given or invalid position is refused by the press itself, so nothing is marked for it.
+livePointer = CGPoint(x: 10, y: 10)
+precondition(indicatorWindow(forInput: "mouse_down", ["x": 10]) == nil)
+precondition(indicatorWindow(forInput: "mouse_down", ["x": "10", "y": 10]) == nil)
+// A release lands where the press did and marks nothing of its own.
+precondition(indicatorWindow(forInput: "mouse_up", ["x": 10, "y": 10]) == nil)
+livePointer = nil
 // Keystrokes go to the frontmost app's frontmost normal window.
 NSWorkspace.shared.frontmostApplication = NSRunningApplication(77)
 precondition(indicatorWindow(forInput: "type", ["text": "x"]) == window(77, 42))

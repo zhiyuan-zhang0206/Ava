@@ -27,8 +27,7 @@ per-machine daemon (the `services/desktop/computer` module family: `mcp_daemon.p
 - screen ownership is coordinated (Phase 2): one holder at a time with a
   renewable lease (default 30s), FIFO queue for peers (default 30s wait),
   explicit `release_control`, and an operator kick via `ava computer release`;
-  this is resource coordination, not governance — who may act at all is a
-  peer-convention question;
+  resource coordination, not governance (who may act is a peer convention);
 - `snapshot(include_ocr=true)` recognizes screen text (macOS Vision, zh-Hans +
   en) with physical-pixel boxes — soft-failing to `ocr: []` + `ocr_error`
   rather than breaking the snapshot.
@@ -40,12 +39,12 @@ is a peer convention. The gateway/user entry point owns the security boundary.
 The only gate left is **platform capability** (`ops/spec.py`
 `_computer_mcp_gate_reason`): the service joins the agent-runner roster only
 when the signed permissions helper is enabled and reports capable. The
-healthcheck (`services.supervision.healthchecks.computer_mcp`) probes the daemon every
+healthcheck (`services.supervision.healthchecks.computer_mcp`) probes it every
 60s with a lock-free `ping` — it never round-trips to the helper or takes the
 action lock, so a slow desktop action cannot false-kill a busy daemon — and
 the watchdog respawns it on death.
 
-Entry-owned image and database: [[services/docs/agent_runner_side/computer-mcp/process-composition.ava.okf.md]].
+Entry-owned image and database: [[process-composition.ava.okf.md]].
 
 ## Wire path
 ```
@@ -61,7 +60,7 @@ agent execute_code
 `AVA_AGENT_ID`; the mcp daemon forwards it onto the computer line protocol).
 It lands in the audit stream, where it is likewise self-reported by the
 agent's own process. Local fallback (no mcp-daemon):
-`services/desktop/computer/mcp_wrapper.py` (the `.mcp.json` command) dials the daemon
+`services/desktop/computer/mcp_wrapper.py` dials the daemon
 directly and stamps the same identity on every request, including `list_tools`.
 It uses `services/desktop/browser/mcp_socket_bridge.py` for socket framing and
 reconnection; its own policy closes a connection after any delivered error.
@@ -70,10 +69,11 @@ may be unknown and a desktop action could repeat; a closed socket detected
 before writing remains retryable.
 
 ## Tool surface
-`snapshot` / `click` / [[drag.ava.okf.md|drag]] / `move` / `cursor_position` /
+`snapshot` / `click` / [[drag.ava.okf.md|drag]] / `mouse_down` / `mouse_up` / `move` / `cursor_position` /
 `type_text` / `key` / `scroll` / `list_apps` / `list_windows` / `focus_app` / `window_info` /
 `session_info` / `frontmost_app` / `release_control`, plus `find_text` /
-`click_text` (OCR), `ax_tree` and `ax_act` (accessibility, below). Coordinates are
+`click_text` (OCR), `clipboard_read` / `clipboard_write`,
+`ax_tree` and `ax_act` (accessibility, below). Coordinates are
 **physical pixels** (the screenshot space); the daemon converts to the
 helper's logical-point space via the backing scale reported by `snapshot`
 (`screen.width/height/scale` + `pixels.width/height`). `snapshot` writes the
@@ -84,7 +84,8 @@ from `services/desktop/computer/ocr/ocr.swift` into `$AVA_HOME/logs/computer/ocr
 
 Explicit observation selectors, cropped captures and coordinate frames are owned
 by `targets.py` and `screen.py`: [[observation-frames.ava.okf.md]].
-Strict input contracts and generated schemas: [[native-input.ava.okf.md]].
+Strict input contracts and generated schemas: [[native-input.ava.okf.md]];
+clipboard: [[clipboard.ava.okf.md]]; held mouse buttons: [[mouse-hold.ava.okf.md]].
 
 ## Accessibility tools (`ax_tree`, `ax_act`)
 Element-level alternative to screenshot + OCR; the helper walks the window and
