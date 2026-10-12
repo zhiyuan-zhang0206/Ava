@@ -8,14 +8,10 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from base.agents.observation.turn_progress import TurnProgress
-from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from services.agent_runner.agent_host.dispatcher import (
-    InboundWakeDispatcher,
     TurnScheduler,
 )
-from services.agent_runner.agent_host.tests.turn_dispatcher.scan_setup import FixedClock
 
 
 class Recorder:
@@ -117,25 +113,6 @@ async def releasing_stuck_turn() -> AsyncGenerator[StuckTurn, None]:
         yield turn
     finally:
         await turn.release()
-
-
-STALE = FixedClock(3600.0)
-FRESH = FixedClock(10.0)
-UNKNOWN = FixedClock(None)
-
-
-def scan_dispatcher(
-    scheduler: object, pending: object, clock: TurnProgress, **extra: object
-) -> InboundWakeDispatcher:
-    """A dispatcher whose turn-progress clock reports a fixed age, scanning with a 180s budget."""
-    return InboundWakeDispatcher(
-        EventBus.from_settings(),
-        scheduler,  # pyright: ignore[reportArgumentType]
-        pending_scan=pending,  # pyright: ignore[reportArgumentType]
-        stale_after_s=180.0,
-        turn_progress=clock,
-        **extra,  # pyright: ignore[reportArgumentType]
-    )
 
 
 class QueueingPubSub:

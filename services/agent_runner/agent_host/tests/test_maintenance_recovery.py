@@ -603,8 +603,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
             model_catalog=model_catalog,
             database_gate=database_gate,
         )
-        wakes = await successor.pending_inbound_wakes(stale_after_s=300)
-        assert agent in [wake.agent_id for wake in wakes]
+        assert agent in await successor.pending_inbound_wakes()
         await successor.run_turn(agent)
         assert calls == ["model", "before_exec", "after_exec"]
         assert effect.read_text() == "once"

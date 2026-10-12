@@ -47,10 +47,13 @@ recovery. Command, input and programming errors end the heartbeat and become
 visible at join. This changes neither the scheduler's drain budget nor the
 process's finite shutdown path.
 
-The durable host scan separates backlog age from active-turn progress. Old pending
-messages alone cannot cancel a newly resumed turn: its monotonic progress clock
-must also be stale, and a missing clock does not authorize cancellation. The same
-scan rediscovers `running` agents owned by another host after their lease expires,
+The durable host scan only wakes agents; it never cancels a running turn. A turn
+that stops making progress is aborted by the in-graph stall guard
+(`stall_guard.py`, driven by the monotonic turn-progress clock), not by the
+dispatcher. The wake subscription reconnects after a failure, and after ten
+consecutive failures without one completed read the dispatcher raises and the
+daemon exits, leaving the restart decision to the supervisor's bounded budget.
+The same scan rediscovers `running` agents owned by another host after their lease expires,
 even if they have only claimed messages or checkpoint work. It schedules the
 ordinary admission path, which retains exact process/resource and owner fences;
 the scan does not rewrite state or manufacture messages.

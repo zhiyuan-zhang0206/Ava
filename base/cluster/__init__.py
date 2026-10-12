@@ -49,9 +49,6 @@ from base.cluster.derive import (
     RUNNER_ROLE as RUNNER_ROLE,
 )
 from base.cluster.derive import (
-    WAKE_KEY_TTL_S as WAKE_KEY_TTL_S,
-)
-from base.cluster.derive import (
     db_identity as db_identity,
 )
 from base.cluster.derive import (
@@ -98,9 +95,6 @@ from base.cluster.derive import (
 )
 from base.cluster.derive import (
     session_name as session_name,
-)
-from base.cluster.derive import (
-    wake_key as wake_key,
 )
 from base.cluster.ports import (
     ClusterPorts as ClusterPorts,

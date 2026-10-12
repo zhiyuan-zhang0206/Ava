@@ -264,9 +264,9 @@ async def node_lifecycle(
     advances to `len(messages)` either way, so a subsequent incremental
     snapshot picks up exactly the next commits.
     """
-    # A node enter is turn activity, full stop: the hosted stall guard and the
-    # dispatcher's turn-level stale scan both read this clock, and a turn
-    # blocked inside one node is exactly what they must be able to see.
+    # A node enter is turn activity, full stop: the hosted stall guard reads
+    # this clock, and a turn blocked inside one node is exactly what it must
+    # be able to see.
     turn_progress.mark(agent_id)
     # The guard spans the pre-enter ops_pool query AND the node body (the
     # `yield`), so a hang in either lands a stack dump naming the blocked frame.

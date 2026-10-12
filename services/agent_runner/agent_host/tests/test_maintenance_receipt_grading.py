@@ -174,7 +174,7 @@ async def test_other_members_with_an_open_restart_are_still_woken(
     await receipts.record_failure(aops_pool, failed, RuntimeError("node failed"))
 
     wakes = await held_maintenance_wakes(aops_pool)
-    assert wakes is not None and [wake.agent_id for wake in wakes] == [healthy]
+    assert wakes == [healthy]
 
 
 async def test_an_applied_restart_is_not_rewritten(

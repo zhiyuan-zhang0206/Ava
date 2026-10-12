@@ -102,10 +102,7 @@ from services.agent_runner.agent_host.runtime import (
     refresh_cached_runtime,
 )
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
-from services.agent_runner.agent_host.scheduling.pending_wakes import (
-    PendingInboundWake,
-    scan_candidates,
-)
+from services.agent_runner.agent_host.scheduling.pending_wakes import scan_candidates
 from services.agent_runner.agent_host.scheduling.wake_screening import (
     is_runnable,
     read_stored_config,
@@ -534,9 +531,9 @@ class AgentHost:
         """Read the scheduler's actual LLM activity clock."""
         return await read_last_active_at(self._control_pool, agent_id)
 
-    async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
+    async def pending_inbound_wakes(self) -> list[int]:
         """Use the scheduling owner's durable work/maintenance scan."""
-        return await scan_candidates(self._control_pool, self._owner, self._machine, stale_after_s)
+        return await scan_candidates(self._control_pool, self._owner, self._machine)
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the

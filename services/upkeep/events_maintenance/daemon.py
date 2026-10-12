@@ -41,7 +41,10 @@ Usage:
 
 Kept alive by the root supervisor's health monitor through the roster's
 `/healthz` identity probe, so the schema-drift exit in
-`_dispatch_loop` is revived on the next round instead of staying dead.
+`_dispatch_loop` is revived on the next round instead of staying dead. Each loop
+logs an unexpected failed pass and waits out its interval; after five failures in a
+row (`base.daemon.round_loop.RoundFailureBudget`) it raises and the process exits for
+the supervisor. A pass skipped because the database is unreachable does not count.
 
 Health reports progress independently for the rollup and resolution loops.
 The endpoint takes the worst state: only a completed bounded unit refreshes
@@ -74,6 +77,7 @@ from base.daemon.health import (
     stop_health_server,
 )
 from base.daemon.health_schema import DEGRADED, OK, component
+from base.daemon.round_loop import RoundFailureBudget
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
@@ -348,6 +352,7 @@ async def _dispatch_loop(
         os.getpid(),
         interval,
     )
+    failures = RoundFailureBudget("events-maintenance rollup")
     while True:
         try:
             if not admission.quiesced():
@@ -357,6 +362,7 @@ async def _dispatch_loop(
                     lambda target_pool: _run_maintenance(target_pool, progress, config, db),
                     tasks=tasks,
                 )
+                failures.succeeded()
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
@@ -372,9 +378,13 @@ async def _dispatch_loop(
                 exc_info=True,
             )
             raise
+        except psycopg.OperationalError as exc:
+            progress.mark_error(str(exc))
+            _log.warning("[events-maintenance] rollup skipped: database unavailable", exc_info=True)
         except Exception as exc:
             progress.mark_error(str(exc))
             _log.exception("[events-maintenance] rollup iteration failed")
+            failures.failed(exc)
         await _sleep_with_liveness(progress, interval)
 
 
@@ -399,6 +409,7 @@ async def _resolution_loop(
         os.getpid(),
         interval,
     )
+    failures = RoundFailureBudget("events-maintenance resolution")
     while True:
         try:
             if not admission.quiesced():
@@ -408,6 +419,7 @@ async def _resolution_loop(
                     lambda target_pool: _run_resolution(target_pool, progress, config, cadence),
                     tasks=tasks,
                 )
+                failures.succeeded()
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
@@ -423,9 +435,15 @@ async def _resolution_loop(
                 exc_info=True,
             )
             raise
+        except psycopg.OperationalError as exc:
+            progress.mark_error(str(exc))
+            _log.warning(
+                "[events-maintenance] resolution skipped: database unavailable", exc_info=True
+            )
         except Exception as exc:
             progress.mark_error(str(exc))
             _log.exception("[events-maintenance] resolution iteration failed")
+            failures.failed(exc)
         await _sleep_with_liveness(progress, interval)
 
 

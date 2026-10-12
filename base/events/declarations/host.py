@@ -91,8 +91,15 @@ EVENTS: dict[str, EventSpec] = {
     "host_dispatcher_reconnect": telemetry_event(
         "host_dispatcher_reconnect",
         "hosted dispatcher's wake subscription dropped — reconnecting (wakes published "
-        "while down are lost; the delivery watchdog re-publish covers them)",
+        "while down are not replayed; the periodic pending scan finds them)",
         tier="noise",
+    ),
+    "host_dispatcher_reconnect_exhausted": telemetry_event(
+        "host_dispatcher_reconnect_exhausted",
+        "hosted dispatcher's wake subscription failed repeatedly without completing a "
+        "read — exiting for supervisor recovery; carries the consecutive failure count "
+        "and the last exception type",
+        tier="anomaly",
     ),
     "host_dispatcher_scan_failed": telemetry_event(
         "host_dispatcher_scan_failed",
@@ -103,7 +110,8 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "host_dispatcher_restart_required": telemetry_event(
         "host_dispatcher_restart_required",
-        "hosted dispatcher could not unwind a stale turn — exiting for supervisor recovery",
+        "a hosted turn refused its bounded cancellation after a stall — the dispatcher is "
+        "exiting for supervisor recovery",
         tier="anomaly",
     ),
     "host_dispatcher_bad_channel": telemetry_event(
@@ -313,18 +321,6 @@ EVENTS: dict[str, EventSpec] = {
         "error; a wait this long means the queue is backing up (raise the limit "
         "or inspect the turns holding slots). The wait is exempt from stall "
         "cancellation — cancelling it would only re-queue it at the tail",
-        tier="anomaly",
-    ),
-    "host_turn_stall_detected": telemetry_event(
-        "host_turn_stall_detected",
-        "the hosted dispatcher's durable scan found an in-flight turn whose "
-        "turn-progress clock (base/agents/observation/turn_progress.py: node enters, completed "
-        "LLM steps, streamed LLM chunks) has been silent past the wedged "
-        "budget while NO pending "
-        "inbound exists — the turn-level fake-alive shape (process alive, turn "
-        "dead) that pending-row and pid-based detectors cannot see. The turn "
-        "task is cancelled and the agent rescheduled; a turn that refuses to "
-        "unwind instead escalates to a daemon restart",
         tier="anomaly",
     ),
     "inbound_reconcile": telemetry_event(

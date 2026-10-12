@@ -22,10 +22,9 @@ Request timeout or caller cancellation cancels the known operation without
 waiting for its rollback. A return proves the request has returned, not that
 its Redis coroutine or resources have terminated.
 
-Wake-key GETDEL remains directly awaited by the caller with its existing
-`asyncio.wait_for` timeout and cancellation behavior. It is not an additional
-registered operation; cancellation-resistant GETDEL can still delay its caller.
 Stop's unfinished identities describe registered work, not caller completion.
+A wake published while the subscription is down is not replayed on reconnect;
+the caller's durable SELECT recheck picks it up within its wait budget.
 
 The listener registers each explicit open, eager-open, consume and handle
 cleanup Task. In-flight results belong to their caller. An unclaimed result,
@@ -41,13 +40,10 @@ Already abandoned operations and handle cleanup keep draining without a second
 cancellation. Cleanup detaches the listener's handles before awaiting them;
 a late open closes its own handles rather than attaching to a stopped or
 replacement generation. Business task admission is checked at each open and
-consume spawn. A GETDEL await that crosses stop cannot admit a later consume;
-one that crosses a resource close retries against the current subscription
-within the original request budget. A positive stop budget is finite; zero
-skips waiting.
+consume spawn. A positive stop budget is finite; zero skips waiting.
 
 Each phase retains the pubsub/client pair and generation it actually used.
-GETDEL timeout, consume abandonment and transport-error cleanup discard only
+Consume abandonment and transport-error cleanup discard only
 that still-current subscription. A resource close followed by eager reconnect
 cannot let the old phase detach or close the replacement; an old resistant
 consume remains known until it finishes.

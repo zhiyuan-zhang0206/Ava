@@ -53,21 +53,13 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Protocol, cast
 
-from base.agents.observation.db_wait import DatabaseWaits
-from base.agents.observation.turn_progress import TurnProgress
 from base.cluster import redis_channel_prefix
 from base.deploy.maintenance import admission
 from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
-from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
-from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
-from services.agent_runner.agent_host.scheduling.turn_gates import (
-    admission_waiting,
-    database_waiting,
-    raise_if_cancellation_pending,
-)
+from services.agent_runner.agent_host.scheduling.turn_gates import raise_if_cancellation_pending
 from services.agent_runner.agent_host.stall_guard import (
     HostRestartRequiredError,
     TurnStallTimeoutError,
@@ -89,6 +81,13 @@ _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S = 30.0
 # client's own timeout before the connection is rebuilt.
 _DEFAULT_SUBSCRIPTION_READ_SLACK_S = 1.0
 _DEFAULT_RECONNECT_DELAY_S = 1.0
+# Consecutive subscription failures tolerated before the daemon exits for its
+# supervisor's bounded restart budget. A failure is a connect/subscribe error
+# or a read that missed its deadline; one completed read resets the count.
+# Ten attempts one second apart ride out a data-plane restart of a few seconds,
+# and a half-open peer burns a full read deadline per attempt, so it takes
+# minutes of unanswered reads to reach the limit.
+_MAX_CONSECUTIVE_RECONNECT_FAILURES = 10
 # The database scan is a durable backstop, not the subscription's liveness
 # probe. Bound its outage retries independently so a long DB outage does not
 # turn into an unbounded delay before the next reconciliation attempt.
@@ -115,6 +114,15 @@ _DEFAULT_MAX_SCAN_BACKOFF_S = 300.0
 # adds a flat 2s to the shutdown budget the cancel wait above already bounds —
 # `test_the_unwind_bound_fits_inside_the_stop_paths_kill_window` asserts the SUM
 # of the two against the stop path's force-kill window.
+
+
+class DispatcherReconnectExhaustedError(RuntimeError):
+    """The wake subscription failed too many times in a row; the daemon must exit.
+
+    The supervisor's bounded restart budget decides whether to start the host
+    again, so a permanently unreachable Redis ends in a stopped, alerting host
+    instead of an endless reconnect loop.
+    """
 
 
 def _age_seconds(moment: datetime) -> float:
@@ -230,8 +238,7 @@ class TurnScheduler:
             # A turn refused its bounded cancellation and still owns the task
             # slot; rescheduling beside it would violate one-turn-per-agent.
             # Escalate to the dispatcher loop, which exits the daemon; the
-            # supervisor restarts it from the durable checkpoint (the same
-            # recovery the pending scan's stale-turn branch uses).
+            # supervisor restarts it from the durable checkpoint.
             logger.error(
                 "hosted turn for agent {agent_id} refused its bounded "
                 "cancellation after a stall — requesting host restart",
@@ -285,26 +292,6 @@ class TurnScheduler:
             self.wake(agent_id)
             return False
         if self._tasks.get(agent_id) is not task:
-            return False
-        task.cancel()
-        await self._await_unwind({agent_id: task})
-        return task.done()
-
-    async def cancel_agent(self, agent_id: int) -> bool:
-        """Cancel ONE agent's turn task, with the same bounded unwind as `aclose`.
-
-        The hosted replacement for force-terminating a wedged agent's process:
-        `Task.cancel()` lands at the task's next await point, the same
-        `CANCEL_UNWIND_TIMEOUT_S` bound applies, and a task that refuses to
-        unwind produces the same `host_turn_uncancellable` report — while
-        staying in the registry, so a later wake for that agent does not
-        double-schedule (the turn it is stuck in is still the turn it owns).
-
-        Returns True only after the captured task ended; stragglers stay false.
-        External force uses ``cancel_exact_force`` instead of this watchdog path.
-        """
-        task = self._tasks.get(agent_id)
-        if task is None:
             return False
         task.cancel()
         await self._await_unwind({agent_id: task})
@@ -452,8 +439,6 @@ class _WakeScheduler(Protocol):
 
     def reaped_successor(self, agent_id: int) -> asyncio.Task[None] | None: ...
 
-    async def cancel_agent(self, agent_id: int) -> bool: ...
-
 
 @dataclass(frozen=True)
 class _ScanSchedule:
@@ -473,8 +458,10 @@ class InboundWakeDispatcher:
     loop free of any delivery semantics: a duplicate wake is harmless and a
     coalesced one is correct.
 
-    Subscription failures rebuild Redis. Database scan failures leave that
-    subscription in place and retry the durable backstop with bounded backoff.
+    Subscription failures rebuild Redis, up to a bounded run of consecutive
+    failures after which `run` raises and the daemon exits for its supervisor.
+    Database scan failures leave the subscription in place and retry the
+    durable backstop with bounded backoff.
     """
 
     def __init__(
@@ -482,11 +469,7 @@ class InboundWakeDispatcher:
         bus: EventBus,
         scheduler: _WakeScheduler,
         *,
-        pending_scan: Callable[[float], Awaitable[list[PendingInboundWake]]] | None = None,
-        database_waits: DatabaseWaits | None = None,
-        turn_progress: TurnProgress | None = None,
-        turn_admission: TurnAdmission | None = None,
-        stale_after_s: float | None = None,
+        pending_scan: Callable[[], Awaitable[list[int]]] | None = None,
         scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         max_scan_backoff_s: float = _DEFAULT_MAX_SCAN_BACKOFF_S,
         subscription_read_timeout_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
@@ -496,10 +479,6 @@ class InboundWakeDispatcher:
         self._bus = bus
         self._scheduler = scheduler
         self._pending_scan = pending_scan
-        self._database_waits = database_waits if database_waits is not None else DatabaseWaits()
-        self._turn_progress = turn_progress if turn_progress is not None else TurnProgress()
-        self._turn_admission = turn_admission if turn_admission is not None else TurnAdmission(0)
-        self._stale_after_s = stale_after_s
         self._scan_interval_s = scan_interval_s
         self._max_scan_backoff_s = max_scan_backoff_s
         self._subscription_read_timeout_s = subscription_read_timeout_s
@@ -510,8 +489,7 @@ class InboundWakeDispatcher:
         """Escalate a turn task's refused-bounded-unwind to a daemon exit.
 
         A plain raise inline trips TRY301 inside the subscription loop's
-        broad except; the escalation is the same one `scan_once` raises
-        directly for a stale pending turn that will not unwind.
+        broad except.
         """
         if self._scheduler.restart_required:
             raise HostRestartRequiredError(
@@ -522,12 +500,17 @@ class InboundWakeDispatcher:
     async def run(self) -> None:
         """Subscribe and feed wakes to the scheduler until cancelled.
 
-        Subscription failures reconnect with a short backoff. The periodic database scan catches
-        a wake published while the subscription is down; its own failures leave a healthy
-        subscription alone and retry with bounded backoff. This shared scan supplies durable
-        recovery for all agents.
+        Subscription failures reconnect with a short delay; after
+        `_MAX_CONSECUTIVE_RECONNECT_FAILURES` in a row without one completed
+        read, `run` raises `DispatcherReconnectExhaustedError` so the daemon
+        exits and its supervisor's bounded restart budget takes over. The
+        periodic database scan catches a wake published while the subscription
+        is down; its own failures leave a healthy subscription alone and retry
+        with bounded backoff. This shared scan supplies durable wake recovery
+        for all agents.
         """
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
+        consecutive_failures = 0
         while True:  # quiesce-exempt: the scan itself is gated by quiesced()
             redis = self._bus.open_async_redis()
             pubsub = None
@@ -561,23 +544,36 @@ class InboundWakeDispatcher:
                         ),
                         timeout=read_timeout_s + self._subscription_read_deadline_grace_s,
                     )
+                    consecutive_failures = 0
                     if message is not None:
                         self._handle(message)  # pyright: ignore[reportUnknownArgumentType]
             except asyncio.CancelledError:
                 raise
             except HostRestartRequiredError:
                 logger.error(
-                    "hosted stale turn would not cancel; exiting for supervisor recovery",
+                    "a hosted turn would not cancel after a stall; exiting for supervisor recovery",
                     event="host_dispatcher_restart_required",
                 )
                 raise
             except Exception as exc:
                 # A dropped subscription read (a host stall outliving the
-                # read deadline) is expected and self-healing: the loop
-                # reconnects after `_reconnect_delay_s` and re-scans, the
-                # delivery watchdog re-publishes wakes missed meanwhile. The
-                # event is declared noise: WARNING without the traceback
-                # (2026-10-03 triage, E1).
+                # read deadline) is usually self-healing: the loop reconnects
+                # after `_reconnect_delay_s` and re-scans, so a wake published
+                # meanwhile is found by the pending scan. Declared noise:
+                # WARNING without the traceback. A run of failures that never
+                # completes a read is not noise: exit for the supervisor.
+                consecutive_failures += 1
+                if consecutive_failures >= _MAX_CONSECUTIVE_RECONNECT_FAILURES:
+                    logger.error(
+                        "hosted dispatcher subscription failed {failures} times in a row — "
+                        "exiting for supervisor recovery",
+                        event="host_dispatcher_reconnect_exhausted",
+                        failures=consecutive_failures,
+                        exception_type=type(exc).__name__,
+                    )
+                    raise DispatcherReconnectExhaustedError(
+                        f"wake subscription failed {consecutive_failures} consecutive times"
+                    ) from exc
                 logger.warning(
                     "hosted dispatcher subscription dropped — reconnecting",
                     event="host_dispatcher_reconnect",
@@ -601,8 +597,6 @@ class InboundWakeDispatcher:
             await self.scan_once()
         except asyncio.CancelledError:
             raise
-        except HostRestartRequiredError:
-            raise
         except Exception:
             backoff_s = min(scan_backoff_s, self._max_scan_backoff_s)
             logger.warning(
@@ -621,81 +615,16 @@ class InboundWakeDispatcher:
         )
 
     async def scan_once(self) -> None:
-        """Wake new input and controls; cancel stalled tasks without replay."""
+        """Wake every agent with new input or an explicit control; never cancel a turn."""
         if self._pending_scan is None:
             return
-        if self._stale_after_s is None:
-            raise RuntimeError("hosted pending scan configured without stale_after_s")
         if admission.quiesced():
             # The operator owns stop-window cancellation; pending rows stay for
             # the scan after the hold releases.
             return
-
-        # Old inbox/DB timestamps cannot license cancellation; only the current
-        # monotonic progress clock can.
-        started: set[int] = set()
-        candidates = await self._pending_scan(self._stale_after_s)
+        agent_ids = await self._pending_scan()
         raise_if_cancellation_pending()
-        for candidate in candidates:
-            if self._candidate_stalled(candidate):
-                # Only the captured task's done state proves unwind across a pre-start reap.
-                unwound = await self._scheduler.cancel_agent(candidate.agent_id)
-                if not unwound:
-                    raise HostRestartRequiredError(
-                        f"hosted turn for agent {candidate.agent_id} did not unwind"
-                    )
-            if candidate.agent_id not in self._scheduler.active_agents:
-                started.add(candidate.agent_id)
-            self._scheduler.wake(candidate.agent_id)
-        await self._cancel_stalled_turns(started)
-
-    def _candidate_stalled(self, candidate: PendingInboundWake) -> bool:
-        """A stale pending agent whose running turn shows no progress past `stale_after_s`."""
-        stale_after_s = self._stale_after_s
-        assert stale_after_s is not None  # noqa: S101
-        return (
-            candidate.stale
-            and candidate.agent_id in self._scheduler.active_agents
-            and not database_waiting(self._database_waits, self._turn_progress, candidate.agent_id)
-            and not admission_waiting(self._turn_admission, candidate.agent_id)
-            and (age := self._turn_progress.age_s(candidate.agent_id)) is not None
-            and age >= stale_after_s
-        )
-
-    async def _cancel_stalled_turns(self, started: set[int]) -> None:
-        stale_after_s = self._stale_after_s
-        assert stale_after_s is not None  # noqa: S101
-        # Turn-level fake-alive: a task can claim its entire inbox, then hang
-        # with no pending rows. Its progress clock detects that stalled turn
-        # (2026-09-04 incident, agent 2998).
-        for agent_id in self._scheduler.active_agents:
-            # Do not apply an old clock to a task this scan just started.
-            if (
-                agent_id in started
-                or database_waiting(self._database_waits, self._turn_progress, agent_id)
-                or admission_waiting(self._turn_admission, agent_id)
-            ):
-                continue
-            age = self._turn_progress.age_s(agent_id)
-            if age is None or age < stale_after_s:
-                continue
-            # Earlier cancellation may have let this snapshotted task finish;
-            # cancel_agent reports a missing task as False, not a straggler.
-            # This membership check and cancel_agent's lookup cannot interleave.
-            if agent_id not in self._scheduler.active_agents:
-                continue
-            unwound = await self._scheduler.cancel_agent(agent_id)
-            if not unwound:
-                raise HostRestartRequiredError(f"hosted turn for agent {agent_id} did not unwind")
-            logger.warning(
-                "hosted turn for agent {agent_id} showed no progress for "
-                "{no_progress_s:.0f}s (turn-level fake-alive) — turn task "
-                "cancelled and the agent rescheduled; its next wake rebuilds "
-                "the runtime, which re-runs the startup reconcile",
-                event="host_turn_stall_detected",
-                agent_id=agent_id,
-                no_progress_s=age,
-            )
+        for agent_id in agent_ids:
             self._scheduler.wake(agent_id)
 
     def _handle(self, message: dict[str, object]) -> None:

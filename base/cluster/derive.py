@@ -5,7 +5,7 @@ from `.env` URLs as data (`identity_from_url` / `db_identity` /
 `redis_identity`, plus the fixed `DATA_PLANE_IDENTITY` at birth); the
 home-derived display label and short-path token (`home_label` / `home_slug`);
 the session-name composer (`session_name`); the redis
-channel/wake-key names and admin URL; and
+channel name and admin URL; and
 `derive_env` — the record-to-env mapping a unit needs (plus its base-URL
 helper `per_cluster_base_urls`).
 """
@@ -279,20 +279,6 @@ def inbound_channel(agent_id: int) -> str:
     `ava.self`) and subscribe (`RedisInboundListener`) both derive the channel here
     so the two halves can never drift."""
     return f"{redis_channel_prefix()}:inbound:{agent_id}"
-
-
-# TTL for the wake-key breadcrumb — must exceed the claim wait budget (30s) + a reconnect.
-WAKE_KEY_TTL_S = 60
-
-
-def wake_key(agent_id: int) -> str:
-    """Redis key SETEXed alongside every inbound pub/sub wake —
-    `ava:wake:<agent_id>`. Pub/sub is fire-and-forget: a wake published while
-    the listener is down is otherwise lost until the 30s SELECT recheck. The
-    listener GETDELs this breadcrumb after (re)subscribing, so a lost wake
-    triggers the SELECT recheck immediately. Keys sit in the cluster ACL
-    user's `~*` grant — no ACL change needed."""
-    return f"{redis_channel_prefix()}:wake:{agent_id}"
 
 
 def derive_env(

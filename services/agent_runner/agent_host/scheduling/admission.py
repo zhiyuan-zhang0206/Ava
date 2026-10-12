@@ -15,9 +15,7 @@ semaphore cannot express:
 
 - **The waiting state.** A waiter is registered in this gate
   BEFORE the acquire await, so there is no window in which a parked turn is
-  invisible to the dispatcher's fake-alive scan. Cancelling a waiter would only
-  re-queue it at the tail (its successor is a new ticket), so the wait is
-  exempted explicitly rather than left to the stall budget.
+  invisible to the beat loop's queue report.
 - **Observability.** Queue depth, current waiter ages and served-wait counters
   feed the daemon's ``/stats``; the beat loop reports each waiter that crosses
   the alert bound once per episode as the ``host_admission_wait_exceeded``
@@ -98,8 +96,6 @@ class TurnAdmission:
     def is_waiting(self, agent_id: int) -> bool:
         """True while ``agent_id``'s turn queues at the gate.
 
-        A queued turn shows no activity by design, so the dispatcher's stall scan reads this to
-        tell "queued" from "stuck": cancelling a waiter would only re-queue it at the tail.
         Wait length is observability (``/stats`` + the ``host_admission_wait_exceeded`` event),
         never a cancellation trigger.
         """

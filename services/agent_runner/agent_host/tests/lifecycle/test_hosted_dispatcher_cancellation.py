@@ -22,7 +22,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
-from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
 
 
 class _IdleScheduler:
@@ -44,9 +43,6 @@ class _IdleScheduler:
 
     def reaped_successor(self, agent_id: int) -> asyncio.Task[None] | None:
         return None
-
-    async def cancel_agent(self, agent_id: int) -> bool:
-        raise AssertionError("no active turn expected in this test")
 
 
 @pytest_asyncio.fixture
@@ -81,7 +77,7 @@ async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
     aops_pool: AsyncConnectionPool,
     blocked_first_check: asyncio.Event,
 ) -> None:
-    async def pending(stale_after_s: float) -> list[PendingInboundWake]:
+    async def pending() -> list[int]:
         async with aops_pool.connection():
             return []
 
@@ -89,7 +85,6 @@ async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
         EventBus.from_settings(),
         _IdleScheduler(),
         pending_scan=pending,
-        stale_after_s=30,
         scan_interval_s=0.05,
         subscription_read_timeout_s=5,
     )
