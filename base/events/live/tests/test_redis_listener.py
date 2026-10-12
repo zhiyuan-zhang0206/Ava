@@ -314,16 +314,7 @@ class TestWaitOneBudgetAndCancel:
 
 
 class TestWakeHealth:
-    """Wake-path health episodes across abandon, breadcrumb, and recovery paths."""
-
-    async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
-        from base.cluster import WAKE_KEY_TTL_S, wake_key
-
-        r = EventBus.from_settings().sync_redis()
-        try:
-            r.set(wake_key(agent_id), payload, ex=WAKE_KEY_TTL_S)
-        finally:
-            r.close()
+    """Wake-path health episodes across abandon and recovery paths."""
 
     @pytest.mark.usefixtures("redis_url")
     async def test_clean_idle_timeout_stays_healthy(
@@ -344,58 +335,6 @@ class TestWakeHealth:
         finally:
             await listener.close()
         assert not any("wake path degraded" in record["message"] for record in loguru_records)
-
-    @pytest.mark.usefixtures("redis_url")
-    async def test_getdel_timeout_degrades_drops_and_recovers(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],
-    ) -> None:
-        """A stuck GETDEL drops stale handles, re-delivers the wake key, and recovers.
-
-        Without the close, the next wait reuses the black-holed command socket;
-        without the clean-consume transition, recovery stays falsely degraded.
-        """
-        agent_id = 6987
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
-
-        async def _hung_getdel(*args: object, **kwargs: object) -> object:
-            await asyncio.sleep(3600)
-            raise AssertionError("unreachable")
-
-        try:
-            await listener.ensure_listening()
-            await self._set_wake_key(agent_id)
-            redis = listener._redis
-            assert redis is not None
-            monkeypatch.setattr(redis, "getdel", _hung_getdel)
-
-            started = time.monotonic()
-            await listener.wait_one(timeout=0.5)
-            assert time.monotonic() - started < 2.0
-            assert listener.wake_state is WakeState.DEGRADED
-            assert listener.wake_degrade_reason == WakeFailure.GETDEL_TIMEOUT.value
-            assert listener.wake_degraded_s is not None
-            assert listener._redis is None
-            assert listener._pubsub is None
-
-            # A fresh client consumes the breadcrumb left by the abandoned
-            # GETDEL, so the caller's SELECT recheck runs without the full wait.
-            started = time.monotonic()
-            await listener.wait_one(timeout=10.0)
-            assert time.monotonic() - started < 3.0
-            await listener.wait_one(timeout=0.5)
-            assert listener.wake_state is WakeState.HEALTHY
-            assert listener.wake_degrade_reason is None
-            assert listener.wake_degraded_s is None
-        finally:
-            await listener.close()
-
-        assert any(
-            "wake path degraded (getdel_timeout)" in record["message"] and record["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            for record in loguru_records
-        )
-        assert any("wake path recovered" in record["message"] for record in loguru_records)
 
     @pytest.mark.usefixtures("redis_url")
     async def test_consume_abandon_degrades_and_drops_connection(
@@ -590,86 +529,6 @@ class TestAclScopedChannel:
         assert any("rejected by redis" in r["message"] for r in loguru_records), (
             "expected an ACL-denial WARNING to be logged"
         )
-
-
-@pytest.mark.usefixtures("redis_url")
-class TestWakeKeyBreadcrumb:
-    """The durable wake-key breadcrumb (`base.cluster.wake_key`) — the
-    publisher SETEXes it alongside every pub/sub wake; the listener GETDELs it
-    after (re)subscribing so a wake lost to pub/sub's fire-and-forget semantics
-    (publish landed while this connection was down / not yet subscribed) still
-    makes the caller's SELECT recheck run immediately instead of after the full
-    wait budget."""
-
-    async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
-        from base.cluster import WAKE_KEY_TTL_S, wake_key
-
-        r = EventBus.from_settings().sync_redis()
-        try:
-            r.set(wake_key(agent_id), payload, ex=WAKE_KEY_TTL_S)
-        finally:
-            r.close()
-
-    async def _get_wake_key(self, agent_id: int) -> str | None:
-        from base.cluster import wake_key
-
-        r = EventBus.from_settings().sync_redis(decode_responses=True)
-        try:
-            val = r.get(wake_key(agent_id))
-            return val.decode() if isinstance(val, bytes) else val
-        finally:
-            r.close()
-
-    async def test_wait_one_returns_immediately_when_wake_key_set(self) -> None:
-        """A wake key present before `wait_one` (the lost-publish window: the
-        publisher SETEXed but the pub/sub message never arrived) makes
-        `wait_one` return right after subscribing instead of sleeping out its
-        budget — the caller's SELECT then finds the pending row."""
-        agent_id = 6991
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
-        try:
-            await self._set_wake_key(agent_id)
-            t0 = time.monotonic()
-            await listener.wait_one(timeout=10.0)
-            elapsed = time.monotonic() - t0
-            assert elapsed < 3.0, (
-                f"wait_one took {elapsed:.1f}s with a wake key set — breadcrumb not consumed"
-            )
-        finally:
-            await listener.close()
-
-    async def test_wake_key_consumed_on_wait_one(self) -> None:
-        """`wait_one` GETDELs the key, so a consumed breadcrumb does not
-        re-trigger on every subsequent wait."""
-        agent_id = 6990
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
-        try:
-            await self._set_wake_key(agent_id)
-            await listener.wait_one(timeout=5.0)
-            assert await self._get_wake_key(agent_id) is None, (
-                "wake key not consumed — would re-trigger a SELECT on every wait"
-            )
-        finally:
-            await listener.close()
-
-    async def test_wake_key_wakes_listener_after_reconnect_gap(self) -> None:
-        """The prod-shaped regression: the listener's connection is dead when
-        the publish lands (simulated: publish the wake key with no live
-        listener), and the next `wait_one` — which reconnects — must return
-        promptly via the breadcrumb."""
-        agent_id = 6989
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
-        try:
-            # No subscription yet (the "disconnected" state).
-            await self._set_wake_key(agent_id)
-            t0 = time.monotonic()
-            await listener.wait_one(timeout=10.0)
-            elapsed = time.monotonic() - t0
-            assert elapsed < 3.0, (
-                f"reconnect + wake key took {elapsed:.1f}s — lost wake not recovered fast"
-            )
-        finally:
-            await listener.close()
 
 
 @pytest.mark.usefixtures("redis_url")

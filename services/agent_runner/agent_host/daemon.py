@@ -533,10 +533,6 @@ async def _dispatch_host(
             bus,
             scheduler,
             pending_scan=host.pending_inbound_wakes,
-            database_waits=host.database_waits,
-            turn_progress=host.turn_progress,
-            turn_admission=host.admission,
-            stale_after_s=float(config.view.daemon.wedged_agent_inbound_age_seconds),
             scan_interval_s=float(config.view.agent.db_notify_wait_timeout_seconds),
             subscription_read_timeout_s=float(config.view.agent.db_notify_wait_timeout_seconds),
         ).run()

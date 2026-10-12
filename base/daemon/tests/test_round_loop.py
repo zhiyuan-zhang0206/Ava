@@ -168,3 +168,23 @@ async def test_a_quiesced_unit_skips_every_round_and_resumes_when_released(
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+def test_a_failure_budget_raises_at_its_limit_chained_to_the_last_error() -> None:
+    budget = round_loop.RoundFailureBudget("t", limit=3)
+    budget.failed(ValueError("one"))
+    budget.failed(ValueError("two"))
+    last = ValueError("three")
+
+    with pytest.raises(round_loop.RoundFailureLimitError, match="3 consecutive") as raised:
+        budget.failed(last)
+
+    assert raised.value.__cause__ is last
+
+
+def test_a_completed_round_clears_the_failure_count() -> None:
+    budget = round_loop.RoundFailureBudget("t", limit=3)
+    for _ in range(5):
+        budget.failed(ValueError("a"))
+        budget.failed(ValueError("b"))
+        budget.succeeded()

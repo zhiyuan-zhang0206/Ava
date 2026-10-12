@@ -376,7 +376,7 @@ async def test_idle_force_only_original_live_host_can_observe(
     assert not await original_host_force(
         aops_pool, agent_id, uuid4(), "claim-test", command_id=command, quiescent=True
     )
-    assert [wake.agent_id for wake in await host.pending_inbound_wakes(0)] == [agent_id]
+    assert await host.pending_inbound_wakes() == [agent_id]
     await host.run_turn(agent_id)
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)

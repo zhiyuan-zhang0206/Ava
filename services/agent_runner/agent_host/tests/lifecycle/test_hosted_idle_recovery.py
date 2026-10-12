@@ -108,12 +108,12 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
         catalog=model_catalog,
         machine=configured_machine(),
     )
-    assert await host.pending_inbound_wakes(60) == []
+    assert await host.pending_inbound_wakes() == []
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     pause_owner.begin_maintenance("test-idle-recovery", datetime.now(UTC))
-    assert await host.pending_inbound_wakes(60) == []
+    assert await host.pending_inbound_wakes() == []
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
 
 

@@ -15,8 +15,8 @@ publish never becomes proof that the inbox is empty.
 
 Wake health is latched as HEALTHY or DEGRADED so wake-path failures cannot look
 healthy to callers. It covers every instant-wake-off cause: abandoned
-open/consume, wake-key GETDEL timeout/error, and ACL-denied subscribe (whose
-channel denial is surfaced lazily on the first read). A clean consume restores
+open/consume and ACL-denied subscribe (whose channel denial is surfaced lazily
+on the first read). A clean consume restores
 HEALTHY; a consume abandonment closes both handles because a black-holed pubsub
 socket can answer ping while its `get_message` remains stuck forever.
 """
@@ -32,7 +32,7 @@ from typing import Any, cast
 import redis.asyncio as aredis
 from redis.asyncio.client import PubSub as _RedisPubSub
 
-from base.cluster import inbound_channel, wake_key
+from base.cluster import inbound_channel
 from base.events.live.redis_client import _TransportAwareAsyncConnection
 from base.events.live.redis_resilience import (
     _HEALTH_CHECK_INTERVAL_S,
@@ -73,8 +73,6 @@ class WakeFailure(StrEnum):
     """First failure recorded for the current wake-degradation episode."""
 
     OPEN_ABANDON = "open_abandon"
-    GETDEL_TIMEOUT = "getdel_timeout"
-    GETDEL_ERROR = "getdel_error"
     CONSUME_ABANDON = "consume_abandon"
     ACL_DENIED = "acl_denied"
 
@@ -240,7 +238,7 @@ class RedisInboundListener:
         self._wake_degraded_at = time.monotonic()
         logger.warning(
             "RedisInboundListener[agent={a}]: wake path degraded ({r}) — instant pub/sub wake off; "
-            "wake now rides the wake-key/SELECT recheck until a clean consume proves the channel readable",
+            "wake now rides the SELECT recheck until a clean consume proves the channel readable",
             a=self._agent_id,
             r=reason.value,
             event="wake_degraded",
@@ -407,65 +405,6 @@ class RedisInboundListener:
             ch=self._channel,
         )
 
-    async def _consume_wake_key(self, timeout: float) -> bool:
-        """Whether a durable wake breadcrumb exists for this agent; consume it.
-
-        The inbound publisher SETEXes `wake_key(agent_id)` alongside every
-        pub/sub publish (see `base.agents.inbox.wake.publish_inbound_wake`). GETDEL it here
-        so a wake lost to pub/sub's fire-and-forget semantics (the publish
-        landed while this connection was down or not yet subscribed) still
-        makes the caller's SELECT recheck run immediately instead of after the
-        full wait budget. The caller-provided remaining budget also bounds this
-        command: a timeout drops both Redis handles before returning False, so
-        the caller can run its SELECT recheck and a later wait can reconnect.
-        Expected transport failures return False and fall back to the normal
-        wait. Unknown errors propagate to the active caller.
-        """
-        redis = self._redis
-        pubsub = self._pubsub
-        generation = self._generation
-        if redis is None or timeout <= 0:
-            return False
-        try:
-            # redis-py types getdel()'s return as Unknown; bool() narrows it.
-            return bool(  # pyright: ignore[reportUnknownMemberType]
-                await asyncio.wait_for(redis.getdel(wake_key(self._agent_id)), timeout=timeout)
-            )
-        except TimeoutError:
-            self._mark_wake_degraded(WakeFailure.GETDEL_TIMEOUT)
-            logger.warning(
-                "RedisInboundListener[agent={a}]: wake-key GETDEL did not complete "
-                "within {t:.1f}s budget — discarding Redis connections before SELECT recheck",
-                a=self._agent_id,
-                t=timeout,
-            )
-            async with self._lock:
-                await self._close_inner(
-                    expected_pubsub=pubsub,
-                    expected_redis=redis,
-                    expected_generation=generation,
-                )
-            return False
-        except (OSError, aredis.RedisError, TypeError) as exc:
-            # First failure of the degraded episode carries the traceback; repeats stay at
-            # debug so a persistent outage does not warn on every wait.
-            first = not self._wake_degraded
-            self._mark_wake_degraded(WakeFailure.GETDEL_ERROR)
-            if first:
-                logger.opt(exception=True).warning(
-                    "RedisInboundListener[agent={a}]: wake-key GETDEL failed; "
-                    "falling back to pub/sub/SELECT recheck",
-                    a=self._agent_id,
-                )
-            else:
-                logger.debug(
-                    "RedisInboundListener[agent={a}]: wake-key GETDEL failed; "
-                    "falling back to pub/sub/SELECT recheck: {exc!r}",
-                    a=self._agent_id,
-                    exc=exc,
-                )
-            return False
-
     async def _consume_one(self, pubsub: _RedisPubSub, timeout: float) -> None:
         """Consume one message from pubsub, or return when `timeout` expires.
 
@@ -555,21 +494,6 @@ class RedisInboundListener:
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     return
-                # A wake may have been published while this connection was
-                # down (or before it subscribed): pub/sub is fire-and-forget,
-                # so the publisher also SETEXes a durable wake key. Consume it
-                # so the caller's SELECT recheck runs NOW instead of after a
-                # full wait budget — this turns a lost wake into (near-)instant
-                # delivery instead of the 30s fallback.
-                if await self._consume_wake_key(remaining):
-                    return
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    return
-                # GETDEL can yield across stop or replacement of this subscription.
-                self._check_admission()
-                if not self._subscription_is_current(pubsub, redis, generation):
-                    continue
                 # Consume with bounded budget (see `_CONSUME_ABANDON_GRACE`).
                 consume_task = asyncio.create_task(self._consume_one(pubsub, remaining))
                 self._own_operation(consume_task, _Phase.CONSUME)

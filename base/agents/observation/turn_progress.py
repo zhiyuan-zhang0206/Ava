@@ -10,22 +10,15 @@ this turn done anything in the last N seconds?" without touching the DB.
 
 The agent host builds one `TurnProgress` and holds it: it hands it to the turns it runs
 (`AvaContext.turn_progress`, where the graph's writers mark activity) and to its own readers.
-Three consumers read the clock:
+Two consumers read the clock:
 
 - the host's stall guard aborts a ``graph.ainvoke`` whose turn clock has been silent for
   ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` (the turn-level timeout: a turn that keeps
   stepping may legitimately run for days, a turn that stops stepping is the failure this clock
   exists to bound);
-- the dispatcher's durable scan treats an in-flight agent with a stale clock as turn-level
-  fake-alive (process alive / turn dead — the exact shape the incident behind task #2417
-  escaped through: agent 2998 claimed its whole inbound queue, then hung inside
-  ``graph.ainvoke`` for 3.5h with no pending row ever aging) and cancels + reschedules it;
 - the host daemon snapshots active turns onto its existing 15-second Redis heartbeat, so the
   gateway delivery watchdog can make the same liveness judgment outside the process whose event
   loop may freeze.
-
-A turn queued at the host's admission gate shows no activity by design; the gate itself
-(`TurnAdmission`) answers "queued" so the stall scan can tell it from "stuck".
 
 One host process serves every local agent and per-agent monotonic timestamps need no
 cross-process coordination. No locks: every writer runs on the host's single event loop

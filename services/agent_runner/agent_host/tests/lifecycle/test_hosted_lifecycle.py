@@ -312,8 +312,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
     )
-    wakes = await host.pending_inbound_wakes(stale_after_s=60)
-    assert agent_id in [wake.agent_id for wake in wakes]
+    assert agent_id in await host.pending_inbound_wakes()
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND status='pending'", (agent_id,)
     ).fetchone() == (0,)
