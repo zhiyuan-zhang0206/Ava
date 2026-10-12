@@ -1,0 +1,3 @@
+[loads]
+"_plugin_metrics.py" = ["ava_builtins/plugins"]
+"_plugin_widgets.py" = ["ava_builtins/plugins"]

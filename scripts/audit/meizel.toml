@@ -1,0 +1,2 @@
+[external]
+"module_moves.py" = "imports the old and new module names the operator passes on the command line"
