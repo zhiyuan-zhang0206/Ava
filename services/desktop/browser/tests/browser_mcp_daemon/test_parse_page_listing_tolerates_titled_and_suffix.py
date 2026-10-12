@@ -11,18 +11,12 @@ import pytest
 from base.config import settings
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import _text_of
-from services.desktop.browser.page_lifecycle import (
-    local_host_port,
-    parse_page_listing,
-    port_listening,
-    reap_dead_agent_pages,
-)
+from services.desktop.browser.page_lifecycle import parse_page_listing
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     _daemon,
     _expire,
     _new_daemon,
     _record_emits,
-    _stamp_idle,
     _TitledListing,
     _ttl_remaining,
 )
@@ -52,273 +46,6 @@ def test_parse_page_listing_tolerates_titled_and_suffix_shapes() -> None:
     assert parse_page_listing("  8: Wiki Page (https://en.wikipedia.org/wiki/Foo_(bar))") == {
         8: "https://en.wikipedia.org/wiki/Foo_(bar)"
     }
-
-
-def test_local_host_port_only_matches_local_http() -> None:
-    assert local_host_port("http://localhost:3112/x") == ("localhost", 3112)
-    assert local_host_port("http://127.0.0.1/") == ("127.0.0.1", 80)
-    assert local_host_port("https://localhost") == ("localhost", 443)
-    assert local_host_port("https://github.com/ava/ava") is None
-    assert local_host_port("chrome-error://chromewebdata/") is None
-    assert local_host_port("file:///tmp/x") is None
-    assert local_host_port("http://localhost:abc") is None
-
-
-async def test_port_listening_dead_refused_live_accepts() -> None:
-    """A refused port is dead; a live listener is alive (probe connects and
-    closes, sends no bytes)."""
-    server = await asyncio.start_server(lambda _r, w: w.close(), host="127.0.0.1", port=0)
-    port = server.sockets[0].getsockname()[1]  # type: ignore[index]
-    try:
-        assert await port_listening("127.0.0.1", port) is True
-    finally:
-        server.close()
-        await server.wait_closed()
-    # The listener is gone now — the port refuses.
-    assert await port_listening("127.0.0.1", port) is False
-
-
-async def test_reap_dead_agent_pages_closes_dead_local_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The reaper closes agent-owned pages whose URL is localhost with no
-    listener, keeps pages on a live port, and never inspects non-local URLs
-    (or user tabs — only affinity slots are candidates)."""
-    probes: list[tuple[str, int]] = []
-
-    async def fake_probe(host: str, port: int) -> bool:
-        probes.append((host, port))
-        return (host, port) != ("localhost", 3111)  # 3111 dead; everything else alive
-
-    monkeypatch.setattr("services.desktop.browser.page_lifecycle.port_listening", fake_probe)
-
-    d, up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3111/next"}, 7)
-    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3112/live"}, 8)
-    await d.call_tool_for_agent("new_page", {"url": "https://github.com/ava/ava"}, 9)
-    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3101/dead2"}, 10)
-    up.calls.clear()
-
-    await reap_dead_agent_pages(d)
-
-    # 7's dead tab closed + slot cleared; 8 (live port), 9 (foreign host) and
-    # 10 (live port 3101 per the probe) are untouched.
-    assert 1 not in up.pages
-    assert up.pages == {
-        2: "http://localhost:3112/live",
-        3: "https://github.com/ava/ava",
-        4: "http://localhost:3101/dead2",
-    }
-    assert d.pages.get_agent_page(7, d.generation) is None
-    assert d.pages.get_agent_page(8, d.generation) == 2
-    assert d.pages.get_agent_page(9, d.generation) == 3
-    assert d.pages.get_agent_page(10, d.generation) == 4
-    # exactly the local candidates were probed; the foreign URL was never touched
-    assert ("localhost", 3111) in probes and ("localhost", 3112) in probes
-    assert ("localhost", 3101) in probes
-    assert ("github.com", 443) not in probes
-    closed = [c[:2] for c in up.calls if c[0] == "close_page"]
-    assert closed == [("close_page", {"pageId": 1})]
-
-
-async def test_reap_dead_agent_pages_idempotent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A second pass has nothing left to close — the slots are cleared, the
-    dead pages are gone from the listing."""
-
-    async def fake_probe(host: str, port: int) -> bool:
-        return False  # everything dead
-
-    monkeypatch.setattr("services.desktop.browser.page_lifecycle.port_listening", fake_probe)
-
-    d, up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3111/a"}, 7)
-    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3112/b"}, 8)
-    up.calls.clear()
-
-    await reap_dead_agent_pages(d)
-    await reap_dead_agent_pages(d)
-
-    assert [c[:2] for c in up.calls if c[0] == "close_page"] == [
-        ("close_page", {"pageId": 1}),
-        ("close_page", {"pageId": 2}),
-    ]
-    assert up.pages == {}
-    # slots cleared to None (same shape as an agent closing its own page) —
-    # nothing left to sweep
-    assert {agent: d.pages.get_agent_page(agent, d.generation) for agent in (7, 8)} == {
-        7: None,
-        8: None,
-    }
-
-
-async def test_reap_dead_agent_pages_never_touches_slotless_page(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A tab with NO affinity slot — the user's own tab, or an agent that never
-    went through the bridge — must be immune to the reaper even on a dead
-    localhost port. The registry is the ONLY thing that ever makes a page a
-    candidate (mutation guard: a reaper that swept all pages instead of slots
-    must fail this test)."""
-
-    async def fake_probe(host: str, port: int) -> bool:
-        return False  # everything dead
-
-    monkeypatch.setattr("services.desktop.browser.page_lifecycle.port_listening", fake_probe)
-
-    d, up = _daemon()
-    # a slotless tab seeded directly (never created via call_tool_for_agent)
-    up.pages[99] = "http://localhost:9999/user-own-tab"
-    up.calls.clear()
-
-    await reap_dead_agent_pages(d)
-
-    # the tab survives and no close_page ever reached the upstream
-    assert up.pages == {99: "http://localhost:9999/user-own-tab"}
-    assert up.calls == [("list_pages", {}, None)]
-    assert d.pages.affinity == {}
-
-
-async def test_port_listening_stalled_connect_reads_alive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A connect that neither completes nor refuses within the probe bound is
-    treated as ALIVE — the docstring's headline promise: never close a live tab
-    on a probe that could not decide (mutation guard for the timeout branch)."""
-
-    async def _stall(*_args: object, **_kwargs: object) -> object:
-        await asyncio.sleep(60)
-
-    monkeypatch.setattr("services.desktop.browser.page_lifecycle.asyncio.open_connection", _stall)
-    monkeypatch.setattr("services.desktop.browser.page_lifecycle._PORT_PROBE_TIMEOUT_S", 0.05)
-    assert await port_listening("localhost", 9999) is True
-
-
-async def test_reap_dead_agent_pages_midpass_navigation_skips_live_repurpose(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The agent navigates its page to a LIVE target while the pass is probing
-    it: the close phase re-reads the listing under the lock, sees the URL has
-    changed, and must NOT close the page (mutation guard for the re-list URL
-    check)."""
-    d, up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3111/old"}, 7)  # page 1
-    up.calls.clear()
-
-    async def fake_probe(host: str, port: int) -> bool:
-        # simulate the agent repurposing its page mid-pass (same page id)
-        await d.call_tool_for_agent("navigate_page", {"url": "http://localhost:3311/live"}, 7)
-        return False  # the OLD port is dead
-
-    monkeypatch.setattr("services.desktop.browser.page_lifecycle.port_listening", fake_probe)
-
-    await reap_dead_agent_pages(d)
-
-    # the re-list saw the new (live) URL: the page is left alone
-    assert up.pages == {1: "http://localhost:3311/live"}
-    closes = [c[:2] for c in up.calls if c[0] == "close_page"]
-    assert closes == []
-    assert d.pages.get_agent_page(7, d.generation) == 1
-
-
-async def test_reap_dead_agent_pages_midpass_slot_move_keeps_live_affinity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The agent opens a NEW page (slot moves) while the pass probes the old
-    dead one: the dead page is closed, but the slot — now naming the live new
-    page — is preserved (mutation guard for the conditional slot clear)."""
-    d, up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "http://localhost:3111/old"}, 7)  # page 1
-    up.calls.clear()
-
-    async def fake_probe(host: str, port: int) -> bool:
-        # the agent's slot moves to a fresh page mid-pass
-        await d.call_tool_for_agent("new_page", {"url": "http://localhost:3311/live"}, 7)
-        return False  # the old port is dead
-
-    monkeypatch.setattr("services.desktop.browser.page_lifecycle.port_listening", fake_probe)
-
-    await reap_dead_agent_pages(d)
-
-    # old dead page closed; the new live page and its slot survive
-    assert 1 not in up.pages
-    assert up.pages == {2: "http://localhost:3311/live"}
-    closes = [c[:2] for c in up.calls if c[0] == "close_page"]
-    assert closes == [("close_page", {"pageId": 1})]
-    assert d.pages.get_agent_page(7, d.generation) == 2
-
-
-async def test_call_tool_for_agent_stamps_last_use() -> None:
-    """Every agent-keyed call moves the idle stamp, so a working agent is
-    never an idle-recycle candidate."""
-    d, _up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
-    assert 7 in d.pages.last_use
-    assert time.monotonic() - d.pages.last_use[7] < 5
-
-
-async def test_reap_idle_agent_pages_closes_only_idle_owned_pages() -> None:
-    """The idle sweep closes agent-owned pages whose owner has been idle past
-    the timeout, clears the slot + stamp, and leaves recent-use agents and
-    slotless (user) tabs untouched."""
-    d, up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "https://example.com/old"}, 7)
-    await d.call_tool_for_agent("new_page", {"url": "https://example.com/live"}, 8)
-    up.pages[99] = "https://user.example.com/mine"  # the user's own tab
-    up.calls.clear()
-
-    # agent 7 idle past the timeout; agent 8 used the browser just now
-    _stamp_idle(d, 7, page_lifecycle._TAB_IDLE_TIMEOUT_S + 60)
-
-    closed = await page_lifecycle.reap_idle_agent_pages(d)
-
-    assert closed == 1
-    assert up.pages == {
-        2: "https://example.com/live",
-        99: "https://user.example.com/mine",
-    }
-    assert d.pages.get_agent_page(7, d.generation) is None
-    assert d.pages.get_agent_page(8, d.generation) == 2
-    assert 7 not in d.pages.last_use
-    assert [c[:2] for c in up.calls if c[0] == "close_page"] == [("close_page", {"pageId": 1})]
-
-
-async def test_reap_idle_agent_pages_idempotent() -> None:
-    """A second pass has nothing left to close — slot cleared, stamp gone."""
-    d, up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
-    _stamp_idle(d, 7, page_lifecycle._TAB_IDLE_TIMEOUT_S + 1)
-    up.calls.clear()
-
-    await page_lifecycle.reap_idle_agent_pages(d)
-    await page_lifecycle.reap_idle_agent_pages(d)
-
-    assert [c[:2] for c in up.calls if c[0] == "close_page"] == [("close_page", {"pageId": 1})]
-    assert {7: d.pages.get_agent_page(7, d.generation)} == {7: None}
-
-
-async def test_reap_idle_agent_pages_within_timeout_keeps_page() -> None:
-    """An agent that used the browser inside the timeout window keeps its
-    page even if its URL points at a dead host — idle is the only signal."""
-    d, up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "https://example.com/x"}, 7)
-    _stamp_idle(d, 7, page_lifecycle._TAB_IDLE_TIMEOUT_S - 1)
-    up.calls.clear()
-
-    assert await page_lifecycle.reap_idle_agent_pages(d) == 0
-    assert up.pages == {1: "https://example.com/x"}
-    assert d.pages.get_agent_page(7, d.generation) == 1
-
-
-async def test_release_agent_page_clears_idle_stamp() -> None:
-    """A deterministic release also drops the last-use stamp, so a released
-    agent never lingers in the idle registry."""
-    d, _up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
-    assert 7 in d.pages.last_use
-    await page_lifecycle.release_agent_page(d, 7)
-    assert 7 not in d.pages.last_use
 
 
 async def test_new_page_registers_ttl_on_both_creation_paths() -> None:
@@ -537,6 +264,39 @@ async def test_ttl_expiry_surfaces_native_no_page_red_green() -> None:
     assert 1 not in d.pages.ttl_deadlines
 
 
+async def test_expired_page_reaper_leaves_a_dead_localhost_page_until_its_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The TTL deadline is the only cleanup for a page nobody releases.
+
+    An agent killed before its exit hook leaves a tab on a dead localhost port and
+    never touches the browser again. No sweep probes the port or the owner's last
+    use: the tab stays open across passes until its deadline, then the expiry
+    sweep closes it.
+    """
+    monkeypatch.setattr(page_lifecycle, "_PAGE_SWEEP_INTERVAL_S", 0.01)
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "http://localhost:9/dev"}, 7)
+    up.calls.clear()
+    stop = asyncio.Event()
+    reaper = asyncio.create_task(page_lifecycle.expired_page_reaper(d, stop))
+    try:
+        await asyncio.sleep(0.2)  # many passes, nothing listens on port 9
+        assert up.pages == {1: "http://localhost:9/dev"}
+        assert not [call for call in up.calls if call[0] == "close_page"]
+
+        _expire(d, 1)
+        for _ in range(100):
+            if not up.pages:
+                break
+            await asyncio.sleep(0.01)
+        assert up.pages == {}
+        assert d.pages.ttl_deadlines == {}
+    finally:
+        stop.set()
+        await reaper
+
+
 async def test_close_page_drops_ttl_slot() -> None:
     """A clean close_page forgets the page's TTL with it."""
     d, _up = _daemon()
@@ -550,15 +310,6 @@ async def test_release_agent_page_drops_ttl_slot() -> None:
     d, _up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
     await page_lifecycle.release_agent_page(d, 7)
-    assert d.pages.ttl_deadlines == {}
-
-
-async def test_idle_sweep_drops_ttl_slot() -> None:
-    """The idle sweep closing a page also forgets its TTL slot."""
-    d, _up = _daemon()
-    await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
-    _stamp_idle(d, 7, page_lifecycle._TAB_IDLE_TIMEOUT_S + 1)
-    await page_lifecycle.reap_idle_agent_pages(d)
     assert d.pages.ttl_deadlines == {}
 
 

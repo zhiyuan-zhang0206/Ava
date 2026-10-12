@@ -25,7 +25,7 @@ Two invariants make one upstream safe for many clients:
 Page lifetime (2026-09-11 ruling): every page this stack
 CREATES (an explicit `new_page`, or the auto-created page on a page-less first
 navigate) carries a hard TTL deadline (`AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`,
-24h default) and is closed by the expiry sweep next to the other reapers when
+24h default) and is closed by the expiry sweep when
 the deadline passes -- activity never extends it. `renew_page`, a daemon-owned
 tool appended to the upstream tool list, moves the deadline to now + ttl (at
 most 24h per call); pages this stack never created (the user's own tabs) are
@@ -98,7 +98,7 @@ from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
     PageRegistry,
     _text_of,
-    dead_page_reaper,
+    expired_page_reaper,
     handle_release_agent_page,
     renew_agent_page,
     renew_page_tool_dump,
@@ -318,11 +318,6 @@ class ChromeMcpDaemon:
             # round-trip); `renew_agent_page` takes the serial lock itself.
             return await renew_agent_page(self, agent_id, args)
         async with self._lock:
-            # Stamp inside the lock: the idle sweep reads the stamp under the
-            # same lock, so a call that lands mid-sweep must serialize with it
-            # (either its stamp is visible before the candidate phase, or the
-            # page is already closed and the next call cold-starts).
-            self.pages.touch_agent_page(agent_id)
             page = self.pages.get_agent_page(agent_id, self.generation)
             result, updated = await self._affinity_call(name, args, page, agent_id)
             self.pages.set_agent_page(agent_id, updated, self.generation)
@@ -682,14 +677,16 @@ async def _serve_generation(
 ) -> None:
     """Serve one upstream connection until it dies or the stop event fires.
 
-    The upstream watchdog and the dead-page reaper run per connection, so they live
+    The upstream watchdog and the expired-page reaper run per connection, so they live
     in a group that closes with it.
     """
     async with asyncio.TaskGroup() as helpers:
         watchdog = helpers.create_task(
             contained(_upstream_watchdog(daemon, stop), "upstream watchdog")
         )
-        reaper = helpers.create_task(contained(dead_page_reaper(daemon, stop), "dead-page reaper"))
+        reaper = helpers.create_task(
+            contained(expired_page_reaper(daemon, stop), "expired-page reaper")
+        )
         # Chrome is confirmed up here — inject the gateway session cookie
         # right away (the periodic loop covers expiry; this covers the
         # fresh-profile cold start and the post-restart gap without

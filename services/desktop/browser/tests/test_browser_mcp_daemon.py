@@ -622,9 +622,6 @@ async def test_release_agent_page_wire_method() -> None:
     sock_path.unlink(missing_ok=True)
 
 
-# ── Dead-page reaper (dead localhost port) ──────────────────────────────
-
-
 def test_parse_page_listing_extracts_urls() -> None:
     text = "  1: http://localhost:3112/memory/graph\n  2: http://a [selected]\n   3: about:blank"
     assert parse_page_listing(text) == {
@@ -633,17 +630,6 @@ def test_parse_page_listing_extracts_urls() -> None:
         3: "about:blank",
     }
     assert parse_page_listing("") == {}
-
-
-# ── Port-probe timeouts ──────────────────────────────────────────────────
-
-
-# ── Idle-tab recycling (task #2618) ──────────────────────────────────────
-
-
-def _stamp_idle(d: ChromeMcpDaemon, agent_id: int, seconds: int) -> None:
-    """Force the agent's last-use stamp back by `seconds`."""
-    d.pages.last_use[agent_id] = time.monotonic() - seconds
 
 
 # ── Page TTL: registration, renewal, expiry reaping ─────────────────────────
