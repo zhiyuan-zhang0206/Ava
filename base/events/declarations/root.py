@@ -171,6 +171,17 @@ class BootRetriesExhausted(TypedDict):
     exit_code: int
 
 
+class LifecyclePointerStuck(TypedDict):
+    """`lifecycle_pointer_stuck` payload — services/upkeep/ttl_reaper/lifecycle_fences.py.
+
+    One row per hourly scan that found stuck pointers: ``count`` agents are
+    affected, ``samples`` lists up to five of their ids.
+    """
+
+    count: int
+    samples: str
+
+
 class ScheduleVerifyFailed(TypedDict):
     """`schedule_verify_failed` payload — cli/commands/management/schedules_verify.py.
 
@@ -348,23 +359,15 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site="cli/commands/management/schedules_verify.py:_report_verify telemetry.emit",
     ),
-    "lifecycle_pointer_done_torn": EventSpec(
-        name="lifecycle_pointer_done_torn",
-        category="log",
+    "lifecycle_pointer_stuck": telemetry_event(
+        "lifecycle_pointer_stuck",
+        "the TTL reaper's hourly scan found agents_meta.lifecycle_command_id pointing at a lifecycle "
+        "command that nothing will settle on its own: one sitting at done (an out-of-band torn write, "
+        "task #3678) or an applied force-terminate still unobserved an hour after it was applied (its "
+        "original host crashed or its machine was decommissioned). Every resurrect of the named "
+        "agent(s) defers until an operator settles the command",
+        payload=LifecyclePointerStuck,
         tier="anomaly",
-        doc="the TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples",
-        site=(
-            "services/upkeep/ttl_reaper/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking "
-            "(positional emit)"
-        ),
-    ),
-    "lifecycle_fences_settled_absent_machine": EventSpec(
-        name="lifecycle_fences_settled_absent_machine",
-        category="log",
-        tier="observation",
-        doc="the TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples",
-        site=(
-            "services/upkeep/ttl_reaper/lifecycle_fences.py:settle_absent_machine_fences (positional emit)"
-        ),
+        site="services/upkeep/ttl_reaper/lifecycle_fences.py:_scan_stuck_lifecycle_pointers_blocking telemetry.emit",
     ),
 }

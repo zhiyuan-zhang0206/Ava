@@ -103,6 +103,49 @@ async def test_expired_owner_replacement_fences_old_settlement(
     assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus, resources=None)
 
 
+async def test_legacy_null_resource_row_waits_for_lease_expiry(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+) -> None:
+    """A row without stored host-process evidence is never taken over early.
+
+    Even when the predecessor's lease has been silent for minutes and no host
+    process of this home is alive, only the lease running out frees the row.
+    """
+    agent_id = _agent(db_conn)
+    old = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
+    )
+    assert old is not None
+    assert db_conn.execute(
+        "SELECT incarnation_resources IS NULL FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone() == (True,)
+    # Five minutes of renewal silence out of the ten-minute lease.
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = now() + interval '5 minutes' WHERE id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
+
+    assert (
+        await admit_hosted_runtime(
+            aops_pool, agent_id, "host-test", uuid4(), expected_from="running", db=database
+        )
+        is None
+    )
+
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = now() - interval '1 second' WHERE id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    successor = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", uuid4(), expected_from="running", db=database
+    )
+    assert successor is not None and successor.generation != old.generation
+
+
 @pytest.mark.parametrize("status", ["running", "idling"])
 @pytest.mark.parametrize("release_lease", [False, True])
 async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(

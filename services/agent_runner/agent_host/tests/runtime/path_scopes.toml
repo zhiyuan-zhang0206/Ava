@@ -3,7 +3,6 @@
 ]
 "tests.path_scoped.services_tests" = [
     "test_agent_host_abort_reconcile.py",
-    "test_agent_host_boot_defer.py",
     "test_agent_host_log_rotate.py",
     "test_agent_host_plugins.py",
     "test_agent_host_shutdown.py",

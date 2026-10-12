@@ -13,7 +13,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.tests.claim.test_inbound_ownership import _admit, agent_row
-from base.agents.incarnation.hosted_force import original_host_force, recover_orphaned_hosted_forces
+from base.agents.incarnation.hosted_force import original_host_force
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -61,17 +61,15 @@ async def _settle(
         return await apply_hosted_lifecycle(
             pool, owner, bus=bus, resources=None, kill_shell_sessions=killer
         )
-    if phase == "force":
-        return await original_host_force(
-            pool,
-            owner.agent_id,
-            owner.owner,
-            "claim-test",
-            command_id=command,
-            quiescent=True,
-            kill_shell_sessions=killer,
-        )
-    return await recover_orphaned_hosted_forces(pool, "claim-test", kill_shell_sessions=killer)
+    return await original_host_force(
+        pool,
+        owner.agent_id,
+        owner.owner,
+        "claim-test",
+        command_id=command,
+        quiescent=True,
+        kill_shell_sessions=killer,
+    )
 
 
 def _assert_committed_and_allocate(dsn: str, agent_id: int, command: int) -> None:
@@ -91,7 +89,7 @@ def _assert_committed_and_allocate(dsn: str, agent_id: int, command: int) -> Non
         ).fetchone() == (7,)
 
 
-@pytest.mark.parametrize("phase", ["graceful", "force", "boot"])
+@pytest.mark.parametrize("phase", ["graceful", "force"])
 async def test_blocked_shell_cleanup_releases_row_lock_with_fixed_cutoff(
     phase: str,
     db_conn: psycopg.Connection,
@@ -127,7 +125,7 @@ async def test_blocked_shell_cleanup_releases_row_lock_with_fixed_cutoff(
     assert cutoffs == [7]  # No chase of the just-allocated ID 7.
 
 
-@pytest.mark.parametrize("phase", ["graceful", "force", "boot"])
+@pytest.mark.parametrize("phase", ["graceful", "force"])
 async def test_unknown_cleanup_error_keeps_original_exception_and_committed_receipt(
     phase: str,
     db_conn: psycopg.Connection,

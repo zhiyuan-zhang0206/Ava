@@ -56,26 +56,24 @@ its own scope even when it uses the same cached model.
 
 ## Remaining boundary
 
-On exclusive agent-host boot, an applied force left by the dead host is observed
-only when no persistent `req-*.json` envelope that could still belong to a live
-exec domain remains for that agent. The envelope is created before a disposable
-exec child and removed after close, root reap, and reader completion, so it is
-the durable resource witness. `base/agents/incarnation/exec_request_evidence.py` classifies each
-leftover envelope against the incarnation that wrote it and against live process
-proof. It quarantine-moves — never deletes — an envelope only when it parses
-with its exact incarnation attribution, no live process references it (the
-child and its env-inheriting descendants carry `AVA_EXEC_REQUEST_FILE`, and an
-environment this kernel will not show is never absence), and the row's stored
-host identity does not contradict the boot premise; the files land under
-`$AVA_HOME/quarantined-exec-requests/<reason>-<stamp>/<agent_id>/` beside a JSON
-receipt. Anything live or unattributable keeps recovery deferred.
+Only the original host's serialized turn pump observes an applied force. If that
+host dies first, no successor boot or sweep settles the force on its behalf: the
+agent stays terminated with its lifecycle pointer set, resurrecting it is
+refused, and the hourly stuck-lifecycle-pointer scan
+(`services/upkeep/ttl_reaper/lifecycle_fences.py`) raises
+`lifecycle_pointer_stuck` for an operator. The operator inspects any leftover
+`req-*.json` envelope with `base/agents/incarnation/exec_request_evidence.py`
+(`disposition_hint` prints the commands), then settles the command and clears
+the pointer by hand. An exec request envelope is created before a disposable exec
+child and removed after close, root reap, and reader completion, so it is the
+durable resource witness.
 
 This does not establish hard-host-death recovery with active exec: independent
 POSIX children may survive and the parent's unreaped root pin may be lost, and
 host PID/birth, lease expiry, or owner UUID alone cannot prove managed-domain
 completion. Request leftovers are not age-pruned; normal exact
-resource settlement removes them. The database settlement re-locks the exact
-target generation, owner, and command before clearing its active pointer.
+resource settlement removes them. The original host's settlement re-locks the
+exact target generation, owner, and command before clearing its active pointer.
 Persistent shell sessions deliberately retain their separate ownership and are
 not disposable exec descendants to kill wholesale.
 

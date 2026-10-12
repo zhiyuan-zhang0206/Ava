@@ -10,3 +10,5 @@ deleteRules:
     uid: ava-ops-pitr-storage-growth
   - orgId: 1
     uid: ava-ops-agent-restart-spike
+  - orgId: 1
+    uid: ava-ops-hosted-boot-recovery-deferred
