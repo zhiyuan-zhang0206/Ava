@@ -21,12 +21,8 @@ import psutil
 import pytest
 
 from base.sessions import posixproc
-from base.sessions.backend import (
-    PosixProcSessionBackend,
-    PtySessionBackend,
-    SessionBackend,
-    get_shell_backend,
-)
+from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend, get_shell_backend
+from base.sessions.protocol import SessionBackend
 from tests.components.base.poll_until import poll_until
 
 # A long-lived child that outlives the test body; each test kills it explicitly.
@@ -118,7 +114,7 @@ def test_new_session_no_login_shell_passthrough(monkeypatch: pytest.MonkeyPatch)
 def test_posix_backend_keeps_its_own_log_file():
     """The native supervisor owns a session log file (liveness consumers can
     watch it); the abstract default answers None — a backend without a file."""
-    from base.sessions.backend import SessionBackend
+    from base.sessions.protocol import SessionBackend
 
     posix_be = _backend()
     assert posix_be.session_log_path("ava-x") is not None

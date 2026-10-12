@@ -24,11 +24,8 @@ import psutil
 import pytest
 
 import base.sessions.backend as sb
-from base.sessions.backend import (
-    PosixProcSessionBackend,
-    PtySessionBackend,
-    SessionBackend,
-)
+from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend
+from base.sessions.protocol import SessionBackend
 from base.sessions.pty import allocation_freeze, client
 from base.sessions.pty.paths import service_socket_path
 from base.sessions.pty.tests.job_wait import wait_for_job

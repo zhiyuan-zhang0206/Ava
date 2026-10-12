@@ -42,7 +42,7 @@ def test_required_set_is_just_baseline_with_empty_migrations(
     exactly the baseline sentinel. Isolated to a tmp dir so a real post-baseline
     migration on disk does not change what this contract tests."""
     _init_repo(tmp_path)  # the loader's git-tracking gate needs a real checkout
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     assert required_migration_set() == {_BASELINE_NAME}
 
 
@@ -52,7 +52,7 @@ def test_list_migration_files_empty_is_valid(
     """An empty migrations/ (no delta over the baseline) is valid — the loader
     returns [] instead of raising."""
     _init_repo(tmp_path)
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     assert _list_migration_files() == []
 
 
@@ -69,7 +69,7 @@ def test_check_passes_when_aligned(
     migrations/ so the seeded baseline-only DB is aligned regardless of real
     post-baseline migrations on disk."""
     _init_repo(tmp_path)
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     check_schema_version(db_conn)
 
 
@@ -99,7 +99,7 @@ def test_apply_pending_nothing_when_baselined(
     """Baselined DB, empty migrations/ -> nothing to apply."""
     _ = db_conn  # fixture reseeds the baseline
     _init_repo(tmp_path)
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url) as fresh:
         assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
 
@@ -118,7 +118,7 @@ def test_apply_pending_applies_post_baseline(
     hour.mkdir(parents=True)
     (hour / f"{_SYN}.sql").write_text("CREATE TABLE syn_t (id int);")
     _init_repo(tmp_path)  # applied only if git-tracked (#998)
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
             assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [_SYN]
@@ -154,7 +154,7 @@ def test_untracked_migration_is_skipped_and_warned(
     rogue = "29991231T235958_synthetic-rogue"
     (tmp_path / f"{rogue}.sql").write_text("CREATE TABLE syn_rogue_t (id int);")
     # NOT git-added: the rogue sits untracked, exactly like the incident file.
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
             assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [_SYN]
@@ -182,7 +182,7 @@ def test_untracked_file_excluded_from_required_set(
     (tmp_path / f"{_SYN}.sql").write_text("-- noop")
     _init_repo(tmp_path)  # _SYN tracked
     (tmp_path / f"{_SYN2}.sql").write_text("-- noop")  # untracked
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     assert required_migration_set() == {_BASELINE_NAME, _SYN}
 
 
@@ -194,14 +194,14 @@ def test_untracked_malformed_name_is_skipped_not_fatal(
     (tmp_path / f"{_SYN}.sql").write_text("-- noop")
     _init_repo(tmp_path)
     (tmp_path / "0001_legacy.sql").write_text("-- noop")  # malformed AND untracked
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     assert [n for n, _ in _list_migration_files()] == [_SYN]
 
 
 def test_non_git_dir_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A migrations dir whose repo root is not a git worktree is refused: the
     loader must not apply files whose git-tracking status it cannot verify."""
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     with pytest.raises(MigrationLayoutError, match="git worktree"):
         _list_migration_files()
 
@@ -226,7 +226,7 @@ def test_apply_multi_statement_migration_over_prepared_conn(
         "CREATE TABLE mstest_t (id int, note text);\nINSERT INTO mstest_t (id, note) VALUES (1, 'ok');"
     )
     _init_repo(tmp_path)
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
 
     # A dedicated connection carrying the prepare posture that broke apply. The
     # applier needs a non-autocommit conn (it manages per-migration transactions).

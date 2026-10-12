@@ -91,7 +91,7 @@ Not every process Ava stops is a named session: the pooler, an orphan holding a 
 ## Entry points
 
 - `cli/commands/lifecycle/_maintenance_stop_report.py` — the deadline survivor report (raise, render, journal payload)
-- `base/sessions/backend.py:SessionBackend.kill_session` — the session stop, per backend
+- `base/sessions/protocol.py:SessionBackend.kill_session` — the session stop, per backend
 - `base/host/proc.py:process_alive` / `request_stop` / `force_kill` — the non-session trio
 - `base/host/proc.py:kill_process_tree` / `run_bounded` — tree teardown and a bounded run
 - `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` — exact pooler custody and bounded stop

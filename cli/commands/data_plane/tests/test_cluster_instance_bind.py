@@ -48,7 +48,7 @@ def _no_native_effect(*_args: object, **_kwargs: object) -> None:
 
 @pytest.fixture(autouse=True)
 def _native_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_ci.ownership, "require_listener", _no_native_effect)
+    monkeypatch.setattr(_ci.port_preflight, "require_listener", _no_native_effect)
     monkeypatch.setattr(_ci.ownership, "require_postgres", _no_native_effect)
     # The loaded-hba proof dials the postmaster; real Postgres covers it
     # (cli/commands/tests/test_single_box.py).

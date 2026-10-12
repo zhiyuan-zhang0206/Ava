@@ -8,14 +8,19 @@ that another endpoint would expose to its watchdog.
 from __future__ import annotations
 
 import json
-
-from base.daemon.health import Liveness, LivenessGroup
+from typing import Protocol
 
 OK = "ok"
 DEGRADED = "degraded"
 DOWN = "down"
 
 _COMPONENT_STATUSES = frozenset((OK, DEGRADED, DOWN))
+
+
+class Alive(Protocol):
+    """A loop heartbeat the envelope can ask for staleness (`Liveness`, `LivenessGroup`)."""
+
+    def is_alive(self) -> bool: ...
 
 
 def component(
@@ -62,7 +67,7 @@ def render(
     identity: dict[str, object],
     components: list[dict[str, object]],
     *,
-    liveness: Liveness | LivenessGroup | None = None,
+    liveness: Alive | None = None,
     stale_for: float | None = None,
     extra: dict[str, object] | None = None,
 ) -> tuple[int, bytes]:

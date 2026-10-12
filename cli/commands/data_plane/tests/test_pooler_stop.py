@@ -20,7 +20,7 @@ import psutil
 import psycopg
 import pytest
 
-from base.cluster import ownership
+from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import settings
@@ -81,12 +81,12 @@ def _owned_listener(identity: OwnedProcess | None, port: int) -> bool:
     deadline = time.monotonic() + 5
     while identity is not None and identity.live() and time.monotonic() < deadline:
         try:
-            if ownership.require_listener(identity, port):
+            if port_preflight.require_listener(identity, port):
                 return True
         except RuntimeError:
             # A foreign listener took the port between allocation and bind, or
             # the pooler has not bound yet; only our own listener proves custody.
-            if ownership.strict_listeners_on(port):
+            if port_preflight.strict_listeners_on(port):
                 return False
         time.sleep(0.01)
     return False
@@ -169,7 +169,9 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
             # still forbid a second signal; native custody remains observable.
             os.kill(custodian.identity.pid, signal.SIGINT)
             deadline = time.monotonic() + 5
-            while ownership.require_listener(custodian.identity, custodian.port, required=False):
+            while port_preflight.require_listener(
+                custodian.identity, custodian.port, required=False
+            ):
                 assert time.monotonic() < deadline, "private pooler did not begin draining"
                 time.sleep(0.01)
         for _attempt in range(2):
@@ -202,7 +204,7 @@ def test_a_drain_that_finishes_during_the_listener_scan_is_stopped(
     pooler's listeners — a busy host's socket scan outlasts the pooler's exit:
     the birth that exits mid-scan is stopped, never a foreign listener."""
     custodian, pooled, direct = native_pooler
-    scan = ownership.strict_listeners_on
+    scan = port_preflight.strict_listeners_on
     with contextlib.closing(psycopg.connect(pooled)) as client:
         client.execute("INSERT INTO pooler_stop_receipt VALUES (7)")
         # The open transaction retains the drain for the whole budget; the budget
@@ -217,7 +219,7 @@ def test_a_drain_that_finishes_during_the_listener_scan_is_stopped(
                 time.sleep(0.01)
             return scan(port)
 
-        monkeypatch.setattr(ownership, "strict_listeners_on", drain_finishes_during_scan)
+        monkeypatch.setattr(port_preflight, "strict_listeners_on", drain_finishes_during_scan)
         assert custodian.stop(deadline=time.monotonic() + budget, force=force)
     with psycopg.connect(direct) as conn:
         assert conn.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (7,)
@@ -269,7 +271,9 @@ def test_durable_intent_prevents_resignal_before_listener_closes(
     custodian = OwnedPooler(identity, 16433, tmp_path / "pgbouncer.ini")
     process = Mock()
     monkeypatch.setattr(OwnedPooler, "_process", Mock(return_value=process))
-    monkeypatch.setattr(ownership, "require_listener", Mock(return_value=frozenset({identity.pid})))
+    monkeypatch.setattr(
+        port_preflight, "require_listener", Mock(return_value=frozenset({identity.pid}))
+    )
     for _attempt in range(2):
         assert not custodian.stop(deadline=stop_clock.monotonic() + 0.02)
     process.send_signal.assert_called_once_with(signal.SIGINT)
@@ -288,7 +292,9 @@ def test_expired_stop_budget_never_admits_a_signal(
     custodian = OwnedPooler(identity, 16433, tmp_path / "pgbouncer.ini")
     process = Mock()
     monkeypatch.setattr(OwnedPooler, "_process", Mock(return_value=process))
-    monkeypatch.setattr(ownership, "require_listener", Mock(return_value=frozenset({identity.pid})))
+    monkeypatch.setattr(
+        port_preflight, "require_listener", Mock(return_value=frozenset({identity.pid}))
+    )
     deadline = stop_clock.monotonic()
     if after_intent_write:
         write = _pooler_stop.write_private_bytes
@@ -335,7 +341,7 @@ def test_foreign_listener_refuses_before_intent_or_signal(
     identity = OwnedProcess.capture(psutil.Process(os.getpid()))
     custodian = OwnedPooler(identity, 16433, tmp_path / "pgbouncer.ini")
     monkeypatch.setattr(
-        ownership, "strict_listeners_on", Mock(return_value=[identity.pid, 99999999])
+        port_preflight, "strict_listeners_on", Mock(return_value=[identity.pid, 99999999])
     )
     with pytest.raises(RuntimeError, match="does not belong"):
         custodian.stop(deadline=time.monotonic() + 1)
@@ -348,6 +354,8 @@ def test_corrupt_stop_intent_cannot_authorize_another_signal(
     identity = OwnedProcess.capture(psutil.Process(os.getpid()))
     custodian = OwnedPooler(identity, 16433, tmp_path / "pgbouncer.ini")
     (tmp_path / "stop-intent.json").write_text(json.dumps({"pid": identity.pid}))
-    monkeypatch.setattr(ownership, "require_listener", Mock(return_value=frozenset({identity.pid})))
+    monkeypatch.setattr(
+        port_preflight, "require_listener", Mock(return_value=frozenset({identity.pid}))
+    )
     with pytest.raises(RuntimeError, match="invalid PgBouncer stop intent"):
         custodian.stop(deadline=time.monotonic() + 1)

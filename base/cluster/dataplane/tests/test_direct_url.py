@@ -11,10 +11,11 @@ from typing import cast
 
 import pytest
 
-from base import cluster
-from base.cluster import ClusterPorts, ClusterRecord
+from base.cluster.dataplane import direct_url
 from base.cluster.dataplane.direct_url import ClusterDirectUrl, direct_db_url
 from base.cluster.machine import MachineIdentity
+from base.cluster.ports import ClusterPorts
+from base.cluster.record import ClusterRecord
 from base.config import DataPlaneSettings, settings
 from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
@@ -49,7 +50,7 @@ def _set(monkeypatch: pytest.MonkeyPatch, *, db_url: str, rec: ClusterRecord | N
     from base import paths
 
     monkeypatch.setattr(settings.data_plane, "db_url", db_url)
-    monkeypatch.setattr(cluster, "get_record", lambda home: rec if str(home) == _HOME else None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(direct_url, "get_record", lambda home: rec if str(home) == _HOME else None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(paths, "ava_home", lambda: Path(_HOME))
 
 

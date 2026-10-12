@@ -38,6 +38,7 @@ from base.cluster.authority.model import (
     LedgerRefusedError,
     Verifier,
 )
+from base.host.net.auth import API_TOKEN_ENV
 
 POOLER_ADMIN = "ava_pooler_admin"
 # Non-secret launch-environment marker naming the delivered generation; its
@@ -130,8 +131,6 @@ class WriteGrant:
     def environment(self, endpoint: str) -> dict[str, str]:
         """The process-environment delivery: the login, its generation marker and
         the class API token."""
-        from base.cluster.authority.api import API_TOKEN_ENV
-
         return {
             "AVA_DB_URL": self.dsn(endpoint),
             GENERATION_ENV: str(self.number),
