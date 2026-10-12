@@ -30,7 +30,7 @@ read each from its own `.env` URL (`db_identity()` / `redis_identity()`) and pas
 Bind posture — authenticated Postgres, PgBouncer and Linux Redis bind loopback
 and this host's declared reachable address (`AVA_MACHINE_HOST`), never all
 interfaces; a host that declares none (`localhost`) binds loopback only. macOS Redis
-retains its loopback-only workaround and host-level `com.ava.redis-bridge` relay
+retains its loopback-only workaround and the root-supervised `redis-bridge` relay
 (task #1469).
 
 POSIX only (macOS brew / Linux postgres + redis-server).

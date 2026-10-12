@@ -272,8 +272,7 @@ def _redis_bridge_probe(*, machine: MachineIdentity, config: ConfigBoot) -> str 
     Gateway-only and alert-only: a failed host listener is an
     infrastructure outage, not evidence that rolling application code back is
     safe or useful.  The probe authenticates and PINGs through the off-box
-    endpoint; a loaded launchd label or open TCP port alone cannot certify the
-    forwarding path.
+    endpoint; an open TCP port alone cannot certify the forwarding path.
     """
     import cli.commands._repo as _repo_commands
 
@@ -288,11 +287,6 @@ def _redis_bridge_probe(*, machine: MachineIdentity, config: ConfigBoot) -> str 
     if not status.serving:
         endpoint = f" {status.endpoint}" if status.endpoint else ""
         return f"Redis bridge{endpoint} failed authenticated PING ({status.detail})"
-    if not status.supervised:
-        return (
-            f"Redis bridge {status.endpoint} serves PING but is unsupervised "
-            "(launchd job com.ava.redis-bridge is absent)"
-        )
     return None
 
 

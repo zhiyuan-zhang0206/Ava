@@ -349,7 +349,7 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
     ),
     # Redis always binds loopback-only (task #1469), so it serves no off-box port
     # and needs no ALF rule. The private-network :6380 listener is the
-    # `com.ava.redis-bridge` relay running as `/usr/bin/python3 relay.py`; that
+    # `redis-bridge` unit running as `/usr/bin/python3 relay.py`; that
     # Apple-signed built-in interpreter is auto-allowed and needs no manifest entry.
     ManifestEntry(
         "pgbouncer",

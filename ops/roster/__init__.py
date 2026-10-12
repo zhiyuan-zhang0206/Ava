@@ -12,6 +12,7 @@ import shlex
 from functools import partial
 
 from base.cluster import frontend_service_cmd
+from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.config import settings
 from base.daemon.health import DaemonProbe, probe_home
 from base.paths import ava_home, otel_collector_binary, otel_collector_config
@@ -25,6 +26,36 @@ from ops.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
 # (the schedule manager's stop, the flushers) plus the pool closes; this is its
 # declared bound.
 _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
+
+
+def _redis_bridge_command() -> tuple[str, str, int]:
+    """The relay's launch command, listen host and port.
+
+    A host that needs no relay is gated out of the roster (`ops.spec`), so its row only has
+    to be well formed: it carries the bare script and port 0.
+    """
+    relay = "services/redis_bridge/relay.py"
+    try:
+        endpoint = redis_bridge_endpoint(
+            ava_home(),
+            machine_host=lambda: settings.general.machine_host.strip() or "localhost",
+            remote_data_plane=lambda: settings.data_plane.is_remote,
+        )
+    except RedisBridgeUnconfiguredError:
+        endpoint = None
+    if endpoint is None:
+        return f"/usr/bin/python3 {relay}", "", 0
+    argv = [
+        "/usr/bin/python3",
+        relay,
+        "--listen-host",
+        endpoint.listen_host,
+        "--listen-port",
+        str(endpoint.port),
+        "--backend-port",
+        str(endpoint.port),
+    ]
+    return shlex.join(argv), endpoint.listen_host, endpoint.port
 
 
 def _frontend_probe() -> DaemonProbe:
@@ -76,9 +107,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
     from services.supervision.healthchecks.gate import probe as probe_gate
     from services.supervision.healthchecks.otel_collector import probe_collector
     from services.supervision.healthchecks.protocol_probe import probe as probe_protocol_service
+    from services.supervision.healthchecks.redis_bridge import probe_relay
 
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
+    _bridge_cmd, _bridge_host, _bridge_port = _redis_bridge_command()
     # ── gateway-only services ───────────────────────────────────────────────
     # The gateway capability owns the data-plane-adjacent daemons: the HTTP
     # gateway, the frontend, and cluster-wide nudgers (heartbeat plus idle shell
@@ -239,6 +272,19 @@ def build_services() -> tuple[ServiceSpec, ...]:
             module="services.backup.scheduler.daemon",
             capabilities=GATEWAY,
             requires_db=True,  # dumps that very database
+        ),
+        # redis-bridge: the macOS gateway's off-box Redis ingress (Redis itself stays
+        # loopback-only). Pure stdlib under the system interpreter so the application
+        # firewall recognises the serving binary; gated to hosts that need a relay
+        # (`ops.spec`). A listener that keeps failing ends the process, so the root's
+        # bounded restart budget applies to it like to every other unit.
+        ServiceSpec(
+            session="redis-bridge",
+            cmd=_bridge_cmd,
+            capabilities=GATEWAY,
+            requires_db=False,
+            identity_probe=partial(probe_relay, _bridge_host, _bridge_port),
+            healthcheck_module="services.supervision.healthchecks.redis_bridge",
         ),
     )
 
