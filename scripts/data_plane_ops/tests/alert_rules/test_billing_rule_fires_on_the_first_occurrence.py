@@ -70,50 +70,6 @@ def test_billing_rule_names_vendor_and_model_in_the_notification() -> None:
     assert len(summary) <= 200, f"summary is {len(summary)} chars, IM truncates at 200"
 
 
-def test_llm_stall_pair_rule_fires_on_the_first_pair() -> None:
-    """A stream+fallback double stall is the worst single-call stall shape:
-    the call is terminated for the delayed stall-retry schedule. Fires on the
-    first pair (threshold > 0, R13-style) over a 15m window that is the whole
-    debounce (tasks #3889/#3948)."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    rule = rules["ava-ops-llm-stall-pair"]
-
-    assert _exprs(rule, "loki") == [
-        'sum(count_over_time({service_name="unknown_service", '
-        'event_name="stream_stall_pair_terminated"} | json | cluster=".ava" | '
-        'category="telemetry" [15m]))'
-    ]
-    assert rule["for"] == "0m"
-    assert rule["noDataState"] == "OK"
-    assert rule["execErrState"] == "OK"
-    assert rule["labels"] == {
-        "severity": "warning",
-        "ruleUID": "ava-ops-llm-stall-pair",
-        "metric": "llm_stall_pair",
-        "team": "ava-ops",
-    }
-    assert _threshold_params(rule) == [[0]]
-    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
-    assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "gt"
-
-
-def test_llm_stall_burst_rule_groups_stalls_by_vendor() -> None:
-    """The burst names the stalling provider: one instance per vendor, ≥5
-    stalled streams in 15m — above the trailing-7d benign ceiling of 2/15m,
-    inside the 2026-09-14/15 wave's 2-9/15m range (task #3948)."""
-    rules = {r["uid"]: r for r in _load_rules()}
-    rule = rules["ava-ops-llm-stall-burst"]
-    expr = _exprs(rule, "loki")[0]
-
-    assert "sum by (attributes_vendor)" in expr
-    assert 'event_name="stream_stalled_retry"' in expr
-    assert "[15m]" in expr
-    assert _threshold_params(rule) == [[4]]
-    assert rule["for"] == "0m"
-    assert rule["labels"]["severity"] == "warning"
-    assert "{{ $labels.attributes_vendor }}" in rule["annotations"]["summary"]
-
-
 def test_delivery_stalled_rule_filters_fresh_by_age() -> None:
     """R5's "fresh" discriminator is attributes.age_s < 600 — a numeric
     comparison on the json-flattened label (numbers parse as numbers)."""

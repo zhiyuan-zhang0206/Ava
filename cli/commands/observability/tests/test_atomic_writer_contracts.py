@@ -14,7 +14,6 @@ import pytest
 
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.deploy.maintenance import pause_owner
-from base.deploy.release import editable_install
 from base.host import atomic_io
 from base.sessions import coding_session_owner_record
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -197,9 +196,7 @@ def test_text_helper_applies_requested_public_mode(tmp_path: Path) -> None:
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
 
 
-@pytest.mark.parametrize(
-    "writer", [editable_install._atomic_write_text, grafana_render._atomic_write]
-)
+@pytest.mark.parametrize("writer", [grafana_render._atomic_write])
 def test_visible_text_writers_use_distinct_sibling_temps_under_concurrency(
     writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -231,9 +228,7 @@ def test_visible_text_writers_use_distinct_sibling_temps_under_concurrency(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize(
-    "writer", [editable_install._atomic_write_text, grafana_render._atomic_write]
-)
+@pytest.mark.parametrize("writer", [grafana_render._atomic_write])
 def test_visible_text_writers_clean_temp_after_failed_replace(
     writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -250,9 +245,7 @@ def test_visible_text_writers_clean_temp_after_failed_replace(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize(
-    "writer", [editable_install._atomic_write_text, grafana_render._atomic_write]
-)
+@pytest.mark.parametrize("writer", [grafana_render._atomic_write])
 def test_visible_text_writers_set_public_mode_without_sync(
     writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -269,16 +262,3 @@ def test_visible_text_writers_set_public_mode_without_sync(
         os.umask(old_umask)
     assert path.read_bytes() == "café".encode()
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
-
-
-def test_atomic_pointer_replacement_restores_read_only_mode(tmp_path: Path) -> None:
-    path = tmp_path / "pointer.pth"
-    path.write_text("old")
-    path.chmod(0o444)
-
-    with editable_install._write_window((path,)):
-        editable_install._atomic_write_text(path, "new")
-        assert stat.S_IMODE(path.stat().st_mode) == 0o644
-
-    assert path.read_text() == "new"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o444

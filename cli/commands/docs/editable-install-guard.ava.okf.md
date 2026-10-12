@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Editable Install Guard
-description: Explicit editable-install inspection and permission restoration for development tooling.
+description: Read-only editable-install inspection used by the exec boundary and the health probe.
 tags:
 - cli
 - lifecycle
@@ -31,19 +31,17 @@ or source convergence. Development starts keep host wiring and plugin scaffold
 preparation, but do not discover or rewrite a separate production virtualenv.
 Converge has no editable pointer repair, protection, or reinstall step.
 
-`base/deploy/release/editable_install.py` provides explicit inspection and repair tools for
-editable installations. Its write window opens the exact records and structural
-site-packages, dist-info and launcher directories, then restores their original
-modes. A caller must identify the intended checkout and its virtualenv; automatic
-startup does not grant permission to repair another installation. The
-`cli/python_install.py` source dependency pipeline owns normal locked dependency
-acquisition and editable builds.
-
-The import proof runs the selected virtualenv interpreter in isolated mode from
-a temporary directory and checks the actual `agent.execution.child` path. A successful
-package-manager exit alone does not prove that the install is usable. Discovery
-covers the `lib`/`lib64` layouts. Inspection and repair must
-name the intended checkout and virtualenv explicitly;
+`base/deploy/release/editable_install.py` provides read-only inspection of
+editable installations: `editable_install_violations` discovers the pointer and
+every `direct_url.json` record and judges them against the exact-root allowlist,
+and `editable_console_script_violations` checks the launcher. The exec boundary
+refuses a child spawn from a violating interpreter and the health probe reports
+the violation; neither rewrites a record. The fix for a violation is the locked
+dependency sync, run by the operator for the intended checkout and its
+virtualenv (`cli/python_install.py` owns normal locked dependency acquisition and
+editable builds). Discovery covers the `lib`/`lib64` layouts; a successful
+package-manager exit alone does not prove that the install is usable, so the
+health probe also asks the venv interpreter to import the application.
 [development setup](../../../docs/conventions/dev-setup.md#development-in-a-worktree)
 owns environment isolation and dependency commands.
 
@@ -51,20 +49,11 @@ owns environment isolation and dependency commands.
 
 - Allowlisting is exact-root based. An allowlisted dev clone does not permit
   any `.worktrees/*` descendant.
-- Both missing editable records need no repair; an existing site-packages
-  directory is still discovered structurally so a later write window can open
-  it. A `direct_url.json` record without its `.pth` pointer is a half-uninstall
-  violation, and the guard recreates the pointer at the checkout root. A pointer
-  without a sibling direct-URL record is the reverse half-uninstall: the guard
-  recreates the JSON only when the sibling `ava-*.dist-info` directory remains;
-  if the directory is gone, it reports the violation and the recovery sync owns
-  recreation because this layer cannot invent a distribution version.
-- Repair changes editable-record content only. The write window restores every
-  record and directory mode that existed before the explicit write window opened.
-  This is exception-safe permission restoration, not a filesystem transaction:
-  process termination or an OS refusal to restore permissions still requires
-  operator recovery. Directory protection prevents launcher unlink/replacement;
-  it does not recursively protect dependency files from in-place writes.
+- Both missing editable records are clean. A `direct_url.json` record without
+  its `.pth` pointer, or a pointer without a sibling direct-URL record, is a
+  half-uninstall violation; this layer cannot recreate either, because it cannot
+  invent a distribution version, so the recovery sync owns recreation.
+- Inspection changes nothing: no file is written and no permission is changed.
 - Session creation projects `VIRTUAL_ENV` only when its cwd is inside the
   spawning checkout and not below its `.worktrees/` or `.claude/worktrees/`
   directories; foreign-cwd and sibling-worktree Codex sessions retain the venv

@@ -147,16 +147,4 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         persist=True,
     ),
-    "editable_pth_repaired": telemetry_event(
-        "editable_pth_repaired",
-        "poisoned editable-install pointer repaired to the prod source root",
-        tier="anomaly",
-        site="base/deploy/release/editable_install.py:repair_editable_ava_pth",
-    ),
-    "editable_direct_url_repaired": telemetry_event(
-        "editable_direct_url_repaired",
-        "poisoned editable-install direct_url repaired to the prod source root",
-        tier="anomaly",
-        site="base/deploy/release/editable_install.py:repair_editable_direct_url",
-    ),
 }

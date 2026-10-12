@@ -126,9 +126,9 @@ working directory does not constrain which environment a polluted
 `VIRTUAL_ENV` selects. Clear that variable for every worktree `uv` command,
 verify `.pth` targets and their `direct_url.json` records when explicitly
 preparing that installation, and inspect those targets before deleting a
-checkout. Startup must not repair a different installation. Any explicit repair
-of protected editable files needs a bounded write window with exact-mode
-restoration.
+checkout. Startup must not repair a different installation, and no code rewrites
+an editable install: a violation is reported and an operator re-runs the locked
+`uv sync`.
 Evidence: [`docs/postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
 
 ### Isolation that one command can undo is a convention, not a boundary
