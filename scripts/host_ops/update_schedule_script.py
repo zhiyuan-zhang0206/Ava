@@ -32,9 +32,8 @@ def require_stopped_hold() -> Any:
         current is None
         or current.maintenance is None
         or current.maintenance.phase != MaintenancePhase.STOPPED
-        or current.maintenance.failures
     ):
-        raise RuntimeError("script repair requires a failure-free stopped maintenance hold")
+        raise RuntimeError("script repair requires a stopped maintenance hold")
     return current
 
 

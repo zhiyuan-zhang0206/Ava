@@ -1,7 +1,7 @@
 """Owned terminal delivery never blocks native dispatch or detaches its worker."""
 
 import asyncio
-from unittest.mock import Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -45,7 +45,7 @@ async def test_owned_notice_activity_cannot_block_native_dispatch(
     expected = [PendingInboundWake(agent_id=17, stale=False)]
     monkeypatch.setattr(
         "services.agent_runner.agent_host.scheduling.pending_wakes.held_maintenance_wakes",
-        Mock(return_value=expected if held else None),
+        AsyncMock(return_value=expected if held else None),
     )
     entered, release, exited = Event(), Event(), Event()
 

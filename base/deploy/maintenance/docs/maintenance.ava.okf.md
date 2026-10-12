@@ -43,17 +43,22 @@ This is preserved idle intent, not a fabricated continuation receipt.
 Hosted drain receipts require the shielded continuation, final checkpoint
 flush, resources and owner settlement to finish. The matching DB restart must
 be applied and unobserved. A successor cannot sign an absent original receipt.
-Failures latch before journal I/O. When the journal is read successfully and
-no hold exists, an ordinary failure does not fence a future maintenance generation;
-unreadable state and failures during the current hold remain fenced. Held
-lifecycle controls flush any prior buffered checkpoint before claiming their
-restart, without invoking the graph or consuming ordinary messages;
+Held lifecycle controls flush any prior buffered checkpoint before claiming
+their restart, without invoking the graph or consuming ordinary messages;
 `applied_at`, an idle row, or a released lease alone is insufficient.
 
-Continuation failures, including database connection failures, are recorded
-as blocking maintenance failures. Same-boot and persisted hold fences prevent
-automatic re-drive after failure. Explicit operator resume is required; restart
-does not turn an unknown continuation into a successful drain receipt.
+A turn that fails while its continuation is still owed to a draining hold
+(`agent_host/lifecycle/maintenance.py`) ends that agent's restart command once:
+an unapplied command is settled `done` with a `failed` lifecycle result
+(`continuation_failed`) and the agent's pointer is cleared, ERROR is logged and
+`agent_continuation_lost` (read by an alert rule) is raised once, and the pending
+wake scan no longer drives that agent. Nothing is latched in the journal and
+nothing is fenced. A restart whose effect had already started is not rewritten
+(it is neither undone nor declared unexecuted); it is reported and keeps its
+normal completion path. The agent stays in the hold: it never drains, so
+`ava stop` ends at its drain deadline with the stall report, and a person takes
+it from there; `ava start` releases the hold. The failed turn's own work may be
+lost, and an unapplied restart that was ended is not carried out.
 
 Phases are `preparing → draining → drained → stopping → stopped`, owned by
 `state.MaintenancePhase`; `ava stop` / `ava restart` walk all five. Journal
@@ -61,15 +66,12 @@ reads validate the enum. There is no start phase: `ava start` authorizes bring-u
 against the retained hold and releases it after actual readiness. Nested calls
 pass the authorized operation snapshot and verify its holder and acquisition time.
 
-A recorded blocking continuation/flush failure prevents drain, phase transitions
-and bare resume. Explicit `ava start` may settle the failed receipt after the unit
-serves, preserving a pending/claimed restart pointer or reporting a lost pointer
-before clearing the receipt by compare-and-swap. A new failure keeps the hold.
-This operator action does not replay the original graph or code execution. Pending
+`ava start` releases the hold once the unit serves; its resume wakes every
+restart pointer. It does not replay the original graph or code execution. Pending
 restart controls remain subject to resource and lifecycle gates; unknown compact
 or cancel attempts stay held. New ordinary execution requires fresh input.
 
-Repeating a completed, failure-free stop reads the journal before configuration
+Repeating a completed stop reads the journal before configuration
 bootstrap. First-time normal drain still needs data-plane configuration.
 
 
@@ -88,7 +90,7 @@ identity and real database probe. It remains public and reports database
 failure as degraded; it does not certify business admission. Ops `status_probe`
 also stays reachable and remains counted through completion. Its existing
 authentication requirements are unchanged.
-Resume still checks the exact generation, failure receipts and actual serving
+Resume still checks the exact generation and actual serving
 state. Ordinary start proves readiness before releasing the hold; an exit-code
 waiver never certifies serving. Business APIs and native work stay closed until
 that successful resume.

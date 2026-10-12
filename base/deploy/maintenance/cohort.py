@@ -7,7 +7,7 @@ refuse. No lifecycle target, acknowledgement, or checkpoint is invented here.
 """
 
 from datetime import datetime
-from typing import Literal, NamedTuple
+from typing import NamedTuple
 from uuid import UUID
 
 import psycopg
@@ -17,7 +17,6 @@ from psycopg.types.json import Jsonb
 from base import telemetry
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.agents.incarnation.resources import ResourceBirth, decode_resources
-from base.config import settings
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.hold_driver import HoldDriver
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
@@ -56,10 +55,10 @@ def prepare(
 
     A failure leaves the hold in place. Repeating preparation resumes the
     same cohort and finds already committed commands by the exact operation.
-    A captured cohort is returned unchanged when no unsettled failures remain.
     Terminated agents never enter the cohort. A previous lifecycle operation,
     stale/unknown runtime requires separate resolution. Ordinary orphan claims
-    on non-cold parked agents settle before the collision guards run.
+    on non-cold parked agents are consumed (marked done, never redelivered)
+    before the collision guards run.
 
     An unfinished agent lifecycle command belonging to another actor raises
     ``LifecycleCollisionError`` before the cohort is frozen; the caller may
@@ -69,8 +68,6 @@ def prepare(
     current = admission.require_operation(holder, acquired_at)
     hold = current.maintenance
     assert hold is not None  # noqa: S101
-    if hold.failures:
-        raise RuntimeError(f"maintenance has failed continuations: {sorted(hold.failures)}")
     if hold.phase != MaintenancePhase.PREPARING:
         return hold
     if conn.info.transaction_status != TransactionStatus.IDLE:
@@ -211,26 +208,27 @@ def orphaned_claims(
 
 def _settle_orphan_claims(
     conn: psycopg.Connection, hold: MaintenanceHold, cold: frozenset[int]
-) -> list[tuple[OrphanClaim, Literal["pending", "done"]]]:
-    """Settle under preparation's agent row locks; preserve boot's stale cutoff."""
-    settled: list[tuple[OrphanClaim, Literal["pending", "done"]]] = []
-    cutoff = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
+) -> list[OrphanClaim]:
+    """Consume orphaned ordinary claims under preparation's agent row locks.
+
+    A claim whose runtime is gone is marked `done`, never returned to
+    `pending`: like a cold boot, preparation does not redeliver input a dead
+    runtime had taken. Returns only the rows this transaction changed.
+    """
+    consumed: list[OrphanClaim] = []
     for row in orphaned_claims(conn, parked=hold.parked, cold=cold):
-        outcome = "done" if row.age_s > cutoff else "pending"
         changed = conn.execute(
-            "UPDATE inbound_messages SET status=%s WHERE id=%s AND status='claimed'",
-            (outcome, row.message_id),
+            "UPDATE inbound_messages SET status='done' WHERE id=%s AND status='claimed'",
+            (row.message_id,),
         ).rowcount
         if changed:
-            settled.append((row, outcome))
-    return settled
+            consumed.append(row)
+    return consumed
 
 
-def _emit_orphan_settlements(
-    settled: list[tuple[OrphanClaim, Literal["pending", "done"]]],
-) -> None:
+def _emit_orphan_settlements(consumed: list[OrphanClaim]) -> None:
     """Report only committed CAS changes, never a rolled-back preparation attempt."""
-    for row, outcome in settled:
+    for row in consumed:
         telemetry.emit(
             "telemetry",
             "pause_orphan_claim_settled",
@@ -239,7 +237,6 @@ def _emit_orphan_settlements(
                 "agent": row.agent_id,
                 "message_id": row.message_id,
                 "age_s": round(row.age_s, 3),
-                "outcome": outcome,
             },
         )
 
@@ -471,8 +468,8 @@ def _restart(conn: psycopg.Connection, agent_id: int, holder: str, acquired_at: 
 
 def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
     """Cross-check local continuation receipts against preserved DB pointers."""
-    if hold.failures or set(hold.drained) != set(hold.commands):
-        raise RuntimeError("maintenance still has unfinished or failed continuations")
+    if set(hold.drained) != set(hold.commands):
+        raise RuntimeError("maintenance still has unfinished continuations")
     if hold.parked:
         rows = conn.execute(
             "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"

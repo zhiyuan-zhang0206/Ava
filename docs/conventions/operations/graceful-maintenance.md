@@ -164,18 +164,18 @@ is a complete halted END. Nothing is written: historical leases, identity,
 messages, checkpoints and lifecycle acknowledgements are preserved.
 An expired lease alone, unfinished lifecycle/graph work or an uncertain
 checkpoint still refuses; queued ordinary messages remain available for resume.
-Preparation settles orphaned ordinary claims on non-cold parked agents and
-bounded-waits unfinished lifecycle commands. Maintenance-authored commands
-still refuse immediately. See the
-[preparation settlement and wait contract](../../../base/deploy/maintenance/docs/lifecycle-wait.ava.okf.md)
-for eligibility, stale cutoff, and retry semantics.
+Preparation consumes orphaned ordinary claims on non-cold parked agents (marks
+them done; they are never redelivered) and bounded-waits unfinished lifecycle
+commands. Maintenance-authored commands still refuse immediately. See the
+[preparation consumption and wait contract](../../../base/deploy/maintenance/docs/lifecycle-wait.ava.okf.md)
+for eligibility and retry semantics.
 
 ## Holds and their exits
 
 `ava stop` and `ava restart` take the hold and walk it through drain and stop;
 `ava start` releases it after readiness. No command runs those steps one at a
 time, and no command reads or ends a hold except these: `ava status` prints the
-hold (phase, operation, acquired-at, recorded failures, the shepherd's
+hold (phase, operation, acquired-at, the shepherd's
 liveness), `ava status --json` prints only it as one JSON object (the fleet
 update's start-of-work refusal and the out-of-band triage read that; it probes
 nothing, so it answers with everything else down), and `ava start` ends it.
@@ -186,34 +186,23 @@ not retract restarts already issued (durable per-agent intents): members not yet
 at their boundary still complete that restart, with its cold recovery, on
 admission.
 
-A drain aborted by failed receipts keeps the hold, and `ava stop` and `ava
-restart` refuse to continue past them. Receipts whose turn raised a
-database-outage exception (`psycopg.OperationalError`, `PoolTimeout` — the
-crash-equivalent family; every database channel hang surfaces as one of
-these) do not block: they are recorded
-as undelivered, and after the channel recovers the host re-drives the
-held-control path (explicit re-flush, then restart claim) before the drain can
-certify. A failed wake of an agent with no continuation left in the hold
-records no receipt at all: one outside the captured cohort (another machine's:
-every runner receives every wake), or a drained or parked member once the
-hold reached `drained`.
+A turn that fails while its continuation is still owed to the hold is logged at
+ERROR and raises the `agent_continuation_lost` alert once; it is not latched in
+the journal. The agent's unapplied restart command is ended (settled `done`,
+result `failed`/`continuation_failed`, pointer cleared) and no scan drives it
+again. The agent never drains, so `ava stop` ends at its drain deadline with the
+stall report, the hold stays, and `ava start` releases it; the ended restart is
+not carried out, and the alert tells the owner to look at the agent. A restart
+whose effect had already started is left as it is and reported. A failed wake of an agent with no
+continuation left in the hold raises nothing: one outside the captured cohort
+(another machine's: every runner receives every wake), or a drained or parked
+member once the hold reached `drained`.
 
-A blocking failure is a continuation that raised, so its final checkpoint may
-not be durable. The agent's restart pointer is: it survives in Postgres exactly
-as after a crash, and the agent continues from its last durable checkpoint
-(`ava stop --force` and a host crash give the same guarantee, no more). Once the
-unit serves, `ava start` settles each failed receipt before it releases the hold:
-
-- the restart pointer is still pending or claimed: the release's resume
-  re-delivers it, with every other member's;
-- the pointer is gone (its command finished, or the agent row is): the failure
-  is logged at ERROR with the agent, category and hold, and an alert row plus an
-  IM push tells the owner through the same channel `ava start` uses for a service
-  that missed its window. The agent has no continuation left to deliver;
-- the agent is terminated: nothing is owed, nothing is revived.
-
-A start that fails before the unit serves settles nothing and keeps the receipts
-for the retry. Undelivered receipts are left in the journal for audit.
+A failed continuation raised, so its final checkpoint may not be durable and the
+interrupted turn may be lost. The agent's restart pointer is durable: it survives
+in Postgres exactly as after a crash, and the agent continues from its last
+durable checkpoint (`ava stop --force` and a host crash give the same guarantee,
+no more). `ava start` does not settle or inspect the agent.
 
 ## Recovering a stuck maintenance operation
 

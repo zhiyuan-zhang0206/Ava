@@ -28,12 +28,12 @@ def test_status_json_of_a_free_unit(capsys: pytest.CaptureFixture[str], isolate:
     assert hold["driver"] is None
 
 
-def test_status_json_carries_the_generation_phase_and_failures(
+def test_status_json_carries_the_generation_and_phase(
     capsys: pytest.CaptureFixture[str], isolate: None
 ) -> None:
     before = pause_owner.begin_maintenance("local", WHEN).snapshot
     assert before.maintenance is not None
-    held = MaintenanceHold(MaintenancePhase.DRAINING, {1: 11}, failures={1: "RuntimeError"})
+    held = MaintenanceHold(MaintenancePhase.DRAINING, {1: 11})
     pause_owner.change_maintenance("local", WHEN, before.maintenance, held)
 
     hold = _json_hold(capsys)
@@ -83,14 +83,14 @@ def test_human_section_names_the_phase_and_the_exit(
 
     before = pause_owner.begin_maintenance("local", WHEN).snapshot
     assert before.maintenance is not None
-    held = MaintenanceHold(MaintenancePhase.DRAINING, {7: 70}, failures={7: "RuntimeError"})
+    held = MaintenanceHold(MaintenancePhase.DRAINING, {7: 70})
     pause_owner.change_maintenance("local", WHEN, before.maintenance, held)
 
     hold_report.print_hold_section()
     out = capsys.readouterr().out
     assert "maintenance hold: draining" in out
     assert "operation=local" in out
-    assert "failures=[7]" in out
+    assert "failures" not in out
     assert "`ava start`" in out
 
 

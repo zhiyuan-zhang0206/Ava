@@ -142,7 +142,10 @@ def _liveness(value: object) -> str:
 
 
 def _failure_count(value: object) -> int:
-    """The number of failed receipts on the raw journal shape."""
+    """The number of failed receipts on a journal written by a release that still latched them.
+
+    Current releases record none, so the key is absent there.
+    """
     if value is None:
         return 0
     if not isinstance(value, dict):
@@ -272,7 +275,7 @@ def classify_status(payload: Payload, *, host: str, now: float | None = None) ->
     if maintenance is not None:
         hold = _mapping(maintenance, "maintenance")
         phase = _phase(hold["phase"])
-        failures = _failure_count(hold["failures"])
+        failures = _failure_count(hold.get("failures"))
     driver_value = payload["driver"]
     driver = (
         "missing"
@@ -332,7 +335,7 @@ def classify_journal(payload: Payload, *, host: str, now: float | None = None) -
     if maintenance is not None:
         hold = _mapping(maintenance, "maintenance")
         phase = _phase(hold["phase"])
-        failures = _failure_count(hold["failures"])
+        failures = _failure_count(hold.get("failures"))
     operation = _whitelisted(payload.get("holder"), _OPERATION_PATTERN)
     acquired_at = _whitelisted(payload.get("acquired_at"), _TIMESTAMP_PATTERN)
     return Triage(

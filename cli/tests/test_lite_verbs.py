@@ -61,11 +61,6 @@ def test_force_stop_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None
     [
         ("paused", MaintenanceHold(MaintenancePhase.STOPPED), "skip"),
         ("paused", MaintenanceHold(MaintenancePhase.DRAINED), None),
-        (
-            "paused",
-            MaintenanceHold(MaintenancePhase.STOPPED, failures={1: "checkpoint_flush"}),
-            None,
-        ),
         ("resumed", MaintenanceHold(MaintenancePhase.STOPPED), None),
         ("paused", None, None),
     ],
@@ -77,7 +72,7 @@ def test_only_completed_cold_stop_can_skip_gateway_fetch(
     hold: MaintenanceHold | None,
     expected: str | None,
 ) -> None:
-    """A repeated stop works offline; incomplete or failed work must still drain."""
+    """A repeated stop works offline; incomplete work must still drain."""
     # Bootstrap and spawned interpreters consume the raw home before Settings.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
     journal = tmp_path / "run" / "deploy-pause-owner.json"

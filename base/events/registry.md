@@ -202,13 +202,13 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `inbound_reconcile` | inbound reconciliation | noise | — | — | events | — |
 | `inbound_reconcile_sideload_fallback` | inbound reconcile switched from the claim window to settled history | observation | — | — | events | — |
 | `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events | — |
-| `pause_orphan_claim_settled` | preparation settled an ordinary claim without a live runtime | anomaly | agent, message_id, age_s, outcome | — | events | — |
+| `pause_orphan_claim_settled` | preparation consumed (marked done, never redelivered) an ordinary claim whose runtime is gone | anomaly | agent, message_id, age_s | — | events | — |
 | `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events | — |
 | `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events | — |
 | `im_push_failed` | an IM bridge outbound send failed after its single retry (failures = the adapter's consecutive-failure count) | anomaly | channel, failures | — | events | — |
 | `im_feishu_owner_seed_failed` | the feishu owner chat could not be restored at bridge boot; feishu notifications are blind until the user messages the bot | anomaly | reason, chats | — | events | — |
 | `native_cancel_uncertain` | native cancel recovery lacks exact execution or certified stop proof; the supported consumer holds new work | anomaly | agent_id, work_id | — | events | — |
-| `agent_continuation_lost` | an agent's continuation failed at a maintenance hold and its restart pointer is gone, so `ava start` cannot re-deliver it | anomaly | failure_category, holder, reason | — | events | — |
+| `agent_continuation_lost` | an agent's turn failed while its continuation was owed to a draining maintenance hold; its interrupted work may be lost | anomaly | failure_category, holder, reason | — | events | — |
 | `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file | — |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events | — |
 | `service_started` | gateway/daemon started | noise | name, pid | — | events | ✓ |

@@ -74,7 +74,7 @@ native helper exit and removal of its definition. Start recreates that definitio
 Root owns Gate and native LGTM application services. `_pause_resume`
 releases normal startup admission only after readiness.
 The hold journal is read through `ava status` and ended by `ava start`
-(`lifecycle/hold_report.py`, `lifecycle/_failed_receipts.py`). They reuse the [durable maintenance journal](../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
+(`lifecycle/hold_report.py`). They reuse the [durable maintenance journal](../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../../docs/conventions/operations/graceful-maintenance.md).
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,

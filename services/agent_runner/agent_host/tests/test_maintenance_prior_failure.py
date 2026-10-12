@@ -28,10 +28,13 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+from ops import agent_pause
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import Alerts
+from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import alerts as alerts
 from tests.components.agent.test_maintenance import WHEN, _agent
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -211,12 +214,14 @@ async def _run_turn_whose_tail_flush_hits_a_database_outage(
             await host.run_turn(agent)
 
 
-async def test_prior_tail_flush_outage_blocks_automatic_maintenance_retry(
+async def test_prior_tail_flush_outage_ends_the_restart_once_and_the_stop_fails_loudly(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
+    alerts: Alerts,
+    database: Database,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -239,16 +244,26 @@ async def test_prior_tail_flush_outage_blocks_automatic_maintenance_retry(
         acquired_at=WHEN,
     )
     await _run_turn_whose_tail_flush_hits_a_database_outage(host, agent, monkeypatch)
-    current = admission.require_operation("failed-flush", WHEN)
-    assert current.maintenance is not None
-    assert current.maintenance.failures == {agent: "OperationalError"}
-    assert current.maintenance.undelivered == {} and current.maintenance.drained == ()
+    # The outage is alerted once and its restart command is ended (the effect
+    # never started); the journal is untouched and the tail is still durable.
+    assert [(row["event"], row["agent_id"]) for row in alerts.rows] == [
+        ("agent_continuation_lost", agent)
+    ]
+    assert alerts.rows[0]["failure_category"] == "OperationalError"
+    assert admission.require_operation("failed-flush", WHEN).maintenance == hold
     await _assert_tail_still_durable(aops_pool, config, tail)
-    assert await host.pending_inbound_wakes(300) == []
-    await host.run_turn(agent)
-    assert admission.require_operation("failed-flush", WHEN).maintenance == current.maintenance
     assert db_conn.execute(
-        "SELECT status,claimed_at,applied_at FROM inbound_messages WHERE id=%s",
+        "SELECT status,applied_at,payload->'lifecycle_result' FROM inbound_messages WHERE id=%s",
         (hold.commands[agent],),
-    ).fetchone() == ("pending", None, None)
+    ).fetchone() == ("done", None, {"outcome": "failed", "reason": "continuation_failed"})
+    # No later scan drives it again, and further wakes alert nothing more.
+    for _scan in range(3):
+        assert await host.pending_inbound_wakes(300) == []
+    await host.run_turn(agent)
+    assert len(alerts.rows) == 1
+    drained = admission.require_operation("failed-flush", WHEN).maintenance
+    assert drained is not None and drained.drained == ()
+    # `ava stop` does not wait forever: its drain ends at the deadline with the report.
+    with pytest.raises(TimeoutError, match="drain timed out without force"):
+        agent_pause.drain(database, "failed-flush", WHEN, 0.5, local_machine=machine_identity)
     assert calls == ["save", "fail"]

@@ -1,8 +1,7 @@
-"""A failed continuation cannot become drained after journal I/O recovers, and a
-failed wake outside the cohort never becomes a receipt."""
+"""A failed continuation is alerted and re-driven, never latched, and a failed wake
+outside the cohort is no continuation failure."""
 
 import asyncio
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -18,59 +17,44 @@ from services.agent_runner.agent_host.tests.test_agent_host import (
 from services.agent_runner.agent_host.tests.test_agent_host import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.test_agent_host import wired as wired
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import (
-    FC10_AT,
     FC10_FOREIGN,
-    FC10_HOLDER,
+    Alerts,
     fc10_hold,
 )
+from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import alerts as alerts
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
 
 
-@pytest.mark.parametrize("broken_io", ["read", "write"])
-async def test_failure_is_latched_before_any_journal_io(
-    wired: _Build,
-    monkeypatch: pytest.MonkeyPatch,
-    broken_io: str,
+async def test_a_failed_continuation_is_alerted_and_the_held_control_stays_runnable(
+    wired: _Build, monkeypatch: pytest.MonkeyPatch, alerts: Alerts
 ) -> None:
+    """The turn raises while its restart command is owed: the host reports it and
+    latches nothing in the journal. (This fake pool cannot settle the command, so
+    the held control stays runnable; the settled case is tested against Postgres in
+    `test_maintenance_receipt_grading`.)"""
     host, graph, _pool = wired({11: _Row(status="idling")})
-    real_snapshot = admission.snapshot
-    fail_next_read = False
+    hold = MaintenanceHold(MaintenancePhase.DRAINING, {11: 100})
 
-    def read() -> pause_owner.PauseOwnerSnapshot | None:
-        nonlocal fail_next_read
-        if fail_next_read:
-            fail_next_read = False
-            raise RuntimeError("isolated journal read failure")
-        return real_snapshot()
-
-    def write(*_args: Any, **_kwargs: Any) -> None:
-        raise OSError("isolated journal write failure")
-
-    async def broken(*_args: Any, **_kwargs: Any) -> None:
-        nonlocal fail_next_read
+    async def broken(*_args: object, **_kwargs: object) -> None:
         before = pause_owner.begin_maintenance("failed", WHEN).snapshot
         assert before.maintenance is not None
-        pause_owner.change_maintenance(
-            "failed",
-            WHEN,
-            before.maintenance,
-            MaintenanceHold(MaintenancePhase.DRAINING, {11: 100}),
-        )
-        fail_next_read = broken_io == "read"
+        pause_owner.change_maintenance("failed", WHEN, before.maintenance, hold)
         raise RuntimeError("isolated final flush failure")
 
-    monkeypatch.setattr(admission, "snapshot", read)
-    if broken_io == "write":
-        monkeypatch.setattr(admission, "record_failure", write)
     monkeypatch.setattr(graph, "ainvoke", broken)
-    with pytest.raises((RuntimeError, OSError), match="journal"):
+    with pytest.raises(RuntimeError, match="final flush"):
         await host.run_turn(11)
+    (row,) = alerts.rows
+    assert row["event"] == "agent_continuation_lost" and row["agent_id"] == 11
+    assert row["failure_category"] == "RuntimeError" and row["holder"] == "failed"
+    assert admission.require_operation("failed", WHEN).maintenance == hold
     assert admission.pending_command(11) == 100
+
     control = AsyncMock()
     monkeypatch.setattr(host, "_run_held_controls", control)
     await host.run_turn(11)
-    control.assert_not_awaited()
+    control.assert_awaited_once()
 
 
 class _BlockedRead:
@@ -96,28 +80,28 @@ class _BlockedRead:
 
 
 @pytest.mark.parametrize(
-    ("phase", "drained", "agent", "latched"),
+    ("phase", "drained", "agent", "reported"),
     [
-        *(("stopping", (2, 6, 7), agent, {}) for agent in FC10_FOREIGN),
-        ("stopping", (2, 6, 7), 2, {}),
-        ("draining", (6, 7), 2, {2: "CancelledError"}),
+        *(("stopping", (2, 6, 7), agent, False) for agent in FC10_FOREIGN),
+        ("stopping", (2, 6, 7), 2, False),
+        ("draining", (6, 7), 2, True),
     ],
     ids=["foreign-3", "foreign-8", "foreign-9", "drained-member", "draining-member"],
 )
-async def test_a_wake_cancelled_before_its_row_read_latches_only_live_continuations(
+async def test_a_wake_cancelled_before_its_row_read_reports_only_owed_continuations(
     wired: _Build,
     monkeypatch: pytest.MonkeyPatch,
+    alerts: Alerts,
     phase: str,
     drained: tuple[int, ...],
     agent: int,
-    latched: dict[int, str],
+    reported: bool,
 ) -> None:
     """FC-10 F20: a stop's SIGTERM cancels every task (`cancel_and_drain`).
 
     Caught before `read_stored_config` could say "not ours", a wake for
-    another machine's agent latched a blocking receipt on the stopping unit's
-    hold, and so could one for a member already drained. A member still
-    draining keeps its receipt.
+    another machine's agent, or one for a member already drained, owes no
+    continuation and raises no alert. A member still draining does.
     """
     host, _graph, pool = wired({})
     blocked = _BlockedRead()
@@ -135,9 +119,7 @@ async def test_a_wake_cancelled_before_its_row_read_latches_only_live_continuati
         task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await turn
-    current = admission.require_operation(FC10_HOLDER, FC10_AT)
-    assert current.maintenance is not None
-    assert current.maintenance.failures == latched
+    assert [row["agent_id"] for row in alerts.rows] == ([agent] if reported else [])
 
 
 @pytest.mark.parametrize("phase", ["stopping", "stopped"])

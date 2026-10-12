@@ -48,5 +48,4 @@ def unit_already_stopped() -> bool:
         current.status == "paused"
         and current.maintenance is not None
         and current.maintenance.phase == MaintenancePhase.STOPPED
-        and not current.maintenance.failures
     )
