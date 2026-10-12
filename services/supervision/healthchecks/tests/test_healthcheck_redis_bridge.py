@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from services.supervision.healthchecks.redis_bridge import probe_relay
 
 
 @contextmanager
-def _listener(reply: bytes | None) -> Iterator[int]:
+def _listener(reply: bytes | None) -> Generator[int]:
     """A TCP listener answering the first connection with `reply` (None: close silently)."""
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
