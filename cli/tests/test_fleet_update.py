@@ -29,7 +29,7 @@ _IDLE: dict[str, Any] = {
     "dirty": 0,
     "hook": "no",
     "active": "no",
-    "hold": ("resumed", None, {}),
+    "hold": ("resumed", None),
     "up": True,
 }
 _ROW = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
@@ -49,7 +49,6 @@ class Cluster:
         self.laptop: dict[str, Any] | None = None  # a roster-only machine no alias reaches
         self.effects: list[tuple[str, str]] = []
         self.fail: dict[tuple[str, str], int] = {}
-        self.stop_failures: dict[str, str] = {}
         self.output = ""
         self.stored_schedules: tuple[int, list[str]] = (
             0,
@@ -78,7 +77,7 @@ class Cluster:
             return self.fail[(kind, alias)]
         if kind == "stop":
             assert not (alias == "gw" and self._runners_up()), "gateway stopped before a runner"
-            host["up"], host["hold"] = False, ("paused", "stopped", self.stop_failures)
+            host["up"], host["hold"] = False, ("paused", "stopped")
         elif kind == "switch":
             assert not host["up"] and self.new in command
             assert fleet_update._CLEAN in shlex.split(command)[2]
@@ -87,7 +86,7 @@ class Cluster:
         elif kind in ("start", "oneshot"):
             assert (kind == "oneshot") == (host["os"] == "Darwin")
             assert self.hosts["gw"]["up"] if alias != "gw" else not self._runners_up()
-            host["up"], host["hold"] = True, ("resumed", None, {})
+            host["up"], host["hold"] = True, ("resumed", None)
         elif kind == "smoke":
             self.smoked.append(command.partition(" - smoke ")[2].split()[0].strip("'"))
         elif kind == "refresh":
@@ -119,12 +118,12 @@ class Cluster:
         if command == "uname -s":
             emit(str(host["os"]))
             return 0
-        status, phase, failures = host["hold"]
+        status, phase = host["hold"]
         hold = json.dumps(
             {
                 "hold": {
                     "status": status,
-                    "maintenance": phase and {"phase": phase, "failures": failures},
+                    "maintenance": phase and {"phase": phase},
                 }
             }
         )
@@ -430,17 +429,6 @@ def test_the_first_failure_stops_the_half(
     assert _STOP_RETRY in capsys.readouterr().out
 
 
-def test_a_stop_that_leaves_failures_fails(
-    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
-) -> None:
-    cluster, run = env
-    cluster.stop_failures = {"5": "wake failed"}
-    assert run("down") == 1
-    assert [a for k, a in cluster.effects if k == "stop"] == ["mac"]
-    out = capsys.readouterr().out
-    assert "stop left paused/stopped" in out and _STOP_RETRY in out
-
-
 def test_the_roster_is_re_read_while_heartbeats_catch_up(
     env: tuple[Cluster, Callable[..., int]],
 ) -> None:
@@ -546,7 +534,7 @@ def test_a_dirty_tree_is_shown_not_cleaned(tmp_path: Path) -> None:
 _UNSAFE: list[tuple[str, object]] = [("hook", "yes"), ("active", "yes"), ("dirty", 3)]
 
 
-@pytest.mark.parametrize(("key", "value"), [*_UNSAFE, ("hold", ("paused", "draining", None))])
+@pytest.mark.parametrize(("key", "value"), [*_UNSAFE, ("hold", ("paused", "draining"))])
 def test_preflight_refuses(
     env: tuple[Cluster, Callable[..., int]], key: str, value: object
 ) -> None:
@@ -597,8 +585,8 @@ def test_the_log_carries_no_secret(
 
 
 _HOLD_WITH_BACKSLASHES = (
-    '{"hold": {"status": "paused", "maintenance": {"phase": "stopped", '
-    '"failures": {"argv": "[\\"sh\\", \\"-c\\", \\"\\\\$HOME\\\\n\\"]"}}}}'
+    '{"hold": {"status": "paused", "operation": "[\\"sh\\", \\"-c\\", \\"\\\\$HOME\\\\n\\"]", '
+    '"maintenance": {"phase": "stopped"}}}'
 )
 
 
@@ -629,11 +617,8 @@ def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
     }
     assert facts["head"] == _git(source, "rev-parse", "HEAD")
     assert facts["dirty"] == "0"
-    assert fleet_update._hold(facts["hold"]) == (
-        "paused",
-        "stopped",
-        {"argv": '["sh", "-c", "\\$HOME\\n"]'},
-    )
+    assert fleet_update._hold(facts["hold"]) == ("paused", "stopped")
+    assert json.loads(facts["hold"])["hold"]["operation"] == '["sh", "-c", "\\$HOME\\n"]'
 
 
 @pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])

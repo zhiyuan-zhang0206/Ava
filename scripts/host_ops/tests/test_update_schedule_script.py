@@ -30,25 +30,19 @@ def private_journal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
 
-def publish(phase: MaintenancePhase, *, failed: bool = False) -> None:
+def publish(phase: MaintenancePhase) -> None:
     stamp = dt.datetime(2026, 10, 10, tzinfo=dt.UTC)
     before = pause_owner.begin_maintenance("test:script-repair", stamp).snapshot
     assert before.maintenance is not None
     assert before.holder is not None
-    hold = MaintenanceHold(phase, {}, failures={1: "RuntimeError"} if failed else {})
+    hold = MaintenanceHold(phase, {})
     pause_owner.change_maintenance(before.holder, stamp, before.maintenance, hold)
 
 
 @pytest.mark.parametrize("phase", [p for p in MaintenancePhase if p != MaintenancePhase.STOPPED])
 def test_only_certified_stopped_phase_is_accepted(phase: MaintenancePhase) -> None:
     publish(phase)
-    with pytest.raises(RuntimeError, match="failure-free stopped"):
-        repair.require_stopped_hold()
-
-
-def test_stopped_failure_receipt_is_refused() -> None:
-    publish(MaintenancePhase.STOPPED, failed=True)
-    with pytest.raises(RuntimeError, match="failure-free stopped"):
+    with pytest.raises(RuntimeError, match="requires a stopped"):
         repair.require_stopped_hold()
 
 

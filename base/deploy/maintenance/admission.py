@@ -123,25 +123,15 @@ def pending_command(agent_id: int) -> int | None:
     if current is None or current.maintenance is None:
         return None
     hold = current.maintenance
-    if (
-        hold.phase != MaintenancePhase.DRAINING
-        or agent_id in hold.drained
-        or agent_id in hold.failures
-    ):
+    if hold.phase != MaintenancePhase.DRAINING or agent_id in hold.drained:
         return None
     return hold.commands.get(agent_id) or None
 
 
-def _drain_update(
-    hold: MaintenanceHold, agent_id: int, command_id: int, failure: str | None
-) -> MaintenanceHold | None:
-    """The hold after recording one agent's drain (or failure); None when already recorded."""
-    if failure is not None:
-        return replace(hold, failures={**hold.failures, agent_id: failure})
+def _drain_update(hold: MaintenanceHold, agent_id: int, command_id: int) -> MaintenanceHold | None:
+    """The hold after recording one agent's drain; None when already recorded."""
     if hold.commands.get(agent_id) != command_id:
         raise RuntimeError("drained command does not belong to this maintenance cohort")
-    if agent_id in hold.failures:
-        raise RuntimeError("failed continuation cannot certify a maintenance drain")
     if agent_id in hold.drained:
         return None
     return replace(hold, drained=tuple(sorted((*hold.drained, agent_id))))
@@ -179,55 +169,13 @@ def _change_with_retry(update: Callable[[MaintenanceHold], MaintenanceHold | Non
             return
 
 
-def record_drained(agent_id: int, command_id: int, *, failure: str | None = None) -> None:
+def record_drained(agent_id: int, command_id: int) -> None:
     """Record only after the host's actual continuation and cleanup returned.
 
     Compare-and-swap retries only contention between independently finishing
     cohort agents. It never retries an execution or checkpoint write.
     """
-    _change_with_retry(lambda hold: _drain_update(hold, agent_id, command_id, failure))
-
-
-def record_undelivered(agent_id: int, category: str) -> None:
-    """Record a crash-equivalent receipt without latching a blocking failure.
-
-    The turn raised a database-outage exception, so its continuation outcome is
-    unknown but durable: the restart pointer survives exactly as after a host
-    crash. This receipt is kept in the journal for audit only — it never blocks
-    resume, and the host re-drives the held-control path (explicit re-flush
-    before the restart claim) on the next wake, so the drain still certifies
-    only through a genuinely completed continuation.
-    """
-    _change_with_retry(
-        lambda hold: (
-            None
-            if agent_id in hold.undelivered
-            else replace(hold, undelivered={**hold.undelivered, agent_id: category})
-        )
-    )
-
-
-def clear_failures() -> dict[int, str]:
-    """Drop every blocking failure receipt from the held journal; the receipts cleared.
-
-    `ava start` calls this once it has re-delivered each failed continuation
-    (`cli.commands.lifecycle._failed_receipts`), so the hold can release. The
-    clear is a compare-and-swap on the journal: a turn that lands another failure
-    in between is cleared with the rest, or leaves a failure that keeps the hold
-    for the next `ava start`. Undelivered receipts are never touched; they never
-    block.
-    """
-    cleared: dict[int, str] = {}
-
-    def update(hold: MaintenanceHold) -> MaintenanceHold | None:
-        if not hold.failures:
-            return None
-        cleared.clear()
-        cleared.update(hold.failures)
-        return replace(hold, failures={})
-
-    _change_with_retry(update)
-    return cleared
+    _change_with_retry(lambda hold: _drain_update(hold, agent_id, command_id))
 
 
 def set_phase(
@@ -243,19 +191,7 @@ def set_phase(
     }
     if phase != allowed.get(hold.phase):
         raise RuntimeError(f"invalid maintenance transition: {hold.phase} -> {phase}")
-    if phase == MaintenancePhase.DRAINED and (
-        hold.failures or set(hold.drained) != set(hold.commands)
-    ):
+    if phase == MaintenancePhase.DRAINED and set(hold.drained) != set(hold.commands):
         raise RuntimeError("resume cohort has not fully drained")
     updated = MaintenanceHold.decode({**hold.encode(), "phase": phase})
     return pause_owner.change_maintenance(holder, acquired_at, hold, updated)
-
-
-def record_failure(agent_id: int, category: str) -> None:
-    # A failure can occur between hold publication and cohort capture. Keep
-    # that evidence too; preparation must not bless a now-idle broken runtime.
-    # Callers grade database-outage exceptions into `record_undelivered`
-    # instead: those are crash-equivalent and must not block resume. They also
-    # drop agents with no continuation left in the hold (`MaintenanceHold`'s
-    # `outside_cohort` and `settled_after_drain`).
-    record_drained(agent_id, 0, failure=category)

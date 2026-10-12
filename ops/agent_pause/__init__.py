@@ -196,11 +196,6 @@ def drain(
             raise RuntimeError(
                 "preparation is incomplete; re-run `ava stop`, or abandon it with `ava start`"
             )
-        if hold.failures:
-            raise RuntimeError(
-                f"continuations failed; hold retained: {sorted(hold.failures)} — "
-                "`ava start` re-delivers them and releases the hold"
-            )
         if set(hold.drained) == set(hold.commands):
             with db.connect() as conn:
                 cohort.verify_drained(conn, hold)
@@ -366,11 +361,6 @@ def resume_agents(db: Database, bus: EventBus) -> None:
         return
     assert current.maintenance is not None  # noqa: S101
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-    if current.maintenance.failures:
-        raise RuntimeError(
-            "cannot resume failed continuation/flush receipts; run `ava start`, which "
-            "re-delivers them before it releases the hold"
-        )
     pause_owner.change_maintenance(
         current.holder, current.acquired_at, current.maintenance, current.maintenance, resumed=True
     )

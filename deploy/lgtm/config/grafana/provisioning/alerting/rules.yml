@@ -3737,9 +3737,9 @@ groups:
                   query:
                     params: [C]
 
-      # ── ava-ops-agent-continuation-lost: replaces cli/commands/lifecycle/_failed_receipts.py _notify_owner (a direct alerts row plus IM push through cli/commands/probe.py) ──
+      # ── ava-ops-agent-continuation-lost: the agent host reports a turn that failed while its continuation was owed to a draining maintenance hold ──
       - uid: ava-ops-agent-continuation-lost
-        title: "Agent continuation lost at ava start"
+        title: "Agent continuation failed at a maintenance hold"
         condition: D
         for: 0m
         noDataState: OK
@@ -3750,13 +3750,13 @@ groups:
           metric: agent_continuation_lost
           team: ava-ops
         annotations:
-          summary: "agent {{ $labels.agent_id }}: its continuation failed ({{ $labels.attributes_failure_category }}) at a maintenance hold and cannot be re-delivered"
+          summary: "agent {{ $labels.agent_id }}: its turn failed ({{ $labels.attributes_failure_category }}) while its continuation was owed to a maintenance hold"
           description: >-
-            An agent's continuation raised during a stop's drain and its durable restart pointer is gone, so
-            `ava start` could not re-deliver it when it released the hold. The agent will not continue its
-            interrupted work by itself: read the agent_continuation_lost event (holder, reason) and re-
-            prompt or resurrect the agent. Emitted once per agent per start, so the instance resolves an
-            hour after.
+            An agent's turn raised during a stop's drain. The host ended its pending restart command and
+            raised this once; the interrupted work may be lost and the restart was not carried out. The
+            drain will time out on this agent: read the agent_continuation_lost event (holder, outcome),
+            check the agent after `ava start`, and re-prompt, restart or resurrect it. The instance
+            resolves an hour after the event.
         data:
           - refId: A
             datasourceUid: loki

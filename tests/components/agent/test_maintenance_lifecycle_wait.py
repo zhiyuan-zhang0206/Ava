@@ -344,13 +344,12 @@ def test_parked_agent_lifecycle_command_is_waitable(
     assert raised.value.agent_ids == (agent,)
 
 
-@pytest.mark.parametrize("age_s,expected", [(10, "pending"), (601, "done")])
+@pytest.mark.parametrize("age_s", [10, 601])
 @pytest.mark.parametrize("legacy", [False, True])
-def test_parked_claimed_ordinary_work_settles(
+def test_parked_claimed_ordinary_work_is_consumed_not_redelivered(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     age_s: int,
-    expected: str,
     legacy: bool,
     database: Database,
     event_bus: EventBus,
@@ -369,7 +368,6 @@ def test_parked_claimed_ordinary_work_settles(
         (age_s, legacy, age_s, message),
     )
     db_conn.commit()
-    monkeypatch.setattr(settings.daemon, "delivery_watchdog_stale_claimed_threshold_seconds", 600)
     events = _events(monkeypatch)
     pause_owner.begin_maintenance("move", WHEN)
 
@@ -385,12 +383,12 @@ def test_parked_claimed_ordinary_work_settles(
     )
     assert db_conn.execute(
         "SELECT status,applied_at FROM inbound_messages WHERE id=%s", (message,)
-    ).fetchone() == (expected, None)
+    ).fetchone() == ("done", None)
     assert len(events) == 1
     assert events[0]["event_name"] == "pause_orphan_claim_settled"
     attributes = events[0]["attributes"]
     assert attributes["agent"] == agent and attributes["message_id"] == message
-    assert attributes["outcome"] == expected and attributes["age_s"] >= age_s
+    assert attributes["age_s"] >= age_s
 
 
 def test_parked_claimed_work_prepares_without_wait(
@@ -420,7 +418,7 @@ def test_parked_claimed_work_prepares_without_wait(
     assert [event["event_name"] for event in events] == ["pause_orphan_claim_settled"]
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (message,)
-    ).fetchone() == ("pending",)
+    ).fetchone() == ("done",)
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])

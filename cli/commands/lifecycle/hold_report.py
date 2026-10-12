@@ -70,9 +70,9 @@ def print_hold_section() -> None:
     acquired_at = current.acquired_at.isoformat() if current.acquired_at else None
     print(
         f"maintenance hold: {hold.phase}  operation={current.holder}  acquired_at={acquired_at}  "
-        f"driver={liveness}  failures={sorted(hold.failures) or 'none'}"
+        f"driver={liveness}"
     )
-    print("  `ava start` re-delivers any failed continuation and releases the hold.")
+    print("  `ava start` releases the hold.")
 
 
 def cmd_status_json() -> int:
