@@ -47,35 +47,7 @@ from tests.path_scoped.cli_tests import operator_database as operator_database
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-# The real `ava init` then `ava start` dispatch into a fresh home: identity
-# publication, then the sinks, then a service phase replaced by the real
-# pgvector pre-create against a port nothing listens on.
-_FIRST_START = r"""
-import os
-import sys
-import types
-from pathlib import Path
-sys.path.insert(0, sys.argv[1])
-from cli import main, start_intent
-from base import cluster
-from base.log import prepare_process_logging
-prepare_process_logging()
-home = Path(os.environ["AVA_HOME"])
-checkout = home.parent / "checkout"
-checkout.mkdir()
-start_intent._checkout = lambda: checkout
-cluster.port_free = lambda _port: True
-def start(**kwargs):
-    from base.cluster import ensure_pgvector_extension
-    ensure_pgvector_extension(
-        "ava", base_admin_url="postgresql://probe@127.0.0.1:1/postgres?connect_timeout=5"
-    )
-    return 0
-sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=start)
-sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
-assert main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]) == 0
-raise SystemExit(main.main(["start"]))
-"""
+_FIRST_START = Path(__file__).with_name("bootstrap") / "child_first_start.py"
 
 
 def test_ava_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Path) -> None:
@@ -83,7 +55,7 @@ def test_ava_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Path)
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(AVA_HOME=str(home))
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
-        [sys.executable, "-I", "-B", "-c", _FIRST_START, str(_REPO_ROOT)],
+        [sys.executable, "-I", "-B", str(_FIRST_START)],
         cwd=tmp_path,
         env=env,
         capture_output=True,

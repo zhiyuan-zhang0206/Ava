@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -45,73 +46,25 @@ def test_host_identity_requires_the_callers_explicit_context() -> None:
     assert getattr(ava, "context", None) is None
 
 
-def test_host_startup_refuses_env_context_and_attachment() -> None:
-    code = """
-import os
-os.environ.pop("AVA_AGENT_ID", None)
-import ava
-import runpy
-from base import config
-class BootStoppedError(RuntimeError):
-    pass
-def stop_boot(self):
-    raise BootStoppedError("after SDK posture")
-config.ConfigBoot.ensure_eager = stop_boot
-try:
-    runpy.run_module("services.agent_runner.agent_host.daemon", run_name="__main__")
-except BootStoppedError:
-    pass
-else:
-    raise AssertionError("boot did not stop")
-from ava.sdk_surface import agent_identity, process_context
-os.environ["AVA_AGENT_ID"] = "5"
-ava.bind_host_process()
-assert ava.is_host_process()
-assert agent_identity.is_launched_child() is False
-assert getattr(ava, "context", None) is None
-try:
-    ava.external.attach("must-not-be-read")
-except RuntimeError as exc:
-    assert "native agent runtime" in str(exc)
-else:
-    raise AssertionError("host attached")
-try:
-    ava.bind_context(process_context.launched_context())
-except RuntimeError as exc:
-    assert "shared agent host" in str(exc)
-else:
-    raise AssertionError("host rebound")
-try:
-    ava.unbind_context()
-except RuntimeError as exc:
-    assert "startup posture" in str(exc)
-else:
-    raise AssertionError("host posture was released")
-"""
+_HOST_POSTURE = Path(__file__).with_name("bootstrap") / "child_sdk_probes.py"
+
+
+def _run_host_posture(scenario: str) -> None:
     result = run_bounded(
-        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=30
+        [sys.executable, "-I", str(_HOST_POSTURE), scenario],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_host_startup_refuses_env_context_and_attachment() -> None:
+    _run_host_posture("host_refuses_env_context_and_attachment")
 
 
 def test_executable_host_rejects_inherited_child_identity_before_sdk_import() -> None:
-    code = """
-import os
-import sys
-import runpy
-os.environ["AVA_AGENT_ID"] = "5"
-try:
-    runpy.run_module("services.agent_runner.agent_host.daemon", run_name="__main__")
-except RuntimeError as exc:
-    assert "cannot inherit a launched-agent identity" in str(exc)
-else:
-    raise AssertionError("host accepted inherited child identity")
-assert "ava" not in sys.modules
-"""
-    result = run_bounded(
-        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=30
-    )
-    assert result.returncode == 0, result.stderr
+    _run_host_posture("host_rejects_inherited_child_identity")
 
 
 def test_established_child_context_cannot_become_shared_host() -> None:

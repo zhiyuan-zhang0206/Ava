@@ -126,7 +126,6 @@ def _ignore(*_args: Any) -> None:
 
 def completion_during_stall(root: Path) -> None:
     """The script returns while a real stall recorder is blocked; hard exit still wins."""
-    import runpy
 
     database, inputs = _schedule_inputs()
     import ava
@@ -152,7 +151,7 @@ def completion_during_stall(root: Path) -> None:
         (root / "script-returned").touch()
 
     r._record_error = record_error
-    runpy.run_path = script  # pyright: ignore[reportAttributeAccessIssue]
+    r.runpy.run_path = script  # pyright: ignore[reportAttributeAccessIssue]
     r._finish_completed = lambda *_args: (root / "completed").touch()
     raise SystemExit(
         r._run(

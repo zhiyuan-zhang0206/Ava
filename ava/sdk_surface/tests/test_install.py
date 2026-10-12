@@ -21,7 +21,7 @@ from unittest.mock import patch
 import pytest
 
 import ava
-from ava.sdk_surface import install, metering, skill_sources, wraps
+from ava.sdk_surface import install, metering, sdk_disable, skill_sources, wraps
 from ava.sdk_surface import plugins as sdk_plugins
 from ava.sdk_surface.installation import installed
 from ava.sdk_surface.plugins import (
@@ -326,9 +326,10 @@ def test_a_plugin_whose_later_piece_fails_is_rolled_back_whole(
 def test_a_namespace_disabled_by_the_sdk_disable_sentinel_refuses_the_plugin(
     load_failures: list[tuple[str, BaseException]],
 ) -> None:
-    sentinel = _DisabledSDKModule("ava.disabled_ns")
-    sys.modules["ava.disabled_ns"] = sentinel
-    try:
+    with patch.dict(sys.modules):
+        sdk_disable.apply_entries(["disabled_ns"])
+        sentinel = sys.modules["ava.disabled_ns"]
+        assert isinstance(sentinel, _DisabledSDKModule)
         admitted = install.install(
             _registry(
                 (
@@ -348,8 +349,6 @@ def test_a_namespace_disabled_by_the_sdk_disable_sentinel_refuses_the_plugin(
         # The sentinel the disable machinery put there is not clobbered.
         assert sys.modules["ava.disabled_ns"] is sentinel
         assert not hasattr(ava, "disabled_ns")
-    finally:
-        sys.modules.pop("ava.disabled_ns", None)
 
 
 # ── the recorder, wrap layering, views ─────────────────────────────────────────

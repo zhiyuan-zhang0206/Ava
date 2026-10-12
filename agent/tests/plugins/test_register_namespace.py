@@ -177,11 +177,14 @@ def test_install_namespace_refuses_disabled_sentinel(installer: _Installer):
     sentinel at import time (before plugin load); the install must not
     clobber it — the namespace stays disabled (framework-owned, not
     overridable) and the sentinel keeps raising its legible error."""
-    from ava.sdk_surface.sdk_disable import _DisabledSDKModule
+    from unittest.mock import patch
 
-    sentinel = _DisabledSDKModule("ava.code")
-    sys.modules["ava.code"] = sentinel
-    try:
+    from ava.sdk_surface import sdk_disable
+
+    with patch.dict(sys.modules):
+        sdk_disable.apply_entries(["code"])
+        sentinel = sys.modules["ava.code"]
+        assert isinstance(sentinel, sdk_disable._DisabledSDKModule)
         with pytest.raises(ava.FrameworkNamespaceConflictError, match="AVA_SDK_DISABLE"):
             installer.namespace("code", _make_module("code"))
         # The sentinel survives: the namespace stays disabled for downstream
@@ -189,8 +192,6 @@ def test_install_namespace_refuses_disabled_sentinel(installer: _Installer):
         assert sys.modules["ava.code"] is sentinel
         assert not hasattr(ava, "code")
         assert "code" not in ava.__all_for_ava__
-    finally:
-        sys.modules.pop("ava.code", None)
 
 
 def test_install_namespace_case_sensitive_check(installer: _Installer):
