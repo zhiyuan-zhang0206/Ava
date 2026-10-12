@@ -239,7 +239,7 @@ class DaemonSettings(
     schedule_fire_log_retention_days: int = Field(
         default=30,
         alias="AVA_SCHEDULE_FIRE_LOG_RETENTION_DAYS",
-        description="Days of schedule_fire_log claims kept by the TTL reaper's retention prune. schedule_fire_log is the at-most-once claim ledger for schedule catch-up; the prune deletes rows whose slot is older than this window but always keeps the newest claim per schedule so the catch-up baseline never regresses (a regressed baseline would refire a sparse-cron schedule's already-claimed slot).",
+        description="Days of schedule_fire_log claims kept by the TTL reaper's retention prune. schedule_fire_log is the at-most-once claim ledger of schedule slots; the prune deletes every row whose slot is older than this window.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",

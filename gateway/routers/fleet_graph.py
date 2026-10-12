@@ -15,29 +15,22 @@ Data sources (task #1197 LGTM cutover):
 
 A successful graph also passes through the gateway-latency heartbeat guard
 (`telemetry_staleness`, over `telemetry_events`). An old or missing heartbeat
-retains and caches the fetched graph, marked separately as telemetry-degraded;
-only fallback data uses the graph's stale flag.
+retains and caches the fetched graph, marked separately as telemetry-degraded.
 
-Each stale-serving fallback emits one `fleet_graph_stale` event per episode
-via its lifespan-owned `FleetGraphStaleEmitter`, watched by the ops rule `ava-ops-fleet-graph-stale` (#3925).
+A failed or timed-out Postgres read is not answered from a cached copy: the
+exception propagates to the gateway's unhandled-exception handler (a logged 500).
 """
 
 from __future__ import annotations
 
-import threading
-import time
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, LiteralString, NamedTuple
 
 from fastapi import APIRouter, Query, Request
-from psycopg import errors as pg_errors
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 
-from base import telemetry
 from base.config import settings
-from base.events.declarations.gateway import FleetGraphStaleReason
 from base.events.live.bus import EventBus
 from base.events.reads import audit_rows
 from base.log import logger
@@ -54,18 +47,6 @@ router = APIRouter()
 # SSE invalidation still carries lifecycle changes promptly. Cache is fail-open:
 # a Redis outage degrades to a direct query, never to a 500.
 _CACHE_TTL_SECONDS = 60
-_LAST_GOOD_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
-
-_ROUTE_TIMEOUT_S = 10.0
-
-# The fixed `route` value of every `fleet_graph_stale` event (task #3925): a
-# closed constant, never a request-derived path; reasons live in the contract.
-_STALE_ROUTE = "fleet_graph"
-
-
-def _monotonic() -> float:
-    """Route-budget clock seam, kept local so tests do not alter anyio timing."""
-    return time.monotonic()
 
 
 def _cache_key(
@@ -77,45 +58,16 @@ def _cache_key(
     )
 
 
-def _last_good_cache_key(key: str) -> str:
-    """Stable full-response fallback corresponding to one poll-cache key."""
-    return f"fleet_graph:last_good:{key}"
-
-
-def _read_graph(bus: EventBus, key: str, *, cache_name: str) -> FleetGraphResponse | None:
-    """Read one graph cache entry; fail-open on an unavailable Redis."""
+def _read_cached_graph(bus: EventBus, key: str) -> FleetGraphResponse | None:
+    """Serve the short-lived poll cache when it exists; fail-open on an unavailable Redis."""
     try:
         with bus.sync_redis(decode_responses=True) as redis:
             cached = redis.get(key)
         if cached is not None:
             return FleetGraphResponse.model_validate_json(cached)
     except (RedisError, OSError, ValidationError) as exc:
-        logger.debug(
-            "fleet_graph {} read failed — falling back to direct query: {}", cache_name, exc
-        )
+        logger.debug("fleet_graph cache read failed — falling back to direct query: {}", exc)
     return None
-
-
-def _read_cached_graph(bus: EventBus, key: str) -> FleetGraphResponse | None:
-    """Serve the short-lived poll cache when it exists."""
-    return _read_graph(bus, key, cache_name="cache")
-
-
-def _read_last_good_graph(bus: EventBus, key: str) -> FleetGraphResponse | None:
-    """Return the last successful full graph for this parameter combination."""
-    return _read_graph(bus, _last_good_cache_key(key), cache_name="last-good cache")
-
-
-def _stale_graph(bus: EventBus, key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
-    """Prefer a complete last-good graph; otherwise preserve known nodes.
-
-    A degraded response intentionally bypasses the 60-second cache so the
-    next poll retries the upstream read instead of extending a failure.
-    """
-    last_good = _read_last_good_graph(bus, key)
-    if last_good is not None:
-        return last_good.model_copy(update={"stale": True})
-    return FleetGraphResponse(nodes=nodes, edges=[], stale=True)
 
 
 def _finalize_graph_response(
@@ -146,53 +98,11 @@ def _finalize_graph_response(
     # otherwise successful complete snapshot.
     try:
         with bus.sync_redis(decode_responses=True) as redis:
-            serialized = response.model_dump_json()
-            redis.set(key, serialized, ex=_CACHE_TTL_SECONDS)
-            redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
+            redis.set(key, response.model_dump_json(), ex=_CACHE_TTL_SECONDS)
     except (RedisError, OSError) as exc:
         # Fail-open: a cache write failure must not fail the response.
         logger.debug("fleet_graph cache write failed: {}", exc)
     return response
-
-
-def _stale_emit_interval_s() -> float:
-    """Seconds between `fleet_graph_stale` events per reason — settings-backed
-    so the storm guard is operator-tunable, and a seam tests use to disable it."""
-    return settings.display.fleet_graph_stale_emit_interval_s
-
-
-class FleetGraphStaleEmitter:
-    """Per-reason event throttles owned by one gateway application lifespan."""
-
-    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
-        self._clock = clock
-        self._last: dict[str, float] = {}
-        self._lock = threading.Lock()
-
-    def emit(self, reason: FleetGraphStaleReason) -> None:
-        """One `fleet_graph_stale` event per degradation episode.
-
-        Every stale-serving fallback funnels through here, so a degraded answer
-        is attributable in the event stream (and alertable) instead of only in a
-        logger.warning line (task #3925, user ruling 2026-09-18). `route` is the
-        fixed `_STALE_ROUTE`; `reason` is the closed FleetGraphStaleReason set.
-
-        Rate cap: at most one event per reason per
-        `display.fleet_graph_stale_emit_interval_s` seconds — the alert counts
-        episodes (two in ten minutes), not polls or storms.
-        """
-        now = self._clock()
-        with self._lock:
-            last = self._last.get(reason)
-            if last is not None and now - last < _stale_emit_interval_s():
-                return
-            self._last[reason] = now
-        telemetry.emit(
-            "telemetry",
-            "fleet_graph_stale",
-            level="warning",
-            attributes={"route": _STALE_ROUTE, "reason": reason},
-        )
 
 
 class _PgGraphData(NamedTuple):
@@ -242,8 +152,8 @@ def _fetch_pg_graph(
     live set is the node set just read.
     """
     with pool.connection() as conn, conn.cursor() as cur:
-        # Bound the PG phase below the route deadline so a sync route worker
-        # can degrade rather than wait for the pool's normal 60-second limit.
+        # Bound the PG phase so a stalled read fails fast instead of holding a sync
+        # route worker for the pool's normal 60-second limit.
         cur.execute("SET LOCAL statement_timeout = '8000'")
         cur.execute(
             # S608: the terminated filter is the only spliced fragment and it
@@ -268,10 +178,9 @@ def _fetch_pg_graph(
 
 
 def _build_nodes(
-    node_rows: list[tuple[Any, ...]], tokens: dict[int, AgentTokens] | None = None
+    node_rows: list[tuple[Any, ...]], tokens: dict[int, AgentTokens]
 ) -> list[FleetGraphNode]:
-    """Build graph nodes, retaining PG identity when the token sums are unavailable."""
-    tokens = tokens or {}
+    """Build graph nodes; an agent without token rows scores zero."""
     none = AgentTokens(0.0, 0.0, 0.0, 0.0)
     return [
         FleetGraphNode(
@@ -358,34 +267,16 @@ def get_fleet_graph(
     if cached is not None:
         return cached
 
-    deadline = _monotonic() + _ROUTE_TIMEOUT_S
-    try:
-        pg_data = _fetch_pg_graph(
-            request.app.state.db_pool,
-            not_terminated=not_terminated,
-            include_terminated=include_terminated,
-            win_start=win_start,
-            now=now,
-            decay_lambda=decay_lambda,
-        )
-    except pg_errors.QueryCanceled:
-        # A canceled PG query cannot provide a fresh node set, but a complete
-        # prior graph is still strictly more useful than an empty fleet.
-        logger.warning("fleet_graph query canceled (statement timeout) — serving stale graph")
-        request.app.state.fleet_graph_stale_emitter.emit("pg_timeout")
-        return _stale_graph(bus, key, [])
+    pg_data = _fetch_pg_graph(
+        request.app.state.db_pool,
+        not_terminated=not_terminated,
+        include_terminated=include_terminated,
+        win_start=win_start,
+        now=now,
+        decay_lambda=decay_lambda,
+    )
 
-    node_rows = pg_data.node_rows
-
-    # A phase that crosses the TTFB deadline has missed its budget. Do not
-    # reject a merely late successful final assembly: only a completed phase
-    # triggers degradation, and degraded results never replace last-good data.
-    if _monotonic() > deadline:
-        logger.warning("fleet_graph PG phase exceeded route budget — serving stale graph")
-        request.app.state.fleet_graph_stale_emitter.emit("pg_budget")
-        return _stale_graph(bus, key, _build_nodes(node_rows))
-
-    nodes = _build_nodes(node_rows, pg_data.tokens)
+    nodes = _build_nodes(pg_data.node_rows, pg_data.tokens)
 
     return _finalize_graph_response(
         request.app.state.db_pool,

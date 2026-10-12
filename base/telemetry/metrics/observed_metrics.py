@@ -335,7 +335,7 @@ def project_events(database: Database, events: Sequence[Event]) -> None:
         if _failures == 1 or _failures % 50 == 0:
             report_no_pipeline(
                 "[observed-metrics] projection failed ({n} consecutive): {err}; "
-                "JSONL replay may repair observed rows, collection remains partial",
+                "collection remains partial",
                 n=_failures,
                 err=repr(exc),
             )

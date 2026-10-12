@@ -15,7 +15,6 @@ import type { FleetGraph, GraphEventType, WireFleetGraph } from "../contracts/ty
 const EMPTY_GRAPH: FleetGraph = {
   nodes: [],
   edges: [],
-  stale: false,
   telemetry_stale: false,
   snapshot_at: null,
 };
@@ -76,7 +75,7 @@ export function useFleetGraph(opts?: { hours?: number; decayLambda?: number }): 
     // Stale-while-error: keep serving the last good graph even if the latest poll
     // failed (error carries the failure). Only fall back to the empty graph when
     // nothing has loaded yet.
-    if (data) return { graph: normalizeGraph(data), loading: false, error: isError || data.stale };
+    if (data) return { graph: normalizeGraph(data), loading: false, error: isError };
     return { graph: EMPTY_GRAPH, loading: isLoading, error: isError };
   }, [data, isError, isLoading]);
   return result;

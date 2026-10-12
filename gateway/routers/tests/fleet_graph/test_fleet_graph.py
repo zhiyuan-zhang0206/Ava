@@ -655,12 +655,11 @@ def test_cache_fail_open_when_redis_down(
     assert edges["send_message"]["weight"] == 1.0
 
 
-def test_query_canceled_degrades_to_empty_graph(
+def test_query_canceled_is_a_500_not_an_empty_graph(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A statement-timeout cancellation returns an empty graph (200), not a
-    500 — and marks it `stale` so the frontend can tell "no data" from
-    "query killed under load" (R4 layer 2, audit P2-10)."""
+    """A statement-timeout cancellation surfaces as the gateway's typed 500; the
+    route never answers a failed read with an empty or cached graph."""
 
     class _CanceledPool:
         def connection(self) -> object:
@@ -669,32 +668,25 @@ def test_query_canceled_degrades_to_empty_graph(
         def close(self) -> None:
             pass
 
-    with TestClient(app) as client:
+    with TestClient(app, raise_server_exceptions=False) as client:
         # The lifespan startup assigns the real pool; override it inside the
         # client context so the teardown close() still runs against our stub.
         monkeypatch.setattr(app.state, "db_pool", _CanceledPool())
         resp = client.get("/api/fleet/graph")
 
-    assert resp.status_code == 200
-    assert resp.json() == {
-        "nodes": [],
-        "edges": [],
-        "stale": True,
-        "telemetry_stale": False,
-        "snapshot_at": None,
-    }
+    assert resp.status_code == 500
+    assert resp.json()["code"] == "internal_error"
+    assert "nodes" not in resp.json()
 
 
-# ── audit gateway.md P2-10: failed != empty (R4 layer 2) ───────────────
+# ── a failed read is an error, not an empty fleet ─────────────────────
 
 
-def test_query_canceled_degrades_with_stale_flag(
+def test_query_canceled_mid_read_is_a_500(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A statement-timeout cancellation degrades to a VISIBLE empty graph
-    (stale=True) — not an indistinguishable empty fleet. The frontend must
-    be able to tell "the cluster has no data" from "the query was killed
-    under load"."""
+    """A cancellation raised from inside the cursor (the statement-timeout path)
+    fails the request rather than degrading to an indistinguishable empty fleet."""
 
     class _BoomCursor:
         def __enter__(self) -> "_BoomCursor":
@@ -723,12 +715,10 @@ def test_query_canceled_degrades_with_stale_flag(
         def close(self) -> None:
             pass
 
-    with TestClient(app) as client:
+    with TestClient(app, raise_server_exceptions=False) as client:
         # The lifespan startup assigns the real pool; override it inside the
         # client context so the teardown close() still runs against our stub.
         monkeypatch.setattr(app.state, "db_pool", _BoomPool())
         resp = client.get("/api/fleet/graph", params={"decay_lambda": 0.77})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["nodes"] == [] and body["edges"] == []
-    assert body["stale"] is True, "a canceled query must be marked stale, not an empty fleet"
+    assert resp.status_code == 500
+    assert resp.json()["code"] == "internal_error"
