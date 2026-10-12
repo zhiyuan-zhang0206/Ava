@@ -9,18 +9,15 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import pytest
-
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import ChromeMcpDaemon, _handle_client, _text_of
-from services.desktop.browser.page_lifecycle import PageRegistry, reap_dead_agent_pages
+from services.desktop.browser.page_lifecycle import PageRegistry
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     FakeUpstream,
     _daemon,
     _expire,
     _new_daemon,
     _restart_with_drift,
-    _stamp_idle,
 )
 
 
@@ -143,46 +140,6 @@ async def test_reconnect_renew_page_reads_stale_slot_as_no_page() -> None:
     assert res.is_error
     assert "no current page" in _text_of(res)
     assert up2.calls == []  # daemon-owned: nothing forwarded
-
-
-async def test_reconnect_sweeps_drop_stale_slots(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The dead sweep drops entries from an earlier connection instead of
-    treating them as candidates: the stale id is never probed or closed."""
-
-    async def fake_probe(host: str, port: int) -> bool:
-        return False  # everything dead
-
-    monkeypatch.setattr("services.desktop.browser.page_lifecycle.port_listening", fake_probe)
-
-    d1, _up1 = _daemon()
-    await d1.call_tool_for_agent("new_page", {"url": "http://localhost:3111/x"}, 7)
-
-    d2, up2 = _restart_with_drift(d1.pages)
-    up2.calls.clear()
-
-    await reap_dead_agent_pages(d2)
-
-    assert d1.pages.affinity == {}  # the stale slot was dropped, not probed
-    assert not [c for c in up2.calls if c[0] == "close_page"]
-
-
-async def test_reconnect_idle_sweep_drops_stale_slot_without_closing() -> None:
-    """The idle sweep reads a stale slot as no-page: no close, no stamp use —
-    the entry is simply dropped."""
-    d1, _up1 = _daemon()
-    await d1.call_tool_for_agent("new_page", {"url": "https://example.com/x"}, 7)
-    _stamp_idle(d1, 7, page_lifecycle._TAB_IDLE_TIMEOUT_S + 1)
-
-    d2, up2 = _restart_with_drift(d1.pages)
-    up2.calls.clear()
-
-    closed = await page_lifecycle.reap_idle_agent_pages(d2)
-
-    assert closed == 0
-    assert [c[0] for c in up2.calls] == ["list_pages"]  # never a close
-    assert d1.pages.affinity == {}
 
 
 async def test_late_write_from_dead_connection_is_inert() -> None:

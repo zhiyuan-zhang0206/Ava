@@ -200,8 +200,8 @@ async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
 # Exit-hook release bound: ONE total budget for the entire dial -> request ->
 # reply round-trip. The agent process is already exiting and must not stall on
 # this cleanup if the daemon happens to be wedged (three separate 3 s timeouts
-# would add up to ~9 s on the exit path). The service's own dead-page reaper is
-# the second line of defense for deaths that never reach the exit hook.
+# would add up to ~9 s on the exit path). The service's page TTL sweep is the
+# only cleanup for deaths that never reach the exit hook.
 _RELEASE_TIMEOUT_S = 3.0
 
 
@@ -214,8 +214,8 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
     affinity page — never another agent's or the user's — and is idempotent.
     A machine without the browser service (no socket), a daemon that is down
     (`OSError`) or one that does not answer in time returns False; a protocol
-    error propagates. Deaths that never reach the exit hook are covered by the service's periodic
-    dead-page reaper.
+    error propagates. Deaths that never reach the exit hook are left to the service's page
+    TTL sweep (24h by default).
     """
     try:
         from base.paths import chrome_mcp_socket
