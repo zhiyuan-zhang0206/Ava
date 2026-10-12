@@ -41,7 +41,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
-from agent.hooks import history_dump
+from agent.hooks import compact, history_dump
 from agent.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
@@ -80,7 +80,7 @@ def _patch_dump_enabled(
     def _fake_workspace_dir(_aid: int) -> Any:
         return ws
 
-    monkeypatch.setattr("agent.hooks.history_dump.workspace_dir", _fake_workspace_dir)
+    monkeypatch.setattr(history_dump, "workspace_dir", _fake_workspace_dir)
     return ws
 
 
@@ -110,7 +110,7 @@ class _FakeClock(datetime):
 
 
 def _patch_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agent.hooks.history_dump.datetime", _FakeClock)
+    monkeypatch.setattr(history_dump, "datetime", _FakeClock)
 
 
 # `<start>__<end>.jsonl`, both UTC: start with second precision, end with
@@ -179,7 +179,7 @@ def _patch_compact_config(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> ContextBudget:
         return budget
 
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixed_budget)
+    monkeypatch.setattr(compact, "resolve_context_budget", fixed_budget)
 
 
 def _fake_llm(summary_text: str) -> Any:
@@ -398,7 +398,7 @@ def test_dump_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     def _boom(aid: int) -> Any:
         raise OSError("disk full")
 
-    monkeypatch.setattr("agent.hooks.history_dump.workspace_dir", _boom)
+    monkeypatch.setattr(history_dump, "workspace_dir", _boom)
     assert _dump(_sample_messages()) is None
 
 
@@ -466,7 +466,7 @@ async def test_auto_compact_proceeds_when_dump_fails(
     def _boom(aid: int) -> Any:
         raise OSError("disk full")
 
-    monkeypatch.setattr("agent.hooks.history_dump.workspace_dir", _boom)
+    monkeypatch.setattr(history_dump, "workspace_dir", _boom)
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(

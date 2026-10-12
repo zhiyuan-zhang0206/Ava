@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import HumanMessage
 
+from agent import startup
 from agent.state import AgentState
 from base.clock import Clock
 from base.config import settings
@@ -22,7 +23,7 @@ async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) ->
     async def _fake_reconcile(pool, agent_id, *, event_publisher, db: object, bus: object):
         calls.append((pool, agent_id, event_publisher))  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr("agent.startup.reconcile_open_pages", _fake_reconcile)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(startup, "reconcile_open_pages", _fake_reconcile)  # pyright: ignore[reportUnknownArgumentType]
 
     class _Ctx:
         ops_pool = object()

@@ -27,6 +27,7 @@ from agent.graph.tests.test_llm_helpers import (
 from agent.graph.tests.test_llm_helpers import (
     ledger as ledger,
 )
+from agent.hooks import compact
 from agent.state import AgentState
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
@@ -55,7 +56,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     ) -> ContextBudget:
         return ContextBudget(10_000, 3_000, 4_000)
 
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixture_budget)
+    monkeypatch.setattr(compact, "resolve_context_budget", fixture_budget)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(402))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)

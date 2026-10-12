@@ -31,6 +31,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from agent.ownership import hosted
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.incarnation.host_process_evidence import LocalHostEvidence, local_host_evidence
 from base.db import Database, create_agent
@@ -202,7 +203,7 @@ async def test_an_admission_whose_audit_fact_cannot_be_recorded_does_not_admit(
     async def refuse(_conn: object, _event: object) -> None:
         raise RuntimeError("audit write failed")
 
-    monkeypatch.setattr("agent.ownership.hosted.record_audit_async", refuse)
+    monkeypatch.setattr(hosted, "record_audit_async", refuse)
     agent_id, prior = _seed(db_conn, lease_s=300.0)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
@@ -372,7 +373,7 @@ async def test_stale_proposal_cannot_adopt_a_row_that_moved_on(
     async def _stale(*_args: object, **_kw: object):
         return proposal
 
-    monkeypatch.setattr("agent.ownership.hosted._legacy_dead_host_adoption", _stale)
+    monkeypatch.setattr(hosted, "_legacy_dead_host_adoption", _stale)
     assert await _admit(aops_pool, agent_id, uuid4(), database_gate=database_gate) is None
     stored_owner, _resources, status, _fresh = _row(db_conn, agent_id)
     assert stored_owner == prior and status == "idling"

@@ -14,6 +14,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 
 import ava
+import base.agents.impersonation.manifest as impersonation_manifest
 from agent import state as state_module
 from ava import external, gateway_client
 from ava.external import state
@@ -64,7 +65,8 @@ def test_legacy_attachment_never_opens_an_event_receipt(
         pytest.fail("legacy attachment opened an event receipt")
 
     monkeypatch.setattr(
-        "base.agents.impersonation.manifest.open_local_participant",
+        impersonation_manifest,
+        "open_local_participant",
         unexpected_open,
     )
 

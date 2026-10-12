@@ -22,6 +22,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
 from agent.graph.recall.skill_recall import FALSE_IF, STATE_PREAMBLE, TRUE_IF
+from agent.hooks import skill_recall
 from agent.hooks.framework import framework_hooks
 from agent.hooks.skill_recall import SkillRecallHook
 from agent.messages import inbound_message
@@ -44,6 +45,7 @@ from base.lm.provider_api import (
     Question,
     YesNo,
 )
+from base.packages.extensions import install_registry
 from base.packages.plugins.extensions import EMPTY
 
 _CONFIG: Any = {"configurable": {"thread_id": "1042"}}
@@ -122,7 +124,8 @@ def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     d = paths.skills_dir()
     d.mkdir()
     monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names",
+        install_registry,
+        "loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
@@ -155,9 +158,7 @@ def _compaction_not_predicted(*_args: object, **_kwargs: object) -> bool:
 
 @pytest.fixture(autouse=True)
 def _no_compaction(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "agent.hooks.skill_recall.auto_compact_will_fire", _compaction_not_predicted
-    )
+    monkeypatch.setattr(skill_recall, "auto_compact_will_fire", _compaction_not_predicted)
 
 
 def _tail(source: str, text: str = "please draft the release notes") -> list[AnyMessage]:
@@ -265,7 +266,7 @@ async def test_an_exec_tail_without_a_new_inbound_does_not_fire(
 async def test_defers_when_auto_compact_will_fire(
     three_skills: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    monkeypatch.setattr("agent.hooks.skill_recall.auto_compact_will_fire", _compaction_predicted)
+    monkeypatch.setattr(skill_recall, "auto_compact_will_fire", _compaction_predicted)
     scorer = _Scorer({"beta": 0.9})
 
     assert await _run(database, _state(_tail("user")), scorer) is None

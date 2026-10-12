@@ -18,8 +18,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph import _init_context
 from agent.graph._init_context import init_context_node
 from agent.graph.llm_errors import LlmLedger
+from agent.hooks import compact
 from agent.state import AgentState, ContextReset
 from base.agents.context import AvaContext
 from base.clock import Clock
@@ -31,6 +33,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.extensions import install_registry
 from base.packages.plugins.extensions import (
     EMPTY,
     ContextNote,
@@ -86,7 +89,7 @@ def _fake_notes(monkeypatch: pytest.MonkeyPatch, *tags: str) -> list[HumanMessag
     def fake_notes(_extensions: ExtensionRegistry, _ctx: AvaContext) -> list[HumanMessage]:
         return list(notes)
 
-    monkeypatch.setattr("agent.graph._init_context.context_notes", fake_notes)
+    monkeypatch.setattr(_init_context, "context_notes", fake_notes)
     return notes
 
 
@@ -315,9 +318,7 @@ async def test_established_head_records_what_the_capability_index_lists(
     (d / "alpha" / "SKILL.md").write_text(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
     )
-    monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names", lambda: {"alpha"}
-    )
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"alpha"})
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
@@ -354,7 +355,8 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
     )
     monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names",
+        install_registry,
+        "loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
@@ -411,7 +413,8 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
     )
     monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names",
+        install_registry,
+        "loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
@@ -431,7 +434,8 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         "---\nname: beta\ndescription: Beta desc\n---\n\nBODY\n", encoding="utf-8"
     )
     monkeypatch.setattr(
-        "agent.hooks.compact.resolve_context_budget",
+        compact,
+        "resolve_context_budget",
         lambda *_, **_kw: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
             max_context_tokens=1_000_000, soft_compact_tokens=1, hard_compact_tokens=1
         ),

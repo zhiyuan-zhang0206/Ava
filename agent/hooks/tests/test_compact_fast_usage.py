@@ -5,9 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agent.hooks import compact
 from agent.hooks.compact import generate_summary
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.lm import usage
 from base.lm.plugin_providers import build_model_catalog
 
 
@@ -25,11 +27,12 @@ async def test_compaction_preserves_fast_accounting_id() -> None:
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
     with (
-        patch(
-            "agent.hooks.compact.ainvoke_tool_call",
+        patch.object(
+            compact,
+            "ainvoke_tool_call",
             new=AsyncMock(return_value=response),
         ),
-        patch("base.lm.usage.log_usage_from_message") as account,
+        patch.object(usage, "log_usage_from_message") as account,
     ):
         assert (
             await generate_summary(

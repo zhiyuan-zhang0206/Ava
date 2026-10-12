@@ -38,6 +38,7 @@ from agent.graph.exec._result import _ExecCrashed
 from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import _collect_child
 from base.db import Database
+from base.native_process import exec_domain
 from base.native_process.ownership import OwnedProcess
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from base.sessions.posixproc import process_group_has_live_members
@@ -307,7 +308,7 @@ async def test_dead_status_is_a_terminal_non_reaping_observation(
     def _identity_for_pid(_pid: int) -> MagicMock:
         return identity
 
-    monkeypatch.setattr("agent.graph.exec._process.psutil.Process", _identity_for_pid)
+    monkeypatch.setattr(_process.psutil, "Process", _identity_for_pid)
 
     await asyncio.wait_for(observe_root_exit(proc), timeout=1.0)
 
@@ -321,9 +322,7 @@ async def test_missing_process_is_a_terminal_non_reaping_observation(
     identity.status.side_effect = psutil.NoSuchProcess(pid=556)
     proc = MagicMock(pid=556)
 
-    monkeypatch.setattr(
-        "agent.graph.exec._process.psutil.Process", MagicMock(return_value=identity)
-    )
+    monkeypatch.setattr(_process.psutil, "Process", MagicMock(return_value=identity))
 
     await asyncio.wait_for(observe_root_exit(proc), timeout=1.0)
 
@@ -446,7 +445,8 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
         # The emergency path must not enqueue new default-executor work: that
         # executor is exactly what Runner is trying to shut down in production.
         monkeypatch.setattr(
-            "agent.graph.exec._process.asyncio.to_thread",
+            _process.asyncio,
+            "to_thread",
             MagicMock(side_effect=AssertionError("default executor re-entered")),
         )
         started = time.monotonic()
@@ -487,7 +487,7 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         assert pgid == proc.pid
         raise PermissionError(errno.EPERM, "private live group signal refusal")
 
-    monkeypatch.setattr("base.native_process.exec_domain.os.killpg", denied)
+    monkeypatch.setattr(exec_domain.os, "killpg", denied)
     try:
         failures = await asyncio.wait_for(
             settle_resources(root_exit, reap, closer, None, request_stop=True),
@@ -499,7 +499,7 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         assert closer.task.done() and reap.done() and root_exit.cancelled()
         assert proc.returncode is None and native.live()
     finally:
-        monkeypatch.setattr("base.native_process.exec_domain.os.killpg", original_signal)
+        monkeypatch.setattr(exec_domain.os, "killpg", original_signal)
         domain.close_confirmed(time.monotonic() + 5)
         proc.wait(timeout=5)
         root_exit.cancel()
