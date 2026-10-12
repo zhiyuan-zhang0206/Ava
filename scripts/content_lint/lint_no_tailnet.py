@@ -53,7 +53,7 @@ __all__ = ["main"]
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.structure import lint_common  # noqa: E402 - standalone script
+from meizel import lint_common  # noqa: E402 - standalone script
 
 # A concrete host address inside 100.64.0.0/10. The negative lookahead keeps
 # the CIDR range notation ("100.64.0.0/10") out of scope — it names the

@@ -59,7 +59,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.structure import lint_common  # noqa: E402 — standalone script
+from meizel import lint_common  # noqa: E402 — standalone script
 from scripts.structure.locality import DECISIONS  # noqa: E402 — standalone script
 
 _DIAL = DECISIONS["postgres-dial"]

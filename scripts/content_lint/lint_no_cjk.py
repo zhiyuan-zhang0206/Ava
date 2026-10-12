@@ -61,7 +61,7 @@ __all__ = ["main"]
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.structure import lint_common  # noqa: E402 - standalone script
+from meizel import lint_common  # noqa: E402 - standalone script
 
 # East Asian text: CJK ideographs U+3400-U+9FFF (incl. ext A) +
 # compatibility ideographs U+F900-U+FAFF, hiragana U+3040-U+309F,

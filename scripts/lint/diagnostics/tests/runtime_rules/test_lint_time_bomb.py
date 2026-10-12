@@ -27,8 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from meizel import lint_common
 from scripts.lint.diagnostics import time_bomb
-from scripts.structure import lint_common
 
 _Scratch = tuple[Path, Callable[[list[Path]], list[str]]]
 

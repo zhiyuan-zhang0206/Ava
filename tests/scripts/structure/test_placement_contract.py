@@ -16,7 +16,7 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 @pytest.mark.parametrize(
     ("name", "home"),
     [
-        ("test_path_imports.py", "scripts/structure"),
+        ("test_path_imports.py", "meizel/language"),
         ("test_placement.py", "scripts/structure"),
         ("test_placement_dependencies.py", "scripts/structure"),
         ("test_coverage_gates.py", "scripts/ci"),
@@ -30,7 +30,7 @@ def test_tests_of_tools_that_carry_sample_paths_and_source_have_one_home(
 ) -> None:
     """Their sample trees and sample source named other units; the tool under test is their home."""
     found_files = [
-        p for top in ("tests", "scripts", "base") for p in (_REPO_ROOT / top).rglob(name)
+        p for top in ("tests", "scripts", "base", "meizel") for p in (_REPO_ROOT / top).rglob(name)
     ]
     assert len(found_files) == 1, found_files
     path = found_files[0]

@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import ambient_state, baseline_shards, imports, path_imports
+from meizel.language import path_imports
+from scripts.structure import ambient_state, baseline_shards, imports
 from scripts.structure.imports import bindings
 
 SECTIONS = ("private_imports", "owner_bypasses")

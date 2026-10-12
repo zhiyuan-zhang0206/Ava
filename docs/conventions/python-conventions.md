@@ -12,7 +12,7 @@ Pydantic do runtime `get_type_hints()` / `inspect.signature` introspection
 that would `NameError` on a TYPE_CHECKING-only import.
 
 Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
-`_TYPE_CHECKING_ALLOWED` with a reason. This rule is lint-enforced by
+`_TYPE_CHECKING_ALLOWED` (`meizel/language/type_checking.py`) with a reason. This rule is lint-enforced by
 `scripts/lint/code_structure.py`.
 
 ## Per-file line budget: 800 lines
@@ -94,7 +94,7 @@ layering and single-owner checks remain enforced during this migration.
 - **Rule 6 — no path imports under `ava_builtins/`.** A skill or plugin
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
-  `runpy.run_path`); `scripts/structure/path_imports.py` finds them. Shared
+  `runpy.run_path`); `meizel/language/path_imports.py` finds them. Shared
   code moves into a governed package the script imports normally, and a
   script that needs it runs on the checkout's venv python. One narrow
   exception: a script under `ava_builtins/skills/<group>/<skill>/` may run a

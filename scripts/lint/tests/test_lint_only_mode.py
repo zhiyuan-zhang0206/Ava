@@ -22,6 +22,8 @@ from types import ModuleType
 import pytest
 
 from base.host.proc import run_bounded
+from meizel import lint_common
+from meizel.language import no_script_sibling_imports
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet, lint_quiesced_loops
 from scripts.lint import (
     async_no_sync_blocking,
@@ -29,7 +31,6 @@ from scripts.lint import (
     code_structure,
     fixture_scope,
     no_os_environ,
-    no_script_sibling_imports,
     pool_keepalives,
     termination_source,
     turn_scoped_config,
@@ -41,7 +42,6 @@ from scripts.lint.diagnostics import (
     time_bomb,
 )
 from scripts.lint.plugins import no_plugin_wrap
-from scripts.structure import lint_common
 
 # A path every lint's tooling-edit check treats as "the lint itself changed".
 _TOOLING = "scripts/lint/some_lint.py"

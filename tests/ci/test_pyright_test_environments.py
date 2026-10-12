@@ -31,13 +31,13 @@ from typing import Any
 
 import pytest
 
+from meizel.lint_common import pytest_test_hosts
 from scripts.codegen import gen_pyright_test_environments as gen
 from scripts.codegen.gen_pyright_test_environments import (
     CALL_SIGNATURE_RULES,
     TESTS_STANDARD,
     effective_rules,
 )
-from scripts.structure.lint_common import pytest_test_hosts
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PYPROJECT_TEXT = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")

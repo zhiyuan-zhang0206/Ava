@@ -41,10 +41,8 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.structure import (  # noqa: E402 — standalone script
-    lint_common,
-    tests_location_allowed,
-)
+from meizel import lint_common  # noqa: E402 — standalone script
+from scripts.structure import tests_location_allowed  # noqa: E402 — standalone script
 
 _CATEGORIES = ("contract", "integration")
 
