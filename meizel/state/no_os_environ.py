@@ -61,26 +61,22 @@ from collections.abc import Callable
 from pathlib import Path
 
 from meizel import lint_common
+from meizel.roles import packages
 
 __all__ = ["main"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
-_SCAN_DIRS = (
-    "agent",
-    "base",
-    "gateway",
-    "services",
-    "ava",
-    "scripts",
-    "meizel",
-)
-
 # Framework dirs Rule 1 does not scan. A test file under them (a package's own
 # `<pkg>/**/tests/`) is still read for Rule 2, so the default scan visits their
 # test files only.
-_TEST_ONLY_DIRS = tuple(d for d in lint_common.FRAMEWORK_DIRS if d not in _SCAN_DIRS)
+_TEST_ONLY_DIRS = ("ava_builtins", "cli", "ops")
+
+# Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
+_SCAN_DIRS = (
+    *(d for d in packages("application") if d not in _TEST_ONLY_DIRS),
+    *packages("tooling"),
+)
 
 # Provider API-key env vars are read from os.environ at build time
 # (base/lm/provider_api.require_key) once the provider is a plugin — the

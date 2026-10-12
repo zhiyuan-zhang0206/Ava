@@ -78,7 +78,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from meizel import lint_common
+from meizel.roles import packages
 from scripts.structure import imports, placement_evidence, service_units
 from scripts.structure.imports import cache, executed, facts
 from scripts.structure.placement_evidence import (
@@ -110,7 +110,7 @@ __all__ = [
 ]
 
 # First-party Python code participates in placement, including runnable templates.
-CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "meizel", "scripts", "schedules", "commands", "demos")
+CODE_TOPS = packages("application", "tooling", "templates", "examples")
 _ARTIFACT_TOPS = (
     "db",
     "deploy",

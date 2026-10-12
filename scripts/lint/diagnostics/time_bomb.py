@@ -85,11 +85,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.roles import packages  # noqa: E402 - standalone script
 from scripts.structure.lazy_modules import ModuleMap  # noqa: E402 - standalone script
 
 __all__ = ["main"]
 
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel")
+_SCAN_DIRS = packages("application", "tooling")
 
 # A parameter carrying any of these names is treated as the caller-visible
 # logical clock (a `now`/`at` the caller can pin). `deadline` is deliberately
@@ -117,7 +118,6 @@ def _is_real_now_call(node: ast.AST) -> bool:
 
 _HTTP_NAMES = frozenset({"client", "session", "httpx", "requests"})
 _HTTP_METHODS = frozenset({"get", "post", "put", "delete", "request", "patch"})
-
 _OPT_OUT = "time-bomb-ok"
 
 # Rule 3 window-shaped names: a fixed calendar literal bound to one of these

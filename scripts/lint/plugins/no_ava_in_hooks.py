@@ -43,19 +43,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.roles import packages  # noqa: E402 - standalone script
 
-_SCAN_DIRS = (
-    "agent",
-    "ava",
-    "ava_builtins",
-    "base",
-    "cli",
-    "demos",
-    "gateway",
-    "ops",
-    "schedules",
-    "services",
-)
+_SCAN_DIRS = packages("application", "templates", "examples")
 _HOOKS_DIR = "agent/hooks/"
 _FACE_NAME = "agent_runtime.py"
 

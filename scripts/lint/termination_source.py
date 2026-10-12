@@ -70,12 +70,13 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.roles import packages  # noqa: E402 - standalone script
 
 # Only OUR non-test code. Tests deliberately write unstamped corpses as fixtures.
 # Every tree that could reach agents_meta is covered, not just the ones that write it
 # today — `ava_builtins` currently only READS the table, and this is
 # what keeps a future write there from being the one site nobody was checking.
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel")
+_SCAN_DIRS = packages("application", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),

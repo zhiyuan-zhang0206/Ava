@@ -92,7 +92,20 @@ JSON
 
 npm_report() { (cd ui/web && npm outdated --json); }
 
-SCAN_DIRS="ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ base/"
+SCAN_ROOTS=(
+  # meizel:roles BEGIN dirs application templates
+  agent/
+  ava/
+  ava_builtins/
+  base/
+  cli/
+  gateway/
+  ops/
+  services/
+  schedules/
+  # meizel:roles END
+)
+SCAN_DIRS="${SCAN_ROOTS[*]}"
 
 # ------------------------------------------------------------------
 # Class 1: outdated deps

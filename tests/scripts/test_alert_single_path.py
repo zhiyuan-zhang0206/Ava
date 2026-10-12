@@ -15,9 +15,10 @@ import ast
 from pathlib import Path
 
 from base.config.service_read import ConfigAuthority
+from meizel.roles import packages
 
 _REPO = Path(__file__).resolve().parents[2]
-_ROOTS = ("agent", "ava", "ava_builtins", "base", "cli", "gateway", "ops", "services", "schedules")
+_ROOTS = packages("application", "templates")
 
 # The only module that writes alert rows and fans them out: the ingest core and its one router.
 _INGEST = {"base/telemetry/alerts/__init__.py", "gateway/alerts/router.py"}

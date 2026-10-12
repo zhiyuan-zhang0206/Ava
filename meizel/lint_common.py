@@ -10,6 +10,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
+from meizel.roles import packages
+
 __all__ = [
     "FRAMEWORK_DIRS",
     "LINT_TOOLING",
@@ -31,16 +33,7 @@ __all__ = [
 # The framework code: every production Python package at the repo root. Lints
 # whose scope is "the framework" import this instead of keeping their own copy,
 # so a new or renamed package cannot drift out of one lint's scope unnoticed.
-FRAMEWORK_DIRS = (
-    "agent",
-    "ava",
-    "ava_builtins",
-    "base",
-    "cli",
-    "gateway",
-    "ops",
-    "services",
-)
+FRAMEWORK_DIRS = packages("application")
 
 
 # A test lives in a `tests/` directory: the top-level `tests/` (e2e, contract
