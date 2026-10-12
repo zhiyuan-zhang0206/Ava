@@ -81,11 +81,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home, chrome_mcp_socket
 from base.telemetry import build_pipeline
 from services.desktop.browser import page_lifecycle
-from services.desktop.browser.gateway_session import (
-    GatewaySession,
-    _navigates_to_gateway,
-    stop_on_signals,
-)
+from services.desktop.browser.gateway_session import GatewaySession, stop_on_signals
 from services.desktop.browser.mcp_upstream import (
     _await_stop_or_timeout,
     _bounded,
@@ -226,30 +222,26 @@ class ChromeMcpDaemon:
     no-page error on its next call, never another client's tab).
 
     Two affinity shapes: requests carrying an `agent_id` resolve their page
-    from the per-agent registry (generation-stamped — see page_lifecycle);
+    from the per-agent registry (see page_lifecycle);
     requests without one fall back to the caller-supplied per-connection page.
 
-    ``pages``, ``gateway`` and ``tab_groups`` are built once by ``run()`` and shared by
-    every daemon it creates, for this daemon process.
+    ``pages`` and ``tab_groups`` are built once by ``run()`` for this daemon process.
     """
 
     def __init__(
         self,
         upstream: ClientSession,
         pages: PageRegistry,
-        gateway: GatewaySession,
         tab_groups: AgentTabGroups,
     ) -> None:
         self._upstream = upstream
         self.pages = pages
-        self.gateway = gateway
         self.tab_groups = tab_groups
         self._lock = asyncio.Lock()
         self._tools: list[types.Tool] | None = None
         # Set when an upstream call hits a closed session; run() watches it to
-        # terminate this unusable generation.
+        # terminate this unusable daemon.
         self.dead = asyncio.Event()
-        self.generation = pages.new_generation()  # page ids are per process
 
     async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
         """Forward to the upstream, turning a dead session into a clean signal:
@@ -318,9 +310,9 @@ class ChromeMcpDaemon:
             # round-trip); `renew_agent_page` takes the serial lock itself.
             return await renew_agent_page(self, agent_id, args)
         async with self._lock:
-            page = self.pages.get_agent_page(agent_id, self.generation)
+            page = self.pages.get_agent_page(agent_id)
             result, updated = await self._affinity_call(name, args, page, agent_id)
-            self.pages.set_agent_page(agent_id, updated, self.generation)
+            self.pages.set_agent_page(agent_id, updated)
             return result
 
     async def _repin(self, current_page: int | None) -> int | None:
@@ -361,20 +353,18 @@ class ChromeMcpDaemon:
         before = await self.tab_groups.snapshot() if group else None
         result = await self._call("new_page", args)
         if not result.is_error:
-            self.pages.register_created_page(_selected_id(result), self.generation)
+            self.pages.register_created_page(_selected_id(result))
             if group and agent_id is not None:
                 await self.tab_groups.group_new_page(agent_id, before)
         return result
 
     async def _bootstrap_page(
-        self, name: str, args: dict[str, Any], *, verify_after: bool, agent_id: int | None
+        self, name: str, args: dict[str, Any], *, agent_id: int | None
     ) -> tuple[types.CallToolResult, int | None]:
         """No tab of our own to act on. navigate_page can bootstrap one; anything else fails
         fast instead of touching another client's tab."""
         if name == "navigate_page" and isinstance(args.get("url"), str):
             result = await self._new_page(args, agent_id)
-            if not result.is_error and verify_after:
-                self.gateway.spawn_verify()
             return result, (_selected_id(result) or None)
         return _no_page_result(), None
 
@@ -386,17 +376,11 @@ class ChromeMcpDaemon:
         agent_id: int | None = None,
     ) -> tuple[types.CallToolResult, int | None]:
         page_scoped = name not in _MANAGEMENT_TOOLS
-        # A navigation to a gateway URL is the early-refresh trigger: the
-        # managed session's 401 surfaces exactly there, so check it right
-        # after the page loads instead of waiting out the refresh interval.
-        verify_after = _navigates_to_gateway(name, args)
 
         if page_scoped:
             current_page = await self._repin(current_page)
             if current_page is None:
-                return await self._bootstrap_page(
-                    name, args, verify_after=verify_after, agent_id=agent_id
-                )
+                return await self._bootstrap_page(name, args, agent_id=agent_id)
 
         # A page created here gets its TTL slot (see `page_lifecycle`) and tab
         # group in `_new_page`; a listing that drifted off the parseable shape
@@ -405,8 +389,6 @@ class ChromeMcpDaemon:
             result = await self._new_page(args, agent_id)
         else:
             result = await self._call(name, args)
-        if verify_after and not result.is_error:
-            self.gateway.spawn_verify()
         if name == "close_page" and not result.is_error:
             # A clean close drops the TTL slot with the page; the shared
             # `_page_id` normalization accepts an integral-float pageId too
@@ -432,7 +414,7 @@ class ChromeMcpDaemon:
         return current_page
 
 
-_ConnPage = tuple[int, int] | None  # (page, generation)
+_ConnPage = int | None  # the connection's current page
 
 
 async def _call_tool_response(
@@ -523,7 +505,7 @@ async def _handle_client(
     """One agent bridge connection. Requests carrying an `agent_id` resolve
     their page from the per-agent registry (a fresh connection — exec
     subprocess child — inherits the agent's page); the rest track their own
-    ``(page, generation)`` (see ``forward_legacy_call``). `daemon_ref` is a
+    page (see ``forward_legacy_call``). `daemon_ref` is a
     mutable cell so the handler always sees the current daemon across
     connects; when None (starting), it returns a pre-execution error."""
     conn_page: _ConnPage = None
@@ -632,7 +614,7 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
     logger.info(f"[browser-mcp] listening on {sock} (upstream {browser_url})")
 
     # Composition root of the shared page/session state: built once, handed to
-    # every ChromeMcpDaemon for this upstream generation. One TaskGroup owns
+    # the ChromeMcpDaemon this process serves. One TaskGroup owns
     # the daemon-long tasks (the session refresh loop and the gateway session's
     # fire-and-forget one-shots and the tab-grouping tasks); the shutdown path cancels
     # them before it closes.
@@ -652,7 +634,7 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
                 )
             except _StoppingError:
                 return
-            daemon = ChromeMcpDaemon(session, pages, gateway, tab_groups)
+            daemon = ChromeMcpDaemon(session, pages, tab_groups)
             daemon_ref[0] = daemon
             await _serve_generation(daemon, stop, gateway)
             if daemon.dead.is_set():

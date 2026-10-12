@@ -24,9 +24,8 @@ showed no folding: raw sends up to 15K characters arrived byte-exact (task
   the escape bytes literally.
 
 The spawn scripts apply this themselves: `spawn_claude.py` sends its
-bootstrap as one bracketed paste (`_bracketed_paste` / `_send_bootstrap`),
-and the rebuild-resend recovery uses the same helper. If you add another
-long-message send site, follow one of the two patterns above.
+bootstrap as one bracketed paste (`_bracketed_paste` / `_send_bootstrap`).
+If you add another long-message send site, follow one of the two patterns above.
 
 Platform stance (evaluation: task #4366): no platform-level auto-wrap — the
 rule lives at the sender.

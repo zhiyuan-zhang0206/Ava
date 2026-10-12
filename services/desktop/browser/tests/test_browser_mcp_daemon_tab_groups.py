@@ -67,7 +67,7 @@ async def test_first_navigate_auto_created_page_is_grouped() -> None:
     assert not result.is_error
     assert up.pages == {1: "https://a.example/"}
     assert groups.grouped() == [7]
-    assert d.pages.ttl_deadlines[1][1] == d.generation  # same creation bookkeeping as before
+    assert 1 in d.pages.ttl_deadlines  # same creation bookkeeping as before
 
 
 async def test_one_agent_many_pages_and_two_agents_are_told_apart_by_agent_id() -> None:
@@ -101,7 +101,7 @@ async def test_isolated_context_page_is_left_out_of_grouping() -> None:
     assert not result.is_error
     assert up.isolated_contexts == {1: "reg-7"}
     assert groups.events == []
-    assert d.pages.ttl_deadlines[1][1] == d.generation  # still a created, TTL-governed page
+    assert 1 in d.pages.ttl_deadlines  # still a created, TTL-governed page
 
 
 async def test_a_failed_new_page_is_not_grouped() -> None:
@@ -145,8 +145,8 @@ async def test_grouping_failure_leaves_the_page_created_registered_and_selected(
 
     assert not explicit.is_error and not auto.is_error
     assert _text_of(explicit) == "  1: https://a.example/ [selected]"
-    assert d.pages.get_agent_page(7, d.generation) == 1
-    assert d.pages.get_agent_page(8, d.generation) == 2
+    assert d.pages.get_agent_page(7) == 1
+    assert d.pages.get_agent_page(8) == 2
     assert set(d.pages.ttl_deadlines) == {1, 2}
     warnings = [r for r in loguru_records if r["level"].name == "WARNING"]
     assert warnings, "a grouping failure must leave a trace"
@@ -254,8 +254,8 @@ async def test_release_closes_the_agents_last_page_through_close_page() -> None:
 
 async def test_hard_ttl_reaper_closes_through_close_page() -> None:
     d, up = await _agent_with_one_page()
-    _deadline, generation = d.pages.ttl_deadlines[1]
-    d.pages.ttl_deadlines[1] = (time.monotonic() - 1.0, generation)
+    assert 1 in d.pages.ttl_deadlines
+    d.pages.ttl_deadlines[1] = time.monotonic() - 1.0
     assert await page_lifecycle.reap_expired_pages(d) == 1
     assert up.closed_pages() == [1]
 
