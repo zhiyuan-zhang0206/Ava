@@ -7,6 +7,7 @@ enter until the real composition root requests it.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,8 +15,10 @@ from pathlib import Path
 _CHILD = Path(__file__).resolve().parents[1] / "machine" / "tests" / "_import_child.py"
 
 
-def test_cluster_package_modules_do_not_load_settings_or_the_home() -> None:
+def test_cluster_package_modules_do_not_load_settings_or_create_the_home(tmp_path: Path) -> None:
     repo = Path(__file__).resolve().parents[3]
     subprocess.run(  # noqa: S603 -- isolated local import boundary, fixed child script and captured repo.
-        [sys.executable, "-I", "-B", str(_CHILD), "cluster_package_modules", str(repo)], check=True
+        [sys.executable, "-I", "-B", str(_CHILD), "cluster_package_modules", str(repo)],
+        check=True,
+        env={**os.environ, "AVA_HOME": str(tmp_path / "never-created")},
     )

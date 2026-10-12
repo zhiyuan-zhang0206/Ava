@@ -47,9 +47,10 @@ from base.cluster.authority.model import (
     SecretRoles,
     VerifiedGeneration,
 )
-from base.host.private_storage import ensure_private_dir, write_private_bytes
+from base.host.private_storage import write_private_bytes
 from base.host.verified_file import RegularFileReadError, regular_bytes
 from base.native_process.os_platform import file_lock
+from base.paths.private_dir import ensure_private_dir
 
 _MAX_FILE_BYTES = 256 * 1024
 _SECRET_FILE = "0.json"  # noqa: S105 — a file name, not a credential

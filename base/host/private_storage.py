@@ -9,65 +9,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from base.log import logger
-
-
-def _private_path_error(path: Path, reason: str) -> RuntimeError:
-    return RuntimeError(f"private storage path {path} {reason}")
-
-
-def _is_foreign_owned(current: os.stat_result) -> bool:
-    """Return whether a path is not owned by this process on POSIX.
-
-    chmod honors the owner (uid) alone, not the group — a uid-ours file
-    with a foreign gid (chgrp'd leftover) is still repairable, and skipping
-    it would strand a 0o644 file as group-readable.
-    """
-    return current.st_uid != os.geteuid()
-
-
-def _dir_refusal(current: os.stat_result) -> str | None:
-    """Why a private-directory candidate is unusable, or None.
-
-    One definition for the three readers of the rule: the writer
-    (`ensure_private_dir`), the converge walk, and the read-only predicates the
-    update leg's pre-stop gate consults — so a repair and a pre-flight cannot
-    disagree about what is broken.
-    """
-    if stat.S_ISLNK(current.st_mode):
-        return "is a symlink"
-    if not stat.S_ISDIR(current.st_mode):
-        return "is not a directory"
-    if _is_foreign_owned(current):
-        return "is not owned by the current user"
-    return None
+from base.paths.private_dir import (
+    dir_refusal,
+    ensure_private_dir,
+    is_foreign_owned,
+    private_path_error,
+)
 
 
 def _file_refusal(current: os.stat_result) -> str | None:
-    """Why a private-file candidate is unusable, or None (see `_dir_refusal`)."""
+    """Why a private-file candidate is unusable, or None (see `base.paths.private_dir.dir_refusal`)."""
     if stat.S_ISLNK(current.st_mode):
         return "is a symlink"
     if not stat.S_ISREG(current.st_mode):
         return "is not a regular file"
     return None
-
-
-def ensure_private_dir(path: Path) -> Path:
-    """Create `path` if needed, then require an owner-only real directory."""
-    try:
-        before = path.lstat()
-    except FileNotFoundError:
-        path.mkdir(parents=True, mode=0o700, exist_ok=True)
-    else:
-        refusal = _dir_refusal(before)
-        if refusal is not None:
-            raise _private_path_error(path, refusal)
-
-    current = path.lstat()
-    refusal = _dir_refusal(current)
-    if refusal is not None:
-        raise _private_path_error(path, refusal)
-    path.chmod(0o700)
-    return path
 
 
 def ensure_private_file(path: Path) -> None:
@@ -78,7 +34,7 @@ def ensure_private_file(path: Path) -> None:
         return
     refusal = _file_refusal(current)
     if refusal is not None:
-        raise _private_path_error(path, refusal)
+        raise private_path_error(path, refusal)
     path.chmod(0o700 if current.st_mode & stat.S_IXUSR else 0o600)
 
 
@@ -174,7 +130,7 @@ def _converge_tree(path: Path, skips: _SkipReport) -> None:
         current = path.lstat()
     except FileNotFoundError:
         current = None
-    if current is not None and _is_foreign_owned(current):
+    if current is not None and is_foreign_owned(current):
         # A directory owned by another account can never be chmod'd by
         # converge — warn and leave it (and its subtree) alone instead of
         # aborting the whole converge run (2026-09-02 boot loop).
@@ -189,7 +145,7 @@ def _converge_tree(path: Path, skips: _SkipReport) -> None:
             logger.debug("private storage convergence skipped symlink {path}", path=child)
             skips.symlinks.append(child)
             continue
-        if _is_foreign_owned(current):
+        if is_foreign_owned(current):
             logger.debug(
                 "private storage convergence skipped foreign-owned path {path}", path=child
             )
@@ -226,9 +182,9 @@ def private_tree_root_problem(path: Path) -> str | None:
         current = path.lstat()
     except FileNotFoundError:
         return None
-    if _is_foreign_owned(current):
+    if is_foreign_owned(current):
         return None
-    return _dir_refusal(current)
+    return dir_refusal(current)
 
 
 def scan_non_regular_nodes(root: Path) -> list[Path]:
@@ -250,11 +206,11 @@ def scan_non_regular_nodes(root: Path) -> list[Path]:
         return out
     if stat.S_ISLNK(current.st_mode) or not stat.S_ISDIR(current.st_mode):
         return out
-    if _is_foreign_owned(current):
+    if is_foreign_owned(current):
         return out
     for child in root.iterdir():
         child_stat = child.lstat()
-        if stat.S_ISLNK(child_stat.st_mode) or _is_foreign_owned(child_stat):
+        if stat.S_ISLNK(child_stat.st_mode) or is_foreign_owned(child_stat):
             continue
         if stat.S_ISDIR(child_stat.st_mode):
             if child.name == _NODE_MODULES_DIRNAME:

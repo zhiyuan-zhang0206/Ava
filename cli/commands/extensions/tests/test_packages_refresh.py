@@ -21,8 +21,8 @@ import pytest
 from loguru import logger
 
 from base.config import ConfigBoot
-from base.host.env.dotenv_boot import resolve_ava_home
 from base.packages.extensions import install_registry as reg
+from base.paths.home import resolve_ava_home
 from cli.commands.extensions._refresh_rules import effective_interval_seconds, is_due
 from cli.commands.extensions.packages.refresh import _Pass, parse_duration, run_refresh
 

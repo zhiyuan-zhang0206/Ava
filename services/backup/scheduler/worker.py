@@ -143,7 +143,8 @@ def commit_scheduled_backup(staged: Path, digest: str, *, keep_reader: Callable[
     published the same exclusive way. Any refusal leaves the staged artifact in
     private staging until cleanup.
     """
-    from base.host.private_storage import ensure_private_dir, ensure_private_file
+    from base.host.private_storage import ensure_private_file
+    from base.paths.private_dir import ensure_private_dir
     from services.backup.dump import backup_dir, prune_after_publish
 
     if staged.is_symlink() or not staged.is_file() or not DUMP_NAME_RE.fullmatch(staged.name):

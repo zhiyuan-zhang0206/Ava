@@ -24,13 +24,13 @@ import psutil
 from pydantic import Field, model_validator
 
 from base.host.atomic_io import write_text_atomic
-from base.host.private_storage import ensure_private_dir
 from base.host.verified_file import regular_bytes
 from base.log import logger
 from base.native_process import native_boot_id
 from base.native_process.evidence import EvidenceModel, ExpectedProcess
 from base.native_process.os_platform import file_lock
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
+from base.paths.private_dir import ensure_private_dir
 
 
 class Receipt(EvidenceModel):

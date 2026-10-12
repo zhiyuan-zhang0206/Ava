@@ -38,9 +38,9 @@ import psycopg
 
 from base.cluster.dataplane import pg_admin, walg_binary
 from base.db import Database
-from base.host.private_storage import ensure_private_dir
 from base.log import logger
 from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.paths.private_dir import ensure_private_dir
 from services.backup.walg import config as walg_config
 from services.backup.walg import drill, state
 from services.backup.walg.backups import Backup, BackupChainError, list_backups

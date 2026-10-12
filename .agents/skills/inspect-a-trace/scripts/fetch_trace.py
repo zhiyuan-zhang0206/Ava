@@ -59,7 +59,7 @@ from _common import source_root
 
 sys.path.insert(0, str(source_root()))
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 _KIND_STRIP = "SPAN_KIND_"
 _STATUS_OK = "STATUS_CODE_OK"

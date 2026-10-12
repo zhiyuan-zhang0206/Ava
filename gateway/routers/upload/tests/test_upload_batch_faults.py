@@ -15,7 +15,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
-from base.host.private_storage import ensure_private_dir
+from base.paths.private_dir import ensure_private_dir
 from gateway.routers.upload import batches as upload_batches
 from gateway.routers.upload.batches import UploadItem
 from gateway.schemas.uploads import UploadedBatch

@@ -40,7 +40,7 @@ from base.cluster.dataplane.pg_admin import OwnerAuthority, local_owner_authorit
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
 from base.deploy.schema.migrations import apply_pending_migrations, required_migration_set
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.lifecycle.migrations import cmd_migrations_apply

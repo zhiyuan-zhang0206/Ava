@@ -11,7 +11,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 from base.native_process.code_version import CodeVersion
 from base.telemetry import build_pipeline, process_name
 from base.daemon.schedules.inputs import ScheduleInputs

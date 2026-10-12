@@ -13,7 +13,7 @@ tags:
 ## What it is
 
 `base/paths/__init__.py` is the single-point resolver for every per-unit path. The root
-comes from `base.host.env.dotenv_boot.resolve_ava_home` (env `AVA_HOME`, default
+comes from `base.paths.home.resolve_ava_home` (env `AVA_HOME`, default
 `~/.ava`), read on every call — never captured at import; each
 helper `mkdir(parents=True, exist_ok=True)` on first access, so calling one
 means "this directory is ready and writable".
@@ -66,7 +66,7 @@ only itself.
   (`base/host/env/dotenv_boot.py:resolve_ava_home`), never from cwd and never from a
   flag: no pointer file, no checkout claim, no in-process override. A home that
   carries its own `<home>/source` checkout is operated only by that checkout's code
-  (`dotenv_boot.home_checkout_error`; `prod_service_checkout_error` applies it to
+  (`base.paths.home.home_checkout_error`; `prod_service_checkout_error` applies it to
   service launches). Cluster identity **is** this path — there is no cluster name;
   see [[base.ava.okf.md|the base overview]].
 - `run/` exists so ephemeral runtime artifacts (pidfiles, sockets, session

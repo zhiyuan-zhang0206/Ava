@@ -11,8 +11,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from base.host.private_storage import ensure_private_dir
 from base.native_process.os_platform import file_lock
+from base.paths.private_dir import ensure_private_dir
 from cli import init_intent, start_intent
 
 

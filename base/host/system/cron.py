@@ -87,7 +87,7 @@ def owns_os_jobs(kind: str) -> bool:
     unlike `os_jobs_enabled`, which gates registration only.
     """
     from base.cluster import is_default_home
-    from base.host.env.dotenv_boot import resolve_ava_home
+    from base.paths.home import resolve_ava_home
 
     home = resolve_ava_home()
     if is_default_home(home):

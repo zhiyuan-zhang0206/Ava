@@ -15,10 +15,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
 from base.host.env.registry import derived_env_keys, env_identity_keys
-from base.host.private_storage import ensure_private_dir
 from base.native_process.os_platform import file_lock
+from base.paths.home import home_checkout_error, resolve_ava_home
+from base.paths.private_dir import ensure_private_dir
 from base.telemetry import EventPipeline
 from cli.start_identity import require_initialized
 from cli.start_runtime import StartRuntime
@@ -32,7 +32,7 @@ def _home() -> Path:
     """The home this start acts on: `$AVA_HOME`, else `~/.ava`.
 
     A home that carries its own `<home>/source` checkout starts only from that
-    checkout (`base.host.env.dotenv_boot.home_checkout_error`).
+    checkout (`base.paths.home.home_checkout_error`).
     """
     error = home_checkout_error(_checkout())
     if error is not None:

@@ -41,7 +41,7 @@ from functools import cache as _cache
 from pathlib import Path
 from typing import Any, Literal
 
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 
 def _default_root() -> Path:
@@ -49,7 +49,7 @@ def _default_root() -> Path:
     state doubling as the sync watermark; the per-content subdir is the stable
     content id, so a re-run reuses it (dedup).
 
-    Resolves `$AVA_HOME` via `base.host.env.dotenv_boot.resolve_ava_home` — the same
+    Resolves `$AVA_HOME` via `base.paths.home.resolve_ava_home` — the same
     resolution every other Ava process uses."""
     return resolve_ava_home() / "state" / "mirrors" / "youtube"
 

@@ -42,7 +42,7 @@ from ava.mcps.tests.test_daemon import (
 from ava.mcps.tests.test_daemon import (
     short_socket_path as short_socket_path,
 )
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 
 
 @pytest.mark.flaky  # real AF_UNIX socket lifecycle: await-until-ready poll

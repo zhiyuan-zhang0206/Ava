@@ -18,8 +18,9 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from base.host.private_storage import ensure_private_dir, ensure_private_file, write_private_bytes
+from base.host.private_storage import ensure_private_file, write_private_bytes
 from base.native_process.os_platform import file_lock
+from base.paths.private_dir import ensure_private_dir
 
 _log = logging.getLogger(__name__)
 

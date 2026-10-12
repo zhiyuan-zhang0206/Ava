@@ -12,7 +12,7 @@ import pytest
 
 import cli.main as cli_main
 from base import cluster
-from base.host.env.dotenv_boot import resolve_ava_home
+from base.paths.home import resolve_ava_home
 from cli import start_identity, start_intent, unit_join
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
