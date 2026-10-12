@@ -6,34 +6,19 @@ from uuid import UUID
 
 import psycopg
 from psycopg.sql import SQL
-from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from base.agents.incarnation.native_work_models import (
     NativeWorkPhase,
     NativeWorkTarget,
     NativeWorkUncertainError,
 )
-from base.agents.incarnation.resource_transfer import ResourceTransferProof
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
-
-
-class NativeWorkTransfer(BaseModel):
-    """An actual admission proof appended in the same successful transaction."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    source_machine: str
-    target_machine: str
-    proof: ResourceTransferProof
 
 
 @dataclass(frozen=True)
 class NativeWorkRecord:
     target: NativeWorkTarget
     phase: NativeWorkPhase
-    transfers: list[NativeWorkTransfer]
-
-
-_TRANSFERS = TypeAdapter(list[NativeWorkTransfer])
 
 
 def decode_work(row: tuple[Any, ...]) -> NativeWorkRecord:
@@ -47,7 +32,6 @@ def decode_work(row: tuple[Any, ...]) -> NativeWorkRecord:
             protocol=row[5],
         ),
         NativeWorkPhase(row[6]),
-        _TRANSFERS.validate_python(row[7]),
     )
 
 
@@ -57,7 +41,7 @@ async def load_work(
     row = await (
         await conn.execute(
             SQL(
-                "SELECT id,agent_id,machine,generation,owner,protocol,phase,transfer_chain "
+                "SELECT id,agent_id,machine,generation,owner,protocol,phase "
                 "FROM native_graph_work WHERE id=%s"
             )
             + SQL(" FOR UPDATE" if lock else ""),
@@ -175,14 +159,5 @@ async def activate_work(conn: psycopg.AsyncConnection, target: NativeWorkTarget)
 
 
 def receiver(work: NativeWorkRecord) -> tuple[str, UUID, UUID]:
-    """Validate every retained hop from the immutable original tuple."""
-    end = (work.target.machine, work.target.generation, work.target.owner)
-    for transfer in work.transfers:
-        proof = transfer.proof
-        if (
-            proof.agent_id != work.target.agent_id
-            or (transfer.source_machine, proof.source_generation, proof.source_owner) != end
-        ):
-            raise NativeWorkUncertainError("native work transfer chain is incomplete")
-        end = (transfer.target_machine, proof.target_generation, proof.target_owner)
-    return end
+    """The only machine, generation and owner allowed to settle this work."""
+    return (work.target.machine, work.target.generation, work.target.owner)

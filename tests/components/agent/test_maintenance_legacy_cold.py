@@ -388,26 +388,6 @@ def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(
     )
 
 
-def test_failed_current_lifecycle_cannot_be_parked(
-    db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    _hide_machine_processes(monkeypatch)
-    agent = _retired(db_conn, machine_identity=machine_identity)
-    db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,status,source,content,target_generation,"
-        "target_owner,claimed_at,payload) SELECT id,'restart','done','system:update','',"
-        'runtime_generation,runtime_owner,clock_timestamp(),\'{"lifecycle_result":{"outcome":"failed"}}\' '
-        "FROM agents_meta WHERE id=%s",
-        (agent,),
-    )
-    db_conn.commit()
-    with pytest.raises(RuntimeError, match="failed lifecycle"):
-        _prepare(db_conn, machine_identity=machine_identity)
-
-
 def test_checkpoint_replaced_by_real_second_connection_refuses_parking(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,

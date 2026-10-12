@@ -59,34 +59,6 @@ async def pending(pool: AsyncConnectionPool, agent_id: int) -> CompactCommand | 
     return None if row is None else decode_command(row)
 
 
-async def completed_original(pool: AsyncConnectionPool, command: CompactCommand) -> bool:
-    """Reconcile a lost terminal commit response using only immutable original identity."""
-    async with pool.connection() as conn:
-        row = await (
-            await conn.execute(
-                "SELECT acceptance,outcome,attempt_id,execution,result,attempt_provider,released_at "
-                "FROM native_compact_commands WHERE id=%s",
-                (command.acceptance.command_id,),
-            )
-        ).fetchone()
-    if row is None:
-        raise CompactHeldError("original compact receipt disappeared")
-    stored = decode_command(row[:6])
-    if stored.acceptance != command.acceptance:
-        raise CompactHeldError("original compact acceptance identity changed")
-    if row[6] is None:
-        return False
-    if (
-        stored.acceptance != command.acceptance
-        or stored.attempt_id != command.attempt_id
-        or stored.execution != command.execution
-    ):
-        raise CompactHeldError("original compact completion identity changed")
-    if command.result is not None and stored.result != command.result:
-        raise CompactHeldError("original compact completion result changed")
-    return True
-
-
 async def history_unchanged(conn: psycopg.AsyncConnection, command: CompactCommand) -> bool:
     target = command.acceptance.target
     row = await (
