@@ -126,14 +126,11 @@ def provision_relay(
     lease_id: str,
     incarnation: RuntimeIncarnation,
     relay_token: str,
-    *,
-    expected_generation: int = 0,
 ) -> dict[str, Any] | None:
-    """Claim one transport generation after the caller confirmed the old relay retired.
+    """Mint the lease's one relay credential; a lease that already has one returns None.
 
-    The locked compare-and-swap prevents two supervisor passes from minting
-    different credentials for the same observation. A loser performs no writes.
-    A new child reads its credential only after its birth identity is persisted.
+    The locked check prevents two passes from minting different credentials. A loser
+    performs no writes.
     """
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
@@ -148,48 +145,19 @@ def provision_relay(
             incarnation.owner,
         ):
             raise ImpersonationError("Relay provisioning belongs to the accepting incarnation")
-        if lease["relay_generation"] != expected_generation:
+        if lease["relay_generation"] != 0:
             return None
         fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
         if fresh != (True,):
             return None
         conn.execute(
             "UPDATE agent_impersonations SET relay_token_hash=%s,relay_generation=relay_generation+1,"
-            "relay_identity=NULL,relay_heartbeat_at=NULL,"
+            "relay_heartbeat_at=NULL,"
             "relay_minted_at=clock_timestamp(),relay_minted_generation=%s,"
             "relay_minted_owner=%s WHERE id=%s",
             (token_hash(relay_token), incarnation.generation, incarnation.owner, lease_id),
         )
         return public(lock_lease(conn, lease_id))
-
-
-def record_relay_identity(
-    db: Database,
-    lease_id: str,
-    incarnation: RuntimeIncarnation,
-    relay_token: str,
-    identity: dict[str, Any],
-    *,
-    local_machine: str,
-) -> None:
-    """Persist a blocked child's birth before allowing it to read the relay credential."""
-    with db.write_transaction() as conn:
-        require_native(conn, incarnation)
-        lease = lock_lease(conn, lease_id)
-        authenticate_relay(
-            lease,
-            relay_token,
-            local_machine=local_machine,
-        )
-        if lease["agent_id"] != incarnation.agent_id or lease["status"] not in (
-            "accepted",
-            "active",
-        ):
-            raise ImpersonationError("Child registration requires the native-held open lease")
-        conn.execute(
-            "UPDATE agent_impersonations SET relay_identity=%s WHERE id=%s",
-            (Jsonb(identity), lease_id),
-        )
 
 
 def record_degradation(
@@ -367,7 +335,7 @@ def stamp_relay_failure(
         return
     if stamped:
         logger.error(
-            "impersonation relay heartbeat stale and it cannot be respawned here",
+            "impersonation relay heartbeat stale; automatic recovery is not provided",
             agent_id=agent_id,
             lease_id=str(session["id"]),
             relay_provider=session["relay_provider"],

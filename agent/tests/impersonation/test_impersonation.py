@@ -396,8 +396,7 @@ def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
     provision.assert_called_once()
     provision_token = provision.call_args.args[3]
     assert spawn.call_count == 1
-    assert spawn.call_args.args[:6] == (42, "lease-1", provision_token, "thread-1", None, None)
-    assert callable(spawn.call_args.args[6])
+    assert spawn.call_args.args == (42, "lease-1", provision_token, "thread-1", None, None)
     assert relays.children[42].token == provision_token
 
 
@@ -483,7 +482,6 @@ async def test_missing_snapshot_cannot_kill_a_replacement_relay(
     conn.execute.return_value.fetchone.return_value = ("active",)
     db = MagicMock()
     db.connect.return_value.__enter__.return_value = conn
-    read_local_machine = Mock(side_effect=AssertionError("identity read before admission"))
     terminate = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     await impersonation.supervise_relay(
@@ -493,10 +491,8 @@ async def test_missing_snapshot_cannot_kill_a_replacement_relay(
         42,
         gate_ctx.relays,
         incarnation=None,
-        read_local_machine=read_local_machine,
     )
     terminate.assert_not_called()
-    read_local_machine.assert_not_called()
     assert gate_ctx.relays.children[42].process is process
 
 
@@ -521,7 +517,6 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
         42,
         gate_ctx.relays,
         incarnation=None,
-        read_local_machine=machine_identity.name,
     )
     terminate.assert_not_called()
     assert gate_ctx.relays.children[42].process is process
@@ -529,7 +524,7 @@ async def test_delayed_snapshot_cannot_retire_replacement_sender(
 
 @pytest.mark.parametrize("owned", [False, True])
 @pytest.mark.parametrize("running", [False, True])
-async def test_claim_gate_recovers_stale_delivery_and_keeps_native_parked(
+async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_it(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
     native_gate_ctx: AvaContext,
@@ -547,28 +542,32 @@ async def test_claim_gate_recovers_stale_delivery_and_keeps_native_parked(
     old.poll.return_value = None if running else 1
     if owned:
         native_gate_ctx.relays.children[42] = RelayChild("lease-1", old, "token", 0.0, 1)
-    retired = Mock(return_value=True)
-    monkeypatch.setattr(impersonation, "_retire_recorded_relay", retired)
     terminated = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminated)
     provision = Mock(return_value={"relay_generation": 2})
     monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
-    new = MagicMock()
-    spawn = Mock(return_value=new)
+    spawn = Mock()
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
+    degradation = Mock()
+    monkeypatch.setattr(relay, "record_degradation", degradation)
+    stamp = Mock()
+    monkeypatch.setattr(impersonation, "_stamp_relay_failure", stamp)
     abort = Mock()
     monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert decision is not None and decision.goto == END
-    assert provision.call_args.kwargs == {"expected_generation": 1}
-    assert native_gate_ctx.relays.children[42].process is new
-    assert terminated.call_count == int(owned)
-    assert retired.call_count == int(not owned)
-    spawn.assert_called_once()
+    # No replacement is ever minted or spawned, and the stale child is left alone.
+    provision.assert_not_called()
+    spawn.assert_not_called()
+    terminated.assert_not_called()
     abort.assert_not_called()
+    degradation.assert_called_once()
+    stamp.assert_called_once()
+    if owned:
+        assert native_gate_ctx.relays.children[42].process is old
 
 
-async def test_startup_grace_does_not_retire_a_fresh_child(
+async def test_startup_grace_does_not_degrade_a_fresh_child(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
     native_gate_ctx: AvaContext,
@@ -580,18 +579,20 @@ async def test_startup_grace_does_not_retire_a_fresh_child(
         "lease-1", child, "token", impersonation.time.monotonic()
     )
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    provision = Mock(return_value={"relay_generation": 1})
-    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
+    degradation = Mock()
+    monkeypatch.setattr(relay, "record_degradation", degradation)
     await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    provision.assert_not_called()
+    degradation.assert_not_called()
     assert native_gate_ctx.relays.children[42].process is child
 
 
-async def test_confirmed_child_exit_bypasses_fresh_heartbeat_and_startup_grace(
+async def test_confirmed_child_exit_is_degraded_at_once_without_replacement(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
     native_gate_ctx: AvaContext,
 ) -> None:
+    from agent.nodes import END
+
     session = _relay_session(
         "active", relay_heartbeat_at=datetime.now(UTC), relay_minted_at=datetime.now(UTC)
     )
@@ -604,15 +605,16 @@ async def test_confirmed_child_exit_bypasses_fresh_heartbeat_and_startup_grace(
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
     provision = Mock(return_value={"relay_generation": 2})
     monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
-    new = MagicMock()
-    spawn = Mock(return_value=new)
+    spawn = Mock()
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
+    degradation = Mock()
+    monkeypatch.setattr(relay, "record_degradation", degradation)
+    monkeypatch.setattr(impersonation, "_stamp_relay_failure", Mock())
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert decision is not None and decision.goto == END
-    assert provision.call_args.kwargs == {"expected_generation": 1}
-    assert native_gate_ctx.relays.children[42].process is new
-    spawn.assert_called_once()
-    old.terminate.assert_not_called()
+    degradation.assert_called_once()
+    provision.assert_not_called()
+    spawn.assert_not_called()
     assert session["relay_generation"] == 1
 
 
@@ -626,6 +628,7 @@ async def test_stale_session_relay_retains_authority_with_visible_unsupported_re
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
+    monkeypatch.setattr(impersonation, "_stamp_relay_failure", Mock())
     abort = Mock()
     monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
@@ -699,7 +702,7 @@ async def test_claim_gate_records_unknown_without_recorded_anchors(
 
 
 @pytest.mark.parametrize("fresh", [False, True])
-async def test_unknown_previous_relay_withholds_spawn_without_ending_lease(
+async def test_unknown_relay_exit_evidence_degrades_only_when_the_heartbeat_is_stale(
     monkeypatch: pytest.MonkeyPatch,
     incarnation: RuntimeIncarnation,
     native_gate_ctx: AvaContext,
@@ -718,6 +721,7 @@ async def test_unknown_previous_relay_withholds_spawn_without_ending_lease(
     monkeypatch.setattr(OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable")))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
+    monkeypatch.setattr(impersonation, "_stamp_relay_failure", Mock())
     provision = Mock()
     monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)

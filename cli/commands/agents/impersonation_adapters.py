@@ -19,8 +19,8 @@ from base.agents.impersonation.host_transport import live_submit, require_contro
 class RelayAdapter:
     """A bound sender and its terminal-notice ownership.
 
-    Codex terminal notices come from the native host's durable notice scan.
-    Controller-session transports send their own notices through stdout.
+    The native host submits a Codex lease's ended notice once, when it observes
+    the end. Controller-session transports send their own notices through stdout.
     """
 
     send: Callable[[str], None]

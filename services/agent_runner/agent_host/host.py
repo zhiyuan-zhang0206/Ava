@@ -456,7 +456,6 @@ class AgentHost:
             agent_id,
             self.relays,
             incarnation=incarnation,
-            read_local_machine=self._machine_identity.name,
         )
         # An earlier ordinary failure can leave a buffered tail. Preserve
         # it before accepting maintenance intent, without replaying graph work.

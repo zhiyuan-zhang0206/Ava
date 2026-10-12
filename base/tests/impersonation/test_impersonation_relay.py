@@ -19,7 +19,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.tests.impersonation.support import (
     accept_controller,
     create_native_owner,
-    native_status,
     request_controller,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -273,7 +272,7 @@ def test_provision_relay_only_for_the_accepting_incarnation(
     )
 
 
-def test_provision_relay_revokes_the_previous_credential(
+def test_provision_relay_mints_one_credential_and_refuses_a_second(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
@@ -283,12 +282,12 @@ def test_provision_relay_revokes_the_previous_credential(
     machine_identity: MachineIdentity,
 ) -> None:
     local_machine = machine_identity.name()
-    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
+    owner = create_native_owner(db_conn, local_machine=local_machine)
     lease = request_controller(
         owner,
         authority=config_authority,
         database_gate=database_gate,
-        local_machine=machine_identity.name(),
+        local_machine=local_machine,
     )
     leases.accept(
         database,
@@ -302,74 +301,14 @@ def test_provision_relay_revokes_the_previous_credential(
     leases.activate(database, event_bus, lease["id"], owner)
     first = leases.provision_relay(database, lease["id"], owner, "first")
     assert first is not None
-    second = leases.provision_relay(
-        database, lease["id"], owner, "second", expected_generation=first["relay_generation"]
-    )
-    assert second is not None
+    # A relay is never replaced: the lease keeps its first credential.
+    assert leases.provision_relay(database, lease["id"], owner, "second") is None
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-        leases.relay_get(
-            database, event_bus, lease["id"], "first", local_machine=machine_identity.name()
-        )
-    assert (
-        leases.relay_get(
-            database, event_bus, lease["id"], "second", local_machine=machine_identity.name()
-        )["status"]
-        == "active"
+        leases.relay_get(database, event_bus, lease["id"], "second", local_machine=local_machine)
+    current = leases.relay_get(
+        database, event_bus, lease["id"], "first", local_machine=local_machine
     )
-
-
-def test_active_lease_binding_inherits_the_replacement_incarnation(
-    db_conn: psycopg.Connection,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """Every restart/host turnover mints a fresh incarnation; the active lease's
-    accepting binding must follow it so relay supervision can re-provision."""
-    owner = create_native_owner(db_conn, local_machine=machine_identity.name())
-    lease = accept_controller(
-        owner,
-        authority=config_authority,
-        database_gate=database_gate,
-        local_machine=machine_identity.name(),
-    )
-    replacement = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
-    db_conn.execute(
-        "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
-        (replacement.generation, replacement.owner, owner.agent_id),
-    )
-    db_conn.commit()
-    state = native_status(replacement, database_gate=database_gate)
-    assert state["status"] == "active"
-    assert (state["accepted_generation"], state["accepted_owner"]) == (
-        str(replacement.generation),
-        str(replacement.owner),
-    )
-    provisioned = leases.provision_relay(
-        database,
-        lease["id"],
-        replacement,
-        "relay-credential",
-        expected_generation=state["relay_generation"],
-    )
-    assert provisioned is not None
-    assert "relay_token_hash" not in provisioned
-    assert (
-        leases.relay_get(
-            database,
-            event_bus,
-            lease["id"],
-            "relay-credential",
-            local_machine=machine_identity.name(),
-        )["status"]
-        == "active"
-    )
-    # The old incarnation cannot mint the relay credential after the transfer.
-    with pytest.raises(leases.ImpersonationError):
-        leases.provision_relay(database, lease["id"], owner, "old-incarnation-credential")
+    assert (current["status"], current["relay_generation"]) == ("active", 1)
 
 
 @pytest.mark.parametrize("kind", ["chat", "heartbeat"])

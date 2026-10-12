@@ -2,7 +2,6 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from threading import Event
 from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
@@ -91,7 +90,7 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
     tokens = ["first-private-token", "second-private-token"]
 
     def claim(token: str) -> dict[str, Any] | None:
-        return relay.provision_relay(database, session["id"], owner, token, expected_generation=0)
+        return relay.provision_relay(database, session["id"], owner, token)
 
     with ThreadPoolExecutor(2) as pool:
         outcomes = list(pool.map(claim, tokens))
@@ -107,10 +106,7 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
     )
     assert latest["relay_generation"] == 1
     assert latest["expires_at"] <= session["expires_at"] + timedelta(seconds=1)
-    assert (
-        relay.provision_relay(database, session["id"], owner, "loser", expected_generation=0)
-        is None
-    )
+    assert relay.provision_relay(database, session["id"], owner, "loser") is None
     assert (
         leases.relay_get(
             database, event_bus, session["id"], winner, local_machine=machine_identity.name()
@@ -119,54 +115,27 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
     )
 
 
-def test_terminal_notice_claim_has_one_sender_and_persists_host_acceptance(
+def test_ended_notice_is_submitted_once_to_the_recorded_destination(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
-    db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    local_machine = machine_identity.name()
     session, _ = active
-    end(database, event_bus, session, local_machine=local_machine)
-    entered, complete = Event(), Event()
-    calls: list[tuple[str, str, str]] = []
-
-    def submit(thread: str, message: str, *, endpoint: str) -> None:
-        calls.append((thread, message, endpoint))
-        entered.set()
-        assert complete.wait(5)
-
-    monkeypatch.setattr(host_transport, "live_submit", submit)
-    with ThreadPoolExecutor(2) as pool:
-        first = pool.submit(terminal_notices.deliver_pending_notice, database, local_machine)
-        assert entered.wait(5)
-        second = pool.submit(terminal_notices.deliver_pending_notice, database, local_machine)
-        assert second.result(timeout=5) is False
-        complete.set()
-        assert first.result(timeout=5) is True
-    assert len(calls) == 1
-    assert calls[0][0] == session["relay_thread_id"]
-    assert calls[0][2] == session["relay_codex_remote"]
-    assert session["id"] in calls[0][1] and "does not end or cancel any newer" in calls[0][1]
-    assert db_conn.execute(
-        "SELECT terminal_notice_attempts,terminal_notice_accepted_at IS NOT NULL FROM agent_impersonations WHERE id=%s",
-        (session["id"],),
-    ).fetchone() == (1, True)
-    assert terminal_notices.deliver_pending_notice(database, local_machine) is False
-    db_conn.execute(
-        "UPDATE agent_impersonations SET status='released' WHERE id=%s", (session["id"],)
-    )
-    db_conn.commit()
-    assert db_conn.execute(
-        "SELECT terminal_notice_attempts,terminal_notice_accepted_at IS NOT NULL FROM agent_impersonations WHERE id=%s",
-        (session["id"],),
-    ).fetchone() == (1, True)
+    end(database, event_bus, session, local_machine=machine_identity.name())
+    submitted = Mock(return_value=None)
+    monkeypatch.setattr(host_transport, "live_submit", submitted)
+    assert terminal_notices.send_ended_notice(database, session["id"]) is None
+    submitted.assert_called_once()
+    assert submitted.call_args.args[0] == session["relay_thread_id"]
+    assert submitted.call_args.kwargs["endpoint"] == session["relay_codex_remote"]
+    text = submitted.call_args.args[1]
+    assert session["id"] in text and "does not end or cancel any newer" in text
 
 
-def test_notice_transient_failure_remains_pending_beyond_three_attempts(
+def test_ended_notice_failure_is_reported_and_leaves_no_retry_state(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
@@ -175,40 +144,23 @@ def test_notice_transient_failure_remains_pending_beyond_three_attempts(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    local_machine = machine_identity.name()
-    session, owner = active
-    end(database, event_bus, session, local_machine=local_machine)
-    monkeypatch.setattr(
-        host_transport,
-        "live_submit",
-        Mock(return_value="TimeoutError: ambiguous acceptance"),
+    session, _ = active
+    end(database, event_bus, session, local_machine=machine_identity.name())
+    submitted = Mock(return_value="TimeoutError: ambiguous acceptance")
+    monkeypatch.setattr(host_transport, "live_submit", submitted)
+    assert (
+        terminal_notices.send_ended_notice(database, session["id"])
+        == "TimeoutError: ambiguous acceptance"
     )
-    for attempt in range(4):
-        db_conn.execute(
-            "UPDATE agent_impersonations SET terminal_notice_attempt_at=clock_timestamp()-interval '1 hour' WHERE id=%s",
-            (session["id"],),
-        )
-        db_conn.commit()
-        assert terminal_notices.deliver_pending_notice(database, local_machine)
-        assert db_conn.execute(
-            "SELECT terminal_notice_attempts,terminal_notice_accepted_at IS NULL FROM agent_impersonations WHERE id=%s",
-            (session["id"],),
-        ).fetchone() == (attempt + 1, True)
-    assert leases.native_status(database, event_bus, owner.agent_id, owner) is None
-    monkeypatch.setattr(host_transport, "live_submit", Mock(return_value=None))
-    db_conn.execute(
-        "UPDATE agent_impersonations SET terminal_notice_attempt_at=clock_timestamp()-interval '1 hour' WHERE id=%s",
-        (session["id"],),
-    )
-    db_conn.commit()
-    assert terminal_notices.deliver_pending_notice(database, local_machine)
+    submitted.assert_called_once()
     assert db_conn.execute(
-        "SELECT terminal_notice_accepted_at IS NOT NULL FROM agent_impersonations WHERE id=%s",
+        "SELECT terminal_notice_attempts,terminal_notice_accepted_at,terminal_notice_error "
+        "FROM agent_impersonations WHERE id=%s",
         (session["id"],),
-    ).fetchone() == (True,)
+    ).fetchone() == (0, None, None)
 
 
-def test_unsupported_terminal_destination_is_visible_and_not_accepted(
+def test_controller_session_destination_gets_no_host_submission(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
@@ -217,29 +169,19 @@ def test_unsupported_terminal_destination_is_visible_and_not_accepted(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    local_machine = machine_identity.name()
     session, _ = active
     db_conn.execute(
         "UPDATE agent_impersonations SET relay_provider='claude',relay_thread_id=NULL,relay_codex_remote=NULL WHERE id=%s",
         (session["id"],),
     )
     db_conn.commit()
-    end(database, event_bus, session, local_machine=local_machine)
+    end(database, event_bus, session, local_machine=machine_identity.name())
     monkeypatch.setattr(
         host_transport,
         "live_submit",
         Mock(side_effect=AssertionError("Unsupported destination must not submit")),
     )
-    assert terminal_notices.deliver_pending_notice(database, local_machine)
-    assert db_conn.execute(
-        "SELECT terminal_notice_unsupported_at IS NOT NULL,terminal_notice_accepted_at IS NULL,terminal_notice_error FROM agent_impersonations WHERE id=%s",
-        (session["id"],),
-    ).fetchone() == (
-        True,
-        True,
-        "Independent ended-lease delivery unsupported for this recorded destination",
-    )
-    assert terminal_notices.deliver_pending_notice(database, local_machine) is False
+    assert terminal_notices.send_ended_notice(database, session["id"]) is None
 
 
 def test_old_notice_keeps_destination_after_replacement_takeover(
@@ -249,12 +191,11 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
+    config_authority: ConfigAuthority,
 ) -> None:
-    local_machine = machine_identity.name()
     session, owner = active
-    end(database, event_bus, session, local_machine=local_machine)
+    end(database, event_bus, session, local_machine=machine_identity.name())
     replacement = leases.request(
         database,
         event_bus,
@@ -267,7 +208,7 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
         relay_codex_remote="unix:///tmp/replacement.sock",
         process_metadata=recorded_tree(),
         authority=config_authority,
-        local_machine=local_machine,
+        local_machine=machine_identity.name(),
     )
     leases.accept(
         database,
@@ -276,7 +217,7 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
         owner.agent_id,
         owner,
         "Replacement task",
-        local_machine=local_machine,
+        local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, replacement["id"], owner)
     # A later edit of old routing columns does not redirect its immutable notice.
@@ -287,20 +228,23 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
     db_conn.commit()
     submitted = Mock(return_value=None)
     monkeypatch.setattr(host_transport, "live_submit", submitted)
-    assert terminal_notices.deliver_pending_notice(database, local_machine)
+    assert terminal_notices.send_ended_notice(database, session["id"]) is None
     assert submitted.call_args.args[0] == session["relay_thread_id"]
     assert submitted.call_args.kwargs["endpoint"] == session["relay_codex_remote"]
     assert session["id"] in submitted.call_args.args[1]
     assert replacement["id"] not in submitted.call_args.args[1]
     assert (
         leases.require_active(
-            database, replacement["id"], attested_caller(replacement), local_machine=local_machine
+            database,
+            replacement["id"],
+            attested_caller(replacement),
+            local_machine=machine_identity.name(),
         )["status"]
         == "active"
     )
 
 
-def test_terminated_agent_notice_is_scanned_without_native_runtime(
+def test_terminated_agent_notice_names_the_termination(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     db_conn: psycopg.Connection,
@@ -308,18 +252,13 @@ def test_terminated_agent_notice_is_scanned_without_native_runtime(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    local_machine = machine_identity.name()
     session, owner = active
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     submitted = Mock(return_value=None)
     monkeypatch.setattr(host_transport, "live_submit", submitted)
-    assert terminal_notices.deliver_pending_notice(database, local_machine)
+    assert terminal_notices.send_ended_notice(database, session["id"]) is None
     assert "terminated: agent was terminated" in submitted.call_args.args[1]
-    assert db_conn.execute(
-        "SELECT terminal_notice_accepted_at IS NOT NULL FROM agent_impersonations WHERE id=%s",
-        (session["id"],),
-    ).fetchone() == (True,)
 
 
 def test_already_terminal_insert_is_not_historically_backfilled(
@@ -327,24 +266,18 @@ def test_already_terminal_insert_is_not_historically_backfilled(
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    local_machine = machine_identity.name()
     session, owner = active
-    end(database, event_bus, session, local_machine=local_machine)
-    submitted = Mock(return_value=None)
-    monkeypatch.setattr(host_transport, "live_submit", submitted)
-    assert terminal_notices.deliver_pending_notice(database, local_machine)
+    end(database, event_bus, session, local_machine=machine_identity.name())
     legacy_id = uuid4()
     db_conn.execute(
         "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,expires_at,ended_at) "
         "VALUES(%s,%s,'external_agent:legacy',%s,'expired',300,clock_timestamp(),clock_timestamp())",
-        (legacy_id, owner.agent_id, local_machine),
+        (legacy_id, owner.agent_id, machine_identity.name()),
     )
     db_conn.commit()
-    assert terminal_notices.deliver_pending_notice(database, local_machine) is False
     assert db_conn.execute(
         "SELECT terminal_notice_pending_at FROM agent_impersonations WHERE id=%s", (legacy_id,)
     ).fetchone() == (None,)
@@ -354,27 +287,3 @@ def test_already_terminal_insert_is_not_historically_backfilled(
             (session["id"],),
         )
     db_conn.rollback()
-
-
-def test_notice_belongs_to_original_machine_after_agent_moves(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
-    database: Database,
-    event_bus: EventBus,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    local_machine = machine_identity.name()
-    session, owner = active
-    end(database, event_bus, session, local_machine=local_machine)
-    db_conn.execute(
-        "UPDATE agents_meta SET machine='replacement-machine' WHERE id=%s", (owner.agent_id,)
-    )
-    db_conn.commit()
-    submitted = Mock(return_value=None)
-    monkeypatch.setattr(host_transport, "live_submit", submitted)
-    assert terminal_notices.deliver_pending_notice(database, "replacement-machine") is False
-    submitted.assert_not_called()
-    assert terminal_notices.deliver_pending_notice(database, local_machine)
-    submitted.assert_called_once()

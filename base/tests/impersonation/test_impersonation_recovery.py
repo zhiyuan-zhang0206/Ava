@@ -65,50 +65,6 @@ def test_termination_atomically_revokes_but_restart_preserves(
         )
 
 
-def test_replacement_requires_fresh_consent_before_checkpoint_ack(
-    db_conn: psycopg.Connection,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    local_machine = machine_identity.name()
-    owner = create_native_owner(db_conn, local_machine=local_machine)
-    lease = request_controller(
-        owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
-    )
-    leases.accept(
-        database,
-        event_bus,
-        lease["id"],
-        owner.agent_id,
-        owner,
-        "Handoff brief",
-        local_machine=local_machine,
-    )
-    replacement = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
-    db_conn.execute(
-        "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
-        (replacement.generation, replacement.owner, owner.agent_id),
-    )
-    db_conn.commit()
-    state = native_status(replacement, database_gate=database_gate)
-    assert state["status"] == "requested"
-    assert state["consent_version"] == 2
-    leases.accept(
-        database,
-        event_bus,
-        lease["id"],
-        owner.agent_id,
-        replacement,
-        "Handoff brief",
-        local_machine=local_machine,
-    )
-    assert leases.activate(database, event_bus, lease["id"], replacement)["status"] == "active"
-
-
 def test_expiry_between_driver_read_and_activation_returns_control(
     db_conn: psycopg.Connection,
     database: Database,

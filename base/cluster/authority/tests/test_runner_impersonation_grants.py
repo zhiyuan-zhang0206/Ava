@@ -59,13 +59,14 @@ def test_runner_transport_maintenance_grants_do_not_allow_destination_mutation(
         ensure_groups(conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups)
     with cluster.connect_class("runner", autocommit=True) as conn:
         conn.execute(
-            "UPDATE agent_impersonations SET relay_generation=1,relay_identity='{}',"
-            "relay_degraded_reason='unknown',terminal_notice_attempts=1 WHERE agent_id=%s",
+            "UPDATE agent_impersonations SET relay_generation=1,"
+            "relay_degraded_reason='unknown' WHERE agent_id=%s",
             (row[0],),
         )
         for column in (
             "terminal_notice_snapshot",
             "terminal_notice_pending_at",
+            "terminal_notice_attempts",
             "relay_thread_id",
             "machine",
         ):

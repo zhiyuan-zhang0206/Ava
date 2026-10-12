@@ -105,7 +105,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     assert not model_calls
     if cause == "relay_death":
         detail = await stop_takeover_with_lost_relay(
-            monkeypatch, database, event_bus, owner, ctx.relays, machine_identity=machine_identity
+            monkeypatch, database, event_bus, owner, ctx.relays
         )
     elif cause == "ack_exhaustion":
         detail = stop_takeover_with_exhausted_ack(db_conn, requested, owner)
@@ -121,7 +121,6 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
             owner.agent_id,
             ctx.relays,
             incarnation=owner,
-            read_local_machine=machine_identity.name,
         )
     died = leases.get(
         database,
@@ -270,7 +269,7 @@ async def test_unreadable_executor_preserves_authority_across_native_wakes(
     ] == [pending]
 
 
-async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
+async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -283,7 +282,8 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A newly admitted runtime reads the durable takeover before doing native work."""
+    """A newly admitted runtime does not inherit the takeover: its admission closed the
+    lease, and the return chain resumes native work with the unacknowledged input."""
     from dataclasses import replace
 
     from base.agents.impersonation import history
@@ -325,14 +325,6 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     pending = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, owner.agent_id, machine_identity=machine_identity
     )
-    expiry = leases.require_active(
-        database,
-        requested["id"],
-        attested_caller(
-            requested,
-        ),
-        local_machine=machine_identity.name(),
-    )["expires_at"]
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
         (owner.agent_id,),
@@ -349,33 +341,22 @@ async def test_successor_graph_stays_parked_and_resumes_preserved_pending_input(
     assert successor is not None and successor.generation != owner.generation
     with pytest.raises(leases.ImpersonationError, match="no longer owns"):
         leases.native_status(database, event_bus, owner.agent_id, owner)
-    replacement_ctx = replace(ctx, relays=RelaySupervision())
-    await graph.ainvoke(
-        reset,
-        config,
-        context=replace(
-            replacement_ctx, original_incarnation=successor, hosted_resources=None, native_work=None
-        ),
-    )
-    await flush_checkpoint(saver, owner.agent_id)
-    assert not model_calls
     assert db_conn.execute(
-        "SELECT status,expires_at,accepted_generation,accepted_owner "
+        "SELECT status,rejection_reason,accepted_generation,accepted_owner "
         "FROM agent_impersonations WHERE id=%s",
         (requested["id"],),
-    ).fetchone() == ("active", expiry, successor.generation, successor.owner)
+    ).fetchone() == (
+        "expired",
+        "aborted: native runtime restarted",
+        successor.generation,
+        successor.owner,
+    )
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (pending,)
     ).fetchone() == ("pending",)
     db_conn.commit()
-    leases.release(
-        database,
-        event_bus,
-        requested["id"],
-        attested_caller(requested),
-        "Successor handoff",
-        local_machine=machine_identity.name(),
-    )
+    replacement_ctx = replace(ctx, relays=RelaySupervision())
+    assert not model_calls
     assert not await settle_checkpoint(
         graph,
         database,

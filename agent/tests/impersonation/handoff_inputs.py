@@ -420,8 +420,6 @@ async def stop_takeover_with_lost_relay(
     event_bus: EventBus,
     owner: RuntimeIncarnation,
     relays: RelaySupervision,
-    *,
-    machine_identity: MachineIdentity,
 ) -> str:
     """Observe unknown legacy relay custody without revoking the executor lease."""
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
@@ -434,7 +432,6 @@ async def stop_takeover_with_lost_relay(
         owner.agent_id,
         relays,
         incarnation=owner,
-        read_local_machine=machine_identity.name,
     )
     return "the bound relay stopped heartbeating"
 
@@ -476,7 +473,7 @@ def assert_successor_handoff_preserves_unacknowledged_input(
     resumed: dict[str, Any], workspace: Path
 ) -> None:
     transcript = "\n".join(str(message.content) for message in resumed["messages"])
-    assert "Successor handoff" in transcript
+    assert "native runtime restarted" in transcript
     assert "Peer message acknowledged" not in transcript
     # Inputs the executor read are returned through the handoff record, not replayed.
     handoff_path = workspace / "impersonation/0.json"
