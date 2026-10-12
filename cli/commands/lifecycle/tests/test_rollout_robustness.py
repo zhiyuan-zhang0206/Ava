@@ -13,23 +13,34 @@ No cluster is required: the `machines` reads and the ops probe are stubbed.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
+from uuid import uuid4
 
+import psycopg
 import pytest
+from psycopg_pool import AsyncConnectionPool
 
 import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_preflight_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
+from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.context.clients import DatabaseFactory
 from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.cluster.machine import MachineIdentity
+from base.db import Database
+from base.deploy.maintenance.state import MaintenancePhase
+from base.events.live.bus import EventBus
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from tests.factories.maintenance import WHEN, maintenance_agent
+from tests.factories.maintenance import isolate as isolate
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -216,3 +227,136 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
         database_factory=operator_database, machine=command_runtime.machine
     )
     assert unpaused == []
+
+
+# ─── A restart that fails before any service stops releases its own hold ─────
+
+
+def _stop_hold() -> str:
+    from ops.agent_pause import new_stop_holder
+
+    return new_stop_holder("test-machine")
+
+
+def _stub_release_effects(monkeypatch: pytest.MonkeyPatch, event_bus: EventBus) -> None:
+
+    def from_settings(_cls: type[EventBus]) -> EventBus:
+        return event_bus
+
+    monkeypatch.setattr(EventBus, "from_settings", classmethod(from_settings))
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
+
+
+@pytest.mark.parametrize("phase", [MaintenancePhase.PREPARING, MaintenancePhase.DRAINING])
+def test_failed_restart_before_any_service_stops_releases_its_own_hold(
+    monkeypatch: pytest.MonkeyPatch,
+    isolate: None,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    command_runtime: CommandRuntime,
+    phase: MaintenancePhase,
+) -> None:
+    """The drain-stage failure leaves the hold this restart took (cohort empty or
+    half drained), which gates every wake on the machine until someone runs
+    `ava start`. Nothing was stopped, so the restart lets go of it: no compensating
+    start, no retry."""
+    from base.deploy.maintenance import admission, pause_owner
+    from base.deploy.maintenance.state import MaintenanceHold
+
+    _stub_release_effects(monkeypatch, event_bus)
+    holder = _stop_hold()
+    pause_owner.begin_maintenance(holder, WHEN)
+    if phase != MaintenancePhase.PREPARING:
+        before = admission.require_operation(holder, WHEN).maintenance
+        assert before is not None
+        pause_owner.change_maintenance(holder, WHEN, before, MaintenanceHold(phase))
+    assert admission.held()
+
+    _stop_commands._release_self_heal_pause(
+        database_factory=lambda: database, machine=command_runtime.machine
+    )
+
+    assert not admission.held()
+
+
+def test_failed_restart_leaves_a_hold_another_process_took(
+    monkeypatch: pytest.MonkeyPatch,
+    isolate: None,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
+    from base.deploy.maintenance import admission, pause_owner
+
+    _stub_release_effects(monkeypatch, event_bus)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", lambda _db, *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    pause_owner.begin_maintenance(f"local-pause:test-machine:{os.getpid() + 1}:{uuid4()}", WHEN)
+
+    _stop_commands._release_self_heal_pause(
+        database_factory=lambda: database, machine=command_runtime.machine
+    )
+
+    assert admission.held()
+
+
+async def test_a_drain_failure_in_restart_leaves_the_host_wakeable(
+    monkeypatch: pytest.MonkeyPatch,
+    isolate: None,
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
+    """Through `ava restart` itself: the stop leg takes the hold and fails in its
+    drain; the command reports the failure and the hold is gone."""
+    from base.deploy.maintenance import admission, pause_owner
+
+    _stub_release_effects(monkeypatch, event_bus)
+
+    def passes(*_args: object, **_kwargs: object) -> int:
+        return 0
+
+    monkeypatch.setattr(_repo_commands, "_preflight_probes", passes)
+    monkeypatch.setattr(_start_readiness_preflight_commands, "preflight_start_readiness", passes)
+
+    def failing_drain(*_args: object, **_kwargs: object) -> int:
+        pause_owner.begin_maintenance(_stop_hold(), WHEN)
+        return 1
+
+    started: list[bool] = []
+    monkeypatch.setattr(_stop_commands, "_do_stop", failing_drain)
+
+    def start(*_args: object, **_kwargs: object) -> int:
+        started.append(True)
+        return 0
+
+    monkeypatch.setattr(_start_commands, "_cmd_start_body", start)
+
+    agent = maintenance_agent(db_conn, machine_name=command_runtime.machine.name())
+
+    rc = _stop_commands.cmd_restart(
+        retained_children=[],
+        database_factory=lambda: database,
+        producer=operator_pipeline,
+        command=command_runtime,
+    )
+
+    assert rc == 1
+    assert not admission.held()
+    assert started == []  # no compensating start
+    # An idle agent is admitted by the next wake instead of being refused by the hold.
+    incarnation = await admit_hosted_runtime(
+        aops_pool,
+        agent,
+        command_runtime.machine.name(),
+        uuid4(),
+        expected_from="idling",
+        db=database,
+    )
+    assert incarnation is not None

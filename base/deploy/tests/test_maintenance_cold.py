@@ -55,15 +55,20 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
     pause_owner.begin_maintenance("cold", WHEN)
-    with pytest.raises(RuntimeError):
-        cohort.prepare(
-            db_conn,
-            machine=machine_identity.name(),
-            host_owner=None,
-            holder="cold",
-            acquired_at=WHEN,
-        )
-    db_conn.rollback()
+    if not observed:
+        # A restart still claimed is unresolved work, so preparation refuses it unless
+        # no host is running. An observed restart leaves the row parked either way (the
+        # parking rule does not depend on a host being absent); only the cold path
+        # preserves the claimed chat, so it is not run here.
+        with pytest.raises(RuntimeError):
+            cohort.prepare(
+                db_conn,
+                machine=machine_identity.name(),
+                host_owner=None,
+                holder="cold",
+                acquired_at=WHEN,
+            )
+        db_conn.rollback()
     held = cohort.prepare(
         db_conn,
         machine=machine_identity.name(),

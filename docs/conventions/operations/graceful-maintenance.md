@@ -180,6 +180,13 @@ liveness), `ava status --json` prints only it as one JSON object (the fleet
 update's start-of-work refusal and the out-of-band triage read that; it probes
 nothing, so it answers with everything else down), and `ava start` ends it.
 
+A restart that fails before any service stopped (its preflight, preparation or
+drain) releases the hold its own process took, so the idle agents on the
+machine stay wakeable. It does not run `ava start` and retries nothing; the
+failure is reported and the operator decides. A failure after the services
+began stopping keeps the hold, as `ava stop` does, until `ava start` passes
+readiness.
+
 `ava start` over a hold in any phase brings the unit's services up (a unit whose
 services are already running is left as it is), then releases the hold. It does
 not retract restarts already issued (durable per-agent intents): members not yet
