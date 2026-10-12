@@ -61,6 +61,7 @@ from pathlib import Path
 import os
 import ava
 from ava import external
+from agent.extensions import plugin_state_codec
 from agent.extensions.registry import build_registry
 from agent.state import build_agent_state
 
@@ -90,7 +91,7 @@ def load_snapshot(_agent_id, **_kwargs):
     state.ava_code__cwd = str(Path(SAMPLE).parent)
     return state, {{}}, None
 
-external.load_snapshot = load_snapshot
+plugin_state_codec.load_snapshot = load_snapshot
 
 with external.attach("lease"):
     assert ava.files.read(SAMPLE) == "tail event"

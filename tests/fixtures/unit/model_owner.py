@@ -1,11 +1,19 @@
 """Explicit SDK model installation owned by consumer-local tests."""
 
+from typing import Any
+
 import pytest
 
 from ava.sdk_surface.installation import Installation
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
+
+
+def _plugin_state_codec() -> Any:
+    from agent.extensions import plugin_state_codec
+
+    return plugin_state_codec
 
 
 @pytest.fixture
@@ -24,6 +32,7 @@ def model_installation(
         undo=(),
         catalog=model_catalog,
         authority=config_authority,
+        external_state=_plugin_state_codec,
     )
 
 

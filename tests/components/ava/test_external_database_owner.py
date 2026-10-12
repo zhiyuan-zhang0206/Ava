@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 import ava
+from agent.extensions import plugin_state_codec
 from ava import external
 from ava.sdk_surface import settings as _settings
 from base.agents.impersonation import manifest
@@ -283,7 +284,7 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
         if failure_at == "lease"
         else (ava, "ensure_plugins_loaded")
         if failure_at == "plugins"
-        else (external, "load_snapshot")
+        else (plugin_state_codec, "load_snapshot")
     )
     (tmp_path / ".env").write_text(
         "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/attachment\n"

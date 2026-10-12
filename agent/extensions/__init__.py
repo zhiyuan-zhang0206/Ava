@@ -46,6 +46,7 @@ from agent.extensions._discovery import (
     pkg_of,
 )
 from agent.extensions.registry import ALL_FACES, SURFACE_FACES, build_registry
+from ava.sdk_surface.installation import ExternalState
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -83,6 +84,13 @@ class LoadedExtensions:
 
     config: plugins_cfg.PluginsConfig
     registry: ExtensionRegistry
+
+
+def _external_state() -> ExternalState:
+    """The plugin-state codec for external attachments, imported when one first attaches."""
+    from agent.extensions import plugin_state_codec
+
+    return plugin_state_codec
 
 
 def load_extensions(
@@ -162,6 +170,7 @@ def load_extensions(
             producer=producer,
             sampling=sampling,
             clock_factory=clock_factory,
+            external_state=_external_state,
         ),
     )
 

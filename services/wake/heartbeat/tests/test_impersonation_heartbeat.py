@@ -220,6 +220,7 @@ def test_sdk_attachment_can_pause_heartbeat(
     machine_identity: MachineIdentity,
 ):
     import ava
+    from agent.extensions import plugin_state_codec
     from agent.state import BaseAgentState
     from ava import external
     from base.agents.sdk import call_policy
@@ -246,7 +247,7 @@ def test_sdk_attachment_can_pause_heartbeat(
         assert isinstance(database, Database)
         return BaseAgentState(), {}, None
 
-    monkeypatch.setattr(external, "load_snapshot", snapshot)
+    monkeypatch.setattr(plugin_state_codec, "load_snapshot", snapshot)
     with external.attach(lease["id"]):
         ava.self.pause_heartbeat(1800)
     assert lease["agent_id"] not in selected(pool)

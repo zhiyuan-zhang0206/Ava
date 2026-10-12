@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import ava
 from ava.sdk_surface import process_context
+from ava.sdk_surface.installation import ExternalState
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
@@ -34,13 +35,6 @@ from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import PluginConfigView, resolve_agent_plugin_pins
-
-from .state import (
-    apply_plugin_delta,
-    decode_plugin_delta,
-    encode_plugin_delta,
-    load_snapshot,
-)
 
 __all_for_ava__ = ["attach", "Attachment"]
 
@@ -220,7 +214,9 @@ class Attachment:
             self._event_seal_wait_reader = lambda: (
                 config.view.general.impersonation_event_seal_wait_seconds
             )
-        state, overlay, birth = load_snapshot(self.agent_id, database=self._database())
+        state, overlay, birth = self._codec().load_snapshot(
+            self.agent_id, database=self._database()
+        )
         self._state_cls = type(state)
         self._resolve_config(overlay, birth)
         # Native applies journal entries only after the controller releases
@@ -228,11 +224,32 @@ class Attachment:
         receipt = state.impersonation_applied
         checkpoint_version = receipt["version"] if receipt.get("lease_id") == self.lease_id else 0
         applied = max(lease["applied_version"], checkpoint_version)
+        codec = self._codec()
         for encoded in lease["plugin_delta"][applied:]:
-            apply_plugin_delta(state, decode_plugin_delta(encoded, self._state_cls))
+            codec.apply_plugin_delta(state, codec.decode_plugin_delta(encoded, self._state_cls))
         self._validate()
         self._open_event_participant()
         ava.state, ava.state_update = state, {}
+
+    def _codec(self) -> ExternalState:
+        """The agent layer's plugin-state codec, supplied through the SDK installation."""
+        from ava.sdk_surface.installation import installed
+
+        installation = installed()
+        if installation is None:
+            raise RuntimeError("the SDK surface was not installed for the attachment")
+        return installation.require_external_state()
+
+    def native_snapshot(self) -> Any:
+        """The agent's saved state, as its checkpoint holds it.
+
+        Unlike `ava.state` this excludes the journal replay, so a controller's staged
+        updates cannot stand in for what the agent itself saved."""
+        self._validate()
+        snapshot, _overlay, _birth = self._codec().load_snapshot(
+            self.agent_id, database=self._database()
+        )
+        return snapshot
 
     def _resolve_config(
         self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
@@ -328,7 +345,7 @@ class Attachment:
         if not isinstance(ava.state_update, dict):
             raise TypeError("external plugin state update must be a dict")
         if ava.state_update:
-            encoded = encode_plugin_delta(ava.state_update, self._state_cls)
+            encoded = self._codec().encode_plugin_delta(ava.state_update, self._state_cls)
             control.merge_plugin_delta(
                 self._database(),
                 self.lease_id,

@@ -16,9 +16,13 @@ from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 import ava
 import base.agents.impersonation.manifest as impersonation_manifest
 from agent import state as state_module
+from agent.extensions import plugin_state_codec
+from agent.extensions.plugin_state_codec import (
+    apply_plugin_delta,
+    decode_plugin_delta,
+    encode_plugin_delta,
+)
 from ava import external, gateway_client
-from ava.external import state
-from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
 from ava.sdk_surface import agent_identity
 from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.settings import agent_setting
@@ -273,7 +277,7 @@ def test_constructor_failure_detaches_and_allows_next_attachment(
         if failure_at == "lease":
             failure_patch.setattr(external.control, "require_active", fail)
         else:
-            failure_patch.setattr(external, "load_snapshot", fail)
+            failure_patch.setattr(plugin_state_codec, "load_snapshot", fail)
         with pytest.raises(RuntimeError, match="constructor interrupted"):
             external.attach("lease")
     assert _borrowed_agent_id() is None
@@ -496,7 +500,7 @@ def test_external_delta_rejects_full_history_reset_before_any_mutation(
             # A persisted envelope must pass the same check before native replay.
             import base64
 
-            encoding, payload = state._serializer().dumps_typed(delta)
+            encoding, payload = plugin_state_codec._serializer().dumps_typed(delta)
             decode_plugin_delta(
                 {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")},
                 ExampleState,
