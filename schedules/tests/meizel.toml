@@ -1,0 +1,7 @@
+[loads]
+"test_adversarial_eval_weekly.py" = ["schedules"]
+"test_agent_directory_consumers.py" = ["schedules"]
+"test_c9_daily_report.py" = ["schedules"]
+"test_catchup.py" = ["schedules"]
+"test_debt_sweep_daily.py" = ["schedules"]
+"test_dev_ci_metrics.py" = ["schedules"]

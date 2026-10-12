@@ -1,0 +1,5 @@
+[loads]
+"test_rss_feed.py" = ["ava_builtins/skills"]
+"test_sms.py" = ["ava_builtins/skills"]
+"test_telegram_send_file.py" = ["ava_builtins/skills"]
+"test_youtube_feed.py" = ["ava_builtins/skills"]

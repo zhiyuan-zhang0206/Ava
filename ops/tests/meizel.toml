@@ -1,0 +1,2 @@
+[external]
+"test_plugin_services.py" = "imports the plugin module the test writes under tmp_path"

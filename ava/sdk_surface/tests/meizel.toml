@@ -1,0 +1,2 @@
+[external]
+"test_help_renderer.py" = "executes generated module source to render help for it"
