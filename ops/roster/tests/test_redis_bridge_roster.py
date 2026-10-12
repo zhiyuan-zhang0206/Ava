@@ -44,11 +44,10 @@ def test_a_macos_gateway_with_a_private_address_is_not_gated(
 def test_the_unit_command_carries_the_recorded_listen_address(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        roster,
-        "redis_bridge_endpoint",
-        lambda *_a, **_k: RedisBridgeEndpoint("10.64.0.7", 16380),
-    )
+    def fixed_endpoint(*_args: object, **_kwargs: object) -> RedisBridgeEndpoint:
+        return RedisBridgeEndpoint("10.64.0.7", 16380)
+
+    monkeypatch.setattr(roster, "redis_bridge_endpoint", fixed_endpoint)
     command, host, port = roster._redis_bridge_command()
     assert command == (
         "/usr/bin/python3 services/redis_bridge/relay.py --listen-host 10.64.0.7 "
