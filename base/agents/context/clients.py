@@ -206,7 +206,17 @@ class ClientSet:
             return self._made[factory]  # type: ignore[return-value]
 
     def event_pipeline(self) -> Any:
-        """Construct this owner's event writer only when its producer needs enqueue."""
+        """Construct this owner's event writer only when its producer needs enqueue.
+
+        A constructed writer is returned without taking the set lock. This is the
+        producer behind the loguru event sink, which runs on whichever thread logs;
+        that thread can be the one building the eager config chain (the timezone
+        warning is logged from inside it) while the SDK thread holds the set lock in
+        `gateway`, waiting for that same build to finish. Taking the lock here would
+        make the two wait on each other until the config wait bound expired."""
+        pipeline = self._event_pipeline
+        if pipeline is not None:
+            return pipeline
         with self._lock:
             if self._event_pipeline is None:
                 if self._pipeline_factory is None:
