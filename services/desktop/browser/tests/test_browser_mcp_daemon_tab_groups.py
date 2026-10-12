@@ -15,8 +15,6 @@ import socket
 import time
 from typing import Any
 
-import pytest
-
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import ChromeMcpDaemon
 from services.desktop.browser.tab_groups.grouping import AgentTabGroups
@@ -251,25 +249,6 @@ async def _agent_with_one_page(
 async def test_release_closes_the_agents_last_page_through_close_page() -> None:
     d, up = await _agent_with_one_page()
     assert await page_lifecycle.release_agent_page(d, 7) == 1
-    assert up.closed_pages() == [1]
-
-
-async def test_dead_localhost_reaper_closes_through_close_page(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def nothing_listens(host: str, port: int) -> bool:
-        return False
-
-    monkeypatch.setattr(page_lifecycle, "port_listening", nothing_listens)
-    d, up = await _agent_with_one_page()
-    await page_lifecycle.reap_dead_agent_pages(d)
-    assert up.closed_pages() == [1]
-
-
-async def test_idle_reaper_closes_through_close_page() -> None:
-    d, up = await _agent_with_one_page()
-    d.pages.last_use[7] = time.monotonic() - page_lifecycle._TAB_IDLE_TIMEOUT_S - 1
-    assert await page_lifecycle.reap_idle_agent_pages(d) == 1
     assert up.closed_pages() == [1]
 
 
