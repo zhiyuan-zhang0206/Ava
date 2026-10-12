@@ -73,7 +73,8 @@ before writing remains retryable.
 `snapshot` / `click` / [[drag.ava.okf.md|drag]] / `move` / `cursor_position` /
 `type_text` / `key` / `scroll` / `list_apps` / `list_windows` / `focus_app` / `window_info` /
 `session_info` / `frontmost_app` / `release_control`, plus `find_text` /
-`click_text` (OCR), `ax_tree` and `ax_act` (accessibility, below). Coordinates are
+`click_text` (OCR), [[clipboard.ava.okf.md|clipboard_read / clipboard_write]],
+`ax_tree` and `ax_act` (accessibility, below). Coordinates are
 **physical pixels** (the screenshot space); the daemon converts to the
 helper's logical-point space via the backing scale reported by `snapshot`
 (`screen.width/height/scale` + `pixels.width/height`). `snapshot` writes the

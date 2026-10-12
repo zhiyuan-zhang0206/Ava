@@ -71,6 +71,8 @@ func requestHelperShutdown(runDir: String) throws -> [String: Any] { [:] }
         "sessionHas",
         "signalSession",
         "indicatorStop",
+        "clipboardRead",
+        "clipboardWrite",
     ]:
         stubs += (
             f"func {name}(_ req: [String: Any]) throws -> [String: Any] "
@@ -209,6 +211,12 @@ for method in ["click", "drag", "move", "focus_app", "type", "key", "scroll", "a
     precondition(posted.isEmpty && created == 0)
 }
 precondition(dispatch(["id": 1, "method": "cursor_position"])["ok"] as? Bool == true)
+// The clipboard is not synthetic input: it needs no Accessibility grant.
+stubCalls = 0
+for method in ["clipboard_read", "clipboard_write"] {
+    precondition(dispatch(["id": 1, "method": method])["ok"] as? Bool == true, "\(method) gated")
+}
+precondition(stubCalls == 2)
 trusted = true; reset()
 precondition(dispatch(["id": 1, "method": "click", "x": 1, "y": 2, "button": "right"])["ok"] as? Bool == true)
 precondition(posted.map { $0.type } == [.mouseMoved, .rightMouseDown, .rightMouseUp])
@@ -231,7 +239,7 @@ cursorReadFails = false
 
 // Dispatch: every desktop-changing method is refused in the corner with no side effect.
 reset(); cursorDefault = CGPoint(x: 0, y: 0); abortStops = 0; holdCalls = []
-for method in ["click", "move", "scroll", "key", "type", "drag", "focus_app", "ax_act"] {
+for method in ["click", "move", "scroll", "key", "type", "drag", "focus_app", "ax_act", "clipboard_write"] {
     let stopsBefore = abortStops
     let response = dispatch(["id": 1, "method": method, "x": 1, "y": 2, "dy": 3, "code": 0])
     precondition(abortStops == stopsBefore + 1, "\(method) abort left the capture indicator running")
@@ -245,7 +253,7 @@ precondition(holdCalls.isEmpty)
 // Observation stays available while the pointer is parked.
 for method in ["cursor_position", "screen_size", "ax_tree", "ax_window_info", "list_apps",
                "list_windows", "window_info", "session_info", "frontmost_app", "ping",
-               "screencapture_window", "screencapture_region"] {
+               "screencapture_window", "screencapture_region", "clipboard_read"] {
     let before = stubCalls
     let response = dispatch(["id": 1, "method": method])
     precondition(response["ok"] as? Bool == true, "\(method) blocked")
@@ -276,6 +284,7 @@ precondition(posted.isEmpty && created == 0)
 let ping = dispatch(["id": 1, "method": "ping"])["result"] as! [String: Any]
 precondition(ping["corner_failsafe_v1"] as? Bool == true)
 precondition(ping["capture_indicator_v1"] as? Bool == true)
+precondition(ping["clipboard_v1"] as? Bool == true)
 
 // Out of the corner, each input method asks for its badge once, before any event is posted.
 // Nothing else does: focus_app produces no input, ax_act decides inside its own body, and
@@ -290,7 +299,7 @@ for method in ["click", "drag", "move", "scroll", "type", "key"] {
 }
 holdCalls = []
 for method in ["focus_app", "ax_act", "ax_tree", "cursor_position", "list_windows", "screencapture_window",
-               "indicator_stop", "ping"] {
+               "indicator_stop", "ping", "clipboard_read", "clipboard_write"] {
     _ = dispatch(["id": 1, "method": method, "x": 1, "y": 2, "dy": 3, "code": 0])
 }
 precondition(holdCalls.isEmpty)

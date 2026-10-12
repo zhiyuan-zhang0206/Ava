@@ -26,6 +26,7 @@ class PingResult(TypedDict):
     capture_indicator_v1: NotRequired[
         bool
     ]  # marks the window each input lands on; serves `indicator_stop`
+    clipboard_v1: NotRequired[bool]  # serves `clipboard_read` / `clipboard_write`
 
 
 class IndicatorStopResult(TypedDict):
@@ -35,6 +36,17 @@ class IndicatorStopResult(TypedDict):
 class ScreencaptureResult(TypedDict):
     path: str
     bytes: int  # PNG size on disk, or -1 if it could not be stat'd
+
+
+class ClipboardReadResult(TypedDict):
+    text: str | None  # None when the clipboard holds no plain text
+    types: list[str]  # every type currently on the clipboard
+    length: int  # code points in the full text; 0 when there is none
+    truncated: bool  # `text` was cut at the helper's length bound
+
+
+class ClipboardWriteResult(TypedDict):
+    length: int  # code points written; the text itself is never echoed
 
 
 class ClickPoint(TypedDict):
