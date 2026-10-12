@@ -33,6 +33,23 @@ PAUSE_TIMEOUT_SECONDS = 300.0
 # Every hold a local stop takes is named with this prefix.
 STOP_HOLDER_PREFIX = "local-pause:"
 
+
+def new_stop_holder(machine: str) -> str:
+    """The name of a hold this process's stop takes: ``local-pause:<machine>:<pid>:<uuid>``."""
+    return f"{STOP_HOLDER_PREFIX}{machine}:{os.getpid()}:{uuid4()}"
+
+
+def owns_stop_hold(holder: str | None) -> bool:
+    """Whether `holder` names a hold the calling process's own stop took.
+
+    Only the pid in the name (see `new_stop_holder`) says whose it is.
+    """
+    if holder is None or not holder.startswith(STOP_HOLDER_PREFIX):
+        return False
+    parts = holder.rsplit(":", 2)
+    return len(parts) == 3 and parts[1] == str(os.getpid())
+
+
 # The retry cadence for the bounded wait on an in-flight agent lifecycle
 # command (task #3591). Every attempt re-runs cohort preparation inside its
 # row-locked transaction, so the interval trades retry cost against how
@@ -337,7 +354,7 @@ def pause_agents(
         if driver is not None:
             pause_owner.refresh_driver(holder, at, driver=driver)
     else:
-        holder = f"{STOP_HOLDER_PREFIX}{local_machine.name()}:{os.getpid()}:{uuid4()}"
+        holder = new_stop_holder(local_machine.name())
         at = datetime.now(UTC)
     if (
         current.status != "paused"

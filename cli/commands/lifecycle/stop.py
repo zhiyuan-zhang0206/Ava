@@ -307,16 +307,21 @@ def cmd_stop(
 def _release_self_heal_pause(
     *, database_factory: DatabaseFactory, machine: MachineIdentity
 ) -> None:
-    """After a declined restart, clear a paused posture that nothing else will.
+    """After a restart that failed before any service stopped, let go of what it took.
 
-    A restart that declines never reaches `ava start`/`ava restart`'s unpause,
-    so a paused posture read here has no other owner coming to release it and
-    would strand the host paused. A stop or maintenance hold in progress owns
-    its own pause and is left to `ava start`; a read failure leaves the host
-    paused — wrongly unpausing is the worse mistake.
+    A restart that declines or fails never reaches `ava start`/`ava restart`'s
+    unpause, so nothing else would release its hold or a paused posture and the
+    host would sit gated until an operator ran `ava start`. The hold this
+    process's own stop took in its preparing, draining or drained phase is
+    released here (nothing was stopped; no start is run and nothing is
+    retried). A hold that has entered its stop window keeps gating agents until
+    `ava start` passes readiness, and a hold taken by anyone else is theirs. A
+    posture read failure leaves the host paused — wrongly unpausing is the
+    worse mistake.
     """
     from base.deploy.maintenance import admission
     from base.deploy.state.host_deploy_state import read
+    from ops.agent_pause import owns_stop_hold
 
     held = admission.snapshot()
     if (
@@ -325,6 +330,9 @@ def _release_self_heal_pause(
         and held.maintenance.phase in (MaintenancePhase.STOPPING, MaintenancePhase.STOPPED)
     ):
         print("  · services partially stopped; holding agents until ava start passes readiness")
+        return
+    if held is not None and owns_stop_hold(held.holder):
+        _release_own_hold(database_factory=database_factory, machine=machine)
         return
 
     # The pause lives in the posture row (R1, PR5): only `paused` is this heal's business.
@@ -342,6 +350,22 @@ def _release_self_heal_pause(
 
     unpause_local_cluster(database_factory(), EventBus.from_settings(), local_machine=machine)
     print("  · unpaused this host (nothing else owns the pause; nothing was stopped)")
+
+
+def _release_own_hold(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
+    """Release this process's pre-service stop hold and restore the posture."""
+    from ops.cluster_status.pause import unpause_local_cluster
+
+    try:
+        unpause_local_cluster(database_factory(), EventBus.from_settings(), local_machine=machine)
+    except Exception as exc:
+        print(
+            f"  · could not release the maintenance hold this restart took ({exc}); "
+            "run `ava start` to release it",
+            file=sys.stderr,
+        )
+        return
+    print("  · released the maintenance hold this restart took (nothing was stopped)")
 
 
 def _require_restart_runtime(runtime: StartRuntime) -> None:

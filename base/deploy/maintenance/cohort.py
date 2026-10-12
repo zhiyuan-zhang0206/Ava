@@ -89,11 +89,9 @@ def prepare(
                 if row.retired_intent():
                     require_cold_end(conn, row.agent_id)
         applied = _applied_capture(conn, hold, host_owner, holder, acquired_at)
-        captured = _classify(
-            [_RuntimeRow(*row) for row in rows], hold, host_owner, applied, host_absent=host_absent
-        )
-        cold = frozenset(
-            row[0] for row in rows if host_absent and _RuntimeRow(*row).cold_hosted_idle()
+        captured = _classify([_RuntimeRow(*row) for row in rows], hold, host_owner, applied)
+        cold = _cold_agents(
+            [_RuntimeRow(*row) for row in rows], host_owner, host_absent=host_absent
         )
         settled = _settle_orphan_claims(conn, captured, cold)
         _refuse_inflight_lifecycle(conn, captured, cold, holder=holder, acquired_at=acquired_at)
@@ -124,31 +122,33 @@ class _RuntimeRow(NamedTuple):
     pid: int | None
     resources: object
 
-    def unowned_idle(self) -> bool:
+    def parked_idle(self, host_owner: UUID | None) -> bool:
+        """An idle agent with nothing running for it and no live lease, owned by nobody
+        or by a host other than the one being restarted.
+
+        A departed host leaves its idle agents with the owner, an expired or
+        released lease and an admitted-but-empty resource set; the next wake
+        re-admits them under the ordinary admission fences, which prove the
+        previous host gone. Anything with work in flight (a running turn, a
+        native process, an exec allocation, a live lease) is not parked.
+        """
         return (
             self.status == "idling"
             and self.kind in (None, "hosted")
-            and self.owner is None
-            and self.generation is None
+            and (self.owner is None or self.owner != host_owner)
+            and (self.owner is None) == (self.generation is None)
             and self.fresh is not True
             and self.pid is None
-            and (
-                self.resources is None
-                or isinstance(decode_resources(self.resources), ResourceBirth)
-            )
+            and self._holds_no_work()
         )
 
-    def cold_hosted_idle(self) -> bool:
-        # Expired owned rows enter here only after retired_intent's persisted
-        # END and native-absence proof. Their historical lease stays unchanged.
-        return (
-            self.status == "idling"
-            and self.kind in (None, "hosted")
-            and (self.fresh is None or self.retired_intent())
-            and self.pid is None
-            and self.resources is None
-            and (self.owner is None) == (self.generation is None)
-        )
+    def _holds_no_work(self) -> bool:
+        if self.resources is None:
+            return True
+        state = decode_resources(self.resources)
+        if isinstance(state, ResourceBirth):
+            return True
+        return not state.requests and state.frozen_by is None
 
     def retired_intent(self) -> bool:
         return (
@@ -246,10 +246,8 @@ def _classify(
     hold: MaintenanceHold,
     owner: UUID | None,
     applied: set[int],
-    *,
-    host_absent: bool = False,
 ) -> MaintenanceHold:
-    parked = _parked_agents(rows, hold, host_absent=host_absent)
+    parked = _parked_agents(rows, hold, owner)
     captured = bool(hold.commands or hold.parked)
     if captured and hold.parked != parked:
         raise RuntimeError("parked native intent changed while preparing")
@@ -265,16 +263,26 @@ def _classify(
     )
 
 
+def _cold_agents(
+    rows: list[_RuntimeRow], host_owner: UUID | None, *, host_absent: bool
+) -> frozenset[int]:
+    """Parked agents with no resource record, when no host is running at all."""
+    return frozenset(
+        row.agent_id
+        for row in rows
+        if host_absent and row.resources is None and row.parked_idle(host_owner)
+    )
+
+
 def _parked_agents(
-    rows: list[_RuntimeRow], hold: MaintenanceHold, *, host_absent: bool
+    rows: list[_RuntimeRow], hold: MaintenanceHold, host_owner: UUID | None
 ) -> tuple[int, ...]:
-    """Agents outside the cohort whose native intent is parked (idle with no live owner)."""
+    """Agents outside the cohort whose native intent is parked (idle, no live owner)."""
     return tuple(
         sorted(
             row.agent_id
             for row in rows
-            if row.agent_id not in hold.commands
-            and (row.unowned_idle() or (host_absent and row.cold_hosted_idle()))
+            if row.agent_id not in hold.commands and row.parked_idle(host_owner)
         )
     )
 
@@ -478,9 +486,7 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
             (list(hold.parked),),
         ).fetchall()
         parked = [_RuntimeRow(*row) for row in rows]
-        if {row.agent_id for row in parked if row.unowned_idle() or row.cold_hosted_idle()} != set(
-            hold.parked
-        ):
+        if {row.agent_id for row in parked if row.parked_idle(None)} != set(hold.parked):
             raise RuntimeError("parked agent intent changed during maintenance")
     for agent_id, command_id in hold.commands.items():
         row = conn.execute(
