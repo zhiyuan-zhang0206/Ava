@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-import importlib
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -252,7 +252,7 @@ class TestUnderstandEntries:
         ) -> list[Any]:
             return [fn(t) for t in targets]
 
-        understand_module = importlib.import_module("ava.understand")
+        understand_module = sys.modules["ava.understand"]  # the module, not the same-named function
         monkeypatch.setattr(understand_module, "run_batch", fake_batch)
         monkeypatch.setattr(understand_module, "_understand_one", lambda **kw: kw["effort"])  # pyright: ignore[reportUnknownArgumentType]
         out = understand([{"prompt": "p", "text": "t"}], effort=("low",))  # pyright: ignore[reportArgumentType, reportCallIssue]

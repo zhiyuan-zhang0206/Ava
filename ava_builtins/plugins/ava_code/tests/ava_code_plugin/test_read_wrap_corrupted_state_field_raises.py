@@ -396,12 +396,10 @@ def test_understand_wrap_outside_turn_defers_to_workspace(workspace: Path, monke
 def test_understand_wrap_keeps_error_attribute_and_doc():
     """After wrap, ava.understand.UnderstandError still reachable (agent's documented catch path),
     docstring original contract preserved."""
-    import importlib
+    from ava.understand import UnderstandError, understand  # the module's own names
 
-    understand_mod = importlib.import_module("ava.understand")
-
-    assert ava.understand.UnderstandError is understand_mod.UnderstandError  # type: ignore[attr-defined] # pyright: ignore[reportFunctionMemberAccess]
-    assert ava.understand.__doc__ == understand_mod.understand.__doc__
+    assert ava.understand.UnderstandError is UnderstandError  # type: ignore[attr-defined] # pyright: ignore[reportFunctionMemberAccess]
+    assert ava.understand.__doc__ == understand.__doc__
 
 
 def test_understand_wrap_passes_invalid_combo_to_core(tmp_path: Path):
