@@ -1,8 +1,9 @@
-"""Old inbox timestamps cannot kill fresh turns or hide expired owners."""
+"""The pending scan never kills a running turn or hides an expired owner."""
 
 import asyncio
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -65,13 +66,11 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         machine=configured_machine(),
     )
 
-    wakes = await host.pending_inbound_wakes(60)
-    assert [wake.agent_id for wake in wakes] == [agent]
+    assert await host.pending_inbound_wakes() == [agent]
 
     ordinary = insert_inbound(db_conn, agent, "Need a reply", "user")
     db_conn.commit()
-    wakes = await host.pending_inbound_wakes(60)
-    assert [wake.agent_id for wake in wakes] == [agent]
+    assert await host.pending_inbound_wakes() == [agent]
 
     db_conn.execute(
         "UPDATE inbound_messages SET status='done' WHERE id IN (%s,%s)", (lifecycle, ordinary)
@@ -83,15 +82,14 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         (uuid4(), agent, machine_identity.name()),
     )
     db_conn.commit()
-    wakes = await host.pending_inbound_wakes(60)
-    assert [wake.agent_id for wake in wakes] == [agent]
+    assert await host.pending_inbound_wakes() == [agent]
 
 
-@pytest.mark.parametrize("known_progress", [True, False])
-async def test_old_pending_does_not_cancel_current_graph_progress(
+@pytest.mark.parametrize("silent_turn", [False, True])
+async def test_old_pending_scan_never_cancels_a_running_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    known_progress: bool,
+    silent_turn: bool,
     insert_inbound: Callable[..., int],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -142,19 +140,15 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         EventBus.from_settings(),
         scheduler,
         pending_scan=host.pending_inbound_wakes,
-        turn_progress=host.turn_progress,
-        turn_admission=host.admission,
-        stale_after_s=60,
     )
     try:
         scheduler.wake(agent)
         await asyncio.wait_for(entered.wait(), 3)
-        assert [(w.agent_id, w.stale) for w in await host.pending_inbound_wakes(60)] == [
-            (agent, True)
-        ]
-        assert (await host.pending_inbound_wakes(60))[0].agent_id == agent
-        if not known_progress:
-            host.turn_progress._marks.pop(agent)
+        assert await host.pending_inbound_wakes() == [agent]
+        if silent_turn:
+            # A progress clock silent for a day is the stall guard's to judge;
+            # the scan has no cancellation path left.
+            host.turn_progress._marks[agent] = [time.monotonic() - 86400]
         await dispatcher.scan_once()
         assert agent in scheduler.active_agents
         assert invocations == [agent]
@@ -222,7 +216,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     if boundary == "fatal":
         db_conn.execute("UPDATE agents_meta SET last_turn_fatal_at=now() WHERE id=%s", (agent,))
     db_conn.commit()
-    assert await host.pending_inbound_wakes(60) == []
+    assert await host.pending_inbound_wakes() == []
 
 
 @pytest.mark.parametrize("status", ["running", "idling"])
@@ -286,7 +280,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
                 "lease_expires_at FROM agents_meta WHERE id=%s",
                 (agent,),
             ).fetchone()
-            assert await host.pending_inbound_wakes(60) == []
+            assert await host.pending_inbound_wakes() == []
             await host.run_turn(agent)
             assert host.stats.cache_misses == 0
             assert (

@@ -4,7 +4,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from base.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
+from base.cluster import inbound_channel
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -12,10 +12,9 @@ from base.log import logger
 
 def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: str) -> bool:
     """Best-effort Redis publish to wake an idle agent — the fast path paired
-    with the claim loop's SELECT recheck. Also SETEXes the agent's wake key
-    (`base.cluster.wake_key`) as a durable breadcrumb so a wake lost to a
-    disconnected listener is recovered on the listener's next (re)subscribe
-    instead of waiting out the full recheck budget.
+    with the claim loop's SELECT recheck. Pub/sub is fire-and-forget: a wake
+    published while the agent's listener is disconnected is not replayed, and
+    the agent picks the inbound up on its next SELECT recheck.
 
     Also runs the best-effort impersonation relay liveness alert before
     publishing. Known Redis/network failures are recovered by `wait_for_inbound`'s
@@ -46,12 +45,6 @@ def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: st
             # redis-py types publish()'s **kwargs as Unknown, so the bound
             # method reads as partially-unknown; the call itself is fully typed.
             r.publish(channel, payload)  # pyright: ignore[reportUnknownMemberType]
-            # Durable breadcrumb for the lost-wake window: pub/sub is
-            # fire-and-forget, so a publish that lands while the agent's
-            # listener is disconnected is otherwise unrecoverable until the
-            # claim loop's 30s SELECT recheck. The listener GETDELs this key
-            # on (re)subscribe and SELECTs immediately when it is present.
-            r.set(wake_key(agent_id), payload, ex=WAKE_KEY_TTL_S)
             return True
         finally:
             r.close()

@@ -68,16 +68,9 @@ class Redis:
         self.close_release = asyncio.Event()
         self.close_release.set()
         self.closed = False
-        self.getdel_entered = asyncio.Event()
-        self.getdel_release = asyncio.Event()
-        self.getdel_release.set()
 
     def pubsub(self, **kwargs: object) -> PubSub:
         return self.subscription
-
-    async def getdel(self, key: str) -> None:
-        self.getdel_entered.set()
-        await self.getdel_release.wait()
 
     async def aclose(self) -> None:
         self.closing.set()
@@ -304,64 +297,6 @@ async def test_expected_late_network_error_does_not_fail_stop(
             await asyncio.gather(pubsub.task, return_exceptions=True)
 
 
-async def test_stop_during_getdel_prevents_later_consume_admission(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pubsub = PubSub()
-    redis = Redis(pubsub)
-    redis.getdel_release.clear()
-    client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7011)
-    waiter = asyncio.create_task(listener.wait_one(30))
-    try:
-        await asyncio.wait_for(redis.getdel_entered.wait(), timeout=1)
-        assert await listener.stop(timeout=0.02) == ()
-        assert listener.unfinished_work == ()
-        redis.getdel_release.set()
-        await finished(waiter)
-        with pytest.raises(RuntimeError, match="has stopped"):
-            waiter.result()
-        assert not pubsub.reading.is_set()
-        assert listener.unfinished_work == ()
-    finally:
-        redis.getdel_release.set()
-        pubsub.message = {"type": "message"}
-        pubsub.release.set()
-        waiter.cancel()
-        await asyncio.gather(waiter, return_exceptions=True)
-        await listener.stop(timeout=1)
-
-
-async def test_close_during_getdel_consumes_only_replacement_subscription(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    old, new = PubSub(), PubSub()
-    first, second = Redis(old), Redis(new)
-    first.getdel_release.clear()
-    new.message = {"type": "message"}
-    new.release.set()
-    client(monkeypatch, first, second)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7012)
-    waiter = asyncio.create_task(listener.wait_one(30))
-    try:
-        await asyncio.wait_for(first.getdel_entered.wait(), timeout=1)
-        await listener.close()
-        await listener.ensure_listening()
-        assert listener._pubsub is new and listener._redis is second
-        first.getdel_release.set()
-        await finished(waiter)
-        waiter.result()
-        assert not old.reading.is_set()
-        assert new.reading.is_set()
-    finally:
-        first.getdel_release.set()
-        old.message = {"type": "message"}
-        old.release.set()
-        waiter.cancel()
-        await asyncio.gather(waiter, return_exceptions=True)
-        await listener.stop(timeout=1)
-
-
 async def test_completed_active_open_stays_owned_until_caller_claims_error(
     monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
@@ -418,26 +353,20 @@ async def test_unknown_cleanup_typeerror_is_not_the_redis_transport_quirk(
     assert listener.unfinished_work == ()
 
 
-@pytest.mark.parametrize("boundary", ["probe", "wake_key"])
-async def test_unknown_probe_or_wake_key_error_reaches_active_caller(
+async def test_unknown_probe_error_reaches_active_caller(
     monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
-    boundary: str,
 ) -> None:
-    error = LateError(f"{boundary} invariant")
+    error = LateError("probe invariant")
 
     class FailingProbe(PubSub):
         async def ping(self) -> None:
             raise error
 
-    class FailingWakeKey(Redis):
-        async def getdel(self, key: str) -> None:
-            raise error
-
-    pubsub = FailingProbe() if boundary == "probe" else PubSub()
+    pubsub = FailingProbe()
     pubsub.message = {"type": "message"}
     pubsub.release.set()
-    redis = FailingWakeKey(pubsub) if boundary == "wake_key" else Redis(pubsub)
+    redis = Redis(pubsub)
     client(monkeypatch, redis)
     listener = redis_listener.RedisInboundListener("redis://unused", 7015)
     try:
@@ -451,22 +380,19 @@ async def test_unknown_probe_or_wake_key_error_reaches_active_caller(
         await listener.stop(timeout=1)
 
 
-@pytest.mark.parametrize("boundary", ["consume_timeout", "consume_transport", "wake_key_timeout"])
+@pytest.mark.parametrize("boundary", ["consume_timeout", "consume_transport"])
 async def test_old_phase_cleanup_preserves_replacement_subscription(
     monkeypatch: pytest.MonkeyPatch,
     boundary: str,
 ) -> None:
     old, new = PubSub(), PubSub()
     first, second = Redis(old), Redis(new)
-    if boundary == "wake_key_timeout":
-        first.getdel_release.clear()
     client(monkeypatch, first, second)
     monkeypatch.setattr(redis_listener, "_CONSUME_ABANDON_GRACE", 0.02)
     listener = redis_listener.RedisInboundListener("redis://unused", 7016)
     waiter = asyncio.create_task(listener.wait_one(0.3))
     try:
-        started = first.getdel_entered if boundary == "wake_key_timeout" else old.reading
-        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(old.reading.wait(), timeout=1)
         await listener.close()
         await listener.ensure_listening()
         assert old.closed and first.closed
@@ -483,7 +409,6 @@ async def test_old_phase_cleanup_preserves_replacement_subscription(
             assert old.task is not None and not old.task.done()
             assert any(":consume:" in name for name in listener.unfinished_work)
     finally:
-        first.getdel_release.set()
         old.release.set()
         new.release.set()
         waiter.cancel()

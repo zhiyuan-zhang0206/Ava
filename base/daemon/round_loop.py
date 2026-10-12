@@ -21,6 +21,53 @@ _log = logging.getLogger("base.daemon.round_loop")
 
 _BEAT_STEP_S = 15.0
 
+# Consecutive rounds of a log-and-continue resident loop that may fail before the
+# process exits for its supervisor. Rounds are minutes to an hour apart, so five
+# in a row is a persistent fault rather than a blip, and the exit is bounded by
+# the supervisor's own restart budget.
+CONSECUTIVE_ROUND_FAILURE_LIMIT = 5
+
+
+class RoundFailureLimitError(RuntimeError):
+    """A resident loop failed too many rounds in a row; the process must exit."""
+
+
+class RoundFailureBudget:
+    """Consecutive-failure budget for a loop that logs a failed round and carries on.
+
+    `run_rounds` ends the loop on the first unexpected exception. A loop whose own
+    structure keeps it out of `run_rounds` spends this budget instead: `succeeded()`
+    after each completed round clears the count, `failed(exc)` after an unexpected
+    exception counts it and, at the limit, raises `RoundFailureLimitError` chained
+    to the last exception. Raised inside the owning `TaskGroup`, that ends the
+    process like any other loop exit. An unreachable database is not an unexpected
+    failure (see `run_rounds`): `failed` does not count it.
+    """
+
+    def __init__(self, name: str, limit: int = CONSECUTIVE_ROUND_FAILURE_LIMIT) -> None:
+        self._name = name
+        self._limit = limit
+        self._failures = 0
+
+    def succeeded(self) -> None:
+        self._failures = 0
+
+    def failed(self, error: BaseException) -> None:
+        if isinstance(error, psycopg.OperationalError):
+            return
+        self._failures += 1
+        if self._failures < self._limit:
+            return
+        _log.critical(
+            "[%s] %d consecutive rounds failed — exiting for supervisor recovery",
+            self._name,
+            self._failures,
+            exc_info=error,
+        )
+        raise RoundFailureLimitError(
+            f"{self._name}: {self._failures} consecutive rounds failed"
+        ) from error
+
 
 async def sleep_with_progress(progress: LoopProgress, total_s: float) -> None:
     """Sleep `total_s`, beating `progress` so a quiet wait is not read as a wedge."""

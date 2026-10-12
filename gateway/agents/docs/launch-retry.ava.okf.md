@@ -37,7 +37,7 @@ by the existing host path.
 metadata row through `base.agents.inbox.wake.publish_inbound_wake`: only matching local machine,
 current attempt, idling status and null admission may publish. Missing,
 terminated, admitted, moved or superseded targets produce no wake. The publisher
-uses existing Redis pub/sub plus the wake breadcrumb; its impersonation alert
+uses existing Redis pub/sub; its impersonation alert
 performs a plain read, without acquiring a host-owner or metadata lock. The
 reconciler does not acquire a host-owner lock, so it introduces no inverse lock
 order. Concurrent admission/termination/rotation waits on the same metadata row.

@@ -7,9 +7,8 @@ contract:
 1. **Ticket rotation** — one ticket per agent (TurnScheduler's single flight),
    arrival-order FIFO service, and a completed turn's next request taken at the
    tail: no starvation, no overtaking.
-2. **Queued is not stalled** — the waiter is registered in the gate BEFORE its
-   acquire await and cleared on serve or cancel; the dispatcher's fake-alive
-   scan reads exactly this registration (``is_waiting``).
+2. **Queued is visible** — the waiter is registered in the gate BEFORE its
+   acquire await and cleared on serve or cancel (``is_waiting``).
 3. **Observability** — depth, ages and served-wait counters for ``/stats``;
    one ``long_waiters`` report per wait episode.
 4. **Unlimited mode** — ``limit <= 0`` is a state-free no-op (legacy zero
@@ -27,7 +26,6 @@ from typing import cast
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
-from services.agent_runner.agent_host.scheduling.pending_wakes import PendingInboundWake
 
 
 async def _until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
@@ -295,15 +293,10 @@ class TestSchedulerIntegration:
 
         fresh = TurnScheduler(run_turn)
 
-        async def _pending(_stale_after_s: float) -> list[PendingInboundWake]:
-            return [
-                PendingInboundWake(agent_id=2, stale=False),
-                PendingInboundWake(agent_id=3, stale=False),
-            ]
+        async def _pending() -> list[int]:
+            return [2, 3]
 
-        disp = InboundWakeDispatcher(
-            EventBus.from_settings(), fresh, pending_scan=_pending, stale_after_s=180.0
-        )
+        disp = InboundWakeDispatcher(EventBus.from_settings(), fresh, pending_scan=_pending)
         try:
             await disp.scan_once()
             await _until(lambda: sorted(served) == [1, 2, 3])

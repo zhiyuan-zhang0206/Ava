@@ -197,7 +197,7 @@ def test_runtime_user_is_confined_to_cluster_data_and_channel_prefix(redis_acces
         )
         user_url = url_with_userinfo(admin_url, "ava_feat_x", _SECRET)
         with redis.Redis.from_url(user_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
-            assert r.set("ava:feat-x:wake:1", "1", ex=60)  # pyright: ignore[reportUnknownMemberType]
+            assert r.set("ava:feat-x:probe:1", "1", ex=60)  # pyright: ignore[reportUnknownMemberType]
             assert r.set("fleet_graph:cache", "v", ex=60)  # pyright: ignore[reportUnknownMemberType]
             assert r.get("fleet_graph:cache") == "v"  # pyright: ignore[reportUnknownMemberType]
             assert r.publish("ava:feat-x:events", "ok") == 0  # pyright: ignore[reportUnknownMemberType]

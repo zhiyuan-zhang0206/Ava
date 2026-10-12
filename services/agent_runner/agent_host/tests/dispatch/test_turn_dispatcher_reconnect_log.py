@@ -41,9 +41,6 @@ class _IdleScheduler:
     def reaped_successor(self, agent_id: int) -> asyncio.Task[None] | None:
         return None
 
-    async def cancel_agent(self, agent_id: int) -> bool:
-        raise AssertionError("the reconnect path must not cancel an agent")
-
 
 async def test_reconnect_logs_warning_without_a_traceback(
     monkeypatch: pytest.MonkeyPatch,

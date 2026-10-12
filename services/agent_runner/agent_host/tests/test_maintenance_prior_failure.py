@@ -165,7 +165,7 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
         holder="after-crash",
         acquired_at=WHEN,
     )
-    assert [wake.agent_id for wake in await host.pending_inbound_wakes(300)] == [agent]
+    assert await host.pending_inbound_wakes() == [agent]
     await host.run_turn(agent)
     current = admission.require_operation("after-crash", WHEN)
     assert current.maintenance is not None
@@ -258,7 +258,7 @@ async def test_prior_tail_flush_outage_ends_the_restart_once_and_the_stop_fails_
     ).fetchone() == ("done", None, {"outcome": "failed", "reason": "continuation_failed"})
     # No later scan drives it again, and further wakes alert nothing more.
     for _scan in range(3):
-        assert await host.pending_inbound_wakes(300) == []
+        assert await host.pending_inbound_wakes() == []
     await host.run_turn(agent)
     assert len(alerts.rows) == 1
     drained = admission.require_operation("failed-flush", WHEN).maintenance

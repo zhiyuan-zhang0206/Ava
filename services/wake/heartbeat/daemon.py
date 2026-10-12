@@ -4,8 +4,8 @@ It sends due, unpaused check-ins to idle native agents and active impersonators.
 Native clocks start at the last completed turn; impersonation clocks run from
 lease activation regardless of external activity. Each check-in is a durable
 `heartbeat` inbound. The inbound-insert trigger wakes the agent (on any
-machine — this is cluster-wide, not machine-scoped: unlike the agent host it never
-touches local sessions). Runs on the gateway, one per cluster.
+machine — cluster-wide, not machine-scoped: unlike the agent host it never touches
+local sessions). Runs on the gateway, one per cluster.
 
 Dispatch is paced for fleet scale: rather than checking in on every due agent in
 one batch per idle window (which would wake 100-300 idle agents simultaneously —
@@ -15,11 +15,8 @@ resets each agent's idle clock in lockstep), it polls on a fine cadence (min of
 deterministic per-agent jitter, and caps check-ins per step for a hard global
 wake-rate ceiling. See the "Wakeup-storm flattening" note below.
 
-Usage:
-    .venv/bin/python -m services.wake.heartbeat.daemon
-
-Kept alive by the root supervisor's health monitor through the roster's `/healthz`
-identity probe (`ops/roster/healthz.py`).
+Usage: .venv/bin/python -m services.wake.heartbeat.daemon. Kept alive by the root
+supervisor through the roster's `/healthz` probe; repeated failed rounds end the process.
 """
 
 import asyncio
@@ -44,6 +41,7 @@ from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
+from base.daemon.round_loop import RoundFailureBudget
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
@@ -601,6 +599,7 @@ async def _dispatch_loop(
     # B7 no-op-nudge counter: in-process only; the raised level itself persists
     # in agents_meta.heartbeat_backoff_level.
     noop_streak: dict[int, int] = {}
+    failures = RoundFailureBudget("heartbeat poll")
     while True:
         try:
             await _sleep_with_liveness(liveness, step)
@@ -634,6 +633,7 @@ async def _dispatch_loop(
                     )
                 except Exception as exc:
                     _log.error("[heartbeat] check-in for agent %s failed: %r", agent_id, exc)
+            failures.succeeded()
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
@@ -642,8 +642,9 @@ async def _dispatch_loop(
                 exc_info=True,
             )
             raise
-        except Exception:
+        except Exception as exc:
             _log.exception("[heartbeat] poll iteration failed")
+            failures.failed(exc)
 
 
 async def _liveness_loop(
@@ -651,14 +652,17 @@ async def _liveness_loop(
 ) -> None:
     """Run agent-liveness checks, the first at start so the roster read model is
     populated at once; a failed pass is retried on the next interval."""
+    failures = RoundFailureBudget("heartbeat liveness")
     while True:
         try:
             if not admission.quiesced():
                 await run_liveness_pass(db, pool, bus)
+                failures.succeeded()
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             _log.exception("[heartbeat] liveness loop iteration failed")
+            failures.failed(exc)
         await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
 
 
