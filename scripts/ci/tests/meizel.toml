@@ -1,0 +1,2 @@
+[external]
+"test_watch_pr.py" = "executes the watcher template the workflow embeds"
