@@ -333,8 +333,7 @@ def _seed_via_helper(
             )
         if state == "exited":
             raise _RootDriverError(
-                "ava-root keeps exiting right after it starts and the keeper stopped restarting "
-                f"it (last exit: {wire.get('last_exit')})"
+                f"the keeper stopped restarting a root that keeps exiting ({wire.get('last_exit')})"
             )
         seed_error = wire.get("seed_error")
         if seed_error:
@@ -427,12 +426,6 @@ def _stop_root_process(
     raise _RootDriverError(f"ava-root at {run_dir} did not stop within {timeout_s:.0f}s")
 
 
-def _restart_budget_spent(status: dict[str, Any], unit_id: str) -> bool:
-    """Whether ava-root's finite restart budget for this unit is spent."""
-    health = cast("dict[str, dict[str, Any]]", status.get("health") or {})
-    return health.get(unit_id, {}).get("restart_limit_reached") is True
-
-
 def _reconcile_units(
     roster: tuple[ServiceSpec, ...],
     client: Any,
@@ -449,11 +442,12 @@ def _reconcile_units(
     unit down whose ava-root restart budget is spent.
     """
     units = _root_units(status)
+    health = cast("dict[str, dict[str, Any]]", status.get("health") or {})
     from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 
     for spec in roster:
         unit = units[spec.session]
-        if honor_restart_budget and _restart_budget_spent(status, spec.session):
+        if honor_restart_budget and health.get(spec.session, {}).get("restart_limit_reached"):
             print(f"  · {session_name(spec.session)} spent its restart budget — left down")
             continue
         if unit.get("state") != "running" or unit.get("intent") != "running":
