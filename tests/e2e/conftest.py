@@ -286,11 +286,11 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # Derived from the same map the endpoint table consults, not hand-listed: the
     # hand-listed version had already drifted (events_maintenance missing), and a
     # newly registered daemon would silently re-open this hole.
-    from base.daemon.health import _HEALTH_PORT_OVERRIDES
+    from base.host.env.health_ports import HEALTH_PORT_OVERRIDES
     from base.host.env.registry import cluster_scope_aliases
 
     _health_port_keys: frozenset[str] = frozenset(
-        f"AVA_{attr.upper()}" for attr in _HEALTH_PORT_OVERRIDES.values()
+        f"AVA_{attr.upper()}" for attr in HEALTH_PORT_OVERRIDES.values()
     )
     # Cluster-scoped CORS origins must be in the unit .env before gateway boot.
     os.environ["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (

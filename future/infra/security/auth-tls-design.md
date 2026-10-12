@@ -40,7 +40,7 @@ cluster secret existed but was only used for data-plane auth (pg/redis passwords
 ## Phase 1 — gateway auth middleware (landed)
 
 `Authorization: Bearer <secret>` on every `/api/*` route, constant-time compared
-(`base/cluster/auth.py`: `bearer_header()` / `verify_bearer()`, pure stdlib). The
+(`base/host/net/auth.py`: `bearer_header()` / `verify_bearer()`, pure stdlib). The
 SDK transport (`ava/gateway_client/transport.py`) and `scripts/entrypoints/agent.py` inject the header
 automatically.
 

@@ -15,12 +15,12 @@ from typing import Any
 import uvicorn
 from uvicorn.config import STARTUP_FAILURE
 
-from base.cluster.auth import require_cluster_secret
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.port_preflight import serves_off_box
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import ConfigBoot, settings
 from base.deploy.schema.migrations import assert_schema_current
+from base.host.net.auth import require_cluster_secret
 from base.log.process import init_gateway_process
 from base.native_process.os_platform import raise_fd_limit
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess

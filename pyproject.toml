@@ -1015,6 +1015,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/agents/model/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/observation/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1156,6 +1161,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/host/env/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/host/git/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

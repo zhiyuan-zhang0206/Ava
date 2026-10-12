@@ -21,7 +21,7 @@ from base.sessions import env_forwarding
 def test_managed_service_path_preserves_tools_across_callers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime: str
 ) -> None:
-    from base.deploy.release import runtime_interpreter
+    from base.host import runtime_interpreter
 
     venv = tmp_path / runtime
     bindir = venv / env_forwarding.get_backend().venv_bin_dir_name()

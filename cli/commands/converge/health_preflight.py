@@ -38,8 +38,8 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from base.cluster import get_record, port_free
-from base.deploy.git.gitenv import git_env
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+from base.host.git.gitenv import git_env
 from base.host.proc import run_bounded
 from cli.commands.converge.spec import ConvergeCtx
 

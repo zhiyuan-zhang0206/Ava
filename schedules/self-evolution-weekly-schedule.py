@@ -53,7 +53,7 @@ def count_events(since: datetime) -> int:
 
     from base.paths import ava_home
 
-    from base.cluster.auth import delivered_token
+    from base.host.net.auth import delivered_token
 
     env_file = Path(ava_home()) / ".env"
     secret = delivered_token() or ""

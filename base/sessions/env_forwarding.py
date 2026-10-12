@@ -127,7 +127,7 @@ def admit_service_path(value: str, *, excluded: tuple[Path, ...] = ()) -> str:
 
 def managed_service_env(service_path: str) -> dict[str, str]:
     """Use the admitted host PATH; interactive session forwarding is separate."""
-    from base.deploy.release.runtime_interpreter import runtime_venv
+    from base.host.runtime_interpreter import runtime_venv
 
     env = forward_env_dict()
     bindir = runtime_venv() / get_backend().venv_bin_dir_name()
@@ -209,7 +209,7 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     env = _session_forward_env()
     # Venv activation (the `uv run` injection this dict reproduces): the
     # allowlist never carried PATH/VIRTUAL_ENV, so the child must get them here.
-    from base.deploy.release.runtime_interpreter import runtime_venv
+    from base.host.runtime_interpreter import runtime_venv
 
     venv = runtime_venv()
     venv_bin = venv / get_backend().venv_bin_dir_name()
@@ -234,7 +234,7 @@ def venv_activation_prefix() -> str:
     injects the provisioned Node locations after the venv, because the frontend
     session runs bare `npm` after that profile has had a chance to discard PATH.
     """
-    from base.deploy.release.runtime_interpreter import runtime_venv
+    from base.host.runtime_interpreter import runtime_venv
 
     venv = runtime_venv()
     bindir = venv / get_backend().venv_bin_dir_name()

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from base.daemon import shutdown
+from base.host import exit_codes as hard_exit_module
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 from tests.components.base.poll_until import poll_until
@@ -68,12 +69,12 @@ def test_hard_exit_flushes_sinks_in_order_before_exiting(
         raise SystemExit(code)
 
     monkeypatch.setattr(loguru_logger, "remove", lambda: calls.append("loguru"))
-    monkeypatch.setattr(shutdown.logging, "shutdown", lambda: calls.append("logging"))
-    monkeypatch.setattr(shutdown.sys, "stdout", _Stream("stdout"))
-    monkeypatch.setattr(shutdown.sys, "stderr", _Stream("stderr"))
-    monkeypatch.setattr(shutdown.os, "_exit", exit_process)
+    monkeypatch.setattr(hard_exit_module.logging, "shutdown", lambda: calls.append("logging"))
+    monkeypatch.setattr(hard_exit_module.sys, "stdout", _Stream("stdout"))
+    monkeypatch.setattr(hard_exit_module.sys, "stderr", _Stream("stderr"))
+    monkeypatch.setattr(hard_exit_module.os, "_exit", exit_process)
     with pytest.raises(SystemExit) as stopped:
-        shutdown.hard_exit(7)
+        hard_exit_module.hard_exit(7)
     assert stopped.value.code == 7
     assert calls == ["loguru", "logging", "stdout", "stderr", "exit:7"]
 
@@ -90,9 +91,9 @@ def test_hard_exit_reports_a_failed_step_on_stderr_and_still_exits(
         raise SystemExit(code)
 
     monkeypatch.setattr(loguru_logger, "remove", broken_remove)
-    monkeypatch.setattr(shutdown.os, "_exit", exit_process)
+    monkeypatch.setattr(hard_exit_module.os, "_exit", exit_process)
     with pytest.raises(SystemExit) as stopped:
-        shutdown.hard_exit(3)
+        hard_exit_module.hard_exit(3)
     assert stopped.value.code == 3
     err = capsys.readouterr().err
     assert "closing the loguru sinks failed" in err

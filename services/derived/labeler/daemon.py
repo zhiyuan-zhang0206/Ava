@@ -34,13 +34,13 @@ from base.config.profiles import PROCESS_PROFILES, profile_unknown_error
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
-from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
+from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
 from base.log.process import init_gateway_process

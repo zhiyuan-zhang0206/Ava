@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
+from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 
 
 def _sleep() -> None:

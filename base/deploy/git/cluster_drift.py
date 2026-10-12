@@ -20,7 +20,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from base.deploy.git.gitenv import git_env
+from base.host.git.gitenv import git_env
 from base.host.proc import run_bounded
 
 # These reads are local-only (rev-parse / merge-base against an existing

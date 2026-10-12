@@ -17,6 +17,7 @@ helpers. HTTPX uses its installed import behavior and public entry points.
 
 - [[base/host/env/docs/audit.ava.okf.md]] — Base — .env write audit & integrity guard.
 - [[base/host/env/docs/registry.ava.okf.md]] — Environment declarations and boot/child projections.
+- [[base/host/docs/runtime_interpreter.ava.okf.md]] — Loaded-runtime interpreter binding.
 
 `base/host/net/resilience.py` owns immutable `Policy` parameters and the shared
 `retry` / `aretry` executors, including backoff, jitter, classification and

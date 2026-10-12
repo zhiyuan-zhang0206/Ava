@@ -22,6 +22,8 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
+from base.lm.content import message_addl_kwargs
+
 if TYPE_CHECKING:
     # Annotation-only on the read helpers; callers always pass real LangChain
     # messages, but this leaf module sits on the provider-registration import
@@ -230,27 +232,3 @@ COMPACT_SUMMARY_HEADER = (
     "[system] Your context was just compacted. The following is the summary of "
     "your own prior context:"
 )
-
-
-# ── Typed accessors for the loosely-typed LangChain message members ──
-#
-# LangChain types `content` blocks and `additional_kwargs` / `response_metadata`
-# as bare `dict` (Unknown keys), which propagates Unknown into every reader. These
-# three accessors are the single narrowing points — one scoped ignore each, so the
-# call sites in timeline / stop / reasoning-compat / labeler stay annotation-clean.
-
-
-def message_content(msg: BaseMessage) -> str | list[str | dict[str, Any]]:
-    """`msg.content` with its content-list block dicts retyped `dict[str, Any]`."""
-    # langchain types content-list blocks as bare dict, whose Unknown keys leak.
-    return cast("str | list[str | dict[str, Any]]", msg.content)  # pyright: ignore[reportUnknownMemberType]
-
-
-def message_addl_kwargs(msg: BaseMessage) -> dict[str, Any]:
-    """`msg.additional_kwargs` as a plain `dict[str, Any]` (langchain types it bare)."""
-    return cast("dict[str, Any]", msg.additional_kwargs)  # pyright: ignore[reportUnknownMemberType]
-
-
-def message_response_metadata(msg: BaseMessage) -> dict[str, Any]:
-    """`msg.response_metadata` as a plain `dict[str, Any]` (langchain types it bare)."""
-    return cast("dict[str, Any]", msg.response_metadata)  # pyright: ignore[reportUnknownMemberType]

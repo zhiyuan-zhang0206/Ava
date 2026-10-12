@@ -1,4 +1,4 @@
-"""Subprocess exit code constants.
+"""Subprocess exit code constants, and the hard exit that leaves with one.
 
 Standalone top-level module (not under ava/) — because
 ava/__init__.py triggers `_AvaEnv()` to read env and initialize
@@ -8,6 +8,16 @@ themselves have no env dependency; putting them at the top level lets
 both sides import without triggering ava SDK initialization side
 effects.
 """
+
+from __future__ import annotations
+
+import contextlib
+import logging
+import os
+import sys
+import traceback
+from collections.abc import Callable
+from typing import NoReturn
 
 IDLE_EXIT_CODE = 42  # `ava.self.terminate()` / `ava.self.restart()`: this turn ends (halted=True)
 SYSTEM_HALT_EXIT_CODE = 43  # `ava.self.compact(summary)`: agent altered control flow
@@ -44,3 +54,54 @@ SERVICES_NOT_READY_EXIT_CODE = 4
 # last exit tells "refused by the gate, update this host" apart from a crash. It
 # is neither 3 (the host is still serving) nor 4 (the start sequence completed).
 CODE_BEHIND_MINIMUM_EXIT_CODE = 78
+
+
+# ── Leaving the process ───────────────────────────────────────────────────────
+#
+# Leave the process at once after daemon-owned cleanup, without thread joins.
+#
+# The daemons with an explicit drain cancel and await remaining loop tasks (see
+# `base.daemon.shutdown`) so ``run()``'s cleanup can finish, then call ``hard_exit``.
+# They do not close ``asyncio.Runner``: its default-executor shutdown can wait up to
+# CPython's 300-second ``THREAD_JOIN_TIMEOUT``, already the stop flow's entire
+# budget, and interpreter teardown can join surviving workers without a bound.
+# A hard exit skips only teardown after daemon-owned cleanup; it also skips the
+# telemetry emitter's atexit drain (accepted for this path in task #4320), so logs
+# are flushed here first.
+
+
+def hard_exit(code: int) -> NoReturn:
+    """Flush logs and exit immediately after daemon-owned async cleanup.
+
+    A failing teardown step must not block the exit: it is reported on stderr and the
+    remaining steps still run.
+    """
+
+    def close_loguru_sinks() -> None:
+        from loguru import logger as _loguru
+
+        _loguru.remove()  # closes (and so flushes) every sink
+
+    def flush_stdout() -> None:
+        sys.stdout.flush()
+
+    def flush_stderr() -> None:
+        sys.stderr.flush()
+
+    steps: tuple[tuple[str, Callable[[], None]], ...] = (
+        ("closing the loguru sinks", close_loguru_sinks),
+        ("logging.shutdown", logging.shutdown),
+        ("flushing stdout", flush_stdout),
+        ("flushing stderr", flush_stderr),
+    )
+    for step, run in steps:
+        try:
+            run()
+        except Exception:
+            # Logging is closing here: stderr is the one report channel left. If stderr itself
+            # is closed or broken there is nowhere to report to.
+            with contextlib.suppress(OSError, ValueError, AttributeError):
+                sys.stderr.write(
+                    f"hard_exit: {step} failed; exiting anyway\n{traceback.format_exc()}"
+                )
+    os._exit(code)

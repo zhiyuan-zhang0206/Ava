@@ -18,7 +18,7 @@ which this presents from the unit's machine API token (`AVA_API_TOKEN`, from
 its installed capability); a unit never holds the human cluster secret.
 Intentionally imports nothing from base.config (it runs DURING base.config
 import) — only stdlib and the settings-free EnvBootResult at import;
-the httpx / base.cluster.auth / base.host.net.http_dial
+the httpx / base.host.net.auth / base.host.net.http_dial
 pieces lazily at fetch time (all config-free, so they're safe this early in
 boot).
 """
@@ -279,7 +279,7 @@ def fetch_bootstrap_config(
     """
     import httpx
 
-    from base.cluster.auth import bearer_header, delivered_token
+    from base.host.net.auth import bearer_header, delivered_token
     from base.host.net.resilience import Policy, retry
 
     token = bearer if bearer is not None else delivered_token()

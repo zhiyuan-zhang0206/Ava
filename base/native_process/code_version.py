@@ -4,7 +4,7 @@ The version is the number of first-parent commits reachable from the commit the
 process loaded (`git rev-list --count --first-parent <sha>`). On `main`, whose
 history is linear through squash merges, every merge raises it by exactly one,
 so a larger number is always newer code. It needs no release process and no
-bump discipline, the same property `base.deploy.git.host_version` has, but it
+bump discipline, the same property `base.host.git.host_version` has, but it
 orders commits inside one day, which a `YYYY.M.D` date cannot.
 
 An entry passes its immutable `LoadedCommit` to `CodeVersion`. It computes and

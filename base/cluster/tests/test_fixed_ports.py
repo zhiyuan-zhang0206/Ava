@@ -55,7 +55,7 @@ def test_fixed_ports_are_unique() -> None:
     """No two services may share a port.
 
     These are the ports a unit whose `.env` predates a key ACTUALLY BINDS
-    (`daemon.health.DEFAULT_PORTS` is derived from this table), so a duplicate
+    (`host.env.health_ports.DEFAULT_PORTS` is derived from this table), so a duplicate
     is not a cosmetic clash — the two daemons fight over one socket on every
     existing unit. The table is deliberately not in any order, so "next number
     after the last line" is not a safe way to add one: agent_host was written as 8113, which

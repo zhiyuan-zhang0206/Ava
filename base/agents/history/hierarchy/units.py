@@ -40,7 +40,8 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.messages.kwargs import AvaMsgType, message_addl_kwargs, read_ava_kwargs
+from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.lm.content import message_addl_kwargs
 
 UnitKind = Literal["work", "text", "inbound", "note"]
 

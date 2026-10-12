@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.host.git.host_version import parse_version
 from base.packages.plugins import manifest as pm
 from base.packages.plugins import pyproject_mirror as mirror
 from base.packages.plugins.manifest import ManifestError
@@ -64,7 +65,7 @@ def test_range_allows_bad_version_raises() -> None:
 
 
 def test_prerelease_is_distinct_from_final_release() -> None:
-    assert pm._parse_version("1.2.3-alpha") != pm._parse_version("1.2.3")
+    assert parse_version("1.2.3-alpha") != parse_version("1.2.3")
     assert pm.range_allows("==1.2.3", "1.2.3-alpha") is False
 
 
@@ -246,16 +247,6 @@ def test_check_host_engine_refuses_prerelease_without_explicit_opt_in() -> None:
     assert pm.check_host_engine(m, "1.2.3-alpha")
     m = _manifest(engines={"ava": ">=1.2.3-alpha"})
     assert pm.check_host_engine(m, "1.2.3-alpha") == []
-
-
-def test_host_version_from_repo(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "ava"\nversion = "0.1.5"\n', encoding="utf-8"
-    )
-    assert pm.host_version_from_repo(tmp_path) == "0.1.5"
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "ava"\n', encoding="utf-8")
-    with pytest.raises(ManifestError):
-        pm.host_version_from_repo(tmp_path)
 
 
 # ── pyproject mirror ───────────────────────────────────────────────────

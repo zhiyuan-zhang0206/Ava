@@ -37,7 +37,7 @@ from typing import Any, NoReturn, Protocol, cast
 
 import psycopg
 
-from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
+from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE, hard_exit
 from base.log import logger
 
 # How stale the process-local copy of `min_code_version` may be. It bounds how
@@ -59,8 +59,6 @@ def _has_log_sink() -> bool:
 
 
 def _refuse(version: int, minimum: int, *, process: str) -> NoReturn:
-    from base.daemon.shutdown import hard_exit
-
     fields = {
         "service": process,
         "version": version,

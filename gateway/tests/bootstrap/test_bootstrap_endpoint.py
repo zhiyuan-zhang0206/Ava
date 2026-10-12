@@ -12,9 +12,9 @@ from urllib.parse import urlsplit
 import pytest
 
 from base import config, paths
-from base.cluster.auth import bearer_header
 from base.cluster.machine import MachineIdentity
 from base.config.domains.storage.data_plane import self_machine_host
+from base.host.net.auth import bearer_header
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from gateway.app import app

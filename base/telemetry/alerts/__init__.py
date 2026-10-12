@@ -36,8 +36,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from base.clock import Clock
-from base.config import settings
-from base.daemon.endpoints import ServiceEndpoints
+from base.config import get_field, settings
+from base.host.env.health_ports import health_port
 from base.telemetry.alerts.copy import (
     ALERT_GROUP_COUNT,
     ALERT_GROUP_MORE,
@@ -331,7 +331,7 @@ def upsert_alert(
 def im_bridge_rpc_url() -> str:
     """Resolve the existing notification daemon endpoint at its composition owner."""
     return (settings.services.im_bridge_health_url or "").rstrip("/") or (
-        f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('im_bridge').health_port}"
+        f"http://127.0.0.1:{health_port('im_bridge', read_field=get_field)}"
     )
 
 

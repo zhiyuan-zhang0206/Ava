@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base import config
-from base.cluster.auth import bearer_header
+from base.host.net.auth import bearer_header
 from gateway.app import app
 from tests.fixtures.unit.gateway_auth import without_credentials
 
