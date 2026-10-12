@@ -184,15 +184,10 @@ Refresh the file manually after a significant test-suite change:
 uv run python scripts/ci/refresh_test_durations.py
 ```
 
-Successful main-push CI records clean timings during its existing backend
-16-way and e2e four-way runs. After 20 first-parent main changes since the last
-published measurement, the refresh workflow reuses those 20 artifacts without
-running the suites again. A squash or merge PR counts as one change; direct
-main commits count too. Backend retries reseed the committed input weights so
-a failed attempt cannot change its shard's selection.
-
-Daily isolated measurements remain the fallback, with a two-hour backstop.
-Backend measurements carry `--omit-static-tests`, `-n 4`, `-m "not flaky"`,
+Main runs no CI (CI runs on pull requests only), so timings come from daily
+isolated measurements of each CI-shaped shard, with a two-hour backstop.
+Backend retries reseed the committed input weights so a failed attempt cannot
+change its shard's selection. Backend measurements carry `--omit-static-tests`, `-n 4`, `-m "not flaky"`,
 and CI's coverage module list; e2e carries `-n 2`. The merge requires every
 artifact, rejects empty or overlapping measurements, retains fast and zero
 entries, and atomically writes compact JSON. All measurements and publication

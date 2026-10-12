@@ -1,0 +1,133 @@
+name: Warm dependency caches
+
+# Hosted Actions caches are scoped by ref: a cache written by a pull-request run is
+# visible only to that PR, while the default branch's caches are readable by every
+# PR. CI runs on pull requests only (main has no push run), so nothing else writes
+# default-branch caches. When an input of a cache key changes on main (a lockfile,
+# the pre-commit config, the pinned Postgres runtime, an install action), this
+# workflow rebuilds the affected caches there, so later PRs restore them instead of
+# each starting cold. Each job runs the same install steps as ci.yml with the same
+# keys; the actions save their own caches on a miss.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - uv.lock
+      - .python-version
+      - .pre-commit-config.yaml
+      - ui/web/package-lock.json
+      - base/cluster/dataplane/runtime_binaries.py
+      - .github/actions/**
+      - .github/workflows/cache-warm.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+
+concurrency:
+  group: cache-warm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Warm Python caches (uv, pre-commit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.23
+          enable-cache: true
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Restore pre-commit environments
+        id: precommit-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml', '.python-version', 'uv.lock') }}
+
+      - name: Build pre-commit environments
+        if: steps.precommit-cache.outputs.cache-hit != 'true'
+        run: env -u VIRTUAL_ENV uv run pre-commit install-hooks
+
+      - name: Save pre-commit environments
+        if: success() && steps.precommit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: ${{ steps.precommit-cache.outputs.cache-primary-key }}
+
+  node:
+    name: Warm npm cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: ui/web
+        run: npm ci
+
+  native:
+    name: Warm native runtime caches (Postgres, Redis, Playwright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.23
+          enable-cache: true
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
+      - name: Restore Playwright chromium cache
+        id: playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Install Playwright chromium
+        timeout-minutes: 10
+        run: timeout 300 uv run playwright install chromium
+
+      - name: Save Playwright chromium cache
+        if: success() && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Install Playwright system deps
+        uses: ./.github/actions/install-playwright-deps
+        timeout-minutes: 15
