@@ -522,10 +522,11 @@ def test_operator_conflict_does_not_block_deployment_update(
     assert (target.parent / "deploy-ava-cluster" / "SKILL.md").read_text() == "deployment v2\n"
 
 
-def test_deployment_publication_crash_recovers_without_changing_operator(
+def test_deployment_publication_crash_is_reported_without_changing_operator(
     home: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -562,6 +563,7 @@ def test_deployment_publication_crash_recovers_without_changing_operator(
             command_config_machine=command_config_machine,
         )
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
+    capsys.readouterr()
     _run(
         repo,
         home,
@@ -569,10 +571,9 @@ def test_deployment_publication_crash_recovers_without_changing_operator(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
+    assert "not resumed" in capsys.readouterr().err
     assert _tree_snapshot(_target(home / ".codex")) == operator_before
-    assert (
-        home / ".codex" / "skills" / "deploy-ava-cluster" / "SKILL.md"
-    ).read_text() == "deployment v1\n"
+    assert not (home / ".codex" / "skills" / "deploy-ava-cluster").exists()
 
 
 def test_product_guide_has_one_builtin_source_and_nested_operator_entries() -> None:

@@ -103,7 +103,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     for name in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         assert rendered["exporters"][name]["endpoint"] == remote
         assert rendered["exporters"][name]["headers"] == {"Authorization": f"Bearer {telemetry}"}
-    assert rendered["exporters"]["otlphttp/tempo"]["sending_queue"]["storage"] == "file_storage"
+    assert "storage" not in rendered["exporters"]["otlphttp/tempo"]["sending_queue"]
 
 
 @pytest.mark.parametrize(

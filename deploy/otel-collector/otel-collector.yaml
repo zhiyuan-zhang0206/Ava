@@ -14,9 +14,9 @@
 # loopback backends. Backend ports never need an off-box bind.
 # Every collector also mirrors locally produced traces to JSONL
 # ($AVA_HOME/traces/spans.jsonl, rotated), so agents can grep spans without a
-# backend. Trace/log exporters use bounded file_storage queues; metrics use a
-# bounded in-memory queue. Every exporter rejects the newest batch immediately
-# when its queue is full, bounds each send attempt to 5s, and retries for at
+# backend. Every exporter uses a bounded in-memory sending queue (a collector
+# restart drops what was queued) and rejects the newest batch immediately when
+# its queue is full, bounds each send attempt to 5s, and retries for at
 # most 15m before dropping with collector failure metrics. Cumulative metrics
 # repair on a later successful sample. The independent file/traces exporter is
 # not queued behind remote delivery and remains the local durable trace sink.
@@ -249,18 +249,6 @@ extensions:
   file_storage/logoffsets:
     directory: $AVA_HOME/otel-collector/log-offsets
     create_directory: true
-  file_storage:
-    directory: $AVA_HOME/otel-collector/queue
-    create_directory: true
-    timeout: 1s
-    # max_size: byte cap per queue file (task #4012). A full file rejects the
-    # newest write (storage-full) — the same counted loss path as the request
-    # bound. 1 GiB fleet-wide: measured steady state 580M on the busiest box,
-    # against a 30G minimum disk.
-    max_size: 1073741824
-    # fsync off: this is a retry buffer, not an fsync durability boundary.
-    # The separate trace mirror covers batches that reach file/traces; upstream
-    # backpressure may still reject before either exporter.
 $CLUSTER_AUTH_EXTENSION
 
 exporters:
@@ -309,7 +297,7 @@ service:
               prometheus:
                 host: localhost
                 port: $SELF_METRICS_PORT
-  extensions: [file_storage, file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
+  extensions: [file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
     traces:
       receivers: [otlp]
