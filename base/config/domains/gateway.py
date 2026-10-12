@@ -193,22 +193,7 @@ class GatewaySettings(EnvSettings):
     schedule_stall_timeout_seconds: float = Field(
         default=1200.0,
         alias="AVA_SCHEDULE_STALL_TIMEOUT_SECONDS",
-        description="How long a schedule runner may stall in one frame before child cleanup, bounded failure recording and hard exit. Guards against hung gateway / DB calls; ScheduleManager relaunches with backoff.",
-        json_schema_extra=_SCHEDULE_RESTART_METADATA,
-    )
-    schedule_stall_check_interval_seconds: float = Field(
-        default=30.0,
-        alias="AVA_SCHEDULE_STALL_CHECK_INTERVAL_SECONDS",
-        description="How often the schedule runner's stall guard samples the main thread's frame.",
-        json_schema_extra=_SCHEDULE_RESTART_METADATA,
-    )
-
-    schedule_stall_exit_record_deadline_seconds: float = Field(
-        default=10.0,
-        gt=0,
-        allow_inf_nan=False,
-        alias="AVA_SCHEDULE_STALL_EXIT_RECORD_DEADLINE_SECONDS",
-        description="Total seconds allowed for both failure-record writes after stall child cleanup. The 10-second default allows ordinary DB latency while bounding exit when the DB is wedged; tune for cluster latency.",
+        description="How long a schedule runner may stall in one frame before child cleanup, failure recording (last_error, run row) and hard exit; also the wall-clock bound on a non-.py command. Guards against hung gateway / DB calls. The exit is recorded as terminal process loss; the manager does not relaunch it.",
         json_schema_extra=_SCHEDULE_RESTART_METADATA,
     )
 
