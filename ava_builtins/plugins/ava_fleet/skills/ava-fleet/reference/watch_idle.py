@@ -5,10 +5,10 @@ substituting TARGET_AGENT_ID. It waits until the agent you are watching finishes
 a turn and goes idle, then sends you a message (`ava.agents.send_message`) once so you wake up
 and judge that agent's progress against the goal.
 
-Delivery survives a restart window: the wake send retries with doubling gaps
-(10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
-window (an update wave, the fleet update) outlasts the SDK's own 3 quick
-retries; if every attempt fails the watcher exits 2.
+The wake is sent once; the SDK's own bounded retries are the only retry. If
+the send still fails the watcher logs the error and exits 2, so the launcher
+gets an exit notice and re-launches; a wake that lands in a gateway / agent
+restart window is not redelivered.
 
 Runtime notes:
 - This program runs under the same Python environment, configuration, and
@@ -38,11 +38,6 @@ TARGET_AGENT_ID = 0
 # means it ended its turn and is waiting for the next message -- the moment to
 # check whether the goal is met.
 IDLE_STATUS = "idling"
-WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
-# sum to ~10.5 min — long enough to ride out a gateway / agent restart window
-# (wake-delivery retry contract; task #3696 exception inventory)
-WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
-WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 
 
 def _is_target_idle(event: dict, target_id: int) -> bool:
@@ -53,26 +48,15 @@ def _is_target_idle(event: dict, target_id: int) -> bool:
 
 
 def _notify(target_id: int) -> None:
-    """Deliver the idle reminder, retrying across a restart window.
-
-    Delivery retries with growing gaps; if every attempt fails the watcher
-    exits 2, so a lost wake surfaces as an exit notice instead of nothing.
-    """
+    """Deliver the idle reminder once; a failed send logs and exits 2."""
     message = (
         f"target agent {target_id} idled -- inspect its recent output and judge it against the goal"
     )
-    delay = WAKE_BACKOFF_S
-    for attempt in range(1, WAKE_ATTEMPTS + 1):
-        try:
-            ava.agents.send_message(ava.self.AGENT_ID, message)
-            return
-        except Exception as exc:  # any transport failure retries
-            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {exc!r}", flush=True)
-            if attempt < WAKE_ATTEMPTS:
-                time.sleep(delay)
-                delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
-    print(f"wake delivery failed after {WAKE_ATTEMPTS} attempts", flush=True)
-    raise SystemExit(2)
+    try:
+        ava.agents.send_message(ava.self.AGENT_ID, message)
+    except Exception as exc:  # a lost wake must surface as an exit notice
+        print(f"wake delivery failed: {exc!r}", flush=True)
+        raise SystemExit(2) from None
 
 
 def _watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:

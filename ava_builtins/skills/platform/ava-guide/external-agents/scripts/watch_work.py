@@ -5,11 +5,11 @@ Canonical Codex use additionally owns terminal cleanup: DONE, HANDOFF, owner
 termination, process death, expiry, or work-file deletion closes the recorded
 PTY and reclaims its generation state directory before this process exits.
 
-Delivery survives a restart window: each wake send retries with doubling gaps
-(10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
-window (an update wave, the fleet update) outlasts the SDK's own 3 quick
-retries; a wake that never lands exits 2 at the one-shot call sites, while the
-supervision loop keeps its schedule and retries at its next trigger.
+Each wake is sent once; the SDK's own bounded retries are the only retry. A
+send that still fails is logged: the one-shot call sites exit 2 (the launcher
+gets an exit notice), while the supervision loop keeps its schedule and sends
+again at its next trigger. A wake that lands in a gateway / agent restart window
+is not redelivered.
 """
 
 from __future__ import annotations
@@ -33,11 +33,6 @@ HEARTBEAT_SECONDS = 480
 # with the limit notice and may relaunch; without it a forgotten runner polls
 # forever (task #3696 exception inventory).
 HARD_LIMIT_SECONDS = 7200
-WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
-# sum to ~10.5 min — long enough to ride out a gateway / agent restart window
-# (wake-delivery retry contract; task #3696 exception inventory)
-WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
-WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 
 ACTIONABLE = ("DONE", "NEED_INPUT", "HANDOFF")
 _STATUS = re.compile(r"^STATUS:\s*(\w+)", re.MULTILINE)
@@ -119,30 +114,22 @@ def _session_crashed(owner: coding_session_owner.CodingSessionOwner) -> bool:
 
 
 def _notify(agent_id: int, content: str, *, canonical: bool) -> bool:
-    """Deliver one supervision message, retrying across a restart window.
+    """Send one supervision message; False when the send failed.
 
-    Delivery retries with growing gaps; returns False when every attempt
-    failed — the one-shot call sites exit 2 on that, while the in-loop call
-    sites keep supervising and retry at their next trigger.
+    The one-shot call sites exit 2 on False, while the in-loop call sites keep
+    supervising and send again at their next trigger.
     """
-    operation_key = str(uuid4())
-    delay = WAKE_BACKOFF_S
-    for attempt in range(1, WAKE_ATTEMPTS + 1):
-        try:
-            if canonical:
-                ava.agents.send_system_note(
-                    agent_id, content, tag="task", resurrect=False, idempotency_key=operation_key
-                )
-            else:
-                ava.agents.send_message(agent_id, content)
-            return True
-        except Exception as exc:  # any transport failure retries
-            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {exc!r}", flush=True)
-            if attempt < WAKE_ATTEMPTS:
-                time.sleep(delay)
-                delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
-    print(f"wake delivery failed after {WAKE_ATTEMPTS} attempts", flush=True)
-    return False
+    try:
+        if canonical:
+            ava.agents.send_system_note(
+                agent_id, content, tag="task", resurrect=False, idempotency_key=str(uuid4())
+            )
+        else:
+            ava.agents.send_message(agent_id, content)
+    except Exception as exc:  # a lost wake must be logged
+        print(f"wake delivery failed: {exc!r}", flush=True)
+        return False
+    return True
 
 
 def _canonical_context(

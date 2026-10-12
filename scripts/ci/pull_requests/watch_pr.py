@@ -6,16 +6,14 @@ agent-profile process carrying the runner DB and Redis URLs with
 `ava.watcher.launch(code, timeout=..., name="ci-watch-<pr>")` right after
 pushing a PR; the wake message carries the verdict.
 
-Delivery survives a restart window: the settled verdict is persisted first —
-`ci-verdict-<PR>.txt` in the launching agent's workspace — then delivered
-with a bounded retry (gaps doubling from 10s to a 160s cap, ~10.5 min in
-total).  A gateway / agent restart window (an update wave, `ava cluster
-update`) refuses connections for minutes and outlasts the SDK's own 3 quick
-send retries; without persistence + retry a wake landing in that window is
-lost with nothing left behind. A persistent agent-profile owner-URL config
-error stops after one attempt. Exit codes: 0 the wake was delivered, 1 the CI
-probe raised, 2 delivery failed — the absolute verdict path and cause are in
-the log and exit notice, and the persisted file is the fallback record.
+The settled verdict is persisted first — `ci-verdict-<PR>.txt` in the
+launching agent's workspace — then sent once; the SDK's own bounded retries are
+the only retry. A wake that lands in a gateway / agent restart window is not
+redelivered: the watcher logs the cause and the absolute verdict path, then
+exits 2, so the launcher gets an exit notice and can read the persisted file.
+Exit codes: 0 the wake was sent, 1 the CI probe raised, 2 the send failed —
+the absolute verdict path and cause are in the log and exit notice, and the
+persisted file is the fallback record.
 
 Uses `scripts/ci/pull_requests/status.py:check_ci` — the repo-provided, correct CI polling
 logic.  Do NOT write ad-hoc `gh pr checks` + exit-code checks: `gh pr checks`
@@ -70,11 +68,6 @@ CHECK_EVERY = 60  # seconds between polls
 NO_CHECKS_RETRIES = 3  # consecutive NO_CHECKS verdicts tolerated before waking
 TIMEOUT_S = 7200  # hard stop; reports "timed out" instead of a verdict
 WATCHER_ID = 0  # agent to wake (ava.self.AGENT_ID of the launching agent)
-WAKE_ATTEMPTS = 8  # wake delivery tries (first + 7 retries); the gaps below
-# sum to ~10.5 min — long enough to ride out a gateway / agent restart window
-# (wake-delivery retry contract; task #3696 exception inventory)
-WAKE_BACKOFF_S = 10.0  # first gap between wake tries; doubles per retry
-WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 VERDICT_FILE = f"ci-verdict-{PR_NUMBER}.txt"  # relative — `ava.files` resolves
 # it in the launching agent's workspace: the settled verdict is persisted
 # there before any delivery attempt and stays behind after a failed delivery
@@ -96,37 +89,20 @@ def persistent_config_cause(exc: Exception) -> str | None:
     return None
 
 
-def wake(message: str) -> tuple[bool, int, str | None]:
-    """Deliver `message` to the agent, retrying across a restart window.
-
-    The SDK already retries 3 times, but a gateway restart window refuses
-    connections for minutes: the growing gaps below ride it out. The owner-URL
-    guard is persistent, so it returns after one attempt. Other errors retain
-    the full retry window. Return delivery, attempts, and failure cause.
-    """
-    delay = WAKE_BACKOFF_S
-    cause: str | None = None
-    for attempt in range(1, WAKE_ATTEMPTS + 1):
-        try:
-            ava.agents.send_message(WATCHER_ID, message)
-            return True, attempt, None
-        except Exception as exc:
-            config_cause = persistent_config_cause(exc)
-            cause = config_cause or f"{type(exc).__name__}: {exc}"
-            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {cause}", flush=True)
-            if config_cause is not None:
-                return False, attempt, cause
-            if attempt < WAKE_ATTEMPTS:
-                time.sleep(delay)
-                delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
-    return False, WAKE_ATTEMPTS, cause
+def wake(message: str) -> tuple[bool, str | None]:
+    """Send `message` to the agent once; return delivery and the failure cause."""
+    try:
+        ava.agents.send_message(WATCHER_ID, message)
+    except Exception as exc:
+        return False, persistent_config_cause(exc) or f"{type(exc).__name__}: {exc}"
+    return True, None
 
 
 def finish(message: str) -> bool:
     """Persist the terminal message, echo it to the session log, wake the agent.
 
-    Persist-first is the contract: the record must exist even when every
-    delivery attempt fails.  The persist is best-effort (its failure is
+    Persist-first is the contract: the record must exist even when the
+    delivery fails.  The persist is best-effort (its failure is
     echoed and the message still goes out); the wake is not — the return
     value is its outcome, and callers exit non-zero when it is False.
     """
@@ -137,7 +113,7 @@ def finish(message: str) -> bool:
         persisted = False
         print(f"verdict persist failed: {exc!r}", flush=True)
     print(message, flush=True)
-    delivered, attempts, cause = wake(message)
+    delivered, cause = wake(message)
     if not delivered:
         if persisted:
             fallback = f"the verdict is at {VERDICT_PATH}"
@@ -145,7 +121,7 @@ def finish(message: str) -> bool:
             fallback = (
                 f"the verdict was not persisted at {VERDICT_PATH} — the message above is the record"
             )
-        summary = f"wake delivery failed after {attempts} attempts — cause: {cause}; {fallback}"
+        summary = f"wake delivery failed — cause: {cause}; {fallback}"
         print(summary, flush=True)
         # Repeat the summary last so --tail-file includes both the absolute
         # fallback path and cause in the shell exit notice.

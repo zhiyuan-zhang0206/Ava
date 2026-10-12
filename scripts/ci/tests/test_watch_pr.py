@@ -8,8 +8,8 @@ artifact the same way — substitute the placeholders, stub `ava` and `ci_utils`
 exec — so the settle semantics the template exists to guarantee stay locked
 (2026-09-12, task #3158: a just-pushed PR read as a settled NO_CHECKS) and the
 delivery semantics stay locked too (2026-09-17, task #3692: the verdict is
-persisted before any send, delivery retries ride out a restart window, and an
-exhausted delivery exits 2 with the persisted verdict left behind).
+persisted before the send, the send is made once, and a failed delivery exits 2
+with the persisted verdict left behind).
 """
 
 from __future__ import annotations
@@ -45,8 +45,8 @@ class _FakeAva:
     """Records wakes and file writes instead of doing them.
 
     `send_failures` / `write_failures` make that many leading calls raise —
-    the shapes of a gateway refusing connections inside a restart window and
-    of an unwritable verdict file.
+    the shapes of a gateway refusing connections and of an unwritable verdict
+    file.
     """
 
     def __init__(
@@ -133,11 +133,10 @@ def _run_watcher(
         ('PR_NUMBER = ""', 'PR_NUMBER = "1234"'),
         ('CI_UTILS = ""', f'CI_UTILS = "{tmp_path}"'),
         ("WATCHER_ID = 0", "WATCHER_ID = 42"),
-        # The retry windows are behavior; their wall clocks are not. Sleep-free
+        # The poll interval is behavior; its wall clock is not. Sleep-free
         # polls keep this test instant — and a template whose default moves must
-        # fail here loudly, not silently sleep the real 60s per retry.
+        # fail here loudly, not silently sleep the real 60s per poll.
         ("CHECK_EVERY = 60", "CHECK_EVERY = 0"),
-        ("WAKE_BACKOFF_S = 10.0", "WAKE_BACKOFF_S = 0.0"),
         # The two imports are substituted rather than patched through
         # sys.modules: a stub left there leaks into fixture teardown, which
         # re-imports `ava` (same substitution the generated-watcher tests use).
@@ -225,35 +224,43 @@ def test_settled_verdict_is_persisted_before_the_wake(
     assert "failed" in persisted
 
 
-def test_wake_retries_across_a_restart_window(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_wake_is_sent_once_after_the_verdict_is_persisted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Two refused sends — a gateway restart window — and the third lands: the
-    retry loop delivers the verdict the single send would have dropped."""
-    wakes, _, fake = _run_watcher(
-        monkeypatch, tmp_path, [CIStatus.ALL_PASSED], fake=_FakeAva(tmp_path, send_failures=2)
-    )
+    """One send, made after the verdict file exists."""
+    wakes, _, fake = _run_watcher(monkeypatch, tmp_path, [CIStatus.ALL_PASSED])
 
-    assert fake.send_calls == 3
-    assert all(fake.verdict_written_at_send)  # persisted before every retry
+    assert fake.send_calls == 1
+    assert fake.verdict_written_at_send == [True]
     assert len(wakes) == 1
     assert "all_passed" in wakes[0][1]
-    assert "wake attempt 1/8 failed" in capsys.readouterr().out
 
 
-def test_exhausted_delivery_exits_2_and_keeps_the_verdict(
+def _forbid_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed wake must not wait out a retry window."""
+
+    def _sleep(seconds: float) -> None:
+        raise AssertionError(f"slept {seconds}s after a failed wake")
+
+    monkeypatch.setattr("time.sleep", _sleep)
+
+
+def test_failed_delivery_exits_2_after_one_send_and_keeps_the_verdict(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Every attempt refused is not a silent death: the watcher exits 2 (the
-    exit notice is the second delivery path) and the persisted verdict remains
-    for a later read."""
+    """A refused send is not a silent death and not a retry window: the watcher
+    exits 2 after the single attempt (the exit notice is the second delivery
+    path) and the persisted verdict remains for a later read."""
     fake = _FakeAva(tmp_path, send_failures=100)
+    _forbid_sleep(monkeypatch)
     with pytest.raises(SystemExit) as excinfo:
         _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake)
 
     assert excinfo.value.code == 2
-    assert fake.send_calls == 8  # WAKE_ATTEMPTS, exhaustion really tried
-    assert "wake delivery failed after 8 attempts" in capsys.readouterr().out
+    assert fake.send_calls == 1
+    out = capsys.readouterr().out
+    assert "wake delivery failed — cause: RuntimeError: gateway refused the connection" in out
+    assert f"the verdict is at {tmp_path / _VERDICT_NAME}" in out
     assert "failed" in (tmp_path / _VERDICT_NAME).read_text(encoding="utf-8")
 
 
@@ -261,25 +268,25 @@ def test_probe_error_is_persisted_then_exits_1(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The probe-error terminal path (2026-09-17 review): persist + echo run
-    before exit 1, across the full retry budget, so the error survives even a
-    wake that cannot land."""
+    before exit 1, so the error survives even a wake that cannot land."""
     fake = _FakeAva(tmp_path, send_failures=100)
     error = RuntimeError("gh exploded")
+    _forbid_sleep(monkeypatch)
     with pytest.raises(SystemExit) as excinfo:
         _run_watcher(monkeypatch, tmp_path, [], fake=fake, raise_on_poll=error)
 
     assert excinfo.value.code == 1
-    assert fake.send_calls == 8  # the retry budget was spent before exiting
+    assert fake.send_calls == 1
     persisted = (tmp_path / _VERDICT_NAME).read_text(encoding="utf-8")
     assert "CI watcher error" in persisted
     assert "gh exploded" in persisted
     assert f"the verdict is at {tmp_path / _VERDICT_NAME}" in capsys.readouterr().out
 
 
-def test_persistent_owner_url_error_stops_early_with_absolute_fallback(
+def test_owner_url_error_reports_its_cause_with_absolute_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A guarded config error cannot heal through transport retries."""
+    """A guarded config error is reported by its cause, not its wrapper."""
     from pydantic import BaseModel, ValidationError, model_validator
 
     from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
@@ -300,7 +307,7 @@ def test_persistent_owner_url_error_stops_early_with_absolute_fallback(
     output = capsys.readouterr().out
     assert f"the verdict is at {tmp_path / _VERDICT_NAME}" in output
     assert "cause: agent-profile owner URL refused" in output
-    assert "failed after 1 attempts" in output
+    assert "wake delivery failed" in output
     assert "all_passed" in (tmp_path / _VERDICT_NAME).read_text(encoding="utf-8")
 
 
@@ -352,6 +359,7 @@ def test_persist_failure_does_not_claim_a_stored_verdict(
     review): the message still goes out, and the exhaustion report says the log
     holds the only copy."""
     fake = _FakeAva(tmp_path, send_failures=100, write_failures=100)
+    _forbid_sleep(monkeypatch)
     with pytest.raises(SystemExit) as excinfo:
         _run_watcher(monkeypatch, tmp_path, [CIStatus.FAILED], fake=fake)
 
