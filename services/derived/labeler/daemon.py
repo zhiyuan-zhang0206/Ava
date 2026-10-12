@@ -20,12 +20,10 @@ import logging
 import os
 import signal
 import sys
-import time
 from collections.abc import Callable
 from pathlib import Path
 
 import psycopg
-from loguru import logger
 from psycopg_pool import ConnectionPool
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -98,99 +96,6 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return _endpoint(config, runtime=runtime).pidfile
 
 
-# Per-agent failure backoff. A trusted transient provider failure or an empty /
-# rejected label leaves `label` NULL, so the next poll
-# re-selects the same agent and retries — without a bound this is an unbounded
-# hot loop of build_chat_model + LLM round-trips (~1/s). Each failure pushes the
-# agent's next eligible retry out exponentially (capped), and cooling agents are
-# excluded from the poll SELECT so they neither burn an LLM call nor occupy the
-# LIMIT window ahead of a fresh agent. State is in-memory (per daemon process): a
-# restart clears it and retries once — correct for a transient failure, one extra
-# attempt for a permanent one.
-_BACKOFF_BASE_S = 2.0
-_BACKOFF_CAP_S = 300.0
-# Give-up threshold. Backoff bounds the RATE of retries but not their NUMBER: at
-# the 300s cap a permanently-unlabelable agent costs ~12 LLM calls an hour, for
-# the life of the process. The validity check in labeler.py enlarges the
-# population that can fail permanently (a model that answers the brief instead of
-# summarizing it is rejected on every draw, not just an unlucky one), so the
-# change that enlarges it carries the bound. After this many consecutive
-# failures the agent is RETIRED: permanently excluded from the poll SELECT, its
-# label left NULL — already the honest resting state for an agent whose prompt
-# cannot be summarized, and where ~50 prod agents sit today.
-#
-# 12 is ~28 minutes of retrying (2+4+8+...+256, then four waits at the cap), so
-# an ordinary provider outage is still ridden out rather than retired through.
-# Per-process like the rest of the backoff state: a daemon restart clears it and every
-# retired agent gets one more chance.
-_GIVE_UP_AFTER_FAILURES = 12
-
-
-class _Backoff:
-    """The per-agent failure state of one dispatch loop: `agent_id -> (consecutive_failures,
-    monotonic deadline before next retry)`."""
-
-    def __init__(self) -> None:
-        self._entries: dict[int, tuple[int, float]] = {}
-
-    def is_retired(self, tid: int) -> bool:
-        """Whether an agent has failed enough consecutive times to be given up on."""
-        return self._entries.get(tid, (0, 0.0))[0] >= _GIVE_UP_AFTER_FAILURES
-
-    def cooling_ids(self, now: float) -> list[int]:
-        """agent ids to keep out of the poll SELECT at `now` (a `time.monotonic`
-        reading): those still inside their backoff window, plus those retired
-        outright. Opportunistically drops entries whose retry was due more than one
-        full cap-window ago: an expired entry that is still label-eligible would have
-        been re-selected and cleared/re-failed by now, so a long-stale one means the
-        agent was labeled out of band (or removed) and its backoff state can go.
-
-        A retired entry is deliberately never pruned — pruning it would readmit the
-        agent to the SELECT and restart the whole attempt cycle, which is the
-        unbounded loop this is here to stop. The retained entries are bounded by the
-        number of permanently-unlabelable agents seen in one process lifetime."""
-        cooling: list[int] = []
-        stale: list[int] = []
-        for tid, (fails, deadline) in self._entries.items():
-            if fails >= _GIVE_UP_AFTER_FAILURES or now < deadline:
-                cooling.append(tid)
-            elif deadline < now - _BACKOFF_CAP_S:
-                stale.append(tid)
-        for tid in stale:
-            del self._entries[tid]
-        return cooling
-
-    def record_failure(self, tid: int, now: float) -> float:
-        """Bump an agent's consecutive-failure count and push its next retry out
-        exponentially (2s, 4s, 8s, ... capped at _BACKOFF_CAP_S). Returns the delay
-        applied, for logging — meaningless once the agent is retired, which the
-        caller checks with `is_retired`."""
-        fails = self._entries.get(tid, (0, 0.0))[0] + 1
-        delay = min(_BACKOFF_BASE_S * 2 ** (fails - 1), _BACKOFF_CAP_S)
-        self._entries[tid] = (fails, now + delay)
-        if fails == _GIVE_UP_AFTER_FAILURES:
-            # Terminal for this process — emitted once, on the crossing, so the
-            # event counts agents given up on rather than retry attempts.
-            logger.error(
-                "label generation retired for agent {agent_id} after {failures} consecutive failures",
-                event="label_generate_retired",
-                agent_id=tid,
-                failures=fails,
-            )
-        return delay
-
-    def retry_note(self, tid: int, delay: float) -> str:
-        """The retry half of a failure log line — the promise must match reality, so
-        a retired agent says so rather than naming a retry that will never come."""
-        if self.is_retired(tid):
-            return f"retired after {_GIVE_UP_AFTER_FAILURES} consecutive failures, label stays NULL"
-        return f"backoff: next retry in >={delay:.0f}s"
-
-    def clear(self, tid: int) -> None:
-        """Drop an agent's backoff state after it labels successfully."""
-        self._entries.pop(tid, None)
-
-
 # The inbound condition a label prompt may come from: a chat peer message,
 # or a system note carrying a task notification (note_tag='task'). Task
 # assignment briefs — the delegator's request a fresh worker exists for —
@@ -203,7 +108,7 @@ _PROMPT_INBOUND_CONDITION = (
 )
 
 
-def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int, str | None]]:
+def _select_unlabeled(cur: psycopg.Cursor, attempted: list[int]) -> list[tuple[int, str | None]]:
     """Poll up to 10 newest agents that still need a label, returning each
     `(agent_id, first_eligible_prompt)`.
 
@@ -215,8 +120,7 @@ def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int
     ORDER BY t.id DESC prioritizes new agents — prevents old agents
     (spawn-without-prompt or with inbounds already cleaned) from clogging the
     head of the LIMIT window and starving the poll. EXISTS filters out threads
-    that will never have a prompt (saves poll iterations). `cooling` ids (agents
-    inside their failure-backoff window) are excluded in SQL — not after the
+    that will never have a prompt (saves poll iterations). `attempted` ids (agents already attempted by this process) are excluded in SQL — not after the
     LIMIT — so a cluster of persistently-failing agents neither burns an LLM call
     nor occupies the window ahead of a fresh agent.
 
@@ -239,7 +143,7 @@ def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int
         ") "
         "ORDER BY t.id DESC "
         "LIMIT 10",
-        (cooling,),
+        (attempted,),
     )
     return cur.fetchall()
 
@@ -279,34 +183,31 @@ async def _dispatch_loop(
     overrides: ModelOverrides,
 ) -> None:
     """Main loop: every second, poll the newest unlabeled agents
-    (`_select_unlabeled`, minus those in failure-backoff) -> grab first prompt ->
-    generate label. A label that fails enters per-agent exponential backoff so a
-    persistent failure does not become a hot retry loop.
+    (`_select_unlabeled`, excluding previous attempts) -> grab first prompt ->
+    generate label. Each eligible row is attempted once per process; failure leaves its label unset.
 
-    Only explicit False generation results enter backoff. Escaping exceptions,
+    False generation results are logged without scheduling another attempt. Escaping exceptions,
     including DB failures, reach run/main's existing service failure owner and
-    stop this batch. No task is claimed or acknowledged here. Restart clears
-    the in-memory cooldown and retirement state; it does not isolate a bad row.
+    stop this batch. No task is claimed or acknowledged here. A service restart may attempt an unset label once again; no retry state is persisted.
 
     generate_label_async writes via internal CAS (WHERE label is unset —
     NULL or empty string — AND NOT label_user_set), so user-edited labels
     are auto-skipped.
     """
     _log.info("[labeler] daemon started, pid=%s", os.getpid())
-    backoff = _Backoff()
+    attempted: set[int] = set()
     while True:
         liveness.beat()
         await asyncio.sleep(_POLL_INTERVAL_S)
         if admission.quiesced():
             continue
-        now = time.monotonic()
-        cooling = backoff.cooling_ids(now)
         with pool.connection() as conn, conn.cursor() as cur:
-            rows = _select_unlabeled(cur, cooling)
+            rows = _select_unlabeled(cur, list(attempted))
         for tid, prompt in rows:
             liveness.beat()  # per-item: a slow LLM call must not look like a wedge
             if not prompt:
                 continue
+            attempted.add(tid)
             result = await generate_label_async(
                 tid,
                 prompt,
@@ -318,14 +219,9 @@ async def _dispatch_loop(
                 overrides=overrides,
             )
             if result is False:
-                delay = backoff.record_failure(tid, now)
-                _log.error(
-                    "[labeler] generate label for thread %s failed (%s)",
-                    tid,
-                    backoff.retry_note(tid, delay),
+                _log.warning(
+                    "[labeler] label generation failed for thread %s; leaving label unset", tid
                 )
-            else:
-                backoff.clear(tid)
 
 
 async def run(

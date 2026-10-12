@@ -197,13 +197,6 @@ _DECLARED_PAYLOAD_KEYS = {
     "otlp_backend_disabled": ("reason", "endpoint"),
     "otlp_backend_recovered": ("endpoint", "disabled_s"),
     "log": ("msg",),  # loguru bare-log payload
-    "page_serve_dir_missing": (
-        "agent_id",
-        "key",
-        "name",
-        "serve_dir",
-        "port",
-    ),
 }
 
 

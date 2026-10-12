@@ -1,13 +1,11 @@
 """Memory indexer daemon — `watchdog` Observer + Gemini embed + backend upsert.
 
 Cold-start reconciliation embeds missing or changed Markdown rows and prunes
-removed entries. A watchdog Observer feeds a deduplicated dirty queue; failed
-reconciles retry with bounded backoff. Rows contain a description and body
-chunks, aggregated back to paths by search. Backend changes require restart.
-
-The gateway checkout refreshes hourly to bound stale indexing after missed
-arbiter refreshes. Failed refreshes log ERROR and retry on the next cycle.
-API key and provider configuration belong to the process configuration owner.
+removed entries. A watchdog Observer feeds a deduplicated dirty queue. An
+incomplete reconcile is logged; no follow-up pass is scheduled. Rows contain a
+description and body chunks, aggregated back to paths by search. Backend changes
+require restart. API key and provider configuration belong to the process
+configuration owner.
 
 Run: python -m services.derived.memory_indexer.daemon
 Health: HTTP /healthz on :8105.
@@ -27,6 +25,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
 import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -55,7 +54,6 @@ from services.derived.memory_indexer import config as indexer_config
 from services.derived.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.derived.memory_indexer.backends.factory import get_backend
 from services.derived.memory_indexer.backends.probe import probe_backend
-from services.derived.memory_indexer.checkout_refresh import refresh_gateway_checkout
 from services.derived.memory_indexer.chunking import _file_rows
 from services.derived.memory_indexer.config import MemoryIndexerInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
@@ -80,14 +78,10 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 
 
 _LOOP_INTERVAL_S = 1.0
-# Startup and follow-up reconciles beat before and after file-granular chunks:
+# Startup reconciles beat before and after file-granular chunks:
 # a full rebuild can outlive the liveness ceiling. Chunks bound preparation and
 # local work; _process_paths also beats before external calls within each chunk.
 _RECONCILE_CHUNK_PATHS = 64
-# How often the daemon fast-forwards the gateway checkout to origin/main —
-# the refresh safety net (see module docstring). An hour bounds index
-# staleness to ~1 consolidation cycle; the fetch is a no-op when main moved.
-_CHECKOUT_REFRESH_INTERVAL_S = 3600.0
 _BATCH_SIZE = 32
 """Gemini embed_content accepts multiple inputs per call; batching amortizes round-trips."""
 
@@ -357,60 +351,6 @@ def _kind_limits(rows: list[tuple[float, str, str, int, str]]) -> dict[str, int]
     return limits
 
 
-class _ReconcileRetrySchedule:
-    """Bounded-backoff schedule for follow-up reconcile passes.
-
-    The daemon keeps at most one follow-up pass scheduled. Each incomplete
-    signal takes the next rung (base_s * 2 ** (n - 1), capped at cap_s): a
-    reconcile pass that could not finish the dirty set, or a drain-batch embed
-    failure that finds no pending schedule (ensure_scheduled counts it).
-    A completed pass resets the ladder; drain failures never move a pending deadline.
-    """
-
-    def __init__(
-        self, *, base_s: float, cap_s: float, clock: Callable[[], float] = time.monotonic
-    ) -> None:
-        self._base_s = base_s
-        self._cap_s = cap_s
-        self._clock = clock
-        self._delay: float | None = None
-        self._next_at: float | None = None
-
-    @property
-    def pending(self) -> bool:
-        return self._next_at is not None
-
-    def due(self) -> bool:
-        return self._next_at is not None and self._clock() >= self._next_at
-
-    def record_incomplete(self) -> float:
-        # Doubling the capped delay implements the formula without an exponent
-        # that overflows after a long quota outage.
-        self._delay = min(self._base_s if self._delay is None else self._delay * 2, self._cap_s)
-        self._next_at = self._clock() + self._delay
-        return self._delay
-
-    def record_pass_complete(self) -> None:
-        self._delay = None
-        self._next_at = None
-
-    def ensure_scheduled(self) -> float | None:
-        """Count an incomplete signal if idle; never move a pending deadline."""
-        return None if self.pending else self.record_incomplete()
-
-    def retry_in_s(self) -> float | None:
-        return None if self._next_at is None else max(0.0, self._next_at - self._clock())
-
-
-def _reconcile_health(retry: _ReconcileRetrySchedule) -> dict[str, object]:
-    """Reconcile retry state for /healthz — informational, never gates 503."""
-    retry_in = retry.retry_in_s()
-    return {
-        "reconcile_pending": retry.pending,
-        "reconcile_retry_in_s": None if retry_in is None else round(retry_in, 1),
-    }
-
-
 def _reconcile(
     backend: MemorySearchBackend,
     provider: EmbeddingProvider,
@@ -418,10 +358,10 @@ def _reconcile(
     *,
     machine: MachineIdentity,
 ) -> bool:
-    """Diff disk vs index db; fill gaps at cold start and on scheduled follow-up passes.
+    """Diff disk vs index db once at cold start.
 
     Runs in a thread executor. Returns True when the dirty set finishes, False
-    when an embed failure truncates the pass so the main loop can schedule a retry.
+    when an embed failure truncates the pass; no follow-up pass is scheduled.
 
     Rows whose path is outside the watched root are pruned even though the
     files still exist on disk (see `_process_paths`): they are leftovers
@@ -475,7 +415,7 @@ def _reconcile(
                 liveness.beat()  # chunk committed -> the rebuild is progressing
         except EmbeddingAPIError as exc:
             _log.error(
-                "[indexer] reconcile embed failed: %r — daemon continues; a follow-up pass will retry",
+                "[indexer] reconcile embed failed: %r — index remains incomplete; explicit rebuild required",
                 exc,
             )
             return False
@@ -487,7 +427,6 @@ async def _drain_loop(
     dirty_queue: queue.Queue[Path],
     liveness: Liveness,
     provider: EmbeddingProvider,
-    retry: _ReconcileRetrySchedule,
     *,
     machine: MachineIdentity,
 ) -> None:
@@ -495,35 +434,15 @@ async def _drain_loop(
 
     `_process_paths` blocks (network embed + backend write calls); use
     ``asyncio.to_thread`` so the event loop can still serve the health
-    probe during embedding. Every `_CHECKOUT_REFRESH_INTERVAL_S` the loop
-    also runs the gateway-checkout refresh safety net.
+    probe during embedding. Failed paths are not requeued; a later file event or
+    explicit rebuild may attempt them again.
     """
     _log.info("[indexer] daemon loop started, pid=%s", os.getpid())
-    next_checkout_refresh = time.monotonic() + _CHECKOUT_REFRESH_INTERVAL_S
     while True:
         liveness.beat()
         await asyncio.sleep(_LOOP_INTERVAL_S)
         if admission.quiesced():
             continue  # the pgvector backend borrows the pool; dirty paths wait in the queue
-        now = time.monotonic()
-        if now >= next_checkout_refresh:
-            next_checkout_refresh = now + _CHECKOUT_REFRESH_INTERVAL_S
-            await asyncio.to_thread(refresh_gateway_checkout, machine=machine)
-        # Waiting is safe: every loop tick keeps beating liveness until due.
-        if retry.due():
-            # Cancellation stays prompt; an in-flight to_thread worker finishes
-            # in the background and is deliberately abandoned at exit (the
-            # hard exit skips the executor join — see main()/_hard_exit).
-            complete = await asyncio.to_thread(
-                _reconcile, backend, provider, liveness, machine=machine
-            )
-            liveness.beat()  # the pass's tail must not stack with the next operation
-            if complete:
-                retry.record_pass_complete()
-                _log.info("[indexer] follow-up reconcile complete: gap closed; retries cleared")
-            else:
-                delay = retry.record_incomplete()
-                _log.warning("[indexer] reconcile incomplete; retry scheduled in %.1fs", delay)
         batch: set[Path] = set()
         # Drain the queue until empty — queue.Empty is the loop terminator.
         with suppress(queue.Empty):
@@ -540,16 +459,11 @@ async def _drain_loop(
             # Name the blast radius: which/how many paths lost this round.
             _log.error(
                 "[indexer] embed failed for a batch of %d path(s) (%s): %r — "
-                "a follow-up reconcile pass will retry",
+                "explicit rebuild or a later file change is required",
                 len(batch),
                 ", ".join(str(p) for p in sorted(batch)[:5]) + ("..." if len(batch) > 5 else ""),
                 exc,
             )
-            # Failed paths stay dirty on disk; reconcile re-derives them from
-            # the disk-vs-index diff, even if no further fs events arrive.
-            delay = retry.ensure_scheduled()
-            if delay is not None:
-                _log.warning("[indexer] follow-up reconcile scheduled in %.1fs", delay)
 
 
 async def _connect_backend_with_retry(
@@ -582,13 +496,13 @@ async def _connect_backend_with_retry(
         name=name,
         uri_reader=uri_reader,
     )
-    start = time.time()
+    start = time.monotonic()
     last_exc: Exception | None = None
-    while time.time() - start < deadline_s:
+    while time.monotonic() - start < deadline_s:
         try:
             await asyncio.to_thread(backend.connect)
             return backend
-        except Exception as exc:
+        except (ConnectionError, TimeoutError, httpx.ConnectError, httpx.ConnectTimeout) as exc:
             last_exc = exc
             _log.info(
                 "[indexer] %s backend not ready (%s: %s), retry in 2s...",
@@ -657,16 +571,11 @@ async def run(
             inputs.embedding_name(), timeout_seconds=inputs.embed_timeout()
         )
     )
-    retry = _ReconcileRetrySchedule(
-        base_s=inputs.retry_base(),
-        cap_s=inputs.retry_cap(),
-    )
     endpoint = _endpoint(config, runtime=runtime)
     health = await start_health_server(
         "memory_indexer",
         endpoint.health_port,
         liveness=liveness,
-        extra=lambda: _reconcile_health(retry),
         image=image,
     )
     _log.info("[indexer] healthz listening on :%s", endpoint.health_port)
@@ -710,9 +619,8 @@ async def run(
 
     try:
         if not await asyncio.to_thread(_reconcile, backend, provider, liveness, machine=machine):
-            delay = retry.record_incomplete()
-            _log.warning("[indexer] startup reconcile incomplete; retry scheduled in %.1fs", delay)
-        await _drain_loop(backend, dirty_queue, liveness, provider, retry=retry, machine=machine)
+            _log.warning("[indexer] startup index incomplete; explicit rebuild required")
+        await _drain_loop(backend, dirty_queue, liveness, provider, machine=machine)
     finally:
         observer.stop()
         observer.join(timeout=5.0)

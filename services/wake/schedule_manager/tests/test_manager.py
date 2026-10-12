@@ -485,7 +485,10 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
     assert name not in backend.live
 
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE schedules SET enabled = true WHERE id = %s", (sid,))
+        cur.execute(
+            "UPDATE schedules SET enabled = true, desired_revision = desired_revision + 1, launch_count = 0 WHERE id = %s",
+            (sid,),
+        )
     db_conn.commit()
     manager.sync_one(sid)  # explicit start -> create a new PTY
     assert launched == [sid, sid]

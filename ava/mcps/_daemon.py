@@ -381,7 +381,7 @@ async def _handle_call_tool(
         ) from e
     content = []
     for c in result.content or []:
-        # Same fail-fast as ava/mcps/__init__.py:_dump_content: the MCP
+        # Fail fast on an unknown content block: the MCP
         # SDK contract requires ContentBlock to be a pydantic
         # model; absence of model_dump means the SDK type
         # changed or we missed a new type — silently turning

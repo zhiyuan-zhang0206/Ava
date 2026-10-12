@@ -130,21 +130,6 @@ class InspectMetricsCoverageGap(TypedDict):
     availability: str
 
 
-class PageServeDirMissing(TypedDict):
-    """`page_serve_dir_missing` payload — page-server daemon degradation alert.
-
-    The directory behind a served page disappeared or ceased to be a directory.
-    The daemon reports the first observation and its eventual auto-close, so the
-    page's key and source path remain attributable after the row is gone.
-    """
-
-    agent_id: int
-    key: str
-    name: str
-    serve_dir: str
-    port: int
-
-
 class UploadDeliveryHeld(TypedDict):
     """`upload_delivery_held` payload — gateway/upload_delivery/worker.py.
 
@@ -200,22 +185,6 @@ EVENTS: dict[str, EventSpec] = {
         "sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly", persist=True
     ),
     # ava.ui.serve page-restore
-    "page_restore_alive": telemetry_event("page_restore_alive", "page restore alive", tier="noise"),
-    "page_restore_reserved": telemetry_event(
-        "page_restore_reserved", "page restore reserved", tier="noise"
-    ),
-    "page_restore_query_failed": telemetry_event(
-        "page_restore_query_failed", "page restore query failed", tier="anomaly"
-    ),
-    "page_restore_failed": telemetry_event(
-        "page_restore_failed", "page restore failed", tier="anomaly"
-    ),
-    "page_restore_closed": telemetry_event(
-        "page_restore_closed", "page restore closed", tier="noise"
-    ),
-    "page_restore_notified": telemetry_event(
-        "page_restore_notified", "page restore notified", tier="noise"
-    ),
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
     # by gateway/http/middleware/latency.py — one event per (route, bucket), never per request
     "gateway_latency": telemetry_event(
@@ -294,13 +263,6 @@ EVENTS: dict[str, EventSpec] = {
         "gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape",
         payload=GateAuthProbeFailed,
         tier="anomaly",
-    ),
-    "page_serve_dir_missing": EventSpec(
-        name="page_serve_dir_missing",
-        category="log",
-        tier="anomaly",
-        payload=PageServeDirMissing,
-        doc="a served page directory disappeared; emitted on degradation and auto-close",
     ),
     "page_ttl_expired": EventSpec(
         name="page_ttl_expired",

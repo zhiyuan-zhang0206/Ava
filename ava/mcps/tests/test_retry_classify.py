@@ -15,31 +15,6 @@ import pytest
 import ava.mcps._daemon as daemon
 from ava import mcps
 from ava.mcp_config import is_transport_error
-from ava.mcps.tests._mcps_helpers import local_mcp_clients
-
-
-@pytest.mark.parametrize("name", ["ClosedResourceError", "MCPError", "JSONRPCError"])
-def test_local_tool_does_not_reconnect_for_a_same_named_programming_error(
-    monkeypatch: pytest.MonkeyPatch, name: str
-) -> None:
-    from mcp.types import REQUEST_TIMEOUT
-
-    error = type(name, (RuntimeError,), {"code": REQUEST_TIMEOUT})("unexpected tool failure")
-    session = MagicMock(call_tool=AsyncMock(side_effect=error))
-    stack = MagicMock(aclose=AsyncMock())
-    monkeypatch.setattr(mcps, "_get_remote_client", lambda: None)
-    clients = local_mcp_clients(monkeypatch)
-    clients.sessions["fs"] = session
-    clients.session_stacks["fs"] = stack
-    connect = AsyncMock(return_value=session)
-    monkeypatch.setattr(mcps, "_connect", connect)
-
-    with pytest.raises(mcps.MCPCallError, match="unexpected tool failure") as raised:
-        mcps._call_raw("fs", "charge")
-    assert "result unknown" not in str(raised.value)
-    connect.assert_awaited_once()
-    session.call_tool.assert_awaited_once()
-    stack.aclose.assert_not_awaited()
 
 
 def test_transport_subclasses_keep_the_known_retry_contract() -> None:
@@ -80,30 +55,6 @@ def test_unrelated_io_failure_is_not_a_transport_retry() -> None:
     assert is_transport_error(FileNotFoundError(errno.ENOENT, "missing configuration")) is False
 
 
-def test_local_tool_result_lost_after_effect(monkeypatch: pytest.MonkeyPatch) -> None:
-    effects = 0
-
-    async def execute_then_disconnect(*_args: Any) -> None:
-        nonlocal effects
-        effects += 1
-        raise BrokenPipeError("reply lost")
-
-    session = MagicMock(call_tool=AsyncMock(side_effect=execute_then_disconnect))
-    stack = MagicMock(aclose=AsyncMock())
-    monkeypatch.setattr(mcps, "_get_remote_client", lambda: None)
-    clients = local_mcp_clients(monkeypatch)
-    clients.sessions["fs"] = session
-    clients.session_stacks["fs"] = stack
-    connect = AsyncMock(return_value=session)
-    monkeypatch.setattr(mcps, "_connect", connect)
-
-    with pytest.raises(mcps.MCPCallError, match="result unknown"):
-        mcps._call_raw("fs", "charge")
-    assert effects == 1
-    connect.assert_awaited_once()
-    stack.aclose.assert_awaited_once()
-
-
 def test_daemon_reply_lost_does_not_fall_back_locally(monkeypatch: pytest.MonkeyPatch) -> None:
     sock = MagicMock()
     sock.recv.return_value = b""  # daemon may have executed the tool
@@ -111,16 +62,9 @@ def test_daemon_reply_lost_does_not_fall_back_locally(monkeypatch: pytest.Monkey
     monkeypatch.setattr(socket, "socket", MagicMock(return_value=sock))
     monkeypatch.setattr(mcps, "_get_remote_client", lambda: client)
 
-    def forbid_local(coro: Any) -> None:
-        coro.close()
-        raise AssertionError("tool replayed locally")
-
-    local = MagicMock(side_effect=forbid_local)
-    monkeypatch.setattr(mcps, "_run_async", local)
     with pytest.raises(mcps.MCPCallError, match="result unknown"):
         mcps._call_raw("fs", "charge")
     sock.sendall.assert_called_once()
-    local.assert_not_called()
 
 
 async def _daemon_call(

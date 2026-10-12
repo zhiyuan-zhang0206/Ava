@@ -357,30 +357,12 @@ async def _handle_heartbeat(
     st: _BatchState,
     state: _state.AgentState,
 ) -> None:
-    """HEARTBEAT: check-in delivered as a system note, plus page liveness.
-
-    The page-server daemon supervises serve() pages inside persistent agent
-    shell sessions, which are outside rollout service teardown. Probing on
-    each heartbeat (default 5 min) remains the catch-all for server death:
-    dead serve_dir pages are re-served and dead no-dir pages are closed.
-    The page-server service's dead-show-page scan covers busy agents whose
-    heartbeats never arrive; this pass keeps the idle-agent cadence.
-    Best-effort; reconcile never raises.
+    """HEARTBEAT: check-in delivered as a system note.
 
     An open provider circuit consumes heartbeat without another model call;
     fresh chat and explicit controls keep their normal routing.
     """
     assert ctx.ops_pool is not None, "_handle_heartbeat requires ctx.ops_pool"  # noqa: S101
-    from agent.startup import reconcile_open_pages
-
-    await reconcile_open_pages(
-        ctx.ops_pool,
-        agent_id,
-        db=ctx.require_db(),
-        bus=ctx.require_bus(),
-        event_publisher=ctx.event_publisher,
-    )
-
     circuit = state.circuit
     if circuit.open:
         logger.warning(

@@ -24,12 +24,11 @@ schedule has a live session. A stall-guard hard exit reaps owned descendants,
 then attempts to close it ``ok = false`` within a bounded record deadline.
 
 The ScheduleManager launches this inside a session named
-``ava-schedule-<id>`` and keeps it up (with a circuit breaker) if it
-crashes. A schedule is a supervised resident process, so an exit-0 is treated as
+``ava-schedule-<id>`` with one admitted launch per desired revision. A schedule is a supervised resident process, so an exit-0 is treated as
 a deliberate finish: the runner records ``status='completed'`` and the manager
-leaves it alone (no relaunch, no breaker). A nonzero exit / uncaught exception is
-a crash — its traceback goes to ``schedules.last_error`` and the manager restarts
-it. A deliberate kill (SIGTERM/SIGHUP) writes nothing and is not counted a crash.
+leaves it alone. A nonzero exit / uncaught exception records its traceback in
+``schedules.last_error``. Process loss becomes terminal error; only an explicit
+new revision authorizes another launch. A deliberate kill (SIGTERM/SIGHUP) writes nothing and is not counted a crash.
 """
 
 from __future__ import annotations
@@ -61,7 +60,7 @@ from base.paths import ava_home
 # weekly schedule sat "alive" through the gateway's 08:28-09:23 freeze window
 # and silently missed its Monday 9am fire. The stall guard watches the main
 # thread's stack and hard-exits after a frame has not advanced for this long,
-# so the ScheduleManager's crash path (backoff + breaker + last_error) gets a
+# so the ScheduleManager's failure observation path (last_error) gets a
 # chance instead of a zombie.
 def _stall_timeout_s() -> float:
     return settings.gateway.schedule_stall_timeout_seconds
@@ -145,7 +144,7 @@ def _mark_completed(database: Database, schedule_id: int) -> None:
     """Record a clean exit (rc=0) as the terminal `completed` status. A schedule
     is a supervised resident process, so an exit-0 is a deliberate finish, not a
     crash — this is the durable signal the ScheduleManager reads to leave the
-    schedule alone instead of relaunching / counting it toward the crash breaker.
+    schedule completed rather than recording process loss as an error.
     The manager reads liveness before status, so a session that is gone is
     guaranteed to have this write already committed (see services/wake/schedule_manager/manager.py)."""
     with database.write_transaction() as conn, conn.cursor() as cur:
@@ -158,8 +157,8 @@ def _mark_completed(database: Database, schedule_id: int) -> None:
 def _finish_completed(database: Database, schedule_id: int, run_id: int | None) -> None:
     """Record a clean finish: mark the schedule completed and close the run
     row ok=true. The completed-marker write is best-effort — if it fails, the
-    manager's liveness-before-status rule makes it relaunch the schedule (the
-    safe side), but the run row must still read as a success: the run itself
+    manager may record process loss as an error, but does not relaunch the
+    schedule. The run row must still read as a success: the run itself
     finished, only the bookkeeping lost a write (QA P3-5 — it must not be
     recorded as 'crashed: OperationalError')."""
     try:
@@ -610,7 +609,7 @@ def _run(
         # window (2026-08-08 audit, P2-2 — the .py branch got its stall guard
         # after the 2026-08-03 self-evolution miss; the command branch was
         # still open). subprocess.run kills the child on expiry and raises
-        # TimeoutExpired; the crash path (backoff + breaker) relaunches.
+        # TimeoutExpired; the manager reports terminal process loss without replay.
         stall_timeout_s = _stall_timeout_s()
         try:
             result = subprocess.run(  # noqa: S603 — command is the operator-authored schedule command

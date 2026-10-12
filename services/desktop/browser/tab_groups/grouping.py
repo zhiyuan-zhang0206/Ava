@@ -20,7 +20,7 @@ Three facts shape the design:
   call that attached to the dying target never gets its reply (measured).
   After attaching it waits for the worker script to have defined ``avaGroup``
   (the target can be attachable first). Nothing is remembered between calls,
-  so daemon reconnects need no repair.
+  so daemon restarts need no repair.
 - **Page ids are not target ids.** The daemon's page ids are chrome-devtools-mcp
   sequence numbers; the extension needs the CDP targetId. The caller holds the
   daemon's machine-wide serial lock, so the one page target that appears
@@ -35,7 +35,7 @@ Three facts shape the design:
   nothing. The tasks run one at a time (``_lock``, the grouping's own lock, not
   the daemon's): two grouping tasks of one agent both search the group by title
   and would otherwise each create it. ``cancel_pending()`` drops in-flight
-  tasks when the daemon stops or its upstream reconnects.
+  tasks when the daemon stops (an upstream death ends the process).
 - **Nothing here deletes a group.** Chrome removes a tab group, and its saved
   group record, when the group's last tab closes. Every way this stack closes
   an agent's page goes through ``close_page`` (``page_lifecycle``), so an
@@ -234,10 +234,10 @@ class AgentTabGroups:
         return next(iter(new))
 
     def cancel_pending(self) -> None:
-        """Drop every in-flight grouping (daemon stop, or an upstream reconnect).
+        """Drop every in-flight grouping (daemon stop, which an upstream death also causes).
 
         A dropped grouping leaves its page ungrouped and reports nothing: the
-        reason is the daemon's own stop or reconnect.
+        reason is the daemon's own stop.
         """
         for task in self._tasks:
             task.cancel()

@@ -2,40 +2,25 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-import queue
-import subprocess
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
-from pydantic import SecretStr
 
 from base.cluster.machine import MachineIdentity, MachineRoles
-from base.config import ConfigBoot
-from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import Liveness
-from base.db import Database
-from base.native_process.loaded_commit import LoadedCommit
 from services.derived.memory_indexer import chunking, daemon
 from services.derived.memory_indexer.backends.base import content_hash
-from services.derived.memory_indexer.checkout_refresh import refresh_gateway_checkout
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.fake_provider import DIM, FINGERPRINT, FakeProvider
 from services.derived.memory_search.tests.store_backend import StoreBackend
 from services.derived.memory_search.tests.test_memory_indexer import (
-    _assert_gap_closed,
-    _assert_one_ladder_rung,
-    _assert_retry_idle,
-    _cancel_quietly,
-    _FlakyProvider,
     _liveness_timeout,
     _long_note,
 )
@@ -107,77 +92,10 @@ def test_reconcile_embed_error_truncates_and_returns_false(
     assert calls == [2]  # first chunk failed -> remaining chunks never ran (as before)
     expected = (
         f"reconcile embed failed: {EmbeddingAPIError('embed boom')!r}"
-        " — daemon continues; a follow-up pass will retry"
+        " — index remains incomplete; explicit rebuild required"
     )
     assert expected in caplog.text
     assert liveness.is_alive()
-
-
-def test_refresh_gateway_checkout_fast_forwards(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """Safety net: pulls origin/main into the gateway checkout and logs
-    loudly when HEAD moved (a post-merge refresh was missed)."""
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)  # noqa: S603 - fixed argv, test sandbox
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "t@t"], check=True)  # noqa: S603 - fixed argv, test sandbox
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "t"], check=True)  # noqa: S603 - fixed argv, test sandbox
-    (tmp_path / "a.md").write_text("x")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)  # noqa: S603 - fixed argv, test sandbox
-    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "init"], check=True)  # noqa: S603 - fixed argv, test sandbox
-    before = subprocess.check_output(  # noqa: S603 — fixed argv, test sandbox  # noqa: S603 - fixed argv, test sandbox
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
-    ).strip()
-
-    from base.deploy.git import memory_repo
-
-    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
-        assert roles == machine_identity.role()
-        return tmp_path
-
-    monkeypatch.setattr("base.paths.gateway_memory_dir", memory_root_for_roles)
-
-    def pulled(*, machine: MachineIdentity) -> str:
-        assert machine is machine_identity
-        return "abc1234"
-
-    monkeypatch.setattr(memory_repo, "pull_main", pulled)
-
-    with caplog.at_level(logging.INFO, logger="services.derived.memory_indexer.daemon"):
-        refresh_gateway_checkout(machine=machine_identity)
-    assert "fast-forwarded" in caplog.text
-    assert before != "abc1234"
-
-
-def test_refresh_gateway_checkout_failure_logs_and_does_not_raise(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A failed pull is logged at ERROR and never raised — the drain loop
-    retries next cycle instead of letting the daemon die."""
-    from base.deploy.git import memory_repo
-
-    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
-        assert roles == machine_identity.role()
-        return tmp_path
-
-    monkeypatch.setattr("base.paths.gateway_memory_dir", memory_root_for_roles)
-
-    def _boom(*, machine: MachineIdentity) -> str:
-        assert machine is machine_identity
-        raise RuntimeError("network down")
-
-    monkeypatch.setattr(memory_repo, "pull_main", _boom)
-
-    with caplog.at_level(logging.ERROR, logger="services.derived.memory_indexer.daemon"):
-        refresh_gateway_checkout(machine=machine_identity)  # must not raise
-    assert "refresh failed" in caplog.text
 
 
 def test_split_note_extracts_description_and_body() -> None:
@@ -500,271 +418,45 @@ def test_complete_file_still_commits_when_another_fails(
     assert str(partial.resolve()) not in meta
 
 
-def test_reconcile_retry_schedule_backoff_and_reset() -> None:
-    clock = SimpleNamespace(now=100.0)
-    retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=9.0, clock=lambda: clock.now)
-    _assert_retry_idle(retry)
-    # Each incomplete signal advances the ladder, including an idle drain failure.
-    for delay in [2.0, 4.0, 8.0, 9.0, 9.0]:
-        _assert_one_ladder_rung(retry, clock, delay)
-    # A quota outage may last indefinitely; the capped backoff must not overflow.
-    for _ in range(1100):
-        assert retry.record_incomplete() == 9.0
-    retry.record_pass_complete()
-    _assert_retry_idle(retry)
-    assert retry.ensure_scheduled() == 2.0  # an idle drain failure takes the base rung
-    assert retry.record_incomplete() == 4.0  # its incomplete follow-up takes the next
-
-
-def test_reconcile_health_payload() -> None:
-    now = 0.0
-    retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=4.0, clock=lambda: now)
-    idle = {"reconcile_pending": False, "reconcile_retry_in_s": None}
-    assert daemon._reconcile_health(retry) == idle
-    retry.ensure_scheduled()
-    assert daemon._reconcile_health(retry) == {
-        "reconcile_pending": True,
-        "reconcile_retry_in_s": 2.0,
-    }
-    now = 0.76
-    assert daemon._reconcile_health(retry)["reconcile_retry_in_s"] == 1.2
-    retry.record_pass_complete()
-    assert daemon._reconcile_health(retry) == idle
-
-
-async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
+async def test_failed_drain_batch_stays_incomplete_until_a_new_file_event(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
-    caplog: pytest.LogCaptureFixture,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    reconcile = Mock(wraps=daemon._reconcile)
-    monkeypatch.setattr(daemon, "_reconcile", reconcile)
-    # More than one reconcile chunk: recovery must fill the entire original gap.
-    files = {tmp_path / f"note-{i:03d}.md" for i in range(70)}
-    for note in files:
-        note.write_text(f"content of {note.name}")
-    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
-    backend = store_backend
-    provider = _FlakyProvider(failures=3)
-    liveness = Liveness(1.0)
-    retry = daemon._ReconcileRetrySchedule(base_s=0.05, cap_s=0.1)
-    assert (
-        await asyncio.to_thread(
-            daemon._reconcile, backend, provider, liveness, machine=machine_identity
-        )
-        is False
+    import asyncio
+    import queue
+
+    file = tmp_path / "failed.md"
+    file.write_text("old content")
+    daemon._process_paths(
+        store_backend, {file.resolve()}, FakeProvider(), Liveness(600), machine=machine_identity
     )
-    retry.record_incomplete()
-    with caplog.at_level(logging.INFO, logger="services.derived.memory_indexer.daemon"):
-        task = asyncio.create_task(
-            daemon._drain_loop(
-                backend, queue.Queue(), liveness, provider, retry, machine=machine_identity
-            )
-        )
-        try:
-            async with asyncio.timeout(5.0):
-                while retry.pending:
-                    assert not task.done()
-                    assert liveness.is_alive()
-                    await asyncio.sleep(0.01)
-            await _assert_gap_closed(backend, files, retry, liveness, reconcile, caplog)
-        finally:
-            await _cancel_quietly(task)
-
-
-async def test_reconcile_retry_drain_failure_arms_schedule(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    caplog: pytest.LogCaptureFixture,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    note = tmp_path / "changed.md"
-    note.write_text("new content")
-    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
-    backend = store_backend
-    provider = _FlakyProvider(failures=1)
+    old_meta = store_backend.all_meta()[str(file.resolve())]
+    file.write_text("new content")
     dirty: queue.Queue[Path] = queue.Queue()
-    dirty.put(note)
-    liveness = Liveness(1.0)
-    retry = daemon._ReconcileRetrySchedule(base_s=0.05, cap_s=0.1)
-    task = asyncio.create_task(
-        daemon._drain_loop(backend, dirty, liveness, provider, retry, machine=machine_identity)
-    )
-    try:
-        async with asyncio.timeout(5.0):
-            while not retry.pending:
-                assert not task.done()
-                await asyncio.sleep(0.005)
-            assert dirty.empty()
-            assert "embed failed for a batch of 1 path(s)" in caplog.text
-            assert "follow-up reconcile scheduled" in caplog.text
-            while retry.pending:
-                assert not task.done()
-                assert liveness.is_alive()
-                await asyncio.sleep(0.01)
-        assert liveness.is_alive()
-        assert set(await asyncio.to_thread(backend.all_meta)) == {str(note)}
-        assert provider.attempts == 2
-        assert not retry.pending
-    finally:
-        await _cancel_quietly(task)
+    dirty.put(file)
+    ticks = 0
 
+    class FailingOnce(FakeProvider):
+        def embed_batch(self, texts: list[str]) -> np.ndarray:
+            if ticks == 1:
+                raise EmbeddingAPIError("temporarily unavailable")
+            return super().embed_batch(texts)
 
-async def test_reconcile_retry_beats_between_failed_pass_and_batch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    completed = {"reconcile": 0, "batch": 0}
+    async def poll(_delay: float) -> None:
+        nonlocal ticks
+        ticks += 1
+        if ticks == 3:
+            assert store_backend.all_meta()[str(file.resolve())] == old_meta
+            dirty.put(file)  # A genuine new event is allowed to update the index.
+        if ticks == 4:
+            raise asyncio.CancelledError
 
-    def slow_reconcile(*args: Any, machine: MachineIdentity) -> bool:
-        time.sleep(0.4)
-        completed["reconcile"] += 1
-        return False
-
-    def slow_batch(*args: Any, machine: MachineIdentity) -> None:
-        time.sleep(0.4)
-        completed["batch"] += 1
-        raise EmbeddingAPIError("429 Too Many Requests")
-
-    monkeypatch.setattr(daemon, "_reconcile", slow_reconcile)
-    monkeypatch.setattr(daemon, "_process_paths", slow_batch)
-    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
-    dirty: queue.Queue[Path] = queue.Queue()
-    dirty.put(tmp_path / "note.md")
-    retry = daemon._ReconcileRetrySchedule(base_s=0.01, cap_s=0.1)
-    retry.record_incomplete()
-    # Either operation fits below the ceiling, but their combined tails do not.
-    liveness = Liveness(0.6)
-    task = asyncio.create_task(
-        daemon._drain_loop(Mock(), dirty, liveness, FakeProvider(), retry, machine=machine_identity)
-    )
-    started = time.monotonic()
-    try:
-        while time.monotonic() - started < 1.3:
-            await asyncio.sleep(0.01)
-            assert not task.done()
-            assert liveness.is_alive(), completed
-        assert completed["reconcile"] >= 1
-        assert completed["batch"] == 1
-    finally:
-        await _cancel_quietly(task)
-
-
-@pytest.mark.usefixtures("owned_config_environment")
-async def test_run_arms_retry_when_startup_reconcile_incomplete(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    database: Database,
-    *,
-    machine_identity: MachineIdentity,
-    tmp_path: Path,
-) -> None:
-    from services.derived.memory_indexer.backends.probe import ProbeResult
-
-    backend = Mock()
-    backend.name = "fake"
-    provider = FakeProvider()
-    reconcile = Mock(return_value=False)
-    drain = AsyncMock()
-
-    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
-    monkeypatch.setattr(daemon, "start_health_server", AsyncMock())
-    monkeypatch.setattr(daemon, "stop_health_server", AsyncMock())
-
-    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
-        return Mock(health_port=0)
-
-    monkeypatch.setattr(daemon, "_endpoint", endpoint_for_entry)
-
-    provider_inputs: list[tuple[str, float, str | None]] = []
-
-    def get_provider(
-        name: str,
-        *,
-        catalog: object,
-        timeout_reader: Callable[[], float],
-        api_key_reader: Callable[[], str | None],
-    ) -> FakeProvider:
-        del catalog
-        provider_inputs.append((name, timeout_reader(), api_key_reader()))
-        return provider
-
-    monkeypatch.setattr(daemon, "get_provider", get_provider)
-    monkeypatch.setattr(daemon, "probe_backend", Mock(return_value=ProbeResult(message=None)))
-    monkeypatch.setattr(daemon, "_connect_backend_with_retry", AsyncMock(return_value=backend))
-    monkeypatch.setattr(daemon, "Observer", Mock())
-    monkeypatch.setattr(daemon, "_reconcile", reconcile)
-    monkeypatch.setattr(daemon, "_drain_loop", drain)
-    boot = ConfigBoot()
-    boot.set_field("memory_indexer_reconcile_retry_backoff_seconds", 7.0)
-    boot.set_field("embedding_backend", "gemini")
-    boot.set_field("memory_embed_timeout_seconds", 17.0)
-    boot.set_field("gemini_api_key", SecretStr("root-key"))
-
-    with caplog.at_level(logging.WARNING, logger="services.derived.memory_indexer.daemon"):
-        await daemon.run(
-            runtime=tmp_path / "run",
-            config=boot,
-            database=lambda: database,
-            image=LoadedCommit(Path(), None),
-            machine=machine_identity,
+    monkeypatch.setattr(daemon.asyncio, "sleep", poll)
+    with pytest.raises(asyncio.CancelledError):
+        await daemon._drain_loop(
+            store_backend, dirty, Liveness(600), FailingOnce(), machine=machine_identity
         )
-
-    assert provider_inputs == [("gemini", 17.0, "root-key")]
-    reconcile.assert_called_once()
-    assert reconcile.call_args.args[:2] == (backend, provider)
-    drain.assert_awaited_once()
-    assert drain.await_args is not None
-    retry = drain.await_args.kwargs["retry"]
-    assert isinstance(retry, daemon._ReconcileRetrySchedule)
-    assert retry.pending
-    retry_in = retry.retry_in_s()
-    assert retry_in is not None and 0 < retry_in <= 7.0
-    assert "startup reconcile incomplete; retry scheduled in 7.0s" in caplog.text
-
-
-async def test_reconcile_retry_wait_keeps_liveness_and_cancels_promptly(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
-    # Wait far longer than the heartbeat ceiling while keeping the test bounded.
-    retry = daemon._ReconcileRetrySchedule(base_s=2.0, cap_s=2.0)
-    retry.record_incomplete()
-    liveness = Liveness(0.15)
-    backend = Mock()
-    task = asyncio.create_task(
-        daemon._drain_loop(
-            backend, queue.Queue(), liveness, FakeProvider(), retry, machine=machine_identity
-        )
-    )
-    started = time.monotonic()
-    try:
-        while time.monotonic() - started < 0.4:
-            await asyncio.sleep(0.01)
-            assert liveness.is_alive()
-            assert retry.pending
-            assert not task.done()
-        backend.all_meta.assert_not_called()  # still waiting, no pass ran yet
-    finally:
-        cancelled_at = time.monotonic()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(task, timeout=0.5)
-        assert time.monotonic() - cancelled_at < 0.5
+    assert store_backend.all_meta()[str(file.resolve())][1] == content_hash("new content")

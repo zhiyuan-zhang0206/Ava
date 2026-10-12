@@ -15,15 +15,12 @@ not the same semantic space).
 
 from __future__ import annotations
 
-import asyncio
 import queue
 import time
 from collections.abc import Callable, Sequence
-from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -652,69 +649,3 @@ def _long_note(paragraphs: int) -> str:
     return "---\ntype: Memory\ndescription: hand off to 402\n---\n\n" + "\n\n".join(
         f"paragraph-{i} " + "word " * 80 for i in range(paragraphs)
     )
-
-
-def _assert_retry_idle(retry: daemon._ReconcileRetrySchedule) -> None:
-    assert not retry.pending
-    assert not retry.due()
-    assert retry.retry_in_s() is None
-
-
-def _assert_one_ladder_rung(
-    retry: daemon._ReconcileRetrySchedule, clock: SimpleNamespace, delay: float
-) -> None:
-    """One incomplete signal arms the rung; repeated drain failures cannot postpone it."""
-    assert retry.record_incomplete() == delay
-    assert retry.pending
-    assert not retry.due()
-    assert retry.retry_in_s() == delay
-    clock.now += delay - 0.25
-    assert retry.ensure_scheduled() is None
-    assert retry.retry_in_s() == 0.25
-    assert not retry.due()
-    clock.now += 0.25
-    assert retry.due()
-    clock.now += 1.0
-    assert retry.retry_in_s() == 0.0
-
-
-class _FlakyProvider(FakeProvider):
-    def __init__(self, failures: int) -> None:
-        super().__init__()
-        self.failures = failures
-        self.attempts = 0
-
-    def embed_batch(self, texts: list[str]) -> np.ndarray:
-        self.attempts += 1
-        if self.attempts <= self.failures:
-            raise EmbeddingAPIError("429 Too Many Requests")
-        return super().embed_batch(texts)
-
-
-async def _cancel_quietly(task: asyncio.Task[None]) -> None:
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
-
-
-async def _assert_gap_closed(
-    backend: StoreBackend,
-    files: set[Path],
-    retry: daemon._ReconcileRetrySchedule,
-    liveness: Liveness,
-    reconcile: Mock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    assert liveness.is_alive()
-    assert set(await asyncio.to_thread(backend.all_meta)) == {str(p) for p in files}
-    assert not retry.pending
-    assert retry.retry_in_s() is None
-    passes = reconcile.call_count
-    assert passes == 4  # startup, two incomplete retries, then completion
-    await asyncio.sleep(0.15)  # no extra pass after the cap-sized wait elapses
-    assert reconcile.call_count == passes
-    assert "gap closed; retries cleared" in caplog.text
-    assert "reconcile incomplete; retry scheduled in 0.1s" in caplog.text
-
-
-__all__ = ["_FlakyProvider"]

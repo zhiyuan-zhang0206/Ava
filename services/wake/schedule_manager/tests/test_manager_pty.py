@@ -2,8 +2,8 @@
 
 A real pty-sessions service + real DB + real backend + the real
 `services.wake.schedule_manager.runner` entrypoint: `_launch` creates a session in the service,
-`_live_ids` / `capture_blocking` see it, `_reap` tears it down, reconcile rebuilds
-after a crash, and the breaker trips after repeated crashes.
+`_live_ids` / `capture_blocking` see it, `_reap` tears it down, and a failed
+revision is never launched again after manager restart.
 
 The schedule commands are deliberately trivial (`sleep 30` for the live
 paths, `false` for the crash paths) — the runner's real script execution and
@@ -12,9 +12,11 @@ status semantics are covered by test_schedule_runner.py.
 
 import contextlib
 import os
+import shlex
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -27,6 +29,7 @@ from base.sessions.pty import client
 from gateway.schedules import session_control
 from services.wake.schedule_manager import manager as sm
 from tests.path_scoped.pty_service import PtyServiceProcess
+from tests.path_scoped.pty_shells import wait_for
 
 REPO = Path(__file__).resolve().parents[4]
 
@@ -190,12 +193,13 @@ def test_pty_launch_live_capture(
     _wait_session_gone(name)
 
 
-def test_pty_crash_then_reconcile_rebuilds(
+def test_pty_crash_is_not_replayed_after_manager_restart(
     db_conn: psycopg.Connection, pool: ConnectionPool, _pty_home: str
 ) -> None:
-    """A crashing runner (a `bash run.sh` that exits 1) dies on its own — pty
-    EOF closes the session — and the next reconcile relaunches it."""
-    sid = _insert_schedule(db_conn, "pty-crash", "exit 1", "bash run.sh")
+    """A real script effect occurs once; fresh managers never repeat it."""
+    marker = Path(_pty_home) / "crash-effects"
+    script = f"printf 'effect\\n' >> {marker}; exit 1"
+    sid = _insert_schedule(db_conn, "pty-crash", script, "bash run.sh")
     mgr = sm.ScheduleManager(pool)
     mgr.reconcile()
     name = session_name(f"schedule-{sid}")
@@ -205,54 +209,47 @@ def test_pty_crash_then_reconcile_rebuilds(
     # The runner exits nonzero immediately → session ends on its own.
     _wait_session_gone(name)
 
-    # Clear the first launch's backoff window.
+    for _ in range(3):
+        sm.ScheduleManager(pool).reconcile()
+        assert not backend.has_session(name)
+    row = db_conn.execute(
+        "SELECT status, launch_count FROM schedules WHERE id = %s", (sid,)
+    ).fetchone()
+    assert row == ("error", 1)
+    assert marker.read_text().splitlines() == ["effect"]
+
+    # An explicit restart is a new revision and deliberately authorizes a new effect.
     db_conn.execute(
-        "UPDATE schedules SET next_launch_at = clock_timestamp() - interval '1 second' "
-        "WHERE id = %s",
+        "UPDATE schedules SET desired_revision = desired_revision + 1, "
+        "launch_count = 0, status = 'stopped' WHERE id = %s",
         (sid,),
     )
     db_conn.commit()
-    mgr.reconcile()  # relaunch
-    assert backend.has_session(name)
-    assert mgr._reap(sid)
+    assert sm.ScheduleManager(pool).sync_one(sid)
     _wait_session_gone(name)
-
-
-def test_pty_breaker_trips_after_repeated_crashes(
-    db_conn: psycopg.Connection, pool: ConnectionPool
-) -> None:
-    """The circuit breaker still trips on the PTY backend: after _BREAKER_MAX
-    crash/relaunch rounds the schedule lands in status='error' and is left
-    alone."""
-    sid = _insert_schedule(db_conn, "pty-breaker", "exit 1", "bash run.sh")
-    mgr = sm.ScheduleManager(pool)
-    name = session_name(f"schedule-{sid}")
-    backend = get_shell_backend()
-    for _ in range(sm._BREAKER_MAX + 3):
-        mgr.reconcile()
-        if backend.has_session(name):
-            _wait_session_gone(name)
-        db_conn.execute(
-            "UPDATE schedules SET next_launch_at = clock_timestamp() - interval '1 second' "
-            "WHERE id = %s",
-            (sid,),
-        )
-        db_conn.commit()
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT status FROM schedules WHERE id = %s", (sid,))
-        row = cur.fetchone()
-    assert row is not None and row[0] == "error", f"breaker did not trip: {row}"
-    # A tripped schedule is terminal: reconcile must not relaunch it.
-    before = backend.has_session(name)
-    mgr.reconcile()
-    assert not backend.has_session(name) or before
+    sm.ScheduleManager(pool).reconcile()
+    assert marker.read_text().splitlines() == ["effect", "effect"]
 
 
 def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
-    db_conn: psycopg.Connection, pool: ConnectionPool, _pty_home: str
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    _pty_home: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from services.wake.schedule_manager import revisions
 
+    # A real PTY runner stub holds the exact pre-acknowledgement window open;
+    # the ordinary runner would also write running during its own startup.
+    marker = tmp_path / "runner-births"
+    runner = tmp_path / ".venv" / "bin" / "python"
+    runner.parent.mkdir(parents=True)
+    runner.write_text(
+        f"#!/bin/sh\nprintf 'birth\\n' >> {shlex.quote(str(marker))}\nexec sleep 30\n"
+    )
+    runner.chmod(0o755)
+    monkeypatch.setattr(sm, "REPO_ROOT", tmp_path)
     sid = _insert_schedule(
         db_conn, "pty-revision", "import time; time.sleep(30)", "python schedule.py"
     )
@@ -260,13 +257,23 @@ def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
     db_conn.commit()
     name = session_name(f"schedule-{sid}")
     mgr = sm.ScheduleManager(pool)
+    monkeypatch.setattr(mgr, "_mark_running", MagicMock(side_effect=RuntimeError("lost ack")))
     try:
-        assert mgr.sync_one(sid)
+        with pytest.raises(RuntimeError, match="lost ack"):
+            mgr.sync_one(sid)
         assert revisions.launched_revision(sid) == 1, repr(client.live_sessions(name))
         before = get_shell_backend().session_started_at(name)
         assert before is not None
-        assert sm.ScheduleManager(pool).sync_one(sid)
+        assert wait_for(marker.exists)
+        assert db_conn.execute(
+            "SELECT status, launch_count FROM schedules WHERE id = %s", (sid,)
+        ).fetchone() == ("error", 1)
+        sm.ScheduleManager(pool).reconcile()
         assert get_shell_backend().session_started_at(name) == before
+        assert db_conn.execute(
+            "SELECT status, launch_count, last_error FROM schedules WHERE id = %s", (sid,)
+        ).fetchone() == ("running", 1, None)
+        assert marker.read_text().splitlines() == ["birth"]
     finally:
         mgr._reap(sid)
         _wait_session_gone(name)

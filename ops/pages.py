@@ -165,8 +165,7 @@ def register_page_in_transaction(
     and publishing the PageOpened event.
 
     `serve_dir` is the directory the page server serves, recorded by
-    ava.ui.serve() so agent boot can re-serve a dead page
-    server after resurrect/restart; NULL for ava.ui.show() pages (the agent
+    ava.ui.serve() so the page-server service can admit its initial serving session; NULL for ava.ui.show() pages (the agent
     manages those servers itself).
     """
     lock_page_agent(db, agent_id)
@@ -176,10 +175,28 @@ def register_page_in_transaction(
         with db.transaction(), db.cursor() as cur:
             cur.execute(
                 "UPDATE agent_pages SET port = %s, host = %s, title = %s, serve_dir = %s, "  # noqa: S608
-                "expires_at = %s, expired_at = NULL "
+                "expires_at = %s, expired_at = NULL, "
+                "session_name = CASE WHEN (port, host, serve_dir) IS DISTINCT FROM (%s, %s, %s) "
+                "THEN NULL ELSE session_name END, "
+                "server_token = CASE WHEN (port, host, serve_dir) IS DISTINCT FROM (%s, %s, %s) "
+                "THEN NULL ELSE server_token END "
                 "WHERE agent_id = %s AND name = %s AND closed_at IS NULL "
                 "RETURNING " + _SELECT_COLUMNS,
-                (port, host, title, serve_dir, expires_at, agent_id, name),
+                (
+                    port,
+                    host,
+                    title,
+                    serve_dir,
+                    expires_at,
+                    port,
+                    host,
+                    serve_dir,
+                    port,
+                    host,
+                    serve_dir,
+                    agent_id,
+                    name,
+                ),
             )
             row = cur.fetchone()
             if row is None:
