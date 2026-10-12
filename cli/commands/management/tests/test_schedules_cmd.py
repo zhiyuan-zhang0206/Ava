@@ -668,7 +668,7 @@ def test_verify_reads_all_rows_from_the_real_table(
     rows = _verify._read_schedule_rows(database_factory=operator_database)
     names = [row[1] for row in rows]
     assert "self-evolution-weekly" in names  # enabled builtin
-    assert "trace-ship-tempo" in names  # operator builtin: present but disabled
+    assert "trace-ship-tempo" not in names  # retired: only `ava trace ship` remains
     ids = [row[0] for row in rows]
     assert ids == sorted(ids)
 
@@ -682,18 +682,18 @@ def test_provision_creates_builtins(
     operator_database: Callable[[], Any],
 ) -> None:
     """`ava schedules provision` creates the repo's built-in schedules in the
-    DB (product enabled, operator disabled) and is a no-op on the second run."""
+    DB (product schedules enabled) and is a no-op on the second run."""
     assert _sched.cmd_schedules_provision(database_factory=operator_database) == 0
     out = capsys.readouterr().out
     assert "self-evolution-weekly" in out
     assert "memory-arbiter" in out
-    assert "trace-ship-tempo" in out
+    assert "trace-ship-tempo" not in out
     with db_conn.cursor() as cur:
         cur.execute("SELECT name, enabled FROM schedules ORDER BY name")
         rows = dict(cur.fetchall())
     assert rows["self-evolution-weekly"] is True
     assert rows["memory-arbiter"] is True
-    assert rows["trace-ship-tempo"] is False
+    assert "trace-ship-tempo" not in rows
 
     # Second run: idempotent, nothing created.
     assert _sched.cmd_schedules_provision(database_factory=operator_database) == 0

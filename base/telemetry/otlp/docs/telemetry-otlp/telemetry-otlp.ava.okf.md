@@ -125,10 +125,12 @@ receiver.
 - Routine OTLP diagnostics use loguru with `_no_emitter`, reaching stderr/file
   without re-entering the pipeline. Registered disabled/recovered events also
   record the otherwise invisible episode in the JSONL mirror.
-- Runner exporters retain `otlphttp/tempo`, `otlphttp/loki` and
-  `otlphttp/prometheus`. Tempo/Loki `file_storage` queues use these IDs; renaming
-  would orphan backlog. Each queue has a 1 GiB byte cap; metrics retry in memory.
-  Queue/drop/silence signals: [[infra-metrics.ava.okf.md|Infrastructure metrics]].
+- Runner exporter component IDs stay `otlphttp/tempo`, `otlphttp/loki` and
+  `otlphttp/prometheus` across the direct-backend → relay cutover so their
+  collector self-metrics keep their series. Every exporter keeps a bounded
+  in-memory sending queue; a collector restart drops what was queued.
+  Queue/drop/silence observability lives in
+  [[infra-metrics.ava.okf.md|Infrastructure metrics]].
 - Exit flush (task #4320) — both providers build with
   `shutdown_on_exit=False`; the single ordered exit seam and its accepted
   semantics: [[exit-flush.ava.okf.md|OTLP exit flush]].

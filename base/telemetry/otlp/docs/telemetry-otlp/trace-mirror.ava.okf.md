@@ -36,9 +36,9 @@ The mirror is a recovery and inspection copy, not the live path; standard
 OTLP/HTTP is the live network form. Each line is one standard OTLP/JSON
 `ExportTraceServiceRequest`, the shape any OTLP backend ingests, so no custom
 format exists to maintain. The collector's file exporter writes it in parallel
-with live delivery. Trace and log exporters use persistent queues; metrics use
-bounded in-memory retry and may shed stale points; the memory limiter can
-return backpressure before the mirror. The system makes no absolute no-loss
+with live delivery. Every exporter uses a bounded in-memory sending queue, so a
+collector restart drops what was queued and metrics may shed stale points; the
+memory limiter can return backpressure before the mirror. The system makes no absolute no-loss
 promise.
 
 It is distinct from the pre-compact conversation dump
@@ -50,8 +50,8 @@ metadata-only OTel with LLM content stripped at the source.
 
 1. `ava trace ship` — recovery replay to Tempo (watermark-resumable, windowed
    backfill, idempotent). It bypasses the local collector so a replay cannot
-   write itself back into the mirror. Scheduled shipping is not the live
-   delivery mechanism.
+   write itself back into the mirror. It is an operator command; nothing
+   schedules it.
 2. `fetch_trace.py --source mirror` in the `inspect-a-trace` skill — complete
    offline span retrieval with no size cap and no network (Tempo's full-trace
    API fails above its cap).
