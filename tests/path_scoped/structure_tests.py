@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from scripts.structure import locality
+from meizel.owners import decisions
 from scripts.structure.ambient_state import allowlist as ambient_allowlist
 
 
@@ -19,9 +19,9 @@ def _synthetic_decision_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
     A test about the allowlist itself installs its own `Decision`.
     """
     monkeypatch.setattr(
-        locality,
+        decisions,
         "DECISIONS",
-        {name: replace(decision, allowed={}) for name, decision in locality.DECISIONS.items()},
+        {name: replace(decision, allowed={}) for name, decision in decisions.DECISIONS.items()},
     )
 
 

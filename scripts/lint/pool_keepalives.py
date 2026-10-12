@@ -16,7 +16,7 @@ no application-level bound — it waits out the OS TCP-retransmit timeout.
 `base.db.pool()` merges those kwargs for every sync pool and
 `base.db.async_pool()` for every async one (the agent host passes its
 `LoggingConnectionPool` in as the pool class). In the governed packages the
-structure gate's Rule 5 (`postgres-dial`, `scripts/structure/locality.py`)
+structure gate's Rule 5 (`postgres-dial`, `meizel/owners/decisions.py`)
 already rejects any pool built outside `base/db/connections.py`, with no
 frozen exceptions left. This lint covers only what that rule does not see:
 `scripts/` (not a governed package) and the modules the decision allows to dial
@@ -60,7 +60,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 — standalone script
-from scripts.structure.locality import DECISIONS  # noqa: E402 — standalone script
+from meizel.owners.decisions import DECISIONS  # noqa: E402 — standalone script
 
 _DIAL = DECISIONS["postgres-dial"]
 

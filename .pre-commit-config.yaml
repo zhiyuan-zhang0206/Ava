@@ -501,7 +501,7 @@ repos:
       - id: lint-clock-lattice
         name: lint clock lattice (lattice-vocabulary clocks only in the family modules)
         language: system
-        entry: .venv/bin/python scripts/lint/clock_lattice.py --only
+        entry: .venv/bin/python -m meizel.owners.clock_lattice --only
         files: \.py$
 
       # A test that exactly asserts a value derived from a repo fixed-instant

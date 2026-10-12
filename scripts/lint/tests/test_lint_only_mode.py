@@ -24,10 +24,10 @@ import pytest
 from base.host.proc import run_bounded
 from meizel import lint_common
 from meizel.language import no_script_sibling_imports
+from meizel.owners import clock_lattice
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet, lint_quiesced_loops
 from scripts.lint import (
     async_no_sync_blocking,
-    clock_lattice,
     code_structure,
     fixture_scope,
     no_os_environ,
