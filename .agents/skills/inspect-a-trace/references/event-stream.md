@@ -148,8 +148,10 @@ observed classes: `"no tool_call (idle)"`, `"system_halt (compact)"`,
 {service_name="unknown_service"} | json | agent_id="3048" | level=~"warning|error|critical"
 ```
 
-**Crash loops.** `event_name="resurrect"`, `category="audit"` — one row per
-resurrection.
+**Resurrections.** `event_name="resurrect"`, `category="audit"` — one row per
+resurrection: a chat message waking a terminated agent, or an operator's explicit
+resurrect. A crash does not resurrect an agent by itself, so a run of these rows
+is not a crash loop.
 
 ## Quantiles lie a little
 
