@@ -48,8 +48,8 @@ def cluster_credential(
     authenticate the one cluster administrator; the fact only records which
     credential did. A blank `secret` never verifies as the human bearer.
     """
-    from base.cluster.auth import verify_bearer
     from base.cluster.authority.api import acceptance, bearer_class
+    from base.host.net.auth import verify_bearer
     from base.paths import ava_home
 
     if verify_bearer(authorization, secret):
@@ -96,8 +96,8 @@ class SessionKeys:
         None when absent and `create` is false (then no session authenticates).
         Losing the file ends every session; the next login mints a new key.
         """
-        from base.deploy.release.verified_file import regular_bytes
         from base.host.private_storage import create_private_bytes, private_file_problem
+        from base.host.verified_file import regular_bytes
 
         path = session_key_path(home)
         if create and not path.exists():

@@ -14,8 +14,7 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage
 
-from base.agents.messages.kwargs import message_addl_kwargs, message_content
-from base.lm.content import content_blocks
+from base.lm.content import content_blocks, message_addl_kwargs, message_content
 from base.log import logger
 
 

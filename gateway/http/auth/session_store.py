@@ -17,8 +17,8 @@ from typing import Any
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from base.cluster.auth import new_session_id
 from base.db.transaction import write_transaction
+from base.host.net.auth import new_session_id
 
 _CACHE_TTL = timedelta(seconds=30)
 _SESSION_CACHE_MAX_ENTRIES = 4096

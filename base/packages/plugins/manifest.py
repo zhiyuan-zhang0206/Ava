@@ -31,12 +31,13 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import tomllib
 from dataclasses import dataclass
-from functools import total_ordering
 from pathlib import Path
 from typing import Any, cast
 
+from base import paths
+from base.host.git import host_version as host_version_module
+from base.host.git.host_version import Version, parse_version
 from base.packages.plugins.ui_contributions import validate_ui_contributions
 
 MANIFEST_FILENAME = "ava-plugin.json"
@@ -47,59 +48,6 @@ API_VERSION = 2
 
 class ManifestError(Exception):
     """Manifest content / validation failure, with all errors joined."""
-
-
-# ── versions ────────────────────────────────────────────────────────────
-
-_VERSION_RE = re.compile(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$")
-_PRE_RE = re.compile(r"^(dev|alpha|a|beta|b|preview|pre|rc|c)(?:[.-]?(\d+))?$", re.I)
-_PRE_ALIASES = {"alpha": "a", "beta": "b", "preview": "rc", "pre": "rc", "c": "rc"}
-_PRE_ORDER = {"dev": 0, "a": 1, "b": 2, "rc": 3}
-
-
-def _normalize_prerelease(raw: str) -> str:
-    match = _PRE_RE.match(raw)
-    if match is None:
-        return raw.lower()
-    label = _PRE_ALIASES.get(match[1].lower(), match[1].lower())
-    return f"{label}.{int(match[2] or 0)}"
-
-
-def _prerelease_key(raw: str) -> tuple[int, int, str]:
-    match = re.fullmatch(r"(dev|a|b|rc)\.(\d+)", raw)
-    if match is not None:
-        return (_PRE_ORDER[match[1]], int(match[2]), "")
-    return (4, 0, raw)
-
-
-@total_ordering
-@dataclass(frozen=True)
-class _Version:
-    """Three-segment version; prereleases sort below the matching release."""
-
-    major: int
-    minor: int = 0
-    patch: int = 0
-    prerelease: str | None = None
-
-    def __lt__(self, other: _Version) -> bool:
-        left = (self.major, self.minor, self.patch)
-        right = (other.major, other.minor, other.patch)
-        if left != right:
-            return left < right
-        if self.prerelease is None:
-            return False
-        if other.prerelease is None:
-            return True
-        return _prerelease_key(self.prerelease) < _prerelease_key(other.prerelease)
-
-
-def _parse_version(raw: str) -> _Version | None:
-    m = _VERSION_RE.match(raw.strip())
-    if m is None:
-        return None
-    prerelease = _normalize_prerelease(m[4]) if m[4] is not None else None
-    return _Version(int(m[1]), int(m[2] or 0), int(m[3] or 0), prerelease)
 
 
 # ── ranges ──────────────────────────────────────────────────────────────
@@ -118,7 +66,7 @@ _CLAUSE_SPLIT_RE = re.compile(r"[,\s]+")
 @dataclass(frozen=True)
 class _Clause:
     op: str  # normalized: "=" folded to "=="
-    version: _Version
+    version: Version
 
 
 def parse_range(raw: str) -> tuple[_Clause, ...]:
@@ -140,7 +88,7 @@ def parse_range(raw: str) -> tuple[_Clause, ...]:
             op = "=="
         else:
             rest = part[len(op) :]
-        ver = _parse_version(rest)
+        ver = parse_version(rest)
         if ver is None:
             raise ManifestError(f"range {raw!r}: {rest!r} is not a version")
         clauses.append(_Clause("==" if op == "=" else op, ver))
@@ -153,7 +101,7 @@ def _has_upper(clauses: tuple[_Clause, ...]) -> bool:
 
 def range_allows(raw: str, version: str) -> bool:
     """True when `version` satisfies every clause of the range."""
-    ver = _parse_version(version)
+    ver = parse_version(version)
     if ver is None:
         raise ManifestError(f"{version!r} is not a version")
     clauses = parse_range(raw)
@@ -288,7 +236,7 @@ def _validate_identity(
         )
 
     version = data.get("version")
-    if not isinstance(version, str) or _parse_version(version) is None:
+    if not isinstance(version, str) or parse_version(version) is None:
         errors.append(f"version must be semver (X.Y.Z, optional -prerelease); got {version!r}")
 
     description = data.get("description")
@@ -594,23 +542,6 @@ def load_optional_manifest(pkg_dir: Path) -> PluginManifest | None:
     return load_manifest(pkg_dir)
 
 
-def host_version_from_repo(repo: Path) -> str:
-    """The Ava version this checkout carries (`[project].version` in its
-    pyproject.toml) — the host version `engines.ava` is checked against."""
-    pyproject = repo / "pyproject.toml"
-    if not pyproject.is_file():
-        raise ManifestError(f"cannot determine host version: no pyproject.toml in {repo}")
-    try:
-        data: dict[str, Any] = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as e:
-        raise ManifestError(f"cannot determine host version: {e}") from e
-    project: dict[str, Any] | None = data.get("project")
-    version = project.get("version") if project is not None else None
-    if not isinstance(version, str) or _parse_version(version) is None:
-        raise ManifestError(f"cannot determine host version: {pyproject} [project].version invalid")
-    return version
-
-
 # ── install-time checks ─────────────────────────────────────────────────
 
 
@@ -646,13 +577,10 @@ def host_contract_errors_dir(pkg_dir: Path, *, repo: Path | None = None) -> list
         return [f"manifest invalid: {exc}"]
     if manifest is None:
         return []
-    from base import paths
-    from base.deploy.git import host_version
-
     target = repo or paths.repo_root()
     try:
-        host = host_version.host_version(target)
-    except host_version.HostVersionError as exc:
+        host = host_version_module.host_version(target)
+    except host_version_module.HostVersionError as exc:
         return [str(exc)]
     return check_host_engine(manifest, host) + check_host_commit(manifest, target)
 
@@ -710,7 +638,7 @@ def _git_rc(repo: Path, *args: str) -> int | None:
 
 
 def _git_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
-    from base.deploy.git.gitenv import git_env
+    from base.host.git.gitenv import git_env
     from base.host.proc import run_bounded
 
     try:

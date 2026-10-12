@@ -28,7 +28,7 @@ from fastapi.testclient import TestClient
 
 from base import config, telemetry
 from base.api_contracts.mcp_tool_contract import project_message
-from base.cluster.auth import bearer_header
+from base.host.net.auth import bearer_header
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from tests.fixtures.gateway_config import create_mcp_client

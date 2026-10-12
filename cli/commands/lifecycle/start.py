@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from base.agents.context.clients import DatabaseFactory
-from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
+from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.paths import prod_service_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands._repo import _repo_root

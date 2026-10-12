@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from base.deploy.release import runtime_interpreter
+from base.host import runtime_interpreter
 from cli.start_runtime import StartRuntime, StartRuntimeChangedError
 
 

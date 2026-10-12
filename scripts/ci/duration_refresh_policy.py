@@ -15,8 +15,8 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from base.deploy.git import gitenv
 from base.host import proc
+from base.host.git import gitenv
 
 _SOURCE_FILE = ".test_durations.source.json"
 _BACKSTOP_WINDOW = timedelta(hours=5)

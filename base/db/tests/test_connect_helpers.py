@@ -31,10 +31,10 @@ import pytest
 from loguru import logger as loguru_logger
 
 from base import db
-from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.config import settings
 from base.db import Database, connections
 from base.db import code_version_gate as gate
+from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 
 
 def _session_direct_url(_config: object = None, **_kwargs: object) -> str:

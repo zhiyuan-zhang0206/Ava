@@ -16,15 +16,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from base.cluster.auth import (
+from base.cluster.authority.api import AcceptanceCache
+from base.cluster.rate_limit import LoginRateLimiter
+from base.config import settings
+from base.host.net.auth import (
     clear_cookie_header,
     cookie_name,
     is_managed_browser_user_agent,
     session_cookie_header,
 )
-from base.cluster.authority.api import AcceptanceCache
-from base.cluster.rate_limit import LoginRateLimiter
-from base.config import settings
 from gateway.http.auth.request_principal import (
     SessionKeys,
     current_session_fact,

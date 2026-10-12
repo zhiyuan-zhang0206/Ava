@@ -15,7 +15,6 @@
     "providers/test_provider_plugins.py",
     "providers/test_provider_stop.py",
     "registry/test_settings.py",
-    "test_agent_model_config.py",
     "test_context_budget.py",
     "test_fast_services.py",
     "test_llm.py",

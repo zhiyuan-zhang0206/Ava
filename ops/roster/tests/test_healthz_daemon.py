@@ -22,8 +22,9 @@ import pytest
 
 from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
-from base.daemon.health import DEFAULT_PORTS, DaemonProbe
+from base.daemon.health import DaemonProbe
 from base.daemon.tests.fakes import pin_endpoints
+from base.host.env.health_ports import DEFAULT_PORTS
 from base.packages.plugins.enable_config import update_all_disk_images
 from ops import roster
 from ops.roster.healthz import (

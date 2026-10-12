@@ -1,4 +1,4 @@
-"""base.deploy.git.host_version — the derived host version and its fallback chain.
+"""base.host.git.host_version — the derived host version and its fallback chain.
 
 The derivation reads the checkout HEAD commit's date (`YYYY.M.D`, no zero
 padding — the gate-comparable form) and the short SHA for the display form; a
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from base.deploy.git import host_version as hv
+from base.host.git import host_version as hv
 
 _COMMIT_DATE = "2026-03-05T12:00:00+00:00"
 
@@ -96,3 +96,13 @@ def test_neither_source_raises(tmp_path: Path) -> None:
     d.mkdir()
     with pytest.raises(hv.HostVersionError):
         hv.host_version(d)
+
+
+def test_host_version_from_repo(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "ava"\nversion = "0.1.5"\n', encoding="utf-8"
+    )
+    assert hv.host_version_from_repo(tmp_path) == "0.1.5"
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "ava"\n', encoding="utf-8")
+    with pytest.raises(hv.HostVersionError):
+        hv.host_version_from_repo(tmp_path)

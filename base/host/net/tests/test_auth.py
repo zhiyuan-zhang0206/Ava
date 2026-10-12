@@ -1,8 +1,8 @@
-"""Unit tests for base/cluster/auth.py — bearer and cookie primitives."""
+"""Unit tests for base/host/net/auth.py — bearer and cookie primitives."""
 
 from base64 import urlsafe_b64decode
 
-from base.cluster.auth import (
+from base.host.net.auth import (
     bearer_header,
     new_session_id,
     session_cookie_header,

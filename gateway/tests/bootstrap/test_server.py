@@ -9,10 +9,10 @@ from typing import Any
 
 import pytest
 
-from base.cluster.auth import ClusterSecretMissingError
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.net.auth import ClusterSecretMissingError
 from gateway.cluster import server as _server
 from tests.fixtures.configuration import snapshot_process_config
 

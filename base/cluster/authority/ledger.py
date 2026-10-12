@@ -47,8 +47,8 @@ from base.cluster.authority.model import (
     SecretRoles,
     VerifiedGeneration,
 )
-from base.deploy.release.verified_file import RegularFileReadError, regular_bytes
 from base.host.private_storage import ensure_private_dir, write_private_bytes
+from base.host.verified_file import RegularFileReadError, regular_bytes
 from base.native_process.os_platform import file_lock
 
 _MAX_FILE_BYTES = 256 * 1024

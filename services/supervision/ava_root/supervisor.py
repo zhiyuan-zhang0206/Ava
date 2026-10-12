@@ -15,8 +15,8 @@ from typing import Protocol
 
 import psutil
 
-from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
-from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
+from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.native_process.child_env import inherited_process_env
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (

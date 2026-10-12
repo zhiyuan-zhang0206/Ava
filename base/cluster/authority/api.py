@@ -19,7 +19,7 @@ cluster secret, so a machine holds no human bearer:
 Settings-free: the launcher, the boot pass and the gateway read the same
 private store. Comparisons are constant-time over SHA-256 digests, so the
 accepting side never needs a token in clear. A client reads its own token
-with `base.cluster.auth.delivered_token` (stdlib-only, safe during boot) and presents
+with `base.host.net.auth.delivered_token` (stdlib-only, safe during boot) and presents
 it through `base.cluster.machine.gateway_bearer`.
 """
 
@@ -30,10 +30,10 @@ import hmac
 from collections.abc import Mapping
 from pathlib import Path
 
-from base.cluster.auth import API_TOKEN_ENV as API_TOKEN_ENV
 from base.cluster.authority.delivery import active_generation
 from base.cluster.authority.ledger import authority_dir, ledger_path, load_ledger, read_secret
 from base.cluster.authority.model import CLASSES, GenerationClass
+from base.host.net.auth import API_TOKEN_ENV as API_TOKEN_ENV
 from base.host.private_storage import write_private_bytes
 
 _SCHEME = "Bearer "

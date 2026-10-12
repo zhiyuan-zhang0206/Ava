@@ -42,9 +42,9 @@ from typing import Literal, cast
 
 from dotenv import dotenv_values
 
-from base.deploy.release.verified_file import regular_bytes
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import write_private_bytes
+from base.host.verified_file import regular_bytes
 from services.backup.artifact import passphrase
 
 _TOKEN_BYTES = 32

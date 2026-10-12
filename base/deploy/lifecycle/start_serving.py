@@ -19,9 +19,9 @@ from typing import Literal, Self, cast
 import psutil
 from pydantic import model_validator
 
-from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
-from base.deploy.release.verified_file import regular_bytes
 from base.host.atomic_io import fsync_parent, write_text_atomic
+from base.host.runtime_interpreter import LoadedRuntimeIdentity
+from base.host.verified_file import regular_bytes
 from base.native_process.evidence import Digest, EvidenceModel, ExpectedProcess
 from base.native_process.os_platform import file_lock
 from base.native_process.ownership import OwnedProcess

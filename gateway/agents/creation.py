@@ -315,7 +315,7 @@ def spawn_preflight_blocking(
         model_receipt = normalize_overlay_llm_model(body.config, models=catalog.models)
     # Validate model config before forwarding — fail fast at the gateway
     # instead of letting the agent process silently hang on a missing API key.
-    from base.lm.model_config import validate_spawn_model_config
+    from base.agents.model.model_config import validate_spawn_model_config
 
     with pool.connection() as conn, conn.cursor() as cur:
         validate_spawn_model_config(

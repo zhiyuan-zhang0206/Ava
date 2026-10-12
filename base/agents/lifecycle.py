@@ -10,7 +10,7 @@ separation lets a context like a benchmark runner disable `ava.self` wholesale
 
 from __future__ import annotations
 
-from base.agents.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
+from base.host.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 
 __all__ = [
     "AgentImpersonation",

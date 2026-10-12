@@ -245,7 +245,7 @@ async def test_serving_reads_bound_runtime_from_native_peer(
 ) -> None:
     """Real local transport plus strict local receipt; no application launch."""
     from base.deploy.lifecycle import start_serving
-    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+    from base.host.runtime_interpreter import LoadedRuntimeIdentity
 
     short_tmp = short_tmp.resolve()
     runtime = LoadedRuntimeIdentity(

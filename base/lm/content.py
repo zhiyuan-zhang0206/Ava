@@ -6,11 +6,21 @@ the list re-derives the same `.get("type")` / `.get("text")` / `.get("thinking")
 protocol by hand. `ContentBlock` names that shape once (all fields optional: a
 block carries only the keys its `type` implies) and `content_blocks` is the
 single seam that re-labels the list arm so those reads are typed.
+
+The typed accessors for the other loosely-typed members of a LangChain message
+(`message_content`, `message_addl_kwargs`, `message_response_metadata`) live here
+too: the same narrowing, one level up.
 """
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
+
+if TYPE_CHECKING:
+    # Annotation-only: this leaf sits on the provider-registration import path,
+    # which must stay off the LangChain message stack (exec-child boot, task
+    # #3633; `_TYPE_CHECKING_ALLOWED`).
+    from langchain_core.messages import BaseMessage
 
 
 class ContentBlock(TypedDict, total=False):
@@ -44,3 +54,27 @@ def content_blocks(content: list[Any]) -> list[str | ContentBlock]:
     str / dict blocks; this only attaches the `ContentBlock` shape to the dicts.
     """
     return content
+
+
+# ── Typed accessors for the loosely-typed LangChain message members ──
+#
+# LangChain types `content` blocks and `additional_kwargs` / `response_metadata`
+# as bare `dict` (Unknown keys), which propagates Unknown into every reader. These
+# three accessors are the single narrowing points — one scoped ignore each, so the
+# call sites in timeline / stop / reasoning-compat / labeler stay annotation-clean.
+
+
+def message_content(msg: BaseMessage) -> str | list[str | dict[str, Any]]:
+    """`msg.content` with its content-list block dicts retyped `dict[str, Any]`."""
+    # langchain types content-list blocks as bare dict, whose Unknown keys leak.
+    return cast("str | list[str | dict[str, Any]]", msg.content)  # pyright: ignore[reportUnknownMemberType]
+
+
+def message_addl_kwargs(msg: BaseMessage) -> dict[str, Any]:
+    """`msg.additional_kwargs` as a plain `dict[str, Any]` (langchain types it bare)."""
+    return cast("dict[str, Any]", msg.additional_kwargs)  # pyright: ignore[reportUnknownMemberType]
+
+
+def message_response_metadata(msg: BaseMessage) -> dict[str, Any]:
+    """`msg.response_metadata` as a plain `dict[str, Any]` (langchain types it bare)."""
+    return cast("dict[str, Any]", msg.response_metadata)  # pyright: ignore[reportUnknownMemberType]

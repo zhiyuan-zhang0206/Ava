@@ -26,11 +26,11 @@ from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
 
 from base import config
-from base.cluster.auth import (
+from base.config.domains.gateway import GatewaySettings
+from base.host.net.auth import (
     bearer_header,
     cookie_name,
 )
-from base.config.domains.gateway import GatewaySettings
 from gateway.app import app
 from gateway.http.middleware.cors import cors_allowed_origins
 from tests.fixtures.unit.gateway_auth import disable_default_gateway_credentials

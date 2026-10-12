@@ -12,9 +12,9 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, BaseMessage
 
 from base.agents.history.checkpoint import CheckpointReadError
-from base.cluster.auth import bearer_header
 from base.config import settings
 from base.db import create_agent
+from base.host.net.auth import bearer_header
 from gateway.agents.history import timeline
 from gateway.agents.history.tests.test_timeline import test_client as test_client
 from gateway.app import app

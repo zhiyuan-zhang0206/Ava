@@ -736,8 +736,8 @@ def test_start_refuses_a_gateway_home_without_a_cluster_secret(
 ) -> None:
     """A hand-edited home, or one born before every cluster had a secret, is refused
     with the instruction to set one, before any native effect."""
-    from base.cluster.auth import ClusterSecretMissingError
     from base.host.env.dotenv_file import upsert_env
+    from base.host.net.auth import ClusterSecretMissingError
 
     home = _initialized_gateway_home(inputs)
     upsert_env(home / ".env", {"AVA_CLUSTER_SECRET": ""})

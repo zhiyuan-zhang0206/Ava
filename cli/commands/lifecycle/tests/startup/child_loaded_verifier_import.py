@@ -12,6 +12,6 @@ class Poison(importlib.abc.MetaPathFinder):
 
 if __name__ == "__main__":
     sys.meta_path.insert(0, Poison())
-    import base.deploy.release.runtime_interpreter  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    import base.host.runtime_interpreter  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     assert "base.config" not in sys.modules

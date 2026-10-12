@@ -27,8 +27,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from base.deploy.release.verified_file import RegularFileReadError, regular_bytes
 from base.host.private_storage import write_private_bytes
+from base.host.verified_file import RegularFileReadError, regular_bytes
 from base.paths import ava_home
 
 _VERSION = 1
