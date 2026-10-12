@@ -53,12 +53,6 @@ from .wire import (
     ClickResult as ClickResult,
 )
 from .wire import (
-    ClipboardReadResult as ClipboardReadResult,
-)
-from .wire import (
-    ClipboardWriteResult as ClipboardWriteResult,
-)
-from .wire import (
     DragResult as DragResult,
 )
 from .wire import (
@@ -351,17 +345,44 @@ def cursor_position(*, sock_path: str | Path | None = None) -> ClickPoint:
     return _call("cursor_position", sock_path=sock_path)
 
 
+def require_capability(capability: str, use: str, *, sock_path: str | Path | None = None) -> None:
+    """Refuse `use` on a running helper that does not advertise `capability`.
+
+    A helper built before a feature would ignore its options or not know its methods, so the
+    client says what is missing instead of letting the call half-work."""
+    if ping(sock_path=sock_path).get(capability) is not True:
+        raise PermissionsHelperError(
+            f"permissions helper lacks {capability}; update it before using {use}"
+        )
+
+
 def drag(
     start_x: float,
     start_y: float,
     end_x: float,
     end_y: float,
     *,
+    button: str | None = None,
+    modifiers: list[str] | None = None,
     sock_path: str | Path | None = None,
 ) -> DragResult:
-    """Drag the left mouse button between global screen points (logical coordinates)."""
+    """Drag a mouse button (left unless `button` names another) between global screen points
+    (logical coordinates), with `modifiers` held from before the press until after the release."""
+    args: dict[str, object] = {}
+    if button is not None:
+        args["button"] = button
+    if modifiers is not None:
+        args["modifiers"] = modifiers
+    if args:
+        require_capability("mouse_hold_v1", "drag options", sock_path=sock_path)
     return _call(
-        "drag", start_x=start_x, start_y=start_y, end_x=end_x, end_y=end_y, sock_path=sock_path
+        "drag",
+        start_x=start_x,
+        start_y=start_y,
+        end_x=end_x,
+        end_y=end_y,
+        sock_path=sock_path,
+        **args,
     )
 
 
@@ -424,30 +445,6 @@ def indicator_stop(*, sock_path: str | Path | None = None) -> IndicatorStopResul
     """
     _require_capture_indicator(sock_path)
     return _call("indicator_stop", sock_path=sock_path)
-
-
-def _require_clipboard(sock_path: str | Path | None) -> None:
-    if ping(sock_path=sock_path).get("clipboard_v1") is not True:
-        raise PermissionsHelperError(
-            "permissions helper lacks clipboard_v1; update it before using the clipboard"
-        )
-
-
-def clipboard_read(*, sock_path: str | Path | None = None) -> ClipboardReadResult:
-    """Read the clipboard's plain text and the list of types it currently holds.
-
-    `text` is None when no plain text is on the clipboard. The content is returned to the
-    caller only; nothing in this layer logs it."""
-    _require_clipboard(sock_path)
-    return _call("clipboard_read", sock_path=sock_path)
-
-
-def clipboard_write(text: str, *, sock_path: str | Path | None = None) -> ClipboardWriteResult:
-    """Replace the clipboard with plain text (`public.utf8-plain-text`) and nothing else.
-
-    The reply carries the length only, so the text is never echoed into a log or an audit row."""
-    _require_clipboard(sock_path)
-    return _call("clipboard_write", text=text, sock_path=sock_path)
 
 
 def list_apps(*, sock_path: str | Path | None = None) -> AppsResult:

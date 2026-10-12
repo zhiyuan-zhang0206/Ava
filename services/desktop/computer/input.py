@@ -61,6 +61,16 @@ class KeyInput(ModifiedInput):
         return self
 
 
+def _check_optional_position(
+    tool: str, x: float | None, y: float | None, frame: ObservationFrame | None
+) -> None:
+    """An optional pointer position is both coordinates or neither, and a frame needs them."""
+    if (x is None) != (y is None):
+        raise ValueError(f"{tool} requires both x and y when positioning explicitly")
+    if frame is not None and x is None:
+        raise ValueError(f"{tool} frame requires explicit x and y")
+
+
 class ScrollInput(PositionedInput):
     x: Coordinate | None = None
     y: Coordinate | None = None
@@ -69,10 +79,7 @@ class ScrollInput(PositionedInput):
 
     @model_validator(mode="after")
     def paired_position_and_delta(self) -> ScrollInput:
-        if (self.x is None) != (self.y is None):
-            raise ValueError("scroll requires both x and y when positioning explicitly")
-        if self.frame is not None and self.x is None:
-            raise ValueError("scroll frame requires explicit x and y")
+        _check_optional_position("scroll", self.x, self.y, self.frame)
         if not self.model_fields_set.intersection({"dx", "dy"}):
             raise ValueError("scroll requires dx or dy")
         return self
@@ -90,13 +97,40 @@ class MoveInput(PositionedInput):
     y: Coordinate
 
 
-class DragInput(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-    frame: ObservationFrame | None = None
+class DragInput(PositionedInput):
     start_x: Coordinate
     start_y: Coordinate
     end_x: Coordinate
     end_y: Coordinate
+    button: MouseButton = "left"
+
+
+class MouseDownInput(PositionedInput):
+    """Press and keep a button down; `modifiers` are held until the matching mouse_up."""
+
+    x: Coordinate | None = None
+    y: Coordinate | None = None
+    button: MouseButton = "left"
+
+    @model_validator(mode="after")
+    def paired_position(self) -> MouseDownInput:
+        _check_optional_position("mouse_down", self.x, self.y, self.frame)
+        return self
+
+
+class MouseUpInput(BaseModel):
+    """Release the held button. It takes no modifiers: those belong to the press."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+    frame: ObservationFrame | None = None
+    x: Coordinate | None = None
+    y: Coordinate | None = None
+    button: MouseButton = "left"
+
+    @model_validator(mode="after")
+    def paired_position(self) -> MouseUpInput:
+        _check_optional_position("mouse_up", self.x, self.y, self.frame)
+        return self
 
 
 def validate_input[InputModel: BaseModel](

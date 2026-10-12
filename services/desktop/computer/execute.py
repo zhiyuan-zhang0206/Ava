@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..permissions_helper import client as helper
+from ..permissions_helper import client_stateful as stateful
 from . import ax_act, ax_tools
 from . import ocr as ocr_mod
 from .ax_ids import AxSession
@@ -16,6 +17,8 @@ from .input import (
     ClipboardWriteInput,
     DragInput,
     KeyInput,
+    MouseDownInput,
+    MouseUpInput,
     MoveInput,
     ScrollInput,
     tool_schema,
@@ -275,7 +278,28 @@ def _drag_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
     request = validate_input(DragInput, args)
     start = _logical_point(request.start_x, request.start_y, request.frame, scale)
     end = _logical_point(request.end_x, request.end_y, request.frame, scale)
-    return dict(helper.drag(*start, *end))
+    options = request.model_dump(
+        exclude_unset=True, exclude={"start_x", "start_y", "end_x", "end_y", "frame"}
+    )
+    return dict(helper.drag(*start, *end, **options))
+
+
+def _mouse_down_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+    request = validate_input(MouseDownInput, args)
+    options = request.model_dump(exclude_unset=True, exclude={"x", "y", "frame"})
+    if request.x is None or request.y is None:
+        return dict(stateful.mouse_down(**options))
+    lx, ly = _logical_point(request.x, request.y, request.frame, scale)
+    return dict(stateful.mouse_down(lx, ly, **options))
+
+
+def _mouse_up_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+    request = validate_input(MouseUpInput, args)
+    options = request.model_dump(exclude_unset=True, exclude={"x", "y", "frame"})
+    if request.x is None or request.y is None:
+        return dict(stateful.mouse_up(**options))
+    lx, ly = _logical_point(request.x, request.y, request.frame, scale)
+    return dict(stateful.mouse_up(lx, ly, **options))
 
 
 def _move_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
@@ -297,7 +321,7 @@ def _scroll_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
 
 def _clipboard_write_tool(args: dict[str, Any]) -> dict[str, Any]:
     request = validate_input(ClipboardWriteInput, args)
-    return {"written": helper.clipboard_write(request.text)["length"]}
+    return {"written": stateful.clipboard_write(request.text)["length"]}
 
 
 def _window_info_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -332,7 +356,7 @@ def _application_tool(tool: str, args: dict[str, Any]) -> dict[str, Any]:
 def _clipboard_read_tool(args: dict[str, Any]) -> dict[str, Any]:
     if args.keys() - {"task_id", "priority"}:
         raise ComputerUseError("clipboard_read takes no arguments")
-    return dict(helper.clipboard_read())
+    return dict(stateful.clipboard_read())
 
 
 # Tools whose pointer arguments are physical pixels converted with the measured scale.
@@ -341,6 +365,8 @@ _SCALED_TOOLS: dict[str, Callable[[dict[str, Any], float | None], dict[str, Any]
     "drag": _drag_tool,
     "scroll": _scroll_tool,
     "move": _move_tool,
+    "mouse_down": _mouse_down_tool,
+    "mouse_up": _mouse_up_tool,
 }
 # Tools that depend on nothing but their own arguments.
 _ARGS_ONLY_TOOLS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
@@ -419,7 +445,8 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "release_control",
         "description": (
             "Release the screen so the next FIFO waiter can act — call it when a "
-            "multi-step desktop flow is done (peers queue behind a held screen). "
+            "multi-step desktop flow is done (peers queue behind a held screen). A mouse "
+            "button still held from mouse_down is released with it. "
             "No-op with an error when you are not the current holder; the holder's "
             "lease also expires on its own after the lease timeout without actions."
         ),
@@ -509,12 +536,46 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "drag",
         "description": (
-            "Drag the left mouse button from start_x/start_y to end_x/end_y in "
-            "physical-pixel screen coordinates (the same space as snapshot and click). "
-            "The daemon converts both endpoints with the measured scale. "
-            "Performs one short straight-line drag and releases the button."
+            "Drag a mouse button (button=left by default, or right/middle) from start_x/start_y "
+            "to end_x/end_y in physical-pixel screen coordinates (the same space as snapshot "
+            "and click; a region snapshot frame gives screenshot-local pixels). The daemon "
+            "converts both endpoints with the measured scale. modifiers (shift/ctrl/alt/cmd) "
+            "are held from before the press until after the release, also when the drag is "
+            "stopped. Performs one short straight-line drag and releases the button before "
+            "returning, so nothing stays pressed. For a drag that needs pauses or a custom path, "
+            "use mouse_down, move and mouse_up."
         ),
         "input_schema": tool_schema(DragInput),
+    },
+    {
+        "name": "mouse_down",
+        "description": (
+            "Press a mouse button (left by default, or right/middle) and KEEP it down across "
+            "calls, at x/y (physical pixels, or screenshot-local pixels with a region frame) or "
+            "at the pointer when x/y are omitted. modifiers (shift/ctrl/alt/cmd) are pressed "
+            "first and stay down until mouse_up. Use it only for a hold that drag cannot do "
+            "(a slider with pauses, press-and-hold, a path of several moves); drag is simpler "
+            "and cannot be left pressed. A pressed button MUST be released: pair it with "
+            "mouse_up in the same execute_code script, in a try/finally. While it is held, move "
+            "and scroll act as drags of that button, click and drag are refused, and only one "
+            "button can be held at a time (pressing again, or releasing a button that is not "
+            "held, is an error). The helper lets go by itself, at the pointer, when no mouse "
+            "call is made for 30 seconds, when the user parks the mouse in the top-left corner, "
+            "and when you release_control; the next mouse call then carries auto_released "
+            "(button, reason, where, message) and the press you made is over."
+        ),
+        "input_schema": tool_schema(MouseDownInput),
+    },
+    {
+        "name": "mouse_up",
+        "description": (
+            "Release the button pressed by mouse_down, at x/y (physical pixels, or "
+            "screenshot-local pixels with a region frame; the pointer is dragged there first) "
+            "or where the pointer is when x/y are omitted. The modifiers given to mouse_down "
+            "come up after the button. Fails, without side effects, when that button is not "
+            "held; if the helper released it by itself, the error says why."
+        ),
+        "input_schema": tool_schema(MouseUpInput),
     },
     {
         "name": "click_text",

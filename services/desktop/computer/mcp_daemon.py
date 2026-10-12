@@ -89,6 +89,7 @@ from base.paths import ava_home, computer_mcp_socket
 from base.telemetry import audit_events, build_pipeline
 
 from ..permissions_helper import client as helper
+from ..permissions_helper import client_stateful as stateful
 from ..permissions_helper.client import PermissionsHelperError
 from .ax_ids import AxSession
 from .config import ComputerUseConfig
@@ -118,7 +119,8 @@ _AuditResult = dict[str, Any] | None
 
 def _coords_point(args: _AuditArgs, result: _AuditResult) -> str | None:
     del result
-    return f"{args['x']},{args['y']}" if "x" in args else None
+    # Audited as given, also for a call refused for a missing coordinate.
+    return f"{args['x']},{args.get('y')}" if "x" in args else None
 
 
 def _coords_drag(args: _AuditArgs, result: _AuditResult) -> str | None:
@@ -141,6 +143,12 @@ def _coords_ax_act(args: _AuditArgs, result: _AuditResult) -> str | None:
     return (
         f"{result.get('x')},{result.get('y')},{result.get('native_action', result.get('action'))}"
     )
+
+
+def _coords_mouse_button(args: _AuditArgs, result: _AuditResult) -> str | None:
+    del result
+    where = f"{args['x']},{args.get('y')}" if "x" in args else "pointer"
+    return f"{where},{args.get('button', 'left')}"
 
 
 def _coords_scroll(args: _AuditArgs, result: _AuditResult) -> str | None:
@@ -173,6 +181,8 @@ _AUDIT_COORDS: dict[str, Callable[[_AuditArgs, _AuditResult], str | None]] = {
     "click_text": _coords_click_text,
     "ax_act": _coords_ax_act,
     "scroll": _coords_scroll,
+    "mouse_down": _coords_mouse_button,
+    "mouse_up": _coords_mouse_button,
     "key": _coords_key,
     "clipboard_write": _coords_clipboard_write,
     "clipboard_read": _coords_clipboard_read,
@@ -380,6 +390,9 @@ class ComputerMcpDaemon:
         self._ocr_cache: dict[str, Any] = {"items": []}
         # Stable accessibility element ids (ax_tree / ax_act), one app at a time.
         self._ax_session = AxSession()
+        # The agent whose mouse_down is outstanding (the helper holds at most one button).
+        # Stale after the helper lets go by itself, which is harmless: releasing is idempotent.
+        self._mouse_holder: int | None = None
         # One lock around execute: a single desktop op at a time machine-wide,
         # and a snapshot's multi-step capture never interleaves with another
         # agent's click (same serial choice as browser-mcp).
@@ -451,7 +464,9 @@ class ComputerMcpDaemon:
             self._pointer = (float(result["x"]), float(result["y"]))
         if "frame" in args:
             return
-        if tool in {"click", "move"} or (tool == "scroll" and "x" in args and "y" in args):
+        if tool in {"click", "move"} or (
+            tool in {"scroll", "mouse_down", "mouse_up"} and "x" in args and "y" in args
+        ):
             self._pointer = (float(args["x"]), float(args["y"]))
         elif tool == "drag":
             self._pointer = (float(args["end_x"]), float(args["end_y"]))
@@ -499,6 +514,10 @@ class ComputerMcpDaemon:
         async with self._action_lock:
             outcome = "ok"
             error: str | None = None
+            if agent_id is not None and self._mouse_holder not in (None, agent_id):
+                # The screen changed hands (a lease expired or was kicked) with a button still
+                # down: it must not carry over into this agent's actions.
+                self._release_held_mouse(f"screen passed to agent {agent_id}")
             try:
                 result = _execute_tool(
                     tool,
@@ -510,6 +529,7 @@ class ComputerMcpDaemon:
                     ax_session=self._ax_session,
                 )
                 self._track_tool_effects(tool, args, result)
+                self._track_mouse_hold(tool, agent_id, result)
             except (PermissionsHelperError, KeyError, TypeError, ValueError, OSError) as e:
                 outcome, error = "error", f"{type(e).__name__}: {e}"
                 result = None
@@ -537,16 +557,61 @@ class ComputerMcpDaemon:
             if args.get("force") and released is not None:
                 # Operator kick: no agent identity, so no audit row — log it.
                 logger.info(f"[computer-mcp] operator forced release of agent {released}")
+            # A button this agent still holds comes up with the screen, and also when its
+            # release_control is refused because the screen had already moved on.
+            mouse: dict[str, Any] = {}
+            if self._mouse_holder is not None and (
+                released is not None or self._mouse_holder == agent_id
+            ):
+                mouse = self._release_held_mouse("release_control")
+                if "mouse_release_error" in mouse:
+                    outcome, error = "error", f"mouse not released: {mouse['mouse_release_error']}"
             self._emit_action(agent_id, "release_control", args, outcome, error)
             if released is not None:
                 _hide_badge()
             if released is None:
-                return {"id": req_id, "ok": False, "error": "not the screen holder"}
+                note = (
+                    " (the mouse button you held was released)"
+                    if mouse.get("mouse_released")
+                    else ""
+                )
+                return {"id": req_id, "ok": False, "error": "not the screen holder" + note}
             return {
                 "id": req_id,
                 "ok": True,
-                "result": _mcp_result({"released": released, "holder": self._screen.holder}),
+                "result": _mcp_result(
+                    {"released": released, "holder": self._screen.holder, **mouse}
+                ),
             }
+
+    def _track_mouse_hold(self, tool: str, agent_id: int | None, result: dict[str, Any]) -> None:
+        """Remember who has a button down, from the helper's own answers."""
+        if result.get("auto_released"):
+            self._mouse_holder = None  # the helper let go by itself; nothing is held now
+        if tool == "mouse_down" and agent_id is not None:
+            self._mouse_holder = agent_id
+        elif tool == "mouse_up":
+            self._mouse_holder = None
+
+    def _release_held_mouse(self, why: str) -> dict[str, Any]:
+        """Ask the helper to let go of any button, loudly: a stuck button hurts the user.
+
+        Failure keeps the holder recorded so the next call tries again, and is returned to
+        the caller as `mouse_release_error`; the helper's own idle bound is the backstop."""
+        holder = self._mouse_holder
+        try:
+            released = stateful.mouse_release_all()["released"]
+        except (PermissionsHelperError, OSError) as e:
+            logger.error(
+                f"[computer-mcp] could not release the mouse button held for agent {holder} ({why}): {e}"
+            )
+            return {"mouse_release_error": str(e)}
+        self._mouse_holder = None
+        if released:
+            logger.warning(
+                f"[computer-mcp] released the mouse button held for agent {holder} ({why}): {released}"
+            )
+        return {"mouse_released": released}
 
     def _emit_action(
         self,
