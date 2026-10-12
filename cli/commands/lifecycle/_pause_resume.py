@@ -59,12 +59,9 @@ def resume_after_start[**P](
         operation = admission.authorized_start(current.holder, current.acquired_at)
         result = start(operation, database_factory, *args, **kwargs)
         if result == 0 and start_serving.is_serving():
-            from cli.commands.lifecycle._failed_receipts import settle_failed_receipts
             from ops.cluster.pause import unpause_local_cluster
 
             admission.require_start_allowed(operation)
-            settle_failed_receipts(database_factory=database_factory)
-
             unpause_local_cluster(
                 database_factory(),
                 EventBus.from_settings(),

@@ -2,50 +2,86 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
 from uuid import UUID
 
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.deploy.maintenance import admission
 from base.log import logger
 
-FailureFences = dict[int, tuple[str | None, datetime | None]]
+_END_UNAPPLIED_RESTART = (
+    "UPDATE inbound_messages SET status='done', "
+    "payload=COALESCE(payload,'{}'::jsonb) || %s "
+    "WHERE id=%s AND agent_id=%s AND kind='restart' AND status IN ('pending','claimed') "
+    "AND applied_at IS NULL RETURNING id"
+)
+_CLEAR_POINTER = (
+    "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s AND lifecycle_command_id=%s"
+)
+_COMMAND_STATE = "SELECT status, applied_at IS NOT NULL FROM inbound_messages WHERE id=%s"
 
 
-async def record_failure(agent_id: int, exc: BaseException, fences: FailureFences) -> None:
-    # Fail closed before reading the journal: both read and write can fail.
-    # The unknown generation remains a same-boot fence until explicit resume.
-    fences[agent_id] = (None, None)
+async def _end_unapplied_restart(pool: AsyncConnectionPool, agent_id: int, command_id: int) -> str:
+    """End the owed restart command once, so nothing drives it again.
+
+    Returns `ended` when this call settled it (the effect never started: it is
+    marked done with a `failed` lifecycle result and the agent's pointer is
+    cleared), `already-ended` when it was already terminal, and `applied` when
+    the restart's effect had started: that command is left as it is, because an
+    applied effect is neither undone nor declared unexecuted.
+    """
+    async with pool.connection() as conn, conn.transaction():
+        await conn.execute("SELECT 1 FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
+        result = {"lifecycle_result": {"outcome": "failed", "reason": "continuation_failed"}}
+        cursor = await conn.execute(_END_UNAPPLIED_RESTART, (Jsonb(result), command_id, agent_id))
+        if await cursor.fetchone() is not None:
+            await conn.execute(_CLEAR_POINTER, (agent_id, command_id))
+            return "ended"
+        cursor = await conn.execute(_COMMAND_STATE, (command_id,))
+        row = await cursor.fetchone()
+    return "applied" if row is not None and row[1] and row[0] != "done" else "already-ended"
+
+
+async def record_failure(pool: AsyncConnectionPool, agent_id: int, exc: BaseException) -> None:
+    """End the restart command of a turn that failed while its continuation was owed.
+
+    The command is settled `done` with a `failed` result (an existing terminal
+    shape; nothing new is latched), ERROR is logged and `agent_continuation_lost`
+    is raised once, and the pending-wake scan stops driving that agent. The agent
+    stays in the hold: `ava stop` ends at its drain deadline with the stall
+    report, and a person takes it from there (`ava start` releases the hold).
+    A restart whose effect had already started is not rewritten; its failure is
+    reported and the normal completion path stays.
+
+    Only an agent with a pending restart command in a draining hold owes a
+    continuation. Every runner sees every wake and a stop's shutdown cancels
+    every task, so a failed wake of another machine's agent, of a drained or
+    parked member, or outside any hold is no continuation failure and is not
+    reported. Those facts come from the local journal, without the database.
+    """
+    command_id = admission.pending_command(agent_id)
+    if command_id is None:
+        return
     current = admission.snapshot()
-    if current is None:
-        # A successful read proves this ordinary failure belongs to no hold.
-        # An unreadable journal still leaves the unknown fence set above.
-        fences.pop(agent_id, None)
+    try:
+        outcome = await _end_unapplied_restart(pool, agent_id, command_id)
+    except Exception as ending_error:  # the failure may itself be the database outage
+        outcome = f"not-ended ({type(ending_error).__name__})"
+    if outcome == "already-ended":
         return
-    category = type(exc).__name__
-    hold = current.maintenance
-    assert hold is not None  # noqa: S101 — snapshot() returns only holds
-    if hold.outside_cohort(agent_id) or hold.settled_after_drain(agent_id):
-        # Every runner sees every wake (the dispatcher's subscription is
-        # cluster-wide), and a stop's shutdown cancels every task. A wake
-        # outside the captured cohort (FC-10 F20: a stopping host latched
-        # other machines' woken agents), or of a drained or parked member once
-        # the drain is certified, runs no continuation: it is no receipt.
-        # Both facts are read from the journal, without the database. An
-        # uncaptured cohort and an uncertified drain still record.
-        fences.pop(agent_id, None)
-        logger.debug(
-            "wake failure for agent {agent_id} not recorded: no continuation in "
-            "this hold (phase {phase}, {category})",
-            agent_id=agent_id,
-            phase=hold.phase,
-            category=category,
-        )
-        return
-    fences[agent_id] = (current.holder, current.acquired_at)
-    await asyncio.to_thread(admission.record_failure, agent_id, category)
+    logger.error(
+        "agent {agent_id}: continuation failed ({failure_category}) at maintenance hold "
+        "{holder}; restart command {command_id}: {outcome}",
+        event="agent_continuation_lost",
+        agent_id=agent_id,
+        failure_category=type(exc).__name__,
+        holder=current.holder if current is not None else None,
+        command_id=command_id,
+        outcome=outcome,
+        reason=f"the turn raised during the drain; the restart command was {outcome}",
+    )
 
 
 async def record_drained(pool: AsyncConnectionPool, owner: UUID, agent_id: int) -> None:
@@ -73,17 +109,11 @@ async def record_drained(pool: AsyncConnectionPool, owner: UUID, agent_id: int) 
 async def run_held(
     agent_id: int,
     status: str,
-    fences: FailureFences,
     control: Callable[[int, str], Awaitable[None]],
 ) -> bool:
     current = admission.snapshot()
     if current is None or current.maintenance is None:
-        fences.pop(agent_id, None)
         return False
-    failed = agent_id in current.maintenance.failures or fences.get(agent_id) in (
-        (None, None),
-        (current.holder, current.acquired_at),
-    )
-    if not failed and admission.pending_command(agent_id) is not None:
+    if admission.pending_command(agent_id) is not None:
         await control(agent_id, status)
     return True

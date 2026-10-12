@@ -153,28 +153,21 @@ def test_windows_read_an_unreadable_owner_as_held(
     assert admission.quiesced()
 
 
-def test_clear_failures_drops_blocking_receipts_and_keeps_the_rest() -> None:
+def test_a_hold_certifies_only_after_every_member_drained() -> None:
     first = pause_owner.begin_maintenance("migration", WHEN).snapshot
     assert first.maintenance is not None
-    hold = MaintenanceHold(
-        MaintenancePhase.DRAINING,
-        {1: 11, 2: 22},
-        drained=(2,),
-        failures={1: "RuntimeError"},
-        undelivered={2: "PoolTimeout"},
-    )
+    hold = MaintenanceHold(MaintenancePhase.DRAINING, {1: 11, 2: 22})
     pause_owner.change_maintenance("migration", WHEN, first.maintenance, hold)
 
-    assert admission.clear_failures() == {1: "RuntimeError"}
+    assert admission.pending_command(1) == 11 and admission.pending_command(2) == 22
+    admission.record_drained(2, 22)
+    assert admission.pending_command(2) is None
+    with pytest.raises(RuntimeError, match="has not fully drained"):
+        admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
 
-    current = admission.snapshot()
-    assert current is not None
-    assert current.maintenance == replace(hold, failures={})
-    assert admission.clear_failures() == {}
-
-
-def test_clear_failures_outside_a_hold_is_a_no_op() -> None:
-    assert admission.clear_failures() == {}
+    admission.record_drained(1, 11)
+    current = admission.set_phase("migration", WHEN, MaintenancePhase.DRAINED)
+    assert current.maintenance == replace(hold, phase=MaintenancePhase.DRAINED, drained=(1, 2))
 
 
 @pytest.mark.parametrize("field", ["holder", "acquired_at"])

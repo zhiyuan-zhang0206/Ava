@@ -174,7 +174,6 @@ class AgentHost:
         self._normalized_configs: dict[int, str] = {}
         # Eviction preserves in-flight runtimes so the next turn can reuse the same build.
         self._in_flight: set[int] = set()
-        self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         # Each agent's latest turn's config fingerprint (scheduler crash report); cleared per turn.
         self.turn_fingerprints: dict[int, str] = {}
         # What the graph and this host share across turns: handed to every turn's context.
@@ -212,9 +211,7 @@ class AgentHost:
             except BaseException as exc:
                 primary = exc
                 try:
-                    await maintenance_receipts.record_failure(
-                        agent_id, exc, self._maintenance_failed
-                    )
+                    await maintenance_receipts.record_failure(self._control_pool, agent_id, exc)
                 except BaseException as receipt_error:
                     exc.add_note(f"hosted failure receipt failed: {receipt_error!r}")
                 raise
@@ -302,7 +299,6 @@ class AgentHost:
         if await maintenance_receipts.run_held(
             agent_id,
             stored.status,
-            self._maintenance_failed,
             partial(self._run_held_controls, resources=resources),
         ):
             return
@@ -459,7 +455,7 @@ class AgentHost:
         # An external lease owns decisions; held wakes alone supervise its relays.
         # One native_status read checks known exits/heartbeats without models or polling.
         # Confirmed exit/staleness triggers recovery; failures use held-wake error handling.
-        # record_failure is a no-op outside maintenance; the next wake re-drives recovery.
+        # record_failure ends the owed restart command once; no later scan drives it.
         session = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
         await supervise_relay(
             self._db,
@@ -556,9 +552,7 @@ class AgentHost:
 
     async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
         """Use the scheduling owner's durable work/maintenance scan."""
-        return await scan_candidates(
-            self._control_pool, self._owner, self._machine, stale_after_s, self._maintenance_failed
-        )
+        return await scan_candidates(self._control_pool, self._owner, self._machine, stale_after_s)
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the

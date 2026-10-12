@@ -28,12 +28,12 @@ class AgentSpawned(TypedDict):
 
 
 class AgentContinuationLost(TypedDict):
-    """`agent_continuation_lost` payload — cli/commands/lifecycle/_failed_receipts.py.
+    """`agent_continuation_lost` payload — services/agent_runner/agent_host/lifecycle/maintenance.py.
 
-    One row per agent whose continuation failed during a stop's drain and whose
-    durable restart pointer is gone, so `ava start` cannot re-deliver it.
-    ``failure_category`` is the drain's failure class, ``holder`` the maintenance
-    hold, ``reason`` why the pointer is lost.
+    One row per agent whose turn failed while its restart command was still owed
+    to a draining maintenance hold: the host ends an unapplied command and raises
+    this once. ``failure_category`` is the exception class, ``holder`` the
+    maintenance hold, ``reason`` what became of the restart command.
     """
 
     failure_category: str
@@ -73,8 +73,8 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "agent_continuation_lost": telemetry_event(
         "agent_continuation_lost",
-        "an agent's continuation failed at a maintenance hold and its restart pointer is gone, "
-        "so `ava start` cannot re-deliver it",
+        "an agent's turn failed while its continuation was owed to a draining maintenance hold; "
+        "its interrupted work may be lost",
         payload=AgentContinuationLost,
         tier="anomaly",
     ),

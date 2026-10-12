@@ -28,7 +28,6 @@ class PauseOrphanClaimSettled(TypedDict):
     agent: int
     message_id: int
     age_s: float
-    outcome: Literal["pending", "done"]
 
 
 class HostDispatcherScanFailed(TypedDict):
@@ -346,7 +345,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "pause_orphan_claim_settled": telemetry_event(
         "pause_orphan_claim_settled",
-        "preparation settled an ordinary claim without a live runtime",
+        "preparation consumed (marked done, never redelivered) an ordinary claim whose runtime is gone",
         payload=PauseOrphanClaimSettled,
         tier="anomaly",
         site="base/deploy/maintenance/cohort.py:_emit_orphan_settlements",

@@ -56,9 +56,8 @@ normal startup admission only after readiness.
 No command reads or ends a hold except `ava status` (and `ava status --json`, the
 hold alone as one JSON object, settings-lite) and `ava start`: the holds are taken
 by `ava stop` and `ava restart` and released by `ava start`. `_pause_resume`
-settles a hold's failed continuation receipts through `_failed_receipts`
-(re-delivering each one, reporting and notifying the owner for any it cannot)
-once the unit serves and before the hold releases. These reuse the
+releases the hold once the unit serves; a continuation that failed during the
+drain was only logged and alerted by the agent host. These reuse the
 [durable maintenance journal](../../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../../../docs/conventions/operations/graceful-maintenance.md).
 

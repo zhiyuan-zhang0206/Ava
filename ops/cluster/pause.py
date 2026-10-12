@@ -69,12 +69,6 @@ def unpause_local_cluster(
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if (refusal := _hold_refusal(current)) is not None:
         raise RuntimeError(refusal)
-    if current.maintenance is not None and current.maintenance.undelivered:
-        _log.warning(
-            "[cluster] releasing with undelivered crash-equivalent receipts; "
-            "cold admission re-drives their continuations: %s",
-            sorted(current.maintenance.undelivered),
-        )
     if operation is None:
         operation = admission.authorized_start(current.holder, current.acquired_at)
     _unpause_local_cluster(db, operation, local_machine=local_machine)
@@ -85,11 +79,6 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     """The refusal `unpause_local_cluster` raises for a held unit, or None when its
     resume may proceed."""
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-    if current.maintenance is not None and current.maintenance.failures:
-        return (
-            "cannot resume failed continuation/flush receipts; run `ava start`, which "
-            "re-delivers them before it releases the hold"
-        )
     from base.deploy.lifecycle import start_serving
 
     if (

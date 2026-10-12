@@ -168,11 +168,11 @@ def ssh(alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
     return process.wait()
 
 
-def _hold(text: str) -> tuple[str, str | None, dict[str, str]]:
+def _hold(text: str) -> tuple[str, str | None]:
     data = json.loads([line for line in text.splitlines() if line.startswith("{")][-1])
     hold = data["hold"]
     held = hold["maintenance"]
-    return (hold["status"], held["phase"], held["failures"]) if held else (hold["status"], None, {})
+    return (hold["status"], held["phase"]) if held else (hold["status"], None)
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -218,7 +218,7 @@ class Session:
 
 def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
     hold = facts["hold"] or '{"hold": {"status": "unreadable", "maintenance": null}}'
-    status, phase, failures = _hold(hold)
+    status, phase = _hold(hold)
     reasons: list[str] = []
     if facts["dirty"] != "0":
         reasons.append(f"{alias}: $HOME/.ava/source has uncommitted changes")
@@ -226,10 +226,10 @@ def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
         reasons.append(f"{alias}: a post-checkout hook (the guard recurses); move it aside")
     if facts["active"] == "yes":
         reasons.append(f"{alias}: $HOME/.ava/updates/active names an unfinished release operation")
-    # A completed, failure-free stop is what an interrupted `down` leaves; rerunning is fine.
-    stopped = (status, phase) == ("paused", "stopped") and not failures
+    # A completed stop is what an interrupted `down` leaves; rerunning is fine.
+    stopped = (status, phase) == ("paused", "stopped")
     if status not in _FREE and not stopped:
-        reasons.append(f"{alias}: maintenance hold {status}/{phase} failures={failures}")
+        reasons.append(f"{alias}: maintenance hold {status}/{phase}")
     return reasons
 
 
@@ -328,9 +328,9 @@ def down(s: Session, args: argparse.Namespace) -> None:
         try:
             s.run(alias, f"{_HOME}; {_AVA} stop -y --timeout {args.stop_timeout}")
             if not s.dry_run:
-                status, phase, failures = _hold(s.run(alias, _STATUS, effect=False))
-                if (status, phase) != ("paused", "stopped") or failures:
-                    raise FailedError(f"{alias}: stop left {status}/{phase} failures={failures}")  # noqa: TRY301
+                status, phase = _hold(s.run(alias, _STATUS, effect=False))
+                if (status, phase) != ("paused", "stopped"):
+                    raise FailedError(f"{alias}: stop left {status}/{phase}")  # noqa: TRY301
         except FailedError as exc:
             raise FailedError(f"{exc}{_STOP_HINT}") from exc
     for alias in everyone:

@@ -16,7 +16,7 @@ class MaintenancePhase(StrEnum):
 
 
 # From `drained` on the drain is certified: that transition required every
-# member drained with no failure (base.deploy.maintenance.admission.set_phase).
+# member drained (base.deploy.maintenance.admission.set_phase).
 CERTIFIED_PHASES = frozenset(
     {
         MaintenancePhase.DRAINED,
@@ -33,46 +33,14 @@ class MaintenanceHold:
     # A zero value means preparation has not yet durably enqueued it.
     commands: dict[int, int] = field(default_factory=dict[int, int])
     drained: tuple[int, ...] = ()
-    failures: dict[int, str] = field(default_factory=dict[int, str])
-    # Crash-equivalent receipts: the turn raised a database-outage exception,
-    # so the continuation outcome is unknown but durable (the restart pointer
-    # survives exactly as after a host crash). Recorded for audit; never
-    # blocks resume. The host re-drives the held-control path on the next wake.
-    undelivered: dict[int, str] = field(default_factory=dict[int, str])
     # Existing unowned idle intent stays untouched; it is not a restart request.
     parked: tuple[int, ...] = ()
-
-    def outside_cohort(self, agent_id: int) -> bool:
-        """Whether `agent_id` provably has no continuation in this hold.
-
-        Preparation captures every non-terminated agent of this machine under
-        row locks, each as a restart command or parked. An agent outside that
-        set is another machine's (every runner sees every wake), or one this
-        hold never drains; no receipt of it gates the hold. Before the capture
-        (phase `preparing`, empty cohort) nothing is proven.
-        """
-        captured = self.phase != MaintenancePhase.PREPARING or bool(self.commands or self.parked)
-        return captured and agent_id not in self.commands and agent_id not in self.parked
-
-    def settled_after_drain(self, agent_id: int) -> bool:
-        """Whether the drain is certified and `agent_id` is a member with nothing
-        left to continue: it drained, or it is parked (never drains).
-
-        A wake of either under the hold claims nothing (no restart command is
-        pending), so no receipt of it gates the hold. Until `drained` their
-        failures still record.
-        """
-        return self.phase in CERTIFIED_PHASES and (
-            agent_id in self.drained or agent_id in self.parked
-        )
 
     def encode(self) -> dict[str, object]:
         return {
             "phase": self.phase.value,
             "commands": {str(agent): command for agent, command in self.commands.items()},
             "drained": list(self.drained),
-            "failures": {str(agent): reason for agent, reason in self.failures.items()},
-            "undelivered": {str(agent): reason for agent, reason in self.undelivered.items()},
             "parked": list(self.parked),
         }
 
@@ -98,15 +66,11 @@ class MaintenanceHold:
             raise ValueError("maintenance receipt is outside the resume cohort")
         if len(set(receipts)) != len(receipts):
             raise ValueError("duplicate maintenance receipt")
-        failed = _receipts(raw["failures"], "maintenance failures")
-        undelivered = _receipts(raw.get("undelivered", {}), "undelivered receipts")
         parked_ids = _parked_ids(raw["parked"], parsed)
         return cls(
             parsed_phase,
             parsed,
             tuple(cast(list[int], receipts)),
-            failed,
-            undelivered,
             tuple(cast(list[int], parked_ids)),
         )
 
@@ -130,17 +94,4 @@ def _commands(commands: dict[object, object]) -> dict[int, int]:
         if type(command) is not int or command < 0:
             raise ValueError("maintenance restart IDs must be nonnegative integers")
         parsed[int(agent)] = command
-    return parsed
-
-
-def _receipts(receipts: object, label: str) -> dict[int, str]:
-    if not isinstance(receipts, dict):
-        raise TypeError(f"{label} must be an object")
-    parsed: dict[int, str] = {}
-    for agent, reason in cast(dict[object, object], receipts).items():
-        if not isinstance(agent, str) or not agent.isdecimal() or int(agent) < 1:
-            raise ValueError(f"{label} must name a positive agent ID")
-        if not isinstance(reason, str) or not reason or len(reason) > 100:
-            raise ValueError(f"invalid {label} category")
-        parsed[int(agent)] = reason
     return parsed

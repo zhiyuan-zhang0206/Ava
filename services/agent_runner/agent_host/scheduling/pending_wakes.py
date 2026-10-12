@@ -9,7 +9,6 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from base.deploy.maintenance import admission
-from services.agent_runner.agent_host.lifecycle.maintenance import FailureFences
 
 
 @dataclass(frozen=True)
@@ -27,19 +26,33 @@ class PendingInboundWake:
     stale: bool
 
 
-def held_maintenance_wakes(fences: FailureFences) -> list[PendingInboundWake] | None:
-    """The restart cohort a held maintenance owns, or None when no hold is active."""
+async def held_maintenance_wakes(pool: AsyncConnectionPool) -> list[PendingInboundWake] | None:
+    """The held cohort members whose restart command is still open in Postgres.
+
+    A member whose command was ended after a failed continuation is not woken
+    again; the journal alone cannot say so. None when no hold is active.
+    """
     current = admission.snapshot()
     if current is None or current.maintenance is None:
         return None
     # A stale-turn cancel could interrupt the action maintenance is draining.
-    # Persisted failures also fence fresh hosts until an explicit resume.
+    owed = {
+        agent: command
+        for agent in current.maintenance.commands
+        if (command := admission.pending_command(agent)) is not None
+    }
+    if not owed:
+        return []
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            "SELECT id FROM inbound_messages WHERE id=ANY(%s) AND status IN ('pending','claimed')",
+            (list(owed.values()),),
+        )
+        open_commands = {row[0] for row in await cursor.fetchall()}
     return [
         PendingInboundWake(agent_id=agent, stale=False)
-        for agent in current.maintenance.commands
-        if agent not in current.maintenance.failures
-        and admission.pending_command(agent) is not None
-        and fences.get(agent) not in ((None, None), (current.holder, current.acquired_at))
+        for agent, command in owed.items()
+        if command in open_commands
     ]
 
 
@@ -79,7 +92,6 @@ async def scan_candidates(
     owner: UUID,
     machine: str,
     stale_after_s: float,
-    failure_fences: FailureFences,
 ) -> list[PendingInboundWake]:
     """Scan new inputs and explicit controls; never revive an expired turn.
 
@@ -87,7 +99,7 @@ async def scan_candidates(
     monotonic turn progress to be stale before cancellation. Held maintenance
     owns its restart cohort; otherwise retained commands share the work scan.
     """
-    held = held_maintenance_wakes(failure_fences)
+    held = await held_maintenance_wakes(pool)
     if held is not None:
         return held
     rows = await scan_rows(pool, owner, machine, stale_after_s)
