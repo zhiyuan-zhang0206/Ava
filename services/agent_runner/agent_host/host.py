@@ -51,7 +51,6 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.agents.incarnation.native_work_models import NativeWorkTarget, NativeWorkUncertainError
-from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import MachineIdentity
@@ -177,7 +176,6 @@ class AgentHost:
         self.turn_progress = TurnProgress()
         self.relays = RelaySupervision()
         self.admission = TurnAdmission(policy.max_concurrent_turns)
-        self.database_waits = DatabaseWaits()
         self.stats = HostStats()
         self._resource_service = HostedServiceResources()
 

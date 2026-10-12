@@ -66,7 +66,6 @@ from ava.sdk_surface.installation import Installation
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
-from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
@@ -194,7 +193,6 @@ async def _publish_turn_progress_heartbeat(
     bus: EventBus,
     machine: str,
     active_agents: Collection[int],
-    database_waits: DatabaseWaits,
     turn_progress: TurnProgress,
 ) -> bool:
     """Best-effort Redis snapshot for the gateway's out-of-process breaker.
@@ -206,11 +204,7 @@ async def _publish_turn_progress_heartbeat(
     for agent_id in sorted(active_agents):
         snapshot = turn_progress.snapshot(agent_id)
         if snapshot is not None:
-            waiting = database_waits.snapshot(agent_id, last_progress=snapshot["last_marks"][-1])
-            snapshots[str(agent_id)] = {
-                **snapshot,
-                **({"db_wait": waiting} if waiting is not None else {}),
-            }
+            snapshots[str(agent_id)] = snapshot
     try:
         async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
             await bus.async_redis().set(
@@ -288,7 +282,7 @@ async def _beat_forever(
             else:
                 renewal_failures = 0
         published = await _publish_turn_progress_heartbeat(
-            bus, machine, scheduler.active_agents, host.database_waits, host.turn_progress
+            bus, machine, scheduler.active_agents, host.turn_progress
         )
         if published and not heartbeat_ok:
             _log.warning("[agent-host] turn-progress heartbeat publish recovered")
