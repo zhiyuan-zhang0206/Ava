@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import services.desktop.computer.ocr as ocr_mod
+from base.host.permissions_helper import client as helper
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.screen import _capture_screen, _to_logical
-from services.desktop.permissions_helper import client as helper
 
 
 def _ocr_screen(path: Path, ocr_cache: dict[str, Any] | None) -> list[dict[str, Any]]:

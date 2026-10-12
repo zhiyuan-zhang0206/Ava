@@ -239,7 +239,7 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:
         clear_status()
         return
 
-    from services.desktop.permissions_helper.client import check_screen_capture
+    from base.host.permissions_helper.client import check_screen_capture
 
     status = check_screen_capture()
     if status.available:
@@ -268,7 +268,7 @@ def _ensure_accessibility(ctx: ConvergeCtx) -> None:
         clear_accessibility_status()
         return
 
-    from services.desktop.permissions_helper.client import check_accessibility
+    from base.host.permissions_helper.client import check_accessibility
 
     status = check_accessibility()
     if status.available:

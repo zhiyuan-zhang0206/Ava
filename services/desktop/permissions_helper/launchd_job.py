@@ -190,7 +190,7 @@ def _retirement_plist(path: Path, home: Path, socket_path: Path) -> tuple[bytes,
 
 
 def _retirement_owner(state: str, socket_path: Path, executable: str) -> OwnedProcess:
-    from services.desktop.permissions_helper import client
+    from base.host.permissions_helper import client
 
     match = re.search(r"^\s*pid = (\d+)\s*$", state, re.MULTILINE)
     if match is None:
@@ -215,7 +215,7 @@ def _retirement_owner(state: str, socket_path: Path, executable: str) -> OwnedPr
 
 
 def _require_empty_helper(owner: OwnedProcess, socket_path: Path) -> None:
-    from services.desktop.permissions_helper import client
+    from base.host.permissions_helper import client
 
     root = client.root_status(sock_path=socket_path)
     stopped = root["state"] == "stopped" and root["stop_requested"] is True
@@ -252,7 +252,7 @@ def unregister_helper(
 
 
 def _request_helper_shutdown(home: Path, port: int, deadline: float) -> bytes | None:
-    from services.desktop.permissions_helper import client
+    from base.host.permissions_helper import client
 
     target = f"{helper_job_domain()}/{helper_job_label(home)}"
     state = retirement_query(target, deadline)

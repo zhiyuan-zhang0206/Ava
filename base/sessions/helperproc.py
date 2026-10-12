@@ -12,12 +12,11 @@ import contextlib
 import os
 import signal
 import time
-from importlib import import_module
 from pathlib import Path
-from typing import Protocol, TypedDict, cast
 
 import psutil
 
+from base.host.permissions_helper import client as helper_client
 from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
@@ -30,23 +29,6 @@ _CREATE_TIME_TOLERANCE_S = 2.0
 _DEAD_CHILD_SENTINEL = -1.0
 _KILL_POLL_S = 0.05
 _KILL_CONFIRM_TIMEOUT_S = 5.0
-
-
-class _SpawnResult(TypedDict):
-    pid: int
-    reused: bool
-
-
-class _HelperClient(Protocol):
-    def spawn_process(
-        self,
-        name: str,
-        argv: list[str],
-        env: dict[str, str],
-        cwd: str,
-        stdout: str,
-        stderr: str,
-    ) -> _SpawnResult: ...
 
 
 def _sessions_dir() -> Path:
@@ -122,12 +104,8 @@ def spawn_via_helper(
     Failure is deliberately loud. Falling back to ``base.native_process.reparent`` would
     launch successfully with the wrong TCC responsibility identity.
     """
-    # Resolve the upper-layer wire adapter lazily. The lifecycle policy stays
-    # in shared while the signed helper's transport client remains a service.
-    client = cast("_HelperClient", import_module("services.desktop.permissions_helper.client"))
-
     try:
-        result = client.spawn_process(
+        result = helper_client.spawn_process(
             name,
             argv,
             env,

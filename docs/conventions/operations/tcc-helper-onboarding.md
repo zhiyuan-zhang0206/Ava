@@ -36,7 +36,7 @@ venv and the user present:
 ```
 
 - Every trigger is a child process spawned through the helper
-  (`services.desktop.permissions_helper.client.spawn_process`), so tccd attributes the
+  (`base.host.permissions_helper.client.spawn_process`), so tccd attributes the
   request to `com.ava.permissions-helper`. The inventory probe uses the same
   helper-spawned `TCCAccessPreflight` pattern as
   `scripts/host_ops/tcc/verify-spawn-chain.sh`: zero dialogs, repeatable.

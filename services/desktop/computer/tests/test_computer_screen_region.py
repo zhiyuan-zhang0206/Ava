@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from ...permissions_helper.client import ScreenSize
+from base.host.permissions_helper.client import ScreenSize
+
 from .. import screen
 from ..errors import ComputerUseError
 from ..targets import CaptureRegion

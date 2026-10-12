@@ -13,7 +13,7 @@ tags:
 across calls, for a slider with pauses, press-and-hold or a path of several moves; the
 caller composes waits and loops in execute_code. That is state that outlives a call,
 so the helper owns it and every way it ends is covered.
-The client calls are in `permissions_helper/client_stateful.py`, with the clipboard's.
+The client calls are in `base/host/permissions_helper/client_stateful.py`, with the clipboard's.
 
 ## Contract
 - `mouse_down(x, y, button="left", modifiers=[], frame=None)`: `x`/`y` both or neither

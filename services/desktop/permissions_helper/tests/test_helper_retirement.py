@@ -487,8 +487,8 @@ def test_idle_shutdown_retry_requires_native_success_and_retained_intent(
 def test_unproven_shutdown_never_boots_out_native_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
+    from base.host.permissions_helper import client
     from base.native_process.ownership import OwnedProcess
-    from services.desktop.permissions_helper import client
     from services.desktop.permissions_helper import launchd_job as jobs
 
     home = tmp_path.resolve()
@@ -668,7 +668,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     commands: list[list[str]] = []
     loaded = [True]
 
-    from services.desktop.permissions_helper import client
+    from base.host.permissions_helper import client
 
     def shutdown(run_dir: Path, *, sock_path: str | Path) -> client.HelperShutdownResult:
         assert run_dir == home / "run" / "ava-root"

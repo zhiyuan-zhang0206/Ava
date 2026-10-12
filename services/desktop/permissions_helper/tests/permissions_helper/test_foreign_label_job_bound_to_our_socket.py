@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from services.desktop.permissions_helper import client
+from base.host.permissions_helper import client
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     _retire_env,
     _write_agent_plist,
@@ -113,7 +113,8 @@ def test_overlong_socket_is_typed_unavailability() -> None:
 def test_helper_ping_refuses_missing_stop_capability(
     monkeypatch: pytest.MonkeyPatch, capability: str
 ) -> None:
-    from services.desktop.permissions_helper import client, lifecycle
+    from base.host.permissions_helper import client
+    from services.desktop.permissions_helper import lifecycle
 
     reply = {"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True}
     reply.pop(capability)

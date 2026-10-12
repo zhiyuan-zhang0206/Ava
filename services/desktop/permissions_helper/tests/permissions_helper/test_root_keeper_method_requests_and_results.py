@@ -17,8 +17,8 @@ import pytest
 from base.config import settings
 from base.host.converge.accessibility import AccessibilityState
 from base.host.converge.screen_capture import ScreenCaptureState
-from services.desktop.permissions_helper import client
-from services.desktop.permissions_helper.client import PermissionsHelperError
+from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperError
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     _argvs,
     _fake_tools,
@@ -267,7 +267,7 @@ def test_truncated_response_raises(fake_helper) -> None:
 
 
 def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(client, "_CALL_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(client, "CALL_TIMEOUT_S", 0.2)
 
     def raw(conn: socket.socket) -> None:
         _read_line(conn)
@@ -278,7 +278,7 @@ def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(client, "_LINE_LIMIT", 16)
+    monkeypatch.setattr(client, "LINE_LIMIT", 16)
 
     def raw(conn: socket.socket) -> None:
         _read_line(conn)
@@ -291,7 +291,7 @@ def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     # Server binds only after the first connect attempt fails -> exercises the
     # retry loop that exists for the daemon-startup race.
-    monkeypatch.setattr(client, "_CONNECT_DELAY_S", 0.1)
+    monkeypatch.setattr(client, "CONNECT_DELAY_S", 0.1)
     path = f"/tmp/avah-retry{os.getpid()}.sock"  # noqa: S108 — short path for AF_UNIX
     Path(path).unlink(missing_ok=True)
     holder: list[_FakeHelper] = []
@@ -372,7 +372,7 @@ def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.Monkey
         return {"pong": True, "preflight_screen": True, "ax_trusted": True}
 
     monkeypatch.setattr(client, "ping", flaky)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(client, "_PROBE_RETRY_DELAY_S", 0.01)
+    monkeypatch.setattr(client, "PROBE_RETRY_DELAY_S", 0.01)
     status = client.check_screen_capture(settle_s=2.0)
     assert len(calls) == 2
     assert status.state is ScreenCaptureState.AVAILABLE

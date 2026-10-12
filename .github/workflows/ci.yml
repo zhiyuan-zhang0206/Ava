@@ -1426,7 +1426,8 @@ jobs:
           import subprocess
 
           from base.paths import permissions_helper_app_dir
-          from services.desktop.permissions_helper import client, lifecycle
+          from base.host.permissions_helper import client
+          from services.desktop.permissions_helper import lifecycle
 
           # Import the signing identity into the isolated keychain.
           lifecycle.ensure_signing_cert()

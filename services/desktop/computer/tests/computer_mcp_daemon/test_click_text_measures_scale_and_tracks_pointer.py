@@ -12,8 +12,8 @@ import pytest
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.permissions_helper.client import PermissionsHelperError
 
-from ....permissions_helper.client import PermissionsHelperError
 from ... import mcp_daemon as daemon_mod
 from ... import screen as screen_mod
 from ...protocol import Response
