@@ -118,26 +118,19 @@ sys.exit(0 if out["completed"] and out["terminate"] < 300 else 2)
 #   throwaway AVA_HOME (the rows file makes it offline, so no real home is needed and the
 #   home-ownership guard has nothing to refuse), never `cmd_schedules_verify` directly, whose
 #   keyword-only parameters change between versions.
-_READ_ROWS_PY = """\
-import inspect, json, sys
-from cli.commands.management import schedules_verify as verify
-out = sys.argv[1]
-if "database_factory" in inspect.signature(verify._read_schedule_rows).parameters:
-    from cli.database import operator_database_factory
-    from cli.database.runtime import CommandRuntime
-    host = CommandRuntime.create().machine.host
-    rows = verify._read_schedule_rows(database_factory=operator_database_factory(local_host=host))
-else:
-    rows = verify._read_schedule_rows()
-json.dump([list(row) for row in rows], open(out, "w"))
-"""
-_CHECK_ROWS_PY = """\
-import sys
-from cli.main import main
-rows = sys.argv[1]
-sys.argv = ["ava", "schedules", "verify", "--rows-file", rows, "--no-notify"]
-sys.exit(main())
-"""
+_VERIFY_SCRIPTS = Path(__file__).parent / "commands" / "management"
+
+
+def _read_rows_py() -> str:
+    """The read step; a real file (so its imports are visible) whose text the host receives."""
+    return (_VERIFY_SCRIPTS / "schedules_verify_read_rows.py").read_text(encoding="utf-8")
+
+
+def _check_rows_py() -> str:
+    """The check step; a real file (so its imports are visible) whose text the host receives."""
+    return (_VERIFY_SCRIPTS / "schedules_verify_check_rows.py").read_text(encoding="utf-8")
+
+
 _PRE_VERIFY = """{home}
 W="$H/pre-update-verify"; R="$W.rows"; T=""
 trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"; [ -z "$T" ] || rm -rf "$T"' EXIT
@@ -268,8 +261,8 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
         _PRE_VERIFY.format(
             home=_HOME,
             new=new,
-            read_rows=shlex.quote(_READ_ROWS_PY),
-            check_rows=shlex.quote(_CHECK_ROWS_PY),
+            read_rows=shlex.quote(_read_rows_py()),
+            check_rows=shlex.quote(_check_rows_py()),
         ),
         effect=False,
     )
