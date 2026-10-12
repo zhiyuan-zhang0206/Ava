@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.structure import lint_common
+from meizel import lint_common
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PRE_COMMIT = yaml.safe_load((_REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))

@@ -78,7 +78,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import imports, lint_common, placement_evidence, service_units
+from meizel import lint_common
+from scripts.structure import imports, placement_evidence, service_units
 from scripts.structure.imports import cache, executed, facts
 from scripts.structure.placement_evidence import (
     IncompleteReferenceEvidenceError,
@@ -109,7 +110,7 @@ __all__ = [
 ]
 
 # First-party Python code participates in placement, including runnable templates.
-CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts", "schedules", "commands", "demos")
+CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "meizel", "scripts", "schedules", "commands", "demos")
 _ARTIFACT_TOPS = (
     "db",
     "deploy",

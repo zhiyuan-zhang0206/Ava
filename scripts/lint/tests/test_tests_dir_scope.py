@@ -14,8 +14,9 @@ import subprocess
 
 import pytest
 
+from meizel.language import path_imports
 from scripts.lint import code_structure as lcs
-from scripts.structure import ambient_state, baseline_shards, path_imports
+from scripts.structure import ambient_state, baseline_shards
 
 _SECTIONS = (ambient_state.SECTION,)
 

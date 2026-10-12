@@ -1,6 +1,6 @@
 """Require a sys.path guard before sibling imports in script-mode Python files.
 
-Run: `.venv/bin/python scripts/lint/no_script_sibling_imports.py [path ...]`
+Run: `.venv/bin/python -m meizel.language.no_script_sibling_imports [path ...]`
 (defaults to scanning the whole repo; an explicit path that does not exist is an
 error (stderr + exit 1) rather than a silent no-op). Also run automatically via
 pre-commit.
@@ -54,10 +54,9 @@ import re
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(_REPO_ROOT))
+from meizel import lint_common
 
-from scripts.structure import lint_common  # noqa: E402 - standalone script
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Directories that are never scanned (vendored / generated / scratch).
 _EXCLUDED_DIRS = frozenset(
@@ -315,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             print(violation)
     if total:
         print(
-            f"\n{total} violation(s). See the header of scripts/lint/no_script_sibling_imports.py "
+            f"\n{total} violation(s). See the header of meizel/language/no_script_sibling_imports.py "
             "for the guard pattern.",
             file=sys.stderr,
         )

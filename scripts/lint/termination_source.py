@@ -69,7 +69,7 @@ from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
-from scripts.structure import lint_common  # noqa: E402 - standalone script
+from meizel import lint_common  # noqa: E402 - standalone script
 
 # Only OUR non-test code. Tests deliberately write unstamped corpses as fixtures.
 # Every tree that could reach agents_meta is covered, not just the ones that write it

@@ -236,11 +236,14 @@ entry_modules = [
 module = "scripts.structure"
 entry_modules = [
     "scripts.structure.lazy_modules",
-    "scripts.structure.lint_common",
     "scripts.structure.patch_points",
     "scripts.structure.placement_evidence",
     "scripts.structure.service_units",
 ]
+
+[[tool.ava.public_contracts.components]]
+module = "meizel"
+entry_modules = ["meizel.lint_common"]
 
 [[tool.ava.public_contracts.components]]
 module = "scripts.lint.public_contracts"
@@ -593,6 +596,7 @@ check-typed-exception = true
 "ava_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 "ava_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
 "scripts/**" = ["ANN", "T20"]
+"meizel/**" = ["ANN", "T20"]
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.
 "scripts/codegen/gen_config_lite_table.py" = ["S110"]
@@ -658,6 +662,7 @@ testpaths = [
     "base/**/tests",
     "cli/**/tests",
     "gateway/**/tests",
+    "meizel/**/tests",
     "ops/**/tests",
     "scripts/**/tests",
     "schedules/**/tests",
@@ -789,6 +794,7 @@ include = [
     "ava_builtins",
     "services",
     "base",
+    "meizel",
     "scripts",
     "tests",
 ]
@@ -1233,6 +1239,21 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meizel/budgets/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meizel/language/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meizel/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

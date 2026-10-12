@@ -2,7 +2,7 @@
 
 `ava_builtins/skills/<group>/<skill>/` directory names are kebab-case, so they are
 never importable Python packages — and Structure Rule 6
-(`scripts/structure/path_imports.py`) forbids loading one by file path from
+(`meizel/language/path_imports.py`) forbids loading one by file path from
 *inside* `ava_builtins/` too (a skill script imports a sibling only through
 the narrow `__file__`-derived `sys.path` guard, never a loader). Tests are
 outside that scope (pytest manages their own sys.path), so a test loads the

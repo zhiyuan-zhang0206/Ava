@@ -168,10 +168,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "keeps ci.yml, .pre-commit-config.yaml and ui/web/openapi.json in step with the codegen coverage",
     ),
-    "tests/ci/test_tests_dir_scope.py": (
-        "contract",
-        "checks .pre-commit-config.yaml and pyproject.toml against every lint that decides about test files",
-    ),
     "tests/ci/test_workflow_paths.py": (
         "contract",
         "scans every .github/workflows file for unfiltered pull_request/push triggers",
@@ -215,10 +211,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/components/plugins/test_plugin_metrics_logql.py": (
         "contract",
         "checks the shipped plugin metrics against the deploy/lgtm dashboard queries",
-    ),
-    "tests/scripts/structure/test_lint_common_contract.py": (
-        "contract",
-        "the framework directory list of scripts/structure/lint_common.py equals the packages pyproject.toml declares",
     ),
     "tests/scripts/structure/test_placement_contract.py": (
         "contract",

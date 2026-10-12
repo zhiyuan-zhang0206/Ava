@@ -67,7 +67,7 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 
-from scripts.structure import lint_common  # noqa: E402 - standalone script
+from meizel import lint_common  # noqa: E402 - standalone script
 
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
 _SCAN_DIRS = (

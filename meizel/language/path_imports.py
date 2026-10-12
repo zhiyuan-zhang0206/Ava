@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import ast
 
-from scripts.structure import lint_common
+from meizel import lint_common
 
 SECTION = "path_imports"
 _SCOPE = ("ava_builtins/",)
