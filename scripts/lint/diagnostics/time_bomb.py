@@ -89,7 +89,7 @@ from scripts.structure.lazy_modules import ModuleMap  # noqa: E402 - standalone 
 
 __all__ = ["main"]
 
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel")
 
 # A parameter carrying any of these names is treated as the caller-visible
 # logical clock (a `now`/`at` the caller can pin). `deadline` is deliberately

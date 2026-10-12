@@ -518,15 +518,14 @@ def test_irrelevant_and_empty_diffs_skip_visibly() -> None:
         assert output == "run=false\n"
         assert log.splitlines() == [
             "STEP SKIPPED: codegen freshness — no codegen inputs changed in this PR; "
-            "main pushes always run it; the merge queue re-runs the combined tree."
+            "manual dispatch always runs it; the merge queue re-runs the combined tree."
         ]
 
 
-def test_push_and_manual_dispatch_always_run_without_diff() -> None:
-    for event in ("push", "workflow_dispatch"):
-        output, log, calls = select(event)
-        assert output == "run=true\n" and "STEP SKIPPED" not in log
-        assert not calls
+def test_manual_dispatch_always_runs_without_diff() -> None:
+    output, log, calls = select("workflow_dispatch")
+    assert output == "run=true\n" and "STEP SKIPPED" not in log
+    assert not calls
 
 
 def test_diff_and_shallow_history_failures_run_freshness() -> None:

@@ -25,15 +25,14 @@ from base.host.proc import run_bounded
 from meizel import lint_common
 from meizel.language import no_script_sibling_imports
 from meizel.owners import clock_lattice
+from meizel.state import no_os_environ, turn_scoped_config
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet, lint_quiesced_loops
 from scripts.lint import (
     async_no_sync_blocking,
     code_structure,
     fixture_scope,
-    no_os_environ,
     pool_keepalives,
     termination_source,
-    turn_scoped_config,
 )
 from scripts.lint.diagnostics import (
     logger_add_diagnose,
@@ -110,6 +109,8 @@ class Case:
     extra: dict[str, str] = field(default_factory=dict[str, str])
     patches: dict[str, object] = field(default_factory=dict[str, object])
     explicit_root: bool = False
+    # How to call `module.main` when the rule takes its application inputs injected.
+    call: Callable[[list[str]], int] | None = None
 
     def clean(self) -> str:
         return self.clean_path or str(
@@ -139,14 +140,19 @@ CASES = [
         "cur.execute(\"UPDATE agents_meta SET status = 'terminated' WHERE id = %s\", (a,))\n",
         patches={"_termination_source_values": lambda: frozenset({"launch-confirm"})},
     ),
-    Case(no_os_environ, "base/x.py", "import os\nx = os.environ['A']\n"),
+    Case(
+        no_os_environ,
+        "base/x.py",
+        "import os\nx = os.environ['A']\n",
+        call=partial(no_os_environ.main, managed_aliases=frozenset),
+    ),
     Case(
         turn_scoped_config,
         "agent/x.py",
         "from base.config import settings\nx = settings.agent.fixture_field\n",
-        # The lint asks the real config registry which fields are per-agent; a field of its
-        # own keeps the case independent of whatever the registry holds today.
-        patches={"base.config.per_agent_field_names": lambda: {"fixture_field"}},
+        # The rule asks its caller which fields are per-agent; a field of its own keeps the
+        # case independent of whatever the application's config registry holds today.
+        call=partial(turn_scoped_config.main, per_agent_field_names=lambda: {"fixture_field"}),
     ),
     Case(
         clock_lattice,
@@ -211,7 +217,14 @@ def fake_repo(tmp_path: Path) -> Path:
     Mac, and a lint that judged the PATH of the checkout instead of the path below it passed on
     one and silently scanned nothing on the other."""
     root = tmp_path / "tmp" / "build" / "repo"
-    for rel in (*lint_common.FRAMEWORK_DIRS, "scripts", "tests", "base/lm", "ava_builtins/plugins"):
+    for rel in (
+        *lint_common.FRAMEWORK_DIRS,
+        "scripts",
+        "meizel",
+        "tests",
+        "base/lm",
+        "ava_builtins/plugins",
+    ):
         (root / rel).mkdir(parents=True, exist_ok=True)
     return root
 
@@ -256,7 +269,7 @@ def test_only_judges_exactly_the_changed_files(
         subprocess.run(["git", "add", "--", "."], cwd=fake_repo, check=True)
 
     main: Callable[[list[str]], int] = (
-        partial(lint.main, repo_root=fake_repo) if case.explicit_root else lint.main
+        partial(lint.main, repo_root=fake_repo) if case.explicit_root else case.call or lint.main
     )
     assert main([]) == 1, "the sample must be a violation the full scan reports"
     assert main(["--only", case.bad_path]) == 1, "a changed file gets the full scan's verdict"

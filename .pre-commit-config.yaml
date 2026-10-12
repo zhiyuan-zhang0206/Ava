@@ -338,9 +338,9 @@ repos:
       # Every detected library-built handle fails; no baseline or write mode exists.
       - id: lint-handle-ratchet
         name: lint library-built database and event-bus handles
-        entry: .venv/bin/python scripts/structure/ambient_state/handle_ratchet.py
+        entry: .venv/bin/python -m meizel.state.ambient_state.handle_ratchet
         language: system
-        files: ^((agent|ava|ava_builtins|base|cli|gateway|ops|services|schedules)/.*\.py|scripts/structure/ambient_state/handle_ratchet\.py)$
+        files: ^((agent|ava|ava_builtins|base|cli|gateway|ops|services|schedules)/.*\.py|meizel/state/ambient_state/handle_ratchet\.py)$
         pass_filenames: false
         require_serial: true
 

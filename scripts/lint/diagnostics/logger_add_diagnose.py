@@ -63,7 +63,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from meizel import lint_common  # noqa: E402 - standalone script
 
 # Scan directories — only OUR code, never .venv / node_modules / vendored trees.
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),

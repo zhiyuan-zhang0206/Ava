@@ -36,7 +36,7 @@ _Scratch = tuple[Path, Callable[[list[Path]], list[str]]]
 @pytest.fixture()
 def scratch(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> _Scratch:
     """Run the public lint against a synthetic repo and collect its diagnostics."""
-    for directory in (*lint_common.FRAMEWORK_DIRS, "scripts", "tests"):
+    for directory in (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
         (tmp_path / directory).mkdir()
 
     def scan(paths: list[Path]) -> list[str]:

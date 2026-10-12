@@ -154,9 +154,6 @@ def _assert_shard_failure_verdicts(root: Path, script: str) -> None:
         "path.write_text(json.dumps(calls))\n"
         "if sys.argv[2] == 'python':\n"
         "    sys.exit(int(os.environ['PLAN_STATUS']))\n"
-        "duration = pathlib.Path('tmp/durations/backend-' + os.environ['GROUP'] + '.json')\n"
-        "assert duration.read_text() == '{}'\n"
-        "duration.write_text('{\"measured\": 1}')\n"
         "attempt = sum(call[1] == 'pytest' for call in calls)\n"
         "sys.exit(int(os.environ['FIRST_STATUS' if attempt == 1 else 'FINAL_STATUS']))\n"
     )
@@ -174,7 +171,6 @@ def _assert_shard_failure_verdicts(root: Path, script: str) -> None:
     for index, (plan_status, first, final, group, expected, attempts) in enumerate(cases):
         directory = root / str(index)
         directory.mkdir()
-        (directory / ".test_durations").write_text("{}")
         env = {
             **os.environ,
             "PATH": str(binary) + os.pathsep + os.environ["PATH"],
@@ -182,7 +178,6 @@ def _assert_shard_failure_verdicts(root: Path, script: str) -> None:
             "FIRST_STATUS": str(first),
             "FINAL_STATUS": str(final),
             "GROUP": str(group),
-            "RECORD_DURATIONS": "true",
             "COVERAGE_FILE": "coverage-data",
             "GITHUB_OUTPUT": str(directory / "outputs"),
         }

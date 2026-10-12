@@ -1258,6 +1258,16 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meizel/state/ambient_state/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meizel/state/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meizel/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1394,11 +1404,6 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/post_deploy_visual/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "scripts/structure/ambient_state/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

@@ -18,7 +18,7 @@ collected a second time:
                           --leak-report test-leak-report.json \\
                           --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
         adds the shards' counts up and prints how the total, and each directory, moved against
-        a baseline (the previous main run's total). Informational: it never fails a run over a
+        a baseline (the previous merge-queue run's total). Informational: it never fails a run over a
         difference. `--out` is written only when every expected count file arrived, so a
         baseline is never partial.
 
@@ -165,12 +165,12 @@ def _diff(new: dict[str, int], old: dict[str, int]) -> list[tuple[str, int]]:
 
 
 def _baseline_lines(total: int, buckets: dict[str, int], baseline: Path | None) -> list[str]:
-    """How the total, and each directory, moved against the baseline (the previous main run)."""
+    """How the total, and each directory, moved against the baseline (the previous queue run)."""
     if baseline is None or not baseline.is_file():
-        return ["  no baseline: no earlier main run left a total; this run becomes the baseline"]
+        return ["  no baseline: no earlier queue run left a total; this run becomes the baseline"]
     base = json.loads(baseline.read_text(encoding="utf-8"))
     lines = [
-        f"  against main {base.get('sha', '?')[:9]} (run {base.get('run_id', '?')}): "
+        f"  against queue {base.get('sha', '?')[:9]} (run {base.get('run_id', '?')}): "
         f"{base['tests']} -> {total} ({total - base['tests']:+d})"
     ]
     changed = _diff(buckets, base["buckets"])

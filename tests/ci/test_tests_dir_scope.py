@@ -215,7 +215,7 @@ def test_fixture_scope_lint_ignores_a_module_that_is_not_a_test(
 
 
 def _time_bomb_root(root: Path) -> None:
-    for name in (*lint_common.FRAMEWORK_DIRS, "scripts", "tests"):
+    for name in (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
         (root / name).mkdir(exist_ok=True)
 
 
@@ -252,8 +252,7 @@ def test_no_os_environ_default_scan_reaches_tests_in_dirs_it_never_scanned(
     same tests inside `cli/`, `ops/` and `ava_builtins/` must stay read."""
     from scripts.lint import no_os_environ as lint
 
-    monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(lint, "_settings_managed_aliases", lambda: frozenset({"AVA_DB_URL"}))
+    monkeypatch.setattr(lint, "settings_managed_aliases", lambda: frozenset({"AVA_DB_URL"}))
     body = """
         def test_x(monkeypatch) -> None:
             monkeypatch.setenv("AVA_DB_URL", "x")
@@ -261,7 +260,7 @@ def test_no_os_environ_default_scan_reaches_tests_in_dirs_it_never_scanned(
     for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, f"{host}/tests/test_x.py", body)
-    assert lint.main([]) == 1
+    assert lint.main([], repo_root=tmp_path) == 1
 
 
 def test_no_os_environ_default_scan_still_reads_only_tests_in_those_dirs(
@@ -270,12 +269,11 @@ def test_no_os_environ_default_scan_still_reads_only_tests_in_those_dirs(
     """The extra roots are read for test files only: Rule 1 does not start covering them."""
     from scripts.lint import no_os_environ as lint
 
-    monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(lint, "_settings_managed_aliases", lambda: frozenset({"AVA_DB_URL"}))
+    monkeypatch.setattr(lint, "settings_managed_aliases", lambda: frozenset({"AVA_DB_URL"}))
     for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, "cli/pkg/mod.py", 'import os\n\nHOME = os.environ["HOME"]\n')
-    assert lint.main([]) == 0
+    assert lint.main([], repo_root=tmp_path) == 0
 
 
 # ── pre-commit hooks that select by directory prefix ────────────────────────

@@ -74,7 +74,7 @@ fails directly; no baseline can permit it. The one narrow exception (a within-sk
 
 ### Rule 9: ambient state (inject what is read to decide)
 
-`scripts/structure/ambient_state/`: module-level state read to decide and free-floating
+`meizel/state/ambient_state/`: module-level state read to decide and free-floating
 background work fail, except what the closed lists in `allowlist.py` allow. Frozen as
 `path::rule:name -> site count`, exact and shrink-only like Rules 4-6; also governs `schedules/`.
 
@@ -116,11 +116,8 @@ from meizel import lint_common  # noqa: E402 — standalone script
 from meizel.budgets import limits  # noqa: E402 — standalone script
 from meizel.language import path_imports, type_checking  # noqa: E402 — standalone script
 from meizel.owners import decisions  # noqa: E402 — standalone script
-from scripts.structure import (  # noqa: E402 — standalone script
-    ambient_state,
-    baseline_shards,
-    locality,
-)
+from meizel.state import ambient_state, machine_role  # noqa: E402 — standalone script
+from scripts.structure import baseline_shards, locality  # noqa: E402 — standalone script
 from scripts.structure.budgets import quality_budget  # noqa: E402 — standalone script
 
 __all__ = ["main"]
@@ -135,19 +132,6 @@ _AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9
 _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts", "meizel")
 
 
-def _machine_role_calls(tree: ast.AST) -> list[int]:
-    """Line numbers of `machine_role(...)` call sites in a parsed module."""
-    hits: list[int] = []
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "machine_role"
-        ):
-            hits.append(node.lineno)
-    return hits
-
-
 def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> list[tuple[int, str]]:
     """Return AST violations as [(lineno, message), ...]."""
     if lint_common.is_test_path(rel_path):
@@ -159,19 +143,8 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
             return []  # unreadable entry (e.g. a dangling symlink) or binary content
         tree = ast.parse(text, filename=rel_path)
     out: list[tuple[int, str]] = []
-
     out.extend(type_checking.violations(tree, rel_path))
-
-    for lineno in _machine_role_calls(tree):
-        out.append(
-            (
-                lineno,
-                "machine_role() is retired; pass an explicit MachineIdentity owner "
-                "and read its role(). The gateway remains the single routing point "
-                "(issue #216).",
-            )
-        )
-
+    out.extend(machine_role.violations(tree))
     out.extend(decisions.allowlist_errors(tree, rel_path, _SCAN_DIRS))
     return out
 
