@@ -26,6 +26,8 @@ from base.deploy.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
 
+_MIGRATIONS = _SCHEMA_SQL.parents[1] / "migrations"
+
 
 def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdentity) -> None:
     """The real fresh-DB bootstrap: apply db/schema.sql to an empty database and
@@ -266,3 +268,103 @@ def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone(
             pytest.raises(psycopg.errors.CheckViolation),
         ):
             conn.execute("UPDATE agents_meta SET status = 'restarting' WHERE id = 8")
+
+
+# ── Contraction of the delivery watchdog's durable retry state ──
+#
+# `20261011T191500_drop-dead-delivery-watchdog-state` drops the two watchdog
+# tables and the three per-inbound dispatch columns nothing reads or writes any more.
+
+_WATCHDOG_STATE = "20261011T191500_drop-dead-delivery-watchdog-state"
+_WATCHDOG_TABLES = ("delivery_watchdog_alerted", "delivery_watchdog_attempts")
+_DISPATCH_COLUMNS = ("dispatch_count", "last_dispatch_at", "poisoned_at")
+
+
+def _watchdog_state_present(conn: psycopg.Connection) -> tuple[list[str], list[str]]:
+    tables = [
+        row[0]
+        for row in conn.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = ANY(%s) ORDER BY 1",
+            (list(_WATCHDOG_TABLES),),
+        ).fetchall()
+    ]
+    columns = [
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'inbound_messages' "
+            "AND column_name = ANY(%s) ORDER BY 1",
+            (list(_DISPATCH_COLUMNS),),
+        ).fetchall()
+    ]
+    return tables, columns
+
+
+def test_a_fresh_database_has_none_of_the_dead_watchdog_state(
+    machine_identity: MachineIdentity,
+) -> None:
+    with _throwaway_database("watchdog_fresh") as url, psycopg.connect(url) as conn:
+        conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+        conn.commit()
+        assert _watchdog_state_present(conn) == ([], [])
+        apply_pending_migrations(conn, machine_name=machine_identity.name)
+        assert _watchdog_state_present(conn) == ([], [])
+
+
+def test_the_contraction_drops_the_state_of_an_upgraded_cluster_and_keeps_its_rows(
+    machine_identity: MachineIdentity,
+) -> None:
+    """An older cluster carries the objects (and rows in them); the migration removes
+    them, keeps every other inbound column, and replays as a no-op."""
+    with _throwaway_database("watchdog_upgrade") as url:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+            conn.execute(
+                "ALTER TABLE inbound_messages "
+                "ADD COLUMN dispatch_count INT NOT NULL DEFAULT 0, "
+                "ADD COLUMN last_dispatch_at TIMESTAMPTZ, "
+                "ADD COLUMN poisoned_at TIMESTAMPTZ"
+            )
+            conn.execute(
+                "CREATE TABLE delivery_watchdog_alerted ("
+                "inbound_id BIGINT PRIMARY KEY REFERENCES inbound_messages(id) ON DELETE CASCADE, "
+                "alerted_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+            )
+            conn.execute(
+                "CREATE TABLE delivery_watchdog_attempts ("
+                "kind TEXT NOT NULL, agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE, "
+                "last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(), "
+                "consecutive_failures INT NOT NULL DEFAULT 0, suppress_count INT NOT NULL DEFAULT 0, "
+                "PRIMARY KEY (kind, agent_id))"
+            )
+            conn.execute("INSERT INTO agents (id, label) VALUES (1, 'a')")
+            conn.execute("INSERT INTO agents_meta (id, status, machine) VALUES (1, 'idling', 'm')")
+            conn.execute(
+                "INSERT INTO inbound_messages (id, agent_id, kind, content, dispatch_count) "
+                "VALUES (10, 1, 'chat', 'hello', 3)"
+            )
+            conn.execute("INSERT INTO delivery_watchdog_alerted (inbound_id) VALUES (10)")
+            conn.execute(
+                "INSERT INTO delivery_watchdog_attempts (kind, agent_id) VALUES ('resurrect', 1)"
+            )
+            assert _watchdog_state_present(conn) == (
+                list(_WATCHDOG_TABLES),
+                sorted(_DISPATCH_COLUMNS),
+            )
+            conn.execute("DELETE FROM schema_migrations WHERE name = %s", (_WATCHDOG_STATE,))
+
+        with psycopg.connect(url) as conn:
+            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            assert _WATCHDOG_STATE in applied
+            assert _watchdog_state_present(conn) == ([], [])
+            kept = conn.execute("SELECT content, status FROM inbound_messages WHERE id = 10")
+            assert kept.fetchone() == ("hello", "pending")
+
+        with psycopg.connect(url) as conn:
+            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+            migration = next(
+                path for path in _MIGRATIONS.rglob(f"{_WATCHDOG_STATE}.sql")
+            ).read_text()
+            conn.execute(cast(LiteralString, migration))  # replay: every statement is IF EXISTS
+            assert _watchdog_state_present(conn) == ([], [])
