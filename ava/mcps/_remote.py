@@ -3,8 +3,7 @@
 The agent process talks to the shared MCP daemon (ops roster session
 "mcp-daemon") over a JSON-line Unix socket — one connection per agent, with
 the agent's identity riding on every request so gated servers can enforce
-per-agent governance. When the daemon is absent the SDK falls back to its own
-local sessions (see `ava.mcps._connect`).
+per-agent governance. When the daemon is absent, SDK calls fail explicitly without starting servers.
 
 Moved out of `ava.mcps` (2026-08-13, #1229) to keep that module under its
 line budget; `ava.mcps` re-exports these names.
@@ -186,13 +185,10 @@ def _socket_path_for() -> str:
 
 
 def _daemon_socket_path() -> str | None:
-    """This process's MCP daemon socket path, or None to fall back to local
-    connect. Derived from `ava.self.AGENT_ID` — so it resolves the same in the
-    agent process and in any background script that recovered the same identity,
-    letting a launched script reuse the agent's running daemon (shared MCP
-    sessions) instead of spawning its own. Returns None when identity is unset or
-    the socket file is absent. The `exists()` check is a cheap presence gate, not
-    a liveness probe — a stale socket left by a hard-killed daemon still looks
-    present; the caller's connect then fails and routes to the local fallback."""
+    """This process's machine MCP socket path, or None when absent.
+
+    Presence does not prove liveness. An absent or stale socket fails the
+    request; callers never fall back to a local server.
+    """
     path = _socket_path_for()
     return path if Path(path).exists() else None

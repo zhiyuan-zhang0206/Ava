@@ -31,8 +31,8 @@ Same-value edits add no version/revision/sync. A real config/enabled change,
 built-in config resync, or explicit restart increments `desired_revision`.
 Start on a completed/error schedule also creates a new deliberate revision;
 start on an enabled nonterminal schedule and stop on a disabled row are no-ops.
-A new revision resets the crash budget once, in its mutation transaction.
-Repeated consumer attempts honor persisted launch backoff and breaker limits.
+A new revision resets launch admission once, in its mutation transaction.
+Repeated consumer attempts cannot launch an already-consumed revision again.
 
 ## Convergence recovery
 
@@ -42,8 +42,10 @@ separate release identity checked through the existing exact-session cleanup.
 A PostgreSQL advisory transaction gives one manager ownership of a schedule's process effects, including across manager processes; conditional revision
 writes prevent it acknowledging a later desired revision. A matching live revision is adopted and marked `applied_revision`; a predecessor
 is officially reaped before replacement. Missing provenance for a versioned
-live session leaves the request queued. Failed reap or launch also stays queued,
-with inspectable status/error and crash budget. One failed schedule does not
+live session leaves the request queued. Failed reap stays queued. Before creating a process, the manager commits
+`launch_count=1`, `applied_revision=desired_revision`, and an inspectable unknown-outcome
+error. A failed or uncertain launch consumes that revision; it is acknowledged
+without automatic replay. One failed schedule does not
 block consumption of unrelated requests.
 
 Runner admission conditionally marks the revision applied and reads its script
@@ -51,8 +53,10 @@ only if the row remains enabled at that desired revision. A delayed obsolete
 launch executes no script. Admission occurs before user code, so a quickly
 completed process remains applied even if its manager died before recording the
 launch. Retrying an unacknowledged applied completed/error revision does not
-rerun it. Normal supervised crash recovery remains available and can execute
-process code again; this contract does not promise exactly-once external effects.
+rerun it. A missing started process is marked error and is not automatically recreated,
+including after manager or PTY service restart. Losing a launch before script
+execution is an accepted cost of this admission rule. Explicit start/restart
+creates a new revision and can intentionally execute the script again.
 
 Reconcile also discovers pending revisions. It always reads current desired
 state rather than replaying an old request's enabled/config payload. Maintenance
@@ -65,8 +69,8 @@ The initial-command metadata survives schedule-manager restarts while its PTY
 owner remains alive. PTY daemon restart is a process-loss boundary: it does not
 re-adopt terminals, and its durable exact-birth ledger sweeps old identities.
 A live versioned session with unavailable metadata remains uncertain/queued;
-normal supervisor recovery after verified process loss is a separate crash
-recovery policy, not receipt replay or proof of exactly-once script execution.
+verified process loss does not authorize script replay. An operator must
+explicitly request a new revision to execute again.
 The optional list metadata is opt-in, preserving the old client's response
 shape. An older PTY service cannot supply this evidence and must be upgraded
 before a pending versioned live session can be safely adopted.

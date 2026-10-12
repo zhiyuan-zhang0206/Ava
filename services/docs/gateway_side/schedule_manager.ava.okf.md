@@ -1,25 +1,25 @@
 ---
 type: doc
 title: Schedule Manager — resident schedule sessions
-description: Gateway-side service that keeps one resident PTY session alive per enabled schedule, under a crash backoff and breaker whose state lives on the schedule row, and consumes the API's sync requests.
+description: Gateway-side service that admits one PTY launch per desired schedule revision and consumes explicit lifecycle requests.
 tags: []
 ---
 
 # Schedule Manager — resident schedule sessions
 
 ## What is it
-The service that supervises the `schedules` table: one session `ava-schedule-<id>` per enabled row, running `services.wake.schedule_manager.runner`. It runs once per cluster on the gateway side (`ServiceSpec.capabilities=GATEWAY`, health port slot `schedule_manager` = 8122) as its own root unit. Stopping or restarting it never touches the HTTP gateway, and the schedule sessions survive it: the next start re-adopts the live ones. The full behavior (state machine, breaker, runner) is in [[gateway/schedules/docs/schedules.ava.okf.md]].
+The service that supervises the `schedules` table: one session `ava-schedule-<id>` per enabled row, running `services.wake.schedule_manager.runner`. It runs once per cluster on the gateway side (`ServiceSpec.capabilities=GATEWAY`, health port slot `schedule_manager` = 8122) as its own root unit. Stopping or restarting it never touches the HTTP gateway, and the schedule sessions survive it: the next start re-adopts the live ones. The full behavior (state machine, launch admission, runner) is in [[gateway/schedules/docs/schedules.ava.okf.md]].
 
 ## Loops
 Two resident sequential loops under one `TaskGroup` (`services/wake/schedule_manager/daemon.py`, on `base/daemon/round_loop.py`). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. Each loop reports its own progress to `/healthz`.
 
 - **`reconcile`** (`manager.py`) — every 5 s.
-- **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A maintenance hold, failed reap/launch or uncertain provenance leaves work queued. See [[gateway/schedules/docs/schedule-convergence.ava.okf.md]] for transactional receipts and advisory ownership.
+- **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A maintenance hold, failed reap or uncertain live provenance leaves work queued. A consumed launch attempt is terminal for that revision, even if its outcome is unknown. See [[gateway/schedules/docs/schedule-convergence.ava.okf.md]] for transactional receipts and advisory ownership.
 
 ## State that moved from memory to the row
 | was (gateway, in memory) | now |
 |---|---|
-| `_backoff[id] = (count, deadline)` | `schedules.launch_count`, `schedules.next_launch_at`; a launch is claimed with one conditional UPDATE |
+| launch admission | `schedules.launch_count` is a one-attempt latch reset by an explicit new revision; the retired `next_launch_at` column is ignored |
 | `_not_live_since`, `_stall_alerted` | `schedules.not_live_since`, `schedules.stall_alerted_at` |
 | the call `ScheduleManager.sync(id)` from the router | a row in `schedule_sync_requests`, consumed by the `requests` loop |
 

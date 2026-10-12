@@ -12,15 +12,6 @@
   or a hosted turn's end or abort); never redelivered
 - `notify_desktop_permissions_at_startup` — surface broken Screen Recording
   or Accessibility permission (detected at converge) to the user, exactly once
-- `reconcile_open_pages` — probe every open page's server and restore it
-  (re-serve dead serve_dir pages, close dead no-dir pages); runs at boot and
-  on heartbeat. The periodic scan of busy agents' pages (task #2260) is a loop
-  of the page-server service (`services/agent_runner/page_server/dead_pages.py`)
-- `_close_dead_show_pages` — close dead no-serve_dir rows in one
-  transaction with a re-serve notice to the agent (deduped per 6h)
-
-The dead-page recovery writes and notifications live in the package-private
-`_page_reconcile.py`; the page restore contract is `docs/page-restore.ava.okf.md`.
 """
 
 from __future__ import annotations
@@ -40,23 +31,6 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.constants import PUSH
 from psycopg_pool import AsyncConnectionPool
 
-from agent.startup._page_reconcile import (
-    _PAGE_RECOVERY_MIN_INTERVAL_S as _PAGE_RECOVERY_MIN_INTERVAL_S,
-)
-from agent.startup._page_reconcile import (
-    _PAGE_RECOVERY_NOTICE_PREFIX as _PAGE_RECOVERY_NOTICE_PREFIX,
-)
-from agent.startup._page_reconcile import (
-    _close_dead_show_pages,
-)
-from agent.startup._page_reconcile import (
-    _page_recovery_notice as _page_recovery_notice,
-)
-from agent.startup._page_reconcile import (
-    _recent_page_recovery_notice as _recent_page_recovery_notice,
-)
-from base.db import Database
-from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -484,128 +458,3 @@ async def notify_desktop_permissions_at_startup() -> None:
         return
     for _, processing_path, _ in claimed:
         processing_path.unlink(missing_ok=True)
-
-
-def _page_server_alive(host: str, port: int) -> bool:
-    """Probe a page server's /health endpoint — True when it answers.
-
-    The serve() liveness check answers `ok:<token>`; here any 200 proves the
-    server is up (the token only guards against a stale occupant satisfying
-    a fresh serve's poll — recovery does not mint a new token, it keeps the
-    existing server when it is alive).
-    """
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=1.5) as resp:
-            return resp.status == 200
-    except OSError:
-        return False
-
-
-async def reconcile_open_pages(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    *,
-    db: Database,
-    bus: EventBus,
-    event_publisher: Any | None = None,
-) -> None:
-    """Probe every open page's server and restore it — boot and heartbeat.
-
-    The page-server daemon creates and supervises every serve() page inside a
-    daemon-owned persistent shell session for this agent. Those sessions are
-    outside rollout service teardown, while this probe remains a catch-all for
-    server death (crash, OOM, or manual kill): an idle agent checks its pages on
-    every heartbeat. The busy agent whose heartbeats never arrive is covered by
-    the page-server service's own scan, which closes its dead show() pages.
-
-    Per open page row:
-    - server alive -> keep (log only)
-    - server dead + serve_dir set (serve()) -> re-serve the
-      recorded directory, the old link works again
-    - server dead + serve_dir NULL (ava.ui.show() pages, or rows created
-      before serve_dir existed) -> the page cannot be rebuilt; close the row
-      so the dead link stops showing as open (frontend popover removes the
-      entry on the PageClosed event), and tell the agent to re-serve the
-      page with one system inbound — see `_close_dead_show_pages` (task
-      #2212: the notice folds into the close path so a boot right after a
-      host restart still tells the owner, with no gateway-side scan racing
-      the agent's own close).
-
-    Best-effort: any failure (DB down, probe error, serve error) is logged
-    and swallowed — the agent must keep running regardless; the page heals
-    on the next heartbeat. `event_publisher` (optional) receives PageClosed
-    for rows this pass closes; boot has the publisher, and heartbeat passes
-    ctx.event_publisher.
-    """
-    import asyncio
-
-    rows: list[
-        tuple[str, int, str, str | None, str | None]
-    ] = []  # name, port, host, title, serve_dir
-    try:
-        async with pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                "SELECT name, port, host, title, serve_dir FROM agent_pages "
-                "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL",
-                (agent_id,),
-            )
-            rows = [(r[0], r[1], r[2], r[3], r[4]) for r in await cur.fetchall()]
-    except Exception:
-        logger.opt(exception=True).warning(
-            "page-restore: open-page query failed",
-            event="page_restore_query_failed",
-            agent_id=agent_id,
-        )
-        return
-
-    if not rows:
-        return
-
-    import ava.ui
-
-    # Dead show() rows (server dead + no serve_dir) — collected over the
-    # probe pass, then closed + notified in ONE transaction below so several
-    # dead pages of one agent produce a single notice.
-    dead_shows: list[tuple[str, int]] = []  # (name, port)
-    for name, port, host, title, serve_dir in rows:
-        try:
-            # _page_server_alive is a blocking urllib probe (timeout 1.5s per
-            # page) — run it off the event loop so a slow/half-dead page server
-            # cannot stall lease renewal / SSE publish / interrupt handling
-            # (2026-08-08 audit, cc-backend-runtime P2 — the heartbeat path
-            # calls this every 5 minutes).
-            if await asyncio.to_thread(_page_server_alive, host, port):
-                logger.info(
-                    "page-restore: server alive, keeping",
-                    event="page_restore_alive",
-                    agent_id=agent_id,
-                    name=name,
-                    port=port,
-                )
-                continue
-            if serve_dir is not None:
-                await asyncio.to_thread(ava.ui.serve, serve_dir, name, port, title)
-                logger.info(
-                    "page-restore: re-served",
-                    event="page_restore_reserved",
-                    agent_id=agent_id,
-                    name=name,
-                    port=port,
-                )
-                continue
-            # Dead page with no serve_dir — cannot be rebuilt; closed (with a
-            # re-serve notice) after the probe pass.
-            dead_shows.append((name, port))
-        except Exception:
-            logger.opt(exception=True).warning(
-                "page-restore: reconcile failed",
-                event="page_restore_failed",
-                agent_id=agent_id,
-                name=name,
-                port=port,
-            )
-
-    if dead_shows:
-        await _close_dead_show_pages(pool, db, bus, agent_id, dead_shows, event_publisher)

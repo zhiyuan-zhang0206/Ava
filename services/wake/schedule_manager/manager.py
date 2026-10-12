@@ -1,53 +1,11 @@
-"""ScheduleManager — supervises one session per enabled schedule.
+"""Admit one schedule session per explicit desired revision.
 
-A schedule (the ``schedules`` table) is a supervised *resident* process: a script
-+ a command, kept up by the manager. The ``schedule-manager`` service
-(``services/wake/schedule_manager/daemon.py``) owns one ScheduleManager: its reconcile
-loop every ``POLL_INTERVAL_S`` reconciles *desired* (enabled rows) against
-*actual* (live sessions named ``ava-schedule-<id>``), launching the missing ones
-and killing sessions whose schedule was disabled/deleted. API start / stop /
-restart / edit and delete reach it as rows in ``schedule_sync_requests``
-(``requests.py``), never as a call into the process.
-
-Liveness is the session itself (its name is the schedule's stable identity),
-so schedules survive a restart of the service — the manager re-adopts live
-sessions instead of respawning them. Why a session vanished decides what happens
-next:
-
-  - clean exit (rc=0): the runner records ``status='completed'`` before the
-    session dies — a resident process that finished on its own. Terminal: the
-    manager leaves it alone (no relaunch, no breaker). Re-run via start/restart.
-  - crash (nonzero rc / signal / hard kill): no completed marker, so the manager
-    relaunches with exponential backoff; past a launch ceiling the breaker trips
-    and the schedule is left ``status='error'`` until re-enabled — this keeps a
-    crash-looping schedule from respawning forever (and it never touches the
-    agent-resurrect crash-loop signal the health probe watches, since a schedule
-    restart is not an agent resurrect). The launch count and the next-launch time
-    are columns of the schedule row (``launch_count`` / ``next_launch_at``), and a
-    launch is claimed with one conditional UPDATE, so a restart of the service
-    resumes the backoff instead of granting a crash-looping schedule a fresh
-    counter; reconcile treats ``status='error'`` as terminal (same as
-    ``'completed'``) and does not relaunch it. Recovery is an explicit
-    start/restart.
-
-The manager reads liveness before status each tick, so a session seen dead is
-guaranteed to already carry the runner's terminal write (completed / last_error).
-
-Each tick also closes run-history rows the runner could not close itself: a
-NULL (in-progress) row whose schedule has no live session belongs to a dead
-process (a SIGKILLed stop/restart/edited-script save, an external kill, a
-stale-session reap) and is closed as ``interrupted`` — a NULL row is
-legitimate only while the schedule has a live session, so the run drawer
-shows a permanent in-progress "…" only for a run that is actually running
-(QA P2-2).
-
-An enabled schedule that is not completed and has no live session for more
-than two hours emits one WARNING and one ``schedule_stalled`` telemetry event.
-The first sessionless observation (``not_live_since``) and the alert
-(``stall_alerted_at``) are columns of the row; seeing the session live again
-clears both and rearms the alert for a later outage; breaker-tripped ``error``
-rows remain eligible because their silence is the failure the alert exists to
-expose.
+The manager adopts matching live PTYs, reaps obsolete sessions through the
+identity-checked backend and consumes schedule_sync_requests. It commits a
+one-attempt launch latch before creating the process. Lost or ambiguous starts
+are errors requiring explicit start/restart; no crash retry or breaker remains.
+The latch and the two-hour absence alert clock survive service restart.
+Dead sessions also have their unfinished run-history rows closed.
 """
 
 from __future__ import annotations
@@ -57,7 +15,7 @@ import shlex
 import threading
 import time
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 from psycopg_pool import ConnectionPool
 
@@ -78,14 +36,6 @@ _log = logging.getLogger(__name__)
 # lag on a crash is fine and keeps the polling cheap.
 POLL_INTERVAL_S = 5.0
 
-# Circuit breaker: a schedule launched more than _BREAKER_MAX times before it
-# stays up trips the breaker (status='error', no more auto-launch). Backoff grows
-# 2s, 4s, 8s, ... capped, between launches; a schedule that stays live past
-# _STABLE_S after its last launch has its counter reset (it recovered).
-_BREAKER_MAX = 5
-_BACKOFF_BASE_S = 2.0
-_BACKOFF_CAP_S = 60.0
-_STABLE_S = 60.0
 _PTY_FAILURE_LOG_INTERVAL_S = 60.0
 _STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 
@@ -94,19 +44,10 @@ _STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-class _Enabled(NamedTuple):
-    """One enabled schedule as the reconcile reads it: its status and the
-    launch-claim state kept on its row."""
-
-    status: str
-    launch_count: int
-    backoff_remaining_s: float
-
-
 class ScheduleManager:
     """The reconcile logic for the ``schedules`` table. One per cluster, owned by
     the ``schedule-manager`` service, whose loops call `reconcile` and
-    `sync_one`. The crash backoff and the stall-alert clock are columns of the
+    `sync_one`. Launch admission and the stall-alert clock are columns of the
     schedule row; schedule sessions are never touched when the service stops
     (they survive it)."""
 
@@ -123,7 +64,7 @@ class ScheduleManager:
         # the first failure and periodic summaries rather than flooding ERROR.
         self._reap_failure_logs: dict[int, tuple[float, int]] = {}
         # Serializes the reconcile tick against the sync requests, which run on
-        # separate threads and both touch the backend and the backoff columns.
+        # separate threads and both touch the backend and launch-admission columns.
         self._lock = threading.Lock()
 
     # ── control (the sync-request consumer calls this) ──────────────────────
@@ -131,7 +72,7 @@ class ScheduleManager:
     def sync_one(self, schedule_id: int) -> bool:
         """Converge the current durable desired revision, preserving an applied run.
 
-        Return False while held, backing off or missing safe session provenance;
+        Return False while held or missing safe session provenance;
         the durable request stays queued for recovery.
         """
         from base.deploy.maintenance import admission
@@ -152,7 +93,6 @@ class ScheduleManager:
         if wanted is None or not wanted.enabled:
             if not self._reap(schedule_id, owned=True):
                 return False
-            self._clear_backoff([schedule_id])
             if wanted is not None:
                 revisions.mark_applied(self._pool, schedule_id, wanted.revision)
             return True
@@ -164,29 +104,28 @@ class ScheduleManager:
                 # not permission to kill a possibly already-applied execution.
                 return wanted.revision == wanted.applied == 0
             if observed == wanted.revision:
-                revisions.mark_applied(self._pool, schedule_id, wanted.revision)
+                self._mark_running(schedule_id, wanted.revision)
                 return True
             if not self._reap(schedule_id, owned=True):
                 self._reap_retries.add(schedule_id)
                 return False
-        elif wanted.revision == wanted.applied and wanted.status in ("completed", "error"):
+        elif wanted.revision == wanted.applied and wanted.status in (
+            "running",
+            "completed",
+            "error",
+        ):
+            if wanted.status == "running":
+                self._mark_lost(schedule_id, wanted.revision)
             return True
         return self._launch_revision(schedule_id)
 
     def _launch_revision(self, schedule_id: int) -> bool:
         from base.deploy.lifecycle import start_serving
 
-        launch = self._load_enabled().get(schedule_id)
-        if launch is None or launch.backoff_remaining_s > 0:
-            return False
-        if launch.launch_count >= _BREAKER_MAX:
-            self._trip_breaker(schedule_id, launch.launch_count)
-            return False
         with start_serving.recovery_permitted() as permitted:
             if not permitted:
                 return False
-            if self._claim_launch(schedule_id, launch.launch_count):
-                self._launch(schedule_id)
+            self._launch(schedule_id)
         latest = revisions.desired(self._pool, schedule_id)
         return latest is not None and latest.revision == latest.applied
 
@@ -215,7 +154,7 @@ class ScheduleManager:
             for schedule_id, state in self._reap_failure_logs.items()
             if schedule_id in known
         }
-        self._report_stalled_schedules({sid: row.status for sid, row in enabled_rows.items()}, live)
+        self._report_stalled_schedules(enabled_rows, live)
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
         # reconcile retry rather than adopting the stale survivor forever.
@@ -232,48 +171,42 @@ class ScheduleManager:
 
         for sid in sorted(enabled):
             wanted = revisions.desired(self._pool, sid)
-            if wanted is not None and wanted.revision != wanted.applied:
+            if wanted is not None and (
+                wanted.revision != wanted.applied or (sid in live and wanted.status == "error")
+            ):
                 self._sync_revision(sid)
         live = self._live_ids()
         enabled_rows = self._load_enabled()
         self._launch_missing(enabled_rows, sorted(set(enabled_rows) - live))
 
-        # Reset backoff for schedules that have stayed live past the stable window.
-        self._reset_stable_backoff(sorted(enabled & live))
-
         # Close run rows the runner could not close: a NULL row is legitimate
         # only while the schedule has a live session (QA P2-2). Launches above
         # already closed their dead predecessors; this catches every other
-        # orphan (disabled/terminal schedules, backing-off relaunches, legacy
+        # orphan (disabled/terminal schedules, failed admissions, legacy
         # rows from before this sweep existed).
         self._close_orphan_runs()
 
-    def _launch_missing(self, enabled_rows: dict[int, _Enabled], missing: list[int]) -> None:
-        """(Re)launch enabled schedules with no live session — unless the row is in
-        a terminal status that must not be auto-launched:
-
-        - 'completed': a resident process that finished on its own.
-        - 'error': the breaker already tripped. This is the DB, so the trip
-          survives a restart of the service. Recovery is an explicit API
-          restart/start, which relaunches and resets status."""
-        from base.deploy.lifecycle import start_serving
-
+    def _launch_missing(self, enabled_rows: dict[int, str], missing: list[int]) -> None:
+        """Apply explicit revisions; an admitted missing execution is never relaunched."""
         for sid in missing:
-            row = enabled_rows[sid]
-            if row.status in ("completed", "error"):
-                self._clear_backoff([sid])  # terminal — clear any prior backoff
-                continue
-            if row.backoff_remaining_s > 0:
-                continue  # backing off
-            if row.launch_count >= _BREAKER_MAX:
-                self._trip_breaker(sid, row.launch_count)
-                continue
-            with start_serving.recovery_permitted() as permitted:
-                if not permitted:
-                    continue
-                with revisions.claim_convergence(self._pool, sid) as owned:
-                    if owned and self._claim_launch(sid, row.launch_count):
-                        self._launch(sid)
+            if enabled_rows[sid] not in ("completed", "error"):
+                self._sync_revision(sid)
+
+    def _mark_lost(self, schedule_id: int, revision: int) -> None:
+        with write_transaction(self._pool) as conn:
+            changed = conn.execute(
+                "UPDATE schedules SET status = 'error', last_error = %s, updated_at = now() "
+                "WHERE id = %s AND desired_revision = %s AND applied_revision = %s "
+                "AND enabled AND status = 'running'",
+                (
+                    "Schedule process lost; inspect effects and explicitly restart to run again",
+                    schedule_id,
+                    revision,
+                    revision,
+                ),
+            ).rowcount
+        if changed:
+            _log.warning("schedule %s process lost; automatic relaunch disabled", schedule_id)
 
     def _report_stalled_schedules(self, status_by_id: dict[int, str], live_ids: set[int]) -> None:
         """Alert once when an active schedule has been sessionless for 2h.
@@ -350,8 +283,8 @@ class ScheduleManager:
                     continue
                 # An enabled schedule is current desired state, but a matching
                 # name from the preceding flip is not its current exact
-                # session. Reap the old record and let this tick launch the
-                # desired runner under the active generation.
+                # session. Reap the old record; an admitted revision stays
+                # consumed, while an explicit new revision may launch.
                 if owned_id is not None and owned_id != schedule_id:
                     live.add(schedule_id)
                     continue
@@ -398,7 +331,7 @@ class ScheduleManager:
         session liveness, so it closes them: history is preserved as a visible
         ✗ interrupted row instead of an eternal "…". Schedules launched in
         this tick already had their rows closed at launch; this catches the
-        rest (disabled, terminal, backing off, never launched)."""
+        rest (disabled, terminal, never launched)."""
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute("SELECT DISTINCT schedule_id FROM schedule_runs WHERE ok IS NULL")
             ids = [r[0] for r in cur.fetchall()]
@@ -429,6 +362,8 @@ class ScheduleManager:
         # reconcile loop adopts live sessions without relaunching), so a
         # same-name survivor is by definition stale.
         if not self._prepare_launch(schedule_id, name, backend, wanted):
+            return
+        if not self._claim_launch(schedule_id, wanted.revision):
             return
         # _launch is only reached for a schedule with no live session, so any
         # in-progress run row at this point belongs to a dead process (the
@@ -474,31 +409,30 @@ class ScheduleManager:
         try:
             backend.new_session(name, cmd, REPO_ROOT, env=env)
         except Exception as exc:
-            # A supervisor/daemon failure must not kill the reconcile tick; the
-            # breaker's next launch attempt backs off and retries.
+            # Admission was committed before the request. Its unknown outcome
+            # consumes this revision; only an explicit restart may try again.
             _log.error("schedule %s launch failed: %s", schedule_id, exc)
             return
         if not backend.has_session(name):
             _log.error(
                 "schedule %s launch failed: session %s did not come up "
-                "(daemon down?) — breaker will retry",
+                "(daemon down?) — explicit restart required",
                 schedule_id,
                 name,
             )
             return
         self._reap_retries.discard(schedule_id)
         _log.info("schedule %s launched (session %s)", schedule_id, name)
-        # A successful launch clears any stale breaker-trip text: the row was
-        # left in 'error' by a prior crash loop, then recovered via an explicit
-        # restart -- without this, last_error keeps showing "auto-restart
-        # paused" forever even though the schedule is running fine (2026-08-11,
-        # all 4 schedules had stale text after a rollout crash-loop).
+        self._mark_running(schedule_id, wanted.revision)
+
+    def _mark_running(self, schedule_id: int, revision: int) -> None:
+        """Confirm a matching live process without overwriting completion or newer intent."""
         with write_transaction(self._pool) as conn:
             conn.execute(
                 "UPDATE schedules SET applied_revision = %s, status = CASE "
                 "WHEN applied_revision = %s AND status = 'completed' THEN status ELSE 'running' END, "
                 "last_error = NULL WHERE id = %s AND desired_revision = %s AND enabled",
-                (wanted.revision, wanted.revision, schedule_id, wanted.revision),
+                (revision, revision, schedule_id, revision),
             )
 
     def _prepare_launch(
@@ -511,7 +445,7 @@ class ScheduleManager:
         if backend.session_generation(name) == current_generation():
             observed = revisions.launched_revision(schedule_id)
             if observed == wanted.revision:
-                revisions.mark_applied(self._pool, schedule_id, wanted.revision)
+                self._mark_running(schedule_id, wanted.revision)
                 return False
             if observed is None:
                 if wanted.revision > 0:
@@ -607,114 +541,41 @@ class ScheduleManager:
         _log.info("schedule %s: PTY session %s reaped (%s)", schedule_id, name, mode)
         return True
 
-    def _trip_breaker(self, schedule_id: int, count: int) -> None:
-        # Only write once per trip: flip to error the first time we cross the ceiling.
-        updated = self._set_status(
-            schedule_id,
-            "error",
-            last_error=(
-                f"auto-restart paused: schedule crashed {count} times without staying up "
-                "(a clean exit is recorded as completed, not error); "
-                "fix the script and re-enable to retry"
-            ),
-            only_if_not_error=True,
-        )
-        if updated:
-            _log.warning("schedule %s breaker tripped after %s launches", schedule_id, count)
-
     # ── DB ──────────────────────────────────────────────────────────────────
 
-    def _load_enabled(self) -> dict[int, _Enabled]:
-        """Enabled schedules as ``{id: _Enabled}`` — the reconcile loop needs the
-        status to leave a cleanly-exited ('completed') schedule alone, and the
-        launch-claim state to honor the backoff."""
-        with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, status, launch_count, "
-                "GREATEST(0, EXTRACT(EPOCH FROM next_launch_at - clock_timestamp())) "
-                "FROM schedules WHERE enabled = true"
-            )
-            return {r[0]: _Enabled(r[1], r[2], float(r[3] or 0.0)) for r in cur.fetchall()}
+    def _load_enabled(self) -> dict[int, str]:
+        with self._pool.connection() as conn:
+            rows = conn.execute("SELECT id, status FROM schedules WHERE enabled").fetchall()
+        return {row[0]: row[1] for row in rows}
 
-    def _claim_launch(self, schedule_id: int, seen_count: int) -> bool:
-        """Claim one launch attempt: bump the count and push the next-launch time
-        out by the backoff (2s, 4s, ... capped), in one statement that holds only
-        while the row is still the one the reconcile read and is not backing off.
-        Counted when claimed, launched or not — a launch that fails is an attempt."""
-        with write_transaction(self._pool) as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE schedules SET launch_count = launch_count + 1, "
-                "next_launch_at = clock_timestamp() "
-                "  + make_interval(secs => LEAST(%s * POWER(2, launch_count), %s)) "
-                "WHERE id = %s AND launch_count = %s "
-                "AND (next_launch_at IS NULL OR next_launch_at <= clock_timestamp())",
-                (_BACKOFF_BASE_S, _BACKOFF_CAP_S, schedule_id, seen_count),
-            )
-            return cur.rowcount == 1
+    def _claim_launch(self, schedule_id: int, revision: int) -> bool:
+        """Admit one process attempt before effects; ambiguity consumes the attempt.
 
-    def _clear_backoff(self, schedule_ids: list[int]) -> None:
-        """Forget the crash backoff of these schedules (a deliberate sync, a
-        clean finish, a disabled or deleted schedule)."""
-        if not schedule_ids:
-            return
-        with write_transaction(self._pool) as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE schedules SET launch_count = 0, next_launch_at = NULL "
-                "WHERE id = ANY(%s) AND (launch_count > 0 OR next_launch_at IS NOT NULL)",
-                (schedule_ids,),
+        Existing launch_count is a one-attempt latch, reset only by a new
+        explicit revision. Old retry timestamps are retained but never read.
+        """
+        with write_transaction(self._pool) as conn:
+            return (
+                conn.execute(
+                    "UPDATE schedules SET launch_count = 1, applied_revision = %s, "
+                    "status = 'error', last_error = %s WHERE id = %s AND enabled "
+                    "AND desired_revision = %s AND launch_count = 0",
+                    (
+                        revision,
+                        "Launch outcome unknown; inspect before explicitly restarting",
+                        schedule_id,
+                        revision,
+                    ),
+                ).rowcount
+                == 1
             )
 
-    def _reset_stable_backoff(self, live_ids: list[int]) -> None:
-        """Reset the counter of live schedules that stayed up past the stable
-        window after their last launch's backoff deadline: they recovered."""
-        if not live_ids:
-            return
-        with write_transaction(self._pool) as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE schedules SET launch_count = 0, next_launch_at = NULL "
-                "WHERE id = ANY(%s) AND launch_count > 0 "
-                "AND clock_timestamp() > next_launch_at + make_interval(secs => %s)",
-                (live_ids, _STABLE_S),
+    def _set_status(self, schedule_id: int, status: str) -> bool:
+        with write_transaction(self._pool) as conn:
+            return (
+                conn.execute(
+                    "UPDATE schedules SET status=%s, updated_at=now() WHERE id=%s",
+                    (status, schedule_id),
+                ).rowcount
+                > 0
             )
-
-    def _set_status(
-        self,
-        schedule_id: int,
-        status: str,
-        *,
-        last_error: str | None = None,
-        only_if_not_error: bool = False,
-        clear_last_error: bool = False,
-    ) -> bool:
-        """Update a schedule's status (and optionally last_error). With
-        only_if_not_error, skip a row already in 'error' so the breaker logs its
-        trip exactly once. `clear_last_error` nulls last_error alongside the
-        status flip (a recovered launch must not keep stale breaker-trip text).
-        Returns whether a row changed."""
-        # Five fully-static queries selected by the flags — no string building.
-        if last_error is not None:
-            params: tuple[object, ...] = (status, last_error, schedule_id)
-            sql = (
-                "UPDATE schedules SET status=%s, last_error=%s, updated_at=now() "
-                "WHERE id=%s AND status <> 'error'"
-                if only_if_not_error
-                else "UPDATE schedules SET status=%s, last_error=%s, updated_at=now() WHERE id=%s"
-            )
-        elif clear_last_error:
-            params = (status, schedule_id)
-            sql = (
-                "UPDATE schedules SET status=%s, last_error=NULL, updated_at=now() "
-                "WHERE id=%s AND status <> 'error'"
-                if only_if_not_error
-                else "UPDATE schedules SET status=%s, last_error=NULL, updated_at=now() WHERE id=%s"
-            )
-        else:
-            params = (status, schedule_id)
-            sql = (
-                "UPDATE schedules SET status=%s, updated_at=now() WHERE id=%s AND status <> 'error'"
-                if only_if_not_error
-                else "UPDATE schedules SET status=%s, updated_at=now() WHERE id=%s"
-            )
-        with write_transaction(self._pool) as conn, conn.cursor() as cur:
-            cur.execute(sql, params)  # pyright: ignore[reportArgumentType]
-            return cur.rowcount > 0

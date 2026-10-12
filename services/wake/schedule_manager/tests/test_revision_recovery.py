@@ -140,6 +140,26 @@ def test_completed_applied_revision_is_not_rerun_by_unacknowledged_queue(
     assert backend.killed == []
 
 
+def test_live_adoption_preserves_completion_before_process_exit(
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
+) -> None:
+    sid = _insert(db_conn)
+    db_conn.execute(
+        "UPDATE schedules SET applied_revision = 1, status = 'completed' WHERE id = %s", (sid,)
+    )
+    db_conn.commit()
+    backend.commands[session_name(f"schedule-{sid}")] = (
+        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 1; exit $?"
+    )
+    with base.db.pool(gate=database_gate) as pool:
+        assert manager.ScheduleManager(pool).sync_one(sid)
+    assert backend.launches == 0
+    assert backend.killed == []
+    assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
+        "completed",
+    )
+
+
 def test_reap_failure_keeps_convergence_pending(
     db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
@@ -155,18 +175,18 @@ def test_reap_failure_keeps_convergence_pending(
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
 
 
-def test_failed_revision_keeps_backoff_across_consumer_retries(
+def test_failed_revision_is_not_retried_after_unknown_launch(
     db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
     backend.fail_launch = True
     with base.db.pool(gate=database_gate) as pool:
-        assert not manager.ScheduleManager(pool).sync_one(sid)
-        assert not manager.ScheduleManager(pool).sync_one(sid)
+        assert manager.ScheduleManager(pool).sync_one(sid)
+        assert manager.ScheduleManager(pool).sync_one(sid)
     assert backend.launches == 1
     assert db_conn.execute(
         "SELECT launch_count, applied_revision FROM schedules WHERE id = %s", (sid,)
-    ).fetchone() == (1, 0)
+    ).fetchone() == (1, 1)
 
 
 def test_an_uncertain_live_revision_is_never_blindly_replaced(
@@ -273,7 +293,7 @@ def test_newer_edit_during_launch_is_not_acknowledged_as_applied(
         assert not manager.ScheduleManager(pool).sync_one(sid)
         assert db_conn.execute(
             "SELECT desired_revision, applied_revision FROM schedules WHERE id = %s", (sid,)
-        ).fetchone() == (2, 0)
+        ).fetchone() == (2, 1)
         monkeypatch.setattr(backend, "new_session", allocate)
         assert manager.ScheduleManager(pool).sync_one(sid)
     assert db_conn.execute(

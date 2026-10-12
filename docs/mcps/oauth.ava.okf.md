@@ -34,7 +34,6 @@ Token files are created 0600 from the start via `os.open` mode (umask can only r
 ## Entry Points
 - `ava/mcps/_oauth.py:oauth_http_client(url, server)` — build the authenticated httpx client; the caller owns its lifecycle
 - `ava/mcps/_daemon.py:_connect_http(..., oauth=True, server=...)` — daemon connect path
-- `ava/mcps/__init__.py:_connect_http(..., oauth=True, server=...)` — local-fallback connect path (no daemon)
 - `ava/mcp_config.py:server_url` — config validation (`oauth` must be bool, exclusive with `headers`)
 
 ## Key Dependencies

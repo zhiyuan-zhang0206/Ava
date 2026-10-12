@@ -9,14 +9,12 @@ Real integration tests (`ava.mcps.chrome.navigate_page(...)` running against rea
 
 import json
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 import ava.mcps as mcps_mod
 import ava.mcps._remote as remote_mod
-from ava.mcps._clients import McpClients
 from ava.mcps.tests._mcps_helpers import (
     _content_image,
     _content_text,
@@ -138,7 +136,7 @@ def test_proxy_attribute_returns_callable(mock_session: MagicMock) -> None:
     assert "Read a file" in (fn.__doc__ or "")
     result = fn(path="/x")
     assert result == "file contents"
-    mock_session.call_tool.assert_awaited_once_with("read_file", {"path": "/x"})
+    mock_session.call_tool.assert_called_once_with("read_file", {"path": "/x"})
 
 
 def test_proxy_attribute_works_for_unknown_tool_too(mock_session: MagicMock) -> None:
@@ -243,128 +241,7 @@ def test_proxy_call_structured_only_raises(mock_session: MagicMock) -> None:
         proxy.count()
 
 
-def test_proxy_tool_not_found_classified(mock_session: MagicMock) -> None:
-    """Server-side 'tool not found' type error → MCPToolNotFound."""
-    mock_session.list_tools.return_value = MagicMock(tools=[])
-    mock_session.call_tool.side_effect = RuntimeError("Tool 'xyz' not found")
-    proxy = mcps_mod._ServerProxy("fs")
-    with pytest.raises(mcps_mod.MCPToolNotFound):
-        proxy.xyz()
-
-
-def test_proxy_other_errors_become_call_error(mock_session: MagicMock) -> None:
-    mock_session.list_tools.return_value = MagicMock(tools=[_make_tool("do")])
-    mock_session.call_tool.side_effect = RuntimeError("boom")
-    proxy = mcps_mod._ServerProxy("fs")
-    with pytest.raises(mcps_mod.MCPCallError, match="boom"):
-        proxy.do()
-
-
 # ─── dead-session rebuild (2026-08-13 #1229) ──────────────────────────────
-
-
-def _patch_local_session_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate the local-path caches for one test (daemon absent → local mode)."""
-    local_mcp_clients(monkeypatch)
-    monkeypatch.setattr(mcps_mod, "_read_cache", lambda _server: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(mcps_mod, "_write_cache", lambda _server, _tools: None)  # pyright: ignore[reportUnknownArgumentType]
-
-
-def _dying_then_healthy_connect(
-    monkeypatch: pytest.MonkeyPatch,
-    dying_call: Any,
-    healthy_call: Any,
-) -> tuple[list[str], MagicMock]:
-    """Fake `_connect`: first call returns a dying cached session (whose stack
-    tracks closure), the next one a healthy session. Returns (order log, dying
-    stack) so tests can assert the old transport was closed."""
-    dying_stack = MagicMock()
-    dying_stack.aclose = AsyncMock()
-    dying = MagicMock()
-    dying.call_tool = AsyncMock(side_effect=dying_call)
-    dying.list_tools = AsyncMock(side_effect=dying_call)
-
-    healthy = MagicMock()
-    healthy.call_tool = AsyncMock(return_value=healthy_call)
-    healthy.list_tools = AsyncMock(return_value=healthy_call)
-
-    order: list[str] = []
-
-    async def _fake_connect(mcp: McpClients, server: str, **kwargs: object) -> MagicMock:
-        if not order:
-            order.append("dying")
-            mcp.sessions[server] = dying
-            mcp.session_stacks[server] = dying_stack
-            return dying
-        order.append("healthy")
-        mcp.sessions[server] = healthy
-        return healthy
-
-    monkeypatch.setattr(mcps_mod, "_connect", _fake_connect)
-    return order, dying_stack
-
-
-def test_call_raw_connection_closed_is_unknown(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """CONNECTION_CLOSED can mean the tool ran before its reply was lost.
-    Invalidate the cached session for a future call without replaying this one."""
-    from mcp import MCPError
-    from mcp.types import CONNECTION_CLOSED
-
-    _patch_local_session_state(monkeypatch)
-    order, dying_stack = _dying_then_healthy_connect(
-        monkeypatch,
-        MCPError(CONNECTION_CLOSED, "Connection closed"),
-        _result([_content_text("ok")], is_error=False),
-    )
-
-    with pytest.raises(mcps_mod.MCPCallError, match="result unknown"):
-        mcps_mod._call_raw("fs", "do")
-    assert order == ["dying"]
-    assert dying_stack.aclose.await_count == 1  # old transport closed
-
-
-def test_call_raw_does_not_retry_tool_level_mcp_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A server-returned JSON-RPC error (MCPError with INVALID_PARAMS) is not a
-    transport death: no rebuild, no retry — a side-effectful tool is never
-    double-run."""
-    from mcp import MCPError
-    from mcp.types import INVALID_PARAMS
-
-    _patch_local_session_state(monkeypatch)
-    order, dying_stack = _dying_then_healthy_connect(
-        monkeypatch,
-        MCPError(INVALID_PARAMS, "Bad args"),
-        _result([_content_text("ok")], is_error=False),
-    )
-
-    with pytest.raises(mcps_mod.MCPCallError, match="Bad args"):
-        mcps_mod._call_raw("fs", "do")
-    assert order == ["dying"]  # one session only — no rebuild, no retry
-    assert dying_stack.aclose.await_count == 0  # nothing invalidated
-
-
-def test_list_tools_rebuilds_session_on_transport_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The tool-listing path gets the same dead-session rebuild."""
-    from mcp import MCPError
-    from mcp.types import CONNECTION_CLOSED
-
-    _patch_local_session_state(monkeypatch)
-    order, dying_stack = _dying_then_healthy_connect(
-        monkeypatch,
-        MCPError(CONNECTION_CLOSED, "Connection closed"),
-        MagicMock(tools=[_make_tool("do")]),
-    )
-
-    tools = mcps_mod._list_tools("fs")
-    assert [t["name"] for t in tools] == ["do"]
-    assert order == ["dying", "healthy"]
-    assert dying_stack.aclose.await_count == 1
 
 
 # ─── _load_config edge cases ──────────────────────────────────────────────
@@ -495,7 +372,8 @@ def test_daemon_socket_path_returns_path_when_socket_present(
 def test_get_remote_client_none_without_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: None)
     local_mcp_clients(monkeypatch)
-    assert mcps_mod._get_remote_client() is None
+    with pytest.raises(mcps_mod.MCPConnectError, match="unavailable"):
+        mcps_mod._get_remote_client()
 
 
 def test_get_remote_client_creates_when_daemon_running(monkeypatch: pytest.MonkeyPatch) -> None:

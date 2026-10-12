@@ -20,10 +20,10 @@ MCP servers run as child processes managed by the shared per-machine MCP
 daemon (`ava/mcps/_daemon.py`, ops roster session "mcp-daemon"). Tool
 discovery is **lazy, not at startup**: config reloads on every call
 (`_load_config`), and tool lists load on first access (daemon → 24h disk
-cache → local connection) — `servers()` and `ava.help(ava.mcps)` prioritize the cache so
+cache for metadata only) — `servers()` and `ava.help(ava.mcps)` prioritize the cache so
 they trigger no connections; the daemon does not prefetch at boot.
 
-Remote `url` entries spawn no child: the daemon dials the Streamable HTTP endpoint directly, and the local fallback (`_connect`) has the same `url` branch when the daemon socket is absent.
+Remote `url` entries spawn no child: the daemon dials the Streamable HTTP endpoint directly. A missing or unreachable daemon fails the request; the SDK never creates a local server.
 
 **Server subprocess sharing**: a server's `.mcp.json` may declare `"shared"`
 to avoid one stdio child per agent connection. `"shared": "browser"`
@@ -34,20 +34,17 @@ at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one da
 **Remote servers**: a `url` entry (validated by `ava/mcp_config.py:server_url`) is an http(s) Streamable HTTP endpoint — mutually exclusive with `command` — with one auth mode: static `headers` (str → str, API-key style) or `"oauth": true`, a full OAuth 2.1 authorization-code + PKCE browser flow ([[oauth.ava.okf.md]]).
 
 
-**Local fallback and the context**: the SDK side holds its MCP clients on the bound `AvaContext` (`ava/mcps/_clients.py:McpClients`, built on first use through `context.clients.get(McpClients)`): the daemon socket client, and for the fallback a loop on a daemon thread (anyio's blocking portal) with one cached session per server. They end with the context: the exec child releases them as it exits, a launched script at interpreter exit. Cached local sessions are not awaited shut (closing stdio children while the parent dies can deadlock); a server sees EOF and exits.
+**Context ownership**: the SDK stores one daemon socket client on the bound `AvaContext` (`ava/mcps/_clients.py:McpClients`). Closing the context closes that client. No portal, local MCP session or SDK-owned server subprocess is created.
 
 `ava.sdk_surface.process_context.process_clients` supplies a narrow timeout
 reader through `ClientSet`'s factory configuration. `McpClients` is still built
-on first use without reading that configuration or starting a portal, session
-or transport. Closing the set clears its clients; a later use rebuilds them
+on first use without reading that configuration or starting a transport. Closing the set clears its clients; a later use rebuilds them
 with the same reader. The daemon supplies its own reader to each connection scope.
 
 The SDK supplies `mcp_connect_timeout_seconds` to the daemon client on each
 request. The cached client owns its socket, not a settings snapshot: dial and
 response waiting use that request's explicit timeout budget, and a later request
-reads the current configuration again. Local session construction reads the
-then-current timeout once for its fixed `ClientSession.read_timeout_seconds`;
-a cached session retains that value until invalidated and reconnected.
+reads the current configuration again.
 
 ## See Also
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — skills vs MCP servers
@@ -78,8 +75,7 @@ overlay raises a configuration error before server selection; it never becomes
 an empty server list or enables servers by default. `ava mcp list` reports the
 error and exits unsuccessfully. Definitions-only inventory can still inspect
 all declared servers, but must read the overlay separately to report enable state.
-Each tool request checks that its server remains enabled before reusing a local
-or daemon session. Disabling a server rejects later requests without terminating
+Each tool request checks that its server remains enabled before reusing a daemon session. Disabling a server rejects later requests without terminating
 existing sessions or cancelling an already-started call. Warm help metadata can
 still list prior tools; it does not authorize their execution.
 
@@ -114,4 +110,4 @@ failures propagate and are not cached as an empty retry policy.
 Repeating a tool with at-least-once delivery requires a protocol-level
 idempotency key and server deduplication.
 
-SDK v2 (pinned `>=2.0.0,<3`, 2026-07-28 protocol revision): SDK field names are snake_case (`input_schema` / `is_error` / `structured_content`); `_dump_content` and the daemon re-serialize `by_alias=True`, so the camelCase wire contract agents parse is unchanged.
+SDK v2 (pinned `>=2.0.0,<3`, 2026-07-28 protocol revision): SDK field names are snake_case (`input_schema` / `is_error` / `structured_content`); the daemon serializes content `by_alias=True`, so the camelCase wire contract agents parse is unchanged.

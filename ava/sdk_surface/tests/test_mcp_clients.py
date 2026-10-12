@@ -18,7 +18,7 @@ def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close()
     first_client = first.clients.get(McpClients)
     second_client = second.clients.get(McpClients)
     assert first_client is not second_client
-    assert first_client._portal is None and second_client._portal is None
+    assert first_client._remote is None and second_client._remote is None
     first_remote, second_remote = MagicMock(), MagicMock()
     first_remote.list_tools.return_value = []
     second_remote.list_tools.return_value = []
@@ -47,7 +47,7 @@ def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close()
         assert rebuilt is not first_client
         assert rebuilt.timeout_seconds() == 2.0
         assert second_client.timeout_seconds() == 11.0
-        assert rebuilt._portal is None
+        assert rebuilt._remote is None
     finally:
         socket_path.unlink()
         ava.unbind_context()
@@ -64,5 +64,5 @@ def test_mcp_client_construction_does_not_read_configuration() -> None:
     clients = process_clients(mcp_timeout_seconds=premature_read)
     assert not clients._made
     mcp = clients.get(McpClients)
-    assert mcp._portal is None and not mcp.sessions
+    assert mcp._remote is None
     clients.close()

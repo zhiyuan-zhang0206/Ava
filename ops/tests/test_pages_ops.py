@@ -103,3 +103,30 @@ def test_register_page_raced_conflict_raises_domain_error(
     _register(db_conn, owner, "holder", 8776, _HOST, None)
     with pytest.raises(PagePortConflictError, match="'holder'"):
         _register(db_conn, other, "clash", 8776, _HOST, None)
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_explicit_registration_resets_admission_only_for_a_changed_server(
+    db_conn: psycopg.Connection, changed: bool
+) -> None:
+    aid = create_agent(db_conn)
+    original = _register(db_conn, aid, "admission", 8900, _HOST, None, serve_dir="/data/a")
+    db_conn.execute(
+        "UPDATE agent_pages SET session_name = 'known-page-session', server_token = 'token' "
+        "WHERE id = %s",
+        (original.id,),
+    )
+    db_conn.commit()
+    _register(
+        db_conn,
+        aid,
+        "admission",
+        8901 if changed else 8900,
+        _HOST,
+        "updated title",
+        serve_dir="/data/a",
+    )
+    state = db_conn.execute(
+        "SELECT session_name, server_token FROM agent_pages WHERE id = %s", (original.id,)
+    ).fetchone()
+    assert state == ((None, None) if changed else ("known-page-session", "token"))

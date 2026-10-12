@@ -1,21 +1,4 @@
-"""Close the show() pages whose server died, a loop of the page-server service.
-
-A `show()` page (no `serve_dir`) is served by the agent's own process, so the
-page-server daemon does not supervise it, and a dead server cannot be rebuilt: the
-row is closed so the dead link stops showing as open, the frontend drops it on the
-`PageClosed` event, and the owner gets one system inbound telling it to re-show the
-page (deduped per agent over six hours, `base/agents/recovery/pages.py`). The agent
-runs the same pass at boot and on each heartbeat, but a busy agent gets no
-heartbeats (task #2260), so this loop scans every open show page of this host every
-`AVA_HEARTBEAT_INTERVAL_SECONDS` as well.
-
-`serve()` pages need nothing here: the daemon's own reconcile relaunches a dead page
-server in its persistent session within one poll.
-
-A round skips while the unit is quiesced (an `ava stop` draining). An unreachable
-database skips the round; any other exception ends the loop and, through the
-service's `TaskGroup`, the process.
-"""
+"""Observe dead show() links and close their rows without agent recovery messages."""
 
 from __future__ import annotations
 
@@ -24,12 +7,9 @@ import functools
 import logging
 import urllib.request
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 
 from psycopg_pool import ConnectionPool
 
-from base.agents.inbox.wake import publish_inbound_wake
-from base.agents.recovery import pages as page_recovery
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
@@ -81,32 +61,23 @@ def page_server_alive(host: str, port: int) -> bool:
 
 
 def close_dead_show_pages(pool: ConnectionPool, agent_id: int, names: list[str]) -> bool:
-    """Close the agent's dead show() rows and tell it to re-show them; True when a
-    notice was written.
-
-    Close and notice are ONE transaction, so a failure rolls back both and the next
-    round retries: the agent is never told about rows that stayed open. The notice is
-    deduped over `MIN_INTERVAL_S` against the agent's own inbound history.
-    """
-    cutoff = datetime.now(UTC) - timedelta(seconds=page_recovery.MIN_INTERVAL_S)
-    with write_transaction(pool) as conn, conn.cursor() as cur:
+    """Close invalid links. There is no recovery notice or model wake."""
+    changed = False
+    with write_transaction(pool) as conn:
         for name in names:
-            cur.execute(page_recovery.CLOSE_PAGE_SQL, (agent_id, name))
-        cur.execute(
-            page_recovery.RECENT_NOTICE_SQL,
-            (agent_id, page_recovery.NOTICE_PREFIX + "%", cutoff),
-        )
-        if cur.fetchone() is not None:
-            return False
-        cur.execute(
-            page_recovery.NOTICE_INSERT_SQL,
-            (agent_id, page_recovery.recovery_notice(agent_id, names)),
-        )
-    return True
+            changed |= (
+                conn.execute(
+                    "UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s "
+                    "AND name = %s AND serve_dir IS NULL AND closed_at IS NULL AND expired_at IS NULL",
+                    (agent_id, name),
+                ).rowcount
+                == 1
+            )
+    return changed
 
 
 async def dead_pages_round(
-    pool: ConnectionPool, db: Database, host: str, progress: LoopProgress, bus: EventBus
+    pool: ConnectionPool, _db: Database, host: str, progress: LoopProgress, bus: EventBus
 ) -> None:
     """Probe every open show page of this host and close the dead ones."""
     if admission.quiesced():
@@ -125,22 +96,13 @@ async def dead_pages_round(
     )
     for agent_id, dead_pages in sorted(dead.items()):
         names = [page.name for page in dead_pages]
-        notified = await asyncio.to_thread(close_dead_show_pages, pool, agent_id, names)
+        await asyncio.to_thread(close_dead_show_pages, pool, agent_id, names)
         for name in names:
             await bus.publish_best_effort(
                 PageClosed(agent_id=agent_id, name=name).model_dump_json(),
                 context="page_server_dead_show",
             )
-        _log.warning(
-            "[page-server] closed dead show page(s) %s of agent %s (owner %s)",
-            names,
-            agent_id,
-            "told to re-show them" if notified else "already told",
-        )
-        if notified:
-            # Wake the agent so the notice is claimed promptly (its claim loop's
-            # SELECT recheck delivers it within its timeout regardless).
-            await asyncio.to_thread(publish_inbound_wake, db, bus, agent_id, "0")
+        _log.warning("[page-server] closed dead show page(s) %s of agent %s", names, agent_id)
         progress.beat()
 
 

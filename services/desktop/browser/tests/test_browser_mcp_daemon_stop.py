@@ -10,7 +10,7 @@ subprocess with a fake ``npx`` upstream and a fake Chrome listener, and prove:
 - TERM on a normally connected daemon exits it and closes server, socket and
   the upstream child, without touching the independently-retained Chrome.
 - TERM while the upstream connect hangs interrupts the connect immediately.
-- TERM during reconnect churn exits promptly with no surviving children.
+- Upstream death exits the daemon without reconnecting or leaving children.
 - A cancelled session task never skips the remaining cleanup (in-process).
 - A wedged cleanup await is bounded, so shutdown always completes.
 """
@@ -49,6 +49,9 @@ def home(tmp_path: Path) -> Path:
 _FAKE_UPSTREAM = r"""
 import json, os, signal, sys
 
+with open(os.path.join(os.path.dirname(sys.argv[0]), "upstream-births"), "a") as births:
+    births.write("birth\n")
+
 def _die(*_args: object) -> None:
     os._exit(0)
 
@@ -77,6 +80,8 @@ for line in sys.stdin:
                        "serverInfo": {"name": "fake", "version": "0"}},
         }) + "\n")
         sys.stdout.flush()
+        if mode == "die-after-init":
+            os._exit(0)
     elif method in ("ping", "tools/list", "tools/call"):
         if method == "tools/list":
             result = {"tools": []}
@@ -329,28 +334,16 @@ def test_sigterm_during_hung_connect_interrupts_immediately(home: Path, tmp_path
 
 
 @pytest.mark.flaky
-def test_sigterm_during_reconnect_churn_leaves_no_children(home: Path, tmp_path: Path) -> None:
-    """TERM while the daemon flaps between dead-upstream cleanup and reconnect.
-
-    The fake upstream answers initialize and then exits immediately, so the
-    daemon is permanently inside the death-cleanup / backoff / reconnect path
-    (upstream child already gone, SDK cleanup still pending) when TERM lands.
-    """
+def test_upstream_death_exits_without_reconnecting(home: Path, tmp_path: Path) -> None:
+    """The real daemon creates one child and exits when that child's session dies."""
     chrome = _ChromeFake()
     bin_dir, _ = _fake_bin(tmp_path, "die-after-init")
     daemon, daemon_log = _spawn(home, tmp_path, bin_dir, chrome, "die-after-init")
-    sock_path = _socket_path(home, chrome)
     try:
-        _wait_socket(sock_path, daemon, daemon_log)
-        time.sleep(1.5)  # a few connect→death→cleanup cycles have run
-        rc = _term_and_wait(daemon, daemon_log)
-        assert rc == 0
-        assert not sock_path.exists()
-        try:
-            children = psutil.Process(daemon.pid).children(recursive=True)
-        except psutil.NoSuchProcess:
-            children = []
-        assert children == [], "no upstream child may survive daemon shutdown"
+        rc = daemon.wait(timeout=20)
+        assert rc != 0, daemon_log.read_text(errors="replace")[-3000:]
+        assert (tmp_path / "upstream-births").read_text().splitlines() == ["birth"]
+        assert not _socket_path(home, chrome).exists()
     finally:
         if daemon.poll() is None:
             daemon.kill()

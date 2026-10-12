@@ -42,9 +42,8 @@ async def test_a_quiesced_unit_processes_no_batch(
     monkeypatch.setattr(daemon, "_process_paths", record_batch)
     dirty: queue.Queue[Path] = queue.Queue()
     dirty.put(tmp_path / "note.md")
-    retry = daemon._ReconcileRetrySchedule(base_s=1.0, cap_s=2.0)
     task = asyncio.create_task(
-        daemon._drain_loop(Mock(), dirty, Liveness(60.0), Mock(), retry, machine=machine_identity)
+        daemon._drain_loop(Mock(), dirty, Liveness(60.0), Mock(), machine=machine_identity)
     )
     try:
         await asyncio.sleep(0.2)

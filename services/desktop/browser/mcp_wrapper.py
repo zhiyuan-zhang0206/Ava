@@ -37,7 +37,7 @@ from services.desktop.browser.mcp_socket_bridge import (
 )
 
 # The daemon explicitly rejected the request before forwarding it upstream.
-_UPSTREAM_DOWN_MSG = "chrome upstream session is down; browser-mcp will restart"
+_UPSTREAM_DOWN_MSG = "chrome upstream session is down; restart browser-mcp before continuing"
 
 
 def _retryable_rejection(exc: Exception) -> bool:

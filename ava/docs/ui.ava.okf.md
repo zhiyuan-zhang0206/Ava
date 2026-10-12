@@ -34,7 +34,7 @@ provided by these calls.
 `name` must match `^[a-zA-Z0-9_-]+$` (1-64 chars). Returned `Page`: id, name, port, title, url.
 
 ### Server lifecycle
-The daemon keeps each `serve()` page in one of the serving agent's own persistent shell sessions, visible in `ava.shell.sessions.list()` as `page-<name>` (name lowercased, underscores replaced by hyphens). One session entry per open `serve()` page is normal. The session ends when the page row closes through `close()`, TTL expiry, or replacement by a new page. If the session dies while the page remains open, the daemon recreates it; killing the session does not close the page. It persists a per-page health token and adopts live page sessions after its own restart. A crashed server is relaunched in the same shell; a stale server that is still a child of that shell causes the daemon to replace the shell. Detached legacy servers and orphaned rows are reclaimed, while a foreign port occupant is left alone and retried with backoff.
+The daemon creates one persistent shell for each fresh `serve()` registration and persists its session name before launch. It adopts recorded live sessions after its own restart. A missing session, missing directory or unhealthy server closes the page and logs a warning; it does not relaunch or message the agent. Explicit registration can serve again. Normal close, TTL and identity-checked cleanup remain in place. See [[agent/startup/docs/page-restore.ava.okf.md]].
 
 ## ava_fleet Plugin Injections (Notifications)
 

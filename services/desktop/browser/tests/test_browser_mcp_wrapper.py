@@ -464,7 +464,7 @@ async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side: str) -> None:
     wrapper = _WRAPPERS[side]
-    rejection = "chrome upstream session is down; browser-mcp will restart"
+    rejection = "chrome upstream session is down; restart browser-mcp before continuing"
     writers = [FakeWriter(), FakeWriter()]
     closed: list[int] = []
     for index, writer in enumerate(writers):
