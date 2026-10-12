@@ -40,7 +40,6 @@ longer drags the node set into the importer — the exec child imports those
 before user code runs (startup-path laziness, task #3585).
 """
 
-import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -58,15 +57,8 @@ if TYPE_CHECKING:
 
 # Eager `from ._build import build_graph` used to run on every `agent.graph`
 # import — pulling the full node set (build/claim/llm/exec and their trees)
-# into every shell/files exec child. Resolve on first attribute access instead.
-_LAZY_EXPORTS = {
-    "build_graph": "._build",
-    "claim_node": ".claim.node",
-    "exec_node": ".exec.node",
-    "EXEC_CANCEL_NOTE": ".exec.output",
-    "llm_node": ".llm.node",
-    "LlmLedger": ".llm_errors",
-}
+# into every shell/files exec child. `__getattr__` below imports each submodule
+# on first attribute access instead.
 
 # Static checkers see the real signatures through the TYPE_CHECKING block
 # above; at runtime `__getattr__` resolves the names lazily (PEP 562).
@@ -88,9 +80,34 @@ _init_complete = False
 
 
 def __getattr__(name: str) -> Any:
-    """PEP 562 lazy re-export of the submodule API (see `_LAZY_EXPORTS`)."""
-    if _init_complete and name in _LAZY_EXPORTS:
-        return getattr(importlib.import_module(_LAZY_EXPORTS[name], __name__), name)
+    """PEP 562 lazy re-export of the submodule API (`__all__`): each branch imports
+    its submodule on first access, so the import stays static and the node set
+    stays out of importers that never touch these names."""
+    if _init_complete:
+        if name == "build_graph":
+            from ._build import build_graph
+
+            return build_graph
+        if name == "claim_node":
+            from .claim.node import claim_node
+
+            return claim_node
+        if name == "exec_node":
+            from .exec.node import exec_node
+
+            return exec_node
+        if name == "EXEC_CANCEL_NOTE":
+            from .exec.output import EXEC_CANCEL_NOTE
+
+            return EXEC_CANCEL_NOTE
+        if name == "llm_node":
+            from .llm.node import llm_node
+
+            return llm_node
+        if name == "LlmLedger":
+            from .llm_errors import LlmLedger
+
+            return LlmLedger
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

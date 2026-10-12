@@ -706,7 +706,8 @@ class _LegacyConfigBoot(ConfigBoot):
         apply_cluster_timezone()
 
     def _install(self, bundle: Any, reason: str) -> None:
-        facade = sys.modules["base.config"]
+        from base import config as facade
+
         facade.__dict__.update(bundle.exports)
         facade.__dict__["settings"] = bundle.settings
         super()._install(bundle, reason)

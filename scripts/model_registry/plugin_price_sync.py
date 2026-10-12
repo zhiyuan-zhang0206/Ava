@@ -661,7 +661,7 @@ def _rewrite_provider(
     for model, target in targets.items():
         if round_trip.prices[model] != target:
             raise RuntimeError(f"{path}: {model!r} did not round-trip to the archive price")
-    compile(rewritten, str(path), "exec")
+    ast.parse(rewritten, filename=str(path))
     return rewritten, tuple(drifted), tuple(drifted_periods)
 
 

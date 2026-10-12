@@ -254,14 +254,11 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> No
 @lru_cache(maxsize=1)
 def domain_model_classes() -> dict[str, type[Any]]:
     """Resolve registry class metadata without constructing any Settings."""
-    from importlib import import_module
+    from base.host.env.config_registry import model_classes
 
-    from base.host.env.config_registry import MODEL_CLASSES
-
+    classes = model_classes()
     return {
-        attr: getattr(import_module(MODEL_CLASSES[model]), model)
-        if isinstance(model, str)
-        else model
+        attr: classes[model] if isinstance(model, str) else model
         for attr, _label, model, _capability in DOMAIN_MODELS
     }
 

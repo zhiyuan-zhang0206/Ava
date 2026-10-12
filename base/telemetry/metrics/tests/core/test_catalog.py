@@ -1,7 +1,6 @@
 """Core metrics (Task #882) — validation reuse and in-process collection
 shared with the plugin registry."""
 
-import sys
 import types
 from typing import Any
 
@@ -38,8 +37,7 @@ def test_validate_core_metric_sets_plugin_core() -> None:
 def test_collect_core_metrics_rejects_duplicates(monkeypatch: pytest.MonkeyPatch) -> None:
     module = types.ModuleType("fake_core_metrics")
     module.core_metrics = lambda: [_spec(), _spec()]  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "fake_core_metrics", module)
-    monkeypatch.setattr(catalog, "_CORE_DEFINITION_MODULES", ("fake_core_metrics",))
+    monkeypatch.setattr(catalog, "_CORE_DEFINITION_MODULES", (module,))
     with pytest.raises(DuplicateMetric):
         catalog.collect_core_metrics()
 

@@ -36,9 +36,22 @@ are "core".
 
 from __future__ import annotations
 
-import importlib
+from types import ModuleType
 from typing import Any, cast
 
+from base.telemetry.metrics.core import (
+    ci,
+    cost,
+    dismissed,
+    events,
+    exec_envelope,
+    fleet,
+    frontend,
+    host,
+    observability,
+    panels,
+    pr_flow,
+)
 from base.telemetry.metrics.plugin_metrics import (
     DuplicateMetric,
     MetricSpec,
@@ -48,20 +61,20 @@ from base.telemetry.metrics.plugin_metrics import (
 # Definition modules collected (in registration order across modules). The
 # renderer orders the dashboard by each spec's ``section`` + ``order`` pins,
 # not this sequence — it only breaks ties for un-pinned specs and shapes the
-# inspector listing. A missing module is tolerated (a partial checkout / test
-# env without the definitions) and renders an empty core section.
-_CORE_DEFINITION_MODULES = (
-    "base.telemetry.metrics.core.panels",
-    "base.telemetry.metrics.core.cost",
-    "base.telemetry.metrics.core.dismissed",
-    "base.telemetry.metrics.core.fleet",
-    "base.telemetry.metrics.core.pr_flow",
-    "base.telemetry.metrics.core.ci",
-    "base.telemetry.metrics.core.events",
-    "base.telemetry.metrics.core.host",
-    "base.telemetry.metrics.core.observability",
-    "base.telemetry.metrics.core.exec_envelope",
-    "base.telemetry.metrics.core.frontend",
+# inspector listing. Every module is required: a definition module that cannot
+# be imported fails the collection rather than silently emptying its section.
+_CORE_DEFINITION_MODULES: tuple[ModuleType, ...] = (
+    panels,
+    cost,
+    dismissed,
+    fleet,
+    pr_flow,
+    ci,
+    events,
+    host,
+    observability,
+    exec_envelope,
+    frontend,
 )
 
 
@@ -81,19 +94,12 @@ def validate_core_metric(spec: MetricSpec) -> MetricSpec:
 def collect_core_metrics() -> list[MetricSpec]:
     """The core metrics of every definition module, validated, in registration order.
 
-    A module that cannot be imported (missing dependency or not present) is
-    skipped — same tolerance as the plugin generator.
-
     Raises:
         DuplicateMetric: two definitions share a name (names are global across core metrics).
         InvalidMetricQuery: any template failed validation.
     """
     collected: dict[str, MetricSpec] = {}
-    for module_name in _CORE_DEFINITION_MODULES:
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError:
-            continue
+    for module in _CORE_DEFINITION_MODULES:
         for spec in cast("Any", module).core_metrics():
             if spec.name in collected:
                 raise DuplicateMetric(

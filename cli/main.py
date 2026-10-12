@@ -266,10 +266,10 @@ def main(
         # after concurrent.futures has stopped accepting SDK resource probes.
         # Drain while the interpreter is alive; the emitter still owns shutdown.
         # No pipeline means no work, so settings-free/no-event verbs stay lazy.
-        telemetry = sys.modules.get("base.telemetry")
-        if telemetry is not None:
-            with telemetry.failure_isolated("CLI telemetry drain"):
-                telemetry.sync(timeout=5.0)
+        from base import telemetry
+
+        with telemetry.failure_isolated("CLI telemetry drain"):
+            telemetry.sync(timeout=5.0)
         producer.close_command(primary=sys.exception())
 
 

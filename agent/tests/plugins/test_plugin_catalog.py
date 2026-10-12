@@ -118,15 +118,14 @@ def _enable(**plugins: bool) -> None:
     write_local({"plugins": {name: {"enabled": on} for name, on in plugins.items()}})
 
 
-def test_every_surface_entry_point_resolves():
-    """`SURFACES` is hand-written; its entry points are not. Each one must
-    resolve to a live object — a moved declaration type breaks the catalog here
-    rather than in front of an agent reading a signature that no longer exists."""
+def test_every_surface_entry_point_renders_its_live_signature():
+    """`SURFACES` holds live declaration types; each must render a signature that
+    names the type where it is defined."""
     for surface in catalog_mod.SURFACES:
         assert surface.entry_points, f"{surface.id} lists no entry point"
         for entry_point in surface.entry_points:
             rendered = catalog_mod.entry_point_signature(entry_point)
-            assert rendered.startswith(entry_point.replace(":", "."))
+            assert rendered.startswith(f"{entry_point.__module__}.{entry_point.__qualname__}")
             assert "(" in rendered
 
 
