@@ -12,6 +12,7 @@ from base.host import brew_pin
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
+_NIGHTLY_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "secret-scan-history.yml"
 _PRE_COMMIT = _REPO_ROOT / ".pre-commit-config.yaml"
 _POLICY = _REPO_ROOT / ".gitleaks.toml"
 
@@ -24,11 +25,32 @@ def _load_yaml(path: Path) -> dict[object, Any]:
 
 def _assert_secret_scan_job_runs_gitleaks(workflow: dict[object, Any]) -> None:
     secret_scan = workflow["jobs"]["secret-scan"]
+    # The required check name is configured in GitHub and Trunk; renaming it blocks merges.
+    assert secret_scan["name"] == "secret scan (Gitleaks)"
     assert secret_scan.get("continue-on-error") is not True
     secret_steps = secret_scan["steps"]
     assert secret_steps[0]["with"]["fetch-depth"] == 0
     assert "github.com/zricethezav/gitleaks/v8@v8.30.1" in secret_steps[1]["run"]
-    assert "gitleaks detect --source . --config .gitleaks.toml --redact" in secret_steps[2]["run"]
+    scan = secret_steps[2]["run"]
+    # A pull request (and so a Trunk queue branch) scans only the commits it adds.
+    assert (
+        'gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${base}..HEAD" .'
+        in scan
+    )
+    assert "git rev-parse --verify HEAD^1" in scan
+    # Whole-history scanning is the nightly workflow's job, and dispatch keeps it too.
+    assert "gitleaks git --config .gitleaks.toml --redact --no-banner ." in scan
+
+
+def _assert_nightly_scan_covers_full_history() -> None:
+    nightly = _load_yaml(_NIGHTLY_WORKFLOW)
+    triggers = nightly[True]
+    assert set(triggers) == {"schedule", "workflow_dispatch"}
+    job = nightly["jobs"]["secret-scan-history"]
+    assert job["if"] == "github.ref == 'refs/heads/main'"
+    assert job["steps"][0]["with"]["fetch-depth"] == 0
+    assert "github.com/zricethezav/gitleaks/v8@v8.30.1" in job["steps"][1]["run"]
+    assert job["steps"][2]["run"] == "gitleaks git --config .gitleaks.toml --redact --no-banner ."
 
 
 def _assert_dependency_audit_job_runs_both_audits(workflow: dict[object, Any]) -> None:
@@ -84,6 +106,7 @@ def _assert_gitleaks_policy_allowlists() -> None:
 def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
     workflow = _load_yaml(_WORKFLOW)
     _assert_secret_scan_job_runs_gitleaks(workflow)
+    _assert_nightly_scan_covers_full_history()
     _assert_dependency_audit_job_runs_both_audits(workflow)
     _assert_pre_commit_uses_the_gitleaks_policy()
     _assert_gitleaks_policy_allowlists()
