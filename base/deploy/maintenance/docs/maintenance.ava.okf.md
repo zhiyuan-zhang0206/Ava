@@ -23,8 +23,13 @@ one more iteration; this is not an instruction-level freeze.
 The journal records one restart ID per captured live incarnation. Preparation
 first records the cohort, commits commands, then records their IDs. A retry
 reuses the same commands. Normal claim binds the target generation and owner.
-Unowned idle rows with NULL resources or an unconsumed birth marker are
-parked when lifecycle work is settled. Stale owners and ambiguous work refuse drain.
+Only an agent with work in flight must have the live original owner. An idle
+row with no PID, no live lease, no exec allocation and an owner that is not the
+host being restarted (none, or a departed host's, with an unconsumed birth
+marker, NULL resources or an admitted-but-empty set) is parked when lifecycle
+work is settled, whether or not a host is running; its next wake is an ordinary
+re-admission, which proves the previous host gone. Running turns, recorded
+PIDs, live leases, outstanding exec allocations and ambiguous work refuse drain.
 
 Already-stopped hosted units also preserve legacy idle rows whose lease is
 NULL and whose PID/resources are empty, after proving the local host absent.
