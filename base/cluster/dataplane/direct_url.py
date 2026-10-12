@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from base.cluster.record import get_record
 from base.db.config import DbConfig, db_config_from_settings
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.predicates import is_loopback_host
@@ -100,7 +101,6 @@ def _gateway_url_host() -> str:
 
 def _from_record(url: str, port: int) -> str | None:
     """The direct URL this home's record dictates for `url`, or None when it names neither port."""
-    from base.cluster import get_record
     from base.paths import ava_home
 
     rec = get_record(ava_home())

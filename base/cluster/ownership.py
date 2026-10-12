@@ -19,8 +19,9 @@ import psutil
 import psycopg
 from redis.asyncio import Redis
 
-from base.cluster.port_preflight import strict_listeners_on
-from base.native_process.ownership import OwnedProcess, capture_tree
+from base.cluster.port_preflight import require_listener
+from base.cluster.postgres import observe
+from base.native_process.ownership import OwnedProcess
 
 
 class RedisConnectionCustody:
@@ -86,8 +87,6 @@ def process_identity(pid: int) -> OwnedProcess | None:
 
 def postgres(data: Path) -> OwnedProcess | None:
     """Observe only a postmaster captured by the home's durable launch boundary."""
-    from base.cluster.postgres import observe
-
     return observe(data)
 
 
@@ -126,44 +125,28 @@ def pooler(config: Path, record: Path) -> OwnedProcess | None:
     return identity
 
 
-def require_listener(
-    identity: OwnedProcess | None, port: int, *, required: bool = True
-) -> frozenset[int]:
-    """Return the observed listeners only after validating their native owner."""
-    listeners = frozenset(strict_listeners_on(port))
-    if identity is None:
-        if listeners or required:
-            raise RuntimeError(f"no owned data-plane process for listener :{port}")
-        return listeners
-    if required and not listeners:
-        raise RuntimeError(f"recorded data-plane process has no listener :{port}; custody retained")
-    owned = {process.pid for process in capture_tree(identity)}
-    if not identity.live() or not listeners <= owned:
-        raise RuntimeError(f"data-plane listener :{port} does not belong to the recorded process")
-    return listeners
-
-
 def require_postgres(data: Path, port: int, *, required: bool = True) -> OwnedProcess | None:
     identity = postgres(data)
     require_listener(identity, port, required=required)
     return identity
 
 
-def require_postgres_connection(conn: psycopg.Connection[Any], data: Path) -> None:
+def require_postgres_connection(
+    conn: psycopg.Connection[Any], data: Path, socket_dir: Path
+) -> None:
     """Bind the connected backend to this home's postmaster before any DDL.
 
     The protocol's backend PID must be a live native child of the validated
     postmaster in its actual data directory. A Unix endpoint must be canonical;
     TCP must be loopback and all listeners must belong to the same postmaster.
+    `socket_dir` is the canonical Unix socket directory of this home's data plane.
     """
-    from base.cluster.dataplane.pg_admin import pg_socket_dir
-
     data = data.resolve()
     owner = postgres(data)
     if owner is None:
         raise RuntimeError("owned PostgreSQL postmaster is absent")
     if conn.info.host.startswith("/"):
-        if Path(conn.info.host).resolve() != pg_socket_dir(home=data.parent).resolve():
+        if Path(conn.info.host).resolve() != socket_dir.resolve():
             raise RuntimeError("PostgreSQL admin connection used a foreign Unix socket")
     else:
         if not ip_address(conn.info.hostaddr).is_loopback:

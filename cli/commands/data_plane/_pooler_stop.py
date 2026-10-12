@@ -16,7 +16,7 @@ from typing import cast
 
 import psutil
 
-from base.cluster import ownership
+from base.cluster import port_preflight
 from base.host.private_storage import write_private_bytes
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.native_process.ownership import OwnedProcess
@@ -66,7 +66,7 @@ class OwnedPooler:
 
     def require_accepting(self) -> None:
         """Preparation cannot rewrite or reload an already-stopping native birth."""
-        ownership.require_listener(self.identity, self.port)
+        port_preflight.require_listener(self.identity, self.port)
         if self._stop_requested():
             raise RuntimeError("PgBouncer stop was already requested; custody retained")
 
@@ -86,7 +86,7 @@ class OwnedPooler:
         still refuses.
         """
         try:
-            return ownership.require_listener(self.identity, self.port, required=False)
+            return port_preflight.require_listener(self.identity, self.port, required=False)
         except RuntimeError:
             if self.identity.live():
                 raise

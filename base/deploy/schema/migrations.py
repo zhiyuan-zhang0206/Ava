@@ -68,12 +68,12 @@ import re as re
 import subprocess as subprocess
 from collections.abc import Callable, Generator
 from collections.abc import Iterable as Iterable
-from pathlib import Path
 
 import psycopg
 
 from base.cluster.machine import MachineNameMissing
 from base.db import connect_url
+from base.deploy.schema import migration_layout
 from base.deploy.schema.migration_errors import CodeBehindSchema as CodeBehindSchema
 from base.deploy.schema.migration_errors import (
     MigrationAuthorityMismatch as MigrationAuthorityMismatch,
@@ -110,9 +110,6 @@ from base.deploy.schema.migration_layout import (
 )
 from base.log import logger
 from base.paths.home import home_checkout_error, resolve_ava_home
-
-# Repo root = base/deploy/schema/../../.. = `<root>/`; migrations dir is under repo root.
-MIGRATIONS_DIR: Path = Path(__file__).resolve().parents[3] / "migrations"
 
 # Fixed key for the Postgres advisory lock that serializes the whole apply loop
 # (see `_schema_mutation_lock`). Arbitrary but stable cluster-wide; ASCII "AVMI".
@@ -298,7 +295,7 @@ def _assert_migration_authority(
     if not units:
         return
     home = resolve_ava_home()
-    foreign = home_checkout_error(MIGRATIONS_DIR.parent)
+    foreign = home_checkout_error(migration_layout.MIGRATIONS_DIR.parent)
     try:
         this_machine = machine_name()
     except MachineNameMissing:
@@ -310,7 +307,7 @@ def _assert_migration_authority(
     raise MigrationAuthorityMismatch(
         f"refusing to migrate: this checkout claims {claim}, but the database's "
         f"gateway unit is {owner}. A cluster's schema is owned by its gateway — "
-        f"update the cluster from there. Applying {MIGRATIONS_DIR} would leave the "
+        f"update the cluster from there. Applying {migration_layout.MIGRATIONS_DIR} would leave the "
         f"gateway's own code behind the schema and wedge every agent boot."
     )
 

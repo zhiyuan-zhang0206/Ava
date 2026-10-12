@@ -50,7 +50,9 @@ class _ReloadProcess:
 @pytest.fixture()
 def _noop_write(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never touch the real $AVA_HOME/pgbouncer dir from a unit test."""
-    monkeypatch.setattr(_pb.ownership, "require_listener", Mock(return_value=frozenset({4242})))
+    monkeypatch.setattr(
+        _pb.port_preflight, "require_listener", Mock(return_value=frozenset({4242}))
+    )
     monkeypatch.setattr(_pb.OwnedPooler, "_stop_requested", Mock(return_value=False))
     # Unchanged files: the reload-vs-restart decision is the bind posture alone.
     monkeypatch.setattr(_pb, "_write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType]

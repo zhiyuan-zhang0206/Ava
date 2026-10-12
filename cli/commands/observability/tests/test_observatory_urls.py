@@ -131,6 +131,7 @@ def test_registered_pooler_is_rendered_as_direct_postgres(
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
+    monkeypatch.setattr("base.cluster.dataplane.direct_url.get_record", _record)
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:20029/ava")
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
     assert (

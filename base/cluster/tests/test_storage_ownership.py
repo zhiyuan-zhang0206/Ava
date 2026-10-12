@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from base.cluster import ownership
+from base.cluster import ownership, port_preflight
 from base.cluster import postgres as pg
 from base.native_process.ownership import OwnedProcess
 
@@ -33,10 +33,10 @@ def test_unrelated_listener_is_not_owned_by_a_valid_native_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner = SimpleNamespace(pid=123, live=lambda: True)
-    monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123, 456])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    monkeypatch.setattr(ownership, "capture_tree", lambda _owner: [owner])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(port_preflight, "strict_listeners_on", lambda _port: [123, 456])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(port_preflight, "capture_tree", lambda _owner: [owner])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     with pytest.raises(RuntimeError, match="does not belong"):
-        ownership.require_listener(cast("ownership.OwnedProcess", owner), 15433)
+        port_preflight.require_listener(cast("port_preflight.OwnedProcess", owner), 15433)
 
 
 def test_postmaster_pidfile_cannot_supply_missing_native_receipt(pg_data: Path) -> None:
@@ -282,7 +282,7 @@ def test_stop_reaps_only_the_matching_home_child_after_native_closure(
         order.append("closed")
 
     monkeypatch.setattr(pg, "_require_closed", closed)
-    monkeypatch.setattr(ownership, "require_listener", Mock(return_value=None))
+    monkeypatch.setattr(pg, "require_listener", Mock(return_value=None))
     pg.stop(pg_data, retained_children=children)
     assert order == ["closed", "reap:1"]
     assert children == [other]

@@ -19,8 +19,9 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from base.cluster import _swap_db, drop_database, provision_database
+from base.cluster import drop_database, provision_database
 from base.cluster.dataplane.pg_admin import owner_conninfo
+from base.cluster.derive import swap_db
 from base.config import settings
 
 # provision_database creates a NOLOGIN owning role sharing the db identifier and
@@ -312,7 +313,7 @@ def test_interrupted_empty_database_requires_initialization_authority(db_conn: o
             )
             is False
         )
-        with psycopg.connect(_swap_db(admin_url, identity)) as conn:
+        with psycopg.connect(swap_db(admin_url, identity)) as conn:
             assert conn.execute("SELECT to_regclass('public.agents')").fetchone() == ("agents",)
     finally:
         _drop_db_and_role(admin_url, identity)
@@ -324,7 +325,7 @@ def test_interrupted_database_with_unknown_objects_is_preserved(db_conn: object)
     with psycopg.connect(admin_url, autocommit=True) as conn:
         conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(identity)))
     try:
-        with psycopg.connect(_swap_db(admin_url, identity)) as conn:
+        with psycopg.connect(swap_db(admin_url, identity)) as conn:
             conn.execute("CREATE TABLE preserve_me (value text)")
             conn.execute("INSERT INTO preserve_me VALUES ('user data')")
         with pytest.raises(RuntimeError, match="unknown database objects"):
@@ -333,7 +334,7 @@ def test_interrupted_database_with_unknown_objects_is_preserved(db_conn: object)
                 base_admin_url=admin_url,
                 resume_initialization=True,
             )
-        with psycopg.connect(_swap_db(admin_url, identity)) as conn:
+        with psycopg.connect(swap_db(admin_url, identity)) as conn:
             assert conn.execute("SELECT value FROM preserve_me").fetchall() == [("user data",)]
             assert conn.execute("SELECT to_regclass('public.schema_migrations')").fetchone() == (
                 None,

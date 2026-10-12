@@ -201,6 +201,7 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
         return SimpleNamespace(ports={"pgbouncer": 6433, "postgres": 5433})
 
     monkeypatch.setattr(base.cluster, "get_record", record)
+    monkeypatch.setattr("base.cluster.dataplane.direct_url.get_record", record)
     gate = MagicMock(spec=ProcessDbGate)
     gate.application_name.return_value = "pgbouncer-contract-test"
     gate.min_read_due.return_value = False

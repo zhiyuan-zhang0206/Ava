@@ -51,7 +51,9 @@ def ensure_cluster_redis_acl(
     from redis.backoff import NoBackoff
     from redis.retry import Retry
 
-    from base.cluster import ownership
+    # Deferred: ownership loads the async redis stack, which `import base.cluster` must not.
+    from base.cluster.ownership import RedisConnectionCustody, redis_server
+    from base.cluster.port_preflight import require_listener
 
     # redis-py types from_url's **kwargs as Unknown; the call itself is fully typed.
     client = redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]
@@ -64,16 +66,16 @@ def ensure_cluster_redis_acl(
     )
     try:
         if expected_data_dir is not None:
-            custody = ownership.RedisConnectionCustody()
+            custody = RedisConnectionCustody()
             if client.connection is None:
                 raise RuntimeError("Redis ownership requires a dedicated connection")
             client.connection.register_connect_callback(custody.refuse_reconnect)  # pyright: ignore[reportUnknownMemberType] — redis callback stubs
-            identity = ownership.redis_server(
+            identity = redis_server(
                 client.info("server"),  # pyright: ignore[reportUnknownMemberType] — redis command stubs
                 client.config_get("dir"),  # pyright: ignore[reportUnknownMemberType] — redis command stubs
                 expected_data_dir,
             )
-            ownership.require_listener(identity, urlsplit(redis_admin_url).port or 6379)
+            require_listener(identity, urlsplit(redis_admin_url).port or 6379)
         # redis-py types execute_command()'s signature as partially Unknown; the call is fully typed.
         client.execute_command(  # pyright: ignore[reportUnknownMemberType]
             "ACL",

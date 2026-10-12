@@ -282,7 +282,7 @@ def _running_pid() -> int | None:
 def _accepting_pooler(listen_port: int) -> OwnedPooler | None:
     owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     if owner is None:
-        ownership.require_listener(None, listen_port, required=False)
+        port_preflight.require_listener(None, listen_port, required=False)
         return None
     custodian = OwnedPooler(owner, listen_port, pooler.ini_path())
     custodian.require_accepting()
@@ -456,7 +456,7 @@ def _launch_pooler(listen_port: int, admin_password: str, *, machine: MachineIde
             file=sys.stderr,
         )
         return 1
-    ownership.require_listener(
+    port_preflight.require_listener(
         ownership.pooler(pooler.ini_path(), pooler.pidfile_path()), listen_port
     )
     print(f"  ✓ pgbouncer started (127.0.0.1:{listen_port}, transaction pooling)")

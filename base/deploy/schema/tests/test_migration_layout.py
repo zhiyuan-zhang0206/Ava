@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import (
-    MIGRATIONS_DIR,
     MigrationLayoutError,
     _list_migration_files,
     validate_migration_layout,
@@ -35,7 +35,7 @@ def test_migrations_dir_resolves_beside_the_checkout_root() -> None:
 
 class TestLayoutValidation:
     def test_dir_missing_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path / "nope")
+        monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path / "nope")
         with pytest.raises(MigrationLayoutError, match="does not exist"):
             _list_migration_files()
 
@@ -43,7 +43,7 @@ class TestLayoutValidation:
         (tmp_path / f"{_SYN}.sql").write_text("-- noop")
         (tmp_path / "0001_legacy.sql").write_text("-- noop")  # old integer format
         _init_repo(tmp_path)  # tracked: layout validation applies to git-tracked files
-        monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+        monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
         with pytest.raises(MigrationLayoutError, match="does not match"):
             _list_migration_files()
 
@@ -54,7 +54,7 @@ class TestLayoutValidation:
         (tmp_path / "README.md").write_text("docs")
         (tmp_path / ".DS_Store").write_text("junk")
         _init_repo(tmp_path)
-        monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+        monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
         assert [n for n, _ in _list_migration_files()] == [_SYN]
 
 
@@ -115,7 +115,7 @@ def test_nested_migrations_are_sorted_by_name_not_directory(
         path.write_text("SELECT 1;")
         paths.append(path)
     _init_repo(tmp_path)
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     assert _list_migration_files() == list(zip((_SYN, _SYN2), paths, strict=True))
 
 
@@ -127,6 +127,6 @@ def test_duplicate_migration_name_in_separate_groups_fails(
         path.parent.mkdir()
         path.write_text("SELECT 1;")
     _init_repo(tmp_path)
-    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
     with pytest.raises(MigrationLayoutError, match="duplicate migration name"):
         _list_migration_files()

@@ -74,6 +74,7 @@ from enum import Enum
 from pathlib import Path
 from typing import cast
 
+from base.daemon import health_schema
 from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
@@ -151,8 +152,6 @@ def _healthz_payload(
         "started_at": started_at,
         "sha": image.sha,
     }
-    from base.daemon import health_schema
-
     stale_for = None
     if liveness is not None:
         stale_for = round(liveness.stale_for(), 1)

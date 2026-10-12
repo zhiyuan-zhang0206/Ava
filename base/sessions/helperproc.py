@@ -21,7 +21,7 @@ from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, run_dir
-from base.sessions.backend import SessionBackend
+from base.sessions.protocol import SessionBackend
 from base.sessions.record import SessionRecord
 
 _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)

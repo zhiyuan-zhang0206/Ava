@@ -13,14 +13,14 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from base import cluster
+from base.cluster.ports import ClusterPorts
 
 INTENT_NAME = "start-intent.json"
 
 
 @dataclass(frozen=True)
 class ClusterRecord:
-    ports: cluster.ClusterPorts
+    ports: ClusterPorts
     gateway_home: str
     created_at: str
     # The host this cluster's data-plane URLs are DERIVED at (birth); empty =

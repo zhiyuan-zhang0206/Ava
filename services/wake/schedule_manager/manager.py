@@ -33,8 +33,9 @@ from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.paths import ava_home
-from base.sessions.backend import SessionBackend, get_shell_backend
+from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
+from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import revisions
 
 _log = logging.getLogger(__name__)

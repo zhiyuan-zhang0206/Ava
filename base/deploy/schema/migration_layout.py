@@ -15,16 +15,14 @@ from base.log import logger
 # all-zeros timestamp sorts before every real migration.
 _BASELINE_NAME = "00000000T000000_baseline"
 
+# Repo root = base/deploy/schema/../../.. = `<root>/`; migrations dir is under repo root.
+# Tests re-point this module attribute, and every reader below reads it at call time.
+MIGRATIONS_DIR: Path = Path(__file__).resolve().parents[3] / "migrations"
+
 # Filename schema: `YYYYMMDDTHHMMSS_<kebab-name>.sql`. Timestamp = 8-digit date +
 # 'T' + 6-digit time; name = lowercase alnum words joined by single hyphens.
 _STEM_RE = r"(\d{8}T\d{6}_[a-z0-9]+(?:-[a-z0-9]+)*)"
 _FILENAME_RE = re.compile(rf"^{_STEM_RE}\.sql$")
-
-
-def _migrations_dir() -> Path:
-    from base.deploy.schema.migrations import MIGRATIONS_DIR  # lazy: sees monkeypatches
-
-    return MIGRATIONS_DIR
 
 
 def _git_probe(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -77,7 +75,7 @@ def _tracked_migration_paths() -> set[Path] | None:
     entries.
     """
 
-    migrations_dir = _migrations_dir()
+    migrations_dir = MIGRATIONS_DIR
     root_result = _git_probe(["-C", str(migrations_dir), "rev-parse", "--show-toplevel"])
     if root_result.returncode != 0:
         return None
@@ -110,7 +108,7 @@ def _list_migration_files() -> list[tuple[str, Path]]:
     tracked filename not matching `YYYYMMDDTHHMMSS_<kebab-name>.sql` / a
     duplicate name.
     """
-    migrations_dir = _migrations_dir()
+    migrations_dir = MIGRATIONS_DIR
     if not migrations_dir.is_dir():
         raise MigrationLayoutError(f"migrations dir does not exist: {migrations_dir}")
 
@@ -163,7 +161,7 @@ def untracked_migration_files() -> list[str]:
     not inside a git worktree — the loader fails closed there and a warning
     would add nothing.
     """
-    migrations_dir = _migrations_dir()
+    migrations_dir = MIGRATIONS_DIR
     tracked = _tracked_migration_paths()
     if tracked is None:
         return []
@@ -248,7 +246,7 @@ def validate_migrations_at_ref(ref: str, *, repo_root: Path | None = None) -> No
             cannot be read (missing object, not a git repo).
     """
 
-    root = repo_root if repo_root is not None else _migrations_dir().parent
+    root = repo_root if repo_root is not None else MIGRATIONS_DIR.parent
     result = _git_probe(["ls-tree", "-r", "--name-only", "-z", ref, "--", "migrations"], cwd=root)
     if result.returncode != 0:
         raise MigrationLayoutError(

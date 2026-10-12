@@ -16,9 +16,9 @@ import hashlib
 import shlex
 from pathlib import Path
 from typing import cast
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
-from base import cluster
+from base.cluster.record import ClusterRecord
 from base.host.env.registry import REDIS_PASSWORD_ENV, health_port_env_aliases
 from base.host.net.url_secret import redacted_url, url_with_port, url_with_userinfo
 
@@ -35,6 +35,12 @@ DATA_PLANE_IDENTITY = "ava"
 # login instead (`base.cluster.authority`); nothing local mints this password.
 RUNNER_ROLE = "ava_runner"
 RUNNER_DB_PASSWORD_ENV = "AVA_RUNNER_DB_PASSWORD"  # noqa: S105 — the env KEY name, not a credential
+
+
+def swap_db(url: str, db_name: str) -> str:
+    """`url` with its database path replaced by `db_name`."""
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, f"/{db_name}", parts.query, parts.fragment))
 
 
 def default_home() -> Path:
@@ -282,7 +288,7 @@ def inbound_channel(agent_id: int) -> str:
 
 
 def derive_env(
-    rec: cluster.ClusterRecord,
+    rec: ClusterRecord,
     *,
     base_db_url: str,
     base_redis_url: str,
@@ -318,8 +324,8 @@ def derive_env(
     redis_default_password = redis_admin_password
     runtime_password = redis_password
     db_url = url_with_userinfo(
-        cluster._swap_db(base_db_url, cluster.DATA_PLANE_IDENTITY),
-        cluster.DATA_PLANE_IDENTITY,
+        swap_db(base_db_url, DATA_PLANE_IDENTITY),
+        DATA_PLANE_IDENTITY,
         "",
     )
     if pgbouncer_enabled:
@@ -343,9 +349,7 @@ def derive_env(
         "AVA_BROWSER_CDP_PORT": str(p["browser"]),
         "AVA_PERMISSIONS_HELPER_PORT": str(p["permissions_helper"]),
         "AVA_DB_URL": db_url,
-        "AVA_REDIS_URL": url_with_userinfo(
-            base_redis_url, cluster.DATA_PLANE_IDENTITY, runtime_password
-        ),
+        "AVA_REDIS_URL": url_with_userinfo(base_redis_url, DATA_PLANE_IDENTITY, runtime_password),
         "AVA_EVENTS_CHANNEL": "ava:events",
     }
     # The health-port services are a subset of the closed ClusterPorts keys.
@@ -360,7 +364,7 @@ def derive_env(
 # cycle. derive_env's output surface is `derived_env_keys()` there.
 
 
-def per_cluster_base_urls(rec: cluster.ClusterRecord) -> tuple[str, str]:
+def per_cluster_base_urls(rec: ClusterRecord) -> tuple[str, str]:
     """The base `(db_url, redis_url)` for a cluster's own instance — loopback at
     the cluster's allocated pg/redis ports by default, or the record's
     `data_plane_host` when one is set (external data plane, Task #1752). The

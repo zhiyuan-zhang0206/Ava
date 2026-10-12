@@ -22,14 +22,9 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from pathlib import Path
 from types import MappingProxyType
-from urllib.parse import urlsplit, urlunsplit
 
+from base.cluster.derive import swap_db
 from base.log import logger
-
-
-def _swap_db(url: str, db_name: str) -> str:
-    parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, f"/{db_name}", parts.query, parts.fragment))
 
 
 def _schema_applied(admin_url: str, target: str, *, expected_data_dir: Path | None = None) -> bool:
@@ -39,7 +34,7 @@ def _schema_applied(admin_url: str, target: str, *, expected_data_dir: Path | No
 
     from base.cluster.dataplane.pg_admin import connect
 
-    with connect(_swap_db(admin_url, target), expected_data_dir=expected_data_dir) as conn:
+    with connect(swap_db(admin_url, target), expected_data_dir=expected_data_dir) as conn:
         row = conn.execute(
             "SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_migrations'"
         ).fetchone()
@@ -167,7 +162,7 @@ def provision_database(
         # A durable fresh-home intent owns this incomplete baseline. SQL executes
         # transactionally; resume an empty database, never delete unknown objects.
         with connect(
-            _swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir
+            swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir
         ) as conn:
             row = conn.execute(
                 "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"
@@ -244,7 +239,7 @@ def ensure_pgvector_extension(
         if available is None:
             return
         with connect(
-            _swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir, autocommit=True
+            swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir, autocommit=True
         ) as conn:
             conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     except psycopg.OperationalError as exc:
