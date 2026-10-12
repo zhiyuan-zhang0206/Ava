@@ -82,11 +82,11 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
-from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus, EventBusConfig
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
+from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.sessions.helper_chain_guard import parent_chain_intact
 
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile

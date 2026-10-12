@@ -100,7 +100,8 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(f"admin:{kwargs}")
         return admin_conn
 
-    def fake_dependency_gate() -> None:
+    def fake_dependency_gate(tracked_migrations: object) -> None:
+        assert isinstance(tracked_migrations, set)
         calls.append("dependency")
 
     def fake_ava_migrations(got: object, *, machine_name: Callable[[], str]) -> list[str]:
@@ -353,7 +354,7 @@ def test_checkpoint_migration_manifest_must_be_contiguous(
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {11: "future"})
 
     with pytest.raises(provision.CheckpointDependencyDriftError, match="contiguous"):
-        provision.assert_checkpoint_dependency_pinned()
+        provision.assert_checkpoint_dependency_pinned(set())
 
 
 def test_checkpoint_migration_manifest_follows_upstream_version_order(
@@ -372,7 +373,7 @@ def test_checkpoint_migration_manifest_follows_upstream_version_order(
     )
 
     with pytest.raises(provision.CheckpointDependencyDriftError, match="version order"):
-        provision.assert_checkpoint_dependency_pinned()
+        provision.assert_checkpoint_dependency_pinned(set())
 
 
 @pytest.mark.parametrize(
@@ -389,6 +390,7 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
 ) -> None:
     from base.cluster import provision
     from base.deploy.schema import migrations
+    from base.deploy.schema.migration_layout import required_migration_set
     from base.deploy.tests.migration_support import _git, _init_repo
 
     _init_repo(tmp_path)
@@ -401,7 +403,7 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
         _git(tmp_path, "add", "-A")
 
     with pytest.raises(provision.CheckpointDependencyDriftError, match="git-tracked Ava migration"):
-        provision.assert_checkpoint_dependency_pinned()
+        provision.assert_checkpoint_dependency_pinned(required_migration_set())
 
 
 def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
@@ -411,6 +413,7 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
 
     from base.cluster import provision
     from base.deploy.schema import migrations
+    from base.deploy.schema.migration_layout import required_migration_set
     from base.deploy.tests.migration_support import _init_repo
 
     name = "20990101T000000_checkpoint-v10"
@@ -422,4 +425,4 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
     monkeypatch.setattr(migrations, "MIGRATIONS_DIR", tmp_path)
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1;"])
 
-    provision.assert_checkpoint_dependency_pinned()
+    provision.assert_checkpoint_dependency_pinned(required_migration_set())

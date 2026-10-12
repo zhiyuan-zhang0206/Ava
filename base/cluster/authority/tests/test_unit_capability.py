@@ -31,7 +31,7 @@ from base.cluster.authority.tests.unit_capability_support import (
 )
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
-from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
+from base.cluster.authority.unit import UNIT_BUNDLE_MAX_TTL_S
 
 # ── sealing: tampering, keys, expiry ────────────────────────────────────────
 

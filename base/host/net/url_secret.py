@@ -12,7 +12,7 @@ the identifier is chosen (`base.cluster.DATA_PLANE_IDENTITY`).
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 
 def url_with_userinfo(url: str, user: str, password: str) -> str:
@@ -44,6 +44,14 @@ def url_with_password(url: str, password: str) -> str:
     if not password:
         return url
     return url_with_userinfo(url, urlsplit(url).username or "", password)
+
+
+def credential_free(url: str) -> str:
+    """`url` with any password removed; the username stays (names-as-data)."""
+    parts = urlsplit(url)
+    if parts.password is None:
+        return url
+    return url_with_userinfo(url, unquote(parts.username or ""), "")
 
 
 def url_with_port(url: str, port: int) -> str:

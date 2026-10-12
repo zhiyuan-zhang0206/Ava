@@ -46,7 +46,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal, Self
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -70,7 +70,6 @@ from base.cluster.authority.ledger import (
     read_secret,
 )
 from base.cluster.authority.model import AuthorityRefusedError, Digest, RoleName
-from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
 from base.host.net.url_secret import url_with_userinfo
 from base.host.private_storage import write_private_bytes
 
@@ -81,6 +80,14 @@ _FORMAT = "ava-db-capability/1"
 _MAX_BUNDLE_BYTES = 64 * 1024
 _KEY_BYTES = 32
 _IV_BYTES = 12
+
+# The most an `issue-unit` bundle may ask to stay installable (`issue_bundle`
+# refuses more). A bundle is carried by hand to one unit (a join, an emergency),
+# so three days covers a weekend. The expiry is the installer's check, not the
+# cipher's: it bounds how long an old bundle can be installed, not what a stolen
+# bundle and its transport key disclose. Registered in the clock lattice
+# (`base.deploy.timing`) with the default `UNIT_BUNDLE_TTL_S` ordered below it.
+UNIT_BUNDLE_MAX_TTL_S = 72 * 3600.0
 
 MachineName = Annotated[
     str, StringConstraints(min_length=1, max_length=255, pattern=r"^[^\x00-\x1f\x7f]+$")
@@ -223,14 +230,6 @@ def endpoint_key(url: str) -> tuple[str, int, str]:
     """(host, port, database) of a Postgres URL: the endpoint identity."""
     parts = urlsplit(url)
     return (parts.hostname or "").lower(), parts.port or 5432, parts.path.strip("/")
-
-
-def credential_free(url: str) -> str:
-    """`url` with any password removed; the username stays (names-as-data)."""
-    parts = urlsplit(url)
-    if parts.password is None:
-        return url
-    return url_with_userinfo(url, unquote(parts.username or ""), "")
 
 
 def _parse[M: BaseModel](model: type[M], body: bytes, path: Path) -> M:

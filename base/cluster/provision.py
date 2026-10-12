@@ -19,7 +19,7 @@ is on the `import ava` path, which stays driver-free (task #3816).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from urllib.parse import urlsplit, urlunsplit
@@ -297,12 +297,8 @@ class CheckpointSchemaMismatchError(CheckpointSchemaError):
     """The database checkpoint migration set is not exactly current."""
 
 
-def _expected_checkpoint_schema_versions() -> frozenset[int]:
-    """The upstream versions explicitly approved by Ava's checkpoint migration manifest."""
-    from langgraph.checkpoint.postgres import PostgresSaver
-
-    from base.deploy.schema import migrations as ava_migrations
-
+def _check_checkpoint_manifest_shape() -> list[int]:
+    """The manifest's versions, contiguous after the baseline and named in version order."""
     declared_versions = sorted(CHECKPOINT_SCHEMA_AVA_MIGRATIONS)
     expected_declared = list(
         range(
@@ -323,15 +319,14 @@ def _expected_checkpoint_schema_versions() -> frozenset[int]:
             "checkpoint migration manifest names must follow upstream version order: "
             f"declared={declared_names}, sorted={sorted(declared_names)}"
         )
+    return declared_versions
 
-    tracked = ava_migrations.required_migration_set()
-    for version, name in CHECKPOINT_SCHEMA_AVA_MIGRATIONS.items():
-        if name not in tracked:
-            raise CheckpointDependencyDriftError(
-                f"checkpoint version {version} must name a git-tracked Ava "
-                f"migration: name={name!r}, tracked={name in tracked}"
-            )
 
+def _expected_checkpoint_schema_versions() -> frozenset[int]:
+    """The upstream versions explicitly approved by Ava's checkpoint migration manifest."""
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    declared_versions = _check_checkpoint_manifest_shape()
     approved_target = CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + len(declared_versions)
     dependency_target = len(PostgresSaver.MIGRATIONS) - 1
     if dependency_target != approved_target:
@@ -346,8 +341,21 @@ def _expected_checkpoint_schema_versions() -> frozenset[int]:
     return frozenset(range(approved_target + 1))
 
 
-def assert_checkpoint_dependency_pinned() -> None:
-    """Fail before any DB work when the dependency schema contract drifted."""
+def assert_checkpoint_dependency_pinned(tracked_migrations: Collection[str]) -> None:
+    """Fail before any DB work when the dependency schema contract drifted.
+
+    `tracked_migrations` is the caller's set of git-tracked Ava migration names
+    (`base.deploy.schema.migration_layout.required_migration_set()`): `cluster`
+    sits below the schema owner, so the caller supplies it. Every manifest entry
+    must name one of them.
+    """
+    _check_checkpoint_manifest_shape()
+    for version, name in CHECKPOINT_SCHEMA_AVA_MIGRATIONS.items():
+        if name not in tracked_migrations:
+            raise CheckpointDependencyDriftError(
+                f"checkpoint version {version} must name a git-tracked Ava "
+                f"migration: name={name!r}, tracked={name in tracked_migrations}"
+            )
     _expected_checkpoint_schema_versions()
 
 

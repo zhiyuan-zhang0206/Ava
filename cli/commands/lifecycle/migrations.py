@@ -39,11 +39,12 @@ def cmd_migrations_apply(
     from base import cluster
     from base.cluster.dataplane import pg_admin
     from base.config import settings
+    from base.deploy.schema.migration_layout import required_migration_set
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
     # must first be mirrored in an Ava migration. Failing before
     # Ava SQL runs keeps update recovery on the old code + old schema.
-    cluster.assert_checkpoint_dependency_pinned()
+    cluster.assert_checkpoint_dependency_pinned(required_migration_set())
 
     # Both dials bypass PgBouncer — the ONE sanctioned data-plane exemption
     # (user ruling 2026-08: every consumer goes through PgBouncer; see
