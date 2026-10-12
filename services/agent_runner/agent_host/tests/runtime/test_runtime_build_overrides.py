@@ -97,6 +97,7 @@ async def test_runtime_build_does_not_repair_a_dangling_history(
         bus=Mock(),
         db=Mock(),
         catalog=model_catalog,
+        machine=configured_machine(),
     )
     slices = AgentSlices.resolve({}, default_reader=configured_policy().default_reader)
 

@@ -86,13 +86,17 @@ async def test_later_wake_holds_a_retained_result_without_resuming_or_crashing(
     add_bindings: AddBindings,
     retained: str,
     model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     model = SummaryModel(responses=["Original source summary. " * 100])
     binding = model_catalog.bindings["gpt-"]
     model_catalog = add_bindings(
         model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
     )
-    accepted = await admit(db_conn, aops_pool, client, monkeypatch, catalog=model_catalog)
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
     install(monkeypatch, "after_result")
     with pytest.raises(psycopg.OperationalError):
         await accepted.host.run_turn(accepted.agent)
