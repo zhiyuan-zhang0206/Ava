@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 import ava
+from ava.sdk_surface import agent_identity
 from ava.sdk_surface.installation import Installation
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import _write_skill
@@ -24,6 +25,7 @@ from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 from base import telemetry
 from base.agents.context import AvaContext
 from base.db import Database
+from base.telemetry import audit_events
 
 pytestmark = pytest.mark.usefixtures("unit_home")
 
@@ -45,8 +47,8 @@ def _exec_turn(
     """An exec turn is bound (the child's state slot and an empty state update), the agent has
     an identity, and the audit write goes nowhere."""
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", _one_agent)
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", _discard_audit)
+    monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
+    monkeypatch.setattr(audit_events, "record_audit_reported", _discard_audit)
     ava.unbind_exec_turn()
     ava.state = object()
     update: dict[str, Any] = {}
@@ -142,7 +144,7 @@ def test_the_audit_is_still_written_when_the_read_is_noted(
     def capture(_db: Database, event: telemetry.Event, **_kw: Any) -> None:
         recorded.append(event.attributes["skill"])
 
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_reported", capture)
+    monkeypatch.setattr(audit_events, "record_audit_reported", capture)
 
     _ = ava.skills.alpha.__doc__
 

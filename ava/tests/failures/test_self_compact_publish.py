@@ -16,6 +16,7 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.tests.fakes import patch_sync_redis
 from base.lm.catalog import ModelCatalog
+from base.telemetry import audit_events
 from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
@@ -124,7 +125,7 @@ def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
     def refuse(_conn: object, _event: object) -> None:
         raise RuntimeError("audit write failed")
 
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit", refuse)
+    monkeypatch.setattr(audit_events, "record_audit", refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
         ava.self.compact("Requests: (none)\nProgress: done\n")

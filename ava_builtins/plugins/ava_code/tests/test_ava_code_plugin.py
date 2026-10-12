@@ -17,6 +17,7 @@ from agent.state import BaseAgentState, CompactState, build_agent_state
 from ava.sdk_surface import install
 from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
 from base.config.service_read import ConfigAuthority
+from base.lm import factory
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
@@ -696,7 +697,7 @@ def _stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
     response.response_metadata = {}
     llm.invoke.return_value = response
     captured: dict = {"llm": llm}
-    monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _model, **_kw: llm)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    monkeypatch.setattr(factory, "build_chat_model", lambda _model, **_kw: llm)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     return captured
 
 

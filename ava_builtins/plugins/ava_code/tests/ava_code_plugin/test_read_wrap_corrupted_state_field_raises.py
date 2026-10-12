@@ -24,6 +24,7 @@ from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
 )
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.lm import factory
 from base.lm.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
 
@@ -440,7 +441,7 @@ def test_understand_wrap_forwards_effort(monkeypatch):
         efforts.append(kw.get("reasoning_effort"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         return llm
 
-    monkeypatch.setattr("base.lm.factory.build_chat_model", _fake_build)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    monkeypatch.setattr(factory, "build_chat_model", _fake_build)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     ava.understand([{"prompt": "p", "text": "t"}])
     ava.understand([{"prompt": "p", "text": "t"}], effort="low")
     assert efforts == ["max", "low"]

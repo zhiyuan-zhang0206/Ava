@@ -17,6 +17,7 @@ from unittest.mock import patch
 import pytest
 
 import ava
+from ava import web
 from ava.tests.web._web_helpers import _FakeResp
 from base.config import settings
 from base.lm.catalog.decide import call as decide_call
@@ -49,7 +50,7 @@ def events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         seen.append("summary")
         return "SUMMARY"
 
-    monkeypatch.setattr("ava.web._answer", answer)
+    monkeypatch.setattr(web, "_answer", answer)
     monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     return seen
@@ -75,7 +76,7 @@ def _fake_decide(
 
 def _fetch() -> list[str]:
     payload = json.dumps({"code": 200, "data": {"title": "", "url": _URL, "content": _PAGE}})
-    with patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload.encode())):
+    with patch.object(web.urllib.request, "urlopen", return_value=_FakeResp(payload.encode())):
         return ava.web.fetch([(_URL, "summarize")])
 
 
@@ -114,7 +115,7 @@ def test_the_raw_page_is_judged_while_it_is_summarized(
         decision = Decision(top="false", probabilities={"true": 0.01, "false": 0.99})
         return dict.fromkeys(questions, decision)
 
-    monkeypatch.setattr("ava.web._answer", answer)
+    monkeypatch.setattr(web, "_answer", answer)
     monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     monkeypatch.setattr(decide_call, "decide", decide)
@@ -135,7 +136,7 @@ def test_a_finding_is_kept_when_the_summary_fails(
     def failing_answer(prompt: str, **kwargs: Any) -> str:
         raise ava.web.FetchError("summary model down")
 
-    monkeypatch.setattr("ava.web._answer", failing_answer)
+    monkeypatch.setattr(web, "_answer", failing_answer)
     monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=0.97))
 
     with pytest.raises(ava.web.FetchError):

@@ -16,7 +16,7 @@ import psycopg
 import pytest
 
 from ava_builtins.plugins.ava_fleet import task_registry
-from base.telemetry import Event
+from base.telemetry import Event, audit_events
 from tests.fixtures.pin_agent import pin_agent
 
 
@@ -84,7 +84,7 @@ def test_a_task_whose_audit_fact_cannot_be_recorded_is_not_created(
     root_task_id: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit", _refuse)
+    monkeypatch.setattr(audit_events, "record_audit", _refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
         task_registry.create("never", "detail", parent=root_task_id, operation_key=str(uuid4()))

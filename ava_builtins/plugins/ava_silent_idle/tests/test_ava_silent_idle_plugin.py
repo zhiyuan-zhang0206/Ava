@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.hooks import compact
 from agent.messages import NoteTag
 from agent.state import build_agent_state
 from base.agents.context import AvaContext
@@ -173,7 +174,7 @@ async def test_defers_when_auto_compact_would_fire(
         assert catalog is model_catalog
         return budget
 
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", pinned_budget)
+    monkeypatch.setattr(compact, "resolve_context_budget", pinned_budget)
     state = _state([HumanMessage(content="a long history " * 20), _reasoning_only_ai()])
     assert (
         await _loaded.silent_idle_continue_before_llm(

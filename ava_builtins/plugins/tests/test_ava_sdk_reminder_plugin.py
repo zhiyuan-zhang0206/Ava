@@ -16,6 +16,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.hooks import compact
 from agent.messages import inbound_message, tail_has_agent_inbound
 from agent.state import CompactState, build_agent_state
 from ava.sdk_surface import install
@@ -45,7 +46,7 @@ def _pin_compact_budget(
         soft_compact_tokens=soft_tokens,
         hard_compact_tokens=hard_tokens,
     )
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_, **_kw: budget)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(compact, "resolve_context_budget", lambda *_, **_kw: budget)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture

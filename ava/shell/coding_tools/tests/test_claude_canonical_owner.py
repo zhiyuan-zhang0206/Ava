@@ -14,6 +14,7 @@ from types import ModuleType
 
 import pytest
 
+from ava.sdk_surface import agent_identity
 from ava.shell.coding_tools import _claude_checks, _common, claude, impersonator_guide
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -592,7 +593,7 @@ def test_claude_takeover_cli_rejects_files_and_requires_a_brief(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("ava.sdk_surface.agent_identity.require_agent_id", lambda: 41)
+    monkeypatch.setattr(agent_identity, "require_agent_id", lambda: 41)
     monkeypatch.setattr(
         sys,
         "argv",

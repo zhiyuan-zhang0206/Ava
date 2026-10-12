@@ -15,6 +15,7 @@ import pytest
 from pydantic import SecretStr
 
 import ava
+from ava import web
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.sdk_surface.installation import Installation
 from ava.tests.web._web_helpers import _FakeResp
@@ -52,7 +53,7 @@ def test_parses_brave_response_into_dataclass(monkeypatch: pytest.MonkeyPatch) -
             },
         ]
     )
-    with patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload)):
+    with patch.object(web.urllib.request, "urlopen", return_value=_FakeResp(payload)):
         results = ava.web.search(["python asyncio"])
     assert len(results) == 1
     assert len(results[0]) == 2
@@ -66,7 +67,7 @@ def test_parses_brave_response_into_dataclass(monkeypatch: pytest.MonkeyPatch) -
 def test_empty_results_returns_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
     payload = _make_brave_response([])
-    with patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload)):
+    with patch.object(web.urllib.request, "urlopen", return_value=_FakeResp(payload)):
         assert ava.web.search(["nonsense query qqqq"]) == [[]]
 
 
@@ -75,8 +76,9 @@ def test_missing_web_section_returns_empty_list(monkeypatch: pytest.MonkeyPatch)
     are guaranteed; `web` and other result-type keys appear only when relevant
     data is available. Missing `web` = no web results → return empty list."""
     monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
-    with patch(
-        "ava.web.urllib.request.urlopen",
+    with patch.object(
+        web.urllib.request,
+        "urlopen",
         return_value=_FakeResp(
             b'{"type": "search", "query": {"original": "q"}, "news": {"results": []}}'
         ),
@@ -95,7 +97,7 @@ def test_collects_results_from_all_sections(monkeypatch: pytest.MonkeyPatch) -> 
             "videos": {"results": [{"title": "V", "url": "https://c.com", "description": "d"}]},
         }
     ).encode()
-    with patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload)):
+    with patch.object(web.urllib.request, "urlopen", return_value=_FakeResp(payload)):
         results = ava.web.search(["query"])
     assert len(results) == 1
     assert len(results[0]) == 3
@@ -117,7 +119,7 @@ def test_http_error_raises_with_detail(monkeypatch: pytest.MonkeyPatch) -> None:
         fp=io.BytesIO(b'{"error": "rate limit exceeded"}'),
     )
     with (
-        patch("ava.web.urllib.request.urlopen", side_effect=http_err),
+        patch.object(web.urllib.request, "urlopen", side_effect=http_err),
         pytest.raises(SearchError, match="Brave Search HTTP 429"),
     ):
         ava.web.search(["query"])
@@ -127,7 +129,7 @@ def test_network_error_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
     url_err = urllib.error.URLError("nodename nor servname provided")
     with (
-        patch("ava.web.urllib.request.urlopen", side_effect=url_err),
+        patch.object(web.urllib.request, "urlopen", side_effect=url_err),
         pytest.raises(WebError, match="connection failed"),
     ):
         ava.web.search(["query"])
@@ -154,7 +156,7 @@ def test_transient_429_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) ->
             _make_brave_response([{"title": "t", "url": "https://a.com", "description": "d"}])
         )
 
-    with patch("ava.web.urllib.request.urlopen", side_effect=_flaky):
+    with patch.object(web.urllib.request, "urlopen", side_effect=_flaky):
         results = ava.web.search(["query"])
     assert calls["n"] == 3
     assert results[0][0].title == "t"
@@ -178,7 +180,7 @@ def test_persistent_429_exhausts_retries(monkeypatch: pytest.MonkeyPatch) -> Non
         raise http_err
 
     with (
-        patch("ava.web.urllib.request.urlopen", side_effect=_always),
+        patch.object(web.urllib.request, "urlopen", side_effect=_always),
         pytest.raises(SearchError, match="Brave Search HTTP 429"),
     ):
         ava.web.search(["query"])
@@ -188,8 +190,9 @@ def test_persistent_429_exhausts_retries(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_malformed_json_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.web, "brave_api_key", SecretStr("fake-key"))
     with (
-        patch(
-            "ava.web.urllib.request.urlopen",
+        patch.object(
+            web.urllib.request,
+            "urlopen",
             return_value=_FakeResp(b"not json at all"),
         ),
         pytest.raises(WebError, match="non-JSON"),
@@ -206,7 +209,7 @@ def test_count_clamped_to_brave_max(monkeypatch: pytest.MonkeyPatch) -> None:
         captured["url"] = req.full_url
         return _FakeResp(_make_brave_response([]))
 
-    with patch("ava.web.urllib.request.urlopen", side_effect=_capture):
+    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
         ava.web.search(["x"], count=100)
     assert "count=20" in captured["url"]
 
@@ -220,7 +223,7 @@ def test_count_floor_at_one(monkeypatch: pytest.MonkeyPatch) -> None:
         captured["url"] = req.full_url
         return _FakeResp(_make_brave_response([]))
 
-    with patch("ava.web.urllib.request.urlopen", side_effect=_capture):
+    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
         ava.web.search(["x"], count=0)
     assert "count=1" in captured["url"]
 
@@ -234,7 +237,7 @@ def test_subscription_token_header_sent(monkeypatch: pytest.MonkeyPatch) -> None
         captured["headers"] = dict(req.headers)
         return _FakeResp(_make_brave_response([]))
 
-    with patch("ava.web.urllib.request.urlopen", side_effect=_capture):
+    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
         ava.web.search(["x"])
     # urllib capitalizes header names; Brave accepts `X-Subscription-Token`
     assert captured["headers"].get("X-subscription-token") == "my-secret-key"
@@ -272,7 +275,7 @@ def test_search_hits_configured_endpoint(monkeypatch: pytest.MonkeyPatch) -> Non
             _make_brave_response([{"title": "t", "url": "https://a.com", "description": "d"}])
         )
 
-    with patch("ava.web.urllib.request.urlopen", side_effect=_capture):
+    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
         ava.web.search(["query"])
     assert captured["url"].startswith("https://search.relay.example/api?")
 
@@ -294,7 +297,10 @@ def test_search_uses_two_owned_boots_and_live_updates(
         return _FakeResp(_make_brave_response([]))
 
     try:
-        with patch.dict(os.environ), patch("ava.web.urllib.request.urlopen", side_effect=capture):
+        with (
+            patch.dict(os.environ),
+            patch.object(web.urllib.request, "urlopen", side_effect=capture),
+        ):
             first, second = ConfigBoot(), ConfigBoot()
             installations: list[Installation] = []
             for index, boot in enumerate((first, second), start=1):
@@ -338,8 +344,9 @@ def test_search_keeps_key_and_retry_timeout_read_order(monkeypatch: pytest.Monke
         return original_read(authority, field)
 
     monkeypatch.setattr(ConfigAuthority, "service_field_value", record)
-    with patch(
-        "ava.web.urllib.request.urlopen",
+    with patch.object(
+        web.urllib.request,
+        "urlopen",
         side_effect=[
             urllib.error.URLError("temporary failure"),
             _FakeResp(_make_brave_response([])),
@@ -398,7 +405,7 @@ def test_search_batch_returns_results_in_input_order(
             )
         return _FakeResp(_make_brave_response([]))
 
-    with patch("ava.web.urllib.request.urlopen", side_effect=_side_effect):
+    with patch.object(web.urllib.request, "urlopen", side_effect=_side_effect):
         results = ava.web.search(["a", "b", "c"])
 
     assert len(results) == 3
@@ -420,7 +427,7 @@ def test_search_batch_runs_concurrently(
         barrier.wait()
         return _FakeResp(_make_brave_response([]))
 
-    with patch("ava.web.urllib.request.urlopen", side_effect=_slow_search):
+    with patch.object(web.urllib.request, "urlopen", side_effect=_slow_search):
         t0 = time.monotonic()
         results = ava.web.search(["q1", "q2", "q3"])
         elapsed = time.monotonic() - t0
@@ -475,7 +482,7 @@ def test_search_max_concurrent_caps_inflight(monkeypatch: pytest.MonkeyPatch) ->
             inflight -= 1
         return _FakeResp(_make_brave_response([]))
 
-    with patch("ava.web.urllib.request.urlopen", side_effect=_tracking_search):
+    with patch.object(web.urllib.request, "urlopen", side_effect=_tracking_search):
         results = ava.web.search(["q1", "q2", "q3", "q4", "q5", "q6"], max_concurrent=2)
     assert results == [[], [], [], [], [], []]
     assert peak == 2, f"peak in-flight {peak} exceeded ceiling 2"
