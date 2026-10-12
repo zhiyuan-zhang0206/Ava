@@ -48,6 +48,27 @@ def _enter_home(home: Path) -> None:
     os.environ["AVA_HOME"] = str(home)
 
 
+def run_start_command(**kwargs: Any) -> int:
+    """`ava start`'s runtime delivery, imported on first use so admission stays settings-free."""
+    from cli.commands.lifecycle.start import cmd_start
+
+    return cmd_start(**kwargs)
+
+
+def complete_start() -> None:
+    """Report the root boot complete (lazy import, as above)."""
+    from cli.commands.lifecycle.root_driver import complete_boot_start
+
+    complete_boot_start()
+
+
+def release_serving() -> None:
+    """Withdraw the serving marker after a failed boot completion (lazy import, as above)."""
+    from base.deploy.lifecycle.start_serving import clear_serving
+
+    clear_serving()
+
+
 def run_start(
     args: argparse.Namespace,
     *,
@@ -141,9 +162,7 @@ def _start_once(
                 )
 
             _init_cli_logging(["start"], initialize=initialize)
-            from cli.commands.lifecycle.start import cmd_start
-
-            result = cmd_start(
+            result = run_start_command(
                 disabled_services=tuple(args.disable_service),
                 only_services=tuple(args.only_service),
                 all_services=args.all_services,
@@ -155,13 +174,10 @@ def _start_once(
                 boot_attempt=boot,
             )
             if result == 0:
-                from base.deploy.lifecycle.start_serving import clear_serving
-                from cli.commands.lifecycle.root_driver import complete_boot_start
-
                 try:
-                    complete_boot_start()
+                    complete_start()
                 except (RuntimeError, OSError, TimeoutError):
-                    clear_serving()
+                    release_serving()
                     raise
             return result
     except (ValueError, TypeError, RuntimeError, OSError) as exc:

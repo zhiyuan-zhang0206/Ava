@@ -121,7 +121,9 @@ def no_agent_child() -> None:
     records: list[str] = []
     logger.add(lambda message: records.append(message.record["message"]), diagnose=False)
     try:
-        runpy.run_module("agent.execution.child", run_name="__main__")
+        from agent.execution import child
+
+        child.run_as_entry()
     except SystemExit as exc:
         assert exc.code == 2
     logger.warning("must stay out of exec output after the no-request refusal")
