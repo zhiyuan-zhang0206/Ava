@@ -11,9 +11,9 @@ from typing import Any
 import psutil
 import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.incarnation import exec_request_evidence
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import ava_home
@@ -119,7 +119,7 @@ def require_persisted_end(conn: psycopg.Connection[Any], agent_id: int) -> str:
     ).fetchone()
     if meta is None or meta[0] is not None:
         raise RuntimeError(f"cold agent {agent_id} still owns a lifecycle command")
-    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     saved = PostgresSaver(conn, serde=serde).get_tuple(
         {"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}}
     )

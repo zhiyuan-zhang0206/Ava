@@ -75,14 +75,10 @@ from pydantic.fields import FieldInfo
 
 from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 
-# The five nested sub-state channel models live in agent/state_channels
-# (issue #156 — this module sat at the 800-line ceiling). They are RE-EXPORTED
-# here, never re-defined: LangGraph checkpoints written before the split carry
-# ("agent.state", "<Name>") ext envelopes, and the serializer resolves them by
-# module attribute lookup — so old checkpoints keep deserializing only while
-# these names stay importable from agent.state. New checkpoints carry
-# ("agent.state_channels", "<Name>") and are allowlisted in
-# base/agents/history/checkpoint_serde.py alongside the legacy pairs.
+# The nested sub-state channel models live in agent/state_channels (issue #156 —
+# this module sat at the 800-line ceiling) and are re-exported here for importers.
+# Checkpoints carry ("agent.state_channels", "<Name>") ext envelopes, allowlisted
+# in base/agents/history/checkpoint_serde.py.
 from agent.state_channels import AttachEntry as _AttachEntry
 from agent.state_channels import (
     AttachState,
@@ -96,6 +92,7 @@ from agent.state_channels import (
 )
 from base.agents.compaction.models import CompactMarker
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.incarnation.native_work_models import NativeCancelMarker, NativeWorkTarget
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.packages.plugins.extensions import (
@@ -784,8 +781,8 @@ def checkpoint_msgpack_allowlist(
 def build_checkpoint_serde(
     plugin_state_classes: Iterable[type[BaseModel]] = (),
 ) -> JsonPlusSerializer:
-    """JsonPlusSerializer with the framework checkpoint allowlist — pass as
+    """CheckpointSerializer with the framework checkpoint allowlist — pass as
     `serde=` when constructing the hosted LangGraph checkpointer."""
-    return JsonPlusSerializer(
+    return CheckpointSerializer(
         allowed_msgpack_modules=checkpoint_msgpack_allowlist(plugin_state_classes)
     )

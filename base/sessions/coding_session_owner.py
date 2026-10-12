@@ -39,7 +39,6 @@ from base.sessions.coding_session_owner_record import (
     generations,
     key_digest,
     lock_path,
-    read_legacy_unlocked,
     read_unlocked,
     remove_unlocked,
     state_path,
@@ -262,10 +261,9 @@ def _reclaim_siblings_unlocked(
     terminate_session: SessionTerminator,
     owner_terminated: OwnerTerminated,
 ) -> None:
-    """Clean up and drop every dead generation under ``key``, the legacy slot included."""
-    siblings = [read_unlocked(key, generation) for generation in generations(key)]
-    legacy = read_legacy_unlocked(key)
-    for owner, generation in [*((o, o.generation) for o in siblings), (legacy, None)]:
+    """Clean up and drop every dead generation under ``key``."""
+    for generation in generations(key):
+        owner = read_unlocked(key, generation)
         if not _reclaimable(
             owner,
             now=now,

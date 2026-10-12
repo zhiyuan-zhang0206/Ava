@@ -75,14 +75,13 @@ This does not promise exactly-once execution by an external provider.
 
 A completed result retains original attempt, summary, message UUID/time and the
 canonical ClosingRequest usage. The permit stamps that exact source checkpoint
-as a boundary with its original token anchor, never a later replacement head. Response loss while saving or applying reuses that
-same durable result. Unknown generation never automatically calls the provider
-again. An unusably short result is REJECTED and closes its native execution.
+as a boundary with its original token anchor, never a later replacement head.
+Unknown generation never automatically calls the provider again. An unusably short result is REJECTED and closes its native execution.
 
 Application first commits an `applying` permit over the unchanged source. It
 then uses the existing compact transition and INIT_CONTEXT owner to materialize
 only standing context and the original summary. No DB connection is held over
-provider calls or saver I/O. A partial reset resumes that same transition.
+provider calls or saver I/O.
 After flush, a fresh persisted reader must prove exact marker/result/segment,
 original execution, halted idle state, empty reset tail, intact standing head,
 original summary at the end and disappearance of the previous source messages.

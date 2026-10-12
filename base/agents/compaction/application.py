@@ -33,10 +33,7 @@ async def authorize(
         ).fetchone()
         if row is None or row[1] != command.result.model_dump(mode="json"):
             raise CompactHeldError("compact application lost its immutable original result")
-        outcome = CompactOutcome(row[0])
-        if outcome is CompactOutcome.APPLYING:
-            return True
-        if outcome is not CompactOutcome.PREPARED:
+        if CompactOutcome(row[0]) is not CompactOutcome.PREPARED:
             raise CompactHeldError("compact result is not eligible for application")
         cancel = await (
             await conn.execute(

@@ -426,18 +426,17 @@ def test_misdirected_full_handle_fails_closed_and_is_never_stopped(tmp_path: Pat
     assert stopped == []
 
 
-@pytest.mark.parametrize("alive", [False, True])
-def test_a_legacy_single_slot_record_is_reclaimed_only_once_dead(
-    alive: bool, tmp_path: Path
-) -> None:
+def test_a_pre_generation_single_slot_record_is_neither_read_nor_removed(tmp_path: Path) -> None:
     key = _key(tmp_path)
     old = _publish(_launch(key, agent_id=41), 3)
-    legacy = record_codec.legacy_state_path(key)
-    owner.state_path(key, _generation(old)).rename(legacy)
+    stray = owner.lock_path(key).with_suffix(".json")
+    owner.state_path(key, _generation(old)).rename(stray)
+    stopped: list[str] = []
 
-    _launch(key, agent_id=42, live=_live(old) if alive else set())
+    fresh = _launch(key, agent_id=42, stopped=stopped)
 
-    assert legacy.exists() is alive
+    assert stray.exists() and stopped == []
+    assert owner.generations(key) == [fresh.generation]
 
 
 _SOCKET_GENERATION = "be6a5e0a-f271-4301-ad6b-521673bf262f"

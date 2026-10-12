@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from base.agents.history.hierarchy.units import (
@@ -135,14 +136,14 @@ def test_blocks_follow_the_read_order_when_an_arrival_is_stamped_early() -> None
     ]
 
 
-def test_a_result_without_a_recorded_body_start_shows_whole_with_its_header() -> None:
+def test_a_result_without_a_recorded_body_start_is_refused() -> None:
     old = ToolMessage(
         content="Code execution output [x]:\n\nfiles",
         tool_call_id="t",
         additional_kwargs={"ava_msg_type": "exec_output", "ava_created_at": at(25)},
     )
-    (output,) = [b for b in display_blocks_of([inbound(0), turn(10), old]) if b.kind == "output"]
-    assert output.preview == "Code execution output [x]: files"
+    with pytest.raises(ValueError, match="ava_exec_body_start"):
+        display_blocks_of([inbound(0), turn(10), old])
 
 
 def test_a_result_with_a_recorded_body_start_shows_only_the_body() -> None:

@@ -39,7 +39,7 @@ from agent.ownership.hosted import (
     release_hosted_owner,
     settle_hosted_runtime,
 )
-from agent.startup import consume_claimed_inbounds, repair_dangling_tool_use_at_startup
+from agent.startup import consume_claimed_inbounds
 from agent.state import BaseAgentState
 from agent.turn.runloop import (
     PendingTurnFailure,
@@ -372,12 +372,7 @@ class AgentHost:
                     )
                     await publish_agent_updated(self._bus, agent_id)
                     slices = self._policy.resolve_slices(pins, plugin_pins, self._plugin_configs)
-                    from base.agents.compaction.startup import resumable_compact
-
-                    compact_continuation = await resumable_compact(self._control_pool, incarnation)
-                    if compact_continuation is not None or await recover_native_cancel(
-                        self._control_pool, incarnation
-                    ):
+                    if await recover_native_cancel(self._control_pool, incarnation):
                         runtime = await self._runtime_for(
                             agent_id,
                             stored.fingerprint,
@@ -519,10 +514,9 @@ class AgentHost:
         incarnation: RuntimeIncarnation | None,
         checkpoints: TurnCheckpoints | None = None,
     ) -> _AgentRuntime:
-        """Repair checkpoint/inbound state, then prepare the model."""
+        """Reconcile claimed inbounds, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         await consume_claimed_inbounds(self._pool, agent_id, incarnation=incarnation)
-        await repair_dangling_tool_use_at_startup(checkpoints.graph, agent_id)
         return await build_runtime(
             agent_id,
             fingerprint,

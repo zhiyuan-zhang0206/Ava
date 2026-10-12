@@ -1,4 +1,4 @@
-"""Unknown provider results never regenerate; unusable results close native execution."""
+"""Unknown provider results never regenerate or resume; unusable results close native execution."""
 
 from dataclasses import replace
 from typing import Any
@@ -12,7 +12,9 @@ from agent.tests.claim.test_inbound_ownership import _insert
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.tests.test_idempotency import client as client
+from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
+from services.agent_runner.agent_host.tests.guarded_compact.faults import install
 from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel
 from tests.fixtures.model_catalog import AddBindings
 
@@ -73,3 +75,55 @@ async def test_generation_unknown_or_short_never_repeats_and_next_chat_runs(
     _insert(db_conn, accepted.agent)
     await accepted.host.run_turn(accepted.agent)
     assert calls == [failure] and len(accepted.ordinary) == 2
+
+
+@pytest.mark.parametrize("retained", ["prepared", "applying", "rejected"])
+async def test_later_wake_holds_a_retained_result_without_resuming_or_crashing(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    add_bindings: AddBindings,
+    retained: str,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    model = SummaryModel(responses=["Original source summary. " * 100])
+    binding = model_catalog.bindings["gpt-"]
+    model_catalog = add_bindings(
+        model_catalog, {"gpt-": replace(binding, build_single_attempt=lambda _: model)}
+    )
+    accepted = await admit(
+        db_conn, aops_pool, client, monkeypatch, catalog=model_catalog, database_gate=database_gate
+    )
+    install(monkeypatch, "after_result")
+    with pytest.raises(psycopg.OperationalError):
+        await accepted.host.run_turn(accepted.agent)
+    # The interrupted attempt's diagnostic UNCERTAIN write may itself be lost
+    # (a crash, or the database still failing): leave the stored result in the
+    # state it had when the original executor stopped.
+    db_conn.execute(
+        "UPDATE native_compact_commands SET outcome=%s WHERE id=%s",
+        (retained, accepted.acceptance["command_id"]),
+    )
+    db_conn.commit()
+    before: dict[str, Any] = accepted.status(client)
+    assert before["result_available"] and not before["continuation_released"]
+    recoveries: list[int] = []
+    recover = host_module.recover_native_cancel
+
+    async def spy(*args: Any, **kwargs: Any) -> bool:
+        recoveries.append(1)
+        return await recover(*args, **kwargs)
+
+    monkeypatch.setattr(host_module, "recover_native_cancel", spy)
+
+    _insert(db_conn, accepted.agent)
+    await accepted.host.run_turn(accepted.agent)
+
+    assert model.calls == 1 and len(accepted.ordinary) == 1
+    assert accepted.status(client) == before
+    # A retained compact result exempts nothing: the wake still consults native
+    # cancel recovery before the held compact stops ordinary work.
+    assert recoveries == [1]

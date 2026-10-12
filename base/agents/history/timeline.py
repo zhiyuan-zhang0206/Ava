@@ -627,10 +627,6 @@ def _ai_message_items(
     #   only; `reasoning_attached` flips after the first block claims it.
     kwargs = read_ava_kwargs(msg)
     reasoning_ms_by_block = kwargs.get("ava_reasoning_ms_by_block")
-    # Legacy turns persisted before per-block timing carried a single
-    # turn-level `ava_reasoning_ms` on the first thinking block; read it back so
-    # old timelines still show "Thought for X". New turns always write the map.
-    legacy_reasoning_ms = kwargs.get("ava_reasoning_ms") if reasoning_ms_by_block is None else None
     code_ms_by_block = kwargs.get("ava_code_ms_by_block")
     from base.lm.reasoning import extract_reasoning_tokens, to_canonical_reasoning
 
@@ -666,7 +662,6 @@ def _ai_message_items(
                 msg,
                 next_ts,
                 reasoning_ms_by_block,
-                legacy_reasoning_ms,
                 reasoning_tokens,
                 reasoning_attached=reasoning_attached,
             )
@@ -702,7 +697,6 @@ def _content_block_item(
     msg: AIMessage,
     next_ts: Callable[[BaseMessage | None], str],
     reasoning_ms_by_block: Any,
-    legacy_reasoning_ms: Any,
     reasoning_tokens: int | None,
     *,
     reasoning_attached: bool,
@@ -731,11 +725,9 @@ def _content_block_item(
         t = typed_block.get("thinking")
         if not (isinstance(t, str) and t):
             return None, block_idx, reasoning_attached
-        if reasoning_ms_by_block is not None:
-            block_reasoning_ms = reasoning_ms_by_block.get(str(block_idx))
-        else:
-            # Legacy single value sits on the first thinking block.
-            block_reasoning_ms = None if reasoning_attached else legacy_reasoning_ms
+        block_reasoning_ms = (
+            None if reasoning_ms_by_block is None else reasoning_ms_by_block.get(str(block_idx))
+        )
         item = TimelineItem(
             item_id=f"{msg_idx}.{block_idx}",
             kind="agent_reasoning",

@@ -1,4 +1,4 @@
-"""A cold admission repairs and invokes from one unchanged history read."""
+"""A cold admission invokes from one unchanged history read and rewrites nothing."""
 
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -42,11 +42,11 @@ def test_unwrapped_saver_does_not_opt_into_reconstruction_cache() -> None:
     assert saver.mock_calls == []
 
 
-@pytest.mark.parametrize("needs_repair", [False, True])
-async def test_cold_repair_and_invocation_share_only_unchanged_messages(
+@pytest.mark.parametrize("dangling", [False, True])
+async def test_cold_admission_reads_the_history_once_and_never_repairs_it(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
-    needs_repair: bool,
+    dangling: bool,
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
@@ -90,7 +90,7 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
             content="",
             tool_calls=[{"id": "unfinished", "name": "execute_code", "args": {}}],
         )
-        if needs_repair
+        if dangling
         else HumanMessage(id="tail", content="Continue")
     )
     await graph.aupdate_state(config, {"messages": [tail]}, as_node="work")
@@ -144,9 +144,10 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
 
     monkeypatch.setattr(host, "_drive_turns", drive)
     await host._run_turn(agent, resources=None)
-    assert reads == (2 if needs_repair else 1)
-    assert any(isinstance(m, ToolMessage) for m in observed) is needs_repair
+    assert reads == 1
+    # Pairing repair is the before_llm hook's job; admission leaves the tail as stored.
+    assert not any(isinstance(m, ToolMessage) for m in observed)
     assert host.stats.cache_misses == 1
     # The retained entry belongs to admission, not the warm runtime or next reader.
     await graph.aget_state(config)
-    assert reads == (3 if needs_repair else 2)
+    assert reads == 2

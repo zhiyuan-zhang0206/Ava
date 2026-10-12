@@ -9,10 +9,7 @@ from base.agents.compaction.models import CompactHeldError
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.apply import CompactGraph
-from services.agent_runner.agent_host.invocation.native_work import (
-    recover_native_cancel,
-    settle_native_invocation,
-)
+from services.agent_runner.agent_host.invocation.native_work import settle_native_invocation
 
 
 async def close_terminal(
@@ -26,11 +23,6 @@ async def close_terminal(
 ) -> bool:
     if command.execution is None:
         raise CompactHeldError("compact terminal continuation lacks original execution")
-    if (command.execution.generation, command.execution.owner) != (
-        incarnation.generation,
-        incarnation.owner,
-    ):
-        await recover_native_cancel(pool, incarnation)
     await settle_native_invocation(
         pool,
         saver,

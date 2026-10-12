@@ -92,7 +92,8 @@ def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, lis
     value falls through to the normal unfiltered (``["*"]``) command view.
     """
     from langgraph.checkpoint.postgres import PostgresSaver
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -108,7 +109,7 @@ def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, lis
 
         saver = PostgresSaver(
             conn=conn,
-            serde=JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES),
+            serde=CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES),
         )
         checkpoint = saver.get({"configurable": {"thread_id": str(agent_id)}})
 

@@ -156,10 +156,6 @@ class AvaMessageKwargs(TypedDict, total=False):
     path. The enums are the write/compare vocabulary, not the storage type — so
     the contract cannot invite a future write of a member that would break
     serialization.
-
-    `ava_reasoning_ms` is legacy (a single turn-level value on the first
-    thinking block); new turns write the per-block `ava_reasoning_ms_by_block`
-    map. Both are read back for backward-compatible timeline rendering.
     """
 
     ava_ephemeral_message_id: bool
@@ -181,7 +177,6 @@ class AvaMessageKwargs(TypedDict, total=False):
     sdk_calls: list[dict[str, Any]] | None
     ava_reasoning_ms_by_block: dict[str, int]
     ava_code_ms_by_block: dict[str, int]
-    ava_reasoning_ms: int
     ava_usage: AvaUsage
 
 
