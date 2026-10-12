@@ -9,7 +9,7 @@ enrolled agent-runner (2026-08-16: two days).
 What is asserted here — the decision logic around `ensure_pgbouncer`:
 
 - the bring-up waits (bounded) for the reachable bind address ONLY on the paths
-  that actually (re)start a pooler (`_wait_for_reachable_bind` returns at once on
+  that actually (re)start a pooler (`wait_for_reachable_bind` returns at once on
   a host whose reachable address is loopback);
 - a fresh start that comes up loopback-only aborts with an explicit error, never
   a "✓ pgbouncer started";
@@ -98,7 +98,7 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
         assert isinstance(machine, MachineIdentity)
         return False
 
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     command_machine.set(host="10.0.0.5")
     calls = _fake_start(monkeypatch)
 
@@ -137,7 +137,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
         assert isinstance(machine, MachineIdentity)
         return True
 
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -178,7 +178,7 @@ def test_fresh_start_with_public_listener_is_success(
         assert isinstance(machine, MachineIdentity)
         return True
 
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -225,7 +225,7 @@ def test_the_pooler_daemon_inherits_no_ava_authority(
         assert isinstance(machine, MachineIdentity)
         return True
 
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -297,7 +297,7 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
 
     monkeypatch.setattr(
         _pb,
-        "_wait_for_reachable_bind",
+        "wait_for_reachable_bind",
         fake_wait_for_reachable_bind,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -359,7 +359,7 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
         assert isinstance(machine, MachineIdentity)
         return True
 
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     command_machine.set(host="10.0.0.5")
     _fake_start(monkeypatch)
@@ -404,7 +404,7 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
         assert isinstance(machine, MachineIdentity)
         return True
 
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb.OwnedPooler, "stop", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     calls = _fake_start(monkeypatch)
 
@@ -453,7 +453,7 @@ def test_running_pooler_with_changed_userlist_is_restarted_never_reloaded(
         assert isinstance(machine, MachineIdentity)
         return True
 
-    monkeypatch.setattr(_pb, "_wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "wait_for_reachable_bind", fake_wait_for_reachable_bind)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(base_pooler, "admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     calls = _fake_start(monkeypatch)
 

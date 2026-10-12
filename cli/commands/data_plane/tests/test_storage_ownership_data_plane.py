@@ -54,7 +54,7 @@ def test_foreign_redis_keeps_acl_and_config(
     config = tmp_path / "redis.conf"
     config.write_text("original config\n")
     monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(instance, "_redis_dial_host", lambda: "127.0.0.1")
+    monkeypatch.setattr(instance, "redis_dial_host", lambda: "127.0.0.1")
     monkeypatch.setattr(instance, "_redis_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     with redis_server() as url:
         port = urlsplit(url).port
@@ -77,7 +77,7 @@ def test_foreign_postgres_listener_refuses_before_hba_or_initdb(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr(instance, "_pg_data_dir", lambda: pg_data)
+    monkeypatch.setattr(instance, "pg_data_dir", lambda: pg_data)
     monkeypatch.setattr(ownership, "strict_listeners_on", lambda _port: [123])  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(instance, "_ensure_pg_data", lambda: pytest.fail("must not initialize"))
     with pytest.raises(RuntimeError, match="no owned data-plane process"):
@@ -356,7 +356,7 @@ def test_pgdata_symlink_cannot_adopt_another_homes_receipt(
     local = tmp_path / "local/pg"
     local.parent.mkdir()
     local.symlink_to(foreign, target_is_directory=True)
-    monkeypatch.setattr(instance, "_pg_data_dir", lambda: local)
+    monkeypatch.setattr(instance, "pg_data_dir", lambda: local)
     monkeypatch.setattr(
         pg, "regular_bytes", Mock(side_effect=AssertionError("foreign receipt read"))
     )
@@ -414,7 +414,7 @@ def test_real_interrupted_admission_completes_same_postmaster(
     command_machine: MachineIdentity,
 ) -> None:
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
-    protocol = instance._pg_running
+    protocol = instance.pg_running
 
     def interrupted(port: int, host: str) -> bool:
         if protocol(port, host):
@@ -423,7 +423,7 @@ def test_real_interrupted_admission_completes_same_postmaster(
 
     try:
         with monkeypatch.context() as context:
-            context.setattr(instance, "_pg_running", interrupted)
+            context.setattr(instance, "pg_running", interrupted)
             with pytest.raises(KeyboardInterrupt, match="before admission"):
                 instance._start_pg(
                     port, retained_children=retained_children, machine=command_machine

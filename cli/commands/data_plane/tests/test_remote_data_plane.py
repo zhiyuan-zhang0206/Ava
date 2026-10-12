@@ -28,7 +28,7 @@ def test_stop_remote_is_a_noop_with_message(
 
     monkeypatch.setattr(ci.subprocess, "run", _no_subprocess)
 
-    rc = ci.stop_cluster_instance(producer=operator_pipeline)
+    rc = dp.stop_cluster_instance(producer=operator_pipeline)
 
     assert rc == 0
     out = capsys.readouterr().out
@@ -52,7 +52,7 @@ def test_status_remote_probes_urls_and_skips_pgbouncer_line(
     monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
 
-    ci.print_data_plane_status(database_factory=operator_database)
+    dp.print_data_plane_status(database_factory=operator_database)
 
     out = capsys.readouterr().out
     assert "remote-managed" in out
@@ -77,7 +77,7 @@ def test_status_remote_reports_unreachable_component(
         lambda: (False, "redis (10.9.8.7:6380) connect failed: timeout"),
     )
 
-    ci.print_data_plane_status(database_factory=operator_database)
+    dp.print_data_plane_status(database_factory=operator_database)
 
     out = capsys.readouterr().out
     assert "✗ redis (10.9.8.7:6380) connect failed: timeout" in out
@@ -95,13 +95,13 @@ def test_stop_remote_warns_about_orphaned_local_instance(
 
     rec = remote_cluster_record()
     monkeypatch.setattr(cluster, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(ci, "_pg_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "pg_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
     # The remote-managed home carries no local Redis admin password, so the
     # leftover Redis is detected by its listener, never by an authenticated PING.
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
     monkeypatch.setattr(dp, "_local_listener", lambda port: port == 18012)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = ci.stop_cluster_instance(producer=operator_pipeline)
+    rc = dp.stop_cluster_instance(producer=operator_pipeline)
 
     assert rc == 0
     captured = capsys.readouterr()

@@ -15,6 +15,7 @@ import pytest
 
 from base.cluster import postgres as owned_postgres
 from base.telemetry import EventPipeline
+from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as instance
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -48,14 +49,14 @@ def test_stop_cluster_instance_reports_an_escalation(
 
     monkeypatch.setattr("base.telemetry.emit", fake_emit)
     monkeypatch.setattr(
-        instance, "settings", SimpleNamespace(data_plane=SimpleNamespace(is_remote=False))
+        dp, "settings", SimpleNamespace(data_plane=SimpleNamespace(is_remote=False))
     )
-    monkeypatch.setattr(instance, "_pg_data_dir", fake_pg_data_dir)
+    monkeypatch.setattr(instance, "pg_data_dir", fake_pg_data_dir)
     monkeypatch.setattr(instance.ownership, "configured_redis_port", fake_port)
     monkeypatch.setattr(instance.owned_postgres, "stop", fake_stop)
     monkeypatch.setattr("cli.commands.data_plane.pgbouncer.stop_pgbouncer", fake_pgbouncer_stop)
 
-    assert instance.stop_cluster_instance(producer=operator_pipeline) == 0
+    assert dp.stop_cluster_instance(producer=operator_pipeline) == 0
 
     assert len(emitted) == 1
     (args, kwargs) = emitted[0]
