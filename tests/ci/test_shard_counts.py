@@ -375,7 +375,6 @@ def test_the_total_job_is_informational_and_needs_only_read_access() -> None:
     assert job["permissions"] == {"contents": "read", "actions": "read"}
     assert set(job["needs"]) == {
         "classify",
-        "test-select",
         "backend-static",
         "backend-shard",
         "backend-serial",
