@@ -42,10 +42,9 @@ def bridge_status(
     required: bool = True,
     endpoint: str = "10.64.0.7:6380",
     serving: bool = True,
-    supervised: bool = True,
     detail: str = "Redis PING succeeded",
 ) -> RedisBridgeStatus:
-    return RedisBridgeStatus(required, endpoint, serving, supervised, detail)
+    return RedisBridgeStatus(required, endpoint, serving, detail)
 
 
 def redis_bridge_verdict(

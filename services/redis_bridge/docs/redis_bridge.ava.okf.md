@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Redis Private-Network Bridge
-description: Host-level macOS TCP relay that keeps Redis loopback-only while serving authenticated split-cluster clients, with listener self-heal and end-to-end health observation.
+description: Root-supervised macOS TCP relay that keeps Redis loopback-only while serving authenticated split-cluster clients, with a bounded listener rebuild and end-to-end health observation.
 tags:
 - services
 - redis
@@ -11,29 +11,30 @@ tags:
 # Redis Private-Network Bridge
 
 The bridge is the macOS gateway host's off-box Redis ingress. Redis listens on
-`127.0.0.1` only; `/usr/bin/python3 $AVA_HOME/redis-bridge/relay.py` listens on
-the machine's declared private-network address at the cluster Redis port and
-forwards bytes to the loopback listener. Redis authentication remains end to
-end because the bridge does not terminate or interpret RESP.
+`127.0.0.1` only; the `redis-bridge` roster unit runs
+`/usr/bin/python3 services/redis_bridge/relay.py` under the root supervisor. It
+listens on the machine's declared private-network address at the cluster Redis
+port and forwards bytes to the loopback listener. Redis authentication remains
+end to end because the bridge does not terminate or interpret RESP.
 
-`cli.commands.converge.redis_bridge` is the authority for installation. The
-prod gateway converge copies `services/redis_bridge/relay.py` to the stable home
-path, writes `com.ava.redis-bridge.plist`, and reloads the launchd job only when
-the source or desired job changes. A remote-managed data plane, a loopback-only
-machine identity, or a cluster without a bearer does not need a bridge;
-converge boots out any stale job and removes its plist and installed source.
-Install and observation use the caller's existing configuration and machine
-owners. The platform, remote-plane, bearer and loopback checks retain their
-short circuits; authenticated probes read the same owner's live Redis URL.
-The CLI's health and status paths borrow their command configuration without
-creating a second boot owner. The registry record still owns the Redis port.
+`base.cluster.dataplane.redis_bridge.redis_bridge_endpoint` is the one answer to
+"does this host need a relay, and where": macOS, a local data plane and a declared
+non-loopback machine host. The roster builds the unit command from it, `ops.spec`
+gates the unit out where it returns None, and the converge and health probes read
+the same endpoint. The registry record owns the Redis port. The unit shares the
+root's bounded restart budget with every other service; its identity probe sends a
+RESP command through the listener and accepts any Redis reply
+(`services.supervision.healthchecks.redis_bridge`). Converge only retires the
+standalone launchd job and installed copy an earlier layout left behind
+(`cli.commands.converge.redis_bridge`), so one supervisor owns the port.
 
 The relay treats its listening socket as replaceable state. An `accept()` or
-bind failure closes the descriptor and enters capped retry; a restored network
-interface therefore creates a new listener without requiring a process restart.
-The listener polls admission every quarter second, without applying a timeout to
-connected sockets. Each successful bind and each rebuild failure is timestamped in
-`$AVA_HOME/redis-bridge/relay.log`.
+bind failure closes the descriptor and retries with a capped, growing delay, but
+only `_MAX_LISTENER_FAILURES` (5) times in a row without an admitted connection:
+the process then exits with status 1 and the root's restart budget decides what
+happens next. The listener polls admission every quarter second, without applying
+a timeout to connected sockets. Each successful bind and each rebuild failure is
+timestamped on stdout, which the root keeps in the unit's log.
 
 The five-second backend timeout bounds connection establishment only. Connected
 sockets return to blocking mode so an idle Redis Pub/Sub subscription remains
@@ -73,10 +74,10 @@ mature platform TCP proxy; a second consumer of this ownership pattern requires
 extraction or a move to an established capability rather than another copy.
 
 `ava status` and the periodic cluster health probe authenticate and issue a
-real Redis `PING` through the private-network endpoint. The launchd-label check
-is reported separately: a live process or an open TCP port alone does not prove
-that the relay can reach and serve Redis. Bridge failures are alert-only and do
-not arm code rollback because a host listener failure is infrastructure state.
+real Redis `PING` through the private-network endpoint: a live process or an open
+TCP port alone does not prove that the relay can reach and serve Redis. Bridge
+failures are alert-only and do not arm code rollback because a host listener
+failure is infrastructure state.
 
 ## Entry Points
 
@@ -84,7 +85,9 @@ not arm code rollback because a host listener failure is infrastructure state.
   finite stop, and original worker error collection
 - `services/redis_bridge/relay.py:serve_forever()` — listener lifecycle and
   per-connection forwarding with cleanup on caller exit
-- `cli/commands/converge/redis_bridge.py:ensure_redis_bridge()` — installed
-  source and launchd desired state
+- `ops/roster/__init__.py` (`redis-bridge` unit) and `base/cluster/dataplane/redis_bridge.py` —
+  rostered command and listen address
+- `cli/commands/converge/redis_bridge.py:retire_launchd_redis_bridge()` — removes the
+  standalone launchd job and installed copy
 - `cli/commands/converge/redis_bridge.py:probe_redis_bridge()` — authenticated
-  end-to-end probe plus supervisor observation
+  end-to-end PING
