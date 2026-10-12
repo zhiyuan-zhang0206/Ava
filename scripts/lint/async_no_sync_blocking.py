@@ -47,6 +47,7 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.roles import packages  # noqa: E402 - standalone script
 
 _SCAN_DIRS = ("gateway", "ops")
 
@@ -113,16 +114,7 @@ _BLOCKING_NAMES = _LIBRARY_BLOCKING_NAMES | _REPO_BLOCKING_HELPERS
 
 # Where a repo helper may be defined (the non-test source tree; a test's own
 # helper never keeps an entry alive).
-_DEFINITION_DIRS = (
-    "agent",
-    "ava",
-    "ava_builtins",
-    "base",
-    "cli",
-    "gateway",
-    "ops",
-    "services",
-)
+_DEFINITION_DIRS = packages("application")
 
 # Module-qualified sync calls (any attribute of these modules).
 _BLOCKING_MODULES = {"shutil", "subprocess", "psutil"}

@@ -21,10 +21,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from meizel.roles import packages
+
 _REPO = Path(__file__).resolve().parents[3]
 
 # Mirrors scripts/lint/termination_source.py's scope: production trees only.
-_SCAN_DIRS = ("agent", "ava", "ava_builtins", "cli", "gateway", "ops", "services", "base")
+_SCAN_DIRS = packages("application")
 
 _REAPER_STAMP = re.compile(r"termination_source\s*=\s*'reaper'")
 _MARKER_CLEAR = re.compile(r"last_turn_fatal_at\s*=\s*NULL")

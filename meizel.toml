@@ -1,0 +1,15 @@
+# The top-level packages and the role each plays. This is the only place the list is
+# kept: Python code reads it through `meizel.roles`, and the lists in non-Python
+# configuration are generated from it (`python -m meizel roles --check`).
+[roles]
+# The shipped packages: the wheel, the import-linter root packages, the framework scans.
+application = ["agent", "ava", "ava_builtins", "base", "cli", "gateway", "ops", "services"]
+# Version-controlled runnable templates: Python that ships as files, not as packages.
+templates = ["schedules"]
+# Illustrative sources that are tracked but not shipped and not governed like the application.
+examples = ["demos"]
+# The repository's own tooling.
+tooling = ["meizel", "scripts"]
+tests = ["tests"]
+# The user interface; its Python is a build helper.
+frontend = ["ui"]

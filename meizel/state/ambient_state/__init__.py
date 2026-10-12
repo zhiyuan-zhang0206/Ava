@@ -54,6 +54,7 @@ import re
 from pathlib import Path
 
 from meizel import lint_common
+from meizel.roles import packages
 from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state import (
     bundle,
@@ -68,7 +69,7 @@ from meizel.state.ambient_state import (
 SECTION = "ambient_state"
 # The rule module path used by integration-test repository fixtures.
 LINT = "meizel/state/ambient_state/__init__.py"
-SCOPE = (*lint_common.FRAMEWORK_DIRS, "schedules")
+SCOPE = packages("application", "templates")
 Sites = dict[str, list[int]]
 
 _SKILL_SCRIPTS = re.compile(r"^ava_builtins/(skills/|plugins/[^/]+/(.*/)?skills/)")

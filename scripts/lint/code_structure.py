@@ -116,6 +116,7 @@ from meizel import lint_common  # noqa: E402 — standalone script
 from meizel.budgets import limits  # noqa: E402 — standalone script
 from meizel.language import path_imports, type_checking  # noqa: E402 — standalone script
 from meizel.owners import decisions  # noqa: E402 — standalone script
+from meizel.roles import packages  # noqa: E402 - standalone script
 from meizel.state import ambient_state, machine_role  # noqa: E402 — standalone script
 from scripts.structure import baseline_shards, locality  # noqa: E402 — standalone script
 from scripts.structure.budgets import quality_budget  # noqa: E402 — standalone script
@@ -129,7 +130,7 @@ _MEASURED_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SE
 # AST rules track [tool.importlinter] root_packages; budgets also cover tooling/tests.
 _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 _AST_DIRS = ambient_state.SCOPE  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
-_STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts", "meizel")
+_STRUCTURE_DIRS = packages("application", "tests", "tooling")
 
 
 def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> list[tuple[int, str]]:

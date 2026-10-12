@@ -53,9 +53,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.roles import packages  # noqa: E402 - standalone script
 
 # In-scope dirs scanned by default (no argv); `_EXEMPT_PREFIXES` still applies.
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "tests")
+_SCAN_DIRS = packages("application", "tooling", "tests")
 
 # Path prefixes (repo-relative, posix) that are never scanned — deliberate-UX
 # surfaces and prose/content. Checked per file so a pre-commit-passed path under

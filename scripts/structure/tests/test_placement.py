@@ -7,6 +7,7 @@ import pathlib
 
 import pytest
 
+from meizel.roles import packages
 from scripts.structure import imports, locality, patch_points, patch_targets, placement
 from scripts.structure.placement_evidence import Placement
 from scripts.structure.tests.patch_repo import make_repo, write
@@ -450,7 +451,7 @@ def test_units_no_contract_or_source_edge_relates_are_ambiguous_and_the_filename
     assert (other.home, other.unit, other.ambiguous) == ("services/alpha", "services.alpha", True)
 
 
-@pytest.mark.parametrize("top", ["schedules", "commands", "demos"])
+@pytest.mark.parametrize("top", packages("templates", "examples"))
 def test_runnable_template_paths_have_their_code_owner(root: pathlib.Path, top: str) -> None:
     write(root, f"{top}/daily-run.py", "from base.net import retry\nretry.backoff()\n")
     text = (
@@ -462,7 +463,7 @@ def test_runnable_template_paths_have_their_code_owner(root: pathlib.Path, top: 
     assert (found.home, found.unit, found.ambiguous) == (top, top, False)
 
 
-@pytest.mark.parametrize("top", ["schedules", "commands", "demos"])
+@pytest.mark.parametrize("top", packages("templates", "examples"))
 def test_runnable_imports_have_the_same_home_after_test_moves(root: pathlib.Path, top: str) -> None:
     write(root, f"{top}/run.py", "def main():\n    return None\n")
     text = f"from {top} import run\nrun.main()\n"
@@ -472,7 +473,7 @@ def test_runnable_imports_have_the_same_home_after_test_moves(root: pathlib.Path
     assert (before.home, before.unit) == (top, top)
 
 
-@pytest.mark.parametrize("top", ["schedules", "commands", "demos"])
+@pytest.mark.parametrize("top", packages("templates", "examples"))
 def test_runnable_tests_do_not_gain_access_to_dependency_private_names(
     root: pathlib.Path, top: str
 ) -> None:

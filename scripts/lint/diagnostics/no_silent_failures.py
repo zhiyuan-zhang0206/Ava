@@ -71,8 +71,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.roles import packages  # noqa: E402 - standalone script
 
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "schedules", ".agents")
+_SCAN_DIRS = (*packages("application", "tooling", "templates"), ".agents")
 
 _BROAD = frozenset({"Exception", "BaseException"})
 _LOUD_LOG_METHODS = frozenset({"warning", "warn", "error", "critical", "exception", "fatal"})

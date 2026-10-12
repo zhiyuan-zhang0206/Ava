@@ -59,10 +59,11 @@ import sys
 from pathlib import Path
 
 from meizel import lint_common
+from meizel.roles import packages
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel")
+_SCAN_DIRS = packages("application", "tooling")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),

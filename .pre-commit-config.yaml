@@ -157,7 +157,18 @@ repos:
         entry: .venv/bin/python scripts/lint/patch_targets.py
         language: system
         require_serial: true
-        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|meizel|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/lint/patch_targets\.py|scripts/structure/(imports/.*|placement|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py|scripts/structure/baseline/.*\.json)$
+        # A verbose regex: the package alternation is generated from the roles.
+        files: |-
+          (?x)^(
+            (tests|(
+              # meizel:roles BEGIN regex-names application tooling
+              agent|ava|ava_builtins|base|cli|gateway|ops|services|meizel|scripts
+              # meizel:roles END
+            )(/.*)?/tests)/.*\.py
+            |scripts/lint/patch_targets\.py
+            |scripts/structure/(imports/.*|placement|patch_points|patch_targets|patch_report|locality|baseline_shards)\.py
+            |scripts/structure/baseline/.*\.json
+          )$
 
       # The full scan of the hook above, at every push that touches Python, whatever the
       # diff (pre-commit's own file selection would never pass it the untouched tests whose
@@ -183,7 +194,17 @@ repos:
         name: lint tests location (a new test belongs in its package, not the top-level tests/)
         entry: .venv/bin/python scripts/structure/tests_location.py --only
         language: system
-        files: ^((tests|(agent|ava|ava_builtins|base|cli|gateway|meizel|ops|services|shared|scripts)(/.*)?/tests)/.*\.py|scripts/structure/(tests_location|tests_location_allowed|tests_location_suggest)\.py|scripts/structure/baseline/.*\.json)$
+        # A verbose regex: the package alternation is generated from the roles.
+        files: |-
+          (?x)^(
+            (tests|(
+              # meizel:roles BEGIN regex-names application tooling
+              agent|ava|ava_builtins|base|cli|gateway|ops|services|meizel|scripts
+              # meizel:roles END
+            )(/.*)?/tests)/.*\.py
+            |scripts/structure/(tests_location|tests_location_allowed|tests_location_suggest)\.py
+            |scripts/structure/baseline/.*\.json
+          )$
 
       # The full check of the hook above at every push (every tracked top-level test, ~0.08 s, so
       # unwrapped): a per-file hook never judges a deletion, so a deleted or renamed test's stale
@@ -334,13 +355,33 @@ repos:
         types: []
         require_serial: true
 
+      # The top-level packages are declared once, in the root meizel.toml `[roles]`. The lists
+      # other files keep are generated from it (`python -m meizel roles write`); this check
+      # fails on a stale generated list and on any other re-listing of a role's packages.
+      - id: lint-meizel-roles
+        name: lint top-level package roles (generated lists fresh, no copy of a role)
+        entry: .venv/bin/python -m meizel roles check
+        language: system
+        files: ^(meizel\.toml|pyproject\.toml|\.pre-commit-config\.yaml|.*\.(py|sh|toml|yaml|yml))$
+        pass_filenames: false
+        require_serial: true
+
       # Library components receive database and event-bus handles from composition roots.
       # Every detected library-built handle fails; no baseline or write mode exists.
       - id: lint-handle-ratchet
         name: lint library-built database and event-bus handles
         entry: .venv/bin/python -m meizel.state.ambient_state.handle_ratchet
         language: system
-        files: ^((agent|ava|ava_builtins|base|cli|gateway|ops|services|schedules)/.*\.py|meizel/state/ambient_state/handle_ratchet\.py)$
+        # A verbose regex: the package alternation is generated from the roles.
+        files: |-
+          (?x)^(
+            (
+              # meizel:roles BEGIN regex-names application templates
+              agent|ava|ava_builtins|base|cli|gateway|ops|services|schedules
+              # meizel:roles END
+            )/.*\.py
+            |meizel/state/ambient_state/handle_ratchet\.py
+          )$
         pass_filenames: false
         require_serial: true
 

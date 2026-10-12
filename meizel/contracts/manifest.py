@@ -11,10 +11,11 @@ from typing import cast
 from meizel.graph.graphs import cycle_through, strongly_connected
 from meizel.graph.model import Code, Diagnostic
 from meizel.graph.universe import MANIFEST, Universe
+from meizel.roles import check_table
 
 __all__ = ["Manifest", "load_manifests", "manifest_path"]
 
-_TOP_KEYS = ("exports", "uses", "loads", "external")
+_TOP_KEYS = ("exports", "uses", "loads", "external", "roles")
 _EdgeReader = Callable[[str, tuple[str, ...], int], tuple[str, ...]]
 
 
@@ -29,6 +30,7 @@ class Manifest:
     uses: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     loads: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     external: dict[str, str] = field(default_factory=dict[str, str])
+    roles: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     lines: list[str] = field(default_factory=list[str])
 
     @property
@@ -91,7 +93,37 @@ class _Reader:
         self.manifest.uses = self.read_table(document.get("uses", {}), "uses", self.read_use)
         self.manifest.loads = self.read_table(document.get("loads", {}), "loads", self.read_load)
         self.manifest.external = self.read_external(document.get("external", {}))
+        if "roles" in document:
+            self.read_roles(document["roles"])
         self.check_cycles()
+
+    def read_roles(self, table: object) -> None:
+        """`[roles]`, root only: every top-level directory with Python has exactly one role."""
+        line = self.manifest.line_of("roles")
+        if self.directory:
+            self.report(line, Code.MANIFEST_ROLES, "[roles] belongs in the root manifest only")
+            return
+        roles, problems = check_table(table)
+        for key, message in problems:
+            self.report(self.manifest.line_of(key), Code.MANIFEST_ROLES, message)
+        self.manifest.roles = roles
+        listed = {name for names in roles.values() for name in names}
+        for name in sorted(listed):
+            if name not in self.universe.dirs:
+                self.report(
+                    self.manifest.line_of(name),
+                    Code.MANIFEST_ROLES,
+                    f"role entry {name!r} is not a tracked top-level directory",
+                )
+        python_tops = {path.split("/", 1)[0] for path in self.universe.python_files if "/" in path}
+        for name in sorted(python_tops - listed):
+            if not name.startswith("."):
+                self.report(
+                    line,
+                    Code.MANIFEST_ROLES,
+                    f"top-level directory {name!r} holds Python but has no role; "
+                    "declare it under [roles]",
+                )
 
     def read_external(self, table: object) -> dict[str, str]:
         """`[external]`: files that run code from outside the repository, each with a reason."""

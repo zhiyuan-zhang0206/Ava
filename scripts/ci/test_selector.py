@@ -21,6 +21,7 @@ from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry ne
     is_doc_path,
 )
 from meizel.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
+from meizel.roles import all_packages  # noqa: E402 - standalone script
 from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     Impact,
     base_checkout,
@@ -37,6 +38,7 @@ from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone s
 _GLOBAL_FILES = frozenset(
     {
         "pyproject.toml",  # interpreter, dependencies, pytest configuration
+        "meizel.toml",  # the declared top-level packages every scan and test host derives from
         "uv.lock",
         "conftest.py",  # root bootstrap: `pytest_plugins` loads for every test
         ".python-version",
@@ -77,23 +79,7 @@ _TREE_SCAN_ONLY_PREFIXES = (
 # (`_referencing_tests`), so the set of readers is derived, never listed by hand.
 _REFERENCED_ROOTS = (".github", ".agents", ".ava", ".trunk")
 # Top-level directories whose files belong to a package with an owning `tests/`.
-_PACKAGE_ROOTS = frozenset(
-    {
-        "agent",
-        "ava",
-        "ava_builtins",
-        "base",
-        "cli",
-        "gateway",
-        "meizel",
-        "ops",
-        "schedules",
-        "scripts",
-        "services",
-        "tests",
-        "ui",
-    }
-)
+_PACKAGE_ROOTS = frozenset(all_packages())
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 _NON_DOCUMENTATION_PREFIXES = ("schedules/", "tests/")
 _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")

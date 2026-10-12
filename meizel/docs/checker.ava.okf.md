@@ -26,6 +26,7 @@ python -m meizel check [paths...] [--limit N]
 python -m meizel explain <path>
 python -m meizel sync --prune
 python -m meizel bootstrap --out <dir>
+python -m meizel roles list <role>... | check | write
 ```
 
 `--repo <root>` selects another checkout; `--jobs N` sets parser processes
