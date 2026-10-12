@@ -1,0 +1,2 @@
+[external]
+"test_register_namespace.py" = "imports SDK namespaces that plugins install at run time; they have no module file"

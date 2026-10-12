@@ -1,0 +1,2 @@
+[loads]
+"test_goal_watch_filter.py" = ["ava_builtins/skills", "ava_builtins/plugins"]

@@ -1,0 +1,3 @@
+[external]
+"test_fix_invalid_escapes.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"test_fix_nested_triple_quote.py" = "checks the syntax repairer's output with the same compile the agent code goes through"

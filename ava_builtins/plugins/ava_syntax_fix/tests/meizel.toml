@@ -1,0 +1,4 @@
+[external]
+"legacy_fixers_support.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"test_syntax_fix.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+"test_syntax_fix_part2.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
