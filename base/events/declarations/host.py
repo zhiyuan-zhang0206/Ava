@@ -36,6 +36,16 @@ class HostDispatcherScanFailed(TypedDict):
     backoff_s: float
 
 
+class ImpersonationTerminalNoticeFailed(TypedDict):
+    """`impersonation_terminal_notice_failed` payload — agent/impersonation.py.
+
+    One event per ended lease whose single notice submission was not accepted;
+    nothing retries it. The agent is the event's `agent_id`."""
+
+    lease_id: str
+    error: str
+
+
 class ImpersonationEventLogIncomplete(TypedDict):
     """`impersonation_event_log_incomplete` payload — base/agents/impersonation/event_signals.py.
 
@@ -282,6 +292,15 @@ EVENTS: dict[str, EventSpec] = {
         "lease: carries the agent, lease, session, the dead component "
         "(executor | relay) and its detail; the end note is delivered through "
         "the resume chain",
+        tier="anomaly",
+    ),
+    "impersonation_terminal_notice_failed": telemetry_event(
+        "impersonation_terminal_notice_failed",
+        "the host's single submission of an ended impersonation lease's notice to its "
+        "Codex thread was not accepted; carries the agent, the lease and the failure "
+        "reason. Nothing retries it: the external controller learns the lease ended "
+        "only on its next relay call",
+        payload=ImpersonationTerminalNoticeFailed,
         tier="anomaly",
     ),
     "host_admission_wait_exceeded": telemetry_event(

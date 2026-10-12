@@ -423,54 +423,6 @@ def native_status(
         lease = parse_lease(lease)
         was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
-        if lease["status"] == ImpersonationStatus.ACCEPTED and (
-            lease["accepted_generation"],
-            lease["accepted_owner"],
-        ) != (incarnation.generation, incarnation.owner):
-            # A crash before the checkpoint ACK never transfers control. Ask
-            # the replacement to make the decision again from its saved state.
-            conn.execute(
-                "UPDATE agent_impersonations SET status='requested',accepted_generation=NULL,"
-                "accepted_owner=NULL,consent_version=consent_version+1 WHERE id=%s",
-                (lease["id"],),
-            )
-            lease["status"] = ImpersonationStatus.REQUESTED
-            lease["accepted_generation"] = None
-            lease["accepted_owner"] = None
-            lease["consent_version"] += 1
-        if lease["status"] == ImpersonationStatus.ACTIVE and (
-            lease["accepted_generation"],
-            lease["accepted_owner"],
-        ) != (incarnation.generation, incarnation.owner):
-            # Every hosted restart and host takeover mints a fresh incarnation
-            # (restart NULLs runtime_generation/owner and admission re-mints,
-            # agent/ownership/hosted.py). The active lease survives the
-            # replacement, so its accepting-incarnation binding must follow the
-            # native lineage — relay supervision re-provisions under the
-            # current incarnation and provision_relay's strict check would
-            # refuse a dead binding forever (task #2635's manual DB alignment).
-            # Legitimacy is require_native above: the caller is the row's one
-            # admitted incarnation. A lingering predecessor cannot race this
-            # transfer — admission fences a foreign owner behind the previous
-            # owner's lease expiry (a live host renews every beat), and every
-            # lease mutation the old incarnation attempts dies at its own
-            # require_native row check. The other accepted_* writer is hosted
-            # admission itself (agent.ownership.hosted.align_accepting_binding,
-            # issue #2052), which holds the same agents_meta row lock — after
-            # it lands, this lazy sync is already a no-op.
-            conn.execute(
-                "UPDATE agent_impersonations SET accepted_generation=%s,accepted_owner=%s "
-                "WHERE id=%s",
-                (incarnation.generation, incarnation.owner, lease["id"]),
-            )
-            lease["accepted_generation"] = incarnation.generation
-            lease["accepted_owner"] = incarnation.owner
-            logger.info(
-                "active lease accepting-incarnation binding inherited by the replacement runtime",
-                agent_id=agent_id,
-                lease_id=str(lease["id"]),
-                generation=str(incarnation.generation),
-            )
         result = public(lease)
     if was_open and result["status"] == ImpersonationStatus.EXPIRED:
         wake_agent(db, bus, agent_id, roster_changed=True)

@@ -263,10 +263,10 @@ def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
     assert relay._ended(
         replace(snapshot, status=ImpersonationStatus.RELEASED), 42, 0, emitted.append
     )
-    assert len(emitted) == 1  # Release injection remains solely host-owned.
+    assert len(emitted) == 1  # A released lease sends no notice: the releaser knows.
 
 
-async def test_codex_relay_never_duplicates_host_owned_terminal_notice() -> None:
+async def test_codex_relay_never_duplicates_the_host_terminal_notice() -> None:
     snapshot = relay.InboxSnapshot(frozenset(), {}, datetime.now(UTC), ImpersonationStatus.EXPIRED)
     emitted: list[str] = []
 

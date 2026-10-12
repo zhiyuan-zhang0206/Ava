@@ -39,16 +39,22 @@ the existing lifecycle apply helpers entirely outside graph execution. Only
 an accepted command can leave that claim path; it bypasses ordinary batch
 acknowledgement. Invalid directed pending intents fail without settlement;
 an accepted intent whose target was replaced receives the existing explicit
-`superseded` result. Restart preserves the external lease; termination revokes it atomically
-through the database lifecycle trigger. New runtime incarnations read the same
-lease before normal execution. Database-clock expiry and explicit release
-begin durable handoff before reopening the ordinary input path.
+`superseded` result. A lease is bound to the native incarnation that accepted it:
+the admission of a replacement incarnation (a restart or a host takeover) closes
+any accepted or active lease as expired with the cause `aborted: native runtime
+restarted`, and the external controller must request again. Termination revokes
+the lease atomically through the database lifecycle trigger. Database-clock expiry,
+explicit release and that admission-time close begin durable handoff before
+reopening the ordinary input path.
 Termination also queues ordered native system notes: impersonation interrupted,
 then completed termination. Ordinary claim renders these before the resurrection
 marker. Resurrection and its prompt use the database clock after locking the
 agent; claim orders by creation time and id, including equal-time notes.
-The closing lease reason drives the independent host scan's durable notice
-without reopening expired inbox authority or delaying native handoff.
+When the host first sees its Codex relay's lease ended, it submits one ended-lease
+notice to the recorded thread without reopening expired inbox authority or
+delaying native handoff. A failed submission is reported once through
+`impersonation_terminal_notice_failed` and never retried; a lease that ended while no
+host held its relay child gets no notice.
 
 Cancel requests remain pending in the external inbox while held. The controller
 acknowledges the request on receipt, then stops its current work; the cancel

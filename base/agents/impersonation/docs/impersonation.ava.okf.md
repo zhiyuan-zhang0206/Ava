@@ -128,11 +128,11 @@ See [[ava/external/docs/external.ava.okf.md]],
 [external agent procedure](../../../../docs/conventions/agents/agent-impersonation.md), and
 [host relay setup](../../../../docs/conventions/agents/agent-impersonation-hosts.md).
 
-Relay generation claims serialize under the native owner and lease locks.
-The private credential pipe opens only after the new child birth is persisted;
-confirmed retirement precedes rotation, including previously reserved senders.
+The relay credential is minted once per lease under the native owner and lease
+locks; a second mint returns nothing and a relay is never rotated or replaced.
 Already in-flight host RPCs may complete later: no distributed exactly-once
 claim is made. `relay_degraded_reason` and `relay_degraded_at` describe the last
 observed failure, not an assertion that the channel is currently unhealthy.
-`terminal_notices.py` owns independently retried ended-lease injection, while
-`host_transport.py` owns actual Codex acceptance and CLI compatibility imports.
+`terminal_notices.py` owns the ended-lease notice text and its single submission
+(nothing is recorded or retried), while `host_transport.py` owns actual Codex
+acceptance and CLI compatibility imports.

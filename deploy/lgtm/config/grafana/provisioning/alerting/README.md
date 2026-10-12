@@ -254,6 +254,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `ava-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |
 | `ava-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |
 | `ava-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
+| `ava-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
 | `ava-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
 | `ava-ops-im-feishu-owner-seed-failed` | `im_feishu_owner_seed_failed` | 0s | warning | a direct owner message |
 | `ava-ops-lifecycle-pointer-stuck` | `lifecycle_pointer_stuck` (2h) | 0s | warning | the settle of an unobserved force-terminate fence (boot recovery and the absent-machine sweep): now an operator settles it by hand |

@@ -86,7 +86,7 @@ def _relay_session(
     return _session(status, **base)
 
 
-async def test_successor_admission_resets_a_stale_accepted_binding(
+async def test_successor_admission_ends_a_stale_accepted_lease(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
@@ -98,9 +98,8 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Issue #2052: an accepted (not yet active) lease whose accepting
-    incarnation died restarts at 'requested' under the successor admission —
-    the same crash-before-ACK semantics as the lazy native_status path."""
+    """An accepted (not yet active) lease whose accepting incarnation died does not
+    survive the successor's admission: it is closed, not re-asked."""
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
     from base.agents.messages.caller_identity import CallerIdentity
@@ -150,10 +149,14 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     )
     assert successor is not None
     assert db_conn.execute(
-        "SELECT status,accepted_generation,accepted_owner,consent_version "
+        "SELECT status,ended_at IS NOT NULL,rejection_reason,consent_version "
         "FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
-    ).fetchone() == ("requested", None, None, 2)
+    ).fetchone() == ("expired", True, "aborted: native runtime restarted", 1)
+    # Closing the lease must not write the dead predecessor back over the live row.
+    assert db_conn.execute(
+        "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (successor.generation, successor.owner)
 
 
 def test_resume_note_pending_tracks_the_trailing_end_note() -> None:
