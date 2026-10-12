@@ -1,100 +1,34 @@
-"""Real process quiescence and the credential pipe's birth-registration boundary."""
+"""The relay credential pipe and the real database effect of a dead relay child."""
 
 from __future__ import annotations
 
-import contextlib
 import subprocess
 import sys
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
-import psutil
 import pytest
 
 from agent import impersonation, impersonation_process
-from base.agents.observation.relay_supervision import relay_exited
+from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
+from agent.tests.impersonation.test_impersonation import relays as relays
+from base.agents.context import AvaContext
+from base.agents.observation.relay_supervision import RelayChild
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
-from base.native_process.ownership import OwnedProcess
 
 
-@pytest.mark.parametrize("wrong_birth", [False, True])
-def test_recorded_birth_retirement_prevents_new_old_sender_submission(
-    tmp_path: Path, wrong_birth: bool
-) -> None:
-    marker = tmp_path / "submitted"
-    process = subprocess.Popen(  # noqa: S603 — fixed isolated test child
-        [
-            sys.executable,
-            "-c",
-            'import sys; from pathlib import Path; sys.stdin.buffer.read(1); Path(sys.argv[1]).write_text("submitted")',
-            str(marker),
-        ],
-        stdin=subprocess.PIPE,
-    )
-    try:
-        identity = OwnedProcess.capture(psutil.Process(process.pid))
-        if wrong_birth:
-            identity = OwnedProcess(
-                identity.pid,
-                identity.birth + 1,
-                identity.starttime + 1 if identity.starttime is not None else None,
-            )
-        assert relay_exited(None, asdict(identity)) is wrong_birth
-        assert impersonation._retire_recorded_relay(
-            {"relay_identity": asdict(identity), "relay_generation": 1}
-        )
-        if wrong_birth:
-            assert process.poll() is None  # Never signal a reused or mismatched birth.
-        else:
-            process.wait(timeout=5)
-            assert process.stdin is not None
-            with pytest.raises(BrokenPipeError):
-                process.stdin.write(b"x")
-                process.stdin.flush()
-            assert not marker.exists()
-    finally:
-        if process.poll() is None:
-            process.terminate()
-        process.wait(timeout=5)
-        if process.stdin is not None:
-            with contextlib.suppress(BrokenPipeError):
-                process.stdin.close()
-
-
-def test_unknown_retirement_does_not_signal_live_pid(
+def test_spawn_sends_the_private_token_over_the_pipe_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-    try:
-        identity = OwnedProcess.capture(psutil.Process(process.pid))
-        monkeypatch.setattr(
-            OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable"))
-        )
-        assert not relay_exited(None, asdict(identity))
-        assert not impersonation._retire_recorded_relay(
-            {"relay_identity": asdict(identity), "relay_generation": 1}
-        )
-        assert process.poll() is None
-    finally:
-        process.terminate()
-        process.wait(timeout=5)
-
-
-@pytest.mark.parametrize("registration_fails", [False, True])
-def test_spawn_never_releases_private_token_before_birth_registration(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    registration_fails: bool,
 ) -> None:
     marker = tmp_path / "received"
     real_popen = subprocess.Popen
-    children: list[subprocess.Popen[bytes]] = []
+    argvs: list[list[str]] = []
 
-    def spawn(_argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
-        child = real_popen(
+    def spawn(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        argvs.append(argv)
+        return real_popen(
             [
                 sys.executable,
                 "-c",
@@ -107,42 +41,18 @@ def test_spawn_never_releases_private_token_before_birth_registration(
             start_new_session=True,
             env=kwargs["env"],
         )
-        children.append(child)
-        return child
 
     monkeypatch.setattr(impersonation_process.subprocess, "Popen", spawn)
-    identities: list[OwnedProcess] = []
-
-    def register(child: subprocess.Popen[bytes]) -> None:
-        assert not marker.exists()
-        identities.append(OwnedProcess.capture(psutil.Process(child.pid)))
-        if registration_fails:
-            raise RuntimeError("DB disconnected before birth persistence")
-
-    if registration_fails:
-        with pytest.raises(RuntimeError, match="DB disconnected"):
-            impersonation_process.spawn_codex_relay(
-                1, "lease", "private-test-token", "thread", None, register=register
-            )
-        assert not marker.exists()
-    else:
-        child = impersonation_process.spawn_codex_relay(
-            1, "lease", "private-test-token", "thread", None, register=register
-        )
-        child.wait(timeout=5)
-        assert marker.read_bytes() == b"private-test-token\n"
-    assert len(identities) == len(children) == 1
-    assert children[0].poll() is not None
-
-
-def test_new_claim_without_birth_is_safe_but_legacy_unknown_is_not() -> None:
-    assert not relay_exited(None, None), "missing birth is not confirmed exit"
-    assert impersonation._retire_recorded_relay({"relay_identity": None, "relay_generation": 1})
-    assert not impersonation._retire_recorded_relay({"relay_identity": None, "relay_generation": 0})
+    child = impersonation_process.spawn_codex_relay(
+        1, "lease", "private-test-token", "thread", None
+    )
+    child.wait(timeout=5)
+    assert marker.read_bytes() == b"private-test-token\n"
+    assert all("private-test-token" not in part for part in argvs[0])
 
 
 @pytest.fixture
-def recovery_lease(
+def active_codex_lease(
     db_conn: Any,
     database: Any,
     event_bus: Any,
@@ -200,7 +110,7 @@ def recovery_lease(
                 aid,
                 caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
                 ttl_seconds=3600,
-                reason="Recover transport",
+                reason="Degrade transport",
                 relay_provider="codex",
                 relay_thread_id=str(uuid4()),
                 relay_codex_remote=f"unix://{socket}",
@@ -223,110 +133,84 @@ def recovery_lease(
             server.stop()
 
 
-async def test_confirmed_child_death_recovers_same_lease_after_db_disconnect(
+async def test_dead_relay_child_is_degraded_and_never_replaced(
     db_conn: Any,
     database: Any,
     event_bus: Any,
     monkeypatch: pytest.MonkeyPatch,
-    recovery_lease: Any,
+    active_codex_lease: Any,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    import asyncio
-    from datetime import UTC, datetime, timedelta
-
-    import psycopg
-    from psycopg.types.json import Jsonb
-
     from base.agents import impersonation as leases
-    from base.agents.observation.relay_supervision import RelaySupervision
+    from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
     from tests.impersonation_support import attested_caller
 
-    session, owner = recovery_lease
+    session, owner = active_codex_lease
     assert leases.provision_relay(database, session["id"], owner, "old-private") is not None
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
-    identity = OwnedProcess.capture(psutil.Process(dead.pid))
     dead.wait(timeout=5)
     db_conn.execute(
-        "UPDATE agent_impersonations SET relay_identity=%s,relay_minted_at=clock_timestamp(),relay_heartbeat_at=clock_timestamp() WHERE id=%s",
-        (Jsonb(asdict(identity)), session["id"]),
+        "UPDATE agent_impersonations SET relay_heartbeat_at=clock_timestamp() WHERE id=%s",
+        (session["id"],),
     )
     db_conn.commit()
     current = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert current is not None
-    assert impersonation._heartbeat_fresh(current["relay_heartbeat_at"])
-    expires_at = current["expires_at"]
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
-    relays = RelaySupervision()
-    original = leases.provision_relay
-    monkeypatch.setattr(
-        leases,
-        "provision_relay",
-        Mock(side_effect=psycopg.errors.ConnectionTimeout("DB unavailable")),
-    )
-    with pytest.raises(psycopg.errors.ConnectionTimeout):
-        await impersonation.supervise_relay(
-            database,
-            event_bus,
-            current,
-            owner.agent_id,
-            relays,
-            incarnation=owner,
-            read_local_machine=machine_identity.name,
-        )
-    assert (
-        leases.get(
-            database,
-            event_bus,
-            session["id"],
-            attested_caller(
-                session,
-            ),
-            local_machine=machine_identity.name(),
-        )["status"]
-        == "active"
-    )
-    monkeypatch.setattr(leases, "provision_relay", original)
-    spawn = Mock(wraps=impersonation_process.spawn_codex_relay)
+    spawn = Mock()
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
-    await asyncio.gather(
-        *(
-            impersonation.supervise_relay(
-                database,
-                event_bus,
-                current,
-                owner.agent_id,
-                relays,
-                incarnation=owner,
-                read_local_machine=machine_identity.name,
-            )
-            for _ in range(2)
-        )
+    relays = RelaySupervision()
+    relays.children[owner.agent_id] = RelayChild(
+        session["id"], dead, "old-private", 0.0, current["relay_generation"]
     )
-    assert spawn.call_count == 1
-    child = relays.children[owner.agent_id]
-    deadline = datetime.now(UTC) + timedelta(seconds=10)
-    try:
-        live = leases.get(
-            database,
-            event_bus,
-            session["id"],
-            attested_caller(
-                session,
-            ),
-            local_machine=machine_identity.name(),
+    await impersonation.supervise_relay(
+        database, event_bus, current, owner.agent_id, relays, incarnation=owner
+    )
+    spawn.assert_not_called()
+    after = leases.get(
+        database,
+        event_bus,
+        session["id"],
+        attested_caller(session),
+        local_machine=machine_identity.name(),
+    )
+    assert after["status"] == "active"
+    assert after["relay_generation"] == current["relay_generation"]
+    assert after["relay_degraded_reason"] == "relay unavailable; automatic recovery unsupported"
+    assert after["relay_degraded_at"] is not None
+    assert after["expires_at"] == current["expires_at"]
+    leases.relay_heartbeat(
+        database, session["id"], "old-private", local_machine=machine_identity.name()
+    )  # the credential is unchanged
+
+
+@pytest.mark.parametrize("error", [None, "TimeoutError: ambiguous acceptance"])
+async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+    gate_ctx: AvaContext,
+    loguru_records: list[dict[str, Any]],
+    error: str | None,
+) -> None:
+    lease_id = "00000000-0000-0000-0000-000000000001"
+    gate_ctx.relays.children[42] = RelayChild(lease_id, MagicMock(), "token", 0.0, 1)
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = ("expired",)
+    db = MagicMock()
+    db.connect.return_value.__enter__.return_value = conn
+    monkeypatch.setattr(impersonation, "_terminate_relay", Mock())
+    send = Mock(return_value=error)
+    monkeypatch.setattr("base.agents.impersonation.terminal_notices.send_ended_notice", send)
+    # Every later pass finds no child left to announce for: there is no retry.
+    for _ in range(3):
+        await impersonation.supervise_relay(
+            db, MagicMock(), None, 42, gate_ctx.relays, incarnation=None
         )
-        while datetime.now(UTC) < deadline and live["relay_heartbeat_at"] is None:
-            await asyncio.sleep(0.05)
-            live = leases.native_status(database, event_bus, owner.agent_id, owner)
-            assert live is not None
-        assert (live["status"], live["relay_generation"]) == ("active", 2)
-        assert live["relay_heartbeat_at"] is not None
-        assert live["relay_identity"]["pid"] == child.process.pid
-        assert live["expires_at"] == expires_at
-        with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
-            leases.relay_heartbeat(
-                database, session["id"], "old-private", local_machine=machine_identity.name()
-            )
-    finally:
-        impersonation._terminate_relay(child)
+    send.assert_called_once_with(db, lease_id)
+    failures = [
+        record["extra"]
+        for record in loguru_records
+        if record["extra"].get("event") == "impersonation_terminal_notice_failed"
+    ]
+    assert [failure["error"] for failure in failures] == ([] if error is None else [error])
+    assert 42 not in gate_ctx.relays.children

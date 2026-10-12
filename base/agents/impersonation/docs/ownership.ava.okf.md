@@ -15,10 +15,11 @@ Internally, preparing uses requested/accepted to preserve the drain handshake.
 A trusted controller does not require a native model approval. The native claim
 gate accepts automatically, ends that invocation, drains execution resources,
 repairs and flushes a checkpoint timeline anchor, verifies the relay heartbeat,
-then activates. Only one executor owns decisions. A new native incarnation
-reconciles preparation; active control survives native restarts. Administrative
+then activates. Only one executor owns decisions. A lease belongs to the native
+incarnation that accepted it: the admission of a replacement incarnation closes an
+accepted or active lease (`base/agents/impersonation/replacement.py`, cause `aborted:
+native runtime restarted`) and the controller must request again. Administrative
 restart/terminate still reach the native dispatcher; termination revokes control.
-Legacy live requests retain their original consent flow during an upgrade.
 
 Lease status is owned by `base/agents/impersonation/status.py` (`ImpersonationStatus`):
 requested, accepted, active, released, rejected, expired. Raw lifecycle query rows
@@ -31,13 +32,14 @@ note followed by a completed-termination note, including when native execution
 is drained. Both precede the next resurrection marker; the graph's acceptance
 acknowledgement describes the earlier intent separately. Termination dismisses
 renewal reminders and records `terminated: agent was terminated` on the session.
-The machine host's existing scan independently sends a lease-scoped notice to
-its immutable recorded Codex endpoint/thread, even when the relay is dead or a
-new lease has replaced it. No inbox authority is reopened. Native restoration
-never waits for notice delivery. Host acceptance is persisted; ambiguous timeout
-retries may duplicate a notice. Unsupported providers remain explicitly marked,
-never described as delivered. Only first open-to-terminal transitions mark a
-notice; existing ended history is not backfilled. Restart preserves the lease.
+When the host sees its Codex relay's lease ended, it submits one lease-scoped
+notice to the immutable recorded Codex endpoint/thread, even if a new lease has
+replaced it. No inbox authority is reopened. Native restoration never waits for
+notice delivery. The submission is not retried and nothing records its outcome; a
+failure raises `impersonation_terminal_notice_failed`, and a lease that ended while
+no host held its relay child, or after a termination, gets no notice. Only first
+open-to-terminal transitions snapshot a notice; existing ended history is not
+backfilled. A restart ends the lease.
 The native pair carries `impersonation_termination_notice: true`; the watchdog
 preserves these notes through long terminated periods for later resurrection.
 

@@ -15,23 +15,19 @@ with an open lease periodically, pull-based from the database, so supervision
 does not depend on wake delivery. Executor authority is separate from relay
 transport: only confirmed provider-anchor death, explicit end or original TTL
 ends the lease. Unknown liveness remains visible until the original deadline.
-Confirmed Codex relay exit bypasses heartbeat freshness and startup grace on
-the next existing supervision pass. Known child handles or the recorded birth
-provide this observation; missing or unknown evidence is not confirmed exit.
-Alive senders keep the existing heartbeat/startup grace behavior. No additional
-scan or wake loop is introduced. Recovery still retires the old recorded process
-birth, then claims one
-transport generation under the lease lock. The new child receives its private
-credential only after its birth is persisted. Message attempts and ACK remain
-durable across replacement; exhaustion pauses a message, never identity.
-Legacy generation-zero relays missing birth evidence remain visibly degraded
-rather than guessed or adopted. Independent ended-lease notices use the existing
-host scan and shared `base.agents.impersonation.host_transport` owner; native
-handoff does not wait for host submission or its retry receipts.
+Confirmed Codex relay exit (the host's own child handle) bypasses heartbeat
+freshness and startup grace on the next existing supervision pass; missing or
+unknown evidence is not confirmed exit. Alive senders keep the existing
+heartbeat/startup grace behavior. No additional scan or wake loop is introduced.
+A stale or exited relay of any provider is recorded as degraded and is never
+replaced: the lease keeps its one credential and runs to its original TTL, the
+executor's confirmed death or an explicit end, and the controller re-requests
+if it wants a new relay. Message attempts and ACK remain durable; exhaustion
+pauses a message, never identity. The ended-lease notice uses the shared
+`base.agents.impersonation.host_transport` owner; native handoff does not wait for
+the host's single submission.
 
-`agent/impersonation_process.py` owns process launch and birth registration.
-Its private pipe writes the scoped credential only after successful registration;
-registration failure terminates and joins the child before propagating the error.
-The native gate and host supply their own machine reader to relay supervision;
-the reader is called at the existing identity-record and relay-authentication
-boundaries, after partial-context and resource-closure guards.
+`agent/impersonation_process.py` owns process launch: its private pipe writes the
+scoped credential to the child's stdin.
+The native gate supplies its machine reader to relay authentication at the
+existing boundaries, after partial-context and resource-closure guards.

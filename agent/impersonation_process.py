@@ -1,19 +1,12 @@
-"""Bound relay process launch and credential delivery after birth registration."""
+"""Bound relay process launch and credential delivery."""
 
 from __future__ import annotations
 
 import contextlib
 import subprocess
 import sys
-from collections.abc import Callable
-from dataclasses import asdict
 
-import psutil
-
-from base.db import Database
-from base.native_process.runtime_incarnation import RuntimeIncarnation
-
-__all__ = ["register_relay", "spawn_codex_relay"]
+__all__ = ["spawn_codex_relay"]
 
 
 def spawn_codex_relay(
@@ -23,7 +16,6 @@ def spawn_codex_relay(
     thread_id: str,
     codex_remote: str | None,
     codex_home: str | None = None,
-    register: Callable[[subprocess.Popen[bytes]], None] | None = None,
 ) -> subprocess.Popen[bytes]:
     """Spawn the bound relay; the scoped credential travels over a private pipe.
 
@@ -64,30 +56,5 @@ def spawn_codex_relay(
     with contextlib.suppress(BrokenPipeError, OSError):  # child already gone; poll reports it
         assert process.stdin is not None  # noqa: S101 — PIPE requested above
         with process.stdin:
-            if register is not None:
-                try:
-                    register(process)
-                except Exception:
-                    process.terminate()
-                    process.wait(timeout=5)
-                    raise
             process.stdin.write(relay_token.encode() + b"\n")
     return process
-
-
-def register_relay(
-    db: Database,
-    lease_id: str,
-    incarnation: RuntimeIncarnation,
-    token: str,
-    process: subprocess.Popen[bytes],
-    *,
-    read_local_machine: Callable[[], str],
-) -> None:
-    from base.agents.impersonation.relay import record_relay_identity
-    from base.native_process.ownership import OwnedProcess
-
-    identity = OwnedProcess.capture(psutil.Process(process.pid))
-    record_relay_identity(
-        db, lease_id, incarnation, token, asdict(identity), local_machine=read_local_machine()
-    )

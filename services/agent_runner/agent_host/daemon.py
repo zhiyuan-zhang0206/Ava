@@ -66,7 +66,6 @@ from ava.sdk_surface.installation import Installation
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
-from base.agents.impersonation.terminal_notices import run_notice_delivery
 from base.agents.observation.db_wait import DatabaseWaits
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import MachineIdentity
@@ -520,16 +519,12 @@ async def _dispatch_host(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     db: Database,
     bus: EventBus,
-    local_machine: str,
     *,
     catalog: ModelCatalog,
     config: ConfigBoot,
 ) -> None:
     """Run dispatcher siblings, joined before the owned heartbeat and turn drain."""
     async with asyncio.TaskGroup() as background:
-        background.create_task(
-            run_notice_delivery(db, local_machine), name="impersonation_terminal_notices"
-        )
         for name, loop in _background_loops(
             control_pool, db, catalog=catalog, config=config
         ).items():
@@ -666,7 +661,6 @@ async def run(
                 control_pool,
                 db,
                 bus,
-                local_machine,
                 catalog=installation.require_catalog(),
                 config=config,
             )

@@ -4,6 +4,7 @@ from typing import Any
 from uuid import uuid4
 
 import psycopg
+import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
@@ -21,7 +22,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
-async def test_successor_admission_aligns_active_lease_binding_before_release(
+async def test_successor_admission_ends_an_active_lease_without_restoring_the_dead_owner(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
@@ -33,8 +34,8 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    """Successor admission aligns accepted_* before release; native_status
-    cannot restore the dead incarnation even before a held wake."""
+    """An active takeover does not follow the native runtime into its successor: the
+    admission closes it, and the close does not restore the dead incarnation."""
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
     from base.agents.messages.caller_identity import CallerIdentity
@@ -96,19 +97,26 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     assert successor is not None
     assert successor.generation != first.generation
     assert db_conn.execute(
-        "SELECT accepted_generation,accepted_owner FROM agent_impersonations WHERE id=%s",
+        "SELECT status,rejection_reason,summary_inbound_id IS NOT NULL "
+        "FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
-    ).fetchone() == (successor.generation, successor.owner)
-    # Release before any native_status: the restore trigger fires, but the
-    # binding already matches the live incarnation — agents_meta is untouched.
-    leases.release(
-        database,
-        event_bus,
-        lease["id"],
-        attested_caller(lease),
-        "Done before the first held wake",
-        local_machine=machine_identity.name(),
-    )
+    ).fetchone() == ("expired", "aborted: native runtime restarted", True)
+    # The end note reaches the replacement's inbox for its return handoff.
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND source='system:impersonation' "
+        "AND content LIKE %s",
+        (agent_id, "%native runtime restarted%"),
+    ).fetchone() == (1,)
+    # The controller's late release finds nothing to release and cannot touch the row.
+    with pytest.raises(leases.ImpersonationError):
+        leases.release(
+            database,
+            event_bus,
+            lease["id"],
+            attested_caller(lease),
+            "Done after the restart",
+            local_machine=machine_identity.name(),
+        )
     db_conn.commit()
     assert db_conn.execute(
         "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",

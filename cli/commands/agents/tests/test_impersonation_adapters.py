@@ -96,7 +96,7 @@ def test_controller_adapter_keeps_multiline_unicode_envelopes(
         assert output == message + "\n"
 
 
-def test_codex_terminal_notice_has_one_native_owner() -> None:
+def test_codex_terminal_notice_is_left_to_the_native_host() -> None:
     adapter = adapters.resolve_adapter(
         "codex", str(THREAD_ID), codex_remote="unix:///tmp/ava-codex.sock"
     )

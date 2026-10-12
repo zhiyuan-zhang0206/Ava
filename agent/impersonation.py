@@ -15,7 +15,6 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-import psutil
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -29,6 +28,7 @@ from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.impersonation.notes import HandoffNotes
+from base.agents.impersonation.relay import record_relay_failure
 from base.agents.impersonation.relay import stamp_relay_failure as _stamp_relay_failure
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
@@ -90,7 +90,6 @@ async def claim_gate(
         agent_id,
         ctx.relays,
         incarnation=incarnation,
-        read_local_machine=lambda: ctx.require_machine().name(),
     )
     if session is None:
         return None
@@ -421,14 +420,6 @@ def _establish_codex_relay(
             session["relay_thread_id"],
             session["relay_codex_remote"],
             session["process_metadata"].get("codex_home"),
-            lambda process: _relay_process.register_relay(
-                db,
-                session["id"],
-                incarnation,
-                relay_token,
-                process,
-                read_local_machine=read_local_machine,
-            ),
         ),
         relay_token,
         time.monotonic(),
@@ -538,13 +529,14 @@ async def supervise_relay(
     relays: RelaySupervision,
     *,
     incarnation: RuntimeIncarnation | None,
-    read_local_machine: Callable[[], str],
 ) -> None:
-    """Supervise executor authority separately from recoverable relay delivery.
+    """Supervise executor authority and observe relay delivery.
 
     Only confirmed executor death ends a valid lease. Uncertain evidence keeps
-    the original TTL unchanged. A stopped delivery child is retired before
-    a locked generation claim mints a replacement; native work stays fenced.
+    the original TTL unchanged. A stale or exited relay is recorded as degraded
+    and never replaced: the lease runs to its TTL or the executor's death. When
+    the host first sees its relay's lease ended, it submits the ended-lease
+    notice once.
     """
     child = relays.children.get(agent_id)
     if (
@@ -563,26 +555,17 @@ async def supervise_relay(
                 if relays.children.get(agent_id) is child:
                     relays.children.pop(agent_id, None)
                 await asyncio.to_thread(_terminate_relay, child)
+                await _send_ended_notice(db, agent_id, child.lease_id)
         return
     if session["status"] != ImpersonationStatus.ACTIVE:
         return
     if await _executor_verdict_stops(db, bus, session, agent_id, relays, incarnation=incarnation):
         return
-    exited = await asyncio.to_thread(
-        relay_exited, child, session.get("relay_identity"), provider=session["relay_provider"]
-    )
+    exited = relay_exited(child)
     if not exited and _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
-    await _handle_stale_relay(
-        db,
-        bus,
-        session,
-        agent_id,
-        child,
-        relays,
-        confirmed_exit=exited,
-        incarnation=incarnation,
-        read_local_machine=read_local_machine,
+    await _record_stale_relay(
+        db, session, agent_id, child, confirmed_exit=exited, incarnation=incarnation
     )
 
 
@@ -623,31 +606,24 @@ async def _executor_verdict_stops(
     return True
 
 
-async def _handle_stale_relay(
+async def _record_stale_relay(
     db: Database,
-    _bus: EventBus,
     session: dict[str, Any],
     agent_id: int,
     child: RelayChild | None,
-    relays: RelaySupervision,
     *,
     confirmed_exit: bool = False,
     incarnation: RuntimeIncarnation | None,
-    read_local_machine: Callable[[], str],
 ) -> None:
-    """Retire the previous sender before claiming a replacement generation."""
+    """Record a stale or exited relay as degraded; nothing replaces it.
+
+    A relay still inside its startup window is left alone. The lease keeps its
+    original TTL: messages stay in the inbox and the liveness alert names the
+    gap until the controller re-requests or releases.
+    """
     from base.agents.impersonation.relay import record_degradation
 
     if incarnation is None:
-        return
-    if session["relay_provider"] != "codex":
-        await asyncio.to_thread(
-            record_degradation,
-            db,
-            session["id"],
-            incarnation,
-            "controller-session relay unavailable; automatic recovery unsupported",
-        )
         return
     if (
         not confirmed_exit
@@ -663,119 +639,34 @@ async def _handle_stale_relay(
         and (datetime.now(UTC) - minted_at).total_seconds() < _RELAY_READY_TIMEOUT_S
     ):
         return
-    if child is not None:
-        await asyncio.to_thread(_terminate_relay, child)
-        if relays.children.get(agent_id) is child:
-            relays.children.pop(agent_id, None)
-    elif not await asyncio.to_thread(_retire_recorded_relay, session):
-        await asyncio.to_thread(
-            record_degradation,
-            db,
-            session["id"],
-            incarnation,
-            "previous relay retirement unknown; replacement withheld",
-        )
-        return
-    await _reprovision_relay(
-        db, session, agent_id, incarnation, relays, read_local_machine=read_local_machine
-    )
-
-
-def _retire_recorded_relay(session: dict[str, Any]) -> bool:
-    """Confirm quiescence by recorded birth; unknown identity never licenses a spawn."""
-    import signal
-
-    from base.native_process.ownership import OwnedProcess
-
-    raw = session.get("relay_identity")
-    if raw is None:
-        # Generation >=1 was minted only after retirement. Its child cannot
-        # receive a token before registering: missing identity is a blocked
-        # child or a crash before spawn, never an authorized unseen sender.
-        return session.get("relay_generation", 0) > 0
-    identity = OwnedProcess(pid=raw["pid"], birth=raw["birth"], starttime=raw["starttime"])
-    try:
-        if not identity.live():
-            return True
-        identity.send_signal(signal.SIGTERM)
-        deadline = time.monotonic() + 5
-        while identity.live() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        if identity.live():
-            identity.send_signal(signal.SIGKILL)
-        deadline = time.monotonic() + 5
-        while identity.live() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        return not identity.live()
-    except (psutil.Error, OSError, RuntimeError):
-        return False
-
-
-async def _reprovision_relay(
-    db: Database,
-    session: dict[str, Any],
-    agent_id: int,
-    incarnation: RuntimeIncarnation,
-    relays: RelaySupervision,
-    *,
-    read_local_machine: Callable[[], str],
-) -> None:
-    """Rotate once for the observed generation; retain lease and message budgets."""
-    from base.agents.impersonation import (
-        ImpersonationError,
-        provision_relay,
-        record_relay_failure,
-    )
-
-    token = secrets.token_urlsafe(32)
-    try:
-        minted = await asyncio.to_thread(
-            provision_relay,
-            db,
-            session["id"],
-            incarnation,
-            token,
-            expected_generation=session["relay_generation"],
-        )
-        if minted is None:
-            return
-    except (ImpersonationError, RuntimeError):
-        await asyncio.to_thread(
-            _stamp_relay_failure,
-            db,
-            session,
-            agent_id,
-            record_relay_failure,
-            incarnation=incarnation,
-        )
-        return
-    spawned_at = time.monotonic()
-    relays.children[agent_id] = RelayChild(
+    await asyncio.to_thread(
+        record_degradation,
+        db,
         session["id"],
-        _relay_process.spawn_codex_relay(
-            agent_id,
-            session["id"],
-            token,
-            session["relay_thread_id"],
-            session["relay_codex_remote"],
-            session["process_metadata"].get("codex_home"),
-            lambda process: _relay_process.register_relay(
-                db,
-                session["id"],
-                incarnation,
-                token,
-                process,
-                read_local_machine=read_local_machine,
-            ),
-        ),
-        token,
-        spawned_at,
-        minted["relay_generation"],
+        incarnation,
+        "relay unavailable; automatic recovery unsupported",
     )
+    await asyncio.to_thread(
+        _stamp_relay_failure,
+        db,
+        session,
+        agent_id,
+        record_relay_failure,
+        incarnation=incarnation,
+    )
+
+
+async def _send_ended_notice(db: Database, agent_id: int, lease_id: str) -> None:
+    """Submit the ended lease's notice once; a failure is logged and never retried."""
+    from base.agents.impersonation.terminal_notices import send_ended_notice
     from base.log import logger
 
-    logger.warning(
-        "recovering impersonation delivery without changing external lease authority",
-        agent_id=agent_id,
-        lease_id=str(session["id"]),
-    )
+    error = await asyncio.to_thread(send_ended_notice, db, lease_id)
+    if error is not None:
+        logger.error(
+            "ended impersonation lease notice was not delivered and will not be retried",
+            event="impersonation_terminal_notice_failed",
+            agent_id=agent_id,
+            lease_id=str(lease_id),
+            error=error,
+        )

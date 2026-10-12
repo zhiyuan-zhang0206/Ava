@@ -168,7 +168,6 @@ async def test_held_controls_supervise_the_active_lease_relay(
         42,
         host.relays,
         incarnation=owner,
-        read_local_machine=machine_identity.name,
     )
 
 
