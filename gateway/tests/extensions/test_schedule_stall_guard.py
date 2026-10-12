@@ -13,8 +13,8 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 
 # ── stall guard (2026-08-03: a hung schedule sat "alive" through the gateway
-#    freeze window and silently missed its Monday fire — the guard hard-exits
-#    so the manager's crash path gets a chance) ─────────────────────────────
+#    freeze window and silently missed its Monday fire — the guard records the
+#    stall and hard-exits so the schedule is not a silent zombie) ────────────
 
 
 @contextmanager
@@ -24,7 +24,6 @@ def _watch_stalls(
     """Record real guard verdicts without exiting the test process."""
     import gateway.schedules.runner as sr
 
-    monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.1)
     fired: list[str] = []
 
@@ -34,7 +33,7 @@ def _watch_stalls(
     monkeypatch.setattr(sr, "_stall_action", record_stall)
     if patch_sleep:
         sr._patch_park_detection()
-    stop = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
+    stop = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
     try:
         yield fired
     finally:
@@ -69,7 +68,6 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
 
     import gateway.schedules.runner as sr
 
-    monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.05)
     fired: list[str] = []
     monkeypatch.setattr(
@@ -83,7 +81,7 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     # which is indistinguishable from a stall.
     _real_sleep = time.sleep
     sr._patch_park_detection()
-    stop = sr._start_stall_guard(Database.from_settings(gate=database_gate), 1, None)
+    stop = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
     try:
         time.sleep(0.4)  # main thread parked in time.sleep the whole time
         assert fired == []
