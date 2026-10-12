@@ -515,7 +515,8 @@ def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
 def test_helper_ping_settles_until_cold_start_answers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.desktop.permissions_helper import client, lifecycle
+    from base.host.permissions_helper import client
+    from services.desktop.permissions_helper import lifecycle
 
     replies: list[object] = [
         client.PermissionsHelperError("socket not ready"),
@@ -571,7 +572,8 @@ def test_unresponsive_loaded_helper_keeps_unknown_custody(
 def test_unloaded_helper_bootstraps_and_must_answer_ping(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from services.desktop.permissions_helper import client, lifecycle
+    from base.host.permissions_helper import client
+    from services.desktop.permissions_helper import lifecycle
 
     app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=False, matching_plist=False)
     monkeypatch.setattr(

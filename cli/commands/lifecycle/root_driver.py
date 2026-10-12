@@ -149,7 +149,7 @@ def _helper_spawn_committed() -> bool:
 
 def _helper_wire_ok() -> bool:
     """Whether the permission helper answers on this cluster's socket."""
-    from services.desktop.permissions_helper import client as helper_client
+    from base.host.permissions_helper import client as helper_client
 
     try:
         ping = helper_client.ping()
@@ -163,10 +163,10 @@ def _require_root_owner(status: dict[str, Any]) -> None:
     """Bind every reused or stopped root to its required live native parent."""
     import psutil
 
+    from base.host.permissions_helper import client as helper_client
     from base.native_process.ownership import OwnedProcess
     from base.native_process.root_control.client import native_identity
     from base.paths import root_run_dir
-    from services.desktop.permissions_helper import client as helper_client
 
     root = native_identity(status.get("root"))
     if not root.live():
@@ -304,7 +304,7 @@ def _seed_via_helper(
     runtime: StartRuntime | None = None,
 ) -> None:
     """Seed the root keeper and wait for it to report the root `running`."""
-    from services.desktop.permissions_helper import client as helper_client
+    from base.host.permissions_helper import client as helper_client
 
     try:
         from base.host.atomic_io import write_text_atomic
@@ -407,7 +407,7 @@ def _stop_root_process(
                 "signal a helper-seeded root directly (the keeper would restart it); stop it "
                 "through the helper"
             )
-        from services.desktop.permissions_helper import client as helper_client
+        from base.host.permissions_helper import client as helper_client
 
         try:
             reply = helper_client.stop_root()
@@ -726,7 +726,7 @@ def _stop_dormant_helper_root(deadline: float) -> None:
     """Revoke a pending keeper restart even when no root IPC is serving."""
     if not _helper_spawn_committed():
         return
-    from services.desktop.permissions_helper import client as helper_client
+    from base.host.permissions_helper import client as helper_client
     from services.desktop.permissions_helper.launchd_job import (
         helper_job_domain,
         helper_job_label,

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from base.host.permissions_helper.client import AxNode
 from services.desktop.computer.errors import ComputerUseError
-from services.desktop.permissions_helper.client import AxNode
 
 # Entries for elements that left the window are kept so a scrolled-away row
 # regains its id when it returns; past this many, the vanished ones are pruned.

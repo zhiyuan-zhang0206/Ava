@@ -149,7 +149,7 @@ def test_helper_admission_requires_normal_retirement_protocol(
     capabilities = {"root_stop_intent_v1": True, "helper_shutdown_v1": True}
     if missing is not None:
         del capabilities[missing]
-    monkeypatch.setattr("services.desktop.permissions_helper.client.ping", lambda: capabilities)
+    monkeypatch.setattr("base.host.permissions_helper.client.ping", lambda: capabilities)
     assert driver._helper_wire_ok() is (missing is None)
 
 
@@ -240,7 +240,7 @@ def test_helper_seed_is_durable_before_wire_start(
 ) -> None:
     import json
 
-    from services.desktop.permissions_helper import client
+    from base.host.permissions_helper import client
 
     monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
 
@@ -259,7 +259,7 @@ def test_helper_seed_is_durable_before_wire_start(
 def test_stop_without_root_ipc_cancels_pending_helper_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.desktop.permissions_helper import client
+    from base.host.permissions_helper import client
 
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
     monkeypatch.setattr(driver, "_helper_wire_ok", lambda: True)
@@ -507,7 +507,8 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
 def test_unusable_helper_socket_requires_positive_native_absence(
     monkeypatch: pytest.MonkeyPatch, loaded: bool
 ) -> None:
-    from services.desktop.permissions_helper import client, launchd_job
+    from base.host.permissions_helper import client
+    from services.desktop.permissions_helper import launchd_job
 
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
 
@@ -776,7 +777,7 @@ def test_a_boot_attempt_still_brings_up_a_unit_with_budget_left(
 def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.desktop.permissions_helper import client
+    from base.host.permissions_helper import client
 
     monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
     exited = {

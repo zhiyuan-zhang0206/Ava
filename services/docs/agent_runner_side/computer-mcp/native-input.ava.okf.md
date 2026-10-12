@@ -13,7 +13,7 @@ tags:
 MCP schemas. Invalid booleans, strings, nonfinite coordinates, unknown modifiers,
 unknown buttons, duplicate modifiers and out-of-range values fail before input
 is posted. Negative global coordinates remain valid for multiple displays.
-`permissions_helper/wire.py` owns Python result shapes; `client.py` retains its
+`base/host/permissions_helper/wire.py` owns Python result shapes; `client.py` retains its
 existing explicit type exports for consumers.
 
 `click(x, y, button="left", click_count=1, modifiers=[], duration_ms=0)` accepts

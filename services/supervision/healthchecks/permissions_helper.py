@@ -14,10 +14,10 @@ from dataclasses import dataclass
 import psutil
 
 from base.daemon.health import DaemonProbe
+from base.host.permissions_helper import client
 from base.native_process.os_platform import is_macos
 from base.native_process.ownership import OwnedProcess
 from base.paths import permissions_helper_socket
-from services.desktop.permissions_helper import client
 from services.desktop.permissions_helper.launchd_job import (
     HelperJobState,
     parse_job_state,

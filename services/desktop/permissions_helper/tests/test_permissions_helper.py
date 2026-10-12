@@ -23,8 +23,8 @@ from typing import Any, NamedTuple
 
 import pytest
 
-from services.desktop.permissions_helper import client
-from services.desktop.permissions_helper.client import PermissionsHelperError, UserAbortError
+from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperError, UserAbortError
 
 
 def _read_line(conn: socket.socket) -> bytes:

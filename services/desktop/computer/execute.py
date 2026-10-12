@@ -6,8 +6,9 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from ..permissions_helper import client as helper
-from ..permissions_helper import client_stateful as stateful
+from base.host.permissions_helper import client as helper
+from base.host.permissions_helper import client_stateful as stateful
+
 from . import ax_act, ax_tools
 from . import ocr as ocr_mod
 from .ax_ids import AxSession

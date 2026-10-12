@@ -17,8 +17,8 @@ import pytest
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.permissions_helper.client import UserAbortError
 
-from ...permissions_helper.client import UserAbortError
 from .. import mcp_daemon as daemon_mod
 from .. import ocr as ocr_mod
 from .. import ocr_text as ocr_text_mod
