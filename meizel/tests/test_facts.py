@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, edges
+from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, edges
 
 
 def test_from_import_targets_the_submodule_when_one_exists_else_the_door(

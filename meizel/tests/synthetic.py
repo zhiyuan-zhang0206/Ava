@@ -7,8 +7,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from textwrap import dedent
 
-from scripts.meizel.analysis import Analysis, analyze
-from scripts.meizel.model import Diagnostic
+from meizel.contracts.analysis import Analysis, analyze
+from meizel.graph.model import Diagnostic
 
 type RepoFactory = Callable[[Mapping[str, str]], Path]
 

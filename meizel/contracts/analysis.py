@@ -9,12 +9,12 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from scripts.meizel.fixtures import FixtureIndex, fixture_facts
-from scripts.meizel.manifest import Manifest, load_manifests, manifest_path
-from scripts.meizel.model import Code, Diagnostic, Fact, FactKind
-from scripts.meizel.rule import Projection, judge, project
-from scripts.meizel.scan import EXTERNAL_FORMS, FileScan, scan_file
-from scripts.meizel.universe import Universe, load_universe
+from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
+from meizel.contracts.rule import Projection, judge, project
+from meizel.graph.model import Code, Diagnostic, Fact, FactKind
+from meizel.graph.universe import Universe, load_universe
+from meizel.language.fixtures import FixtureIndex, fixture_facts
+from meizel.language.scan import EXTERNAL_FORMS, FileScan, scan_file
 
 __all__ = ["Analysis", "analyze"]
 
@@ -167,7 +167,7 @@ def _stale_diagnostics(
                 manifest.line_of(cf),
                 Code.MANIFEST_STALE_EDGE,
                 f"{cf} -> {ct} is declared but no fact edge needs it",
-                ("run `python -m scripts.meizel sync --prune` to remove it",),
+                ("run `python -m meizel sync --prune` to remove it",),
             )
         )
     for directory, name in stale_loads:
@@ -178,7 +178,7 @@ def _stale_diagnostics(
                 manifest.line_of(name),
                 Code.STALE_LOAD,
                 f"[loads] {name!r} is declared but the file has no dynamic load",
-                ("run `python -m scripts.meizel sync --prune` to remove it",),
+                ("run `python -m meizel sync --prune` to remove it",),
             )
         )
     for directory, name in stale_externals:

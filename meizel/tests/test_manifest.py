@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.meizel.tests.synthetic import RepoFactory, diagnostics, verdict
+from meizel.tests.synthetic import RepoFactory, diagnostics, verdict
 
 BASE = {
     "pkg/__init__.py": "",
