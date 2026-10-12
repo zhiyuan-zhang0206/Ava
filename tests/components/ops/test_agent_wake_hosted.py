@@ -486,49 +486,6 @@ def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
     assert _row(db_conn, aid)[0] == "terminated"
 
 
-def test_reaped_crash_row_keeps_the_failed_restart_fence(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A failed-restart target keeps its hard fence even for a reaped crash
-    row: the relaunch observation must settle first."""
-    aid, trigger = _reaped_crash_park(
-        db_conn,
-        config_authority=config_authority,
-        model_catalog=model_catalog,
-        database_gate=database_gate,
-        machine_identity=machine_identity,
-    )
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET runtime_generation = gen_random_uuid(), "
-            "runtime_owner = gen_random_uuid() WHERE id = %s",
-            (aid,),
-        )
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, status, "
-            "target_generation, target_owner, claimed_at, applied_at, payload) "
-            "SELECT id, '', 'restart', 'system', 'done', runtime_generation, "
-            "runtime_owner, now(), now(), "
-            '\'{"lifecycle_result": {"outcome": "failed", '
-            '"reason": "restart_deadline_expired"}}\'::jsonb '
-            "FROM agents_meta WHERE id = %s",
-            (aid,),
-        )
-    db_conn.commit()
-
-    with pytest.raises(wake.ResurrectTriggerStaleError):
-        _guarded_resurrect(
-            aid, trigger, database_gate=database_gate, machine_identity=machine_identity
-        )
-    assert _row(db_conn, aid)[0] == "terminated"
-
-
 def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
     db_conn: psycopg.Connection,
     wakes: list[tuple[int, str]],

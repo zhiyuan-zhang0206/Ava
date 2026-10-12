@@ -44,7 +44,7 @@ class LivenessState(StrEnum):
 
 class TerminationSource(StrEnum):
     """WHO/WHAT wrote `agents_meta.status='terminated'` — stamped by EVERY code path
-    that writes it, and the sole input to "may this corpse be auto-resurrected".
+    that writes it, so a corpse always records how it died.
 
     Meaningful only while status='terminated'; cleared to NULL on the
     terminated -> idling resurrect transition, so the mark is per-death.
@@ -54,18 +54,13 @@ class TerminationSource(StrEnum):
     the value-set source of truth, locked to the column's CHECK by
     `tests/contracts/test_db_check_enum_sync.py` and to the literals by
     `scripts/lint/termination_source.py`.
-
-    Resurrect policy — INVOLUNTARY deaths come back, intentional ones stay dead:
-    `ops/controllers/resurrect.py` allowlists exactly `RESURRECTABLE`.
     """
 
     # Intentional — the user's will (force-kill, or a terminate that found the pid
-    # already dead). Never auto-resurrected.
+    # already dead).
     USER = "user"
     # Intentional — the agent's own graceful process-exit finalize (self-terminate,
-    # or a caught SIGTERM/SIGHUP that ran the exit finally). Never auto-resurrected.
-    # Also records a positively exited target after its restart deadline fails;
-    # the command retains that failure separately, never a successful observation.
+    # or a caught SIGTERM/SIGHUP that ran the exit finally).
     EXIT = "exit"
     # Involuntary — a restarter corpse reaper found a dead pid / stale unclaimed idling
     # row (OOM/SIGKILL/crash leaves no finally, so it never reaches EXIT).
@@ -73,23 +68,13 @@ class TerminationSource(StrEnum):
     # Involuntary — a launch that never confirmed: the launcher's confirm poll timed
     # out, or the child's own early-boot gates rejected the
     # boot before claiming its row (`agent/_starting.py` — schema mismatch or
-    # placement mismatch). Both are "the wake never came up", and both self-heal
-    # once the cause clears, so both are resurrect-eligible (backoff-spaced).
+    # placement mismatch). Both are "the wake never came up".
     LAUNCH_CONFIRM = "launch-confirm"
     # A framework-detected inconsistency in the row's OWN state killed it — not a
     # death anyone requested and not a launch that can be retried. No code writes
-    # it now; historical rows keep it. Deliberately NOT resurrectable: the row's
-    # history is corrupt, so an automatic retry would convert a loud one-time
-    # fault into a recurring background warning. Ops inspects, then resurrects by
-    # hand.
+    # it now; historical rows keep it. The row's history is corrupt: ops inspects,
+    # then resurrects by hand.
     INTEGRITY = "integrity"
-
-    @classmethod
-    def resurrectable(cls) -> tuple[TerminationSource, ...]:
-        """The sources that mean "died involuntarily, bring it back" — the
-        allowlist `CrashResurrectController` filters its scan on. NULL (a
-        pre-column legacy row) is outside this enum and likewise never eligible."""
-        return (cls.REAPER, cls.LAUNCH_CONFIRM)
 
 
 class TerminateResult(StrEnum):

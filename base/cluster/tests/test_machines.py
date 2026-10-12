@@ -475,25 +475,6 @@ def test_pause_independent_of_staging_and_stop(
     ]
 
 
-def test_clear_stopped_marker_puts_a_stale_row_back_in_the_fan_out(
-    _machine_setup: MachineSetup, database_gate: ProcessDbGate
-) -> None:
-    """A probe proving the host live outranks the stop latch: clearing the composed
-    row's marker is what makes the roster and the next fan-out agree again."""
-    _machine_setup(name="stale", role="agent-runner", home="~/.ava")
-    _machine_setup.register(_db(database_gate=database_gate), url="http://stale:9000")
-    machines.mark_stopping(_db(database_gate=database_gate), "stale", "~/.ava")
-    assert machines.list_agent_runners(_db(database_gate=database_gate)) == []
-
-    assert machines.clear_stopped_marker(_db(database_gate=database_gate), "stale") is True
-    assert machines.list_agent_runners(_db(database_gate=database_gate)) == [
-        ("stale", "http://stale:9000")
-    ]
-    assert machines.list_stopped_agent_runners(_db(database_gate=database_gate)) == []
-    # idempotent: a second reconcile of an already-clear row changes nothing
-    assert machines.clear_stopped_marker(_db(database_gate=database_gate), "stale") is False
-
-
 # unit_dial_url() — the one address definition both writers share
 
 

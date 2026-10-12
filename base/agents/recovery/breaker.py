@@ -20,9 +20,8 @@ HALT_SUPPRESSION_WINDOW_S = 3650 * 24 * 3600.0
 # Stored reason for an HTTP 402 billing rejection, shared with the classifier.
 PERMANENT_REJECT_REASON_BILLING: Final = "billing"
 
-# Correlated against the unaliased agents_meta row (same shape as
-# `base.agents.incarnation.lifecycle_acceptance.FAILED_RESTART_FOR_CURRENT_TARGET`). This is the
-# SQL half of the breaker the automatic-recovery gates embed; keep the literal
+# Correlated against the unaliased agents_meta row. This is the SQL half of the
+# breaker the automatic-recovery gates embed; keep the literal
 # in sync with HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS (asserted by
 # tests/components/base/test_recovery_breaker.py).
 RECOVERY_BREAKER_CLEAR: LiteralString = "permanent_reject_streak < 1"

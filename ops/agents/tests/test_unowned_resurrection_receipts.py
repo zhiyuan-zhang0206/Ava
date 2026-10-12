@@ -126,7 +126,7 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     assert hold.commands == {}
 
 
-@pytest.mark.parametrize("invalid", ["unapplied", "failed"])
+@pytest.mark.parametrize("invalid", ["unapplied", "other_result"])
 async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -157,7 +157,7 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
         db_conn.execute(
             "UPDATE inbound_messages SET payload=jsonb_set(payload,'{lifecycle_result}',%s) "
             "WHERE agent_id=%s AND kind='restart'",
-            (Jsonb({"outcome": "failed", "reason": "restart_deadline_expired"}), aid),
+            (Jsonb({"outcome": "superseded", "reason": "target_replaced"}), aid),
         )
     db_conn.commit()
     wake.resurrect_agent(

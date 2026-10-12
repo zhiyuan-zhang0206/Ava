@@ -21,9 +21,8 @@ the request, not a promise that execution stopped. See
 The live original invocation observes cancellation, unwinds its known resources,
 records the halt marker and flushes its checkpoint. Only this original path can
 produce a new APPLIED receipt. An interrupted or uncertain command remains held
-for inspection. A successor does not create transfer certificates, reconstruct
-an ACK, write a recovery pause or produce RECOVERED_STOPPED. Historical stored
-receipts and transfer records remain readable.
+for inspection. A successor cannot ACK another owner's work, reconstruct an ACK
+or write a recovery pause; only the exact original owner settles it.
 
 Database-only phases have a finite deadline. A graph is invoked once; failures
 in execution-result, flush or command writes leave the current operation failed.
