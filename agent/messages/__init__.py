@@ -84,10 +84,9 @@ def inbound_message(
     additional_kwargs:
         ava_msg_type: "inbound"
         ava_source: original source string ("system" / "agent:N" / "user")
-        ava_inbound_id: inbound_messages.id of the source row — startup
-            reconciliation reads this back from state.messages to confirm
-            whether a 'claimed' inbound's commit actually landed (see
-            agent/db/__init__.py:reconcile_claimed_inbounds + claim_inbound_batch).
+        ava_inbound_id: inbound_messages.id of the source row — history
+            readers (timeline, run timeline) correlate a message with its
+            queue row through it (see agent/db/__init__.py:claim_inbound_batch).
         ava_inbound_body_start: index in the (first text block of) `content` where the
             sender's content begins, after the envelope header (`inbound_head`).
         ava_created_at: ISO-8601 wall-clock the inbound entered the conversation

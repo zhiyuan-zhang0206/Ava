@@ -92,9 +92,7 @@ class TestPoolIsolation:
         ) -> TurnSettlement:
             if not exited:
                 calls.append(("settle", pool))
-            return TurnSettlement(
-                stamp=TurnFatalStamp(applied=crashed, recrash=False), settled=not exited
-            )
+            return TurnSettlement(stamp=TurnFatalStamp(applied=crashed), settled=not exited)
 
         async def force(pool: object, *_args: object, **_kwargs: object) -> bool:
             calls.append(("force", pool))

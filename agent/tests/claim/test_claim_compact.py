@@ -614,11 +614,8 @@ async def test_claim_compact_summary_finalizes_claimed_history(
 ):
     """A compaction finalizes every already-claimed inbound row to 'done'
     BEFORE the REMOVE_ALL wipe. Those rows' HumanMessages live in
-    state.messages (about to be wiped) and carry the ava_inbound_id startup
-    reconcile matches on; if they stay 'claimed', the next restart sees them
-    missing from the checkpoint, resets them to 'pending', and re-delivers
-    already-answered messages — a run of consecutive user messages with the
-    compacted replies gone (Task #823)."""
+    state.messages (about to be wiped), so the rows are consumed rather than
+    left 'claimed' (Task #823)."""
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,

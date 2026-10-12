@@ -8,7 +8,6 @@ from ava.sdk_surface.installation import Installation
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
-from base.agents.history.inbound_sideload import ReconcileReadInputs
 from base.agents.impersonation.notes import HandoffNotes
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
@@ -53,15 +52,6 @@ def host_policy(config: ConfigBoot) -> HostPolicy:
         handoff_notes=HandoffNotes(
             clock_factory=lambda: Clock(clock_config_from_boot(config)),
             timestamps_enabled=lambda: config.view.general.message_timestamps,
-        ),
-        recrash_reap_enabled=lambda: config.view.daemon.hosted_recrash_prompt_reap_enabled,
-        reconcile_inputs=ReconcileReadInputs(
-            stale_claimed_seconds=lambda: (
-                config.view.daemon.delivery_watchdog_stale_claimed_threshold_seconds
-            ),
-            clock_pad_seconds=lambda: config.view.daemon.inbound_reconcile_clock_pad_seconds,
-            boundary_scan_limit=lambda: config.view.daemon.inbound_reconcile_boundary_scan_limit,
-            window_row_cap=lambda: config.view.daemon.inbound_reconcile_window_row_cap,
         ),
     )
 

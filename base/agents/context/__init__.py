@@ -105,7 +105,7 @@ class AvaContext:
 
     ops_pool: AsyncConnectionPool | None = None
     """Pool for all kernel-side transactional SQL (claim_inbound_batch /
-    reconcile_claimed_inbounds / lifecycle settlement). The
+    finalize_claimed_inbounds / lifecycle settlement). The
     pool's `check_connection` health-checks every borrowed conn and
     transparently reconnects when the remote PG / PgBouncer evicts an idle
     conn — single-conn alternative silently dies after server idle timeout
