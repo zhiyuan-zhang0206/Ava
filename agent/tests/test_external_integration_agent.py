@@ -13,6 +13,7 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import BaseModel, Field
 
+import agent.extensions.registry as extensions_registry
 import ava
 from agent import state as state_module
 from agent.messages import NoteTag, system_note_message
@@ -55,7 +56,7 @@ def native_checkpoint(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
     )
     # The attachment builds its state class from the registry of the plugins loaded into the process.
-    monkeypatch.setattr("agent.extensions.registry.build_registry", lambda: registry)
+    monkeypatch.setattr(extensions_registry, "build_registry", lambda: registry)
     pin_agent(None, owns_loop=True)
     ava.unbind_exec_turn()
     request.addfinalizer(ava.unbind_exec_turn)

@@ -26,6 +26,7 @@ from agent.graph.prompt.capabilities import (
     index_drift,
     indexed_skill_identifiers,
 )
+from agent.hooks import compact
 from agent.hooks.capabilities import _newly_installed_skills
 from agent.hooks.framework import framework_hooks
 from agent.state import AgentState, CapabilitiesState
@@ -40,6 +41,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
+from base.packages.extensions import install_registry
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
 
@@ -68,7 +70,8 @@ def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     d = paths.skills_dir()
     d.mkdir()
     monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names",
+        install_registry,
+        "loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
@@ -287,7 +290,7 @@ def _pin_compact_ceiling(monkeypatch: pytest.MonkeyPatch, *, hard_tokens: int) -
             hard_compact_tokens=hard_tokens,
         )
 
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", budget)
+    monkeypatch.setattr(compact, "resolve_context_budget", budget)
 
 
 async def test_hook_defers_when_a_compaction_will_replace_the_window(

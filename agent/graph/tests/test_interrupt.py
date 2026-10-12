@@ -18,8 +18,10 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
+from agent.graph import _init_context, interrupt
 from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm_errors import LlmLedger
+from agent.hooks import compact
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
@@ -474,7 +476,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     from base.lm.context_budget import ContextBudget
 
     tid = create_agent(db_conn)
-    monkeypatch.setattr("agent.graph.interrupt._INTERRUPT_POLL_S", 0.01)
+    monkeypatch.setattr(interrupt, "_INTERRUPT_POLL_S", 0.01)
 
     def small_budget(
         _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
@@ -483,7 +485,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             max_context_tokens=10_000, soft_compact_tokens=1, hard_compact_tokens=1
         )
 
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
+    monkeypatch.setattr(compact, "resolve_context_budget", small_budget)
     started, settled = asyncio.Event(), asyncio.Event()
 
     async def summarizing(
@@ -501,7 +503,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             settled.set()
         raise AssertionError("unreachable")
 
-    monkeypatch.setattr("agent.hooks.compact.generate_summary", summarizing)
+    monkeypatch.setattr(compact, "generate_summary", summarizing)
     state = AgentState(
         messages=[HumanMessage(content="uncompacted original work " * 30)],
         compact=CompactState(version=4),
@@ -612,7 +614,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
             update["messages"] = add_messages(list(state.messages), update["messages"])
         return state.model_copy(update=update)
 
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
+    monkeypatch.setattr(compact, "resolve_context_budget", small_budget)
 
     def standing_head(
         _extensions: ExtensionRegistry,
@@ -628,10 +630,10 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
         assert ctx.identity is None
         return []
 
-    monkeypatch.setattr("agent.graph._init_context.build_system_prompt", standing_head)
-    monkeypatch.setattr("agent.graph._init_context.context_notes", no_notes)
+    monkeypatch.setattr(_init_context, "build_system_prompt", standing_head)
+    monkeypatch.setattr(_init_context, "context_notes", no_notes)
     summary = AsyncMock(return_value="the retained summary is still above the ceiling " * 30)
-    monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
+    monkeypatch.setattr(compact, "generate_summary", summary)
 
     async def ordinary_generation():
         yield AIMessageChunk(

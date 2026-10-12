@@ -21,6 +21,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 import ava
+from agent import process_boot
 from agent.graph.exec.protocol import (
     make_request_path,
     make_result_path,
@@ -608,12 +609,12 @@ def test_child_overlay_phases_framework_then_plugin(
 
     monkeypatch.setattr(protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "_init_logger", fake_init_logger)
-    monkeypatch.setattr("agent.process_boot._apply_per_agent_sdk_disable", fake_sdk_disable)
-    monkeypatch.setattr("agent.process_boot._apply_per_agent_eval_isolation", fake_eval_isolation)
+    monkeypatch.setattr(process_boot, "_apply_per_agent_sdk_disable", fake_sdk_disable)
+    monkeypatch.setattr(process_boot, "_apply_per_agent_eval_isolation", fake_eval_isolation)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr("ava.ensure_plugins_loaded", fake_plugins_loaded)
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", fake_plugins_loaded)
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     def fake_apply_scope(

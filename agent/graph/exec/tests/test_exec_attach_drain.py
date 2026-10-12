@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.graph.exec import node
 from agent.graph.exec._result import _ExecDone
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState, AttachState
@@ -104,7 +105,7 @@ async def test_exec_drains_attachment_right_after_output(
             [{"method": "files.read", "count": 3}],
         )
 
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", _fake_run_agent_code)
+    monkeypatch.setattr(node, "_run_agent_code", _fake_run_agent_code)
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
     result = await _exec_node_impl(
@@ -151,7 +152,7 @@ async def test_exec_without_attachments_appends_no_attach_message(
     ) -> tuple[_ExecDone, dict[str, Any], int, list[dict[str, str]] | None, list[Any] | None]:
         return (_ExecDone(output="exec output text", stream_cap=None), {}, 12, None, None)
 
-    monkeypatch.setattr("agent.graph.exec.node._run_agent_code", _fake_run_agent_code)
+    monkeypatch.setattr(node, "_run_agent_code", _fake_run_agent_code)
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
     result = await _exec_node_impl(

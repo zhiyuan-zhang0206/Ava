@@ -15,6 +15,7 @@ from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from ops import cluster_status
 
 
 async def test_stale_unapplied_pointer_closes_without_retargeting(
@@ -72,7 +73,7 @@ def _record_kills(
             raise RuntimeError("failed to kill shell session(s) [4]")
         return [4]
 
-    monkeypatch.setattr("ops.cluster_status.kill_agent_shells", _kill)
+    monkeypatch.setattr(cluster_status, "kill_agent_shells", _kill)
     return calls
 
 

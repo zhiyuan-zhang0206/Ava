@@ -15,12 +15,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from agent import impersonation, impersonation_process
+import base.agents.impersonation as agents_impersonation
+from agent import impersonation, impersonation_handoff, impersonation_process
 from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
 from agent.state import BaseAgentState
 from agent.tests._fakes import placeholder_runtime
+from ava.external import state
 from base.agents.context import AvaContext
+from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.lifecycle import AgentImpersonation
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
@@ -159,9 +162,9 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
         assert state_cls is State  # the class the graph runs on
         return delta
 
-    monkeypatch.setattr("ava.external.state.decode_plugin_delta", decode)
+    monkeypatch.setattr(state, "decode_plugin_delta", decode)
     receipt = Mock(side_effect=RuntimeError("receipt commit lost"))
-    monkeypatch.setattr("base.agents.impersonation.mark_plugin_applied", receipt)
+    monkeypatch.setattr(agents_impersonation, "mark_plugin_applied", receipt)
     with pytest.raises(RuntimeError, match="receipt commit lost"):
         await impersonation.settle_checkpoint(
             graph,
@@ -199,7 +202,7 @@ def test_accept_stops_exec_and_uses_captured_incarnation(
     from ava.impersonation import accept
 
     accepted = Mock()
-    monkeypatch.setattr("base.agents.impersonation.accept", accepted)
+    monkeypatch.setattr(agents_impersonation, "accept", accepted)
     pin_agent(incarnation.agent_id, incarnation=incarnation)
     with pytest.raises(AgentImpersonation):
         accept("lease-1", "Hand the task to the external session.")
@@ -262,9 +265,9 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
         impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
     )
     activate = Mock()
-    monkeypatch.setattr("base.agents.impersonation.activate", activate)
+    monkeypatch.setattr(agents_impersonation, "activate", activate)
     checkpoint = AsyncMock()
-    monkeypatch.setattr("agent.impersonation_handoff.ensure_start_marker", checkpoint)
+    monkeypatch.setattr(impersonation_handoff, "ensure_start_marker", checkpoint)
 
     def refused(*_args: object, read_local_machine: Callable[[], str]) -> bool:
         return False
@@ -297,9 +300,9 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
         impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
     )
     activate = Mock(return_value=_relay_session("active"))
-    monkeypatch.setattr("base.agents.impersonation.activate", activate)
+    monkeypatch.setattr(agents_impersonation, "activate", activate)
     checkpoint = AsyncMock()
-    monkeypatch.setattr("agent.impersonation_handoff.ensure_start_marker", checkpoint)
+    monkeypatch.setattr(impersonation_handoff, "ensure_start_marker", checkpoint)
     establish = Mock(return_value=True)
     monkeypatch.setattr(impersonation, "establish_relay", establish)
     assert await impersonation.settle_checkpoint(
@@ -331,7 +334,7 @@ def test_establish_relay_session_relay_requires_a_fresh_heartbeat(
     from datetime import UTC, datetime, timedelta
 
     fail = Mock()
-    monkeypatch.setattr("base.agents.impersonation.fail_acceptance", fail)
+    monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
     stale = _relay_session(
         "accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5)
     )
@@ -374,11 +377,11 @@ def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
     from datetime import UTC, datetime
 
     provision = Mock(return_value={"relay_generation": 1})
-    monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
+    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     spawn = Mock(return_value=MagicMock(poll=Mock(return_value=None)))
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     ready = {"status": "accepted", "relay_heartbeat_at": datetime.now(UTC)}
-    monkeypatch.setattr("base.agents.impersonation.relay_get", Mock(return_value=ready))
+    monkeypatch.setattr(agents_impersonation, "relay_get", Mock(return_value=ready))
     assert (
         impersonation.establish_relay(
             database,
@@ -410,11 +413,11 @@ def test_establish_relay_codex_spawn_exit_rolls_back(
     child.poll.return_value = 5
     child.returncode = 5
     monkeypatch.setattr(
-        "base.agents.impersonation.provision_relay", Mock(return_value={"relay_generation": 1})
+        agents_impersonation, "provision_relay", Mock(return_value={"relay_generation": 1})
     )
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
     fail = Mock()
-    monkeypatch.setattr("base.agents.impersonation.fail_acceptance", fail)
+    monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
     assert (
         impersonation.establish_relay(
             database,
@@ -442,13 +445,13 @@ def test_establish_relay_codex_readiness_timeout_rolls_back(
     child = MagicMock()
     child.poll.return_value = None
     monkeypatch.setattr(
-        "base.agents.impersonation.provision_relay", Mock(return_value={"relay_generation": 1})
+        agents_impersonation, "provision_relay", Mock(return_value={"relay_generation": 1})
     )
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
     terminate = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     fail = Mock()
-    monkeypatch.setattr("base.agents.impersonation.fail_acceptance", fail)
+    monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
     monkeypatch.setattr(impersonation, "_RELAY_READY_TIMEOUT_S", 0.0)
     assert (
         impersonation.establish_relay(
@@ -549,12 +552,12 @@ async def test_claim_gate_recovers_stale_delivery_and_keeps_native_parked(
     terminated = Mock()
     monkeypatch.setattr(impersonation, "_terminate_relay", terminated)
     provision = Mock(return_value={"relay_generation": 2})
-    monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
+    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     new = MagicMock()
     spawn = Mock(return_value=new)
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     abort = Mock()
-    monkeypatch.setattr("base.agents.impersonation.abort_lease", abort)
+    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert decision is not None and decision.goto == END
     assert provision.call_args.kwargs == {"expected_generation": 1}
@@ -578,7 +581,7 @@ async def test_startup_grace_does_not_retire_a_fresh_child(
     )
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     provision = Mock(return_value={"relay_generation": 1})
-    monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
+    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     provision.assert_not_called()
     assert native_gate_ctx.relays.children[42].process is child
@@ -600,7 +603,7 @@ async def test_confirmed_child_exit_bypasses_fresh_heartbeat_and_startup_grace(
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
     provision = Mock(return_value={"relay_generation": 2})
-    monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
+    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     new = MagicMock()
     spawn = Mock(return_value=new)
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
@@ -622,9 +625,9 @@ async def test_stale_session_relay_retains_authority_with_visible_unsupported_re
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     degradation = Mock()
-    monkeypatch.setattr("base.agents.impersonation.relay.record_degradation", degradation)
+    monkeypatch.setattr(relay, "record_degradation", degradation)
     abort = Mock()
-    monkeypatch.setattr("base.agents.impersonation.abort_lease", abort)
+    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     degradation.assert_called_once()
     assert "unsupported" in degradation.call_args.args[-1]
@@ -644,7 +647,7 @@ async def test_claim_gate_stops_the_lease_when_the_executor_anchors_are_gone(
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=fresh))
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=list(states)))
     abort = Mock(return_value={"id": "lease-1"})
-    monkeypatch.setattr("base.agents.impersonation.abort_lease", abort)
+    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     from agent.nodes import END
 
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
@@ -665,9 +668,9 @@ async def test_repeated_unknown_executor_evidence_keeps_original_authority(
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["denied"]))
     degradation = Mock()
-    monkeypatch.setattr("base.agents.impersonation.relay.record_degradation", degradation)
+    monkeypatch.setattr(relay, "record_degradation", degradation)
     abort = Mock()
-    monkeypatch.setattr("base.agents.impersonation.abort_lease", abort)
+    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     for _ in range(3):
         await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert degradation.call_count == 3
@@ -684,9 +687,9 @@ async def test_claim_gate_records_unknown_without_recorded_anchors(
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=[]))
     degradation = Mock()
-    monkeypatch.setattr("base.agents.impersonation.relay.record_degradation", degradation)
+    monkeypatch.setattr(relay, "record_degradation", degradation)
     abort = Mock(return_value={"id": "lease-1"})
-    monkeypatch.setattr("base.agents.impersonation.abort_lease", abort)
+    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     from agent.nodes import END
 
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
@@ -714,9 +717,9 @@ async def test_unknown_previous_relay_withholds_spawn_without_ending_lease(
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
     monkeypatch.setattr(OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable")))
     degradation = Mock()
-    monkeypatch.setattr("base.agents.impersonation.relay.record_degradation", degradation)
+    monkeypatch.setattr(relay, "record_degradation", degradation)
     provision = Mock()
-    monkeypatch.setattr("base.agents.impersonation.provision_relay", provision)
+    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert decision is not None and decision.goto == END
     assert degradation.call_count == int(not fresh)

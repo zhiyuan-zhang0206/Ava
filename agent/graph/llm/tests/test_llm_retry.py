@@ -42,6 +42,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm import registry
 from base.lm.plugin_providers import build_model_catalog
 
 _MODEL = "deepseek-flash"
@@ -126,7 +127,7 @@ def test_the_model_caps_the_number_of_tries(monkeypatch: pytest.MonkeyPatch) -> 
         seen.append(model)
         return 3
 
-    monkeypatch.setattr("base.lm.registry.resolve_setting", fake_resolve)
+    monkeypatch.setattr(registry, "resolve_setting", fake_resolve)
     exc = ModelConnectionError("x")
     assert (
         retry_wait(
@@ -333,7 +334,7 @@ def test_the_node_gives_up_at_the_models_attempt_cap(
     monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
     monkeypatch.setattr(_retry, "_NEVER_RETRIED", ())
-    monkeypatch.setattr("base.lm.registry.resolve_setting", _fixed_cap(3))
+    monkeypatch.setattr(registry, "resolve_setting", _fixed_cap(3))
     tries, sleeps, result = _drive(
         monkeypatch, [ModelConnectionError(str(i)) for i in range(5)], database_gate=database_gate
     )
@@ -417,7 +418,7 @@ def test_two_agents_in_one_process_get_their_own_schedules(
 ) -> None:
     """The point of retrying in the node: the one loop serves each agent's model and id — the
     try cap follows the model and the first wait follows the agent's phase."""
-    monkeypatch.setattr("base.lm.registry.resolve_setting", _caps({"model-a": 2, "model-b": 4}))
+    monkeypatch.setattr(registry, "resolve_setting", _caps({"model-a": 2, "model-b": 4}))
     initial = settings.lm.llm_retry_initial_interval_seconds
     tries_a, sleeps_a = _failing_node_run(
         monkeypatch, "1100", "model-a", ledger, database_gate=database_gate

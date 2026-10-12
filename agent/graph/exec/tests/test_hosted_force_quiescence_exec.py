@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from agent.graph.exec import _subprocess
 from base.db import Database
 from tests.fixtures.pin_agent import exec_context
 
@@ -16,7 +17,7 @@ async def test_real_missing_executable_is_not_an_unresolved_child(
     from agent.graph.exec._subprocess import _run_in_subprocess
     from base.native_process.turn_identity import HostedTurnResources
 
-    monkeypatch.setattr("agent.graph.exec._subprocess.sys.executable", str(tmp_path / "absent"))
+    monkeypatch.setattr(_subprocess.sys, "executable", str(tmp_path / "absent"))
     scope = HostedTurnResources()
     outcome, _ = await _run_in_subprocess(
         database,

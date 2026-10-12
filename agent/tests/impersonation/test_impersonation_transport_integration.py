@@ -12,7 +12,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent import impersonation
+from agent import impersonation, impersonation_handoff
 from agent.impersonation import settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
@@ -84,7 +84,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         wakes.append((agent_id, payload))
         return True
 
-    monkeypatch.setattr("agent.impersonation_handoff.publish_inbound_wake", record_wake)
+    monkeypatch.setattr(impersonation_handoff, "publish_inbound_wake", record_wake)
     await graph.ainvoke(
         reset,
         config,
@@ -569,7 +569,7 @@ async def test_end_note_resumes_an_empty_queue(
         wakes.append((agent_id, payload))
         return True
 
-    monkeypatch.setattr("agent.impersonation_handoff.publish_inbound_wake", record_wake)
+    monkeypatch.setattr(impersonation_handoff, "publish_inbound_wake", record_wake)
     await graph.ainvoke(
         reset,
         config,

@@ -11,6 +11,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from agent.ownership import corpse_reap
 from agent.ownership.corpse_reap import reap_crash_corpses
 from agent.ownership.hosted import (
     admit_hosted_runtime,
@@ -337,13 +338,13 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
             events.append((event.agent_id, event.event_name, "corpse_reaper"))
         return event
 
-    monkeypatch.setattr("agent.ownership.corpse_reap.record_audit_async", _event)
+    monkeypatch.setattr(corpse_reap, "record_audit_async", _event)
     published: list[int] = []
 
     async def _publish(_bus: object, agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
+    monkeypatch.setattr(corpse_reap, "publish_agent_updated", _publish)
     owner = uuid4()
 
     async def _row(

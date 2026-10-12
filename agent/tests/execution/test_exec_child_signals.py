@@ -122,7 +122,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr("ava.ensure_plugins_loaded", fake_ensure_plugins_loaded)
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", fake_ensure_plugins_loaded)
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     try:

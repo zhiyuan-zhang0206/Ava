@@ -31,6 +31,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 
+from agent.hooks import compact
 from agent.hooks.compact import (
     auto_compact_for_llm,
     generate_summary,
@@ -91,7 +92,7 @@ def _patch_compact_config(
     ) -> ContextBudget:
         return budget
 
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixed_budget)
+    monkeypatch.setattr(compact, "resolve_context_budget", fixed_budget)
 
 
 def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:

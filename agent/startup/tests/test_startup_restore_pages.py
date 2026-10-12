@@ -16,7 +16,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agent import startup
 from agent.startup import _page_server_alive, reconcile_open_pages
+from ava import ui
 from base.db import Database
 from base.events.live.bus import EventBus
 
@@ -109,8 +111,8 @@ def _fake_serve(served: list[tuple]) -> object:
 async def test_reserves_dead_server(monkeypatch: pytest.MonkeyPatch) -> None:
     """Server probe fails + serve_dir set → re-serve the recorded dir/name/port/title."""
     served: list[tuple] = []
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+    monkeypatch.setattr(startup, "_page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ui, "serve", _fake_serve(served))
 
     pool = _FakePool([_row("report", 18001, title="Report", serve_dir="/data/report")])
     await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]
@@ -123,8 +125,8 @@ async def test_reserves_dead_server(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_keeps_alive_server(monkeypatch: pytest.MonkeyPatch) -> None:
     """Server probe succeeds → no re-serve (the row stays as-is)."""
     served: list[tuple] = []
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+    monkeypatch.setattr(startup, "_page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ui, "serve", _fake_serve(served))
 
     pool = _FakePool([_row("report", 18001, serve_dir="/data/report")])
     await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]
@@ -143,8 +145,8 @@ async def test_closes_dead_page_without_serve_dir(monkeypatch: pytest.MonkeyPatc
         def emit(self, payload: str) -> None:
             events.append(payload)
 
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+    monkeypatch.setattr(startup, "_page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ui, "serve", _fake_serve(served))
 
     pool = _FakePool(
         [
@@ -179,8 +181,8 @@ async def test_keeps_alive_page_without_serve_dir(monkeypatch: pytest.MonkeyPatc
         def emit(self, payload: str) -> None:
             events.append(payload)
 
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ava.ui.serve", lambda *a, **k: pytest.fail("must not serve"))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(startup, "_page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ui, "serve", lambda *a, **k: pytest.fail("must not serve"))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
 
     pool = _FakePool([_row("plain", 18002, serve_dir=None)])
     await reconcile_open_pages(pool, 7, event_publisher=_Pub(), db=_DB, bus=_BUS)  # type: ignore[arg-type]
@@ -195,8 +197,8 @@ async def test_closes_multiple_dead_show_pages_with_one_notice(
     """Several dead show() rows of one agent merge into ONE notice listing
     them all — the heartbeat must not nag once per page."""
     served: list[tuple] = []
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+    monkeypatch.setattr(startup, "_page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ui, "serve", _fake_serve(served))
 
     pool = _FakePool(
         [
@@ -222,8 +224,8 @@ async def test_dead_show_page_recent_notice_skips_notify(
     heartbeat runs every 5 min — without the window a persistent failure
     would nag on every pass). The row still closes."""
     served: list[tuple] = []
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+    monkeypatch.setattr(startup, "_page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ui, "serve", _fake_serve(served))
 
     pool = _FakePool([_row("plain", 18002, serve_dir=None)], fetchone_row=((1,),))
     await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]
@@ -240,7 +242,7 @@ async def test_swallows_query_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         async def connection(self) -> None:
             raise RuntimeError("pg down")
 
-    monkeypatch.setattr("ava.ui.serve", lambda *a, **k: pytest.fail("must not serve"))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ui, "serve", lambda *a, **k: pytest.fail("must not serve"))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
     await reconcile_open_pages(_BoomPool(), 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]  # must not raise
 
 
@@ -282,8 +284,8 @@ async def test_open_pages_query_filters_closed_and_expired(
     logged while that row was still OPEN (closed_at set hours later) — the
     fresh-rowset filter is what keeps closed rows out of every pass."""
     served: list[tuple] = []
-    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+    monkeypatch.setattr(startup, "_page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ui, "serve", _fake_serve(served))
 
     pool = _FakePool([_row("report", 18001, serve_dir="/data/report")])
     await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]

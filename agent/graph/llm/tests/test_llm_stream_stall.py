@@ -34,6 +34,7 @@ from agent.graph.llm_errors import (
 )
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
+from base import config
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
@@ -106,7 +107,7 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
         await asyncio.Future()  # never returns — simulates server hang
         yield  # type: ignore[unreachable]
 
-    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
+    monkeypatch.setattr(config.settings.lm, "llm_stream_ttft_timeout_seconds", 0.05)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _hang_immediately()
 
@@ -150,8 +151,8 @@ async def test_stall_mid_stream_raises_with_chunk_count(
         yield AIMessageChunk(content="!")
         await asyncio.Future()  # hangs after 3 chunks
 
-    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 10.0)
-    monkeypatch.setattr("base.config.settings.lm.llm_stream_inter_chunk_timeout_seconds", 0.05)
+    monkeypatch.setattr(config.settings.lm, "llm_stream_ttft_timeout_seconds", 10.0)
+    monkeypatch.setattr(config.settings.lm, "llm_stream_inter_chunk_timeout_seconds", 0.05)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream_then_hang()
 
@@ -197,8 +198,8 @@ async def test_normal_stream_completes_no_stall_timeout(
         )
 
     # 1.0s timeout is generous for a normal stream (zero latency), but it is a test value, not the production default
-    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 1.0)
-    monkeypatch.setattr("base.config.settings.lm.llm_stream_inter_chunk_timeout_seconds", 1.0)
+    monkeypatch.setattr(config.settings.lm, "llm_stream_ttft_timeout_seconds", 1.0)
+    monkeypatch.setattr(config.settings.lm, "llm_stream_inter_chunk_timeout_seconds", 1.0)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _normal_stream()
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)

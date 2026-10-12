@@ -36,6 +36,7 @@ from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.packages.extensions import install_registry
 from base.paths import skills_dir
 from tests.fixtures.unit.identity import MachineIdentitySetter
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -149,9 +150,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     def _all_enabled() -> set[str]:
         return {p.name for p in load_dir.iterdir() if p.is_dir()}
 
-    monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
-    )
+    monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
 
     tid = spawn_agent(
         catalog=model_catalog,

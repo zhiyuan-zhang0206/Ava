@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from agent.startup import notify_desktop_permissions_at_startup
+from base.host.converge import accessibility, screen_capture
 from base.host.converge.accessibility import (
     AccessibilityState,
     AccessibilityStatus,
@@ -70,8 +71,8 @@ def fake_ui(monkeypatch: pytest.MonkeyPatch) -> _FakeUI:
 
 
 def _patch_status_homes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("base.host.converge.screen_capture.ava_home", lambda: tmp_path)
-    monkeypatch.setattr("base.host.converge.accessibility.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(screen_capture, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(accessibility, "ava_home", lambda: tmp_path)
 
 
 class TestNotifyDesktopPermissionsAtStartup:

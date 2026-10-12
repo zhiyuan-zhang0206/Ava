@@ -7,6 +7,7 @@ from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.claim import node
 from agent.state import AgentState
 from agent.tests.claim.claim_support import (
     _await_inbound_visible,
@@ -68,7 +69,7 @@ async def test_claim_unknown_kind_raises(
         assert not lifecycle_only
         return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
 
-    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(ValueError, match="Unknown inbound kind"):
         await claim_node(
@@ -138,7 +139,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
             )
         ]
 
-    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -224,7 +225,7 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
             ),
         ]
 
-    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),

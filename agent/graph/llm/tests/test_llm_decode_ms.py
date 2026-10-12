@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage
 
+import agent.graph.llm._stream as llm_stream
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_llm
 from base.agents.observation.turn_progress import TurnProgress
@@ -65,7 +66,7 @@ async def test_consume_stream_records_first_last_timestamps(
     """The stream records (first, last) chunk-arrival timestamps; decode window
     = last - first regardless of how the loop consumed the clock."""
     clock = _FakeClock()
-    monkeypatch.setattr("agent.graph.llm._stream.time.monotonic", clock)
+    monkeypatch.setattr(llm_stream.time, "monotonic", clock)
 
     async def _stream() -> AsyncIterator[AIMessageChunk]:
         clock.t = 1005.0
@@ -111,7 +112,7 @@ async def test_stream_llm_stamps_decode_ms(monkeypatch: pytest.MonkeyPatch) -> N
     """Happy path: handler.llm_decode_ms = (last - first) * 1000, stamped
     alongside llm_latency_ms after the successful attempt."""
     clock = _FakeClock()
-    monkeypatch.setattr("agent.graph.llm._stream.time.monotonic", clock)
+    monkeypatch.setattr(llm_stream.time, "monotonic", clock)
 
     async def _stream() -> AsyncIterator[AIMessageChunk]:
         clock.t = 1005.0
@@ -146,7 +147,7 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
     """No chunks at all → decode_ms stays None (latency still stamped)."""
 
     clock = _FakeClock()
-    monkeypatch.setattr("agent.graph.llm._stream.time.monotonic", clock)
+    monkeypatch.setattr(llm_stream.time, "monotonic", clock)
 
     async def _empty() -> AsyncIterator[AIMessageChunk]:
         if False:  # pragma: no cover — never yields
