@@ -13,13 +13,13 @@ delay cron by hours) and on `workflow_dispatch`, on main only:
 
 1. `plan` resolves the newest existing cache so the measured shards split with the
    current model (the first run has none and splits by test count).
-2. `measure-backend` (16 shards) and `measure-e2e` (4) each run
+2. `measure-backend` (8 shards) and `measure-e2e` (4) each run
    `refresh_test_durations.py measure` on their own runner: the CI pytest arguments,
    the CI coverage module list, `--store-durations --clean-durations`, three attempts
    that each reseed the temporary duration input, so a failed attempt cannot leak a
    partial measurement. The native backend population excludes the separately owned
    static tests, as normal CI does.
-3. `publish` downloads the artifacts and runs `merge`, which requires all 20, rejects
+3. `publish` downloads the artifacts and runs `merge`, which requires all 12, rejects
    empty or overlapping shards before touching anything, keeps every measured entry
    (fast and zero timings included), rounds to three decimals and writes
    `.test_durations` atomically. The file is saved as the cache
