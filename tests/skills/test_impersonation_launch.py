@@ -608,7 +608,7 @@ def test_instruction_script_prints_only_after_successful_detach(
         )
         raise RuntimeError("lease expired before detach")
 
-    monkeypatch.setattr(instruction_reader.external, "attach", attach)
+    monkeypatch.setattr(instruction_reader.impersonation, "attach", attach)
     monkeypatch.setattr(sys, "argv", ["read_instructions.py", "0", "--agent", "405"])
     with pytest.raises(RuntimeError, match="lease expired"):
         instruction_reader.main()

@@ -266,7 +266,7 @@ def host_refuses_env_context_and_attachment() -> None:
     assert process_context.is_host_process()
     assert agent_identity.is_launched_child() is False
     assert getattr(ava, "context", None) is None
-    _expect_refusal(lambda: ava.external.attach("must-not-be-read"), "native agent runtime")
+    _expect_refusal(lambda: ava.impersonation.attach("must-not-be-read"), "native agent runtime")
     _expect_refusal(
         lambda: process_context.bind_context(boot.launched_context()),  # pyright: ignore[reportArgumentType]
         "shared agent host",
