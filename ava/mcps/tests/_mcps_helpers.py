@@ -75,13 +75,13 @@ def mock_session(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     return session
 
 
-def _content_text(text: str) -> MagicMock:
+def content_text(text: str) -> MagicMock:
     c = MagicMock()
     c.model_dump = MagicMock(return_value={"type": "text", "text": text})
     return c
 
 
-def _content_image(b64: str) -> MagicMock:
+def content_image(b64: str) -> MagicMock:
     c = MagicMock()
     c.model_dump = MagicMock(return_value={"type": "image", "data": b64, "mimeType": "image/png"})
     return c
@@ -95,7 +95,7 @@ def _result(content: list, *, is_error: bool = False, structured: dict | None = 
     return r
 
 
-def _make_tool(name: str, description: str = "", schema: dict | None = None) -> MagicMock:
+def make_tool(name: str, description: str = "", schema: dict | None = None) -> MagicMock:
     t = MagicMock(spec=["name", "description", "input_schema"])
     t.name = name
     t.description = description

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import UnitState
-from services.supervision.ava_root.unit_records import _Generation, _UnitRuntime
+from services.supervision.ava_root.unit_records import Generation, UnitRuntime
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +39,7 @@ class StoppingMixin:
 
     _config: SupervisorConfig
 
-    async def _stop_unit(self, runtime: _UnitRuntime, *, force: bool = False) -> None:
+    async def _stop_unit(self, runtime: UnitRuntime, *, force: bool = False) -> None:
         generation = runtime.generation
         if generation is None:
             runtime.state = UnitState.STOPPED
@@ -47,7 +47,7 @@ class StoppingMixin:
         await self._stop_generation(runtime, generation, force=force)
 
     async def _stop_generation(
-        self, runtime: _UnitRuntime, generation: _Generation, *, force: bool = False
+        self, runtime: UnitRuntime, generation: Generation, *, force: bool = False
     ) -> None:
         """Signal a birth-validated live group and await the direct child's exit."""
         generation.closing = True
@@ -66,7 +66,7 @@ class StoppingMixin:
             )
 
     @staticmethod
-    async def _wait_exit(generation: _Generation, timeout_s: float) -> bool:
+    async def _wait_exit(generation: Generation, timeout_s: float) -> bool:
         """Await the existing watcher, without cancelling it on timeout."""
         try:
             await asyncio.wait_for(generation.exited.wait(), timeout_s)
@@ -74,7 +74,7 @@ class StoppingMixin:
             return generation.exited.is_set()
         return True
 
-    def _stop_window(self, runtime: _UnitRuntime) -> float:
+    def _stop_window(self, runtime: UnitRuntime) -> float:
         declared = runtime.manifest.stop_timeout_s
         return self._config.stop_timeout_s if declared is None else declared
 

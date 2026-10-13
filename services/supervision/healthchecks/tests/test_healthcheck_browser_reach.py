@@ -38,7 +38,7 @@ def _wire_cdp(
     def version(_url: str, _timeout: float) -> dict[str, object]:
         return {"webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/test"}
 
-    monkeypatch.setattr(hc, "_read_json", version)
+    monkeypatch.setattr(hc, "read_json", version)
     return browser, page, connect
 
 
@@ -84,8 +84,8 @@ def test_canary_rejected_hidden_target_never_falls_back_to_visible_tab(
 def test_canary_unexpected_failure_is_not_reachability_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fail(_port: int, _url: str, _timeout_s: float) -> hc._CanaryResult:
+    async def fail(_port: int, _url: str, _timeout_s: float) -> hc.CanaryResult:
         raise RuntimeError("CDP failed")
 
-    monkeypatch.setattr(hc, "_canary_async", fail)
+    monkeypatch.setattr(hc, "canary_async", fail)
     assert hc.canary(9222, "https://example.invalid/", 1).outcome == "skip"

@@ -101,8 +101,8 @@ def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariabl
 
 
 def _attached() -> tuple[Mapping[str, Any], Any] | None:
-    """The pins and plugin-config view of the agent this process attached to (`ava.external`:
-    one attachment per process), if any: the lease its context carries."""
+    """The pins and plugin-config view of the agent this process attached to
+    (`ava.impersonation.attach`: one attachment per process), if any: the lease its context carries."""
 
     context = process_context.ambient_context()
     lease = None if context is None or context.identity is None else context.identity.lease

@@ -31,7 +31,7 @@ from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY
 _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
 
 
-def _redis_bridge_command() -> tuple[str, str, int]:
+def redis_bridge_command() -> tuple[str, str, int]:
     """The relay's launch command, listen host and port.
 
     A host that needs no relay is gated out of the roster (`services.supervision.roster.spec`), so its row only has
@@ -74,7 +74,7 @@ def _frontend_probe() -> DaemonProbe:
     return probe_frontend()
 
 
-def _browser_probe() -> DaemonProbe:
+def browser_probe() -> DaemonProbe:
     """The headed browser's identity probe, imported at call time.
 
     CDP exposes
@@ -114,7 +114,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
 
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
-    _bridge_cmd, _bridge_host, _bridge_port = _redis_bridge_command()
+    _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command()
     # ── gateway-only services ───────────────────────────────────────────────
     # The gateway capability owns the data-plane-adjacent daemons: the HTTP
     # gateway, the frontend, and cluster-wide nudgers (heartbeat plus idle shell
@@ -335,7 +335,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             curl_url=f"http://127.0.0.1:{settings.services.browser_cdp_port}/json/version",
             # CDP has no identity field, so a 2xx here says only "a debuggable
             # Chrome is up" — the profile-anchored check is what says it is ours.
-            identity_probe=_browser_probe,
+            identity_probe=browser_probe,
             healthcheck_module="services.supervision.healthchecks.browser",
         ),
         # browser-mcp: shared chrome-devtools-mcp upstream. Speaks MCP over a

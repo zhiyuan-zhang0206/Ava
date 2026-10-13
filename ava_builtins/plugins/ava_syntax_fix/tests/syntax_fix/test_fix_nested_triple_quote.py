@@ -9,7 +9,7 @@ from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
     fix_escape_inner_quotes,
     fix_nested_triple_quote,
 )
-from ava_builtins.plugins.ava_syntax_fix.tests.test_syntax_fix import _is_broken
+from ava_builtins.plugins.ava_syntax_fix.tests.test_syntax_fix import is_broken
 
 
 class TestFixNestedTripleQuote:
@@ -19,7 +19,7 @@ class TestFixNestedTripleQuote:
 
     def test_inner_docstring_escaped_and_content_preserved(self):
         code = 'src = """\ndef f():\n    """doc"""\n    return 1\n"""'
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_nested_triple_quote(code)
         assert n >= 1
         compile(fixed, "<t>", "exec")
@@ -29,7 +29,7 @@ class TestFixNestedTripleQuote:
 
     def test_single_quote_delim_nested(self):
         code = "src = '''\nclass C:\n    '''doc'''\n    x = 1\n'''"
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_nested_triple_quote(code)
         assert n >= 1
         compile(fixed, "<t>", "exec")
@@ -49,7 +49,7 @@ class TestFixNestedTripleQuote:
             '    return True""",\n'
             ")"
         )
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_nested_triple_quote(code)
         assert n >= 1
         compile(fixed, "<t>", "exec")
@@ -76,7 +76,7 @@ class TestFixNestedTripleQuote:
             '    new="""def g() -> bool: return True""",\n'
             ")"
         )
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_nested_triple_quote(code)
         assert n >= 1
         compile(fixed, "<t>", "exec")
@@ -108,7 +108,7 @@ class TestFixNestedTripleQuote:
             '    return True""",\n'
             ")"
         )
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_nested_triple_quote(code)
         # Honest refusal: the fixer cannot fix both interior docstrings
         # without merging the real delimiters, so it defers to LLM repair.
@@ -131,7 +131,7 @@ class TestFixNestedTripleQuote:
             '    new="""x = 2""",\n'
             ")\n"
         )
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_nested_triple_quote(code)
         assert n >= 1
         compile(fixed, "<t>", "exec")
@@ -151,7 +151,7 @@ class TestFixNestedTripleQuote:
         # (a real delimiter of a separate literal), the fixer refuses and leaves
         # the error for the repair step rather than merge two literals.
         code = 'a = """x"""\nb = """y"""\nc = """z"""\nd = (1\n'  # broken: open paren
-        assert _is_broken(code)
+        assert is_broken(code)
         assert fix_nested_triple_quote(code) == (code, 0)
 
     def test_valid_triple_quote_no_change(self):
@@ -167,7 +167,7 @@ class TestFixEscapeInnerQuotes:
 
     def test_nested_double_quote_escaped(self):
         code = 'print(run("grep -n "pat" file"))'
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_escape_inner_quotes(code)
         assert n == 2
         compile(fixed, "<t>", "exec")
@@ -177,7 +177,7 @@ class TestFixEscapeInnerQuotes:
         # them would merge three literals into one wrong-but-compiling string,
         # so the fixer must refuse and leave the error for the repair step.
         code = 'print("a" + "b" + "c"\n'  # unterminated paren -> broken
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_escape_inner_quotes(code)
         assert n == 0
         assert fixed == code

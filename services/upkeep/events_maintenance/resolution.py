@@ -283,7 +283,7 @@ def _insert_auto_dismissal(conn: Any, event_class: EventClass, days: int) -> boo
         return cur.fetchone() is not None
 
 
-def _stable_auto_classes(
+def stable_auto_classes(
     now: datetime,
     conn: Any,
     current: dict[EventClass, int],
@@ -473,7 +473,7 @@ def _read_window_counts(
         return (
             unresolved_counts,
             burst_counts,
-            _stable_auto_classes(at, conn, unresolved_counts, config, cadence),
+            stable_auto_classes(at, conn, unresolved_counts, config, cadence),
         )
 
 

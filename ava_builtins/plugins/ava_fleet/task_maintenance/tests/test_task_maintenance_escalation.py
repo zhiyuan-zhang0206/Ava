@@ -38,7 +38,7 @@ def pool(db_url: str):
         p.close()
 
 
-def _make_agent(db: psycopg.Connection) -> int:
+def make_agent(db: psycopg.Connection) -> int:
     with db.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         aid = int(cur.fetchone()[0])  # type: ignore[index]
@@ -50,7 +50,7 @@ def _make_agent(db: psycopg.Connection) -> int:
     return aid
 
 
-def _make_task(
+def make_task(
     db: psycopg.Connection,
     *,
     owner: int,
@@ -85,12 +85,12 @@ def _make_task(
     return tid
 
 
-def _stalled_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple[int, int, int]:
+def stalled_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple[int, int, int]:
     """A delegated, stalled subtask: (parent_owner, owner, task_id)."""
-    parent_owner = _make_agent(db)
-    parent = _make_task(db, owner=parent_owner, remind_interval_seconds=None)
-    owner = _make_agent(db)
-    tid = _make_task(
+    parent_owner = make_agent(db)
+    parent = make_task(db, owner=parent_owner, remind_interval_seconds=None)
+    owner = make_agent(db)
+    tid = make_task(
         db,
         owner=owner,
         parent_id=parent,
@@ -101,7 +101,7 @@ def _stalled_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tupl
     return parent_owner, owner, tid
 
 
-def _inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
+def inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
     """Inbound rows for an agent: (content, kind, source)."""
     db.rollback()  # the daemon committed on its own connection; refresh our view
     with db.cursor() as cur:
@@ -112,7 +112,7 @@ def _inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, 
         return cur.fetchall()
 
 
-def _escalated_at(db: psycopg.Connection, tid: int) -> Any:
+def escalated_at(db: psycopg.Connection, tid: int) -> Any:
     """The task's delegator escalation marker (None while unescalated)."""
     db.rollback()  # the daemon committed on its own connection; refresh our view
     with db.cursor() as cur:
@@ -133,11 +133,11 @@ def test_delegator_escalation_at_most_once_per_overdue_window(
     (Defect class fixed here: every 5-min sweep re-sent the digest while
     reminder_count sat at the threshold — reminder delivery is backoff-gated
     for up to 24h.)"""
-    parent_owner, _owner, tid = _stalled_subtask(db_conn)
+    parent_owner, _owner, tid = stalled_subtask(db_conn)
     assert _run_escalate(pool, database, event_bus, 3) == 1
     assert _run_escalate(pool, database, event_bus, 3) == 0
-    assert len(_inbound_messages(db_conn, parent_owner)) == 1
-    assert _escalated_at(db_conn, tid) is not None
+    assert len(inbound_messages(db_conn, parent_owner)) == 1
+    assert escalated_at(db_conn, tid) is not None
 
 
 def test_delegator_escalation_retries_after_delivery_failure(
@@ -149,7 +149,7 @@ def test_delegator_escalation_retries_after_delivery_failure(
 ) -> None:
     """A failed digest leaves no marker (no message landed), so the next sweep
     retries; once it lands, later sweeps stay quiet."""
-    parent_owner, _owner, tid = _stalled_subtask(db_conn)
+    parent_owner, _owner, tid = stalled_subtask(db_conn)
     real = escalation.insert_inbound_message_in_transaction
 
     def unavailable(*args: object, **kwargs: object) -> None:
@@ -158,13 +158,13 @@ def test_delegator_escalation_retries_after_delivery_failure(
     monkeypatch.setattr(escalation, "insert_inbound_message_in_transaction", unavailable)
     with pytest.raises(psycopg.OperationalError):
         _run_escalate(pool, database, event_bus, 3)
-    assert _inbound_messages(db_conn, parent_owner) == []
-    assert _escalated_at(db_conn, tid) is None
+    assert inbound_messages(db_conn, parent_owner) == []
+    assert escalated_at(db_conn, tid) is None
     monkeypatch.setattr(escalation, "insert_inbound_message_in_transaction", real)
     assert _run_escalate(pool, database, event_bus, 3) == 1  # retried and delivered
-    assert len(_inbound_messages(db_conn, parent_owner)) == 1
+    assert len(inbound_messages(db_conn, parent_owner)) == 1
     assert _run_escalate(pool, database, event_bus, 3) == 0  # marker holds: no third send
-    assert len(_inbound_messages(db_conn, parent_owner)) == 1
+    assert len(inbound_messages(db_conn, parent_owner)) == 1
 
 
 def test_delegator_escalation_rearms_after_owner_update(
@@ -176,7 +176,7 @@ def test_delegator_escalation_rearms_after_owner_update(
     """Any update() clears the marker with the reminder counters; after the
     owner re-engages and a later window re-crosses the threshold, the delegator
     is told again."""
-    parent_owner, _owner, tid = _stalled_subtask(db_conn)
+    parent_owner, _owner, tid = stalled_subtask(db_conn)
     assert _run_escalate(pool, database, event_bus, 3) == 1
     assert _run_escalate(pool, database, event_bus, 3) == 0
     # The owner updates the task: both update() paths reset the bookkeeping
@@ -197,4 +197,4 @@ def test_delegator_escalation_rearms_after_owner_update(
         )
     db_conn.commit()
     assert _run_escalate(pool, database, event_bus, 3) == 1
-    assert len(_inbound_messages(db_conn, parent_owner)) == 2
+    assert len(inbound_messages(db_conn, parent_owner)) == 2

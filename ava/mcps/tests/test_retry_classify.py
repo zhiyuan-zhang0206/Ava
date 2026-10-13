@@ -70,8 +70,8 @@ def test_daemon_reply_lost_does_not_fall_back_locally(monkeypatch: pytest.Monkey
 async def _daemon_call(
     monkeypatch: pytest.MonkeyPatch, session_getter: AsyncMock
 ) -> dict[str, Any]:
-    monkeypatch.setattr(daemon, "_get_session", session_getter)
-    monkeypatch.setattr(daemon, "_invalidate_session", AsyncMock())
+    monkeypatch.setattr(daemon, "get_session", session_getter)
+    monkeypatch.setattr(daemon, "invalidate_session", AsyncMock())
     request = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "charge"}}
     reader = asyncio.StreamReader()
     reader.feed_data((json.dumps(request) + "\n").encode())
@@ -81,13 +81,13 @@ async def _daemon_call(
     writer.write.side_effect = chunks.append
     writer.drain = AsyncMock()
     writer.wait_closed = AsyncMock()
-    scope = daemon._Scope(
-        local=daemon._Buckets(),
-        shared=daemon._Buckets(),
+    scope = daemon.Scope(
+        local=daemon.Buckets(),
+        shared=daemon.Buckets(),
         oauth_locks={},
         timeout_seconds=lambda: 15.0,
     )
-    await daemon._handle_client(reader, cast(asyncio.StreamWriter, writer), scope)
+    await daemon.handle_client(reader, cast(asyncio.StreamWriter, writer), scope)
     return json.loads(b"".join(chunks))
 
 

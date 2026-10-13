@@ -57,7 +57,7 @@ DRILL_PERIOD = timedelta(days=7)
 full backup). The drill can only run when a tick does, so it falls due one tick period early
 and is overdue only one tick period late (`drill.drill_due`, `tick_judge`)."""
 
-_CONNECT_TIMEOUT_S = 5
+CONNECT_TIMEOUT_S = 5
 _STATEMENT_TIMEOUT = "10s"
 
 CONFIG_UNUSABLE = "WAL archiving: the WAL-G configuration is unusable"
@@ -105,7 +105,7 @@ def admin_connection() -> Generator[psycopg.Connection[Any]]:
         authority.admin_url,
         expected_data_dir=authority.data_dir,
         autocommit=True,
-        connect_timeout=_CONNECT_TIMEOUT_S,
+        connect_timeout=CONNECT_TIMEOUT_S,
     ) as conn:
         conn.execute(f"SET statement_timeout = '{_STATEMENT_TIMEOUT}'")
         yield conn
@@ -212,7 +212,7 @@ def drill_judge(
     return None
 
 
-def _enabled_since() -> datetime | None:
+def enabled_since() -> datetime | None:
     try:
         return datetime.fromtimestamp(walg_config.key_id_path().stat().st_mtime, tz=UTC)
     except FileNotFoundError:
@@ -223,7 +223,7 @@ def tick_failure(now: datetime | None = None) -> str | None:
     """The daily tick's condition from its state file; never raises."""
     try:
         recorded = walg_state.read_state()
-        return tick_judge(recorded, now or datetime.now(UTC), enabled_since=_enabled_since())
+        return tick_judge(recorded, now or datetime.now(UTC), enabled_since=enabled_since())
     except Exception as exc:  # the probe must never raise; the cause is logged
         logger.warning(f"[walg] probe: tick state unreadable: {type(exc).__name__}: {exc}")
         return TICK_STATE_UNREADABLE

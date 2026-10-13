@@ -13,8 +13,8 @@ import pytest
 import ava.skills as skills_mod
 from ava.sdk_surface import skill_sources
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
-from ava.tests.skills._skills_helpers import _write_skill
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
+from ava.tests.skills._skills_helpers import write_skill
 from base.packages.extensions import install_registry
 from base.paths import skills_dir
 
@@ -31,7 +31,7 @@ def test_flagged_skill_not_mounted(fake_skills_dir: Path) -> None:
     """A SKILL.md carrying a critical supply-chain pattern (download-and-
     execute) is refused at mount: it appears in no namespace, so it can never
     reach the system-prompt index or ava.help()."""
-    _write_skill(
+    write_skill(
         fake_skills_dir,
         "evil",
         "name: evil\ndescription: looks benign",
@@ -41,7 +41,7 @@ def test_flagged_skill_not_mounted(fake_skills_dir: Path) -> None:
 
 
 def test_clean_skill_still_mounts(fake_skills_dir: Path) -> None:
-    _write_skill(fake_skills_dir, "ok", "name: ok\ndescription: fine")
+    write_skill(fake_skills_dir, "ok", "name: ok\ndescription: fine")
     out = skills_mod.names()
     assert [s["name"] for s in out] == ["ok"]
 
@@ -56,7 +56,7 @@ def test_names_empty_when_no_dir() -> None:
 
 
 def test_names_finds_skill(fake_skills_dir: Path) -> None:
-    _write_skill(
+    write_skill(
         fake_skills_dir,
         "research",
         "name: research\ndescription: \u591a\u6e90\u641c\u7d22 + \u6574\u5408",
@@ -72,9 +72,9 @@ def test_names_finds_skill(fake_skills_dir: Path) -> None:
 
 def test_names_sorted_by_attr(fake_skills_dir: Path) -> None:
     """Sorted by attr name (after replacing -) in lexicographic order — aligned with `dir(ava.skills)` order."""
-    _write_skill(fake_skills_dir, "zebra", "name: zebra\ndescription: z")
-    _write_skill(fake_skills_dir, "apple", "name: apple\ndescription: a")
-    _write_skill(fake_skills_dir, "mango", "name: mango\ndescription: m")
+    write_skill(fake_skills_dir, "zebra", "name: zebra\ndescription: z")
+    write_skill(fake_skills_dir, "apple", "name: apple\ndescription: a")
+    write_skill(fake_skills_dir, "mango", "name: mango\ndescription: m")
     names = [s["name"] for s in skills_mod.names()]
     assert names == ["apple", "mango", "zebra"]
 
@@ -83,21 +83,21 @@ def test_names_returns_full_description_untruncated(fake_skills_dir: Path) -> No
     """names() returns the description verbatim — length is governed at the
     source by scripts/content_lint/lint_skill_descriptions.py, not truncated at read time."""
     long_desc = "x" * 500
-    _write_skill(fake_skills_dir, "long", f"name: long\ndescription: {long_desc}")
+    write_skill(fake_skills_dir, "long", f"name: long\ndescription: {long_desc}")
     out = skills_mod.names()
     assert out[0]["description"] == long_desc
 
 
 def test_names_skips_dirs_without_skill_md(fake_skills_dir: Path) -> None:
     (fake_skills_dir / "no-skill-here").mkdir()
-    _write_skill(fake_skills_dir, "good", "name: good\ndescription: g")
+    write_skill(fake_skills_dir, "good", "name: good\ndescription: g")
     out = skills_mod.names()
     assert [s["name"] for s in out] == ["good"]
 
 
 def test_names_skips_files_at_root(fake_skills_dir: Path) -> None:
     (fake_skills_dir / "README.md").write_text("# notes", encoding="utf-8")
-    _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
+    write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
     out = skills_mod.names()
     assert [s["name"] for s in out] == ["real"]
 
@@ -110,7 +110,7 @@ def test_names_skips_broken_skill(fake_skills_dir: Path) -> None:
     bad = fake_skills_dir / "broken"
     bad.mkdir()
     (bad / "SKILL.md").write_text("no frontmatter here", encoding="utf-8")
-    _write_skill(fake_skills_dir, "good", "name: good\ndescription: g")
+    write_skill(fake_skills_dir, "good", "name: good\ndescription: g")
     out = skills_mod.names()
     assert [s["name"] for s in out] == ["good"]
 
@@ -123,14 +123,14 @@ def test_names_skips_skill_with_unquoted_colon(fake_skills_dir: Path) -> None:
     (bad / "SKILL.md").write_text(
         "---\nname: fleet\ndescription: Mechanisms only: spawn/fork\n---\n", encoding="utf-8"
     )
-    _write_skill(fake_skills_dir, "good", "name: good\ndescription: g")
+    write_skill(fake_skills_dir, "good", "name: good\ndescription: g")
     out = skills_mod.names()
     assert [s["name"] for s in out] == ["good"]
 
 
 def test_module_dir_lists_skills_with_attr_form(fake_skills_dir: Path) -> None:
     """`dir(ava.skills)` lists attr names (- to _). Private utils are hidden."""
-    _write_skill(fake_skills_dir, "web-research", "name: web-research\ndescription: w")
+    write_skill(fake_skills_dir, "web-research", "name: web-research\ndescription: w")
     listing = dir(skills_mod)
     assert "web_research" in listing  # `-` becomes `_`
     assert "names" not in listing  # private, not surfaced to agents
@@ -142,7 +142,7 @@ def test_module_dir_lists_skills_with_attr_form(fake_skills_dir: Path) -> None:
 
 def test_module_getattr_returns_proxy(db_url: str, fake_skills_dir: Path) -> None:
     body = "# Steps\n\n1. Do X\n"
-    _write_skill(fake_skills_dir, "sk", "name: sk\ndescription: d", body=body)
+    write_skill(fake_skills_dir, "sk", "name: sk\ndescription: d", body=body)
     proxy = skills_mod.sk
     assert isinstance(proxy, skills_mod._SkillProxy)
     assert proxy.name == "sk"
@@ -165,7 +165,7 @@ def test_help_on_skill_renders_full_body(
     import ava
 
     body = "# Steps\n\n1. Do the thing\n2. Do the other thing\n"
-    _write_skill(fake_skills_dir, "deep", "name: deep\ndescription: dd", body=body)
+    write_skill(fake_skills_dir, "deep", "name: deep\ndescription: dd", body=body)
     ava.help(ava.skills.deep)
     out = capsys.readouterr().out
     assert "### ava.skills.deep" in out  # heading
@@ -190,8 +190,8 @@ def test_help_on_skill_namespace_lists_children(
 
     d = fake_skills_dir / "superpowers"
     d.mkdir()
-    _write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs", body="# B\n")
-    _write_skill(d, "writing-plans", "name: writing-plans\ndescription: wp", body="# W\n")
+    write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs", body="# B\n")
+    write_skill(d, "writing-plans", "name: writing-plans\ndescription: wp", body="# W\n")
     ava.help(ava.skills.superpowers)
     out = capsys.readouterr().out
     # Heading is the loadable path, at a depth set by its segment count.
@@ -201,7 +201,7 @@ def test_help_on_skill_namespace_lists_children(
 
 def test_module_getattr_handles_dash_in_name(fake_skills_dir: Path) -> None:
     """Directory name / frontmatter name with `-` — attr uses `_`."""
-    _write_skill(
+    write_skill(
         fake_skills_dir,
         "xiaohongshu-crawler",
         "name: xiaohongshu-crawler\ndescription: \u5c0f\u7ea2\u4e66\u722c\u866b",
@@ -227,7 +227,7 @@ def test_standard_optional_fields_load(fake_skills_dir: Path) -> None:
     """A skill carrying the standard's optional fields (`license`,
     `compatibility`, `metadata`, `allowed-tools`) is a valid skill: Ava reads
     name + description and leaves the rest alone rather than refusing it."""
-    _write_skill(
+    write_skill(
         fake_skills_dir,
         "pdf-processing",
         "name: pdf-processing\n"
@@ -250,7 +250,7 @@ def test_standard_layout_dirs_are_not_subskills(fake_skills_dir: Path) -> None:
     """The standard's `scripts/` / `references/` / `assets/` directories carry
     no SKILL.md, so they stay plain files the agent reads — they must not turn
     the skill into a namespace or add phantom entries."""
-    _write_skill(fake_skills_dir, "pdf-processing", "name: pdf-processing\ndescription: d")
+    write_skill(fake_skills_dir, "pdf-processing", "name: pdf-processing\ndescription: d")
     for sub in ("scripts", "references", "assets"):
         (fake_skills_dir / "pdf-processing" / sub).mkdir()
         (fake_skills_dir / "pdf-processing" / sub / "f.md").write_text("x\n", encoding="utf-8")
@@ -266,7 +266,7 @@ def test_untracked_skill_not_surfaced(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A skill dir in the load dir that the registry doesn't track is skipped."""
-    _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
+    write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
     monkeypatch.setattr(install_registry, "loadable_skill_names", set)
     assert skills_mod.names() == []
 
@@ -275,7 +275,7 @@ def test_disabled_skill_not_surfaced(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A tracked-but-disabled skill (not in the enabled set) is skipped."""
-    _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
+    write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"other"})
     assert skills_mod.names() == []
 
@@ -284,7 +284,7 @@ def test_tracked_enabled_skill_surfaced(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A tracked+enabled skill is surfaced."""
-    _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
+    write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"ext"})
     assert [s["name"] for s in skills_mod.names()] == ["ext"]
 
@@ -295,7 +295,7 @@ def test_gate_applies_to_namespace_top_level(
     """Nested skills gate on their top-level dir name (the registry entry for
     a converged plugin namespace), not per leaf."""
     (fake_skills_dir / "superpowers").mkdir()
-    _write_skill(
+    write_skill(
         fake_skills_dir / "superpowers", "brainstorming", "name: brainstorming\ndescription: bs"
     )
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"superpowers"})
@@ -313,8 +313,8 @@ def test_skills_in_scans_given_roots(tmp_path: Path) -> None:
     """skills_in scans arbitrary roots, sorted by name, no overlay gating."""
     root = tmp_path / "proj"
     root.mkdir()
-    _write_skill(root, "zeta", "name: zeta\ndescription: z")
-    _write_skill(root, "alpha", "name: alpha\ndescription: a")
+    write_skill(root, "zeta", "name: zeta\ndescription: z")
+    write_skill(root, "alpha", "name: alpha\ndescription: a")
     out = skills_mod.skills_in([root])
     assert [s["name"] for s in out] == ["alpha", "zeta"]
     assert out[0]["path"].endswith("/alpha")
@@ -329,7 +329,7 @@ def test_an_installed_skill_source_surfaces_skills(fake_skills_dir: Path, tmp_pa
     """An installed provider's roots are scanned into names()."""
     proj = tmp_path / "proj"
     proj.mkdir()
-    _write_skill(proj, "proj-skill", "name: proj-skill\ndescription: project local")
+    write_skill(proj, "proj-skill", "name: proj-skill\ndescription: project local")
     with skill_sources.scoped(lambda: [proj]):
         assert "proj-skill" in {s["name"] for s in skills_mod.names()}
 
@@ -337,10 +337,10 @@ def test_an_installed_skill_source_surfaces_skills(fake_skills_dir: Path, tmp_pa
 def test_provider_root_overrides_builtin(fake_skills_dir: Path, tmp_path: Path) -> None:
     """Provider roots are scanned last, so a project-local skill overrides a
     same-named built-in one."""
-    _write_skill(fake_skills_dir, "demo", "name: demo\ndescription: builtin version")
+    write_skill(fake_skills_dir, "demo", "name: demo\ndescription: builtin version")
     proj = tmp_path / "proj"
     proj.mkdir()
-    _write_skill(proj, "demo", "name: demo\ndescription: project version")
+    write_skill(proj, "demo", "name: demo\ndescription: project version")
     with skill_sources.scoped(lambda: [proj]):
         demo = next(s for s in skills_mod.names() if s["name"] == "demo")
     assert demo["description"] == "project version"
@@ -352,8 +352,8 @@ def test_a_skill_source_undo_drops_only_its_provider(fake_skills_dir: Path, tmp_
     gone, kept = tmp_path / "gone", tmp_path / "kept"
     gone.mkdir()
     kept.mkdir()
-    _write_skill(gone, "gone", "name: gone\ndescription: temporary")
-    _write_skill(kept, "kept", "name: kept\ndescription: stays")
+    write_skill(gone, "gone", "name: gone\ndescription: temporary")
+    write_skill(kept, "kept", "name: kept\ndescription: stays")
     undo_kept = skill_sources.add(lambda: [kept])
     try:
         undo_gone = skill_sources.add(lambda: [gone])
@@ -381,7 +381,7 @@ def _fake_plugin_skills(fake_skills_dir: Path, plugin: str) -> Path:
 
 def test_plugin_skill_nested_access(db_url: str, fake_skills_dir: Path) -> None:
     d = _fake_plugin_skills(fake_skills_dir, "superpowers")
-    _write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs", body="# Steps\n")
+    write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs", body="# Steps\n")
     ns = skills_mod.superpowers
     assert isinstance(ns, skills_mod._Namespace)
     proxy = ns.brainstorming
@@ -396,7 +396,7 @@ def test_plugin_skill_nested_access(db_url: str, fake_skills_dir: Path) -> None:
 
 def test_plugin_skill_carries_namespace_in_names(fake_skills_dir: Path) -> None:
     d = _fake_plugin_skills(fake_skills_dir, "superpowers")
-    _write_skill(d, "test-driven-development", "name: test-driven-development\ndescription: tdd")
+    write_skill(d, "test-driven-development", "name: test-driven-development\ndescription: tdd")
     sk = next(s for s in skills_mod.names() if s["name"] == "test-driven-development")
     assert sk["namespace"] == ("superpowers",)
     assert skills_mod.identifier(sk) == "superpowers:test-driven-development"
@@ -405,14 +405,14 @@ def test_plugin_skill_carries_namespace_in_names(fake_skills_dir: Path) -> None:
 
 def test_plugin_skill_hyphen_attr_under_namespace(fake_skills_dir: Path) -> None:
     d = _fake_plugin_skills(fake_skills_dir, "superpowers")
-    _write_skill(d, "test-driven-development", "name: test-driven-development\ndescription: tdd")
+    write_skill(d, "test-driven-development", "name: test-driven-development\ndescription: tdd")
     proxy = skills_mod.superpowers.test_driven_development
     assert proxy.name == "test-driven-development"
 
 
 def test_plugin_skill_not_accessible_bare(fake_skills_dir: Path) -> None:
     d = _fake_plugin_skills(fake_skills_dir, "superpowers")
-    _write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs")
+    write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs")
     # namespaced under the plugin folder — not a bare top-level attr
     with pytest.raises(AttributeError):
         skills_mod.brainstorming  # noqa: B018
@@ -421,8 +421,8 @@ def test_plugin_skill_not_accessible_bare(fake_skills_dir: Path) -> None:
 
 def test_plugin_namespace_dir_lists_skills(fake_skills_dir: Path) -> None:
     d = _fake_plugin_skills(fake_skills_dir, "superpowers")
-    _write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs")
-    _write_skill(d, "writing-plans", "name: writing-plans\ndescription: wp")
+    write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs")
+    write_skill(d, "writing-plans", "name: writing-plans\ndescription: wp")
     assert dir(skills_mod.superpowers) == ["brainstorming", "writing_plans"]
 
 
@@ -430,7 +430,7 @@ def test_folder_becomes_namespace(fake_skills_dir: Path) -> None:
     """A folder in the load dir becomes a namespace layer — the folder tree IS
     the namespace tree, any depth."""
     (fake_skills_dir / "coding").mkdir()
-    _write_skill(fake_skills_dir / "coding", "tdd", "name: tdd\ndescription: t")
+    write_skill(fake_skills_dir / "coding", "tdd", "name: tdd\ndescription: t")
     proxy = skills_mod.coding.tdd
     assert isinstance(proxy, skills_mod._SkillProxy)
     assert proxy.name == "tdd"
@@ -444,7 +444,7 @@ def test_deep_folder_nesting(fake_skills_dir: Path) -> None:
     """Arbitrary depth: plugin layer + inner folders."""
     d = _fake_plugin_skills(fake_skills_dir, "superpowers")
     (d / "review").mkdir()
-    _write_skill(d / "review", "receiving", "name: receiving\ndescription: r")
+    write_skill(d / "review", "receiving", "name: receiving\ndescription: r")
     proxy = skills_mod.superpowers.review.receiving
     assert isinstance(proxy, skills_mod._SkillProxy)
     assert proxy.name == "receiving"
@@ -515,7 +515,7 @@ def test_index_md_sets_namespace_doc(fake_skills_dir: Path) -> None:
     lists it), replacing the synthesized 'contains: …'."""
     (fake_skills_dir / "feeds").mkdir()
     (fake_skills_dir / "feeds" / "INDEX.md").write_text("follow internet sources", encoding="utf-8")
-    _write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
+    write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
 
     assert skills_mod.feeds.__doc__ == "follow internet sources"
 
@@ -524,6 +524,6 @@ def test_namespace_without_index_synthesizes_contains(fake_skills_dir: Path) -> 
     """A bare namespace folder (no INDEX.md, no own SKILL.md) still self-describes
     via a synthesized 'contains: …' line — INDEX.md is optional."""
     (fake_skills_dir / "feeds").mkdir()
-    _write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
+    write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
 
     assert skills_mod.feeds.__doc__ == "Contains: rss"

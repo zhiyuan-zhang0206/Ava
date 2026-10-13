@@ -53,7 +53,11 @@ pytest.register_assert_rewrite(
     "tests.fixtures.guards",
 )
 
-import tests.fixtures.env_bootstrap  # noqa: E402, F401  # pyright: ignore[reportUnusedImport] -- isolation first
+from tests.fixtures.env_bootstrap import (  # noqa: E402 -- isolation first: no project import precedes it
+    distinct_free_ports,
+    process_config,
+    session_ports,
+)
 from tests.fixtures.guards import (  # noqa: E402
     guard_service_readiness,
     homes_get_their_own_ports,
@@ -84,6 +88,7 @@ __all__ = [
     "database_gate",
     "db_conn",
     "db_url",
+    "distinct_free_ports",
     "event_bus",
     "gateway_data_plane",
     "guard_service_readiness",
@@ -91,9 +96,11 @@ __all__ = [
     "insert_inbound",
     "permissions_helper_native_io",
     "postgres_access",
+    "process_config",
     "publish_wake",
     "redis_access",
     "redis_url",
+    "session_ports",
 ]
 
 pytest_plugins = [

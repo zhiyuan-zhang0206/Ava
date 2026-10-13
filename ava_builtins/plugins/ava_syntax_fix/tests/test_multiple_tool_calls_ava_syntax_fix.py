@@ -102,7 +102,7 @@ async def test_syntax_repair_is_per_call_and_preserves_content(
     ]
     original = ai.model_dump()
     fix = MagicMock(side_effect=[("print(10)", ["test"]), ("print(20)", ["test"])])
-    monkeypatch.setattr(syntax, "_apply_fix_pipeline", fix)
+    monkeypatch.setattr(syntax, "apply_fix_pipeline", fix)
     update = await syntax.syntax_fix_before_exec(state, runtime, {})
     assert update is not None
     fixed = update["messages"][0]
@@ -126,8 +126,8 @@ async def test_unfixable_syntax_does_not_skip_sibling(
     def unchanged(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
         return code, []
 
-    monkeypatch.setattr(syntax, "_apply_fix_pipeline", unchanged)
-    monkeypatch.setattr(syntax, "_llm_repair_syntax", AsyncMock(return_value=None))
+    monkeypatch.setattr(syntax, "apply_fix_pipeline", unchanged)
+    monkeypatch.setattr(syntax, "llm_repair_syntax", AsyncMock(return_value=None))
     update = await syntax.syntax_fix_before_exec(state, runtime, {})
     assert update is not None
     assert "goto" not in update
@@ -148,8 +148,8 @@ async def test_unfixable_single_call_error_result_carries_creation_time(
     def unchanged(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
         return code, []
 
-    monkeypatch.setattr(syntax, "_apply_fix_pipeline", unchanged)
-    monkeypatch.setattr(syntax, "_llm_repair_syntax", AsyncMock(return_value=None))
+    monkeypatch.setattr(syntax, "apply_fix_pipeline", unchanged)
+    monkeypatch.setattr(syntax, "llm_repair_syntax", AsyncMock(return_value=None))
     before = datetime.now(UTC)
     update = await syntax.syntax_fix_before_exec(_state("return"), runtime, {})
     assert update is not None

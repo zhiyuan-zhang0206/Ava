@@ -265,9 +265,9 @@ def test_per_agent_framing_makes_no_path_resolution_claim(memory_plugin: Any) ->
     writing memory beside the tracked cwd (leaks 7/13 and 8/1, audit #577). The
     SDK core's statement — file ops default to the workspace — is the only
     source of truth for path resolution."""
-    from ava_builtins.plugins.ava_memory.notes import _PER_AGENT_FRAMING
+    from ava_builtins.plugins.ava_memory.notes import PER_AGENT_FRAMING
 
-    assert "resolve" not in _PER_AGENT_FRAMING
+    assert "resolve" not in PER_AGENT_FRAMING
 
 
 def test_memory_index_injection_guard(

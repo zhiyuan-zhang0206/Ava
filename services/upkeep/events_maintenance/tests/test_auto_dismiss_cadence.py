@@ -15,10 +15,10 @@ from base.daemon.loop_health import LoopProgress
 from services.upkeep.events_maintenance import daemon, resolution
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 from services.upkeep.events_maintenance.tests.test_events_maintenance_resolution import (
-    _capture_events,
-    _event_class,
-    _Pool,
+    Pool,
     _record,
+    capture_events,
+    event_class,
 )
 
 
@@ -61,8 +61,8 @@ def test_fetch_failure_retries_but_write_failure_consumes_the_day(
     )
     cadence = resolution.AutoDismissCadence()
     connection = _ScanConnection(db_conn)
-    pool = cast(ConnectionPool, _Pool(cast(Any, connection)))
-    _capture_events(monkeypatch)
+    pool = cast(ConnectionPool, Pool(cast(Any, connection)))
+    capture_events(monkeypatch)
     connection.fail_fetch = True
     assert resolution.run_resolution_slice(pool, config, cadence=cadence, now=now) is None
     assert cadence.due(now)
@@ -80,7 +80,7 @@ def test_fetch_failure_retries_but_write_failure_consumes_the_day(
     assert connection.scans == 2
     assert db_conn.execute("SELECT count(*) FROM event_dismissals").fetchone() == (0,)
     tomorrow = now + timedelta(days=1)
-    resolution._stable_auto_classes(tomorrow, connection, {}, config, cadence)
+    resolution.stable_auto_classes(tomorrow, connection, {}, config, cadence)
     assert connection.scans == 3
     assert not cadence.due(tomorrow)
 
@@ -90,11 +90,11 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
 ) -> None:
     _history(db_conn)
     connection = _ScanConnection(db_conn)
-    pool = cast(ConnectionPool, _Pool(cast(Any, connection)))
+    pool = cast(ConnectionPool, Pool(cast(Any, connection)))
     config = events_maintenance_config(
         process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
     )
-    _capture_events(monkeypatch)
+    capture_events(monkeypatch)
     monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)
     passes = 0
 
@@ -109,12 +109,12 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
         if passes % 2 == 0:
             raise asyncio.CancelledError
 
-    monkeypatch.setattr(daemon, "_maintenance_with_liveness", execute_pass)
+    monkeypatch.setattr(daemon, "maintenance_with_liveness", execute_pass)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", stop_after_two)
     for expected_scans in (1, 2):
         async with asyncio.TaskGroup() as tasks:
             with pytest.raises(asyncio.CancelledError):
-                await daemon._resolution_loop(
+                await daemon.resolution_loop(
                     pool, LoopProgress("test", timeout_s=5), config, tasks=tasks
                 )
         assert connection.scans == expected_scans
@@ -129,8 +129,8 @@ def test_disabled_scan_does_not_consume_cadence(
     connection = _ScanConnection(db_conn)
     cadence = resolution.AutoDismissCadence()
     assert (
-        resolution._stable_auto_classes(
-            now, connection, {_event_class(): 1}, events_maintenance_config(process_config), cadence
+        resolution.stable_auto_classes(
+            now, connection, {event_class(): 1}, events_maintenance_config(process_config), cadence
         )
         == set()
     )

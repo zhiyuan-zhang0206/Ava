@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Nightly Test Duration Refresh"
-description: "CI-shaped isolated pytest timing measurements that publish complete .test_durations updates through a review-only pull request."
+description: "Daily CI-shaped isolated pytest timing measurements saved as an Actions cache that every CI run restores as .test_durations."
 tags:
   - ci
   - testing
@@ -10,22 +10,20 @@ tags:
 
 # Nightly Test Duration Refresh
 
-`workflows/refresh-test-durations.yml` runs daily at 19:30 UTC, with a 21:30
-UTC backstop, and on manual dispatch. A guard skips all measurements when any
-manual or scheduled refresh succeeded in the preceding five hours, so the
-backstop covers a missing or failed primary run without duplicate daily work.
-It re-measures the 16 backend and four e2e CI shard shapes on isolated runners.
-Each shard uses the matching CI pytest arguments, records a clean duration
-artifact, and retries independently when a timing-sensitive failure occurs.
+`workflows/refresh-test-durations.yml` runs daily at 19:30 UTC and on manual
+dispatch. It re-measures the 16 backend and four e2e CI shard shapes on isolated
+runners, each shard seeded with the current timings and using the matching CI pytest
+arguments, recording a clean duration artifact and retrying independently when a
+timing-sensitive failure occurs.
 
-The merge job accepts only the complete 20-artifact set. It atomically updates
-`.test_durations` after dropping sub-0.2-second entries, so a failed or missing
-shard cannot publish a partial timing model. This preserves CI's environmental
-isolation rather than running the whole suite in one timing-coupled runner.
-
-When timings change, the workflow force-updates the review-only
-`ava-bot/test-durations` branch and opens or updates the fixed refresh PR. It
-does not auto-merge that PR.
+The publish job accepts only the complete 20-artifact set, merges it into
+`.test_durations` and saves that file as the Actions cache
+`test-durations-<date>-<run id>-<attempt>` on main; a verify job lists the newest
+cache, restores its exact key and checks the contents. Nothing is committed and no
+pull request is opened. CI's `classify` job resolves the newest entry once per run
+(`actions/resolve-test-durations`) and each shard restores that exact key
+(`actions/restore-test-durations`); with no entry the run warns, shards split by test
+count and the selector keeps the full suite. The file is gitignored.
 
 ## Key dependencies
 

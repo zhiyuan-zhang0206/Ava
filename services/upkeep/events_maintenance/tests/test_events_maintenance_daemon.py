@@ -7,7 +7,7 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
     DB error does not become a tight hot-loop against Postgres;
   - the hourly pass ALWAYS runs the rollup + blob vacuum.
 
-All driven directly (no DB): `_run_maintenance` / `_maintenance_with_liveness` are
+All driven directly (no DB): `_run_maintenance` / `maintenance_with_liveness` are
 monkeypatched, so these are pure asyncio-loop tests.
 """
 
@@ -44,7 +44,7 @@ from services.upkeep.events_maintenance.tests.slices import (
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
-# The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
+# The pool is never touched — `_run_maintenance` / `maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
 
 
@@ -89,7 +89,7 @@ async def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.M
 
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(daemon.WedgedPassError, match=r"dispatch.*hard deadline"):
-            await daemon._maintenance_with_liveness(
+            await daemon.maintenance_with_liveness(
                 _FAKE_POOL,
                 progress,
                 lambda _pool: time.sleep(0.05),
@@ -120,7 +120,7 @@ async def test_completed_pass_beats_once_after_worker_finishes(
 
     monkeypatch.setattr(progress, "beat", counting_beat)
     async with asyncio.TaskGroup() as tasks:
-        await daemon._maintenance_with_liveness(_FAKE_POOL, progress, run, tasks=tasks)
+        await daemon.maintenance_with_liveness(_FAKE_POOL, progress, run, tasks=tasks)
 
     assert len(beat_at) == 1
     assert beat_at[0] >= finished_at
@@ -196,7 +196,7 @@ async def test_wedged_dispatch_parks_without_entering_retry_sleep(
     async def forbidden_retry_sleep(_progress: LoopProgress, _total_s: float) -> None:
         pytest.fail("wedged loop entered the normal retry sleep")
 
-    monkeypatch.setattr(daemon, "_maintenance_with_liveness", wedge)
+    monkeypatch.setattr(daemon, "maintenance_with_liveness", wedge)
     monkeypatch.setattr(daemon.asyncio, "sleep", forbidden_park)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", forbidden_retry_sleep)
 
@@ -347,7 +347,7 @@ def test_loop_components_report_fresh_loops_as_ok(monkeypatch: pytest.MonkeyPatc
     liveness.register("dispatch", timeout_s=15.0)
     liveness.register("resolution", timeout_s=20.0)
 
-    assert daemon._loop_components(liveness) == [
+    assert daemon.loop_components(liveness) == [
         {"name": "dispatch", "status": "ok", "progress": "idle"},
         {"name": "resolution", "status": "ok", "progress": "idle"},
     ]
@@ -359,7 +359,7 @@ def test_loop_components_report_wedged_loop_reason(monkeypatch: pytest.MonkeyPat
     dispatch = liveness.register("dispatch", timeout_s=15.0)
     dispatch.fail("dispatch pass exceeded hard deadline")
 
-    assert daemon._loop_components(liveness) == [
+    assert daemon.loop_components(liveness) == [
         {
             "name": "dispatch",
             "status": "degraded",
@@ -377,7 +377,7 @@ def test_loop_components_report_stale_loop(monkeypatch: pytest.MonkeyPatch) -> N
     liveness.register("resolution", timeout_s=5.0)
     now = 106.0
 
-    assert daemon._loop_components(liveness) == [
+    assert daemon.loop_components(liveness) == [
         {
             "name": "resolution",
             "status": "degraded",
@@ -397,7 +397,7 @@ def test_loop_components_convert_success_iso_to_epoch(monkeypatch: pytest.Monkey
     last_success = datetime.fromisoformat(stamped).timestamp()
     monkeypatch.setattr(daemon.time, "time", lambda: last_success + 12.5)
 
-    assert daemon._loop_components(liveness) == [
+    assert daemon.loop_components(liveness) == [
         {
             "name": "dispatch",
             "status": "ok",
@@ -505,7 +505,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(
 
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
-    monkeypatch.setattr(daemon, "_resolution_loop", resolution)
+    monkeypatch.setattr(daemon, "resolution_loop", resolution)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", gauge)
 
     asyncio.run(
@@ -596,7 +596,7 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
 
     monkeypatch.setattr(daemon.Database, "pool", pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", loop("dispatch"))
-    monkeypatch.setattr(daemon, "_resolution_loop", loop("resolution"))
+    monkeypatch.setattr(daemon, "resolution_loop", loop("resolution"))
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", loop("registry_gauge"))
 
     with pytest.raises(ExceptionGroup) as raised:
@@ -677,7 +677,7 @@ def _run_with_alert_loop(
 
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", parked)
-    monkeypatch.setattr(daemon, "_resolution_loop", parked)
+    monkeypatch.setattr(daemon, "resolution_loop", parked)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", parked)
     monkeypatch.setattr(daemon.alert_reconciler, "reconciliation_loop", alert_loop)
 

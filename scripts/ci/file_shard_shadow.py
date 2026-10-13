@@ -178,10 +178,21 @@ def _configure_runtime(config: pytest.Config) -> None:
 
 
 def _durations(config: pytest.Config) -> tuple[dict[str, float], str]:
+    """The duration input, or an empty one when no file exists.
+
+    Timings arrive from the daily measurement through the Actions cache, so a run can start
+    without them (the CI step that restores them warns). They only balance the split: with none,
+    every test costs the same, which is also what pytest-split does for a missing file. A file
+    that exists but is unreadable or malformed is still an error."""
     try:
         raw = Path(cast(str, config.getoption("durations_path"))).read_bytes()
+    except FileNotFoundError:
+        return {}, hashlib.sha256(b"").hexdigest()
+    except OSError as error:
+        raise pytest.UsageError(f"Invalid shadow duration input: {error}") from error
+    try:
         return _DURATIONS.validate_json(raw, strict=True), hashlib.sha256(raw).hexdigest()
-    except (OSError, ValidationError) as error:
+    except ValidationError as error:
         raise pytest.UsageError(f"Invalid shadow duration input: {error}") from error
 
 

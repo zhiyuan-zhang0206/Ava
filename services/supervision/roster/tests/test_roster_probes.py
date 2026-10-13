@@ -25,7 +25,7 @@ def test_roster_uses_healthy_protocol_without_native_listener_proof(
         pytest.fail("roster protocol availability must not inspect native ownership")
 
     monkeypatch.setattr(roster, "probe_home", healthy)
-    monkeypatch.setattr(roster, "_browser_probe", healthy)
+    monkeypatch.setattr(roster, "browser_probe", healthy)
     monkeypatch.setattr(healthz, "probe_daemon", healthy)
 
     def identity(*_args: object) -> Callable[[], DaemonProbe]:
@@ -48,5 +48,5 @@ def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
 
     browser = next(s for s in roster.build_services() if s.session == "browser")
     probe = browser.identity_probe
-    assert probe is roster._browser_probe
+    assert probe is roster.browser_probe
     assert probe_browser is not None  # the lazy import target exists

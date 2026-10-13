@@ -362,7 +362,7 @@ def test_real_repository_map_is_fast_and_has_broad_static_coverage() -> None:
     probe = (
         "import json, sys; from pathlib import Path; from scripts.ci import test_selector;"
         "r = test_selector.select_tests(['scripts/ci/test_selector.py'], repo_root=Path(sys.argv[1]));"
-        "print(json.dumps([r.map_source_count, r.full_est_seconds]))"
+        "print(r.map_source_count)"
     )
     started = perf_counter()
     completed = subprocess.run(  # noqa: S603 -- fixed interpreter and in-repo code
@@ -374,9 +374,8 @@ def test_real_repository_map_is_fast_and_has_broad_static_coverage() -> None:
     )
     elapsed = perf_counter() - started
 
-    map_source_count, full_est_seconds = json.loads(completed.stdout.splitlines()[-1])
+    map_source_count = int(completed.stdout.splitlines()[-1])
     assert map_source_count > 500
-    assert full_est_seconds > 0
     assert elapsed < 60
 
 

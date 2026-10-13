@@ -116,7 +116,7 @@ def test_worker_shares_one_gate_with_work_log_and_scratch_url(
         database_for_url("postgresql://scratch.invalid/two")
         return {"restored": True}
 
-    monkeypatch.setattr(worker, "_execute", execute)
+    monkeypatch.setattr(worker, "execute", execute)
     with patch.dict(os.environ):
         worker.main()
     capture.assert_called_once_with()

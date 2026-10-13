@@ -48,13 +48,13 @@ class RestoreReport:
 
 
 def _newest_artifact() -> Path:
-    artifacts = backup._managed_dumps(backup.backup_dir())
+    artifacts = backup.managed_dumps(backup.backup_dir())
     if not artifacts:
         raise RuntimeError("no managed backup artifact exists")
     return artifacts[-1][1]
 
 
-_RESTORE_ROLES = ("ava_main", GATEWAY_GROUP, RUNNER_GROUP, "grafana_ro", "zzy")
+RESTORE_ROLES = ("ava_main", GATEWAY_GROUP, RUNNER_GROUP, "grafana_ro", "zzy")
 """Roles a managed dump's OWNER/GRANT statements reference. initdb only
 creates the `ava` superuser; without these pg_restore fails on
 `role "..." does not exist` (2026-08-27 prod drill finding). They are created
@@ -73,7 +73,7 @@ def _ensure_restore_roles(db_url: str) -> None:
     from psycopg import sql as pgsql
 
     with connect_url(db_url, autocommit=True, unbounded=True) as conn:
-        for role in _RESTORE_ROLES:
+        for role in RESTORE_ROLES:
             exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
             if exists is None:
                 conn.execute(pgsql.SQL("CREATE ROLE {} LOGIN").format(pgsql.Identifier(role)))
@@ -92,13 +92,13 @@ def _restore(raw_dump: Path, db_url: str, *, base: Path) -> None:
         ],
         capture_output=True,
         check=False,
-        timeout=backup._DUMP_TIMEOUT_S,
+        timeout=backup.DUMP_TIMEOUT_S,
     )
     if proc.returncode != 0:
-        raise RuntimeError(_restore_failure_message(proc, base))
+        raise RuntimeError(restore_failure_message(proc, base))
 
 
-def _restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Path) -> str:
+def restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Path) -> str:
     """The pg_restore failure with the capacity context an operator needs.
 
     A scratch restore that outgrows its base dies server-side mid-COPY, so the
@@ -180,7 +180,7 @@ remaining a floor. A base that clears it is not guaranteed to fit; one that fail
 it is almost certainly too small."""
 
 
-def _scratch_space_requirement(raw_dump: Path) -> int:
+def scratch_space_requirement(raw_dump: Path) -> int:
     """Bytes the base holding this dump's restore must offer (an estimate — see
     `_SCRATCH_SPACE_FACTOR`)."""
     return int(raw_dump.stat().st_size * _SCRATCH_SPACE_FACTOR)
@@ -207,7 +207,7 @@ def run_drill(
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
         backup.decrypt_artifact(artifact, raw_dump)
-        required = _scratch_space_requirement(raw_dump)
+        required = scratch_space_requirement(raw_dump)
         base = select_throwaway_base(required)
         logger.info(
             f"restore drill: scratch cluster on {base} "
