@@ -28,7 +28,7 @@ from base.api_contracts.agent_contract import (
     ErrorReason,
 )
 from base.db import Database
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, OpFailure, SpawnedAgent
 
 # Browser clients and the agent UI give lifecycle requests a short response
@@ -126,7 +126,7 @@ async def enqueue_lifecycle(
     """
     try:
         async with asyncio.timeout(_LIFECYCLE_DISPATCH_DEADLINE_S):
-            return await _cluster_rpc.dispatch_to_machine(
+            return await cluster_rpc.dispatch_to_machine(
                 db,
                 target_machine=target,
                 kind="lifecycle",
@@ -140,11 +140,11 @@ async def enqueue_lifecycle(
             f"target machine={target!r} lifecycle op did not answer within "
             f"{_LIFECYCLE_DISPATCH_DEADLINE_S:.0f}s"
         ) from exc
-    except _cluster_rpc.ClusterOpUnreachable as exc:
+    except cluster_rpc.ClusterOpUnreachable as exc:
         raise CrossMachineGatewayUnavailable(
             f"target machine={target!r} ops server unreachable for lifecycle op: {exc!s}"
         ) from exc
-    except _cluster_rpc.ClusterOpFailed as exc:
+    except cluster_rpc.ClusterOpFailed as exc:
         _raise_proxied_wire_error_from_payload(exc.result)
         raise  # unreachable — _raise_proxied_wire_error_from_payload must raise
 
@@ -167,18 +167,18 @@ async def forward_spawn_to_remote(
     """
     forward_body = body.model_dump(mode="json", exclude_none=True)
     try:
-        result = await _cluster_rpc.dispatch_to_machine(
+        result = await cluster_rpc.dispatch_to_machine(
             db,
             target_machine=target,
             kind="spawn-launch",
             payload=forward_body,
         )
-    except _cluster_rpc.ClusterOpUnreachable as exc:
+    except cluster_rpc.ClusterOpUnreachable as exc:
         raise LaunchForwardError(
             AvailabilityReason.LAUNCH_UNREACHABLE,
             f"target machine={target!r} ops server unreachable for spawn op: {exc!s}",
         ) from exc
-    except _cluster_rpc.ClusterOpFailed as exc:
+    except cluster_rpc.ClusterOpFailed as exc:
         try:
             failure = OpFailure.model_validate(exc.result)
         except ValidationError:

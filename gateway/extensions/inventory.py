@@ -38,7 +38,7 @@ from gateway.extensions.schemas import (
     InventoryMachineView,
     InventoryWriteResult,
 )
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import InventoryReadResult, InventoryWriteOpResult
 
 router = APIRouter()
@@ -84,7 +84,7 @@ async def _dispatch_inventory_read(
     view leaves the cluster default.
     """
     return InventoryReadResult.model_validate(
-        await _cluster_rpc.dispatch_to_machine(
+        await cluster_rpc.dispatch_to_machine(
             db,
             target_machine=target,
             kind="inventory_read",
@@ -102,13 +102,13 @@ async def _dispatch_inventory_write(
 
     Caller has already verified the target is a registered agent-runner."""
     try:
-        wire = await _cluster_rpc.dispatch_to_machine(
+        wire = await cluster_rpc.dispatch_to_machine(
             db,
             target_machine=target,
             kind="inventory_write",
             payload={"plugins": plugins, "mcp_servers": mcp_servers},
         )
-    except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
+    except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
         raise HTTPException(
             status_code=503,
             detail=f"machine {target!r} unreachable or failed the inventory request: {exc!s}",
@@ -152,7 +152,7 @@ async def _dial_inventory_read(db: Database, target: str) -> InventoryReadResult
         async with asyncio.timeout(budget):
             return await _dispatch_inventory_read(db, target, timeout_s=budget, retries=1)
     except TimeoutError as exc:
-        raise _cluster_rpc.ClusterOpUnreachable(
+        raise cluster_rpc.ClusterOpUnreachable(
             f"inventory_read for machine={target!r} exceeded its {budget:.1f}s total budget"
         ) from exc
 
@@ -182,7 +182,7 @@ async def _aggregate(db: Database, pool: ConnectionPool) -> InventoryAggregate:
     reads: dict[str, InventoryReadResult] = {}
     unreachable: list[str] = sorted(skipped)
     for m, res in zip(to_dial, results, strict=True):
-        if isinstance(res, (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed)):
+        if isinstance(res, (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed)):
             # The host couldn't serve its inventory (unreachable, or it answered and
             # its op failed) — bucket it.
             _log.warning("inventory_read on %s failed: %s", m, res)
@@ -213,7 +213,7 @@ async def get_inventory(
     await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)
     try:
         read = await _dispatch_inventory_read(request.app.state.db, machine)
-    except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
+    except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
         raise HTTPException(
             status_code=503,
             detail=f"machine {machine!r} unreachable or failed the inventory request: {exc!s}",

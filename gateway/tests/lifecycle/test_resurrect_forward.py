@@ -194,7 +194,7 @@ async def test_lifecycle_forward_uses_a_short_idempotent_retry_budget(
         captured.update(kwargs)
         return {"status": "enqueued"}
 
-    monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _dispatch)
+    monkeypatch.setattr(forward.cluster_rpc, "dispatch_to_machine", _dispatch)
 
     result = await forward.enqueue_lifecycle(
         Database.from_settings(gate=database_gate), "offline-runner", "/restart", {}
@@ -219,7 +219,7 @@ async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
         await never.wait()
         return {}
 
-    monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _never_dispatch)
+    monkeypatch.setattr(forward.cluster_rpc, "dispatch_to_machine", _never_dispatch)
     monkeypatch.setattr(forward, "_LIFECYCLE_DISPATCH_DEADLINE_S", 0.01, raising=False)
 
     with pytest.raises(CrossMachineGatewayUnavailable, match="did not answer"):

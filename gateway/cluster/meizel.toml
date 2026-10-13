@@ -8,6 +8,3 @@ exports = ["alert_classes.py", "bootstrap.py", "machine_pause.py", "ops_monitor.
 "server.py" = ["process_boot.py"]
 "status.py" = ["_health.py", "_roster_rows.py", "_stats_events.py", "alert_classes.py", "roster_probe.py", "schemas.py", "snapshots.py"]
 "tests" = ["bootstrap.py", "ops_series.py", "process_boot.py", "roster_probe.py", "status.py"]
-
-[debt.private-name]
-"tests/test_cluster_status_fields_cluster.py -> status.py#_cluster_rpc" = 6

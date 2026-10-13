@@ -15,7 +15,7 @@ import logging
 from fastapi import APIRouter, Request
 
 from gateway.schemas.commands import CommandItem
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -60,14 +60,14 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
         _log.warning("commands: agent %s has no agents_meta row; using local fallback", agent_id)
         return _local_commands()
     try:
-        result = await _cluster_rpc.dispatch_to_machine(
+        result = await cluster_rpc.dispatch_to_machine(
             request.app.state.db,
             machine,
             "agent_skill_view",
             {"agent_id": agent_id},
             timeout_s=_AGENT_SKILL_VIEW_TIMEOUT_S,
         )
-    except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
+    except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
         _log.warning(
             "commands: agent %s command view unavailable on %s; using local fallback: %s",
             agent_id,

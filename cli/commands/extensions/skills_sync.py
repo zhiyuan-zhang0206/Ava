@@ -96,7 +96,7 @@ def assert_repo_source_bound(repo: Path, ava_home: Path) -> None:
         )
 
 
-def _warn_preserved(result: SkillsConvergeResult, s: _Source, dest: Path) -> None:
+def _warn_preserved(result: SkillsConvergeResult, s: Source, dest: Path) -> None:
     """Warn about one managed copy that drifted locally, and report it (task #3871)."""
     report_converge_preserve(path=str(dest), key=s.name, surface="skills")
     result.warnings.append(
@@ -146,7 +146,7 @@ def copy_tree(src: Path, dest: Path) -> None:
 
 
 @dataclass(frozen=True)
-class _Source:
+class Source:
     """One sync unit: a source dir that lands at `skills/<name>/`."""
 
     name: str
@@ -164,7 +164,7 @@ class _Source:
     False for installed-plugin skills, which keep the sync-on-change behavior."""
 
 
-def _stamp_trust(entry: InstalledPackage, s: _Source) -> None:
+def _stamp_trust(entry: InstalledPackage, s: Source) -> None:
     """Apply this source's content trust to its registry row.
 
     Converge owns the *builtin* stamp and nothing else: it marks repo-sourced
@@ -202,11 +202,11 @@ def _repo_skill_dirs(repo_skills: Path) -> list[Path]:
     return found
 
 
-def iter_sources(repo: Path) -> tuple[list[_Source], list[str]]:
+def iter_sources(repo: Path) -> tuple[list[Source], list[str]]:
     """Enumerate sync units in precedence order (repo skills, then built-in
     plugins, then installed plugins). A later source whose name is already
     taken is dropped and reported as a conflict."""
-    sources: dict[str, _Source] = {}
+    sources: dict[str, Source] = {}
     conflicts: list[str] = []
 
     def add(
@@ -221,7 +221,7 @@ def iter_sources(repo: Path) -> tuple[list[_Source], list[str]]:
         if prev is not None:
             conflicts.append(f"{src} (name '{name}' already provided by {prev.src})")
             return
-        sources[name] = _Source(name, key, src, origin, trust, bootstrap_only=bootstrap_only)
+        sources[name] = Source(name, key, src, origin, trust, bootstrap_only=bootstrap_only)
 
     for d in _repo_skill_dirs(repo / "ava_builtins" / "skills"):
         add(d.name, d, "repo", "builtin", bootstrap_only=True)
@@ -265,7 +265,7 @@ class SkillsConvergeResult:
 
 
 def _adopt_copy(
-    s: _Source,
+    s: Source,
     registry: install_registry.Registry,
     now: str,
     result: SkillsConvergeResult,
@@ -283,7 +283,7 @@ def _adopt_copy(
     result.unchanged.append(s.name)
 
 
-def _untracked_warning(s: _Source, dest: Path) -> str:
+def _untracked_warning(s: Source, dest: Path) -> str:
     """The registry-less differing-copy warning: the dir will not load and
     converge will not clobber it — register it to keep it."""
     return (
@@ -293,7 +293,7 @@ def _untracked_warning(s: _Source, dest: Path) -> str:
 
 
 def _sync_bootstrap_only(
-    s: _Source,
+    s: Source,
     registry: install_registry.Registry,
     now: str,
     result: SkillsConvergeResult,
@@ -324,7 +324,7 @@ def _sync_bootstrap_only(
 
 
 def _land_new_copy(
-    s: _Source,
+    s: Source,
     registry: install_registry.Registry,
     now: str,
     result: SkillsConvergeResult,
@@ -348,7 +348,7 @@ def _land_new_copy(
 
 
 def _sync_existing(
-    s: _Source,
+    s: Source,
     registry: install_registry.Registry,
     now: str,
     result: SkillsConvergeResult,
@@ -392,7 +392,7 @@ def _sync_existing(
 
 
 def _sync_one(
-    s: _Source,
+    s: Source,
     skills_root: Path,
     registry: install_registry.Registry,
     now: str,

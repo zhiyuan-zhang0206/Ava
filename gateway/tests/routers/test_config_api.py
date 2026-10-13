@@ -31,7 +31,7 @@ from base.host import config_validators
 from base.host.env import dotenv_file
 from gateway.app import app
 from gateway.routers.configuration import runtime as config_router
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -234,7 +234,7 @@ def test_get_remote_machine_composes_host_from_dispatch(
     }
 
     enqueue = AsyncMock(return_value=canned)
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/config?machine={REMOTE}")
@@ -296,8 +296,8 @@ def test_get_unknown_machine_404() -> None:
 def test_get_offline_machine_503(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET ?machine=<known-but-offline>: ops server unreachable -> 503."""
     seed_machine(REMOTE)
-    enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
+    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/config?machine={REMOTE}")
@@ -308,8 +308,8 @@ def test_get_offline_machine_503(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_get_remote_failed_503(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET ?machine=<known>: the remote op fails (row marked failed) -> 503."""
     seed_machine(REMOTE)
-    enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpFailed({"error": "boom"}))
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
+    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpFailed({"error": "boom"}))
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/config?machine={REMOTE}")
@@ -324,8 +324,8 @@ def test_get_local_unreachable_503_no_in_process_fallback(
     The router has NO in-process fallback — a silent local read would mask the
     outage (the old behavior). This overrides the conftest's in-process stand-in
     for the local ops daemon."""
-    enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
+    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.get("/api/config")  # machine absent -> the local machine
@@ -631,7 +631,7 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
         return ["agent-runner"]
 
     monkeypatch.setattr(machines, "lookup_role", roles)
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
     monkeypatch.setattr(config_router.runtime_config, "write_fields", _write_fields)
 
     anon = cast(

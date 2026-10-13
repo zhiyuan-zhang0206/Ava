@@ -29,7 +29,7 @@ from gateway.app import app
 from gateway.cluster import snapshots
 from gateway.cluster.snapshots import Snapshot
 from gateway.extensions import inventory as inventory_router
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
 
 
@@ -74,7 +74,7 @@ def _stub_reads(
         result = await read(db, target_machine, timeout_s=timeout_s, retries=retries)
         return result.model_dump()
 
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
 
 
 def _stub_writes(
@@ -92,7 +92,7 @@ def _stub_writes(
         result = await write(db, target_machine, payload["plugins"], payload["mcp_servers"])
         return result.model_dump()
 
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
 
 
 # ── machines-table seeding helper ──
@@ -157,7 +157,7 @@ def test_aggregate_buckets_unreachable_machine(monkeypatch: pytest.MonkeyPatch) 
     ) -> InventoryReadResult:
         if target == "A":
             return _read({"X": _plugin(enabled=True)}, {}, "A")
-        raise _cluster_rpc.ClusterOpUnreachable("no ack")
+        raise cluster_rpc.ClusterOpUnreachable("no ack")
 
     _stub_reads(monkeypatch, fake_read)
 
@@ -232,7 +232,7 @@ def test_aggregate_dials_run_under_the_aggregate_budget(monkeypatch: pytest.Monk
         seen[target] = (timeout_s, retries)
         if target == "A":
             return _read({"X": _plugin(enabled=True)}, {}, "A")
-        raise _cluster_rpc.ClusterOpUnreachable("no ack")
+        raise cluster_rpc.ClusterOpUnreachable("no ack")
 
     _stub_reads(monkeypatch, fake_read)
 
@@ -319,7 +319,7 @@ def test_get_single_machine_offline_503(monkeypatch: pytest.MonkeyPatch) -> None
     async def fake_read(
         db: Database, target: str, *, timeout_s: float = 0.0, retries: int | None = None
     ) -> InventoryReadResult:
-        raise _cluster_rpc.ClusterOpUnreachable("no ack")
+        raise cluster_rpc.ClusterOpUnreachable("no ack")
 
     _stub_reads(monkeypatch, fake_read)
 
@@ -430,7 +430,7 @@ def test_inventory_uses_each_request_apps_database_and_pool(
             applied=True,
         ).model_dump()
 
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
     other_database = Database.from_settings(gate=database_gate)
     with database.pool(max_size=2) as first_pool, other_database.pool(max_size=2) as second_pool:
         for db, pool in [(database, first_pool), (other_database, second_pool)]:
