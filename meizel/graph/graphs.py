@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Iterable, Mapping
 
-__all__ = ["cycle_through", "reachable", "strongly_connected", "transitive_reduction_size"]
+__all__ = [
+    "cycle_through",
+    "feedback_edges",
+    "is_acyclic",
+    "reachable",
+    "strongly_connected",
+    "transitive_reduction_size",
+    "unneeded_back_edges",
+]
 
 
 def strongly_connected[N: Hashable](graph: Mapping[N, Iterable[N]]) -> list[list[N]]:
@@ -96,3 +104,89 @@ def transitive_reduction_size[N: Hashable](graph: Mapping[N, Iterable[N]]) -> in
             if in_cycle or target not in reachable(graph, node, skip=(node, target)):
                 kept += 1
     return kept
+
+
+def is_acyclic[N: Hashable](graph: Mapping[N, Iterable[N]]) -> bool:
+    return not strongly_connected(graph)
+
+
+def _without[N: Hashable](
+    graph: Mapping[N, Iterable[N]], removed: Iterable[tuple[N, N]]
+) -> dict[N, list[N]]:
+    gone = set(removed)
+    return {src: [dst for dst in dsts if (src, dst) not in gone] for src, dsts in graph.items()}
+
+
+def _vertex_order[N: Hashable](graph: Mapping[N, Iterable[N]]) -> list[N]:
+    """Eades-Lin-Smyth: sinks go last, sources first, else the most out-edges over in-edges."""
+    successors: dict[N, set[N]] = {n: set(t) for n, t in graph.items()}
+    for targets in list(successors.values()):
+        for target in targets:
+            successors.setdefault(target, set())
+    predecessors: dict[N, set[N]] = {n: set() for n in successors}
+    for src, targets in successors.items():
+        for dst in targets:
+            predecessors[dst].add(src)
+    head: list[N] = []
+    tail: list[N] = []
+
+    def detach(node: N) -> None:
+        del successors[node]
+        for other in predecessors.pop(node):
+            if other in successors:
+                successors[other].discard(node)
+        for other in list(predecessors):
+            predecessors[other].discard(node)
+
+    while successors:
+        ordered = sorted(successors, key=str)
+        sink = next((n for n in ordered if not successors[n]), None)
+        source = next((n for n in ordered if not predecessors[n]), None)
+        if sink is not None:
+            tail.append(sink)
+            detach(sink)
+        elif source is not None:
+            head.append(source)
+            detach(source)
+        else:
+            best = max(ordered, key=lambda n: len(successors[n]) - len(predecessors[n]))
+            head.append(best)
+            detach(best)
+    return [*head, *reversed(tail)]
+
+
+def feedback_edges[N: Hashable](graph: Mapping[N, Iterable[N]]) -> list[tuple[N, N]]:
+    """Edges whose removal leaves `graph` acyclic, in a deterministic order.
+
+    The edges that run backwards in a greedy vertex order are returned. The result is small but
+    not guaranteed minimum.
+    """
+    position = {node: index for index, node in enumerate(_vertex_order(graph))}
+    return sorted(
+        (
+            (src, dst)
+            for src, dsts in graph.items()
+            for dst in dsts
+            if position[src] > position[dst]
+        ),
+        key=str,
+    )
+
+
+def unneeded_back_edges[N: Hashable](
+    graph: Mapping[N, Iterable[N]], back: Iterable[tuple[N, N]]
+) -> list[tuple[N, N]]:
+    """Members of `back` that are not in `graph`, or that `graph` can carry without a cycle.
+
+    Taken in sorted order against the members still needed, so two edges that were each
+    removable alone but not together are not both reported.
+    """
+    edges = {n: list(t) for n, t in graph.items()}
+    needed = set(back)
+    unneeded: list[tuple[N, N]] = []
+    for edge in sorted(needed, key=str):
+        src, dst = edge
+        if dst not in edges.get(src, ()) or is_acyclic(_without(edges, needed - {edge})):
+            unneeded.append(edge)
+            needed.discard(edge)
+    return unneeded

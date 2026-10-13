@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from meizel.contracts.debt import file_key
+from meizel.contracts.ledger import reconcile
 from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
 from meizel.contracts.rule import Projection, judge, project
-from meizel.graph.model import Code, Diagnostic, Fact, FactKind
+from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
 from meizel.language.scan import EXTERNAL_FORMS, FileScan, scan_file
@@ -24,12 +26,21 @@ _WORKER: dict[str, Universe] = {}
 
 @dataclass(slots=True)
 class Analysis:
+    """Everything one run found.
+
+    `diagnostics` holds every violation the rules found. `verdict` holds the ones that fail
+    `check` once each directory's recorded debt is taken into account. `changed` is the set of
+    files a `check --changed` run judged, or None for a whole-repository run.
+    """
+
     universe: Universe
     manifests: dict[str, Manifest]
     scans: dict[str, FileScan]
     facts: list[Fact]
     projections: list[Projection]
     diagnostics: list[Diagnostic] = field(default_factory=list[Diagnostic])
+    verdict: list[Diagnostic] = field(default_factory=list[Diagnostic])
+    changed: frozenset[str] | None = None
     needed: dict[tuple[str, str, str], list[Fact]] = field(
         default_factory=dict[tuple[str, str, str], list[Fact]]
     )
@@ -46,8 +57,10 @@ def _scan_in_worker(path: str) -> FileScan:
     return scan_file(_WORKER["universe"], path)
 
 
-def scan_all(universe: Universe, jobs: int | None = None) -> dict[str, FileScan]:
-    paths = universe.python_files
+def scan_all(
+    universe: Universe, jobs: int | None = None, paths: Sequence[str] | None = None
+) -> dict[str, FileScan]:
+    paths = universe.python_files if paths is None else paths
     workers = jobs if jobs is not None else min(os.cpu_count() or 1, 8)
     if workers <= 1 or len(paths) < _PARALLEL_FROM:
         return {p: scan_file(universe, p) for p in paths}
@@ -68,7 +81,9 @@ def _load_facts(manifests: dict[str, Manifest]) -> list[Fact]:
     return facts
 
 
-def _fixture_facts(universe: Universe, scans: dict[str, FileScan]) -> list[Fact]:
+def _fixture_facts(
+    universe: Universe, scans: dict[str, FileScan], judged: Collection[str]
+) -> list[Fact]:
     defined = {
         path: scan.fixtures.defs | scan.imported
         for path, scan in scans.items()
@@ -77,7 +92,9 @@ def _fixture_facts(universe: Universe, scans: dict[str, FileScan]) -> list[Fact]
     plugins = {
         p: [n for n, _ in s.fixtures.plugins] for p, s in scans.items() if s.fixtures.plugins
     }
-    requests = {p: s.fixtures.requests for p, s in scans.items() if s.fixtures.requests}
+    requests = {
+        p: s.fixtures.requests for p, s in scans.items() if s.fixtures.requests and p in judged
+    }
     return fixture_facts(FixtureIndex(universe, defined, plugins), requests)
 
 
@@ -105,20 +122,23 @@ def _source_diagnostics(
         found.extend(Diagnostic(scan.path, p.line, p.code, p.message) for p in scan.problems)
         if scan.path in loaders:
             continue
+        owner = scan.path.rpartition("/")[0]
         for item in scan.restricted:
             if scan.path in externals and item.form in EXTERNAL_FORMS:
                 continue
+            form = f"{item.form}{' ' + repr(item.detail) if item.detail else ''}"
             found.append(
                 Diagnostic(
                     scan.path,
                     item.line,
                     Code.RESTRICTED,
-                    f"{item.form}{' ' + repr(item.detail) if item.detail else ''} is outside the restricted Python subset",
+                    f"{form} is outside the restricted Python subset",
                     (
                         "use a static import or the object form of patching; a file that genuinely "
                         f"owns a dynamic load declares it under [loads] in {manifest_path(scan.path.rpartition('/')[0])}; "
                         "a file that runs code from outside the repository declares it under [external] with a reason",
                     ),
+                    DebtKey(owner, file_key(owner, scan.path, form)),
                 )
             )
     return found
@@ -152,14 +172,20 @@ def _stale_edges(
     ]
 
 
+@dataclass(slots=True)
+class StaleDeclarations:
+    """Declared edges, loads and externals that nothing needs; only a whole run knows them."""
+
+    edges: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
+    loads: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    externals: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+
+
 def _stale_diagnostics(
-    manifests: dict[str, Manifest],
-    stale_edges: list[tuple[str, str, str]],
-    stale_loads: list[tuple[str, str]],
-    stale_externals: list[tuple[str, str]],
+    manifests: dict[str, Manifest], stale: StaleDeclarations
 ) -> list[Diagnostic]:
     found: list[Diagnostic] = []
-    for directory, cf, ct in stale_edges:
+    for directory, cf, ct in stale.edges:
         manifest = manifests[directory]
         found.append(
             Diagnostic(
@@ -170,7 +196,7 @@ def _stale_diagnostics(
                 ("run `python -m meizel sync --prune` to remove it",),
             )
         )
-    for directory, name in stale_loads:
+    for directory, name in stale.loads:
         manifest = manifests[directory]
         found.append(
             Diagnostic(
@@ -181,7 +207,7 @@ def _stale_diagnostics(
                 ("run `python -m meizel sync --prune` to remove it",),
             )
         )
-    for directory, name in stale_externals:
+    for directory, name in stale.externals:
         manifest = manifests[directory]
         found.append(
             Diagnostic(
@@ -195,26 +221,72 @@ def _stale_diagnostics(
     return found
 
 
-def analyze(root: Path, *, jobs: int | None = None) -> Analysis:
-    universe = load_universe(root)
-    manifests, diagnostics = load_manifests(universe)
-    scans = scan_all(universe, jobs)
-    loaders = _declared_loads(manifests)
-    externals = _declared_externals(manifests)
-    facts = [f for scan in scans.values() for f in scan.facts]
-    facts.extend(_fixture_facts(universe, scans))
-    facts.extend(_load_facts(manifests))
+def _scan_changed(
+    universe: Universe, changed: Collection[str], jobs: int | None
+) -> dict[str, FileScan]:
+    """The changed Python files, plus what resolving their fixture requests needs."""
+    wanted = {p for p in universe.python_files if p in changed or p.endswith("conftest.py")}
+    scans = scan_all(universe, jobs, sorted(wanted))
+    while True:
+        modules = (
+            universe.resolve_module(n) for s in scans.values() for n, _ in s.fixtures.plugins
+        )
+        more = sorted({m.file for m in modules if m is not None and m.file and m.file not in scans})
+        if not more:
+            return scans
+        scans.update(scan_all(universe, jobs, more))
+
+
+def _distinct(diagnostics: list[Diagnostic]) -> list[Diagnostic]:
+    """One diagnostic per site and message, as `check` prints them."""
+    return list({(d.path, d.line, d.code, d.message): d for d in diagnostics}.values())
+
+
+def _judge_facts(
+    facts: list[Fact], manifests: dict[str, Manifest]
+) -> tuple[list[Projection], list[Diagnostic], dict[tuple[str, str, str], list[Fact]]]:
+    """Project every fact edge and judge it against the manifests."""
     projections = [p for p in map(project, facts) if p is not None]
+    found: list[Diagnostic] = []
     needed: dict[tuple[str, str, str], list[Fact]] = defaultdict(list)
     for proj in projections:
-        diagnostics.extend(judge(proj, manifests))
+        found.extend(judge(proj, manifests))
         if not proj.exempt:
             needed[proj.local_edge].append(proj.fact)
-    diagnostics.extend(_source_diagnostics(scans.values(), loaders, externals))
-    stale_edges = _stale_edges(manifests, needed)
-    stale_loads = _stale_loads(scans, loaders)
-    stale_externals = _stale_externals(scans, externals)
-    diagnostics.extend(_stale_diagnostics(manifests, stale_edges, stale_loads, stale_externals))
+    return projections, found, dict(needed)
+
+
+def analyze(
+    root: Path, *, jobs: int | None = None, changed: Collection[str] | None = None
+) -> Analysis:
+    """Analyse the repository, or with `changed` only the facts those files contribute.
+
+    A partial run still reads every manifest, so the declared graphs are checked in full. It
+    judges the changed files' fact edges, restricted forms and recorded debt, and every `[loads]`
+    declaration, but not what is stale: that needs the whole repository.
+    """
+    universe = load_universe(root)
+    manifests, diagnostics = load_manifests(universe)
+    scope = None if changed is None else frozenset(changed)
+    scans = scan_all(universe, jobs) if scope is None else _scan_changed(universe, scope, jobs)
+    judged = sorted(scans if scope is None else scope & scans.keys())
+    loaders = _declared_loads(manifests)
+    externals = _declared_externals(manifests)
+    facts = [f for p in judged for f in scans[p].facts]
+    facts.extend(_fixture_facts(universe, scans, judged))
+    facts.extend(_load_facts(manifests))
+    projections, found, needed = _judge_facts(facts, manifests)
+    diagnostics.extend(found)
+    diagnostics.extend(_source_diagnostics([scans[p] for p in judged], loaders, externals))
+    stale = StaleDeclarations()
+    if scope is None:
+        stale = StaleDeclarations(
+            _stale_edges(manifests, needed),
+            _stale_loads(scans, loaders),
+            _stale_externals(scans, externals),
+        )
+        diagnostics.extend(_stale_diagnostics(manifests, stale))
+    diagnostics = _distinct(diagnostics)
     return Analysis(
         universe,
         manifests,
@@ -222,8 +294,10 @@ def analyze(root: Path, *, jobs: int | None = None) -> Analysis:
         facts,
         projections,
         diagnostics,
-        dict(needed),
-        stale_edges,
-        stale_loads,
-        stale_externals,
+        reconcile(diagnostics, manifests, lambda path: scope is None or path in scope),
+        scope,
+        needed,
+        stale.edges,
+        stale.loads,
+        stale.externals,
     )

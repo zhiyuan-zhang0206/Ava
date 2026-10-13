@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import cast
 
-from meizel.graph.graphs import cycle_through, strongly_connected
+from meizel.contracts.debt import CYCLE, TABLE_KEY, DebtTable, back_edge, owner_hint, parse_debt
+from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic
 from meizel.graph.universe import MANIFEST, Universe
 from meizel.roles import check_table
 
 __all__ = ["Manifest", "load_manifests", "manifest_path"]
 
-_TOP_KEYS = ("exports", "uses", "loads", "external", "roles")
+_TOP_KEYS = ("exports", "uses", "loads", "external", "roles", TABLE_KEY)
 _EdgeReader = Callable[[str, tuple[str, ...], int], tuple[str, ...]]
 
 
@@ -31,6 +33,7 @@ class Manifest:
     loads: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     external: dict[str, str] = field(default_factory=dict[str, str])
     roles: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    debt: DebtTable = field(default_factory=dict[Code, dict[str, int]])
     lines: list[str] = field(default_factory=list[str])
 
     @property
@@ -45,8 +48,27 @@ class Manifest:
                 return number
         return 1
 
+    def debt_line(self, code: Code, key: str) -> int:
+        """Line of a recorded debt, or of its table when the key is written differently."""
+        header = re.compile(rf"^\s*\[\s*debt\s*\.\s*{re.escape(code.value)}\s*\]")
+        start = next((n for n, text in enumerate(self.lines) if header.match(text)), None)
+        if start is None:
+            return 1
+        quoted = json.dumps(key, ensure_ascii=False)
+        for number in range(start + 1, len(self.lines)):
+            text = self.lines[number].strip()
+            if text.startswith("["):
+                break
+            if text.startswith((quoted, f"'{key}'")):
+                return number + 1
+        return start + 1
+
     def graph(self) -> dict[str, tuple[str, ...]]:
         return dict(self.uses)
+
+    def back_edges(self) -> list[tuple[str, str]]:
+        """The declared edges recorded as allowed to close a cycle."""
+        return sorted(back_edge(key) for key in self.debt.get(CYCLE, ()))
 
 
 class _Reader:
@@ -59,8 +81,8 @@ class _Reader:
         self.diagnostics: list[Diagnostic] = []
         self.children = frozenset(universe.children.get(directory, ()))
 
-    def report(self, line: int, code: Code, message: str) -> None:
-        self.diagnostics.append(Diagnostic(self.manifest.path, line, code, message))
+    def report(self, line: int, code: Code, message: str, hints: tuple[str, ...] = ()) -> None:
+        self.diagnostics.append(Diagnostic(self.manifest.path, line, code, message, hints))
 
     def names(self, value: object, where: str, line: int) -> tuple[str, ...]:
         items = cast("list[object]", value) if isinstance(value, list) else None
@@ -95,6 +117,11 @@ class _Reader:
         self.manifest.external = self.read_external(document.get("external", {}))
         if "roles" in document:
             self.read_roles(document["roles"])
+        if TABLE_KEY in document:
+            line = self.manifest.line_of(TABLE_KEY)
+            self.manifest.debt = parse_debt(
+                document[TABLE_KEY], lambda text: self.report(line, Code.MANIFEST_DEBT, text)
+            )
         self.check_cycles()
 
     def read_roles(self, table: object) -> None:
@@ -208,12 +235,31 @@ class _Reader:
         return tuple(kept)
 
     def check_cycles(self) -> None:
-        graph = self.manifest.graph()
-        for component in strongly_connected(graph):
-            cycle = cycle_through(graph, component)
+        """The declared graph minus its recorded back-edges must be acyclic."""
+        uses = self.manifest.graph()
+        back = self.manifest.back_edges()
+        carried = set(back)
+        base = {
+            src: tuple(t for t in targets if (src, t) not in carried)
+            for src, targets in uses.items()
+        }
+        hint = (owner_hint(self.directory, self.manifest.debt),) if self.manifest.debt else ()
+        for component in strongly_connected(base):
+            cycle = cycle_through(base, component)
             line = self.manifest.line_of(cycle[0])
             self.report(
-                line, Code.MANIFEST_CYCLE, "cycle in the local graph: " + " -> ".join(cycle)
+                line, Code.MANIFEST_CYCLE, "cycle in the local graph: " + " -> ".join(cycle), hint
+            )
+        for src, dst in unneeded_back_edges(uses, back):
+            key = f"{src} -> {dst}"
+            reason = (
+                "closes no cycle any more" if dst in uses.get(src, ()) else "is no longer declared"
+            )
+            self.report(
+                self.manifest.debt_line(CYCLE, key),
+                Code.DEBT_PAID,
+                f"{CYCLE} debt {key!r} is recorded but the edge {reason}",
+                ("run `python -m meizel debt prune` to remove it",),
             )
 
 
