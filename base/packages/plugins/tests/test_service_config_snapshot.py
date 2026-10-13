@@ -7,12 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
 from base.packages.plugins.config_registration import (
-    InvalidConfigData,
-    SchemaDriftError,
     read_config_image,
     read_service_config,
     service_config_packet,
 )
+from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 
 
 class Config(BaseModel):

@@ -10,16 +10,15 @@ from ava_builtins.plugins.ava_fleet.default_config import FleetConfig, contribut
 from ava_builtins.plugins.ava_fleet.services import services
 from base.host.env import bootstrap, runtime_config
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, SERVICE_PLUGIN_CONFIG_ENV
-from base.packages.plugins.config_face import plugin_bootstrap_config
 from base.packages.plugins.config_registration import (
-    InvalidConfigData,
-    SchemaDriftError,
     disk_image_path,
+    plugin_bootstrap_config,
     read_plugin_config,
     read_service_config,
     service_config_packet,
 )
 from base.packages.plugins.flags import UndeclaredFlag, read_declared_flag
+from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 
 
 @pytest.fixture(autouse=True)

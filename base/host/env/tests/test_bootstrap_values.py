@@ -15,7 +15,7 @@ from base.host.env.dotenv_file import upsert_env
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from base.packages.plugin_providers import build_model_catalog
-from base.packages.plugins.config_face import plugin_bootstrap_config
+from base.packages.plugins.config_registration import plugin_bootstrap_config
 
 
 @pytest.fixture

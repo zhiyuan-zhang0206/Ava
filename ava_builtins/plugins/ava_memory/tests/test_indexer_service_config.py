@@ -8,13 +8,10 @@ import pytest
 from ava_builtins.plugins.ava_memory import services
 from ava_builtins.plugins.ava_memory.default_config import MemoryConfig
 from base.config import settings
+from base.packages.plugin_config_admin import update_all_disk_images
 from base.packages.plugins import enable_config, load_report
-from base.packages.plugins.config_registration import (
-    InvalidConfigData,
-    SchemaDriftError,
-    disk_image_path,
-)
-from base.packages.plugins.enable_config import update_all_disk_images
+from base.packages.plugins.config_registration import disk_image_path
+from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 from services.supervision.ava_root.inputs import InputChangedError, InputSeal
 from services.supervision.ava_root_glue.manifests import build_units
 from services.supervision.roster import plugin_services as roster_plugins
