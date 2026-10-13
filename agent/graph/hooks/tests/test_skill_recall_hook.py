@@ -1,4 +1,4 @@
-"""Skill recall at the before_llm edge (`agent/hooks/skill_recall.py`).
+"""Skill recall at the before_llm edge (`agent/graph/hooks/skill_recall.py`).
 
 The hook runs against the real `decide()` over a catalog whose decision provider keeps its real
 id and price but answers from a scripted binding, so the questions the hook asks, the scores it
@@ -21,10 +21,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
+from agent.graph.hooks import skill_recall
+from agent.graph.hooks.framework import framework_hooks
+from agent.graph.hooks.skill_recall import SkillRecallHook
 from agent.graph.recall.skill_recall import FALSE_IF, STATE_PREAMBLE, TRUE_IF
-from agent.hooks import skill_recall
-from agent.hooks.framework import framework_hooks
-from agent.hooks.skill_recall import SkillRecallHook
 from agent.messages import inbound_message
 from agent.state import CompactState, SkillRecallState, build_agent_state
 from base import paths
@@ -200,7 +200,7 @@ def _offered(update: dict[str, Any] | None) -> list[str]:
 
 
 def test_the_hook_is_a_framework_before_llm_hook_and_drift_stays_last() -> None:
-    from agent.hooks.capabilities import _newly_installed_skills
+    from agent.graph.hooks.capabilities import _newly_installed_skills
 
     hooks = framework_hooks()["before_llm"]
     assert any(isinstance(hook, SkillRecallHook) for hook in hooks)

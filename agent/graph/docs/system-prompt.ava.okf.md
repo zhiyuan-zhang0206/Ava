@@ -51,7 +51,7 @@ The public signature, declaration order and external-plugin migration contract l
 - Header prose names only the halves actually rendered.
 - Descriptions flatten to one line, capped at 300 characters. The initial index has no total cap.
 
-### Keeping the index from going stale (`agent/graph/prompt/capabilities.py:index_drift` + `agent/hooks/capabilities.py`)
+### Keeping the index from going stale (`agent/graph/prompt/capabilities.py:index_drift` + `agent/graph/hooks/capabilities.py`)
 - The rendered index is a **snapshot**, built once per window; `ava.skills.names()` under it is an **uncached filesystem scan**. Nothing reconciles them by itself, so a skill installed mid-window would be reachable by name and absent from the listing the delegation check orders the agent to match every task against — until a compaction happened to rebuild the prompt
 - `init_context` records the full selected catalog membership (including folded descendants) into `state.capabilities.indexed` (see [[../../docs/state.ava.okf.md]]). Snapshot taken **before** the render, so a skill landing between the two is named once too many rather than dropped
 - A framework-owned `before_llm` hook diffs the live membership against that record each turn and names whatever appeared in one `new_skills` system note, in the index's own line shape; the snapshot advances with the note, so one install produces one note no matter who installed it. Drift is the trigger, not a timer
@@ -65,7 +65,7 @@ The public signature, declaration order and external-plugin migration contract l
 - `base/packages/plugins/extensions.py:PluginContributions` — what a plugin's `contribute()` declares
 - `agent/graph/prompt/capabilities.py:capabilities_section(slices)` / `resolve_prompt_skills()` — the `# Capabilities` index and the name→skill resolver it shares with the preloaded-skills note
 - `agent/graph/prompt/capabilities.py:indexed_skills(prompt)` / `index_drift(known, prompt)` — what the index covers right now, and the diff against a snapshot of it
-- `agent/hooks/capabilities.py:_newly_installed_skills` — the `before_llm` hook that names skills installed since the index was built
+- `agent/graph/hooks/capabilities.py:_newly_installed_skills` — the `before_llm` hook that names skills installed since the index was built
 - `agent/graph/_init_context.py:init_context_node()` — caller of `build_system_prompt()`, and where the snapshot is recorded
 
 ## Notes

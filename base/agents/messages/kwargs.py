@@ -212,11 +212,11 @@ def message_read_time(msg: BaseMessage) -> str | None:
 
 
 # The header prepended to every replacement compact summary (forced / command /
-# spontaneous) — written by `agent.hooks.compact.compose_summary_message`, and
+# spontaneous) — written by `agent.graph.hooks.compact.compose_summary_message`, and
 # the one invariant the read side (base/agents/history/context_breakdown.py) classifies the
 # untagged summary HumanMessage by. It lives here, in the leaf message-contract
 # module, so the gateway and the insights service can import it without pulling in
-# agent.hooks.compact (whose agent.graph imports do not resolve outside the agent).
+# agent.graph.hooks.compact (whose agent.graph imports do not resolve outside the agent).
 # Two jobs:
 #   1. "just compacted" — the compaction is the one event the post-compact context
 #      has no surviving record of: REMOVE_ALL wipes the turn that ran it, including

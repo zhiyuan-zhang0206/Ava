@@ -36,9 +36,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent import state as _state
+from agent.graph.hooks.compact import auto_compact_will_fire
 from agent.graph.prompt.capabilities import index_drift, new_skills_note_text, skill_identifiers
-from agent.hooks._registry import Hook
-from agent.hooks.compact import auto_compact_will_fire
+from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import CapabilitiesState
 from base.agents.context import AvaContext

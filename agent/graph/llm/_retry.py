@@ -12,11 +12,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from agent.graph.hooks.compact import CompactionFailedError
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
 )
-from agent.hooks.compact import CompactionFailedError
 from base.lm.catalog import ModelCatalog
 from base.lm.errors import is_retryable_provider_error
 

@@ -18,9 +18,9 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMes
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.graph.hooks.compact import auto_compact_will_fire
 from agent.graph.tool_calls import first_tool_call_code
 from agent.hooks import Hook
-from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
 from agent.state import AgentState
 from base.agents.context import AvaContext

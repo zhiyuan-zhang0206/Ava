@@ -107,7 +107,7 @@ class CapabilitiesState(BaseModel):
     `indexed` is the set of skill display identifiers the standing SystemMessage
     lists. It is recorded by `init_context` at the moment it builds that prompt
     and advanced by the drift check that keeps the listing honest between builds
-    (`agent/hooks/capabilities.py`). The record has to exist because the two
+    (`agent/graph/hooks/capabilities.py`). The record has to exist because the two
     sides age differently: the index is rendered once per context window, while
     `ava.skills` under it is an uncached filesystem scan — without a snapshot,
     nothing in the loop can tell that they have diverged.

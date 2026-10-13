@@ -293,53 +293,6 @@ def test_compaction_resets_the_cut_with_the_version() -> None:
     assert nxt.reminder_shown  # the other bookkeeping rides along untouched
 
 
-async def test_stamp_enqueues_the_closing_chunk_against_the_stamped_checkpoint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent.hooks import compact
-    from agent.state import AgentState
-
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
-
-    async def stamp(_pool: object, _thread_id: str, *, closing: object = None) -> str:
-        return "cp-7"
-
-    monkeypatch.setattr(compact, "mark_compact_boundary", stamp)
-    state = AgentState(
-        messages=_request(8), compact=CompactState(version=1, understanding_cut_index=3)
-    )
-    await compact.stamp_compact_boundary(MagicMock(), 9, state, read_agent=_read_agent)
-    assert queue.calls == [
-        (
-            9,
-            {
-                "compact_version": 1,
-                "chunk": Chunk(3, 8),
-                "end_msg_id": "m7",
-                "boundary_checkpoint_id": "cp-7",
-            },
-        )
-    ]
-
-
-async def test_failed_stamp_enqueues_no_closing_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.hooks import compact
-    from agent.state import AgentState
-
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
-
-    async def stamp(_pool: object, _thread_id: str, *, closing: object = None) -> str:
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(compact, "mark_compact_boundary", stamp)
-    await compact.stamp_compact_boundary(
-        MagicMock(), 9, AgentState(messages=_request(8)), read_agent=_read_agent
-    )
-    assert queue.calls == []
-
-
 async def test_closing_chunk_stops_before_an_unanswered_tool_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -9,12 +9,12 @@ because they append a note to whatever history survives repair's guard and compa
 full replacement.
 """
 
-from agent.hooks._registry import Hook
-from agent.hooks.capabilities import _newly_installed_skills
-from agent.hooks.compact import _compact_reminder
-from agent.hooks.repair import _repair_dangling_tool_pairing
-from agent.hooks.security import _deliver_security_findings
-from agent.hooks.skill_recall import SkillRecallHook
+from agent.graph.hooks.capabilities import _newly_installed_skills
+from agent.graph.hooks.compact import _compact_reminder
+from agent.graph.hooks.skill_recall import SkillRecallHook
+from agent.hooks import Hook
+from agent.hooks.repair import repair_dangling_tool_pairing
+from agent.hooks.security import deliver_security_findings
 from base.packages.plugins.extensions import HookPoint
 
 
@@ -22,11 +22,11 @@ def framework_hooks() -> dict[HookPoint, tuple[Hook, ...]]:
     return {
         "after_init": (),
         "before_llm": (
-            _repair_dangling_tool_pairing,
+            repair_dangling_tool_pairing,
             _compact_reminder,
             SkillRecallHook(),
             _newly_installed_skills,
         ),
         "before_exec": (),
-        "after_exec": (_deliver_security_findings,),
+        "after_exec": (deliver_security_findings,),
     }

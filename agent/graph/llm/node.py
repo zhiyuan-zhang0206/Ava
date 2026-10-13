@@ -54,6 +54,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.graph._callbacks import RedisStreamHandler
+from agent.graph.hooks.compact import auto_compact_for_llm
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
@@ -62,7 +63,6 @@ from agent.graph.llm_errors import (
 )
 from agent.graph.node_log import node_lifecycle
 from agent.graph.tool_calls import code_from_args
-from agent.hooks.compact import auto_compact_for_llm
 from agent.hooks.understanding_chunks import due_chunk_update
 from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC

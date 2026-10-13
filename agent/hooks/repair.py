@@ -214,4 +214,4 @@ class _RepairDanglingToolPairingHook(Hook):
 
 
 # Module-level singleton — the instance `framework_hooks()` hands the graph build.
-_repair_dangling_tool_pairing = _RepairDanglingToolPairingHook()
+repair_dangling_tool_pairing = _RepairDanglingToolPairingHook()

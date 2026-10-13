@@ -9,7 +9,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
-from agent.hooks import compact
+from agent.graph.hooks import compact
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog

@@ -124,7 +124,7 @@ compressible content because TOAST pzips it).
 **History (until 2026-09-12).** Three paths touched old rows: the reaper
 (`services/upkeep/events_maintenance/checkpoint_reaper.py`) trimmed every thread over `_KEEP = 3`
 checkpoints down to 3 (60 s cadence, <= 64 productive trims per pass, rotated for fairness;
-`compact_boundary: true` rows exempt); compaction (`agent/hooks/compact.py`) stamped the
+`compact_boundary: true` rows exempt); compaction (`agent/graph/hooks/compact.py`) stamped the
 boundary and trimmed the frozen pre-compact history to `COMPACT_TRIM_KEEP = 1`; and
 `blob_vacuum.py` ran plain `VACUUM (ANALYZE)` in the 05:00-08:00 window (never `VACUUM FULL`;
 user-ruled out).

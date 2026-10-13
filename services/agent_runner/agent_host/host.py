@@ -22,9 +22,9 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
+from agent.graph.hooks.compact import CompactionFailedError
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.node_log import flush_node_exit_aggregate
-from agent.hooks.compact import CompactionFailedError
 from agent.impersonation import (
     active_lease,
     native_status,

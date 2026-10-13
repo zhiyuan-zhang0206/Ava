@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 
-from agent.hooks.compact import _compact_reminder_update, auto_compact_will_fire
+from agent.graph.hooks.compact import _compact_reminder_update, auto_compact_will_fire
 from agent.state import AgentState, CompactState
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices

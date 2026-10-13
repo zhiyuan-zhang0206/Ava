@@ -724,7 +724,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
 # verified against the DeepSeek anthropic endpoint 2026-08-11: "tool_use ids
 # were found without tool_result blocks immediately after"). Security findings
 # take the graph-state route: the child writes them to the state update and the
-# after_exec hook delivers them (agent/hooks/tests/test_security_findings.py).
+# after_exec hook delivers them (agent/graph/hooks/tests/test_security_findings.py).
 
 
 def _scan_flagged_code(*sources: str) -> str:
