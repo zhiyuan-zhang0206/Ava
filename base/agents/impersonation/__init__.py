@@ -663,7 +663,7 @@ def mark_plugin_applied(
 # The relay binding and its failure paths live in base/agents/impersonation/relay.py;
 # re-exported here so every base.agents.impersonation.<name> caller keeps resolving.
 from base.agents.impersonation.relay import (  # noqa: E402, I001
-    _ABORTED_REASON_PREFIX as _ABORTED_REASON_PREFIX,
+    ABORTED_REASON_PREFIX as ABORTED_REASON_PREFIX,
     abort_lease as abort_lease,
     aborted_detail as aborted_detail,
     fail_acceptance as fail_acceptance,

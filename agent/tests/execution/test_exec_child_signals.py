@@ -17,7 +17,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
-from agent.tests.execution.test_exec_child import _AGENT_ID, _child_env
+from agent.tests.execution.test_exec_child import AGENT_ID, child_env
 from ava.sdk_surface.installation import Installation
 from tests.fixtures.pin_agent import exec_context
 
@@ -26,17 +26,17 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     """SIGTERM -> TimeoutError inside the child -> kind=timed_out envelope with
     partial output preserved."""
     exec_dir = tmp_path / "exec"
-    request_path = make_request_path(exec_dir, agent_id=_AGENT_ID)
-    result_path = make_result_path(exec_dir, agent_id=_AGENT_ID)
+    request_path = make_request_path(exec_dir, agent_id=AGENT_ID)
+    result_path = make_result_path(exec_dir, agent_id=AGENT_ID)
     write_request(
         request_path,
         code="import time\nprint('before sleep', flush=True)\ntime.sleep(60)",
-        context=exec_context(_AGENT_ID).describe(),
+        context=exec_context(AGENT_ID).describe(),
         timeout_s=60.0,
         state=None,
         incarnation=None,
     )
-    env = _child_env(tmp_path, request_path, result_path)
+    env = child_env(tmp_path, request_path, result_path)
     proc = subprocess.Popen(
         [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
         stdout=subprocess.PIPE,
@@ -115,12 +115,12 @@ def test_child_installs_signal_handlers_before_reading_request(
         assert ava.context.clock_factory is clock_factory
         assert ava.context.machine is machine
 
-    monkeypatch.setattr(exec_child, "_line_buffered_output", lambda: None)
+    monkeypatch.setattr(exec_child, "line_buffered_output", lambda: None)
     monkeypatch.setattr(protocol, "read_request", fake_read_request)
-    monkeypatch.setattr(exec_child, "_pop_overlay_env", lambda: (None, None))
-    monkeypatch.setattr(exec_child, "_apply_overlay_scope", fake_apply_scope)
+    monkeypatch.setattr(exec_child, "pop_overlay_env", lambda: (None, None))
+    monkeypatch.setattr(exec_child, "apply_overlay_scope", fake_apply_scope)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
-    monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
+    monkeypatch.setattr(exec_child, "run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr(ava, "ensure_plugins_loaded", fake_ensure_plugins_loaded)
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)

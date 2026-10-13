@@ -4,7 +4,7 @@ exports = ["support.py"]
 "test_shell_sessions_identity.py" = ["support.py"]
 
 [debt.first-party-patch]
-"test_shell_scan.py#monkeypatch.setattr ava.security._record_finding" = 1
+"test_shell_scan.py#monkeypatch.setattr ava.security.record_finding" = 1
 "test_shell_scan.py#monkeypatch.setattr ava.shell.sessions.shell_sessions" = 1
 "test_shell_scan.py#monkeypatch.setattr base.config.settings.display.shell_capture_default_lines" = 1
 "test_validation_shell.py#monkeypatch.setattr ava.shell.background.allocate_output_path" = 1

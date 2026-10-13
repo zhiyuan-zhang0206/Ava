@@ -18,10 +18,10 @@ import agent.state as agent_state
 from agent.state import (
     BaseAgentState,
     PluginStateHandle,
-    _validate_plugin_state_keys,
     build_agent_state,
     checkpoint_msgpack_allowlist,
     plugin_state_schema,
+    validate_plugin_state_keys,
 )
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.loading.registry import loaded_state_classes
@@ -114,16 +114,16 @@ def test_state_key_validation_reads_the_classs_own_declared_base_fields() -> Non
     declaring = build_agent_state(_registry(("demo", _MessagesDeclaring)))
     plain = build_agent_state(_registry(("demo", _Private)))
 
-    assert _validate_plugin_state_keys({"messages": []}, declaring) == {"messages": []}
+    assert validate_plugin_state_keys({"messages": []}, declaring) == {"messages": []}
     with pytest.raises(ValueError, match="undeclared base field"):
-        _validate_plugin_state_keys({"messages": []}, plain)
+        validate_plugin_state_keys({"messages": []}, plain)
     # A framework-managed core key is never writable, declared or not.
     with pytest.raises(ValueError, match="undeclared base field"):
-        _validate_plugin_state_keys({"halted": True}, declaring)
+        validate_plugin_state_keys({"halted": True}, declaring)
     # A prefixed private field of the class's own plugin passes; a typo does not.
-    assert _validate_plugin_state_keys({"demo__counter": 1}, plain) == {"demo__counter": 1}
+    assert validate_plugin_state_keys({"demo__counter": 1}, plain) == {"demo__counter": 1}
     with pytest.raises(ValueError, match="unregistered key"):
-        _validate_plugin_state_keys({"demo__typo": 1}, plain)
+        validate_plugin_state_keys({"demo__typo": 1}, plain)
 
 
 def test_the_handle_routes_base_fields_bare_and_private_fields_prefixed() -> None:

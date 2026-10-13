@@ -126,11 +126,11 @@ def test_run_background_rejects_invalid_ttl(ttl: float) -> None:
 
 def test_validate_ttl_accepts_exactly_max() -> None:
     """The cap is inclusive: exactly 86400s (24h) is allowed (ruling 2026-09-01)."""
-    from ava.shell.sessions import _validate_ttl
+    from ava.shell.sessions import validate_ttl
 
-    assert _validate_ttl(86400.0) == 86400.0
+    assert validate_ttl(86400.0) == 86400.0
     with pytest.raises(ValueError, match="ttl"):
-        _validate_ttl(86400.001)
+        validate_ttl(86400.001)
 
 
 # ─────────────── sessions.renew — explicit TTL renewal (task #2647) ───────────────
@@ -330,6 +330,6 @@ def test_renewal_guard_evaluates_at_statement_time_not_transaction_start(
         # The transaction starts before the deadline passes.
         cur.execute("SET TRANSACTION READ WRITE")
         time.sleep(2.0)
-        assert sessions._renewal_update(cur, _agent_row, 301, 600.0) is None
+        assert sessions.renewal_update(cur, _agent_row, 301, 600.0) is None
     db_conn.rollback()
     assert _facts(db_conn, _agent_row, 301) == (0, None)
