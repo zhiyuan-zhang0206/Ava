@@ -157,9 +157,9 @@ def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
     the event stream after the upgrade, without needing to rewrite callsites line by line."""
     import logging
 
-    from base.log import _install_stdlib_intercept
+    from base.log import install_stdlib_intercept
 
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     stdlib_log = logging.getLogger("test.stdlib.intercept")
     stdlib_log.warning("stdlib warn via intercept handler")
     event, _agent_id, level, payload = _last_event()

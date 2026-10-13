@@ -17,7 +17,7 @@ from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.app import app
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
-from gateway.tests.lifecycle.creation.test_sdk_strong_creation import _response, sdk
+from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
 from ops.cluster import rpc
 from ops.lifecycle.launch import _validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
@@ -63,7 +63,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
         if lose:
             assert response.status_code == 201, response.text
             raise httpx.ReadTimeout("committed birth response lost")
-        return _response(response)
+        return httpx_response_of(response)
 
     http.post.side_effect = submit
     with transport.use_client(http):

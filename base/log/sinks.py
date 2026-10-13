@@ -66,7 +66,7 @@ class StdlibInterceptHandler(logging.Handler):
             self.handleError(record)
 
 
-# Top-level logger names for our own code. `_install_stdlib_intercept` raises
+# Top-level logger names for our own code. `install_stdlib_intercept` raises
 # these back to DEBUG so a controller's
 # `_log.debug(...)` (e.g. `ops.controllers.respawn`'s gateway-health
 # deferral line, #1126) reaches the file sink instead of being dropped at
@@ -75,7 +75,7 @@ class StdlibInterceptHandler(logging.Handler):
 # (`Logger.getEffectiveLevel`) — nothing to register per-module. Third-party
 # libraries (httpx / psycopg / urllib3 / langchain / uvicorn / ...) are
 # deliberately absent, so their un-audited DEBUG volume stays behind the
-# root floor; see `_install_stdlib_intercept`.
+# root floor; see `install_stdlib_intercept`.
 FIRST_PARTY_LOGGER_NAMES = (
     "ops",
     "services",
@@ -128,7 +128,7 @@ class GenaiEmptyPartsWarningFilter(logging.Filter):
         return not (isinstance(record.msg, str) and _GENAI_EMPTY_PARTS_MARKER in record.msg)
 
 
-def _install_stdlib_intercept() -> None:
+def install_stdlib_intercept() -> None:
     """Install the intercept handler on the root logger. Idempotent — the
     `init_*` functions can call it on every startup; we replace the
     handler list rather than appending, so reinit doesn't accumulate.

@@ -35,7 +35,7 @@ from gateway.cluster.status import gather_cluster_status
 from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
 from ops.cluster import operations as _ops
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import ClusterStatus
 from ops.cluster_status.pause import is_paused as cluster_is_paused
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
@@ -122,15 +122,15 @@ async def _dispatch_op(
             (e.g. an update already in flight there).
     """
     try:
-        return await _cluster_rpc.dispatch_to_machine(
+        return await cluster_rpc.dispatch_to_machine(
             db, target_machine=target, kind=kind, payload=payload
         )
-    except _cluster_rpc.ClusterOpUnreachable as exc:
+    except cluster_rpc.ClusterOpUnreachable as exc:
         raise HTTPException(
             status_code=503,
             detail=f"machine {target!r} ops server unreachable for {kind}: {exc!s}",
         ) from exc
-    except _cluster_rpc.ClusterOpFailed as exc:
+    except cluster_rpc.ClusterOpFailed as exc:
         raise HTTPException(
             status_code=502,
             detail=f"machine {target!r} {kind} failed: {exc.result!r}",

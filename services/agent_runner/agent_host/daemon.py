@@ -265,7 +265,7 @@ async def _beat_forever(
     heartbeat_ok = True
     renewal_failures = 0
     while True:
-        _require_helper_parent_chain()
+        require_helper_parent_chain()
         liveness.beat()
         # Liveness stays unconditional; database work does not. A quiesced unit
         # is between stop and resume — renewing here would keep agent-row
@@ -682,7 +682,7 @@ async def run(
         host_log.info("[agent-host] daemon stopped")
 
 
-def _require_helper_parent_chain() -> None:
+def require_helper_parent_chain() -> None:
     """Exit a helper-spawned host whose ancestor chain no longer holds the helper."""
     if parent_chain_intact():
         return
@@ -698,7 +698,7 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     config, home = boot_process()
-    _require_helper_parent_chain()
+    require_helper_parent_chain()
     assert_schema_current(config.view.data_plane.db_url)
     machine = host_machine(config)
     version = CodeVersion(process_context.loaded_code_image())

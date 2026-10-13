@@ -20,8 +20,8 @@ from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.invocation import native_work
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
+    FakePool,
     Row,
-    _FakePool,
     build_agent_host,
 )
 from services.agent_runner.agent_host.tests.runtime.host_support import (
@@ -67,7 +67,7 @@ class TestPoolIsolation:
 
         rows = {11: Row(status="idling")}
         original, graph, turn_pool = wired(rows)
-        control_pool = _FakePool(rows)
+        control_pool = FakePool(rows)
         calls: list[tuple[str, object]] = []
 
         async def admit(

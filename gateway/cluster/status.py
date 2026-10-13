@@ -52,7 +52,7 @@ from gateway.cluster.schemas import (
 )
 from gateway.cluster.snapshots import Snapshot, read_all
 from gateway.schemas.stats import StatsWindowHours, window_delta
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import ClusterStatus, check_pidfile
 from ops.cluster_status.pause import is_paused as cluster_is_paused
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
@@ -370,10 +370,10 @@ async def probe_agent_runner(
         return _roster_rows.offline_status(*row_args, is_staging=is_staging)
     try:
         result = await roster_probe.dispatch_status_probe(name, gateway_url)
-    except _cluster_rpc.ClusterOpUnreachable:
+    except cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet.
         return _roster_rows.offline_status(*row_args, is_staging=is_staging)
-    except _cluster_rpc.ClusterOpFailed as exc:
+    except cluster_rpc.ClusterOpFailed as exc:
         # Reached the ops server, but its status_probe op itself raised (DB error,
         # schema drift inside the op). That is NOT "offline" — surface it so the
         # real error is not invisible behind a misleading offline marker.

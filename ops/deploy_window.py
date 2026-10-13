@@ -152,7 +152,7 @@ def _posture_signal(db: Database) -> DeployWindow | None:
     machines = _machines(db)
     if not machines:
         return None
-    states = _read_deploy_states(db)
+    states = read_deploy_states(db)
     excluded = _read_excluded(db)
     for name, _url in machines:
         state = states.get(name)
@@ -166,7 +166,7 @@ def _posture_signal(db: Database) -> DeployWindow | None:
     return None
 
 
-def _read_deploy_states(db: Database) -> dict[str, HostDeployState]:
+def read_deploy_states(db: Database) -> dict[str, HostDeployState]:
     """machine -> deploy-state row for every machine in the table; {} on failure.
 
     Best-effort by contract: an unreadable table degrades to "cannot tell"."""

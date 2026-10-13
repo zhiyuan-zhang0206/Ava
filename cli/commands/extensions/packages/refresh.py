@@ -52,7 +52,7 @@ from cli.commands.extensions._refresh_rules import (
     is_due,
     staged_gate_error,
 )
-from cli.commands.extensions.skills_sync import _Source, iter_sources
+from cli.commands.extensions.skills_sync import Source, iter_sources
 
 # How long the pass waits for the per-home flock before skipping (a held lock
 # means another pass is live; waiting is pointless — this pass is periodic).
@@ -139,7 +139,7 @@ class Pass:
         self.counts: dict[str, int] = {}
         self.applies_used = 0
         self.deadline = 0.0
-        self._sources_cache: list[_Source] | None = None
+        self._sources_cache: list[Source] | None = None
 
     # -- bookkeeping ---------------------------------------------------------
 
@@ -408,7 +408,7 @@ class Pass:
             last_result=note,
         )
 
-    def _sources(self) -> list[_Source]:
+    def _sources(self) -> list[Source]:
         if self._sources_cache is None:
             sources, _conflicts = iter_sources(self.repo)
             self._sources_cache = sources

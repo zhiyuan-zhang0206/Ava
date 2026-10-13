@@ -184,7 +184,7 @@ def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
     db_conn.commit()
 
     async def unreachable(*args: object, **kwargs: object) -> dict[str, object]:
-        raise inspect_router._cluster_rpc.ClusterOpUnreachable("connect failed")
+        raise inspect_router.cluster_rpc.ClusterOpUnreachable("connect failed")
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", unreachable)
     with TestClient(app) as client:

@@ -66,12 +66,12 @@ from base.agents.incarnation.native_work_models import NativeCancelPendingError
 
 from ._decide import decide
 from ._dispatch import BatchState, dispatch_batch
-from ._dispatch import _handle_heartbeat as _handle_heartbeat
 
 # Names moved to co-located submodules during the Task #1006 split, re-exported
 # here so existing `from agent.graph.claim.node import ...` call sites (tests)
 # keep working unchanged. New code should import from the submodule that owns them.
 from ._dispatch import by_who as by_who
+from ._dispatch import handle_heartbeat as handle_heartbeat
 from ._dispatch import render_restart_completed_marker as render_restart_completed_marker
 from ._present import publish_end_timeline_snapshot, publish_inbound_committed
 from ._routing import ClaimGoto, resolve_routing

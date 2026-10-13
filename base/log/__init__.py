@@ -24,13 +24,13 @@ from base.log.sinks import (
     StdlibInterceptHandler as StdlibInterceptHandler,
 )
 from base.log.sinks import (
-    _install_stdlib_intercept as _install_stdlib_intercept,
-)
-from base.log.sinks import (
     add_file_sink as add_file_sink,
 )
 from base.log.sinks import (
     add_sink as add_sink,
+)
+from base.log.sinks import (
+    install_stdlib_intercept as install_stdlib_intercept,
 )
 from base.log.sinks import (
     rotate_by_size_or_day as rotate_by_size_or_day,

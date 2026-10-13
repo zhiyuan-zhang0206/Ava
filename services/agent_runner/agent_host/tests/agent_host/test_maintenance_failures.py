@@ -11,8 +11,8 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
     FakeConnCtx,
+    FakePool,
     Row,
-    _FakePool,
 )
 from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
@@ -63,7 +63,7 @@ class _BlockedRead:
     def __init__(self) -> None:
         self.entered = asyncio.Event()
         self._first_read = True
-        self._cleanup_pool = _FakePool({})
+        self._cleanup_pool = FakePool({})
 
     def connection(self, timeout: float | None = None) -> "_BlockedRead | FakeConnCtx":
         if self._first_read:

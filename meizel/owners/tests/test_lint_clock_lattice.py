@@ -194,8 +194,8 @@ def test_real_allowlists_are_current() -> None:
 
 
 def test_exemption_for_a_deleted_file_is_stale(scan_tmp, monkeypatch) -> None:
-    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ())
-    monkeypatch.setattr(_lint, "_INDEPENDENT_CLOCKS", {("base/gone.py", "_REAP_S"): "why"})
+    monkeypatch.setattr(_lint, "FAMILY_MODULES", ())
+    monkeypatch.setattr(_lint, "INDEPENDENT_CLOCKS", {("base/gone.py", "_REAP_S"): "why"})
     errs = _lint.stale_allowlist_entries()
     assert len(errs) == 1
     assert "base/gone.py" in errs[0] and "_REAP_S" in errs[0]
@@ -203,9 +203,9 @@ def test_exemption_for_a_deleted_file_is_stale(scan_tmp, monkeypatch) -> None:
 
 def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> None:
     _write(scan_tmp, "base/host/proc.py", "_OTHER_GRACE_S = 1.0\n")
-    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ())
+    monkeypatch.setattr(_lint, "FAMILY_MODULES", ())
     monkeypatch.setattr(
-        _lint, "_INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
+        _lint, "INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
     )
     errs = _lint.stale_allowlist_entries()
     assert len(errs) == 1
@@ -215,9 +215,9 @@ def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> Non
 def test_live_exemption_and_family_module_are_current(scan_tmp, monkeypatch) -> None:
     _write(scan_tmp, "base/host/proc.py", "_TERMINATE_GRACE_S: float = 1.0\n")
     _write(scan_tmp, "base/deploy/timing.py", "CLOCKS = {}\n")
-    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("base/deploy/timing.py",))
+    monkeypatch.setattr(_lint, "FAMILY_MODULES", ("base/deploy/timing.py",))
     monkeypatch.setattr(
-        _lint, "_INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
+        _lint, "INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
     )
     assert _lint.stale_allowlist_entries() == []
 
@@ -228,9 +228,9 @@ def test_full_scan_fails_on_a_stale_family_module(
     """Only the argument-free full scan (pre-commit, CI) judges the allowlists."""
     for scan_dir in _lint._SCAN_DIRS:
         (_lint._REPO_ROOT / scan_dir).mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("base/retired_timing.py",))
-    monkeypatch.setattr(_lint, "_INDEPENDENT_CLOCKS", {})
+    monkeypatch.setattr(_lint, "FAMILY_MODULES", ("base/retired_timing.py",))
+    monkeypatch.setattr(_lint, "INDEPENDENT_CLOCKS", {})
     assert _lint.main([]) == 1
-    assert "stale _FAMILY_MODULES entry" in capsys.readouterr().err
+    assert "stale FAMILY_MODULES entry" in capsys.readouterr().err
     ok = _write(scan_tmp, "ok.py", "value = 1\n")
     assert _lint.main([str(ok)]) == 0

@@ -122,7 +122,7 @@ class TestResurrectIfTerminatedPlacement:
 
         async def _fake_dispatch(*args: object, **kwargs: object) -> dict:
             dispatch_called.append(kwargs)
-            raise lifecycle._cluster_rpc.ClusterOpUnreachable("ops server not reachable")
+            raise lifecycle.cluster_rpc.ClusterOpUnreachable("ops server not reachable")
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
@@ -413,7 +413,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_op)
 
         async def _unreachable(*_a: object, **_kw: object) -> dict:
-            raise lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
+            raise lifecycle.cluster_rpc.ClusterOpUnreachable("no ops server")
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
 
