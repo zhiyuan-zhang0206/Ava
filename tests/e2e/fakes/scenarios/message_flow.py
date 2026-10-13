@@ -15,11 +15,10 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
+from scripts.verify.scripted_reply import REPLY_TEXT
 from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-
-REPLY_TEXT = "\u7ed3\u679c\u662f 3\u3002"
 
 MESSAGE_FLOW_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(

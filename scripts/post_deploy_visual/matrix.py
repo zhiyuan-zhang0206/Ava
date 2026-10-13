@@ -27,6 +27,12 @@ from scripts.post_deploy_visual.fixtures import (
     INERT_EVENT_SOURCE,
     RUN_TIMELINE,
 )
+from scripts.post_deploy_visual.layout_assertions import (
+    LayoutFailure,
+    structural_failures,
+    wait_for_layout_settled,
+    wait_for_minimum_visible_counts,
+)
 from scripts.post_deploy_visual.policy import (
     CHANNEL_DELTA_THRESHOLD,
     STRUCTURAL_SPECS,
@@ -35,12 +41,6 @@ from scripts.post_deploy_visual.policy import (
     DiffRegion,
     classify_stable_diff,
     route_for_surface,
-)
-from tests.e2e.visual._layout_assertions import (
-    LayoutFailure,
-    structural_failures,
-    wait_for_layout_settled,
-    wait_for_minimum_visible_counts,
 )
 
 
