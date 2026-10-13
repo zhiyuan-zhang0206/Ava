@@ -29,10 +29,10 @@ from gateway.tests.routers.test_memory_search import (
     patch_provider,
 )
 from gateway.tests.routers.test_memory_search import (
-    _app_db as _app_db,
+    judge as judge,
 )
 from gateway.tests.routers.test_memory_search import (
-    judge as judge,
+    memory_search_app_db as memory_search_app_db,
 )
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit

@@ -17,10 +17,10 @@ from base.host.env import dotenv_file
 from gateway.app import app
 from gateway.tests.routers.test_config_api import REMOTE, seed_machine
 from gateway.tests.routers.test_config_api import (
-    _clean_overrides as _clean_overrides,
+    clean_overrides as clean_overrides,
 )
 from gateway.tests.routers.test_config_api import (
-    _stub_browser_capability as _stub_browser_capability,
+    stub_browser_capability as stub_browser_capability,
 )
 from ops import env_audit as audit
 from ops.cluster import rpc as _cluster_rpc
@@ -29,7 +29,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_get_explicit_self_is_host_view_not_cluster(
-    _clean_overrides: Path, *, machine_identity: MachineIdentity
+    clean_overrides: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """GET `?machine=<self>` is a host view: raw_overrides is the remote_writable
     host set, so a writable-but-not-remote_writable field
@@ -47,7 +47,7 @@ def test_get_explicit_self_is_host_view_not_cluster(
     )  # not remote_writable -> host view excludes it
 
 
-def test_put_remote_rejects_cluster_key(_clean_overrides: Path) -> None:
+def test_put_remote_rejects_cluster_key(clean_overrides: Path) -> None:
     """PUT ?machine=<remote> carrying a cluster key -> 400 (cluster config is
     machine-independent)."""
     seed_machine(REMOTE)
@@ -58,7 +58,7 @@ def test_put_remote_rejects_cluster_key(_clean_overrides: Path) -> None:
 
 
 def test_put_remote_host_field_dispatches_config_write(
-    monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path
+    monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
 ) -> None:
     """PUT ?machine=<remote> with a host remote_writable key -> dispatches a
     config_write carrying the overrides + gateway-stamped actor/trace, and
@@ -94,7 +94,7 @@ def test_put_remote_host_field_dispatches_config_write(
 
 
 def test_put_remote_rejects_writable_non_remote_host_field(
-    monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path
+    monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
 ) -> None:
     """A writable-but-not-remote_writable host field (cross_machine_transfer_backend) is
     rejected at the gate on a machine-addressed PUT — 400 before any dispatch,
@@ -113,7 +113,7 @@ def test_put_remote_rejects_writable_non_remote_host_field(
 
 
 def test_put_remote_rejects_oss_credential_fields(
-    monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path
+    monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
 ) -> None:
     """The OSS credential path is host-local editable only: a machine-addressed PUT
     400s at the gate (remote_writable=False), so a remote admin can never point a
@@ -127,7 +127,7 @@ def test_put_remote_rejects_oss_credential_fields(
             f"/api/config?machine={REMOTE}",
             json={
                 "backup_offsite_credentials_file": str(
-                    _clean_overrides / "attacker-credentials.json"
+                    clean_overrides / "attacker-credentials.json"
                 )
             },
         )
@@ -136,7 +136,7 @@ def test_put_remote_rejects_oss_credential_fields(
     dispatched.assert_not_awaited()
 
 
-def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path) -> None:
+def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, clean_overrides: Path) -> None:
     """PUT ?machine=<known-but-offline>: config_write times out -> 503."""
     seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
@@ -148,7 +148,7 @@ def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, _clean_override
     assert REMOTE in resp.json()["detail"]
 
 
-def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path) -> None:
+def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, clean_overrides: Path) -> None:
     """PUT ?machine=<known>: the remote config_write fails (row marked failed) -> 503."""
     seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpFailed({"error": "boom"}))
@@ -160,7 +160,7 @@ def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, _clean_overrides
     assert REMOTE in resp.json()["detail"]
 
 
-def test_put_remote_unknown_machine_404(_clean_overrides: Path) -> None:
+def test_put_remote_unknown_machine_404(clean_overrides: Path) -> None:
     """PUT ?machine=<unknown> -> 404 before any dispatch."""
     with TestClient(app) as client:
         resp = client.put("/api/config?machine=ghost-host", json={"ops_concurrency": 1})
@@ -207,14 +207,13 @@ def test_request_actor_reads_only_middleware_state() -> None:
     assert request_actor(bearer) == ("cluster_bearer", None)
 
 
-def test_put_records_write_audit_with_value_diff(_clean_overrides: Path) -> None:
+def test_put_records_write_audit_with_value_diff(clean_overrides: Path) -> None:
     """A cluster PUT lands an audit record carrying the non-sensitive value diff."""
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"llm_model": "audit-model-1"})
     assert resp.status_code == 200, resp.text
     records = [
-        json.loads(line)
-        for line in (_clean_overrides / ".env.audit.jsonl").read_text().splitlines()
+        json.loads(line) for line in (clean_overrides / ".env.audit.jsonl").read_text().splitlines()
     ]
     latest = records[-1]
     entries = cast("list[dict[str, object]]", latest["changed"])
@@ -231,7 +230,7 @@ def test_get_config_audit_last_is_bounded() -> None:
 
 
 def test_get_config_audit_default_last_comes_from_display_config(
-    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
+    clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Omitted `last` is ``settings.display.config_audit_default_last``
     (``AVA_CONFIG_AUDIT_DEFAULT_LAST``); the literal 20 is only that field's
@@ -268,7 +267,7 @@ def test_get_config_audit_default_last_comes_from_display_config(
 
 
 def test_get_config_audit_reads_own_records(
-    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A self audit read returns this box's newest records, tagged with its machine."""
     from base.api_contracts.agent_contract import MachineNotRegistered

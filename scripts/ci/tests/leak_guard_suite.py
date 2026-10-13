@@ -131,7 +131,7 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture(scope="session", autouse=True)
 def _lazy_provisioned_env() -> Iterator[None]:
-    # Like `_provisioned_db`: sets os.environ inside the FIRST test's setup, undoes it at session end.
+    # Like `provisioned_db`: sets os.environ inside the FIRST test's setup, undoes it at session end.
     os.environ["DEMO_LAZY_URL"] = "postgresql://demo"
     yield
     os.environ.pop("DEMO_LAZY_URL", None)

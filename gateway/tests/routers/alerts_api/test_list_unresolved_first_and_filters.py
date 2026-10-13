@@ -14,15 +14,15 @@ from base.config import settings
 from gateway.alerts import router as alerts_router
 from gateway.app import app
 from tests.components.gateway.test_alerts_api import (
-    _alerts_auth_and_im as _alerts_auth_and_im,
-)
-from tests.components.gateway.test_alerts_api import (
     _seed,
     alert,
     capture_im,
     ingest,
     native_sender,
     webhook,
+)
+from tests.components.gateway.test_alerts_api import (
+    alerts_auth_and_im as alerts_auth_and_im,
 )
 from tests.components.gateway.test_alerts_api import (
     client as client,

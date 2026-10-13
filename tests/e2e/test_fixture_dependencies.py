@@ -8,7 +8,7 @@ import pytest
 def test_direct_unit_does_not_request_e2e_process_environment(
     request: pytest.FixtureRequest,
 ) -> None:
-    assert "_e2e_process_env" not in request.fixturenames
+    assert "e2e_process_env" not in request.fixturenames
     assert "frontend_proc" not in request.fixturenames
     assert "playwright_runtime" not in request.fixturenames
 
@@ -66,7 +66,7 @@ def test_browser_contexts_need_no_minted_credentials(
     """A session without the e2e stack still creates browser contexts.
 
     The visual-baselines workflow renders `tests/e2e/visual/test_visual_regression.py`
-    standalone — no `_e2e_process_env`, no gateway. Its session runs with the autouse
+    standalone — no `e2e_process_env`, no gateway. Its session runs with the autouse
     client-credential hook installed but nothing minted, so `install_browser_login`'s
     serving probe must answer "nothing to log in to" without a request; a probe that
     reaches for the missing mint turns every context creation into a setup error. The

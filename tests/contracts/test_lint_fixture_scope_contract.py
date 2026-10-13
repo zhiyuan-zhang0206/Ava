@@ -29,7 +29,7 @@ def test_the_real_e2e_conftest_in_its_pre_fix_shape_is_flagged() -> None:
     assert pre_fix != src, "the fixture's decorator no longer matches — update this test"
     found = _lint.findings_in_source(pre_fix, "tests/e2e/conftest.py", has_package_init=True)
     assert len(found) == 1
-    assert "_e2e_process_env" in found[0][1]
+    assert "e2e_process_env" in found[0][1]
     for key in ("AVA_HOME", "AVA_GATEWAY_URL"):
         assert f"os.environ['{key}']" in found[0][1]
 
@@ -41,7 +41,7 @@ def test_the_real_e2e_conftest_is_flagged_if_the_package_init_is_deleted() -> No
     found = _lint.findings_in_source(src, "tests/e2e/conftest.py", has_package_init=False)
     messages = [m for _, m in found]
     assert any("tests/e2e/__init__.py does not exist" in m for m in messages)
-    assert any("_e2e_process_env" in m and "session-scoped" in m for m in messages)
+    assert any("e2e_process_env" in m and "session-scoped" in m for m in messages)
     assert _lint.findings_in_source(src, "tests/e2e/conftest.py", has_package_init=True) == []
 
 
@@ -52,7 +52,7 @@ def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
     # vacuously (both empty), so it tracks the fixture body — update it when the body
     # gains or drops an assignment, do not relax it.
     literal, dynamic = _lint.setup_env_keys(
-        _E2E_CONFTEST.read_text(encoding="utf-8"), "_e2e_process_env"
+        _E2E_CONFTEST.read_text(encoding="utf-8"), "e2e_process_env"
     )
     assert dynamic == frozenset()
     assert len(literal) == 14

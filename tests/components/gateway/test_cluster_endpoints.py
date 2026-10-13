@@ -96,7 +96,7 @@ def fake_flag(
 
 
 @pytest.fixture(autouse=True)
-def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
+def pinned_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the session-name composer for gateway cluster tests so composed
     session names are deterministic regardless of the dev host config.
     Patches ``session_name`` directly so ``machine_name()``

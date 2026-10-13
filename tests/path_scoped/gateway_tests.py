@@ -44,7 +44,7 @@ from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
 
 # One definition shared with the ava and integration modules; imported here so it
 # registers for this module's paths.
-from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
+from tests.path_scoped.api_keys import mock_api_keys as mock_api_keys
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +71,7 @@ def gateway_config_owner(
 
 
 @pytest.fixture(autouse=True)
-def _local_spawn_in_process(
+def local_spawn_in_process(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,

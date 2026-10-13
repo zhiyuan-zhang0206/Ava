@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineRoles
 from gateway.app import app
-from gateway.tests.routers.test_memory_search import _app_db as _app_db
+from gateway.tests.routers.test_memory_search import memory_search_app_db as memory_search_app_db
 
 
 class TestMemoryGraph:

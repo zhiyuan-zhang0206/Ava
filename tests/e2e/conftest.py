@@ -4,8 +4,8 @@ Fixture dependency:
 - e2e_env (function): depends on spawned_agent + playwright_page + frontend_proc
 - spawned_agent (function): depends on gateway_proc + truncated_db
 - gateway_proc (function): depends on scenario_env (env must be set first)
-- package-scoped: _e2e_process_env / e2e_db / playwright_runtime / playwright_browser —
-  package, not session, because `_e2e_process_env` mutates process-global env and its
+- package-scoped: e2e_process_env / e2e_db / playwright_runtime / playwright_browser —
+  package, not session, because `e2e_process_env` mutates process-global env and its
   restore must fire when pytest leaves this directory rather than at end-of-session,
   and playwright_runtime's main-thread asyncio loop must close the same way (see their
   docstrings)
@@ -18,7 +18,7 @@ env injection chain:
     subsequent setenv cannot get into agent subprocess.
 
 Concurrency isolation: DB/Redis reuses the throwaway Postgres + Redis started per worker in the top-level conftest
-(`_provisioned_db` / `_provisioned_redis`, URLs already in settings + env). This conftest
+(`provisioned_db` / `provisioned_redis`, URLs already in settings + env). This conftest
 adds another layer of per-session suffix `<PID>_<TS>` to isolate remaining process-level resources:
 - Redis channel `ava:events:e2e:<suffix>`
 - AVA_HOME `tmp/ava_e2e_home_<suffix>` (transcripts/plugins)
@@ -174,7 +174,7 @@ def _apply_e2e_seq_offset() -> None:
 
 
 @pytest.fixture(scope="package")
-def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
+def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[None]:
     """Layer e2e-specific process config on the suite's session Postgres +
     Redis requested from tests/fixtures/provisioning.py. This package delivers
     their URLs to settings and environment for gateway / agent subprocesses.
@@ -224,11 +224,11 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     )
     prev_env = {k: os.environ.get(k) for k in _env_keys}
     settings.data_plane.db_url, settings.data_plane.redis_url = (
-        _provisioned_db,
-        _provisioned_redis,
+        provisioned_db,
+        provisioned_redis,
     )
-    os.environ["AVA_DB_URL"] = _provisioned_db
-    os.environ["AVA_REDIS_URL"] = _provisioned_redis
+    os.environ["AVA_DB_URL"] = provisioned_db
+    os.environ["AVA_REDIS_URL"] = provisioned_redis
     _apply_e2e_seq_offset()
 
     settings.data_plane.events_channel = f"ava:events:e2e:{_E2E_SUFFIX}"
@@ -360,15 +360,15 @@ def _e2e_data_plane(db_url: str, redis_url: str) -> None:
 
 
 @pytest.fixture(scope="package")
-def e2e_db(_e2e_process_env: None) -> Iterator[None]:
+def e2e_db(e2e_process_env: None) -> Iterator[None]:
     """The e2e database is the suite's session Postgres (tests/fixtures/provisioning.py +
-    _e2e_process_env). Kept as a thin fixture because the e2e fixtures
+    e2e_process_env). Kept as a thin fixture because the e2e fixtures
     (truncated_db) depend on it to order after process-env setup.
 
-    Package-scoped because `_e2e_process_env` is: a broader scope may not depend on a
+    Package-scoped because `e2e_process_env` is: a broader scope may not depend on a
     narrower one, so leaving this at `session` raises `ScopeMismatch` at setup. The DB
     itself is unaffected — it is the *root* conftest's session Postgres, provisioned
-    once per session by `_provisioned_db`, and this fixture only orders consumers
+    once per session by `provisioned_db`, and this fixture only orders consumers
     after the env layering."""
     yield
 
@@ -419,7 +419,7 @@ def frontend_proc() -> Iterator[None]:
     # symlink goes relative path `../../node_modules` (= ui/web/node_modules)
     (build_dir / "node_modules").symlink_to(Path("../../node_modules"))
 
-    # _LOG_DIR is created by the package-scoped _e2e_process_env, which runs
+    # _LOG_DIR is created by the package-scoped e2e_process_env, which runs
     # AFTER session-scoped frontend_proc — a fresh checkout (CI runner cache
     # evicted, new worktree) has no tmp/e2e-logs and this open() would fail.
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -466,7 +466,7 @@ def playwright_runtime() -> Iterator[Playwright]:
     breaking every later async test (`Runner.run() cannot be called from a
     running event loop`, observed pairing tests/e2e with tests/gateway). The
     package scope fires teardown when pytest leaves `tests/e2e/` (the same
-    pattern `_e2e_process_env` uses for its env restore).
+    pattern `e2e_process_env` uses for its env restore).
     """
     with sync_playwright() as p:
         yield p
@@ -487,7 +487,7 @@ def playwright_browser(playwright_runtime: Playwright) -> Iterator[Browser]:
 
 
 @pytest.fixture
-def scenario_env(_e2e_process_env: None, request: pytest.FixtureRequest) -> Iterator[None]:
+def scenario_env(e2e_process_env: None, request: pytest.FixtureRequest) -> Iterator[None]:
     """Read test's @pytest.mark.scenario('module:factory') to set AVA_LLM_OVERRIDE.
 
     Use bare os.environ not monkeypatch——the latter function teardown automatically unsets,

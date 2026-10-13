@@ -10,7 +10,7 @@ Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 What is (and is not) covered, feature by feature, lives in [FEATURES.md](FEATURES.md).
 
 
-The stack authenticates like a started cluster (`_credentials.py`). `_e2e_process_env`
+The stack authenticates like a started cluster (`_credentials.py`). `e2e_process_env`
 gives the e2e home a cluster secret and an active write generation in its private
 ledger (the one `ava start` births at first start). The gateway is delivered its
 gateway-class machine API token, the ops daemon and the agent host the runner-class

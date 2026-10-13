@@ -48,7 +48,7 @@ _PROCESS_IMAGE_KEY = pytest.StashKey[LoadedCommit]()
 
 
 @pytest.fixture(scope="session")
-def _provisioned_db(
+def provisioned_db(
     pytestconfig: pytest.Config, process_config, database_version: CodeVersion
 ) -> Iterator[str]:
     """Own one native cluster only when a database consumer requests it."""
@@ -64,7 +64,7 @@ def _provisioned_db(
     database_version.get()
     machine = machine_from_boot(process_config)
     with postgres(machine_name=machine.name, watch_stalls=False) as url:
-        assert_test_db_url(url, context="_provisioned_db")
+        assert_test_db_url(url, context="provisioned_db")
         process_config.set_field("db_url", url)
         with PostgresSaver.from_conn_string(url) as saver:
             saver.setup()
@@ -72,7 +72,7 @@ def _provisioned_db(
 
 
 @pytest.fixture(scope="session")
-def _provisioned_redis(pytestconfig: pytest.Config, process_config) -> Iterator[str]:
+def provisioned_redis(pytestconfig: pytest.Config, process_config) -> Iterator[str]:
     """Own one native server only when a Redis consumer requests it."""
     if static_mode(pytestconfig):
         pytest.fail("Static tests cannot request Redis; use the native test environment.")
@@ -302,21 +302,21 @@ def _default_gateway_credentials(
 
 
 @pytest.fixture
-def _db_stall_guard(_provisioned_db: str, postgres_access: None) -> Iterator[None]:
+def _db_stall_guard(provisioned_db: str, postgres_access: None) -> Iterator[None]:
     """Own the cluster probe until this function's admitted DB users finish."""
     from psycopg.conninfo import conninfo_to_dict
 
     from base.cluster.dataplane.pg_stall_watchdog import stall_guard
 
-    port = conninfo_to_dict(_provisioned_db)["port"]
+    port = conninfo_to_dict(provisioned_db)["port"]
     assert isinstance(port, str), "the native test database must publish its port"
-    with stall_guard(_provisioned_db, int(port)):
+    with stall_guard(provisioned_db, int(port)):
         yield
 
 
 @pytest.fixture
 def _clean_db(
-    _provisioned_db: str,
+    provisioned_db: str,
     postgres_access: None,
     _db_stall_guard: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -330,12 +330,12 @@ def _clean_db(
     from base.telemetry.emitter import sync
     from base.telemetry.metrics.observed_metrics import close_projection
 
-    monkeypatch.setattr(settings.data_plane, "db_url", _provisioned_db)
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", _provisioned_db)
+    monkeypatch.setattr(settings.data_plane, "db_url", provisioned_db)
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", provisioned_db)
     env_file = _TEST_AVA_HOME / ".env"
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
-    _rewrite_test_env_file_line(env_file, "AVA_DB_URL", _provisioned_db)
+    _rewrite_test_env_file_line(env_file, "AVA_DB_URL", provisioned_db)
     event_store.set_enabled(enabled=False)
     # Barrier before the TRUNCATE: the telemetry drain thread may hold a batch
     # dequeued during the previous test (events are written by that single
@@ -392,7 +392,7 @@ def _clean_db(
 
 @pytest.fixture
 def _clean_redis(
-    _provisioned_redis: str,
+    provisioned_redis: str,
     redis_access: None,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
@@ -402,13 +402,13 @@ def _clean_redis(
 
     from base.config import settings
 
-    monkeypatch.setattr(settings.data_plane, "redis_url", _provisioned_redis)
-    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", _provisioned_redis)
+    monkeypatch.setattr(settings.data_plane, "redis_url", provisioned_redis)
+    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", provisioned_redis)
     env_file = _TEST_AVA_HOME / ".env"
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
-    _rewrite_test_env_file_line(env_file, "AVA_REDIS_URL", _provisioned_redis)
-    with redis.Redis.from_url(_provisioned_redis) as client:
+    _rewrite_test_env_file_line(env_file, "AVA_REDIS_URL", provisioned_redis)
+    with redis.Redis.from_url(provisioned_redis) as client:
         client.flushdb()
     yield
 
@@ -512,7 +512,7 @@ def _fail_on_runaway_memory(session: pytest.Session) -> None:
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Session end: fail on leaked OS-scheduler jobs and on a runaway memory peak,
     then clean the tmpfs AVA_HOME. The Postgres / Redis clusters are torn down by
-    the `_provisioned_db` / `_provisioned_redis` fixture finalizers (the cluster
+    the `provisioned_db` / `provisioned_redis` fixture finalizers (the cluster
     process + data dir are removed), so there is no database to drop here."""
     import shutil
 
@@ -525,8 +525,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def gateway_data_plane(
     db_url: str,
     redis_url: str,
-    _stub_label_llm: None,
-    _guard_schedule_session_control: None,
+    stub_label_llm: None,
+    guard_schedule_session_control: None,
 ) -> None:
     """An assembled in-process Gateway consumes both resources and its owner guards."""
 
@@ -555,9 +555,9 @@ def cluster_defaults_unset(db_conn) -> Iterator[None]:
 
 
 @pytest.fixture
-def db_url(_provisioned_db: str, _clean_db: None) -> str:
+def db_url(provisioned_db: str, _clean_db: None) -> str:
     """The session's test database URL, for tests that open their own connections."""
-    return _provisioned_db
+    return provisioned_db
 
 
 @pytest.fixture(scope="session")
@@ -604,9 +604,9 @@ def insert_inbound(database, event_bus) -> Callable[..., int]:
 
 
 @pytest.fixture
-def redis_url(_provisioned_redis: str, _clean_redis: None) -> str:
+def redis_url(provisioned_redis: str, _clean_redis: None) -> str:
     """The admitted per-test Redis URL, including a clean initial keyspace."""
-    return _provisioned_redis
+    return provisioned_redis
 
 
 @pytest.fixture

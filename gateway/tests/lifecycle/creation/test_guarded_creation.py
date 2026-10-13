@@ -19,7 +19,7 @@ from gateway.tests.mcp_calls import tool_call, tool_result
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
+from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 PATH = "/api/keyed/v1/agents"
 SECRET = "guarded-test-secret"  # noqa: S105 -- isolated auth fixture
