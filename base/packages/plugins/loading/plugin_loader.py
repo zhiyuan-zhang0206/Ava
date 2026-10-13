@@ -1,12 +1,10 @@
 """The plugin loader — by-path import and fail-soft containment.
 
-This is framework API for the agent kernel, not the agent SDK: it carries a
-public name — reached across the `ava` package boundary by `agent/extensions/__init__.py` —
-but stays out of the agent's `ava.help()` view
-because it is absent from `ava.__all_for_ava__`.
+This is framework API for the plugin loader and the plugin catalog, not the agent SDK, and
+it lives in base so the SDK surface does not own plugin discovery.
 
-The one production load path (`agent/extensions/__init__.py:load_extensions`, which the
-agent host, a child and the plugin catalog all run) uses the primitives here — `load_plugin_module`
+The one production load path (`base.packages.plugins.loading.faces.import_faces`, which
+`ava.sdk_surface.extensions.load_extensions` runs for the agent host, a child and the plugin catalog) uses the primitives here — `load_plugin_module`
 (the by-path import contract: dotted name, synthetic parent packages,
 `sys.modules` registration before execution, reload-in-place) and
 `safe_load_plugin_module` (the fail-soft wrapper), so a plugin sees one module name,
@@ -68,12 +66,12 @@ def load_plugin_module(
 ) -> ModuleType:
     """Import one plugin's ``plugin.py`` by path under its production dotted name.
 
-    THE by-path loader (`agent.extensions.load_extensions` drives it), so
+    THE by-path loader (`ava.sdk_surface.extensions.load_extensions` drives it), so
     one plugin sees one module name, one ``__package__``, and one
     ``sys.modules`` identity however many times it loads. The dotted name is
     ``plugins.<name>.<module>`` for an external plugin and
     ``ava_builtins.plugins.<name>.<module>`` for a built-in (`module` defaults
-    to the entry ``plugin``; `agent.extensions` passes ``agent_runtime`` for
+    to the entry ``plugin``; `faces.py` passes ``agent_runtime`` for
     the runtime face) — importlib sets
     ``__package__`` from it, which is what makes ``from . import sibling``
     inside plugin.py resolve; the external ``plugins`` parent packages are

@@ -1,6 +1,6 @@
 """Agent-runtime face of the ava_code plugin — hooks and contributions.
 
-Loaded only in the agent process: `agent.extensions` imports this module after
+Loaded only in the agent process: the plugin loader (`base.packages.plugins.loading`) imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin's SDK
 **surface** — the `cwd` namespace, the file/shell/understand/ui wraps, and the
 context-file injection — lives in `plugin.py`, which agent-launched children

@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from base import config
 from base.host.net.auth import bearer_header
 from gateway.app import app
-from tests.fixtures.unit.gateway_auth import without_credentials
+from gateway.tests.agents.gateway_auth import without_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

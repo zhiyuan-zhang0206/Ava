@@ -37,7 +37,7 @@ Each declaration derives attribution records (`PluginContributions.as_records`):
 
 ## Entry Points
 - `base/packages/plugins/enable_config.py:discover_plugins()` — filesystem scan for `ava_builtins/plugins/<name>/plugin.py` (built-in) and `~/.ava/plugins/<name>/plugin.py` (external)
-- `agent/extensions/__init__.py:load_extensions()` — imports plugins according to the enabled set, builds the gated registry from their faces' `contribute()` and installs its SDK surface (which binds configs). A plugin's optional `agent_runtime.py` face loads on the full form only ([[docs/plugins/module-loading/two-faces.ava.okf.md]]); the daemon calls it at host boot. Import mechanics, load order and reload semantics: [[docs/plugins/module-loading/module-loading.ava.okf.md]].
+- `ava/sdk_surface/extensions.py:load_extensions()` — imports plugins according to the enabled set, builds the gated registry from their faces' `contribute()` and installs its SDK surface (which binds configs). A plugin's optional `agent_runtime.py` face loads on the full form only ([[docs/plugins/module-loading/two-faces.ava.okf.md]]); the daemon calls it at host boot. Import mechanics, load order and reload semantics: [[docs/plugins/module-loading/module-loading.ava.okf.md]].
 - `agent/graph/_build.py:build_graph()` — at build time hands each hook container its hooks
 - `agent/state.py:build_agent_state()` — at build time merges all plugins' state fields
 - `agent/extensions/catalog.py:build_catalog()` — loads this machine's enabled plugins and reads back what they declared (`ava plugins inspect`)

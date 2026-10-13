@@ -33,13 +33,13 @@ import pytest_asyncio
 
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from gateway.tests.agents.gateway_auth import install_default_gateway_credentials
 from tests._os_jobs import host_ava_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
     _TEST_AVA_HOME,
 )
 from tests.fixtures.static_environment import static_mode
-from tests.fixtures.unit.gateway_auth import install_default_gateway_credentials
 
 # Host job inventory as it stood BEFORE this session — `pytest_sessionfinish`
 # diffs against it and fails the run on anything new (see tests/_os_jobs.py).
@@ -293,7 +293,7 @@ def _default_gateway_credentials(
 
     The cluster API always authenticates, so the suite keeps its cluster secret
     (`env_bootstrap`) and every `TestClient` over the Gateway app carries it as its
-    bearer by default (`tests.fixtures.unit.gateway_auth`); authentication tests patch
+    bearer by default (`gateway.tests.agents.gateway_auth`); authentication tests patch
     the secret or drop the header (`without_credentials`). The patch touches no store,
     so it applies to every test outside the static environment.
     """

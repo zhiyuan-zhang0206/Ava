@@ -100,7 +100,7 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
     _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
     write_local({"plugins": {"codex_usage": {"enabled": False}, "good": {"enabled": True}}})
 
-    from agent.extensions import load_extensions
+    from ava.sdk_surface.extensions import load_extensions
 
     load_extensions()  # must not raise: the disabled plugin is never imported
 
@@ -128,7 +128,7 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
         }
     )
 
-    from agent.extensions import load_extensions
+    from ava.sdk_surface.extensions import load_extensions
 
     load_extensions()  # must not raise
 
@@ -154,7 +154,7 @@ def test_a_package_relative_sibling_import_resolves_and_a_reload_keeps_the_modul
     )
     write_local({"plugins": {"codex_usage": {"enabled": True}}})
 
-    from agent.extensions import load_extensions
+    from ava.sdk_surface.extensions import load_extensions
 
     load_extensions()
     first = sys.modules["plugins.codex_usage.plugin"]
@@ -174,7 +174,7 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
     _write_plugin(paths.plugins_dir(), "codex_usage", "from . import refresh\n")
     write_local({"plugins": {"codex_usage": {"enabled": True}}})
 
-    from agent.extensions import load_extensions
+    from ava.sdk_surface.extensions import load_extensions
 
     for _ in range(3):
         load_extensions()  # each call stands in for one host boot
@@ -190,8 +190,8 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
 
 def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> None:
     """`plugin.py` declares nothing about config; `default_config.py` does, and the install binds it."""
-    from agent.extensions import load_extensions
     from ava.sdk_surface import install, settings
+    from ava.sdk_surface.extensions import load_extensions
 
     _write_plugin(
         paths.plugins_dir(),
@@ -222,8 +222,8 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
 
 
 def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAuthority) -> None:
-    from agent.extensions import load_extensions
     from ava.sdk_surface import install, settings
+    from ava.sdk_surface.extensions import load_extensions
     from ava.sdk_surface.installation import installed
     from base.agents.sdk import call_policy
     from base.lm.catalog import CatalogBuilder

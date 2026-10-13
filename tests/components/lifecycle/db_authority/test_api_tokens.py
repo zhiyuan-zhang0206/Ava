@@ -39,10 +39,10 @@ from cli.commands.data_plane import bringup
 from gateway.http.auth import request_principal
 from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.auth.webhook import authenticate_webhook
+from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
 from services.agent_runner.agent_ops import boot as ops_boot
 from services.supervision.roster.service_spec import ServiceSpec, api_access
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
-from tests.fixtures.unit.gateway_auth import disable_default_gateway_credentials
 
 _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"

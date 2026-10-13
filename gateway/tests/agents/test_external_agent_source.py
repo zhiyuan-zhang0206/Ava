@@ -34,8 +34,8 @@ from base.host.net import http_dial
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
+from gateway.tests.agents.gateway_auth import without_credentials
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.gateway_auth import without_credentials
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)

@@ -5,7 +5,7 @@ The plugins here are written to disk and loaded through the real
 produced: the SDK surface is what the plugin's `plugin.py` `contribute()` declares, and hooks, state and
 prompt sections are what its `agent_runtime.py` `contribute()` declares — not anything the test hands
 the registry. The load gate of
-`agent.extensions.registry.build_registry` (a plugin whose manifest and `contribute()`
+`base.packages.plugins.loading.registry.build_registry` (a plugin whose manifest and `contribute()`
 disagree, or whose state declaration is invalid, is left out and reported) is covered at the
 bottom, on the same harness.
 """
@@ -16,14 +16,15 @@ from pathlib import Path
 import pytest
 
 from agent.extensions import catalog as catalog_mod
-from agent.extensions import load_extensions
-from agent.extensions.registry import declarations
+from agent.state import plugin_state_schema
+from ava.sdk_surface.extensions import load_extensions
 from base import paths
 from base.lm.catalog import ModelCatalog
 from base.packages import plugin_providers
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.gate import ContributionMismatch
+from base.packages.plugins.loading.registry import declarations
 from base.packages.plugins.manifest import ManifestError
 
 
@@ -377,7 +378,7 @@ def load_failures(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, BaseExcept
 
 def _registered() -> dict[str, tuple[str, ...]]:
     """What a fresh load admits (the gate, then the SDK install): plugin -> its declared hook points."""
-    registry = load_extensions().registry
+    registry = load_extensions(validate_state=plugin_state_schema).registry
     return {
         name: tuple(point for point in _HOOK_POINTS if contributions.hooks(point))  # pyright: ignore[reportArgumentType]
         for name, contributions in registry.plugins
@@ -542,7 +543,7 @@ def test_a_valid_state_declaration_is_admitted(load_failures: list[tuple[str, Ba
     )
     _enable(gate_state=True)
 
-    registry = load_extensions().registry
+    registry = load_extensions(validate_state=plugin_state_schema).registry
 
     assert [(plugin, cls.__name__) for plugin, cls in registry.state_classes()] == [
         ("gate_state", "GateState")

@@ -1,7 +1,7 @@
 """What a plugin contributes, as a value — and the registry of every enabled plugin's.
 
 A plugin does not register anything: its `agent_runtime.py` face exports `contribute()`, a
-pure function returning a frozen `PluginContributions`. The loader (`agent.extensions`) calls it
+pure function returning a frozen `PluginContributions`. The loader (`base.packages.plugins.loading`) calls it
 for every enabled plugin and holds the results in an `ExtensionRegistry` instance, which the
 composition roots (the agent host, the graph build) hand to the code that consumes them. There
 is no process-global registry to mutate at import, so attribution does not ride a ContextVar
