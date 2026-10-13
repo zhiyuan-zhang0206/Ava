@@ -47,12 +47,12 @@ def test_the_route_returns_the_services_suggestion() -> None:
 
 
 def test_the_route_reports_why_there_is_no_suggestion_as_a_200() -> None:
-    service = StubService(ReplySuggestionResponse(suggestions=[], reason="not_awaiting_reply"))
+    service = StubService(ReplySuggestionResponse(suggestions=[], reason="not_useful"))
 
     response = client_for(service).post("/api/agents/7/reply-suggestion")
 
     assert response.status_code == 200
-    assert response.json() == {"suggestions": [], "reason": "not_awaiting_reply"}
+    assert response.json() == {"suggestions": [], "reason": "not_useful"}
 
 
 def test_a_non_integer_agent_id_is_rejected() -> None:

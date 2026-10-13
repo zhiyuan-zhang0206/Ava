@@ -7,7 +7,7 @@ tags: [gateway, agents, lm]
 
 # Reply Suggestion
 
-After an agent's turn the web console shows up to three drafted replies in the empty
+After an agent's turn the web console shows model-chosen reply candidates in the empty
 composer's placeholder, using its ordinary font and colour. Several candidates carry a
 `[1/3]` position marker. Up/Down cycles through them; Right fills the selected text and
 places the caret at its end, without the marker. Enter then sends the draft.
@@ -39,7 +39,7 @@ modified arrows and arrows in nonempty drafts keep their ordinary behaviour.
 
 `POST /api/agents/{agent_id}/reply-suggestion` answers `{suggestions, reason}`. `suggestions`
 is an empty array exactly when `reason` is set: `disabled`, `agent_not_idle`, `no_agent_text`,
-`not_awaiting_reply`, `gate_failed`, `generation_failed`, `invalid_generation`. Every one is
+`not_useful`, `gate_failed`, `generation_failed`, `invalid_generation`. Every one is
 a 200. An unknown agent is 404 and an unreadable checkpoint is the history read's 503.
 
 1. The agent must exist and be idle; the cluster switch must be on.
@@ -47,23 +47,24 @@ a 200. An unknown agent is 404 and an unreadable checkpoint is the history read'
    into items. The excerpt is the newest human message (`user` or `ui:page:*`) and the
    text of the last turn (everything after the newest inbound), cut from the end to
    `reply_suggestion_max_input_tokens`.
-3. Gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "is the last
-   assistant message waiting for the user". Below `reply_suggestion_gate_threshold` the
-   answer is `not_awaiting_reply`.
+3. Gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "would suggesting
+   a reply help the user at this point in the conversation?". Below
+   `reply_suggestion_gate_threshold` the answer is `not_useful`. This judges the value
+   of suggesting a reply, not whether the agent is blocked waiting for the user.
 4. Draft: `reply_suggestion_model` with reasoning off (DeepSeek defaults to maximum
    effort, which makes a one-line draft run for tens of seconds). The fixed instruction
    is the system message, first in the request, so the provider's prompt cache covers it.
-   One call returns a JSON array of 1-3 distinct reply strings. Explicit choices such as
-   A/B/C get separate candidates in their original order, rather than choosing for the
-   user. Pydantic rejects malformed JSON, duplicate replies, empty strings, candidates
-   over 500 characters or an array outside the bound as `invalid_generation`. Invalid
+   One call returns a JSON array of reply strings. The model chooses both the number
+   and content from context; there is no preferred count, three-candidate ceiling or
+   question-type policy. Pydantic rejects malformed JSON, duplicate replies, empty
+   arrays or strings, and candidates over 500 characters as `invalid_generation`. Invalid
    arrays are rejected as a whole, never partially salvaged or truncated.
 5. Usage: `llm_usage` rows with `usage_kind` `reply_suggestion_gate` and `reply_suggestion`,
    both attributed to the agent (`for_agent_id`).
 
 A failed gate or draft is logged as a warning (`reply_suggestion_gate_failed`,
 `reply_suggestion_draft_failed`) and answered as above; failures are not cached.
-Completed results (a draft or `not_awaiting_reply`) are cached in process by agent and the
+Completed results (a draft or `not_useful`) are cached in process by agent and the
 agent message's identity (`source_message_id`), so several tabs share one generation.
 
 The route races the work against `request.is_disconnected()` and cancels it when the client
@@ -79,3 +80,10 @@ registered chat model and the gate model a registered decision model
 
 Code: `gateway/agents/reply_suggestion/` (`router.py`, `service.py`, `excerpt.py`,
 `configuration.py`).
+
+## Verification scope
+
+Unit tests inject fake decision and chat models. They verify gating, parsing, candidate
+transport, caching and keyboard behaviour, including preserving model-returned counts
+above three. They do not evaluate the usefulness judgement or generated reply quality;
+those require a benchmark with representative conversations and actual model outputs.

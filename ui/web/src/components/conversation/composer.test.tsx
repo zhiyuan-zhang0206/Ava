@@ -131,28 +131,30 @@ describe("Composer reply suggestion", () => {
 
   it("browses numbered candidates in the placeholder and sends only the accepted text", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={["Use A.", "Use B.", "Use C."]} />);
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={["Use A.", "Use B.", "Use C.", "Use D."]} />);
 
-    expect(input().placeholder).toBe("[1/3] Use A.");
+    expect(input().placeholder).toBe("[1/4] Use A.");
     fireEvent.keyDown(input(), { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(input(), { key: "ArrowDown" });
-    expect(input().placeholder).toBe("[2/3] Use B.");
+    expect(input().placeholder).toBe("[2/4] Use B.");
     fireEvent.keyDown(input(), { key: "ArrowDown" });
-    expect(input().placeholder).toBe("[3/3] Use C.");
+    expect(input().placeholder).toBe("[3/4] Use C.");
     fireEvent.keyDown(input(), { key: "ArrowDown" });
-    expect(input().placeholder).toBe("[1/3] Use A.");
+    expect(input().placeholder).toBe("[4/4] Use D.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[1/4] Use A.");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
-    expect(input().placeholder).toBe("[3/3] Use C.");
+    expect(input().placeholder).toBe("[4/4] Use D.");
     expect(input().value).toBe("");
 
     fireEvent.keyDown(input(), { key: "ArrowRight" });
-    await waitFor(() => expect(input().value).toBe("Use C."));
-    expect(input().selectionStart).toBe("Use C.".length);
-    expect(input().selectionEnd).toBe("Use C.".length);
+    await waitFor(() => expect(input().value).toBe("Use D."));
+    expect(input().selectionStart).toBe("Use D.".length);
+    expect(input().selectionEnd).toBe("Use D.".length);
     fireEvent.keyDown(input(), { key: "Enter" });
 
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Use C.", [], expect.any(String)));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Use D.", [], expect.any(String)));
     await waitFor(() => expect(input().value).toBe(""));
     expect(input().placeholder).toBe("Send a message");
     expect(fireEvent.keyDown(input(), { key: "ArrowRight" })).toBe(true);

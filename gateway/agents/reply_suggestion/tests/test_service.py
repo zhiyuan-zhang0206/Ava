@@ -28,9 +28,9 @@ from gateway.agents.reply_suggestion.service import (
 from gateway.agents.reply_suggestion.tests.support import (
     Harness,
     agent_text,
-    awaiting,
     conversation,
     inbound,
+    useful_reply,
 )
 
 
@@ -81,17 +81,17 @@ async def test_the_cluster_switch_turns_the_pipeline_off(harness: Harness) -> No
 
 
 async def test_a_gate_below_the_threshold_returns_no_suggestion(harness: Harness) -> None:
-    harness.decide.result = awaiting(0.2)
+    harness.decide.result = useful_reply(0.2)
 
     result = await harness.service.suggest(7)
 
-    assert (result.suggestions, result.reason) == ([], "not_awaiting_reply")
+    assert (result.suggestions, result.reason) == ([], "not_useful")
     assert len(harness.decide.calls) == 1
     assert harness.chat.invocations == []
 
 
 async def test_a_gate_exactly_at_the_threshold_passes(harness: Harness) -> None:
-    harness.decide.result = awaiting(0.5)
+    harness.decide.result = useful_reply(0.5)
 
     result = await harness.service.suggest(7)
 
@@ -106,8 +106,8 @@ async def test_the_gate_asks_its_question_about_the_excerpt_and_is_billed_to_the
     model, state, questions, kwargs = harness.decide.calls[0]
     assert model == "gate-model"
     assert state == "[User]\nPlease prepare the release.\n\n[Assistant]\nDeploy now?"
-    assert list(questions) == ["awaiting"]
-    assert isinstance(questions["awaiting"], YesNo)
+    assert list(questions) == ["useful_reply"]
+    assert isinstance(questions["useful_reply"], YesNo)
     assert kwargs["usage_kind"] == GATE_USAGE_KIND == "reply_suggestion_gate"
     assert kwargs["for_agent_id"] == 7
     assert kwargs["catalog"] is harness.service._catalog
@@ -167,7 +167,7 @@ async def test_a_completed_result_is_served_from_the_cache(harness: Harness) -> 
 
 
 async def test_a_gate_refusal_is_cached_too(harness: Harness) -> None:
-    harness.decide.result = awaiting(0.1)
+    harness.decide.result = useful_reply(0.1)
 
     await harness.service.suggest(7)
     await harness.service.suggest(7)
@@ -242,7 +242,6 @@ async def test_a_draft_failure_degrades_to_no_suggestion_with_a_warning(
         json.dumps([]),
         json.dumps(["   \n"]),
         json.dumps(["x" * (MAX_SUGGESTION_CHARS + 1)]),
-        json.dumps(["A", "B", "C", "D"]),
         json.dumps(["Yes", " yes "]),
         json.dumps(["Yes", 42]),
         json.dumps({"suggestions": ["Yes"]}),
@@ -256,27 +255,24 @@ async def test_invalid_candidates_are_rejected_as_a_whole(harness: Harness, repl
     assert (result.suggestions, result.reason) == ([], "invalid_generation")
 
 
-async def test_explicit_choices_keep_their_order_and_share_one_draft_call(harness: Harness) -> None:
-    harness.messages = conversation("Which approach: A, B or C?")
-    harness.chat.reply = json.dumps(["Use A.", "Use B.", "Use C."])
+@pytest.mark.parametrize(
+    "candidates",
+    [
+        ["Continue."],
+        ["Continue.", "Pause."],
+        ["Use A.", "Use B.", "Use C.", "Use D."],
+    ],
+)
+async def test_model_candidate_count_and_order_reach_the_response(
+    harness: Harness, candidates: list[str]
+) -> None:
+    harness.chat.reply = json.dumps(candidates)
 
     result = await harness.service.suggest(7)
 
-    assert result.suggestions == ["Use A.", "Use B.", "Use C."]
+    assert result.suggestions == candidates
     assert result.reason is None
     assert len(harness.chat.invocations) == 1
-    excerpt = harness.chat.invocations[0][1].content
-    assert isinstance(excerpt, str)
-    assert excerpt.endswith("Which approach: A, B or C?")
-
-
-async def test_one_useful_candidate_is_valid(harness: Harness) -> None:
-    harness.chat.reply = json.dumps(["Please explain the options first."])
-
-    result = await harness.service.suggest(7)
-
-    assert result.suggestions == ["Please explain the options first."]
-    assert result.reason is None
 
 
 async def test_a_conversation_without_agent_text_has_nothing_to_suggest(harness: Harness) -> None:

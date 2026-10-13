@@ -1443,10 +1443,10 @@ export interface paths {
         put?: never;
         /**
          * Post Reply Suggestion
-         * @description Draft the reply the user is likely to send to the agent's last message.
+         * @description Suggest replies when helping the user respond would be useful.
          *
-         *     200 with `suggestion` null and a `reason` for every way there is nothing to show: the
-         *     agent is mid-turn, its last message is not waiting for the user, or the gate or draft
+         *     200 with an empty `suggestions` array and a `reason` when there is nothing to show: the
+         *     agent is mid-turn, a reply suggestion is not useful, or the gate or draft
          *     model failed (logged as a warning). 404 for an unknown agent; 503 when the conversation
          *     cannot be read. The work stops when the client disconnects.
          */
@@ -7384,7 +7384,7 @@ export interface components {
             /** Suggestions */
             suggestions: string[];
             /** Reason */
-            reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_awaiting_reply" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
+            reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_useful" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
         };
         /**
          * ResolveNoticeIn

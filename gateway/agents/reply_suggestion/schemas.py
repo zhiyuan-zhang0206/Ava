@@ -7,7 +7,6 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, RootModel, StringConstraints, field_validator
 
 MAX_SUGGESTION_CHARS = 500
-MAX_REPLY_SUGGESTIONS = 3
 ReplyText = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_SUGGESTION_CHARS)
 ]
@@ -16,7 +15,7 @@ SuggestionReason = Literal[
     "disabled",
     "agent_not_idle",
     "no_agent_text",
-    "not_awaiting_reply",
+    "not_useful",
     "gate_failed",
     "generation_failed",
     "invalid_generation",
@@ -27,7 +26,7 @@ SuggestionReason = Literal[
 class DraftReplies(RootModel[list[ReplyText]]):
     """Validate the model's JSON array before any candidate reaches the composer."""
 
-    root: list[ReplyText] = Field(min_length=1, max_length=MAX_REPLY_SUGGESTIONS)
+    root: list[ReplyText] = Field(min_length=1)
 
     @field_validator("root")
     @classmethod
@@ -44,5 +43,5 @@ class ReplySuggestionResponse(BaseModel):
     missing suggestion is an ordinary result, never a failure of the request.
     """
 
-    suggestions: list[ReplyText] = Field(max_length=MAX_REPLY_SUGGESTIONS)
+    suggestions: list[ReplyText]
     reason: SuggestionReason | None = None

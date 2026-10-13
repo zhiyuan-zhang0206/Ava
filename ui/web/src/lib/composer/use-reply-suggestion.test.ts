@@ -85,8 +85,8 @@ describe("useReplySuggestion", () => {
     expect(pending[0].agentId).toBe(7);
     expect(result.current).toBeNull();
 
-    await settle({ suggestions: ["Use A.", "Use B.", "Use C."], reason: null });
-    expect(result.current).toEqual(["Use A.", "Use B.", "Use C."]);
+    await settle({ suggestions: ["Use A.", "Use B.", "Use C.", "Use D."], reason: null });
+    expect(result.current).toEqual(["Use A.", "Use B.", "Use C.", "Use D."]);
   });
 
   it("starts nothing when a new turn begins within the quiet period", async () => {
@@ -249,7 +249,7 @@ describe("useReplySuggestion", () => {
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
-    await settle({ suggestions: [], reason: "not_awaiting_reply" });
+    await settle({ suggestions: [], reason: "not_useful" });
 
     rerender({ ...idle, busy: true });
     rerender(idle);
@@ -300,7 +300,7 @@ describe("useReplySuggestion", () => {
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
 
-    await settle({ suggestions: [], reason: "not_awaiting_reply" });
+    await settle({ suggestions: [], reason: "not_useful" });
 
     expect(result.current).toBeNull();
   });

@@ -30,7 +30,6 @@ from base.lm.usage import log_usage_from_message
 from base.log import logger
 from gateway.agents.reply_suggestion.excerpt import ConversationExcerpt, build_excerpt
 from gateway.agents.reply_suggestion.schemas import (
-    MAX_REPLY_SUGGESTIONS,
     DraftReplies,
     ReplySuggestionResponse,
     SuggestionReason,
@@ -46,38 +45,18 @@ DRAFT_TIMEOUT_S = 20.0
 # Completed results kept for repeated requests (several tabs, a re-focused page).
 CACHE_ENTRIES = 512
 
-AWAITING = "awaiting"
+USEFUL_REPLY = "useful_reply"
 GATE_QUESTION = YesNo(
-    question=(
-        "Is the assistant's last message waiting for the user to reply, decide or provide input?"
-    ),
-    true_if=(
-        "The last assistant message asks the user a question, offers options to choose from, "
-        "requests confirmation or missing information, or otherwise needs the user's answer "
-        "before work can continue."
-    ),
-    false_if=(
-        "The last assistant message reports completion, progress or results and needs "
-        "nothing from the user, or is a closing remark."
-    ),
+    question="Would suggesting a reply help the user at this point in the conversation?",
+    true_if="A reply suggestion would help the user respond.",
+    false_if="A reply suggestion would not help the user respond.",
 )
 
 # First in the request so the provider's prompt cache covers it on every call.
 DRAFT_INSTRUCTION = (
-    "You draft the reply a user is about to send to an AI agent. The excerpt holds the user's "
-    "latest message and what the agent said last.\n"
-    "Offer distinct possible replies in the user's own voice: answers, decisions, "
-    "confirmations or instructions. The user chooses a candidate; do not choose for them.\n"
-    "Rules:\n"
-    f"- Output only a JSON array of 1 to {MAX_REPLY_SUGGESTIONS} reply strings, with no "
-    "Markdown fences, labels or explanation. Prefer 2 or 3 useful alternatives.\n"
-    "- Write in the language the user writes in.\n"
-    "- Keep each reply short: one or two sentences at most.\n"
-    "- If the agent offered A/B/C or other explicit options, offer a reply for each "
-    "option in its original order, up to the array limit. Preserve their meanings.\n"
-    "- For a confirmation, include both agreement and refusal or a request to adjust.\n"
-    "- Do not invent information only the user would know; offer clarification if needed.\n"
-    "- Do not ask the user's questions back to the agent."
+    "Draft short replies the user could send next based on the conversation. "
+    "Decide the appropriate number of suggestions and their content from context. "
+    "Return only a JSON array of reply strings in the user's language."
 )
 
 LoadMessages = Callable[[int], Sequence[BaseMessage]]
@@ -162,7 +141,7 @@ class ReplySuggestionService:
             self._cache.move_to_end(key)
             return cached
         result = await self._gate_and_draft(agent_id, excerpt)
-        if result.reason in (None, "not_awaiting_reply"):
+        if result.reason in (None, "not_useful"):
             self._remember(key, result)
         return result
 
@@ -182,7 +161,7 @@ class ReplySuggestionService:
         self, agent_id: int, excerpt: ConversationExcerpt
     ) -> ReplySuggestionResponse:
         try:
-            awaiting = await self._awaiting_probability(agent_id, excerpt)
+            useful = await self._useful_reply_probability(agent_id, excerpt)
         except DecisionError:
             logger.opt(exception=True).warning(
                 "reply suggestion gate failed for agent {agent_id}",
@@ -192,18 +171,18 @@ class ReplySuggestionService:
             return _none("gate_failed")
         threshold = self._policy.gate_threshold()
         logger.info(
-            "reply suggestion gate for agent {agent_id}: awaiting={awaiting:.3f} threshold={threshold}",
+            "reply suggestion gate for agent {agent_id}: useful={useful:.3f} threshold={threshold}",
             event="reply_suggestion_gate",
             agent_id=agent_id,
-            awaiting=awaiting,
+            useful=useful,
             threshold=threshold,
         )
-        if awaiting < threshold:
-            return _none("not_awaiting_reply")
+        if useful < threshold:
+            return _none("not_useful")
         return await self._draft(agent_id, excerpt)
 
-    async def _awaiting_probability(self, agent_id: int, excerpt: ConversationExcerpt) -> float:
-        questions: dict[str, Question] = {AWAITING: GATE_QUESTION}
+    async def _useful_reply_probability(self, agent_id: int, excerpt: ConversationExcerpt) -> float:
+        questions: dict[str, Question] = {USEFUL_REPLY: GATE_QUESTION}
         decisions = await self._decide(
             self._policy.gate_model(),
             excerpt.text,
@@ -213,7 +192,7 @@ class ReplySuggestionService:
             for_agent_id=agent_id,
             timeout=GATE_TIMEOUT_S,
         )
-        return decisions[AWAITING].probability("true")
+        return decisions[USEFUL_REPLY].probability("true")
 
     async def _draft(self, agent_id: int, excerpt: ConversationExcerpt) -> ReplySuggestionResponse:
         model_id = self._policy.model()

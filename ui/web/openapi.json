@@ -2487,7 +2487,7 @@
     "/api/agents/{agent_id}/reply-suggestion": {
       "post": {
         "summary": "Post Reply Suggestion",
-        "description": "Draft the reply the user is likely to send to the agent's last message.\n\n200 with `suggestion` null and a `reason` for every way there is nothing to show: the\nagent is mid-turn, its last message is not waiting for the user, or the gate or draft\nmodel failed (logged as a warning). 404 for an unknown agent; 503 when the conversation\ncannot be read. The work stops when the client disconnects.",
+        "description": "Suggest replies when helping the user respond would be useful.\n\n200 with an empty `suggestions` array and a `reason` when there is nothing to show: the\nagent is mid-turn, a reply suggestion is not useful, or the gate or draft\nmodel failed (logged as a warning). 404 for an unknown agent; 503 when the conversation\ncannot be read. The work stops when the client disconnects.",
         "operationId": "post_reply_suggestion_api_agents__agent_id__reply_suggestion_post",
         "parameters": [
           {
@@ -15278,7 +15278,6 @@
               "minLength": 1
             },
             "type": "array",
-            "maxItems": 3,
             "title": "Suggestions"
           },
           "reason": {
@@ -15289,7 +15288,7 @@
                   "disabled",
                   "agent_not_idle",
                   "no_agent_text",
-                  "not_awaiting_reply",
+                  "not_useful",
                   "gate_failed",
                   "generation_failed",
                   "invalid_generation",

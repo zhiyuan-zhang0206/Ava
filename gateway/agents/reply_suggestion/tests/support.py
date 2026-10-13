@@ -37,9 +37,9 @@ def conversation(question: str = "Deploy now?") -> list[BaseMessage]:
     ]
 
 
-def awaiting(probability: float) -> Mapping[str, Decision]:
+def useful_reply(probability: float) -> Mapping[str, Decision]:
     return {
-        "awaiting": Decision(
+        "useful_reply": Decision(
             top="true" if probability >= 0.5 else "false",
             probabilities={"true": probability, "false": 1 - probability},
         )
@@ -70,7 +70,7 @@ class FakeDecide:
     """Records every call; answers with `result` or raises `error`."""
 
     def __init__(self, result: Mapping[str, Decision] | None = None) -> None:
-        self.result = result if result is not None else awaiting(0.9)
+        self.result = result if result is not None else useful_reply(0.9)
         self.error: Exception | None = None
         self.calls: list[tuple[str, str, Mapping[str, Question], dict[str, Any]]] = []
 

@@ -42,7 +42,7 @@
   "confirmForceKillDesc": "Show a confirmation dialog when force-killing (kill / SIGKILL) an agent",
   "composer": "Composer",
   "replySuggestions": "Reply suggestions",
-  "replySuggestionsDesc": "After an agent finishes a turn that waits for you, draft up to three replies as grey text in the empty input. Use Up/Down to choose, Right to fill the input, then Enter to send. Typing hides the suggestions. Uses a small model on the last messages of the conversation.",
+  "replySuggestionsDesc": "After an agent finishes a turn, suggest replies when they would help you respond. The model chooses how many suggestions to provide. They appear as grey text in the empty input. Use Up/Down to choose, Right to fill the input, then Enter to send. Typing hides the suggestions.",
   "modelPicker": "Model picker",
   "english": "English",
   "chinese": "中文"
