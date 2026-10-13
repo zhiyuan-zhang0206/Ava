@@ -218,6 +218,21 @@ does not expire. There is no pause-controller or OS hold-watchdog recovery job.
 A failed or unreadable ownership observation never permits an independent
 restart or release of admission.
 
+A hold older than `AVA_MAINTENANCE_HOLD_ALERT_AFTER_S` (default 1800 seconds,
+counted from its `acquired_at`) raises one `maintenance_hold_overdue` event, and
+the `ava-ops-maintenance-hold-overdue` Grafana rule alerts on it. The check is
+the `maintenance-hold` diagnostic of the running root, so it needs no CLI process
+to be alive; it only reads the journal and never releases or repairs anything. An
+unreadable journal counts as a hold too (the event reports `state: invalid`, with
+no holder or phase, aged from the file's modification time). The alert is raised
+once per hold, and a root restart re-raises it for a hold still in place. A
+machine that is being deliberately kept stopped also holds past the age, so the
+alert there is an expected operational signal, not a fault. Because a full `ava
+stop` also stops the root, a hold left in the `stopped` phase of a full stop is
+not observed by this check; it covers holds left while the root is running (a
+stop that keeps a service, a restart that failed or was cut off, a stuck
+drain). The recovery it names is the one below: run `ava start` on that machine.
+
 First identify what owns the home: `ava status` names the operation and phase.
 Do not apply the table below over a `cli.fleet_update` half that is still
 running; rerun that half after its failure is fixed instead. Status includes the

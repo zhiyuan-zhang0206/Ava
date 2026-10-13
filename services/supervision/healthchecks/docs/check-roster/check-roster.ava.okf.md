@@ -35,6 +35,7 @@ file to this directory and no row to this table.
 | `otel_collector.py` | Service protocol probe | Valid OTLP request accepted |
 | `redis_bridge.py` | Service protocol probe | RESP command through the relay gets a Redis reply |
 | `protocol_probe.py` | Read-only diagnostic helper | Protocol result adapter and bounded Unix ping |
+| `maintenance_hold.py` | Read-only diagnostic helper | Age of this home's maintenance hold; one `maintenance_hold_overdue` event per hold |
 | `permissions_helper.py` | Read-only diagnostic helper | Parent helper ping and launchd failure classification |
 | `prod_venv.py` | Read-only diagnostic helper | Bounded dependency check and isolated import smoke |
 | `redis_acl.py` | Read-only diagnostic helper | Runtime-credential Redis PING |

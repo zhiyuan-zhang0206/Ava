@@ -112,6 +112,24 @@ class ScheduleConvergenceAbandoned(TypedDict):
     blocked_seconds: float
 
 
+class MaintenanceHoldOverdue(TypedDict):
+    """`maintenance_hold_overdue` payload — services/supervision/healthchecks/maintenance_hold.py.
+
+    Emitted once per hold (one episode) by the root diagnostic that reads this
+    home's pause-owner journal, when the hold has been in place for the
+    configured age. ``state`` is ``paused`` for a readable hold, with its
+    ``holder``, ``phase`` and ``acquired_at``; ``invalid`` for an unreadable
+    journal, whose holder, phase and acquisition time are unknown (None) and
+    whose ``held_seconds`` counts from the file's modification time.
+    """
+
+    state: str
+    holder: str | None
+    phase: str | None
+    acquired_at: str | None
+    held_seconds: float
+
+
 class RecoveryDrillFailed(TypedDict):
     """`recovery_drill_failed` payload — the scheduled logical restore drill.
 
@@ -300,6 +318,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=ScheduleConvergenceAbandoned,
         tier="anomaly",
         site="services/wake/schedule_manager/manager.py:_give_up telemetry.emit",
+    ),
+    "maintenance_hold_overdue": telemetry_event(
+        "maintenance_hold_overdue",
+        "this home's maintenance hold, or an unreadable hold journal, has been in place for more than the configured age (default 30 minutes) and freezes every wake on the machine; one event per hold, reporting only, release it with `ava start`",
+        payload=MaintenanceHoldOverdue,
+        tier="anomaly",
+        site="services/supervision/healthchecks/maintenance_hold.py:_emit_overdue logger.error",
     ),
     "root_health_expected": telemetry_event(
         "root_health_expected",
