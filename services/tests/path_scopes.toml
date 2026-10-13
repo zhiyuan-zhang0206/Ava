@@ -2,4 +2,8 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.services_tests" = [
     ".",
+    "test_daemon_shutdown_bound.py",
+]
+"tests.fixtures.unit.sdk" = [
+    "test_daemon_shutdown_bound.py",
 ]

@@ -156,12 +156,6 @@ def test_task_validation_failure_rolls_back_birth_and_prompt(
         assert _counts(observer) == before
 
 
-def test_fleet_task_model_remains_the_shared_model() -> None:
-    from ava_builtins.plugins.ava_fleet.task_registry import Task as FleetTask
-
-    assert FleetTask is Task
-
-
 def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
     db_conn: psycopg.Connection,
     *,

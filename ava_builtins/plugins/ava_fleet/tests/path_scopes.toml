@@ -8,7 +8,6 @@
     "test_lazy_plugin_import.py",
 ]
 "tests.fixtures.unit.sdk" = [
-    "ava_fleet_plugin/test_dismissing_response_notice_refreshes_inspector_snapshot.py",
     "task_registry/test_create_unique_title_no_conflict.py",
     "task_registry/test_creation_receipt_identity.py",
     "task_registry/test_creation_receipts.py",

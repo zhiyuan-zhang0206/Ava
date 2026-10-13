@@ -42,7 +42,7 @@ import pytest
 
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _MARKERS_ENV = "DAEMON_SHUTDOWN_TEST_MARKERS"
 _CASE_ENV = "DAEMON_SHUTDOWN_TEST_CASE"

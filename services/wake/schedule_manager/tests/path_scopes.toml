@@ -7,5 +7,4 @@
 "tests.fixtures.unit.sdk" = [
     "test_manager.py",
     "test_manager_state.py",
-    "test_runner_composition.py"
 ]
