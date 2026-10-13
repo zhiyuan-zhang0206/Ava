@@ -196,4 +196,5 @@ async def test_llm_node_cancel_event_race_normal_completion(
     result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
 
     assert isinstance(result, Command)
+    assert result.update is not None
     assert result.update["messages"][0].content == "print('hi')"  # pyright: ignore[reportUnknownMemberType]
