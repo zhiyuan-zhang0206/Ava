@@ -21,7 +21,7 @@ def _lint(monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT, stub_ba
     """Point the lint module at a tmp migrations/ + db/schema.sql; return
     (lint_module, migrations_dir)."""
     if stub_base:
-        monkeypatch.setattr(lint, "_immutability_base", lambda _ref: None)
+        monkeypatch.setattr(lint, "immutability_base", lambda _ref: None)
     migrations_dir = tmp_path / "migrations"
     migrations_dir.mkdir()
     monkeypatch.setattr(lint, "MIGRATIONS_DIR", migrations_dir)

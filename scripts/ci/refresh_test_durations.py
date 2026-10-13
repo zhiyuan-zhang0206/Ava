@@ -58,13 +58,13 @@ from pathlib import Path
 
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)
 _E2E_WORKERS = 2  # mirrors the e2e-shard job (-n 2)
-_BACKEND_SHARDS = 8
-_E2E_SHARDS = 4
+BACKEND_SHARDS = 8
+E2E_SHARDS = 4
 _MEASUREMENT_ATTEMPTS = 3
 # The exact --cov module list of the backend-shard job (ci.yml): the refresh
 # carries it so the measured durations include the same tracing overhead the
 # shards will pay.
-_BACKEND_COVERAGE_ARGS = [
+BACKEND_COVERAGE_ARGS = [
     "--cov=agent",
     "--cov=ava",
     "--cov=cli",
@@ -76,10 +76,10 @@ _BACKEND_COVERAGE_ARGS = [
     "--cov=ava_builtins",
 ]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DURATIONS_PATH = _REPO_ROOT / ".test_durations"
+DURATIONS_PATH = _REPO_ROOT / ".test_durations"
 
 
-def _load_durations(path: Path) -> dict[str, float]:
+def load_durations(path: Path) -> dict[str, float]:
     """Load a pytest-split durations file; missing or corrupt -> empty dict."""
     try:
         data = json.loads(path.read_text())
@@ -100,7 +100,7 @@ def _load_durations(path: Path) -> dict[str, float]:
     return {str(nodeid): float(value) for nodeid, value in data.items()}
 
 
-def _run_suite(
+def run_suite(
     pytest_args: list[str],
     durations_path: Path,
     *,
@@ -122,7 +122,7 @@ def _run_suite(
         *pytest_args,
     ]
     if coverage:
-        cmd.extend(_BACKEND_COVERAGE_ARGS)
+        cmd.extend(BACKEND_COVERAGE_ARGS)
     cmd.extend(
         [
             "--store-durations",
@@ -136,7 +136,7 @@ def _run_suite(
 
 def _seed_shard_durations(path: Path) -> None:
     """Give each shard CI's current timing model without sharing a writable file."""
-    source = _load_durations(_DURATIONS_PATH)
+    source = load_durations(DURATIONS_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(source, sort_keys=True, separators=(",", ":")) + "\n")
 
@@ -144,7 +144,7 @@ def _seed_shard_durations(path: Path) -> None:
 def _measure_shard(suite: str, group: int, output_path: Path) -> int:
     """Record one CI-equivalent shard, retrying only that isolated measurement."""
     if suite == "backend":
-        groups = _BACKEND_SHARDS
+        groups = BACKEND_SHARDS
         pytest_args = [
             "-q",
             "--omit-static-tests",
@@ -162,7 +162,7 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
         ]
         coverage = True
     else:
-        groups = _E2E_SHARDS
+        groups = E2E_SHARDS
         pytest_args = [
             "tests/e2e/",
             "-v",
@@ -180,13 +180,13 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
     if not 1 <= group <= groups:
         print(f"{suite} group must be between 1 and {groups}, got {group}", file=sys.stderr)
         return 1
-    if output_path.resolve() == _DURATIONS_PATH.resolve():
+    if output_path.resolve() == DURATIONS_PATH.resolve():
         print("shard output must not overwrite .test_durations", file=sys.stderr)
         return 1
 
     for attempt in range(1, _MEASUREMENT_ATTEMPTS + 1):
         _seed_shard_durations(output_path)
-        result = _run_suite(pytest_args, output_path, coverage=coverage)
+        result = run_suite(pytest_args, output_path, coverage=coverage)
         if result == 0:
             return 0
         print(
@@ -200,8 +200,8 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
 def _expected_measurement_paths(durations_dir: Path) -> list[Path] | None:
     """Return all required artifacts, or fail before an incomplete timing model publishes."""
     paths = [
-        *(durations_dir / f"backend-{group}.json" for group in range(1, _BACKEND_SHARDS + 1)),
-        *(durations_dir / f"e2e-{group}.json" for group in range(1, _E2E_SHARDS + 1)),
+        *(durations_dir / f"backend-{group}.json" for group in range(1, BACKEND_SHARDS + 1)),
+        *(durations_dir / f"e2e-{group}.json" for group in range(1, E2E_SHARDS + 1)),
     ]
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
@@ -218,7 +218,7 @@ def _merge_shard_measurements(durations_dir: Path) -> int:
 
     merged: dict[str, float] = {}
     for path in paths:
-        measured = _load_durations(path)
+        measured = load_durations(path)
         if not measured:
             print(f"empty shard measurement: {path}", file=sys.stderr)
             return 1
@@ -231,12 +231,12 @@ def _merge_shard_measurements(durations_dir: Path) -> int:
             return 1
         merged.update(measured)
 
-    refreshed = _write_durations(merged)
+    refreshed = write_durations(merged)
     print(f"merged {len(paths)} shard measurements into {len(refreshed)} duration entries")
     return 0
 
 
-def _write_durations(durations: dict[str, float]) -> dict[str, float]:
+def write_durations(durations: dict[str, float]) -> dict[str, float]:
     """Atomically write the canonical compact JSON format + trailing newline."""
     # pytest-split assigns unrecorded tests the known average. Dropping fast
     # measurements would therefore price them as unknown, often slow tests.
@@ -247,7 +247,7 @@ def _write_durations(durations: dict[str, float]) -> dict[str, float]:
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=_DURATIONS_PATH.parent,
+            dir=DURATIONS_PATH.parent,
             prefix=".test_durations.",
             suffix=".tmp",
             delete=False,
@@ -256,7 +256,7 @@ def _write_durations(durations: dict[str, float]) -> dict[str, float]:
             tmp.write(content)
             tmp.flush()
             os.fsync(tmp.fileno())
-        Path(tmp_path).replace(_DURATIONS_PATH)
+        Path(tmp_path).replace(DURATIONS_PATH)
         tmp_path = None
     finally:
         if tmp_path is not None:
@@ -265,7 +265,7 @@ def _write_durations(durations: dict[str, float]) -> dict[str, float]:
 
 
 def _refresh_all() -> int:
-    previous = _load_durations(_DURATIONS_PATH)
+    previous = load_durations(DURATIONS_PATH)
     print(f"refreshing .test_durations (previous: {len(previous)} entries)")
 
     with tempfile.TemporaryDirectory(prefix="durations-") as tmp:
@@ -273,7 +273,7 @@ def _refresh_all() -> int:
         backend_path = tmp_dir / "backend.json"
         e2e_path = tmp_dir / "e2e.json"
 
-        backend_rc = _run_suite(
+        backend_rc = run_suite(
             [
                 "-q",
                 "--ignore=tests/e2e",
@@ -293,7 +293,7 @@ def _refresh_all() -> int:
             )
             return 1
 
-        e2e_rc = _run_suite(
+        e2e_rc = run_suite(
             ["tests/e2e/", "-v", "-n", str(_E2E_WORKERS)],
             e2e_path,
             coverage=False,
@@ -304,8 +304,8 @@ def _refresh_all() -> int:
                 file=sys.stderr,
             )
 
-        merged = _load_durations(backend_path)
-        merged.update(_load_durations(e2e_path))
+        merged = load_durations(backend_path)
+        merged.update(load_durations(e2e_path))
         if all(not nodeid.startswith("tests/e2e/") for nodeid in merged):
             # e2e recorded nothing (e.g. collection error); keep the previous
             # e2e entries rather than dropping them from the split.
@@ -317,11 +317,11 @@ def _refresh_all() -> int:
                 }
             )
 
-        refreshed = _write_durations(merged)
+        refreshed = write_durations(merged)
 
     e2e_count = sum(1 for nodeid in refreshed if nodeid.startswith("tests/e2e/"))
     print(
-        f"wrote {len(refreshed)} entries to {_DURATIONS_PATH.name} "
+        f"wrote {len(refreshed)} entries to {DURATIONS_PATH.name} "
         f"({len(refreshed) - e2e_count} backend, {e2e_count} e2e; "
         f"estimated total serial: {sum(refreshed.values()):.0f}s; "
         f"previous: {len(previous)} entries)"

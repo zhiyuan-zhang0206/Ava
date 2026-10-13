@@ -84,7 +84,7 @@ _TREE_SCAN_ONLY_PREFIXES = (
 )
 # Hidden tool directories that tests read by path rather than import. A change
 # there also selects every collectable test whose source text names the directory
-# (`_referencing_tests`), so the set of readers is derived, never listed by hand.
+# (`referencing_tests`), so the set of readers is derived, never listed by hand.
 _REFERENCED_ROOTS = (".github", ".agents", ".ava", ".trunk")
 # Top-level directories whose files belong to a package with an owning `tests/`.
 _PACKAGE_ROOTS = frozenset(all_packages())
@@ -99,7 +99,7 @@ _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
 # gate (task #4183: PR #3020's subset passed while the full population was red
 # on tests/contracts/test_lint_event_kinds.py).
 _TREE_SCAN_FILE_PATTERN = re.compile(r"test_lint_.*\.py$")
-_TREE_SCAN_TESTS = frozenset(
+TREE_SCAN_TESTS = frozenset(
     {
         "scripts/ci/pull_requests/tests/test_ci_job_rerun.py",
         "tests/harness/test_ci_rerun_workflow.py",
@@ -150,7 +150,7 @@ class SelectionResult:
         return {
             "decision": self.decision,
             "reason": self.reason,
-            "mode": _selection_mode(),
+            "mode": selection_mode(),
             "tests": list(self.tests),
             "count": self.count,
             "est_seconds": self.est_seconds,
@@ -173,7 +173,7 @@ class Checkout:
     global_files: frozenset[str]  # root-conftest plugin modules and their package inits
 
 
-def _selection_mode() -> str:
+def selection_mode() -> str:
     """The mode CI is running: the ci.yml TEST_SELECTION_MODE value.
 
     The selector itself behaves identically in either mode — the mode only
@@ -218,14 +218,13 @@ def tree_scan_tests(repo_root: Path) -> set[str]:
 
     Membership is the ``test_lint_*.py`` family (by name, so a new lint test
     joins automatically) plus the explicit repo-level CI/governance checks in
-    ``_TREE_SCAN_TESTS``; both resolve against the collectable universe.
+    ``TREE_SCAN_TESTS``; both resolve against the collectable universe.
     """
     collectable = collectable_test_paths(repo_root)
     return {
         path
         for path in collectable
-        if _TREE_SCAN_FILE_PATTERN.fullmatch(Path(path).name) is not None
-        or path in _TREE_SCAN_TESTS
+        if _TREE_SCAN_FILE_PATTERN.fullmatch(Path(path).name) is not None or path in TREE_SCAN_TESTS
     }
 
 
@@ -329,7 +328,7 @@ def _reference_pattern(root: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![\w.]){escaped}/|[\"']{escaped}[\"']")
 
 
-def _referencing_tests(root: str, checkout: Checkout) -> set[str]:
+def referencing_tests(root: str, checkout: Checkout) -> set[str]:
     """Collectable tests whose source text names the top-level directory ``root``."""
     pattern = _reference_pattern(root)
     return {
@@ -354,7 +353,7 @@ def _path_tests(
         return runtime | _manifest_tests(path, checkout, reverse_map)
     root = path.split("/", maxsplit=1)[0]
     if path_class is PathClass.TREE_SCAN_ONLY and root in _REFERENCED_ROOTS:
-        return _referencing_tests(root, checkout) | runtime
+        return referencing_tests(root, checkout) | runtime
     return runtime
 
 
@@ -658,9 +657,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result.as_json(), sort_keys=True))
     else:
-        print(
-            f"selector mode={_selection_mode()} decision={result.decision} reason={result.reason}"
-        )
+        print(f"selector mode={selection_mode()} decision={result.decision} reason={result.reason}")
         print(f"changed files={args.changed_files}")
         print(
             f"tests={result.count} estimate={result.est_seconds:.3f}s full={result.full_est_seconds:.3f}s"

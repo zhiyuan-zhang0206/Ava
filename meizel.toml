@@ -560,11 +560,7 @@ frontend = ["ui"]
 "tests/integration/test_impersonation_notifications.py -> ops/lifecycle/termination.py#_enqueue_termination_inbounds" = 1
 "tests/integration/test_impersonation_notifications.py -> ops/lifecycle/termination.py#_force_terminate_transaction" = 1
 "tests/integration/test_termination_shell_cleanup.py -> ops/lifecycle/termination.py#_force_terminate_transaction" = 1
-"tests/scripts/test_refresh_test_durations_contract.py -> scripts/ci/refresh_test_durations.py#_BACKEND_COVERAGE_ARGS" = 1
-"tests/scripts/test_refresh_test_durations_contract.py -> scripts/ci/refresh_test_durations.py#_BACKEND_SHARDS" = 1
-"tests/scripts/test_refresh_test_durations_contract.py -> scripts/ci/refresh_test_durations.py#_E2E_SHARDS" = 1
 "tests/scripts/test_rotate_cluster_secret.py -> scripts/data_plane_ops/rotate_cluster_secret.py#_write_secret" = 1
-"tests/scripts/test_test_selector_contract.py -> scripts/ci/test_selector.py#_TREE_SCAN_TESTS" = 1
 
 [debt.undeclared-edge]
 "services/wake/heartbeat/tests/test_impersonation_heartbeat.py -> agent/extensions/plugin_state_codec.py" = 2

@@ -325,9 +325,9 @@ def test_selector_mode_is_audit_metadata_from_the_workflow_env(
 ) -> None:
     """The recorded mode follows ci.yml's switch; the default matches it."""
     monkeypatch.delenv("TEST_SELECTION_MODE", raising=False)
-    assert test_selector._selection_mode() == "enforce"
+    assert test_selector.selection_mode() == "enforce"
     monkeypatch.setenv("TEST_SELECTION_MODE", "shadow")
-    assert test_selector._selection_mode() == "shadow"
+    assert test_selector.selection_mode() == "shadow"
 
 
 def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:

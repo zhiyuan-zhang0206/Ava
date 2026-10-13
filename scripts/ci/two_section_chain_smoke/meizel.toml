@@ -6,34 +6,7 @@
 "tests" = ["__init__.py"]
 
 [debt.private-name]
-"cli.py -> f12.py#_f12_finish" = 1
-"cli.py -> f12.py#_f12_point" = 1
-"cli.py -> support.py#_ROOT_SOCKET" = 1
-"cli.py -> support.py#_ROOT_WAIT_S" = 1
-"cli.py -> support.py#_UNIT_IDS" = 1
-"cli.py -> support.py#_UNIT_PROBE" = 1
-"cli.py -> support.py#_bootout" = 1
-"cli.py -> support.py#_fail" = 1
-"cli.py -> support.py#_job_pid" = 1
-"cli.py -> support.py#_kill" = 1
-"cli.py -> support.py#_launchctl_domain" = 1
-"cli.py -> support.py#_pid_alive" = 1
-"cli.py -> support.py#_ping_or_none" = 1
-"cli.py -> support.py#_ppid_of" = 1
-"cli.py -> support.py#_ps_line" = 1
-"cli.py -> support.py#_refusal" = 1
-"cli.py -> support.py#_relaunched_helper" = 1
-"cli.py -> support.py#_root_call" = 1
 "cli.py -> support.py#_run" = 1
 "cli.py -> support.py#_save" = 1
-"cli.py -> support.py#_status_if_conflict" = 1
-"cli.py -> support.py#_status_if_keeper_running" = 1
-"cli.py -> support.py#_status_if_running" = 1
-"cli.py -> support.py#_tail" = 1
-"cli.py -> support.py#_unit_entry" = 1
-"cli.py -> support.py#_wait_for" = 1
-"f12.py -> support.py#_fail" = 1
-"f12.py -> support.py#_pid_alive" = 1
 "f12.py -> support.py#_run" = 1
 "f12.py -> support.py#_save" = 1
-"f12.py -> support.py#_wait_for" = 1
