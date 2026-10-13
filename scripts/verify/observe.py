@@ -289,9 +289,11 @@ def check_helper_chain(_home: Path, _source: Path) -> Detail:
     """The signed helper holds both desktop grants and owns the tree: launchd -> helper
     -> ava-root -> every unit. Reads the helper, the root and the system TCC database;
     changes nothing."""
-    from base.host.permissions_helper import client as helper
     from base.native_process.root_control.client import RootClient
     from base.paths import root_run_dir
+    from base.sessions.helperproc import helper_client
+
+    helper = helper_client()
 
     ping: Detail = dict(helper.ping())
     seen = {key: ping[key] for key in HELPER_PING}

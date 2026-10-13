@@ -18,8 +18,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from base.host.permissions_helper import client as helper
-from base.host.permissions_helper.client import AxActResult
+from base.host.permissions_helper.client import AxActResult, PermissionsHelperClient
 
 from .ax_ids import AxIdTable, AxSession
 from .ax_tools import require_helper_support
@@ -118,7 +117,9 @@ def _selection_request(sid: int, args: dict[str, Any]) -> AxRequest:
 _VISUAL_ID_RE = re.compile(r"^px:(\d+)$")
 
 
-def _press_visual(args: dict[str, Any], session: AxSession) -> dict[str, Any]:
+def _press_visual(
+    helper: PermissionsHelperClient, args: dict[str, Any], session: AxSession
+) -> dict[str, Any]:
     """`px:N` (a visual-only text from `ax_tree(include_ocr_gap)`): the only
     thing that can be done with it is a click at its center."""
     match = _VISUAL_ID_RE.match(str(args["id"]))
@@ -146,7 +147,9 @@ def _press_visual(args: dict[str, Any], session: AxSession) -> dict[str, Any]:
     }
 
 
-def _attempt(table: AxIdTable, request: AxRequest) -> AxActResult | None:
+def _attempt(
+    helper: PermissionsHelperClient, table: AxIdTable, request: AxRequest
+) -> AxActResult | None:
     """One try through the element's current raw id; None when it has none."""
     raw = table.entry(request.sid).raw
     if raw is None:
@@ -172,11 +175,15 @@ def _attempt(table: AxIdTable, request: AxRequest) -> AxActResult | None:
 
 
 def ax_act_tool(
-    args: dict[str, Any], _agent_id: int, scale: float | None, session: AxSession
+    helper: PermissionsHelperClient,
+    args: dict[str, Any],
+    _agent_id: int,
+    scale: float | None,
+    session: AxSession,
 ) -> dict[str, Any]:
     """`ax_act`: an AX action or text selection on an `ax_tree` element."""
     if str(args.get("id", "")).startswith("px:"):
-        return _press_visual(args, session)
+        return _press_visual(helper, args, session)
     request = _args(args)
     sid, action = request.sid, request.action
     table = session.current()
@@ -184,9 +191,9 @@ def ax_act_tool(
     capability = (
         "ax_act_v2" if action in (AxAction.PERFORM_ACTION, AxAction.SELECT_TEXT) else "ax_act_v1"
     )
-    require_helper_support(capability, "ax_act")
-    require_helper_support("ax_target_v1", "ax_act")
-    result = _attempt(table, request)
+    require_helper_support(helper, capability, "ax_act")
+    require_helper_support(helper, "ax_target_v1", "ax_act")
+    result = _attempt(helper, table, request)
     if result is None:
         raise ComputerUseError(
             f"element e{sid} is gone or changed in {table.app}: call ax_tree again"
@@ -203,7 +210,7 @@ def ax_act_tool(
     if "label" in result:
         out["label"] = result["label"]
     if "x" in result and "y" in result and "w" in result and "h" in result:
-        factor = _current_scale(scale)
+        factor = _current_scale(helper, scale)
         out["x"] = round((result["x"] + result["w"] / 2) * factor)
         out["y"] = round((result["y"] + result["h"] / 2) * factor)
     if result.get("unanswered"):

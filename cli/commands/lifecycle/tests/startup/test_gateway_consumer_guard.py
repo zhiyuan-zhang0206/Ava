@@ -246,11 +246,10 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
         # keys via get_field with a .env-file fallback (see
         # base/lm/tests/test_lm_factory.py).
         "base/lm/_providers.py",
-        # The two settings reads here live in chrome_mcp_socket() /
-        # permissions_helper_socket() — socket-path helpers called only by
-        # agent-runner-side services (browser MCP daemon, permissions helper).
-        # Verified 2026-08-06: no gateway-side caller in the import closure.
-        "base/paths/__init__.py",
+        # helper_client() reads the helper port to build the client for a spawn.
+        # The session backend takes it as a factory and only a spawn calls it —
+        # an agent-runner-side action; the gateway lists sessions and never spawns.
+        "base/sessions/helperproc.py",
     }
 )
 

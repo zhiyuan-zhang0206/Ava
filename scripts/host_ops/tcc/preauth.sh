@@ -133,9 +133,9 @@ verify_helper_ping() {
     if ! output=$(
         cd "$repo_root"
         "$python_bin" - 2>&1 <<'PY'
-from base.host.permissions_helper.client import ping
+from base.sessions.helperproc import helper_client
 
-reply = ping()
+reply = helper_client().ping()
 print(
     int(reply["pong"] is True),
     int(reply["preflight_screen"] is True),

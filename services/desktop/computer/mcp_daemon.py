@@ -81,13 +81,12 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.permissions_helper import client as helper
-from base.host.permissions_helper import client_stateful as stateful
-from base.host.permissions_helper.client import PermissionsHelperError
+from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home, computer_mcp_socket
+from base.sessions.helperproc import helper_client
 from base.telemetry import audit_events, build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 
@@ -103,7 +102,7 @@ from .task_sessions import TaskSessionTracker
 _LINE_LIMIT = 64 * 1024 * 1024
 
 
-def _hide_badge() -> None:
+def _hide_badge(helper: PermissionsHelperClient) -> None:
     """End the capture badge when the screen is handed over. The helper shows it, per input, on
     the window the input lands on, and ends it on its own; this only makes it prompt. It is
     display-only, so a failure is logged and never fails the release."""
@@ -374,8 +373,16 @@ async def _bounded_cleanup(
 class ComputerMcpDaemon:
     """Unix-socket server for the computer-mcp line protocol."""
 
-    def __init__(self, config: ComputerUseConfig, db: Database, sock: str | None = None) -> None:
+    def __init__(
+        self,
+        config: ComputerUseConfig,
+        db: Database,
+        sock: str | None = None,
+        *,
+        helper: PermissionsHelperClient,
+    ) -> None:
         self._db = db
+        self._helper = helper
         self._sock = sock or str(computer_mcp_socket())
         # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
         # Scroll without x/y reads the actual native cursor.
@@ -520,6 +527,7 @@ class ComputerMcpDaemon:
                 self._release_held_mouse(f"screen passed to agent {agent_id}")
             try:
                 result = _execute_tool(
+                    self._helper,
                     tool,
                     args,
                     agent_id or 0,
@@ -568,7 +576,7 @@ class ComputerMcpDaemon:
                     outcome, error = "error", f"mouse not released: {mouse['mouse_release_error']}"
             self._emit_action(agent_id, "release_control", args, outcome, error)
             if released is not None:
-                _hide_badge()
+                _hide_badge(self._helper)
             if released is None:
                 note = (
                     " (the mouse button you held was released)"
@@ -600,7 +608,7 @@ class ComputerMcpDaemon:
         the caller as `mouse_release_error`; the helper's own idle bound is the backstop."""
         holder = self._mouse_holder
         try:
-            released = stateful.mouse_release_all()["released"]
+            released = self._helper.mouse_release_all()["released"]
         except (PermissionsHelperError, OSError) as e:
             logger.error(
                 f"[computer-mcp] could not release the mouse button held for agent {holder} ({why}): {e}"
@@ -631,7 +639,7 @@ class ComputerMcpDaemon:
         # Enrichment only: an unreachable helper is already reported by the
         # tool call itself.
         with suppress(PermissionsHelperError, OSError):
-            app = helper.frontmost_app()["app"] or None
+            app = self._helper.frontmost_app()["app"] or None
         event = audit_events.prepare_event_log(
             event_type="computer_action",
             agent_id=agent_id,
@@ -713,9 +721,14 @@ def _tracked_client(
     return task
 
 
-async def run(sock: str | None = None, *, database: Callable[[], Database]) -> None:
+async def run(
+    sock: str | None = None,
+    *,
+    database: Callable[[], Database],
+    helper: PermissionsHelperClient,
+) -> None:
     config = computer_use_config()
-    daemon = ComputerMcpDaemon(config, database(), sock)
+    daemon = ComputerMcpDaemon(config, database(), sock, helper=helper)
     path = Path(daemon._sock)
     if await _socket_in_use(path):
         logger.error(
@@ -777,7 +790,7 @@ def main() -> None:
         machine_reader=machine.name,
         image=image,
     )
-    asyncio.run(run(database=database))
+    asyncio.run(run(database=database, helper=helper_client()))
 
 
 if __name__ == "__main__":

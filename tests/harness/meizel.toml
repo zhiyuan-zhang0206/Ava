@@ -8,7 +8,6 @@
 "test_helperproc.py#monkeypatch.setattr base.config.settings" = 1
 "test_helperproc.py#monkeypatch.setattr base.config.settings.services.permissions_helper_enabled" = 1
 "test_helperproc.py#monkeypatch.setattr base.config.settings.services.permissions_helper_spawn" = 1
-"test_helperproc.py#monkeypatch.setattr base.host.permissions_helper.client.spawn_process" = 3
 "test_helperproc.py#monkeypatch.setattr base.sessions.backend.is_macos" = 2
 "test_helperproc.py#monkeypatch.setattr base.sessions.env_forwarding.venv_activation_prefix" = 1
 "test_helperproc.py#monkeypatch.setattr base.sessions.helperproc.os.kill" = 2

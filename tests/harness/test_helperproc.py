@@ -7,18 +7,31 @@ import os
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import psutil
 import pytest
 
 from base.host.permissions_helper import client
-from base.host.permissions_helper.client import PermissionsHelperError
+from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
 from base.native_process import pid_starttime_ticks
 from base.sessions import helperproc
 from base.sessions.helper_chain_guard import parent_chain_intact
 from base.sessions.record import SessionRecord
+
+
+class _SpawnClient(PermissionsHelperClient):
+    """A helper client whose spawn is the given function (no socket involved)."""
+
+    def __init__(self, spawn: Callable[..., client.SpawnResult]) -> None:
+        super().__init__("/unused.sock")
+        self._spawn = spawn
+
+    def spawn_process(self, *args: Any, **kwargs: Any) -> client.SpawnResult:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return self._spawn(*args, **kwargs)
 
 
 def _current_process_record(*, generation: str | None = None) -> SessionRecord:
@@ -61,10 +74,10 @@ def test_new_session_preserves_login_shell_env_stderr_and_record(
         )
         return {"pid": os.getpid(), "reused": False}
 
-    monkeypatch.setattr(client, "spawn_process", fake_spawn_process)
+    fake_client = _SpawnClient(fake_spawn_process)
     monkeypatch.setattr(env_forwarding, "venv_activation_prefix", lambda: "activate-venv && ")
     stderr = unit_home / "logs" / "service.stderr.log"
-    backend = helperproc.HelperProcSessionBackend()
+    backend = helperproc.HelperProcSessionBackend(lambda: fake_client)
 
     assert backend.new_session(
         "ava-service",
@@ -120,8 +133,8 @@ def test_new_session_preserves_argv_and_non_login_shell(
         calls.append(argv)
         return {"pid": os.getpid(), "reused": False}
 
-    monkeypatch.setattr(client, "spawn_process", fake_spawn_process)
-    backend = helperproc.HelperProcSessionBackend()
+    fake_client = _SpawnClient(fake_spawn_process)
+    backend = helperproc.HelperProcSessionBackend(lambda: fake_client)
     argv = [sys.executable, "-m", "services.agent_runner.agent_host.daemon"]
 
     assert backend.new_session("ava-agent", argv, unit_home, env={})
@@ -141,10 +154,10 @@ def test_spawn_failure_is_loud_and_has_no_fallback(
     def unavailable(*_args: object, **_kwargs: object) -> client.SpawnResult:
         raise PermissionsHelperError("socket refused")
 
-    monkeypatch.setattr(client, "spawn_process", unavailable)
+    fake_client = _SpawnClient(unavailable)
 
     with pytest.raises(RuntimeError, match=r"helper is down or refused.*ava converge.*helper log"):
-        helperproc.HelperProcSessionBackend().new_session(
+        helperproc.HelperProcSessionBackend(lambda: fake_client).new_session(
             "ava-service", "echo nope", unit_home, env={}
         )
 
@@ -161,7 +174,7 @@ def test_record_registry_drives_list_timestamps_and_generation(unit_home: Path) 
     )
     live.write(sessions / "ava-live.json")
     dead.write(sessions / "ava-dead.json")
-    backend = helperproc.HelperProcSessionBackend()
+    backend = helperproc.HelperProcSessionBackend(lambda: PermissionsHelperClient("/unused.sock"))
 
     assert backend.list_sessions("ava-") == ["ava-live"]
     assert not (sessions / "ava-dead.json").exists()
@@ -188,9 +201,9 @@ def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
         path = unit_home / "run" / "sessions" / "ava-live.json"
         record.write(path)
 
-        assert helperproc.HelperProcSessionBackend().kill_session(
-            "ava-live", graceful=True, timeout=10.0
-        ) == (True, "graceful")
+        assert helperproc.HelperProcSessionBackend(
+            lambda: PermissionsHelperClient("/unused.sock")
+        ).kill_session("ava-live", graceful=True, timeout=10.0) == (True, "graceful")
         assert child.wait(timeout=10) == -signal.SIGTERM
         assert not path.exists()
     finally:
@@ -214,7 +227,9 @@ def test_graceful_delivery_tolerates_whole_second_create_time_drift(
     drifted.write(unit_home / "run" / "sessions" / "ava-live.json")
     monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
 
-    assert helperproc.HelperProcSessionBackend().graceful_signal("ava-live", expected=drifted)
+    assert helperproc.HelperProcSessionBackend(
+        lambda: PermissionsHelperClient("/unused.sock")
+    ).graceful_signal("ava-live", expected=drifted)
     assert sent == [(drifted.pid, signal.SIGTERM)]
 
 
@@ -227,7 +242,9 @@ def test_graceful_delivery_refuses_a_birth_beyond_the_tolerance(
     replaced.write(unit_home / "run" / "sessions" / "ava-live.json")
     monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
 
-    assert not helperproc.HelperProcSessionBackend().graceful_signal("ava-live", expected=replaced)
+    assert not helperproc.HelperProcSessionBackend(
+        lambda: PermissionsHelperClient("/unused.sock")
+    ).graceful_signal("ava-live", expected=replaced)
     assert sent == []
 
 

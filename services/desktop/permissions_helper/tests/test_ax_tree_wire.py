@@ -12,19 +12,23 @@ from typing import Any
 
 import pytest
 
-from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperClient
 
 _SWIFT = (Path(__file__).parents[1] / "helper" / "main.swift").read_text()
+
+
+def _helper() -> PermissionsHelperClient:
+    return PermissionsHelperClient("/unused.sock")
 
 
 def _capture(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
     seen: list[tuple[str, dict[str, Any]]] = []
 
-    def fake_call(method: str, **args: Any) -> dict[str, Any]:
+    def fake_call(_self: PermissionsHelperClient, method: str, **args: Any) -> dict[str, Any]:
         seen.append((method, args))
         return {}
 
-    monkeypatch.setattr(client, "_call", fake_call)
+    monkeypatch.setattr(PermissionsHelperClient, "call", fake_call)
     return seen
 
 
@@ -32,7 +36,7 @@ def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen = _capture(monkeypatch)
-    client.ax_tree("Finder")
+    _helper().ax_tree("Finder")
     method, args = seen[0]
     assert method == "ax_tree"
     assert args["app"] == "Finder"
@@ -48,15 +52,15 @@ def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope(
 
 def test_ax_tree_request_forwards_a_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _capture(monkeypatch)
-    client.ax_tree("Finder", scope=12, scope_fp="abc", max_nodes=50)
+    _helper().ax_tree("Finder", scope=12, scope_fp="abc", max_nodes=50)
     assert (seen[0][1]["scope"], seen[0][1]["scope_fp"]) == (12, "abc")
     assert seen[0][1]["max_nodes"] == 50
 
 
 def test_ax_act_request_carries_the_value_only_when_given(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _capture(monkeypatch)
-    client.ax_act("Mail", 7, "press")
-    client.ax_act("Mail", 7, "set_value", value="hi")
+    _helper().ax_act("Mail", 7, "press")
+    _helper().ax_act("Mail", 7, "set_value", value="hi")
     (method, plain), (_, with_value) = seen
     assert method == "ax_act"
     assert (plain["app"], plain["id"], plain["action"]) == ("Mail", 7, "press")

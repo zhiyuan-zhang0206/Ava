@@ -368,7 +368,7 @@ async def _run_with_fakes(
     from services.desktop.browser.mcp_daemon import run
 
     sock = home / "chrome-mcp.1.sock"
-    monkeypatch.setattr(daemon_mod, "chrome_mcp_socket", lambda: sock)
+    monkeypatch.setattr(daemon_mod, "chrome_mcp_socket", lambda _port: sock)  # pyright: ignore[reportUnknownArgumentType]
 
     async def socket_free(_path: Path) -> bool:
         return False
