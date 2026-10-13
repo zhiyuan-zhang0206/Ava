@@ -58,7 +58,7 @@ import re
 import sys
 from pathlib import Path
 
-from meizel import lint_common
+from meizel import allowances, lint_common
 from meizel.roles import packages
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -87,14 +87,11 @@ _LATTICE_TERMS = (
     "REAP_INTERVAL",
 )
 
-# The lattice family modules: lattice vocabulary may be DEFINED here (and only
-# here).
-_FAMILY_MODULES = (
-    "base/deploy/timing.py",
-    "base/deploy/progress_timeout.py",
-    "base/native_process/stop_timing.py",
-    "base/deploy/schedule_timing.py",
-)
+_POLICY = allowances.load(_REPO_ROOT)
+
+# The lattice family modules: lattice vocabulary may be DEFINED here (and only here). Listed in
+# meizel.policy.toml under [clock-lattice].
+_FAMILY_MODULES = _POLICY.names("clock-lattice", "family-modules")
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 
@@ -129,66 +126,14 @@ def _registered_clock_names() -> frozenset[str]:
     return REGISTERED_CLOCKS
 
 
-# Explicit exemptions: `(relative_path, NAME)` -> why this lattice-vocabulary
-# constant may live outside the family modules. Either it is not a clock at all
-# (a flag, a key, a collection), or it is a genuinely independent clock with no
-# lattice neighbour. Every entry states which.
+# Explicit exemptions: `(relative_path, NAME)` -> why this lattice-vocabulary constant may live
+# outside the family modules. Either it is not a clock at all (a flag, a key, a collection), or it
+# is a genuinely independent clock with no lattice neighbour. Every entry states which, in
+# meizel.policy.toml under [clock-lattice.independent-clocks] (`path::NAME`).
 _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
-    (
-        "agent/graph/node_log.py",
-        "_STALL_GUARD_EXEMPT",
-    ): "frozenset of exempt node kinds, not a clock",
-    (
-        "base/native_process/exec_domain.py",
-        "KILL_GRACE_S",
-    ): "independent: SIGINT/SIGTERM -> SIGKILL grace ladder for the exec child, no lattice neighbour",
-    (
-        "base/host/proc.py",
-        "_TERMINATE_GRACE_S",
-    ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
-    (
-        "services/backup/scheduler/operation/staging.py",
-        "TERMINATE_GRACE_S",
-    ): "independent: bounded TERM grace for a scheduled worker to unwind private cleanup; "
-    "no family-disappearance proof or lattice neighbour",
-    (
-        "base/host/proc.py",
-        "_REAP_TIMEOUT_S",
-    ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",
-    (
-        "cli/commands/lifecycle/service_stop.py",
-        "_TERMINAL_STOP_GRACE_S",
-    ): "independent: HUP/TERM -> SIGKILL grace of a normal stop's terminal closure "
-    "(docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md); the stop's own deadline caps it "
-    "and nothing orders against it, no lattice neighbour",
-    (
-        "base/events/live/redis_listener.py",
-        "_CONSUME_ABANDON_GRACE",
-    ): "independent: pubsub consume-abandon window, no lattice neighbour",
-    (
-        "base/events/contract.py",
-        "DELIVERY_STALLED_KEYS",
-    ): "SQL key set for the delivery_stalled view, not a clock",
-    (
-        "ava_builtins/plugins/lm_anthropic/provider.py",
-        "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
-    ): "LLM thinking-token budget, not a wall-clock constant",
-    (
-        "base/daemon/schedules/watcher.py",
-        "AT_SESSION_TTL_GRACE_SECONDS",
-    ): "independent: the at-watcher session's post-fire reclamation window (wake delivery + "
-    "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "
-    "no lattice neighbour and no ordering safety depends on this value",
-    (
-        "ava_builtins/skills/platform/ava-guide/external-agents/scripts/watch_work.py",
-        "STALL_SECONDS",
-    ): "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour",
-    (
-        "services/desktop/computer/mcp_daemon.py",
-        "_WATCHDOG_MIN_STALL_S",
-    ): "not a clock: a sanity floor on the operator-configured loop-stall window "
-    "(settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor "
-    "misconfiguration from restart-looping a healthy daemon, no lattice neighbour",
+    (path, name): why
+    for site, why in _POLICY.reasons("clock-lattice", "independent-clocks").items()
+    for path, _, name in [site.partition("::")]
 }
 
 

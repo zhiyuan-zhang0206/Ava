@@ -20,7 +20,7 @@ cached); and LangGraph / Pydantic introspect type hints at runtime via
 `get_type_hints()` / `inspect.signature`, so a name imported only under
 `TYPE_CHECKING` raises NameError. The genuine exceptions — a real circular
 import, or an `import torch`-class heavy dependency on a path that does not use
-the type — go in `_TYPE_CHECKING_ALLOWED` with a one-line reason.
+the type — are listed under `[type-checking.files]` in `meizel.policy.toml` with a one-line reason.
 
 ### Rule 3: retired ambient machine-role reader
 
@@ -43,7 +43,7 @@ one owning module; any other module making that decision is a bypass. Today:
 connect`) or a construction of a psycopg_pool pool or of this repo's own
 `*ConnectionPool` subclass belongs to `base/db/connections.py`, which owns the
 transport posture. A site that genuinely cannot go through the owner goes in that
-decision's `allowed` map with a one-line reason; an allowed module that stops
+decision's `[single-owner.<decision>]` table in `meizel.policy.toml` with a one-line reason; an allowed module that stops
 bypassing, or no longer exists, fails as stale.
 
 Rule 5 has no baseline allowance. Every measured decision-owner bypass fails directly. Owner resolution stays in scripts/structure/locality.py and

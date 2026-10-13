@@ -179,6 +179,10 @@ WAIVE = (
     "--waive-if-changed",
     ":(glob)rules/**/*.py",
     ":(exclude,glob)rules/**/tests/**",
+    "--waive-only-within",
+    ":(glob)rules/**",
+    ":(glob)**/meizel.toml",
+    "policy.toml",
 )
 
 
@@ -195,7 +199,7 @@ def test_growth_is_only_a_warning_when_the_change_touches_the_rules(
     )
     assert diff(root, *WAIVE) == 0
     out = capsys.readouterr()
-    assert "this change edits the rules (rules/engine.py)" in out.out
+    assert "this change edits only the rules (rules/engine.py)" in out.out
     assert "warning" in out.err
 
 
@@ -209,6 +213,58 @@ def test_a_test_under_the_rules_does_not_waive_growth(make_repo: RepoFactory) ->
         },
     )
     assert diff(root, *WAIVE) == 1
+
+
+def test_a_change_that_also_edits_product_code_is_not_waived(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(make_repo)
+    write(
+        root,
+        {
+            "a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 4\n',
+            "rules/engine.py": "RULE = 1\n",
+            "a/product.py": "VALUE = 1\n",
+        },
+    )
+    assert diff(root, *WAIVE) == 1
+    out = capsys.readouterr()
+    assert "not waived" in out.out
+    assert "a/product.py" in out.out
+    assert "warning" not in out.err
+
+
+def test_a_rule_change_may_carry_the_baselines_and_the_policy_it_moves(
+    make_repo: RepoFactory,
+) -> None:
+    root = base_repo(make_repo)
+    write(
+        root,
+        {
+            "a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 4\n',
+            "rules/engine.py": "RULE = 1\n",
+            "rules/tests/test_engine.py": "def test_a(): ...\n",
+            "policy.toml": "[external]\n",
+        },
+    )
+    assert diff(root, *WAIVE) == 0
+
+
+def test_manifests_alone_are_no_rule_change(make_repo: RepoFactory) -> None:
+    root = base_repo(make_repo)
+    write(root, {"a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 4\n'})
+    assert diff(root, *WAIVE) == 1
+
+
+def test_only_within_alone_waives_a_change_confined_to_those_paths(
+    make_repo: RepoFactory,
+) -> None:
+    root = base_repo(make_repo)
+    write(root, {"a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 4\n'})
+    args = ("--on-growth", "fail", "--waive-only-within", ":(glob)**/meizel.toml")
+    assert diff(root, *args) == 0
+    write(root, {"a/product.py": "VALUE = 1\n"})
+    assert diff(root, *args) == 1
 
 
 def test_a_ref_that_records_a_retired_code_still_counts(

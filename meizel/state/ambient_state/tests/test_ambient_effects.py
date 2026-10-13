@@ -322,7 +322,7 @@ def test_a_list_entry_whose_site_is_gone_is_stale(
         "hidden-singleton:table" in message and "site is gone" in message for message in problems
     )
     assert any(
-        "SINK_FACADES entry" in message and "no module-level state" in message
+        "[ambient-state.sink-facades] entry" in message and "no module-level state" in message
         for message in problems
     )
 
@@ -341,7 +341,9 @@ def test_a_list_entry_for_a_missing_file_or_function_is_stale(
 
     assert any(error.startswith("base/gone.py:1:") for error in errors)
     assert any(error.startswith("base/also_gone.py:1:") for error in errors)
-    assert any("PURE_REPO_CALLEES entry base.keys.vanished" in error for error in errors)
+    assert any(
+        "[ambient-state.pure-repo-callees] entry base.keys.vanished" in error for error in errors
+    )
     assert not any("base.keys.derive" in error for error in errors)
 
 
