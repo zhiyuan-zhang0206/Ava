@@ -73,7 +73,7 @@ def _argument_path(config: pytest.Config, arg: str) -> Path:
 
 
 def _refuse_native_data_plane(patch: pytest.MonkeyPatch) -> None:
-    from tests import _containers
+    from base.deploy.tests import containers
     from tests.fixtures.guards import refuse_native_data_plane, stub_everywhere
 
     refuse_native_data_plane(
@@ -84,8 +84,8 @@ def _refuse_native_data_plane(patch: pytest.MonkeyPatch) -> None:
         pytest.fail("Static tests cannot use Postgres or Redis; use the native test environment.")
 
     # Keep the existing helper-entry refusal before even a private process starts.
-    stub_everywhere(patch, _containers, "postgres", refuse_container)
-    stub_everywhere(patch, _containers, "redis_server", refuse_container)
+    stub_everywhere(patch, containers, "postgres", refuse_container)
+    stub_everywhere(patch, containers, "redis_server", refuse_container)
 
 
 def _select_static_paths(config: pytest.Config) -> None:

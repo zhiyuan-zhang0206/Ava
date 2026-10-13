@@ -14,7 +14,7 @@ import tests.fixtures.env_bootstrap  # noqa: F401  # pyright: ignore[reportUnuse
 from base.cluster.machine.boot import machine_from_boot
 from base.config import refresh_data_plane_settings, settings
 from base.config.tests.configuration import snapshot_process_config
-from tests._containers import postgres
+from base.deploy.tests.containers import postgres
 
 scratch = Path(sys.argv[1])
 assert settings.data_plane.pg_throwaway_base == str(scratch)

@@ -38,10 +38,10 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import MIN_REFRESH_INTERVAL_S, ProcessDbGate
+from base.deploy.tests.containers import free_port, postgres, wait_port
 from base.events.live.bus import EventBus
 from base.host.db_authority.delivery import POOLER_ADMIN
 from cli.commands.data_plane.pgbouncer import pgbouncer_bin
-from tests._containers import free_port, postgres, wait_port
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
