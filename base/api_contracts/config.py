@@ -14,11 +14,12 @@ from pydantic import (
     BaseModel,
 )
 
-# The config-panel capability sections — same Literal the config metadata resolves
-# (`base.config.config_registry.Capability`), reused so the schema field and the metadata
-# it is built from are one type, not two structurally-equal aliases. The registry is
-# settings-free, so thin clients can validate gateway responses during repair.
-from base.config.config_registry import Capability
+# The config-panel capability sections. The config registry resolves its metadata to this same
+# Literal (`base.config.config_registry` imports it), so the schema field and the metadata
+# it is built from are one type, not two structurally-equal aliases. It is declared here,
+# not in `base.config`, so thin clients can validate gateway responses during repair
+# without importing the config package.
+Capability = Literal["gateway", "agent-runner", "common"]
 
 
 class ConfigFieldView(BaseModel):
