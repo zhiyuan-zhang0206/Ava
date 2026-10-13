@@ -31,7 +31,7 @@ The public signature, declaration order and external-plugin migration contract l
 - `_prefer_sdk_section` — "Prefer SDK"
 - `_codeact_section` (in `agent/graph/prompt/_codeact.py`, registered by `system_prompt`) — "CodeAct — batch work into fewer calls": batch known operations when no intermediate review is needed. Toggle `AVA_SYSTEM_PROMPT_CODEACT` (default on; explicit cluster settings and per-agent overlays can disable it).
 - `_keep_it_simple_section` — "Keep It Simple"
-- `conversation.user_reply_section` — Always-on reply, language and milestone rules: every text must remain useful after an hour away. Follow user language, default to meaningful milestones, preserve answers/questions/deliverables, and skip routine operations or wake/peer courtesy summaries. See [prompt architecture](../../docs/prompt-architecture.md).
+- `conversation.user_reply_section` — Always-on reply, language and milestone rules: ordinary text is self-contained, substantive communication with the user. Follow user language, default to meaningful milestones, preserve answers/questions/deliverables, and skip routine operations or wake/peer courtesy summaries. See [prompt architecture](../../docs/prompt-architecture.md).
 - `_communication_style_section` — Optional `AVA_AGENT_COMMUNICATION_STYLE`: `off` (default; omitted), `oriented` (live pairing), `concise` (brief milestones), `silent` (one human-requested report plus blockers/questions). Per-agent overlays may select pairing; core language and text usefulness remain active.
 - `_output_conciseness_section` — Output conciseness
 - `_outcome_reporting_section` — Honest reporting

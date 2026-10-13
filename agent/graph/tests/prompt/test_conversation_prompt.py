@@ -87,16 +87,21 @@ def test_language_policy_survives_optional_guidance(communication_prompt: tuple[
     assert "Preserve code, identifiers, quotations and requested artifacts" in prompt
 
 
-def test_async_reader_policy_survives_every_style(communication_prompt: tuple[str, str]) -> None:
-    """Only explicit live pairing adds checkpoints; all readers retain useful text."""
+def test_user_facing_text_policy_survives_every_style(
+    communication_prompt: tuple[str, str],
+) -> None:
+    """Only explicit live pairing adds checkpoints; text always serves the user."""
     style, prompt = communication_prompt
 
     assert prompt.count("## Meaningful progress") == 1
-    assert "Assume the user manages many agents and may return after an hour away" in prompt
+    assert "Treat ordinary assistant text as substantive communication with the user" in prompt
+    assert "Every message must be independently useful to the user" in prompt
     assert "without watching tool execution or reconstructing your internal steps" in prompt
     assert "Make it self-contained: state what changed, why it matters" in prompt
     assert ("This agent is configured for live pairing" in prompt) == (style == "oriented")
-    assert "every message must satisfy the same returning-reader standard" in prompt
+    assert "every message must remain self-contained and useful to the user" in prompt
+    assert "Do not assume continuous attention to the session" in prompt
+    assert "after an hour away" not in prompt
 
 
 def test_milestone_policy_preserves_results_and_questions(
@@ -105,7 +110,7 @@ def test_milestone_policy_preserves_results_and_questions(
     """The default filters internal steps without suppressing actual deliverables."""
     _, prompt = communication_prompt
 
-    assert "meaningful milestones for the user or a collaborating agent" in prompt
+    assert "meaningful milestones for the user: a usable result" in prompt
     assert "Completing an internal step or ending a turn is not itself a milestone" in prompt
     assert "Do not narrate routine tool calls, retries, file reads, internal bookkeeping" in prompt
     assert "There is no fixed reporting cadence" in prompt

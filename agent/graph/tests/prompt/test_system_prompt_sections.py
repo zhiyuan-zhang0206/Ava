@@ -341,7 +341,7 @@ def test_oriented_style_keeps_the_user_oriented(monkeypatch: pytest.MonkeyPatch)
     assert "This agent is configured for live pairing" in rendered
     assert "meaningful findings and checkpoints" in rendered
     assert "why it matters and what remains unresolved" in rendered
-    assert "useful to someone returning after an hour away" in rendered
+    assert "self-contained and useful to the user" in rendered
     assert "alongside each action" not in rendered
 
 
