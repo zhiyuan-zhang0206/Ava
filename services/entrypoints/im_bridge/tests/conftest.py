@@ -7,6 +7,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.tests.fixtures.homes import unit_home as unit_home
 from services.entrypoints.im_bridge.types import (
     IMAdapter,
     OutboundAdapterKind,
@@ -18,7 +19,6 @@ from tests.fixtures.model_catalog import add_models as add_models
 from tests.fixtures.model_catalog import model_catalog as model_catalog
 from tests.fixtures.model_catalog import set_prices as set_prices
 from tests.fixtures.unit.config_authority import config_authority as config_authority
-from tests.fixtures.unit.homes import unit_home as unit_home
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
 from tests.fixtures.unit.sdk import sdk_identity as sdk_identity

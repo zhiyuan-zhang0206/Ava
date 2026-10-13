@@ -8,7 +8,7 @@
 "tests.path_scoped.integration_tests" = [
     "test_agent_launch_visibility.py",
 ]
-"tests.fixtures.unit.homes" = ["."]
+"base.tests.fixtures.homes" = ["."]
 "tests.fixtures.unit.identity" = ["."]
 "tests.fixtures.unit.config_authority" = [
     "test_agent_launch_visibility.py",
