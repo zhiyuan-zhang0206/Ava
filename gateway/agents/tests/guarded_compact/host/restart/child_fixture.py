@@ -26,7 +26,7 @@ async def read_child(child: subprocess.Popen[str]) -> dict[str, Any]:
 
 def start_child(dsn: str, agent: int, stage: str) -> subprocess.Popen[str]:
     return subprocess.Popen(
-        [sys.executable, "-m", "services.agent_runner.agent_host.tests.guarded_compact.child"],
+        [sys.executable, "-m", "gateway.agents.tests.guarded_compact.host.child"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
