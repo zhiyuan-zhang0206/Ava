@@ -93,8 +93,21 @@ errors cannot be recorded.
   file at the base and in the new file, and rekeys one for one at most what the
   symbol cost before, costs now and has recorded, so what it gained on the way
   stays an error. The old file must no longer define the name.
+- `debt sites --code <patch code> [--target-prefix P]... [--json] [paths...]`
+  lists where the source holds each patch of a code: file, line, form and
+  target, sorted by target. A prefix is dotted (`lib.mod` holds `lib.mod.f`, not
+  `lib.mod2`), several are a union, and paths limit the scan. It reads the
+  source, not the baseline, so it lists what a codemod has to change whether or
+  not it is recorded. Codemods and design write-ups use it instead of their own
+  scripts.
 - `debt diff --against <ref> --on-growth fail|warn` compares the recorded
-  totals per code with those at a git ref. Totals, not directories, are
+  totals per code with those at a git ref. `--by-target` adds the recorded patch
+  debt per target group: what the change paid down or added, to paste into a PR
+  description. Entries are counted by the target in their key, so debt that
+  moves with its file stays in its group. The groups are the first `--depth`
+  dotted names of a target (default 3), or the `--target-prefix` values (a target
+  counts under the longest one, the rest under `(other)`; a listed prefix always
+  shows). Totals, not directories, are
   compared, so debt that moves with its file does not count as growth. The
   caller chooses `fail` or `warn`; there is no default.
 
