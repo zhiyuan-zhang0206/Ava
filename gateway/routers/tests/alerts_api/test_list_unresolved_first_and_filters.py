@@ -82,11 +82,53 @@ def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: 
     assert body["meta"]["unresolved_count"] == 0  # scoped to resolved -> badge count 0
 
     resp = client.get("/api/alerts?window=1h")
-    assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f3"]
+    assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f3", "f1"]
 
     resp = client.get("/api/alerts?limit=1")
     assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f3"]
     assert resp.json()["meta"]["total"] == 3  # limit does not shrink total
+
+
+@pytest.mark.parametrize("window", ["1h", "6h", "24h", "7d"])
+def test_live_alerts_never_age_out_and_history_uses_recovery_time(
+    db_conn: psycopg.Connection, client: TestClient, window: str
+) -> None:
+    """A ten-day outage remains visible; its recent recovery belongs to history."""
+    now = datetime.now(UTC)
+    _seed(
+        db_conn,
+        [
+            {
+                "status": status,
+                "severity": severity,
+                "alertname": fingerprint,
+                "starts_at": now - timedelta(days=10),
+                "ends_at": end,
+                "fingerprint": fingerprint,
+            }
+            for status, severity, end, fingerprint in [
+                ("unresolved", "critical", None, "old-live"),
+                ("unresolved", "warning", None, "old-warning"),
+                ("resolved", "critical", now - timedelta(minutes=10), "recent-recovery"),
+                ("resolved", "critical", now - timedelta(days=9), "old-recovery"),
+            ]
+        ],
+    )
+    result = client.get(f"/api/alerts?window={window}").json()
+    assert {a["fingerprint"] for a in result["alerts"]} == {
+        "old-live",
+        "old-warning",
+        "recent-recovery",
+    }
+    assert result["meta"]["unresolved_count"] == 2
+    assert result["meta"]["total"] == 3
+    limited = client.get(f"/api/alerts?window={window}&limit=1&severity=critical").json()
+    assert limited["meta"]["unresolved_count"] == 1
+    assert limited["meta"]["total"] == 2
+    assert len(limited["alerts"]) == 1
+    resolved = client.get(f"/api/alerts?window={window}&status=resolved").json()
+    assert [a["fingerprint"] for a in resolved["alerts"]] == ["recent-recovery"]
+    assert resolved["meta"]["unresolved_count"] == 0
 
 
 def test_list_default_limit_comes_from_display_config(

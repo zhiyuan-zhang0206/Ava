@@ -2,10 +2,13 @@
 
 // The alert section (/insights#alerts) — the system→human alert history list
 // (Task #1224, user design: the badge jumps here). Unresolved alerts are
-// listed first (the backend owns ordering; SSE frames prepend). Alert is fully
+// listed first (the backend owns ordering; SSE invalidates snapshots). Alert is fully
 // separate from Notice.
 
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
+
+import { API_BASE } from "@/lib/transport/api";
 
 import {
   Table,
@@ -56,12 +59,19 @@ function summaryOf(a: Alert): string {
 }
 
 export default function AlertsSection() {
+  const t = useTranslations("alerts");
   const { data, isLoading, error } = useAlertsSection();
 
   const alerts = data?.alerts ?? [];
 
   return (
     <div data-testid="alerts-section" className="rounded-md border border-border">
+      <div className={cn("items-center justify-end border-b border-border px-3 py-2", FLEX)}>
+        <a href={`${API_BASE}/grafana/alerting/list`} target="_blank" rel="noreferrer"
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
+          {t("rules")}
+        </a>
+      </div>
       {isLoading ? (
         <div className={cn("justify-center py-8", FLEX)}>
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -72,7 +82,7 @@ export default function AlertsSection() {
         </div>
       ) : alerts.length === 0 ? (
         <div className="px-3 py-4 text-center text-sm text-muted-foreground">
-          No alerts in the last 24h
+          No active alerts or recoveries in the last 24h
         </div>
       ) : (
         // No horizontal scrolling at any viewport width (task #1960): the

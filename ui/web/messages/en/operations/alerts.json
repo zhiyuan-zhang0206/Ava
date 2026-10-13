@@ -1,3 +1,4 @@
 {
-  "unresolvedAlerts": "{count} unresolved alerts"
+  "unresolvedAlerts": "{count} unresolved alerts",
+  "rules": "Alert rules"
 }
