@@ -16,7 +16,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion
 from base.telemetry import process_name
-from gateway.schedules import runner
+from services.wake.schedule_manager import engine
 
 
 def bind_actor(schedule_id: int, *, clients: ClientSet, machine: MachineIdentity) -> None:
@@ -36,7 +36,7 @@ def run_schedule(schedule_id: int, revision: int | None = None, *, machine: Mach
     gate = ProcessDbGate(process=process_name(), version=version.get)
     database = partial(Database.from_settings, gate=gate, direct_url=ClusterDirectUrl(machine.host))
     with closing(process_clients(database=database, machine=machine)) as clients:
-        return runner.run(
+        return engine.run(
             schedule_id,
             revision,
             database=database,
