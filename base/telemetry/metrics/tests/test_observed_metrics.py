@@ -11,15 +11,17 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
-from base import telemetry
 from base.db import Database
+from base.telemetry.delivery import reporting
+from base.telemetry.delivery.mirror import event_row
+from base.telemetry.delivery.receipts import Event
 from base.telemetry.metrics import observed_metrics as metrics
 
 _AT = datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC)
 
 
-def _event(name: str, **attributes: Any) -> telemetry.Event:
-    return telemetry.Event(
+def _event(name: str, **attributes: Any) -> Event:
+    return Event(
         ts=_AT,
         trace_id=None,
         span_id=None,
@@ -63,7 +65,7 @@ def test_usage_keeps_usage_time_price_without_payload_or_repricing() -> None:
         5,
     )
     assert not hasattr(fact, "body")
-    assert metrics.observe_row(telemetry.event_row(event)) == fact
+    assert metrics.observe_row(event_row(event)) == fact
 
 
 def test_absent_usage_price_and_optional_fields_stay_unknown() -> None:
@@ -219,7 +221,7 @@ def test_one_malformed_fact_does_not_discard_other_supported_rows(
     write = Mock(return_value=1)
     report = Mock()
     monkeypatch.setattr(metrics, "write_observations", write)
-    monkeypatch.setattr(telemetry, "report_no_pipeline", report)
+    monkeypatch.setattr(reporting, "report_no_pipeline", report)
     metrics.project_events(
         database,
         [

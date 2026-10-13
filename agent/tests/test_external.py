@@ -403,8 +403,14 @@ def test_close_delivers_telemetry_when_plugin_flush_fails(
 def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     paused_otlp_record: tuple[Event, InMemoryLogRecordExporter],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A closing attachment waits for the OTLP worker's already-dequeued tail."""
+
+    def no_sync(*_args: object, **_kwargs: object) -> telemetry.DrainResult:
+        return telemetry.DrainResult(telemetry.DrainStatus.COMPLETED, telemetry.DrainPhase.DRAIN)
+
+    monkeypatch.setattr(telemetry, "sync", no_sync)
     release, exporter = paused_otlp_record
     # Bind the dequeued record to the client owner whose close performs delivery.
     ava.context.clients.event_pipeline()

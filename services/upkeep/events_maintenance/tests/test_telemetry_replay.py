@@ -10,7 +10,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.telemetry.emitter import event_id
+from base.telemetry.delivery.mirror import event_id
 from services.upkeep.events_maintenance import telemetry_replay as replay
 
 _TS = "2026-10-02T12:00:00+00:00"

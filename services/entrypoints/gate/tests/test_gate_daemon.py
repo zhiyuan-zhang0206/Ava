@@ -80,7 +80,7 @@ def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
         assert name == "gate"
 
     setup.pipeline.stop.side_effect = stop
-    monkeypatch.setattr("base.telemetry.emitter.build_pipeline", build_pipeline)
+    monkeypatch.setattr("base.telemetry.pipeline_build.build_pipeline", build_pipeline)
     monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", logging)
     monkeypatch.setattr("base.daemon.shutdown.install_graceful_shutdown", install_shutdown)
     monkeypatch.setattr(daemon, "Gate", gate)
@@ -183,7 +183,7 @@ def test_unfinished_stop_is_reported_without_reentering_pipeline(
     entry.pipeline.stop.side_effect = None
     entry.pipeline.stop.return_value = drain
     report = Mock()
-    monkeypatch.setattr("base.telemetry.emitter.report_no_pipeline", report)
+    monkeypatch.setattr("base.telemetry.delivery.reporting.report_no_pipeline", report)
     daemon.main()
     entry.pipeline.stop.assert_called_once_with(timeout=2)
     assert "unfinished" in report.call_args.args[0]
@@ -201,7 +201,7 @@ def test_real_owned_pipeline_is_joined_on_http_exit(
         del database
         return pipeline
 
-    monkeypatch.setattr("base.telemetry.emitter.build_pipeline", build_pipeline)
+    monkeypatch.setattr("base.telemetry.pipeline_build.build_pipeline", build_pipeline)
     try:
         daemon.main()
         assert entry.logging.call_args.kwargs["producer"]() is pipeline

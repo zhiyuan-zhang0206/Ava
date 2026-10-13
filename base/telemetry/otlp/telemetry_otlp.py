@@ -61,16 +61,16 @@ from typing import Any
 
 from base.cluster.derive import production_identity
 from base.cluster.machine import MachineIdentity
-from base.telemetry import (
-    DrainPhase,
-    DrainResult,
-    DrainStatus,
-    Event,
-    EventPipeline,
+from base.telemetry.delivery.loss import report_loss
+from base.telemetry.delivery.mirror import append_jsonl
+from base.telemetry.delivery.pipeline import EventPipeline
+from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
+from base.telemetry.delivery.reporting import (
     failure_isolated,
     report_no_pipeline,
     report_sink_failure,
 )
+from base.telemetry.emitter import emit
 from base.telemetry.metrics import ci_runs_metrics
 from base.telemetry.observability import (
     cluster_label,
@@ -206,7 +206,7 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("gateway_process", "fd_count"): "gauge",
 }
 
-_NO_EMITTER = "_no_emitter"
+NO_EMITTER = "_no_emitter"
 
 
 def observability_export_allowed(machine: MachineIdentity, *, home: Path) -> bool:
@@ -224,7 +224,7 @@ def observability_export_allowed(machine: MachineIdentity, *, home: Path) -> boo
     if not allowed:
         from base.log import logger
 
-        logger.bind(**{_NO_EMITTER: True}).warning(
+        logger.bind(**{NO_EMITTER: True}).warning(
             "[otlp-exporter] OTLP export disabled: gateway home is not the "
             "observability station (no {} marker and no observability-station "
             "capability); set AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
@@ -288,9 +288,7 @@ def _emit_backend_event(event_name: str, **attributes: Any) -> None:
     though its OTLP copy cannot leave the process.
     """
     with failure_isolated("otlp init-status event"):
-        from base import telemetry
-
-        telemetry.emit("telemetry", event_name, attributes=attributes)
+        emit("telemetry", event_name, attributes=attributes)
 
 
 class OtlpBackend:
@@ -401,15 +399,12 @@ class OtlpBackend:
                 lost += 1
                 example = event
         if lost and example is not None:
-            from base.telemetry import _append_jsonl
-            from base.telemetry.loss import report_loss
-
             with self._dropped_lock:
                 self._dropped += lost
             report = report_loss(example, lost, "otlp", record_metric=self.record_loss)
             # The alarm itself bypasses both queues. Metrics can still export
             # while the log lane is full; the local mirror retains the evidence.
-            _append_jsonl([report])
+            append_jsonl([report])
         for event in events:
             with failure_isolated("otlp metric mapping"):
                 self._record_metrics(event)
@@ -742,7 +737,7 @@ class OtlpBackend:
     # ── diagnostics ──────────────────────────────────────────────────────────
 
     def _report(self, message: str) -> None:
-        """Log an OTLP-side diagnostic through loguru, marked `_NO_EMITTER` so
+        """Log an OTLP-side diagnostic through loguru, marked `NO_EMITTER` so
         it reaches stderr/file sinks and never re-enters the event pipeline.
         Best-effort: never raises, falls back to stderr."""
         report_no_pipeline(f"[otlp-exporter] {message}")

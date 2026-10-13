@@ -32,7 +32,8 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext
 from base import cluster, paths, telemetry
 from base.db import Database
 from base.telemetry import emitter, observability
-from base.telemetry.tests.identity_inputs import machine_identity
+from base.telemetry.delivery import mirror
+from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 _AGENT = 8901
 
@@ -173,13 +174,13 @@ def test_machine_falls_back_to_hostname_on_explicit_missing_reader() -> None:
     def missing() -> str:
         raise MachineNameMissing("unit is not configured")
 
-    assert telemetry._resolve_machine(missing) == socket.gethostname()
+    assert telemetry.resolve_machine(missing) == socket.gethostname()
 
 
 def test_event_machine_reader_does_not_rebind_process_or_other_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(emitter._state, "machine", "process-owner")
+    monkeypatch.setitem(emitter.process_state, "machine", "process-owner")
     first = telemetry.prepare_event("log", "log", machine_reader=lambda: "first-context")
     second = telemetry.prepare_event("log", "log", machine_reader=lambda: "second-context")
     assert (first.machine, second.machine) == ("first-context", "second-context")
@@ -259,7 +260,7 @@ def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
         for event_name in event_names
     ]
 
-    telemetry._append_jsonl(events)
+    telemetry.append_jsonl(events)
 
     day = now.strftime("%Y%m%d")
     full_rows = [
@@ -273,7 +274,7 @@ def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_lef
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
-    monkeypatch.setattr(emitter, "_JSONL_RETENTION_DAYS", 2)
+    monkeypatch.setattr(mirror, "JSONL_RETENTION_DAYS", 2)
     today = datetime.now(UTC)
     full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
     full_kept = tmp_path / f"events-{today - timedelta(days=2):%Y%m%d}.jsonl"
@@ -283,7 +284,7 @@ def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_lef
     for path in (full_old, full_kept, rollup_old, rollup_kept, malformed):
         path.write_text("{}\n", encoding="utf-8")
 
-    telemetry._prune_jsonl_mirror()
+    telemetry.prune_jsonl_mirror()
 
     assert not full_old.exists()
     assert full_kept.exists()
@@ -408,7 +409,7 @@ def test_drain_on_exit_lands_queued_events() -> None:
 def test_resolve_machine_falls_back_only_on_documented_absence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    machine = telemetry._resolve_machine()  # type: ignore[attr-defined]
+    machine = telemetry.resolve_machine()  # type: ignore[attr-defined]
     assert machine  # non-empty on this host
 
 
@@ -480,7 +481,7 @@ def test_explicit_capture_precedes_closed_projection_admission(
 ) -> None:
     pipe = telemetry.EventPipeline(writer=lambda _batch: None)
     pipe.stop(timeout=1)
-    monkeypatch.setitem(emitter._state, "pipeline", pipe)
+    monkeypatch.setitem(emitter.process_state, "pipeline", pipe)
     captured: list[telemetry.Event] = []
 
     def capture(prepared: telemetry.Event) -> telemetry.Event:

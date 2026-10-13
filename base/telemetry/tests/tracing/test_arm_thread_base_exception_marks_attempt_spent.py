@@ -11,7 +11,7 @@ import pytest
 from base import config
 from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
-from base.telemetry.tests.identity_inputs import ignore_arguments, machine_identity
+from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import (
     _assert_root_once_with_child_parented_under_it,
     _assert_turn_root_exported_at_start,

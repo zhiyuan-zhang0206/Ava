@@ -35,13 +35,14 @@ import queue
 import threading
 from collections.abc import Callable
 
-from base.telemetry import Event, failure_isolated
+from base.telemetry.delivery.receipts import Event
+from base.telemetry.delivery.reporting import failure_isolated
 
 _CHILD_DEFER_ENV = "AVA_TELEMETRY_OTLP_CHILD_DEFER"
 _CHILD_DEFER_MAX_AGE_ENV = "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
 # Fallback when the env value is absent/unparseable/non-positive — mirrors the
 # declared field default (locked by
-# base/telemetry/otlp/tests/test_telemetry_otlp_child_defer.py::test_env_defaults_locked_to_settings_fields).
+# base/telemetry/tests/otlp/test_telemetry_otlp_child_defer.py::test_env_defaults_locked_to_settings_fields).
 CHILD_DEFER_MAX_AGE_DEFAULT_S = 60.0
 _TRUE_SPELLINGS = frozenset({"1", "true", "yes", "on"})
 _FALSE_SPELLINGS = frozenset({"0", "false", "no", "off"})

@@ -25,7 +25,8 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
-from base.telemetry import Event, event_row
+from base.telemetry.delivery.mirror import event_row
+from base.telemetry.delivery.receipts import Event
 from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 
 
@@ -309,7 +310,7 @@ _failures = 0
 def project_events(database: Database, events: Sequence[Event]) -> None:
     """Best-effort emitter sink; diagnostics must never reenter the emitter."""
     global _failures  # noqa: PLW0603
-    from base.telemetry import report_no_pipeline
+    from base.telemetry.delivery.reporting import report_no_pipeline
 
     observations: list[MetricObservation] = []
     rejected = 0

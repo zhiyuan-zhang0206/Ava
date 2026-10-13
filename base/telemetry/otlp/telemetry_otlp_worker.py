@@ -9,13 +9,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from base.telemetry import (
-    DrainPhase,
-    DrainResult,
-    DrainStatus,
-    failure_isolated,
-    report_no_pipeline,
-)
+from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
+from base.telemetry.delivery.reporting import failure_isolated, report_no_pipeline
 from base.telemetry.otlp.telemetry_otlp_barrier import WorkerFlushMarker
 
 

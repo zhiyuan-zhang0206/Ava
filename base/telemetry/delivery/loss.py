@@ -9,7 +9,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from base.log import logger
-from base.telemetry import Event
+from base.telemetry.delivery.mirror import append_jsonl
+from base.telemetry.delivery.receipts import Event
+from base.telemetry.delivery.state import process_name, process_state, resolve_machine
 
 
 def _stderr(message: str) -> None:
@@ -86,18 +88,16 @@ class _ExporterDropFilter(logging.Filter):
         if record.msg != "Queue full, dropping %s.":
             return True
         try:
-            from base import telemetry
-
             now = datetime.now(UTC)
-            state = telemetry._state
+            state = process_state
             event = Event(
                 ts=now,
                 trace_id=None,
                 span_id=None,
                 agent_id=None,
-                machine=state["machine"] or telemetry._resolve_machine(),
+                machine=state["machine"] or resolve_machine(),
                 cluster=state["cluster"] or "",
-                process=telemetry.process_name(),
+                process=process_name(),
                 category="telemetry",
                 event_name="event_log_drop",
                 level="error",
@@ -111,7 +111,7 @@ class _ExporterDropFilter(logging.Filter):
                 "otel-sdk",
                 record_metric=pipeline.record_export_loss if pipeline is not None else None,
             )
-            telemetry._append_jsonl([report])
+            append_jsonl([report])
         except Exception as exc:
             _stderr(f"ERROR: OTel SDK queue-overflow loss could not be recorded: {exc!r}")
         # The replacement error already reached local sinks. Re-exporting the

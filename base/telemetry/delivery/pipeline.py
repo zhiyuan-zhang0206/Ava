@@ -93,7 +93,7 @@ class EventPipeline:
             if due:
                 self._drop_reported_at = now
         if due:
-            from base.telemetry.loss import report_loss
+            from base.telemetry.delivery.loss import report_loss
 
             report_loss(event, 1, "emitter", record_metric=self.record_export_loss)
 
@@ -109,7 +109,7 @@ class EventPipeline:
         self._check_error()
         result = DrainResult(DrainStatus.COMPLETED if completed else DrainStatus.UNFINISHED, phase)
         if not completed:
-            from base.telemetry.emitter import report_no_pipeline
+            from base.telemetry.delivery.reporting import report_no_pipeline
 
             report_no_pipeline(
                 "[event-emitter] {operation} timed out; telemetry shutdown degraded: "
@@ -192,7 +192,7 @@ class EventPipeline:
             example = self._drop_example
             self._drop_example = None
         if n and example is not None:
-            from base.telemetry.loss import loss_event
+            from base.telemetry.delivery.loss import loss_event
 
             batch = [*batch, loss_event(example, n, "emitter", dropped_at=example.ts)]
         if not batch:
@@ -204,7 +204,7 @@ class EventPipeline:
         try:
             self._run_drain()
         except BaseException as exc:
-            from base.telemetry.emitter import report_no_pipeline
+            from base.telemetry.delivery.reporting import report_no_pipeline
 
             self._error = exc
             report_no_pipeline("[event-emitter] drain failed: {err}", err=repr(exc), exc=exc)

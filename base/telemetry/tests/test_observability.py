@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from base.telemetry import observability
-from base.telemetry.tests.identity_inputs import machine_identity
+from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 
 @pytest.mark.parametrize(

@@ -24,7 +24,7 @@ from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
-from base.telemetry.emitter import build_pipeline
+from base.telemetry.pipeline_build import build_pipeline
 from services.backup.artifact.names import DUMP_NAME_RE
 from services.backup.scheduler.operation.staging import (
     OperationKind,

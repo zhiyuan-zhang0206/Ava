@@ -12,7 +12,8 @@ from datetime import UTC, datetime
 
 from base import telemetry
 from base.log import logger
-from base.telemetry import Event, EventPipeline
+from base.telemetry.delivery.pipeline import EventPipeline
+from base.telemetry.delivery.receipts import Event
 
 
 def _event() -> Event:

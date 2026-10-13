@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 from base import paths, telemetry
-from base.telemetry import emitter, loss
+from base.telemetry.delivery import loss, mirror
 
 
 def _event(i: int, category: str = "log") -> telemetry.Event:
@@ -260,7 +260,7 @@ def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyP
     # The module-level counter may be non-zero from a prior test in the
     # same process (xdist workers share the module) — reset it so the
     # first-failure report cadence assertion is deterministic.
-    monkeypatch.setattr(emitter, "_jsonl_failures", 0)
+    monkeypatch.setattr(mirror, "_jsonl_failures", 0)
     monkeypatch.setattr(paths, "logs_dir", _boom)
     sink_id = logger.add(
         lambda m: captured.append(m.record["message"]),
@@ -268,8 +268,8 @@ def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyP
         filter=lambda r: bool(r["extra"].get("_no_emitter")),
     )
     try:
-        telemetry._append_jsonl([_event(0)])
-        telemetry._append_jsonl([_event(1)])  # second consecutive failure — same report window
+        telemetry.append_jsonl([_event(0)])
+        telemetry.append_jsonl([_event(1)])  # second consecutive failure — same report window
     finally:
         logger.remove(sink_id)
 

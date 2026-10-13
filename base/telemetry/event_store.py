@@ -33,7 +33,10 @@ from psycopg.types.json import Jsonb
 
 from base.db import Database
 from base.events.contract import EVENTS
-from base.telemetry.emitter import Event, event_row
+from base.telemetry.delivery.mirror import event_row
+from base.telemetry.delivery.receipts import Event
+from base.telemetry.delivery.reporting import report_no_pipeline
+from base.telemetry.emitter import emit
 
 STORED_CATEGORIES = frozenset({"telemetry", "log"})
 _STORED_LEVELS = frozenset({"warning", "error", "critical"})
@@ -181,9 +184,7 @@ def _write(db: Database, records: list[dict[str, Any]]) -> None:
 
 def _failed(exc: Exception, rows: int) -> None:
     global _disabled, _failures, _retry_at  # noqa: PLW0603
-    from base import telemetry
     from base.db.connections import NoDatabaseAuthorityError, PlaceholderDbUrlError
-    from base.telemetry import report_no_pipeline
 
     if isinstance(exc, (NoDatabaseAuthorityError, PlaceholderDbUrlError)):
         _disabled = True
@@ -203,7 +204,7 @@ def _failed(exc: Exception, rows: int) -> None:
             err=repr(exc),
             level="error",
         )
-        telemetry.emit(
+        emit(
             "telemetry",
             "telemetry_store_failed",
             level="error",

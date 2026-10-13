@@ -6,7 +6,7 @@ import math
 import threading
 from collections.abc import Callable
 
-from base.telemetry import report_no_pipeline
+from base.telemetry.delivery.reporting import report_no_pipeline
 
 
 class TraceArm:
