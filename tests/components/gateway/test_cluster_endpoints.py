@@ -15,19 +15,25 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+import base.sessions.backend as sessions_backend
+import gateway.app as gateway_app
+import gateway.cluster.status as gateway_cluster_status
+from base import cluster
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.deploy.git import cluster_drift
+from base.deploy.git import cluster_drift, running_sha
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.root_control import client as root_client
 from gateway.app import app
+from gateway.cluster import router
 from gateway.events import telemetry_rows
 from gateway.http.middleware.cors import cors_allowed_origins
 from ops import agent_pause, cluster_status
@@ -77,15 +83,15 @@ def fake_flag(
         assert machine_name == machine_identity.name
         return flag.exists()
 
-    monkeypatch.setattr("gateway.app._cluster_is_paused", _paused)
+    monkeypatch.setattr(gateway_app, "_cluster_is_paused", _paused)
 
     def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
         assert machine_name == machine_identity.name
         return flag.exists()
 
-    monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", paused)
-    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", paused)
-    monkeypatch.setattr("ops.cluster_status.pause.is_paused", _snapshot_paused)
+    monkeypatch.setattr(router, "cluster_is_paused", paused)
+    monkeypatch.setattr(gateway_cluster_status, "cluster_is_paused", paused)
+    monkeypatch.setattr(cluster_pause, "is_paused", _snapshot_paused)
     return flag
 
 
@@ -104,7 +110,7 @@ def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     The pause tests patch ``base.sessions.backend.get_backend`` to a recording
     fake, so the composed names are what the assertions read.
     """
-    monkeypatch.setattr("base.cluster.session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster, "session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
 
 
 # ─── middleware 503 mode ──────────────────────────────────────────────────────
@@ -269,7 +275,7 @@ class _FakeSessionBackend:
 @pytest.fixture
 def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
     backend = _FakeSessionBackend()
-    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: backend)
+    monkeypatch.setattr(sessions_backend, "get_backend", lambda: backend)
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)
     return backend
 
@@ -461,9 +467,7 @@ class TestStatusSnapshot:
         def unexpected_process_read(_root: Path) -> str | None:
             raise AssertionError("snapshot must use its supplied image")
 
-        monkeypatch.setattr(
-            "base.native_process.loaded_commit.capture_commit", unexpected_process_read
-        )
+        monkeypatch.setattr(loaded_commit, "capture_commit", unexpected_process_read)
         assert (
             cluster_status.status_snapshot(
                 database,
@@ -493,7 +497,7 @@ class TestStatusSnapshot:
         answers from the process, so the stale commit survives the bookmark's
         advance and the divergence every drift renderer keys on is there."""
         set_machine_identity(role="agent-runner", name="runner-a")
-        monkeypatch.setattr("base.deploy.git.running_sha.get", lambda: "n3wn3w0bbbb")
+        monkeypatch.setattr(running_sha, "get", lambda: "n3wn3w0bbbb")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "n3wn3w0bbbb")
 
         snap = cluster_status.status_snapshot(

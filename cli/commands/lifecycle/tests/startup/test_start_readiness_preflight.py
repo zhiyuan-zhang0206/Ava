@@ -17,8 +17,14 @@ from types import SimpleNamespace
 
 import pytest
 
+import cli.commands._repo as commands_repo
+from base import paths
 from base.cluster.machine import MachineIdentity
+from base.deploy.schema import migrations
+from base.host.system import backend
+from cli.commands import probe
 from cli.commands.lifecycle import _start_readiness_preflight as preflight
+from cli.commands.lifecycle import root_driver
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 
@@ -33,7 +39,7 @@ class _Backend:
 
 @pytest.fixture(autouse=True)
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.host.system.backend.get_backend", _Backend)
+    monkeypatch.setattr(backend, "get_backend", _Backend)
 
 
 @pytest.fixture
@@ -48,13 +54,14 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     for name in ("logs", "workspaces", "memory"):
         (home / name).mkdir(parents=True)
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
-    monkeypatch.setattr("cli.commands._repo._roles_or_none", read_roles)
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(commands_repo, "_roles_or_none", read_roles)
     monkeypatch.setattr(
-        "cli.commands.lifecycle.root_driver._root_tree_roster",
+        root_driver,
+        "_root_tree_roster",
         lambda *_a, **_k: (),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("base.deploy.schema.migrations.unreadable_migration_files", list)
+    monkeypatch.setattr(migrations, "unreadable_migration_files", list)
     return home
 
 
@@ -113,7 +120,7 @@ def test_machine_role_missing_skips_ports_as_an_observation(
         del machine
         return None
 
-    monkeypatch.setattr("cli.commands._repo._roles_or_none", read_roles)
+    monkeypatch.setattr(commands_repo, "_roles_or_none", read_roles)
 
     assert _run(repo, command_runtime=command_runtime) == 0
 
@@ -129,7 +136,8 @@ def test_prod_checkout_violation_is_fatal(
     """`ava start` refuses a prod home launched from a dev checkout; that refusal
     must be reachable before the stop."""
     monkeypatch.setattr(
-        "base.paths.prod_service_checkout_error",
+        paths,
+        "prod_service_checkout_error",
         lambda _repo: "prod home launched from a disposable checkout",  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -151,7 +159,7 @@ def test_health_port_occupancy_is_fatal(
         spec=SimpleNamespace(session="ava-gateway"),
         detail="answered by $AVA_HOME=/other-unit (http://127.0.0.1:8123/healthz)",
     )
-    monkeypatch.setattr("cli.commands.probe.occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe, "occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
 
     assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
@@ -253,7 +261,8 @@ def test_migration_readability_is_fatal(
     """The apply-side vet: a tracked migration the applier cannot open would fail
     `ava start`'s apply on the stopped host."""
     monkeypatch.setattr(
-        "base.deploy.schema.migrations.unreadable_migration_files",
+        migrations,
+        "unreadable_migration_files",
         lambda: [("20260912T010000_x", "Permission denied: 'x.sql'")],
     )
 
@@ -278,7 +287,7 @@ def test_migration_enumeration_failure_is_fatal(
     def _raise() -> list[tuple[str, str]]:
         raise MigrationLayoutError("migrations dir does not exist: /x/migrations")
 
-    monkeypatch.setattr("base.deploy.schema.migrations.unreadable_migration_files", _raise)
+    monkeypatch.setattr(migrations, "unreadable_migration_files", _raise)
 
     assert _run(repo, command_runtime=command_runtime) == 1
     assert "cannot be enumerated" in capsys.readouterr().err
@@ -392,7 +401,8 @@ def test_all_fatal_findings_are_reported_together(
 ) -> None:
     """One refusal lists every reason, so the operator fixes the set in one pass."""
     monkeypatch.setattr(
-        "base.paths.prod_service_checkout_error",
+        paths,
+        "prod_service_checkout_error",
         lambda _repo: "checkout problem",  # pyright: ignore[reportUnknownArgumentType]
     )
     (home / "memory").rmdir()

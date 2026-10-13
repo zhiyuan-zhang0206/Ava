@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster import machine_exclusions, machines
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.state.host_deploy_state import HostDeployState
@@ -32,8 +33,8 @@ def _db(*, database_gate: ProcessDbGate) -> Database:
 @pytest.fixture(autouse=True)
 def _quiet_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     """An idle cluster. Each test re-arms exactly the signal it is about."""
-    monkeypatch.setattr("base.cluster.machines.list_all", lambda _db: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", lambda _db: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(machines, "list_all", lambda _db: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(machine_exclusions, "list_excluded_machines", lambda _db: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(dw, "_read_deploy_states", lambda _db: {})  # pyright: ignore[reportUnknownArgumentType]
 
 
@@ -56,7 +57,8 @@ def _paused_since_0909() -> datetime:
 
 def _machines(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
     monkeypatch.setattr(
-        "base.cluster.machines.list_all",
+        machines,
+        "list_all",
         lambda _db: [(n, f"http://{n}:8600") for n in names],  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -141,7 +143,8 @@ def test_excluded_machines_stale_posture_does_not_block(
     resumed the machine or learned to pass `--force`."""
     _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
-        "base.cluster.machine_exclusions.list_excluded_machines",
+        machine_exclusions,
+        "list_excluded_machines",
         lambda _db: [("runner-a", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -160,7 +163,8 @@ def test_an_excluded_machines_row_is_ignored_whatever_its_posture(
     excluded machine is as stale as a `paused` one, and is ignored the same."""
     _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
-        "base.cluster.machine_exclusions.list_excluded_machines",
+        machine_exclusions,
+        "list_excluded_machines",
         lambda _db: [("runner-a", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -178,7 +182,8 @@ def test_an_excluded_machine_does_not_hide_a_cohort_machine(
     """The filter must not widen: only the excluded machine's row is withheld."""
     _machines(monkeypatch, "runner-a", "macmini")
     monkeypatch.setattr(
-        "base.cluster.machine_exclusions.list_excluded_machines",
+        machine_exclusions,
+        "list_excluded_machines",
         lambda _db: [("runner-a", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -203,7 +208,8 @@ def test_a_staging_machine_with_a_stale_posture_does_not_block(
     it bare."""
     _machines(monkeypatch, "stage")
     monkeypatch.setattr(
-        "base.cluster.machine_exclusions.list_excluded_machines",
+        machine_exclusions,
+        "list_excluded_machines",
         lambda _db: [("stage", "staging", None)],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -227,7 +233,8 @@ def test_the_skip_line_names_exclusion_and_freshness(
     read"."""
     _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
-        "base.cluster.machine_exclusions.list_excluded_machines",
+        machine_exclusions,
+        "list_excluded_machines",
         lambda _db: [("runner-a", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -256,7 +263,7 @@ def test_an_unreadable_exclusion_read_still_refuses(
     def _fail(_db: object) -> object:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", _fail)
+    monkeypatch.setattr(machine_exclusions, "list_excluded_machines", _fail)
     _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         dw,

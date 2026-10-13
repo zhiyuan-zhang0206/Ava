@@ -17,9 +17,13 @@ import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.status as _status_commands
 import cli.commands.probe as _probe_commands
 import services.supervision.roster as _roster
+import services.supervision.roster.spec as roster_spec
+from base import paths
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, settings
+from base.host import resource_sample
+from base.native_process.root_control import client
 from cli.database.runtime import CommandRuntime
 from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
 from cli.tests._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
@@ -59,7 +63,7 @@ def _local_status_boundary(
 
     monkeypatch.setattr(_status_commands, "print_data_plane_status", _print_plane)
     monkeypatch.setattr(httpx, "get", _unreachable)
-    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _AbsentRoot)
+    monkeypatch.setattr(client, "RootClient", _AbsentRoot)
 
 
 # ─── gateway cluster-status probe carries the bearer ───────────────────────────
@@ -236,9 +240,7 @@ def test_status_shows_browser_skip_reason(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(
-        "services.supervision.roster.spec.browser_incapability", lambda: "no display (headless)"
-    )
+    monkeypatch.setattr(roster_spec, "browser_incapability", lambda: "no display (headless)")
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
@@ -388,7 +390,7 @@ def test_status_reads_root_units(
                 },
             }
 
-    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _Client)
+    monkeypatch.setattr(client, "RootClient", _Client)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
@@ -432,7 +434,7 @@ def test_status_root_mode_survives_an_unreachable_root(
 
             raise RootClientError("unreachable in test")
 
-    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _Down)
+    monkeypatch.setattr(client, "RootClient", _Down)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
@@ -520,7 +522,7 @@ def test_detect_prod_source_drift_detached(monkeypatch: pytest.MonkeyPatch, tmp_
     """Prod source detached at the released commit → "HEAD" (source-mode steady state)."""
 
     _init_prod_source(tmp_path / "source", branch="DETACHED")
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     assert _cluster_drift.prod_source_branch_drift() == "HEAD"
 
 
@@ -539,9 +541,7 @@ def test_cmd_status_warns_on_prod_source_drift(
         return frozenset({"agent-runner"})
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: "ava-7/fix"
-    )
+    monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: "ava-7/fix")
     rc = _status_commands.cmd_status(
         database_factory=operator_database,
         machine=command_runtime.machine,
@@ -570,7 +570,7 @@ def test_cmd_status_detached_prod_source_is_not_a_warning(
         return frozenset({"agent-runner"})
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: "HEAD")
+    monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: "HEAD")
     rc = _status_commands.cmd_status(
         database_factory=operator_database,
         machine=command_runtime.machine,
@@ -594,8 +594,8 @@ def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
         return frozenset({"agent-runner"})
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: None)
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
 
 
 def test_cmd_status_names_the_source_checkout_it_runs(
@@ -607,7 +607,7 @@ def test_cmd_status_names_the_source_checkout_it_runs(
     command_runtime: CommandRuntime,
 ) -> None:
     _quiet_status(monkeypatch, tmp_path)
-    monkeypatch.setattr("base.deploy.git.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cluster_drift, "checkout_head_sha", lambda _repo: "c" * 40)  # pyright: ignore[reportUnknownArgumentType]
 
     assert (
         _status_commands.cmd_status(
@@ -702,7 +702,7 @@ def test_status_prints_a_live_host_reading(
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(status_mod, "_source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: None)
+    monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
 
     def _print_plane(*, database_factory: DatabaseFactory) -> None:
@@ -738,7 +738,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(status_mod, "_source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_branch_drift", lambda: None)
+    monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
 
     def _print_plane(*, database_factory: DatabaseFactory) -> None:
@@ -747,7 +747,8 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     monkeypatch.setattr(status_mod, "print_data_plane_status", _print_plane)
     monkeypatch.setattr(status_mod, "print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        "base.host.resource_sample.resource_sample",
+        resource_sample,
+        "resource_sample",
         lambda: (_ for _ in ()).throw(RuntimeError("no psutil here")),
     )
 

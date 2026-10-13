@@ -4,6 +4,8 @@ from typing import Any, cast
 
 import pytest
 
+from cli.commands import probe
+
 __all__ = ["guard_health_port_gate"]
 
 
@@ -34,4 +36,4 @@ def guard_health_port_gate(request: pytest.FixtureRequest, monkeypatch: pytest.M
     def no_occupied_ports(*_args: object, **_kwargs: object) -> tuple[()]:
         return ()
 
-    monkeypatch.setattr("cli.commands.probe.occupied_health_ports", no_occupied_ports)
+    monkeypatch.setattr(probe, "occupied_health_ports", no_occupied_ports)

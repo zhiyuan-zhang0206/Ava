@@ -25,17 +25,19 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
+import base.host.proc as host_proc
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
+from base.deploy.state import host_deploy_state
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.sessions.record import SessionRecord
+from cli.commands.lifecycle import _stop_extras, root_driver
 from cli.commands.lifecycle import _temporary_stop as command
-from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle import service_stop as strict
 from ops import pty_close_notices
 from tests.components.agent.test_maintenance import WHEN
@@ -202,12 +204,12 @@ def dependencies(monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity) -
         ],
     )
     monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.host.proc.hosting_supervised_session", lambda: None)
+    monkeypatch.setattr(host_proc, "hosting_supervised_session", lambda: None)
 
     def set_posture(_db: object, _value: str, *, machine: str) -> None:
         del _db, _value, machine
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", set_posture)
+    monkeypatch.setattr(host_deploy_state, "set_posture", set_posture)
 
 
 def record_root_stops(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -251,12 +253,12 @@ def stop_env(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
     for hook in ("stop_permissions_helper",):
-        monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{hook}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
     def announce(*, machine: MachineIdentity) -> None:
         del machine
 
-    monkeypatch.setattr("cli.commands.lifecycle._temporary_stop.announce_stopping", announce)
+    monkeypatch.setattr(command, "announce_stopping", announce)
 
 
 def busy_session(

@@ -11,8 +11,10 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
+from agent.ownership import hosted_cleanup
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.hosted_force import original_host_force
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -100,9 +102,7 @@ async def test_blocked_shell_cleanup_releases_row_lock_with_fixed_cutoff(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
-    )
+    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda: tmp_path)
     owner, command = await _prepare(phase, db_conn, aops_pool, database_gate=database_gate)
     entered, release = asyncio.Event(), threading.Event()
     loop = asyncio.get_running_loop()
@@ -136,9 +136,7 @@ async def test_unknown_cleanup_error_keeps_original_exception_and_committed_rece
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
-    )
+    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda: tmp_path)
     owner, command = await _prepare(phase, db_conn, aops_pool, database_gate=database_gate)
     original = RuntimeError("unknown cleanup defect")
 
@@ -174,7 +172,7 @@ async def test_publication_failure_still_attempts_cleanup_and_keeps_primary_erro
         calls.append((agent_id, cutoff))
         raise secondary
 
-    monkeypatch.setattr("agent.ownership.hosted_cleanup.publish_agent_updated", failed_publish)
+    monkeypatch.setattr(hosted_cleanup, "publish_agent_updated", failed_publish)
     with pytest.raises(RuntimeError) as caught:
         await _settle("graceful", aops_pool, owner, command, event_bus, failed_kill)
     assert caught.value is original

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+import base.deploy.lifecycle.service_selection as lifecycle_service_selection
+import services.supervision.roster.spec as roster_spec
 from base.cluster.machine import MachineIdentity
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster.tests.health_probe_inputs import (
@@ -61,7 +63,8 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
         )
 
     monkeypatch.setattr(
-        "services.supervision.roster.spec.services_for_capabilities_annotated",
+        roster_spec,
+        "services_for_capabilities_annotated",
         fake_services_for_capabilities_annotated,
     )
 
@@ -104,7 +107,8 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
         return tmp_home
 
     monkeypatch.setattr(
-        "services.supervision.roster.spec.gateway_observability_home",
+        roster_spec,
+        "gateway_observability_home",
         fake_gateway_observability_home,
     )
 
@@ -145,7 +149,8 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
         return tmp_home
 
     monkeypatch.setattr(
-        "services.supervision.roster.spec.gateway_observability_home",
+        roster_spec,
+        "gateway_observability_home",
         fake_gateway_observability_home,
     )
 
@@ -186,7 +191,8 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
         return tmp_home
 
     monkeypatch.setattr(
-        "services.supervision.roster.spec.gateway_observability_home",
+        roster_spec,
+        "gateway_observability_home",
         fake_gateway_observability_home,
     )
 
@@ -225,7 +231,8 @@ def test_service_probes_carry_the_failing_fact(
         return ((spec, None),)
 
     monkeypatch.setattr(
-        "services.supervision.roster.spec.services_for_capabilities_annotated",
+        roster_spec,
+        "services_for_capabilities_annotated",
         fake_services_for_capabilities_annotated,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
@@ -289,9 +296,7 @@ def test_service_probes_respect_durable_service_intent(
         return _probe_commands.ServiceProbe(True, "owned", "ready")
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(
-        "services.supervision.roster.spec.services_for_capabilities_annotated", roster
-    )
+    monkeypatch.setattr(roster_spec, "services_for_capabilities_annotated", roster)
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
     monkeypatch.setattr(
         service_selection,
@@ -314,7 +319,7 @@ def test_service_probes_unreadable_selection_is_unhealthy(
         raise ValueError("corrupt selection")
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr("base.deploy.lifecycle.service_selection.read_selection", unreadable)
+    monkeypatch.setattr(lifecycle_service_selection, "read_selection", unreadable)
     assert cluster_health._service_probes(machine=command_runtime.machine) == [
         "service selection unavailable (corrupt selection)"
     ]

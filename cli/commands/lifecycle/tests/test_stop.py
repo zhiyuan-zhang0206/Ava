@@ -20,9 +20,12 @@ from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
+from base.deploy.state import host_deploy_state
+from base.host import proc
 from base.sessions.pty import client
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
+from cli.commands.lifecycle import _stop_extras
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
@@ -41,6 +44,7 @@ from cli.commands.lifecycle.tests.stop_support import written as written
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops import agent_pause, pty_close_notices
+from ops.cluster_status import pause
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.path_scoped import pty_jobs as jobs
@@ -289,7 +293,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", record)
     for hook in ("stop_permissions_helper",):
-        monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{hook}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
     def announce(*, machine: MachineIdentity) -> None:
         assert machine is command_runtime.machine
@@ -322,7 +326,7 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
     command_runtime: CommandRuntime,
 ) -> None:
     drained()
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
     monkeypatch.setattr(agent_pause, "publish_inbound_wake", lambda _db, _bus, *_a: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
@@ -353,7 +357,7 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
     drained()
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     unpause = MagicMock()
-    monkeypatch.setattr("ops.cluster_status.pause.unpause_local_cluster", unpause)
+    monkeypatch.setattr(pause, "unpause_local_cluster", unpause)
 
     def child() -> int:
         assert not admission.start_authorized(None)
@@ -424,7 +428,8 @@ def test_repeated_stop_needs_no_live_database_or_host(
     )
     monkeypatch.setattr(Database, "connect", MagicMock(side_effect=AssertionError("DB is down")))
     monkeypatch.setattr(
-        "base.deploy.state.host_deploy_state.set_posture",
+        host_deploy_state,
+        "set_posture",
         MagicMock(side_effect=AssertionError("DB is down")),
     )
     assert (
@@ -450,7 +455,7 @@ def test_two_stop_start_cycles_reuse_identity_not_old_operation(
     dependencies(monkeypatch, machine=command_runtime.machine)
     monkeypatch.setattr(command, "pause_agents", agent_pause.pause_agents)
     command_runtime.machine.set(role="gateway", name="test-machine")
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     starts = resume_after_start(lambda _operation, _database_factory: 0)
     holders: list[str | None] = []
@@ -542,7 +547,7 @@ def test_explicit_force_stops_host_and_closes_terminals_unless_their_service_is_
 
     monkeypatch.setattr(command, "announce_stopping", announce)
     for hook in ("stop_permissions_helper",):
-        monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{hook}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         command, "pause_agents", MagicMock(side_effect=AssertionError("force fabricated a drain"))
     )
@@ -662,7 +667,7 @@ def test_stop_refused_inside_an_exec_domain(
     group, and a stop (a restart's stop leg too) closes this unit's persistent
     terminals — the refusal points at a shell no ava session hosts."""
     dependencies(monkeypatch, machine=command_runtime.machine)
-    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: "agent.execution.child")
+    monkeypatch.setattr(proc, "hosting_exec_domain", lambda: "agent.execution.child")
 
     with pytest.raises(RuntimeError, match="login shell"):
         if leg == "stop":
@@ -690,7 +695,7 @@ def test_nested_start_receives_the_exact_outer_operation_without_releasing_it(
     drained()
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     unpause = MagicMock()
-    monkeypatch.setattr("ops.cluster_status.pause.unpause_local_cluster", unpause)
+    monkeypatch.setattr(pause, "unpause_local_cluster", unpause)
     operation = admission.authorized_start("local", WHEN)
 
     @resume_after_start

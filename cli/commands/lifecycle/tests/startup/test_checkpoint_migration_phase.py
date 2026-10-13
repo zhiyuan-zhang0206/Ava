@@ -18,6 +18,7 @@ import psycopg
 import pytest
 
 from base.db.tests.fakes import patch_database
+from base.deploy.schema import migration_layout
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -395,7 +396,7 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
     if write_up:
         (tmp_path / f"{name}.sql").write_text("SELECT 1;\n")
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
-    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     if tracked:
         _git(tmp_path, "add", "-A")
 
@@ -418,7 +419,7 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
     (hour / f"{name}.sql").write_text("SELECT 1;\n")
     _init_repo(tmp_path)
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
-    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1;"])
 
     provision.assert_checkpoint_dependency_pinned(required_migration_set())

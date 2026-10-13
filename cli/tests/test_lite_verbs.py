@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
+from base.host.env import bootstrap
 from cli import main as cli_main
 from cli import parsers
 
@@ -144,7 +145,7 @@ def test_lite_cli_uses_its_local_runner_api_token(
     else:
         monkeypatch.setenv("AVA_API_TOKEN", explicit)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
 
     def consume(home: Path) -> types.SimpleNamespace:
         assert home == tmp_path
@@ -184,7 +185,7 @@ def test_lite_cli_in_agent_profile_does_not_consume_operator_capability(
     monkeypatch.delenv("AVA_API_TOKEN", raising=False)
     monkeypatch.setenv("AVA_CONFIG_FETCH", "")
     monkeypatch.delenv("AVA_CONFIG_FETCH", raising=False)
-    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
 
     def no_operator_capability(_home: Path) -> None:
         pytest.fail("an agent descendant must retain the launcher token boundary")

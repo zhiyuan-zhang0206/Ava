@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+import base.config as base_config
 from base.deploy.release import collector_artifact as artifact
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import (
@@ -237,7 +238,7 @@ def test_station_otlp_ingress_port_follows_single_source(
     """The station's advertised unit url (base.cluster.machines.unit_dial_url) and
     its remote receiver bind the SAME port — AVA_TELEMETRY_OTLP_PORT is the
     single knob for both (WP4, task #1946)."""
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_port", 4321)
+    monkeypatch.setattr(base_config.settings.observability, "telemetry_otlp_port", 4321)
     cfg = _render_real_template(
         monkeypatch,
         frozenset({"observability-station"}),
@@ -267,7 +268,7 @@ def test_local_ingress_port_does_not_change_gateway_projection(
     command_runtime: CommandRuntime,
 ) -> None:
     """Local receivers follow this unit's port; relay targets follow bootstrap."""
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_port", 4319)
+    monkeypatch.setattr(base_config.settings.observability, "telemetry_otlp_port", 4319)
     gateway_cfg = _render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
@@ -547,9 +548,9 @@ def test_config_file_is_owner_only(
     )
     monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        "base.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
+        base_config.settings.observability, "gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )
-    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "cluster-token")
+    monkeypatch.setattr(base_config.settings.data_plane, "cluster_secret", "cluster-token")
     command_runtime.machine.set(host="10.0.0.10")
     repo = Path(__file__).resolve().parents[5]
 

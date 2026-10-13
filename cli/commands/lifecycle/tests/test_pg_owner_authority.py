@@ -36,6 +36,7 @@ from base.cluster import (
     provision_database,
 )
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
@@ -150,7 +151,7 @@ def owned_pg(
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
-    monkeypatch.setattr("base.cluster.dataplane.pg_admin.get_record", _record)
+    monkeypatch.setattr(pg_admin, "get_record", _record)
     children: list[subprocess.Popen[bytes]] = []
     try:
         assert (
@@ -474,7 +475,7 @@ def test_local_owner_authority_reads_record_and_url_as_data(
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
-    monkeypatch.setattr("base.cluster.dataplane.pg_admin.get_record", _record)
+    monkeypatch.setattr(pg_admin, "get_record", _record)
     # A delivered generation login replaces the URL's username; the owner is the
     # database's same-named identity.
     monkeypatch.setattr(

@@ -9,8 +9,10 @@ import pytest
 from base import cluster, paths
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
+from base.host import proc
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as stop
+from cli.commands.lifecycle import service_stop
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
@@ -35,7 +37,7 @@ def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             {"AVA_MACHINE_NAME": "partial"},
         )
     )
-    monkeypatch.setattr("cli.commands.lifecycle.service_stop.require_no_terminals", lambda: None)
+    monkeypatch.setattr(service_stop, "require_no_terminals", lambda: None)
     return home
 
 
@@ -125,8 +127,8 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
         steps.append("native")
         return []
 
-    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: None)
-    monkeypatch.setattr("base.host.proc.hosting_supervised_session", lambda: None)
+    monkeypatch.setattr(proc, "hosting_exec_domain", lambda: None)
+    monkeypatch.setattr(proc, "hosting_supervised_session", lambda: None)
     monkeypatch.setattr(stop, "_stop_plan", _fake_stop_plan)
     monkeypatch.setattr(stop, "pause_agents", _fake_pause_agents)
     monkeypatch.setattr(stop, "_services_phase_action", _fake_services_phase_action)

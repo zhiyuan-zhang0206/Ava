@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from base import config
+from base.packages import dashboard_supply
 from cli.commands.observability import lgtm_native
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -32,16 +34,17 @@ def darwin_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
 def default_provisioning(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default-render assertions use an explicit default deployment configuration."""
     monkeypatch.setattr(
-        "base.config.settings.data_plane.db_url", "postgresql://reader@127.0.0.1:5433/ava"
+        config.settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:5433/ava"
     )
-    monkeypatch.setattr("base.config.settings.gateway.gateway_url", "")
-    monkeypatch.setattr("base.config.settings.gateway.gateway_port", 8000)
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "")
+    monkeypatch.setattr(config.settings.gateway, "gateway_port", 8000)
 
     def render_dashboard_json(_db: object, _repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
-        "base.packages.dashboard_supply.render_dashboard_json",
+        dashboard_supply,
+        "render_dashboard_json",
         render_dashboard_json,
     )
 

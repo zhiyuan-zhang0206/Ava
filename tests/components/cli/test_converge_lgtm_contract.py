@@ -9,8 +9,10 @@ from typing import Any
 import pytest
 import yaml
 
+from base import config
 from base.cluster.machine import MachineIdentity
 from base.db import Database
+from base.packages import dashboard_supply
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import service_argv
 from cli.commands.observability import lgtm_native
@@ -39,10 +41,10 @@ _STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
 def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default-render assertions use an explicit default deployment configuration."""
     monkeypatch.setattr(
-        "base.config.settings.data_plane.db_url", "postgresql://reader@127.0.0.1:5433/ava"
+        config.settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:5433/ava"
     )
-    monkeypatch.setattr("base.config.settings.gateway.gateway_url", "")
-    monkeypatch.setattr("base.config.settings.gateway.gateway_port", 8000)
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "")
+    monkeypatch.setattr(config.settings.gateway, "gateway_port", 8000)
 
     def render_dashboard_json(
         _db: Database, _repo_only: bool = False
@@ -50,7 +52,8 @@ def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
-        "base.packages.dashboard_supply.render_dashboard_json",
+        dashboard_supply,
+        "render_dashboard_json",
         render_dashboard_json,
     )
 
@@ -82,7 +85,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     repo = Path(__file__).resolve().parents[3]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
-    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "127.0.0.1")
+    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "127.0.0.1")
     lgtm_native._render_configs(
         repo,
         native_dir,
@@ -98,7 +101,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     assert "--web.listen-address=127.0.0.1:9090" in prometheus_argv
 
     # A non-loopback setting flows through to the rendered listeners.
-    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "10.0.0.5")
+    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "10.0.0.5")
     lgtm_native._render_configs(
         repo,
         native_dir,
@@ -166,11 +169,13 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_query_url",
+        config.settings.observability,
+        "telemetry_tempo_query_url",
         "http://tempo.test:3200/",
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint",
+        config.settings.observability,
+        "telemetry_tempo_endpoint",
         "http://tempo.test:14318/",
     )
 

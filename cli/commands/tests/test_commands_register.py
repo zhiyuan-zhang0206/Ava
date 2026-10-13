@@ -10,10 +10,12 @@ import pytest
 import cli.commands.probe as _probe_commands
 import services.supervision.roster as _roster
 import services.supervision.roster.service_spec as _service_spec
+from base.cluster import machines
 from base.cluster.machine import MachineRoles
 from base.daemon.tests.fakes import pin_endpoints
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.deploy.schema import migrations
 from cli.commands._repo import _register_machine_or_die
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
@@ -142,7 +144,7 @@ def test_register_gateway_advertises_without_gateway_url(
         assert gateway == command_runtime.config.view.gateway.gateway_url
         calls.append(url)
 
-    monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
+    monkeypatch.setattr(machines, "register_self", fake_register_self)
     command_runtime.config.set_field("gateway_url", "")
     command_runtime.config.set_field("gateway_port", 8000)
     command_runtime.machine.set(host="10.0.0.2")
@@ -185,7 +187,7 @@ def test_register_gateway_only_advertises_reachable_host(
         assert gateway == command_runtime.config.view.gateway.gateway_url
         calls.append(url)
 
-    monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
+    monkeypatch.setattr(machines, "register_self", fake_register_self)
     command_runtime.config.set_field("gateway_url", "https://ava.example:8000")
     command_runtime.machine.set(host="10.0.0.2")
 
@@ -225,7 +227,7 @@ def test_register_agent_runner_advertises_ops_url(
         assert gateway == command_runtime.config.view.gateway.gateway_url
         calls.append(url)
 
-    monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
+    monkeypatch.setattr(machines, "register_self", fake_register_self)
     command_runtime.machine.set(host="10.0.0.2")
     pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
 
@@ -269,7 +271,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(
         calls.append(url)
         raise LoopbackDialUrlRefused(f"loopback dial url refused: {url}")
 
-    monkeypatch.setattr("base.cluster.machines.register_self", _reject)
+    monkeypatch.setattr(machines, "register_self", _reject)
     command_runtime.machine.set(host="127.0.0.1")
     pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
 
@@ -310,7 +312,7 @@ def test_register_schema_behind_hint_names_working_commands(
         del _db, url, name, roles, description, home, gateway
         raise psycopg.errors.UndefinedTable('relation "machines" does not exist')
 
-    monkeypatch.setattr("base.cluster.machines.register_self", _missing_table)
+    monkeypatch.setattr(machines, "register_self", _missing_table)
     command_runtime.machine.set(host="10.0.0.2")
 
     rc = _register_machine_or_die(
@@ -335,7 +337,7 @@ def test_code_behind_schema_hint_names_working_commands(
     def _ahead(_url: str) -> None:
         raise CodeBehindSchema("DB has migrations this checkout lacks")
 
-    monkeypatch.setattr("base.deploy.schema.migrations.assert_schema_current", _ahead)
+    monkeypatch.setattr(migrations, "assert_schema_current", _ahead)
 
     assert _repo_commands._assert_schema_current_or_die() == 1
     err = capsys.readouterr().err

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import base.sessions.backend as sessions_backend
 from ops import cluster_status
 from ops.cluster_status import _count_agent_shells, agent_shell_sessions, check_pidfile
 from ops.rpc_schemas import SessionInfo
@@ -38,8 +39,8 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):
         ["ava-main-restarter", "ava-main-gateway", "ava-main-agent-9", "other-stray"]
     )
     shell = _FakeBackend(["ava-main-agent-7-shell-0", "ava-main-agent-7-shell-0-watcher"])
-    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(sessions_backend, "get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
 
     sessions, shell_count, total = cluster_status._collect_sessions()
     names = {s.name for s in sessions}
@@ -65,7 +66,7 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
             return {n: self.session_started_at(n) for n in names}
 
     backend = _FakeBackend()
-    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: backend)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(sessions_backend, "get_backend", lambda: backend)  # pyright: ignore[reportUnknownMemberType]
 
     empty = type(
         "_Empty",
@@ -75,7 +76,7 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
             "session_started_ats": staticmethod(lambda _names: {}),  # pyright: ignore[reportUnknownArgumentType]
         },
     )
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
     sessions, _, _ = cluster_status._collect_sessions()
     assert sessions[0].created_at is not None
     assert sessions[0].uptime_seconds > 0
@@ -153,7 +154,7 @@ def _stub_capture_backend(
                 raise error
             return output
 
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _FakeBackend)
+    monkeypatch.setattr(sessions_backend, "get_shell_backend", _FakeBackend)
 
 
 def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.MonkeyPatch):
@@ -216,7 +217,7 @@ def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name="build", uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
+    monkeypatch.setattr(sessions_backend, "get_shell_backend", _Backend)
 
     # the verdict rides the kill itself (one call, no separate probe)
     assert cluster_status.kill_shell(7, 3) == ("killed", True, "build")
@@ -245,7 +246,7 @@ def test_kill_shell_uninspectable_backend_reports_interrupted(
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
+    monkeypatch.setattr(sessions_backend, "get_shell_backend", _Backend)
 
     assert cluster_status.kill_shell(7, 3) == ("killed", True, None)
 
@@ -267,7 +268,7 @@ def test_kill_shell_idle_session_reports_not_interrupted(
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
+    monkeypatch.setattr(sessions_backend, "get_shell_backend", _Backend)
 
     assert cluster_status.kill_shell(7, 3) == ("killed", False, None)
 
@@ -319,7 +320,7 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
         "ava-restarter",
     )
     backend = _KillAllBackend()
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
+    monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: backend)
 
     assert cluster_status.kill_agent_shells(7, before_session_index=6) == [0, 2, 5]
     assert sorted(backend.killed) == sorted(
@@ -340,7 +341,7 @@ def test_kill_agent_shells_raises_after_trying_every_session(
 
     _stub_sessions(monkeypatch, "ava-agent-7-shell-0", "ava-agent-7-shell-1")
     backend = _KillAllBackend(survives=frozenset({session_name("agent-7-shell-0")}))
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
+    monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: backend)
 
     with pytest.raises(RuntimeError, match=r"shell session\(s\) \[0\] of agent 7"):
         cluster_status.kill_agent_shells(7, before_session_index=6)

@@ -9,6 +9,8 @@ from typing import Any
 import httpx
 import pytest
 
+from base.cluster import machine
+from base.host.net import http_dial
 from cli.commands.agents import impersonation as cli
 from cli.commands.agents.timeline import cmd_agents_timeline
 
@@ -27,10 +29,10 @@ def test_timeline_preserves_existing_payload(
         seen.update({"url": url, **kwargs})
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("base.host.net.http_dial.get", get)
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gateway")
+    monkeypatch.setattr(http_dial, "get", get)
+    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gateway")
     monkeypatch.setattr(
-        "base.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer cluster"}
+        machine, "gateway_auth_headers", lambda: {"Authorization": "Bearer cluster"}
     )
     assert cmd_agents_timeline(405) == 0
     assert seen["url"] == "http://gateway/api/agents/405/timeline"

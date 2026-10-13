@@ -20,6 +20,7 @@ from base.native_process.os_platform import file_lock
 from base.paths import ava_home
 from cli import init_intent, start_intent
 from cli import start_identity as identity
+from cli.commands.lifecycle import start
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap._init_identity import prepare_init_identity
@@ -628,7 +629,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
             pytest.fail("another lifecycle operation entered during start")
         return 0
 
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
+    monkeypatch.setattr(start, "cmd_start", runtime)
     prepare_init_identity(_single_box())
     assert (
         start_intent.run_start(
@@ -662,7 +663,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
         calls.append("complete wrapped start")
         return result
 
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
+    monkeypatch.setattr(start, "cmd_start", runtime)
     monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
     prepare_init_identity(_single_box())
     assert (
@@ -696,7 +697,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     def ready(**_kw: object) -> int:
         return 0
 
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", ready)
+    monkeypatch.setattr(start, "cmd_start", ready)
     monkeypatch.setattr(start_serving, "clear_serving", lambda: calls.append("cleared"))
 
     def fail() -> None:

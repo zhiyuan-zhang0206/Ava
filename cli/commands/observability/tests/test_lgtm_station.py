@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
+from base import config
 from base.cluster.machine import MachineIdentity
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import service_argv
@@ -82,7 +83,7 @@ def test_native_storage_dir_default_matches_historical_layout(
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
-    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", "")
+    monkeypatch.setattr(config.settings.observability, "lgtm_storage_dir", "")
     lgtm_native._render_configs(
         repo,
         native_dir,
@@ -115,7 +116,7 @@ def test_native_storage_dir_parameterized(
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
-    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", "/data/obs")
+    monkeypatch.setattr(config.settings.observability, "lgtm_storage_dir", "/data/obs")
     lgtm_native._render_configs(
         repo,
         native_dir,
@@ -152,7 +153,7 @@ def test_station_role_creates_configured_storage_dirs(
     storage = tmp_path / "obs-data"
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", str(storage))
+    monkeypatch.setattr(config.settings.observability, "lgtm_storage_dir", str(storage))
 
     lgtm_native.ensure_lgtm_native(
         repo,

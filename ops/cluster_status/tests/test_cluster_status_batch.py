@@ -12,11 +12,18 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base import db
 from base.cluster.machine import MachineIdentity
 from base.db import Database
+from base.deploy.git import cluster_drift
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission
+from base.deploy.state import host_deploy_state
 from base.deploy.state.host_deploy_state import HostDeployState
+from base.host import resource_sample
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
+from base.sessions import backend
 from ops import cluster_status
 from ops.cluster_status import schema_mismatch
 from ops.rpc_schemas import SessionInfo
@@ -87,7 +94,7 @@ def snapshot_dependencies(
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", _applied)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
     machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
-    monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_head_sha", lambda: None)
+    monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: None)
     return state
 
 
@@ -111,8 +118,8 @@ def test_collect_sessions_batches_timestamp_reads(monkeypatch: pytest.MonkeyPatc
     """Each backend receives one timestamp batch, never one read per session."""
     service = _BatchOnlyBackend("ava-main-agent-host")
     shell = _BatchOnlyBackend("ava-main-agent-7-shell-0")
-    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: service)
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: shell)
+    monkeypatch.setattr(backend, "get_backend", lambda: service)
+    monkeypatch.setattr(backend, "get_shell_backend", lambda: shell)
 
     sessions, _, _ = cluster_status._collect_sessions()
 
@@ -130,8 +137,8 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
     from zoneinfo import ZoneInfo
 
     service = _BatchOnlyBackend("ava-main-agent-host")
-    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: service)
-    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: _BatchOnlyBackend("x"))
+    monkeypatch.setattr(backend, "get_backend", lambda: service)
+    monkeypatch.setattr(backend, "get_shell_backend", lambda: _BatchOnlyBackend("x"))
     from base.config import settings
     from base.config.domains.general import GeneralSettings
 
@@ -195,8 +202,8 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
 
     monkeypatch.setattr(Database, "connect", _connect)
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample)
+    monkeypatch.setattr(host_deploy_state, "read", _read_state)
+    monkeypatch.setattr(resource_sample, "resource_sample", _sample)
 
     snapshot = cluster_status.status_snapshot(
         database,
@@ -234,9 +241,9 @@ def test_status_snapshot_borrows_pool_once_with_a_bounded_timeout(
     def _fresh_connect(**_kwargs: object) -> object:
         raise AssertionError("pool-backed snapshot opened a fresh DB connection")
 
-    monkeypatch.setattr("base.db.connect", _fresh_connect)
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr(db, "connect", _fresh_connect)
+    monkeypatch.setattr(host_deploy_state, "read", _read_state)
+    monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
 
     snapshot = cluster_status.status_snapshot(
         database,
@@ -276,8 +283,8 @@ def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
         sample_reads += 1
         return _RESOURCE
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample)
+    monkeypatch.setattr(host_deploy_state, "read", _read_state)
+    monkeypatch.setattr(resource_sample, "resource_sample", _sample)
 
     cluster_status.status_snapshot(
         database,
@@ -309,7 +316,7 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
     """DB-down is valid even if the unreachable row says the host was paused."""
     del snapshot_dependencies
     pool = _Pool(object(), error=RuntimeError(f"DB down with {stored_posture} row"))
-    monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
 
     snapshot = cluster_status.status_snapshot(
         database,
@@ -346,8 +353,8 @@ def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
         assert conn is db_conn
         return state
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _state)
-    monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr(host_deploy_state, "read", _state)
+    monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied_migration_names)
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("ALTER TABLE schema_migrations RENAME COLUMN name TO unexpected_name")
@@ -381,12 +388,12 @@ def test_resource_sample_failure_still_degrades_to_none_from_worker(
         del conn
         return state
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
+    monkeypatch.setattr(host_deploy_state, "read", _read_state)
 
     def _sample_failure() -> ResourceSample:
         raise RuntimeError("psutil unavailable")
 
-    monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample_failure)
+    monkeypatch.setattr(resource_sample, "resource_sample", _sample_failure)
 
     snapshot = cluster_status.status_snapshot(
         database,
@@ -445,7 +452,7 @@ def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
         return state
 
     monkeypatch.setattr(cluster_status, "_count_local_agents", count)
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", read_state)
+    monkeypatch.setattr(host_deploy_state, "read", read_state)
     monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
     snapshot = cluster_status.status_snapshot(
         database,
@@ -543,10 +550,10 @@ def test_status_snapshot_paused_reason_names_the_first_true_clause(
         del conn
         return state
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("base.deploy.maintenance.admission.held", lambda: held_flag)
-    monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: serving)
-    monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr(host_deploy_state, "read", _read_state)
+    monkeypatch.setattr(admission, "held", lambda: held_flag)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
+    monkeypatch.setattr(resource_sample, "resource_sample", lambda: _RESOURCE)
 
     snapshot = cluster_status.status_snapshot(
         database,
