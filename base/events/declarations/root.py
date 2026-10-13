@@ -211,7 +211,7 @@ class ScheduleVerifyFailed(TypedDict):
 
 
 class ConvergeFilePreserved(TypedDict):
-    """`converge_file_preserved` payload — base/host/converge/preserve_report.py.
+    """`converge_file_preserved` payload — base/telemetry/converge_report.py.
 
     One row per converge-managed destination preserved because its current
     content no longer matches the recorded render — someone hand-edited it
@@ -242,7 +242,7 @@ EVENTS: dict[str, EventSpec] = {
         payload=ConvergeFilePreserved,
         tier="anomaly",
         site=(
-            "base/host/converge/preserve_report.py:report_converge_preserve "
+            "base/telemetry/converge_report.py:report_converge_preserve "
             'telemetry.emit("telemetry", ...)'
         ),
     ),

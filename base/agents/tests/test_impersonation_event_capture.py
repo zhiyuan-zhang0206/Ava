@@ -25,7 +25,6 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
-from base.agents.messages.caller_identity import CallerIdentity
 from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
 from base.agents.tests.capture_inputs import (
@@ -43,6 +42,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event

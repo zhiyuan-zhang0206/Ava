@@ -23,7 +23,7 @@ from base.agents.impersonation.status import (
     is_log_native,
     parse_lease,
 )
-from base.agents.messages.caller_identity import caller_payload
+from base.events.caller_identity import caller_payload
 from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
 from base.native_process.runtime_incarnation import RuntimeIncarnation

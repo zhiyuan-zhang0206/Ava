@@ -43,7 +43,6 @@ from starlette.responses import JSONResponse
 from base.agents import AvaAgentError
 from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
 from base.agents.inbox.chat_delivery import ClientMessageConflictError
-from base.agents.messages.caller_identity import CallerIdentity
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
@@ -55,6 +54,7 @@ from base.api_contracts.mcp_tool_contract import (
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit

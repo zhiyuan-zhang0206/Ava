@@ -92,9 +92,9 @@ def test_file_anchored_roots_resolve_to_the_checkout_root() -> None:
     """Modules that locate the checkout from their own `__file__` count their
     package depth: the paths door and the Grafana dashboard supplier's builtin
     plugins directory all land on this checkout."""
-    from base.telemetry.metrics import grafana_dashboard_supply
+    from base.packages import dashboard_supply
 
     checkout = Path(__file__).resolve().parents[3]
     assert (checkout / "base" / "__init__.py").is_file()
     assert paths.repo_root() == checkout
-    assert checkout / "ava_builtins" / "plugins" == grafana_dashboard_supply._REPO_PLUGINS_DIR
+    assert checkout / "ava_builtins" / "plugins" == dashboard_supply._REPO_PLUGINS_DIR

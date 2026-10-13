@@ -4,7 +4,7 @@ The provisioning file ``deploy/lgtm/config/grafana/provisioning/dashboards/
 ava-ops-main.json`` is on its way to becoming a render of the metric
 registries instead of a hand-maintained file. This module locks the renderer
 (``base.telemetry.metrics.grafana_dashboard``) and the plugin suppliers
-(``base.telemetry.metrics.grafana_dashboard_supply``):
+(``base.packages.dashboard_supply``):
 
 1. **Fidelity vs the as-is board** — for every registered ``grafana`` spec,
    the rendered panel must equal its counterpart in the current provisioning
@@ -52,6 +52,11 @@ from typing import Any, cast
 import psycopg
 import pytest
 
+from base.packages.dashboard_supply import (
+    collect_plugin_specs,
+    load_installed_plugin_specs,
+    load_repo_plugin_specs,
+)
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.grafana_dashboard import (
     _CORE_SECTIONS_PREFIX,
@@ -60,11 +65,6 @@ from base.telemetry.metrics.grafana_dashboard import (
     _Layout,
     render_dashboard,
     render_to_json,
-)
-from base.telemetry.metrics.grafana_dashboard_supply import (
-    collect_plugin_specs,
-    load_installed_plugin_specs,
-    load_repo_plugin_specs,
 )
 from base.telemetry.metrics.plugin_metrics import MetricSpec, render_title
 
@@ -542,7 +542,7 @@ def test_repo_supplier_reports_a_broken_plugin_loudly(
     (plugins_dir / "broken_one" / "ava-plugin.json").write_text(
         _metrics_manifest("broken_one", "broken_one_calls")
     )
-    import base.telemetry.metrics.grafana_dashboard_supply as supply
+    import base.packages.dashboard_supply as supply
 
     for name in ("good_one", "broken_one"):
         sys.modules.pop(f"ava_repo_plugins.{name}.metrics", None)

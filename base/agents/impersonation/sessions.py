@@ -4,9 +4,9 @@ from typing import Any
 
 from base.agents import impersonation as control
 from base.agents.impersonation.history import public_session, resolve
-from base.agents.messages.caller_identity import CallerIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 
 

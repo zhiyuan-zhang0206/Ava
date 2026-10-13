@@ -3,9 +3,9 @@
 import pytest
 from pydantic import ValidationError
 
-from base.agents.messages.caller_identity import CallerIdentity, caller_payload
 from base.agents.messages.envelope import EnvelopeReadInputs, validate_source, wrap_inbound
 from base.clock import Clock
+from base.events.caller_identity import CallerIdentity, caller_payload
 
 _ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
 

@@ -40,9 +40,7 @@ def _dashboard_supply_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     def unavailable(_database: object) -> None:
         raise RuntimeError("native dashboard supply is unavailable in this rendering test")
 
-    monkeypatch.setattr(
-        "base.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json", unavailable
-    )
+    monkeypatch.setattr("base.packages.dashboard_supply.render_dashboard_json", unavailable)
 
 
 def _render(

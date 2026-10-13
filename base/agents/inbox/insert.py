@@ -8,7 +8,6 @@ import psycopg
 from base import telemetry
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.messages.caller_identity import caller_payload
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound_provenance import (
     InboundProvenance,
@@ -16,6 +15,7 @@ from base.agents.messages.inbound_provenance import (
     source_assertion_match,
 )
 from base.db import Database, fetch_one
+from base.events.caller_identity import caller_payload
 from base.events.live.bus import EventBus
 from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log, record_audit

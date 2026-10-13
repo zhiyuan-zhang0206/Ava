@@ -1,0 +1,2 @@
+[loads]
+"dashboard_supply.py" = ["ava_builtins/plugins"]

@@ -46,8 +46,8 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory) -> None
     up.
     """
     from base import paths
-    from base.host.converge.preserve_report import report_converge_preserve
     from base.packages.extensions import materialize
+    from base.telemetry.converge_report import report_converge_preserve
 
     try:
         # The pool opens eagerly and owns worker threads; close it here rather

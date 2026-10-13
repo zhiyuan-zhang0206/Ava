@@ -33,6 +33,7 @@ from xml.sax.saxutils import escape
 from loguru import logger
 
 import base.host.system.cron
+from base.cluster.derive import production_identity
 from base.cluster.machine import MachineIdentity
 
 # Daily at 00:25 host-local (macmini lives on the fleet wall clock,
@@ -178,8 +179,6 @@ def credential_blocker(*, machine: MachineIdentity, home: Path) -> str | None:
     identity, `gh` on PATH, the Trunk token file. No network probes — the
     sampler itself reports its own fetch failures loudly when it runs.
     """
-    from base.telemetry.observability import production_identity
-
     if not production_identity(machine=machine, home=home):
         return "not the registered production home"
     if shutil.which("gh") is None:

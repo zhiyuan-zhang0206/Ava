@@ -47,22 +47,6 @@ def _report_label_fallback(stage: str, exc: BaseException) -> None:
     report_sink_failure(f"cluster label {stage}", exc)
 
 
-def production_identity(machine: MachineIdentity, *, home: Path) -> bool:
-    """Whether this process has the registered production identity.
-
-    The default implicit collector belongs only to a configured machine running
-    against the production ``~/.ava`` cluster. Tests, ad-hoc processes without a
-    machine identity, and other homes must opt into their own explicit endpoint.
-    """
-    from base.cluster.machine import MachineNameMissing
-
-    try:
-        machine.name()
-    except MachineNameMissing:
-        return False
-    return cluster_label(home) == ".ava"
-
-
 def endpoint_override_is_explicit(variable: ObservabilityEndpointVariable) -> bool:
     """Whether the process environment explicitly selected an endpoint.
 

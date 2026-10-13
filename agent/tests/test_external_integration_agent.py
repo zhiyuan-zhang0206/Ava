@@ -23,11 +23,11 @@ from ava.sdk_surface import agent_identity
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
-from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
+from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions

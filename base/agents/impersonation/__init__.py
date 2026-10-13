@@ -42,9 +42,9 @@ from base.agents.impersonation._store import (
 from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, ImpersonationStatus, parse_lease
 from base.agents.impersonation.wake import wake_agent as wake_agent
-from base.agents.messages.caller_identity import CallerIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
 from base.native_process.runtime_incarnation import RuntimeIncarnation

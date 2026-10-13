@@ -1,6 +1,6 @@
 """ava_fleet Grafana + inspector metrics — declared, not registered.
 
-``base/telemetry/metrics/grafana_dashboard_supply`` imports this module and takes its
+``base/packages/dashboard_supply`` imports this module and takes its
 ``contribute()`` declaration for the rendered Ava Ops
 dashboard (``ava lgtm render``, task #3697). Two metrics:
 

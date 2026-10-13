@@ -20,7 +20,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, LiteralString, NamedTuple, cast
 
 from base.events.contract import LLM_USAGE_KEYS
-from base.telemetry.event_sql import numeric
+from base.telemetry.metrics.event_sql import numeric
 from services.upkeep.events_maintenance.token_totals import folded_through
 
 _RETAINED_WINDOW = timedelta(days=7)

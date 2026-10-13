@@ -50,7 +50,7 @@ class PluginSpecs:
     failed: list[str]
 
 
-_REPO_PLUGINS_DIR = Path(__file__).resolve().parents[3] / "ava_builtins" / "plugins"
+_REPO_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
 
 
 def _specs_of(faces: list[data_registry.DeclaredFace | None], names: list[str]) -> PluginSpecs:
