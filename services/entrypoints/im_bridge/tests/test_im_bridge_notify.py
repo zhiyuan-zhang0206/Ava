@@ -206,7 +206,7 @@ def _make_handler() -> Any:
 
     # the factory is async (returns the handler) — resolve it
     async def build() -> Any:
-        return await daemon._handle_send(core)  # type: ignore[attr-defined]
+        return await daemon.handle_send(core)  # type: ignore[attr-defined]
 
     return asyncio_run(build()), core
 
@@ -249,7 +249,7 @@ def test_send_route_502_when_no_channel_delivered() -> None:
             return {"telegram": "error: RuntimeError", "feishu": "skipped"}
 
     async def build() -> Any:
-        return await daemon._handle_send(_Core())  # type: ignore[attr-defined]
+        return await daemon.handle_send(_Core())  # type: ignore[attr-defined]
 
     handler = asyncio_run(build())
     status, body, ctype = asyncio_run(handler(b'{"text": "alert line"}'))
@@ -268,7 +268,7 @@ def test_send_route_502_when_no_adapter_loaded() -> None:
             return {}
 
     async def build() -> Any:
-        return await daemon._handle_send(_Core())  # type: ignore[attr-defined]
+        return await daemon.handle_send(_Core())  # type: ignore[attr-defined]
 
     handler = asyncio_run(build())
     status, body, _ = asyncio_run(handler(b'{"text": "alert line"}'))
@@ -287,7 +287,7 @@ def test_send_route_200_when_at_least_one_channel_delivered() -> None:
             return {"telegram": "ok", "feishu": "error: RuntimeError"}
 
     async def build() -> Any:
-        return await daemon._handle_send(_Core())  # type: ignore[attr-defined]
+        return await daemon.handle_send(_Core())  # type: ignore[attr-defined]
 
     handler = asyncio_run(build())
     status, body, _ = asyncio_run(handler(b'{"text": "alert line"}'))

@@ -72,7 +72,7 @@ async def test_a_quiesced_unit_runs_no_liveness_pass(
     bus = cast("EventBus", MagicMock())
     await _run_briefly(
         monkeypatch,
-        lambda pool, liveness: daemon._liveness_loop(
+        lambda pool, liveness: daemon.liveness_loop(
             Database.from_settings(gate=database_gate), pool, bus, liveness
         ),
         MagicMock(),

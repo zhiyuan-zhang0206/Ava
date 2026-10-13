@@ -247,7 +247,7 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
     with base.db.pool(gate=database_gate) as pool:
         mgr = manager.ScheduleManager(pool)
         session_control.enqueue_blocking(pool, sid)
-        while clock["t"] < 1000.0 + manager._BLOCKED_GIVE_UP_AFTER_S:
+        while clock["t"] < 1000.0 + manager.BLOCKED_GIVE_UP_AFTER_S:
             assert requests.consume_requests(pool, mgr) == 0  # still blocked: requeued
             clock["t"] += 30
         assert events == []

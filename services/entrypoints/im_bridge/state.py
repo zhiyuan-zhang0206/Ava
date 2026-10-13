@@ -21,7 +21,7 @@ def _switch_state_path() -> Path:
     return path
 
 
-def _load_switch_state() -> dict[str, int]:
+def load_switch_state() -> dict[str, int]:
     """Restore {channel}:{chat_id} -> agent_id from disk; {} when absent."""
 
     path = _switch_state_path()
@@ -30,7 +30,7 @@ def _load_switch_state() -> dict[str, int]:
     return TypeAdapter(dict[str, int]).validate_json(path.read_text(encoding="utf-8"), strict=True)
 
 
-def _save_switch_state(state: dict[str, int]) -> None:
+def save_switch_state(state: dict[str, int]) -> None:
     """Persist atomically so a crash never leaves a half-written file."""
 
     path = _switch_state_path()

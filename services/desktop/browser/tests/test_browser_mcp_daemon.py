@@ -66,7 +66,7 @@ class FakeUpstream:
         if name == "select_page":
             pid = args["pageId"]
             if pid not in self.pages:
-                return _err("No page with that id")
+                return err("No page with that id")
             self.selected = pid
             return self._listing()
         if name == "close_page":
@@ -79,12 +79,12 @@ class FakeUpstream:
             return self._listing()
         if name == "navigate_page":
             if self.selected is None:
-                return _err("No page selected")
+                return err("No page selected")
             self.pages[self.selected] = args.get("url", "about:blank")
             return _ok(f"navigated page {self.selected}")
         # page-scoped op: acts on whatever is globally selected
         if self.selected is None:
-            return _err("No page selected")
+            return err("No page selected")
         return _ok(f"ran {name} on page {self.selected}")
 
     def _listing(self) -> types.CallToolResult:
@@ -107,7 +107,7 @@ def _ok(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=False)
 
 
-def _err(text: str) -> types.CallToolResult:
+def err(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
 
 
@@ -124,14 +124,14 @@ class NoTabGroups(AgentTabGroups):
         return None
 
 
-def _new_daemon(upstream: Any, tab_groups: AgentTabGroups | None = None) -> ChromeMcpDaemon:
+def new_daemon(upstream: Any, tab_groups: AgentTabGroups | None = None) -> ChromeMcpDaemon:
     """A daemon the way ``run()`` builds one: its own registry."""
     return ChromeMcpDaemon(upstream, PageRegistry(), tab_groups or NoTabGroups())
 
 
 def _daemon() -> tuple[ChromeMcpDaemon, FakeUpstream]:
     up = FakeUpstream()
-    return _new_daemon(up), up
+    return new_daemon(up), up
 
 
 async def test_two_connections_do_not_clobber() -> None:
@@ -281,14 +281,14 @@ class DeadUpstream:
 async def test_call_tool_flags_dead_and_raises_on_upstream_death() -> None:
     """A closed upstream session sets `dead` (so run() exits for respawn) and
     raises a readable error, not an opaque empty-message transport exception."""
-    d = _new_daemon(DeadUpstream())
+    d = new_daemon(DeadUpstream())
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await d.call_tool("new_page", {}, None)
     assert d.dead.is_set()
 
 
 async def test_list_tools_flags_dead_on_upstream_death() -> None:
-    d = _new_daemon(DeadUpstream())
+    d = new_daemon(DeadUpstream())
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await d.list_tools()
     assert d.dead.is_set()
@@ -318,14 +318,14 @@ class OtherMCPErrorUpstream:
 async def test_call_tool_flags_dead_on_timeout_upstream() -> None:
     """MCPError(REQUEST_TIMEOUT / CONNECTION_CLOSED) from the SDK counts as
     upstream death: dead is set so run() ends the daemon on a wedged upstream."""
-    d = _new_daemon(TimedOutUpstream())
+    d = new_daemon(TimedOutUpstream())
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await d.call_tool("navigate_page", {"url": "https://x.com"}, None)
     assert d.dead.is_set()
 
 
 async def test_list_tools_flags_dead_on_timeout_upstream() -> None:
-    d = _new_daemon(TimedOutUpstream())
+    d = new_daemon(TimedOutUpstream())
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await d.list_tools()
     assert d.dead.is_set()
@@ -334,7 +334,7 @@ async def test_list_tools_flags_dead_on_timeout_upstream() -> None:
 async def test_other_mcp_error_does_not_flag_dead() -> None:
     """A tool-level MCP error (wrong params etc.) is a normal failure: it must
     not kill the session or end the daemon."""
-    d = _new_daemon(OtherMCPErrorUpstream())
+    d = new_daemon(OtherMCPErrorUpstream())
     with pytest.raises(MCPError):
         await d.call_tool("list_pages", {}, None)
     assert not d.dead.is_set()
@@ -477,7 +477,7 @@ async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
     import contextlib
 
     up = FakeUpstream()
-    daemon_ref: list[ChromeMcpDaemon | None] = [_new_daemon(up)]
+    daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
     # macOS unix sockets cap at ~104-char paths; pytest tmp dirs blow past it.
     sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
@@ -561,7 +561,7 @@ async def test_release_agent_page_idempotent_and_no_slot() -> None:
 async def test_release_agent_page_keeps_slot_when_upstream_down() -> None:
     """The upstream dying mid-release must not clear the slot — the page is
     still open and the reaper needs to find it."""
-    d = _new_daemon(DeadUpstream())
+    d = new_daemon(DeadUpstream())
     d.pages.set_agent_page(7, 1)
     d.pages.register_created_page(1)
     with pytest.raises(RuntimeError, match="upstream session is down"):
@@ -576,7 +576,7 @@ async def test_release_agent_page_wire_method() -> None:
     import contextlib
 
     up = FakeUpstream()
-    daemon_ref: list[ChromeMcpDaemon | None] = [_new_daemon(up)]
+    daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
     sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
         lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
@@ -625,13 +625,13 @@ def test_parse_page_listing_extracts_urls() -> None:
 # ── Page TTL: registration, renewal, expiry reaping ─────────────────────────
 
 
-def _expire(d: ChromeMcpDaemon, page_id: int) -> None:
+def expire(d: ChromeMcpDaemon, page_id: int) -> None:
     """Force a page's TTL deadline into the past."""
     assert page_id in d.pages.ttl_deadlines
     d.pages.ttl_deadlines[page_id] = time.monotonic() - 1.0
 
 
-def _record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
+def record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
     """An `emit` stand-in capturing (args, kwargs) pairs for assertions."""
 
     def record(*args: Any, **kwargs: Any) -> None:
@@ -640,11 +640,11 @@ def _record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
     return record
 
 
-def _ttl_remaining(d: ChromeMcpDaemon, page_id: int) -> float:
+def ttl_remaining(d: ChromeMcpDaemon, page_id: int) -> float:
     return d.pages.ttl_deadlines[page_id] - time.monotonic()
 
 
-class _TitledListing(FakeUpstream):
+class TitledListing(FakeUpstream):
     """Renders titled lines the way chrome-devtools-mcp does --
     `<id>: <title> (<url>) [selected] [isolatedContext=<name>]` -- so sweep
     behavior is exercised against the shapes the incident page had (#3570)."""
@@ -695,4 +695,4 @@ async def test_gateway_origin_navigation_is_an_ordinary_navigation(
     ]
 
 
-__all__ = ["_TitledListing"]
+__all__ = ["TitledListing"]

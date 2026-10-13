@@ -10,7 +10,7 @@ Two signals, merged per agent:
 - **Machine reachability** — each agent-runner is probed via the `status_probe`
   op at its machines-table ops URL (the uniform-RPC path; the local machine is
   dialed at its localhost URL like any other). A machine is judged offline only
-  after two *consecutive* failed probes (`_OFFLINE_AFTER_FAILURES`), so one
+  after two *consecutive* failed probes (`OFFLINE_AFTER_FAILURES`), so one
   dropped packet never flips the fleet; one success resets the count. Results
   land in `machine_probe` (deliberately a separate table — the machines row is
   a recomputed composition of machine_units and any column there would be
@@ -84,10 +84,10 @@ _log = logging.getLogger("services.wake.heartbeat.liveness")
 # Consecutive failed probes before a machine is judged offline. The pass runs
 # once per minute, so this is a ~2-minute anti-jitter window (a single dropped
 # packet or a mid-restart runner is not "offline").
-_OFFLINE_AFTER_FAILURES = MACHINE_OFFLINE_AFTER_FAILURES
+OFFLINE_AFTER_FAILURES = MACHINE_OFFLINE_AFTER_FAILURES
 
 # How often the pass runs. Independent of the check-in dispatch step (15s).
-_PASS_INTERVAL_S = LIVENESS_PASS_INTERVAL_S
+PASS_INTERVAL_S = LIVENESS_PASS_INTERVAL_S
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,7 @@ class ProbeOutcome:
 _UNREACHED = ProbeOutcome(reached=False, host_online=None, status=None)
 
 
-async def _probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> ProbeOutcome:
+async def probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> ProbeOutcome:
     """One status_probe round-trip.
 
     An unreachable host or a failed op (timeout and transport errors surface as
@@ -169,7 +169,7 @@ async def _record_probe(
         )
 
 
-def _merge_liveness(pool: ConnectionPool) -> list[int]:
+def merge_liveness(pool: ConnectionPool) -> list[int]:
     """Recompute `liveness_state` for every non-terminated row whose machine is
     registered, from the current machine_probe rows and lease state. Return the
     ids whose user-visible liveness crossed into or out of `offline`.
@@ -208,7 +208,7 @@ def _merge_liveness(pool: ConnectionPool) -> list[int]:
             "FROM desired d "
             "WHERE a.id = d.id "
             "RETURNING a.id, d.old_liveness_state, d.new_liveness_state",
-            (_OFFLINE_AFTER_FAILURES,),
+            (OFFLINE_AFTER_FAILURES,),
         )
         rows = cur.fetchall()
     # `unknown` is already rendered conservatively as online, so the first
@@ -272,15 +272,15 @@ async def run_liveness_pass(
     machines = sorted(targets | {name for name, _url in list_roster_agent_runners(db)})
     if not machines:
         return
-    results = await asyncio.gather(*(_probe_machine(name, probe) for name in machines))
+    results = await asyncio.gather(*(probe_machine(name, probe) for name in machines))
     outcomes = dict(zip(machines, results, strict=True))
     for name in machines:
         outcome = outcomes[name]
         if name in targets:
             await _record_probe(pool, name, ok=outcome.reached, host_online=outcome.host_online)
         await _record_snapshot(pool, name, outcome)
-    changed_agent_ids = _merge_liveness(pool)
-    # `_merge_liveness` committed before these best-effort invalidation hints.
+    changed_agent_ids = merge_liveness(pool)
+    # `merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:
         publish_agent_updated_sync(bus, agent_id)
     _log.info(

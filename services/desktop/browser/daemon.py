@@ -37,7 +37,7 @@ from base.paths import logs_dir
 from . import macos_readiness
 from . import profile as browser_profile
 from .probe import cdp_url
-from .profile import profile_dir as _profile_dir
+from .profile import profile_dir as profile_dir
 
 _CDP_TIMEOUT_S = 2.0
 
@@ -53,7 +53,7 @@ def assert_browser_capable() -> None:
         raise RuntimeError(f"ava-browser: {reason}")
 
 
-def _cdp_reachable(port: int) -> bool:
+def cdp_reachable(port: int) -> bool:
     """True when a debuggable Chrome answers on this CDP port (`/json/version`
     -> 200). Before launch, a served port means a second Chrome on the same
     profile would collide on the singleton profile lock. main() refuses it.
@@ -66,7 +66,7 @@ def _cdp_reachable(port: int) -> bool:
         return False
 
 
-def _chrome_args(binary: str, port: int, profile: Path) -> list[str]:
+def chrome_args(binary: str, port: int, profile: Path) -> list[str]:
     return [
         binary,
         f"--remote-debugging-port={port}",
@@ -91,7 +91,7 @@ def main() -> None:
     # launch (the converge preflight only runs at `ava start`).
     assert_browser_capable()
     cdp_port = settings.services.browser_cdp_port  # the recorded/`.env` port; default 9222
-    if _cdp_reachable(cdp_port):
+    if cdp_reachable(cdp_port):
         # Something already serves this CDP port — either a manually-started
         # Chrome holding the profile lock, or one of ours that outlived its
         # session on a `SingletonLock` handoff. Launching a second Chrome on the
@@ -110,7 +110,7 @@ def main() -> None:
         # as ours — so that case stays the operator's to quit.
         print(  # noqa: T201 — pre-redirect, surfaces in the session log
             f"ava-browser: CDP port {cdp_port} already served by another Chrome; "
-            f"refusing to start a second instance on {_profile_dir()}. "
+            f"refusing to start a second instance on {profile_dir()}. "
             "To clear it: `ava stop` then `ava start` — that sweeps any "
             "Chrome running on this cluster's profile, including one left behind by a "
             "SingletonLock handoff. If instead you started a Chrome of your own on this "
@@ -127,7 +127,7 @@ def main() -> None:
     # the matching marker lets the healthcheck report degraded state without
     # killing and respawning this deliberate wait.
     macos_readiness.wait_for_browser_startup_readiness()
-    profile = _profile_dir()
+    profile = profile_dir()
     profile.mkdir(parents=True, exist_ok=True)
     local_state_warning = browser_profile.validate_local_state(profile)
     if local_state_warning is not None:
@@ -138,7 +138,7 @@ def main() -> None:
     os.dup2(log_fd, 1)
     os.dup2(log_fd, 2)
     os.close(log_fd)
-    _launch(binary, _chrome_args(binary, cdp_port, profile))
+    _launch(binary, chrome_args(binary, cdp_port, profile))
 
 
 if __name__ == "__main__":

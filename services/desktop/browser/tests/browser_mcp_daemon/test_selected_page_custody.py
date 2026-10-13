@@ -7,7 +7,7 @@ from typing import Literal
 import pytest
 
 from services.desktop.browser import page_lifecycle
-from services.desktop.browser.tests.test_browser_mcp_daemon import _daemon, _expire
+from services.desktop.browser.tests.test_browser_mcp_daemon import _daemon, expire
 
 
 @pytest.mark.parametrize("cleanup", ["release", "expiry"])
@@ -40,6 +40,6 @@ async def test_owned_page_keeps_creation_deadline_after_switching_to_user_tab() 
     assert await page_lifecycle.release_agent_page(daemon, 7) is None
     assert 1 in upstream.pages
 
-    _expire(daemon, 1)
+    expire(daemon, 1)
     assert await page_lifecycle.reap_expired_pages(daemon) == 1
     assert upstream.pages == {99: "https://example.com/user-tab"}

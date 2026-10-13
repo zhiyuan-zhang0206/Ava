@@ -51,7 +51,7 @@ from services.desktop.browser.protocol import Request, Response
 
 # Expiry sweep cadence: a page is closed on the first pass after its TTL
 # deadline, so it can outlive the deadline by up to one interval.
-_PAGE_SWEEP_INTERVAL_S = 600.0
+PAGE_SWEEP_INTERVAL_S = 600.0
 
 # Hard cap on one renewal grant — at most 24h, the same cap persistent shell
 # sessions live under (user ruling 2026-09-01). The initial (creation) deadline
@@ -438,7 +438,7 @@ async def expired_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
     # quiesce-exempt: reaps expired browser pages; no database
     while not stop.is_set():
         with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=_PAGE_SWEEP_INTERVAL_S)
+            await asyncio.wait_for(stop.wait(), timeout=PAGE_SWEEP_INTERVAL_S)
         if stop.is_set():
             return
         try:

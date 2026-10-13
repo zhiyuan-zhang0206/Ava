@@ -27,7 +27,7 @@ def _drive(loop: str, gate: ProcessDbGate) -> Awaitable[None]:
     progress = LoopProgress(loop, 60.0)
     if loop == "poll":
         return heartbeat_daemon._dispatch_loop(pool, database, bus, progress)
-    return heartbeat_daemon._liveness_loop(database, pool, bus, progress)
+    return heartbeat_daemon.liveness_loop(database, pool, bus, progress)
 
 
 def _script(
@@ -67,7 +67,7 @@ def _script(
         monkeypatch.setattr(heartbeat_daemon, "_sweep_backoff_resets", nothing)
         monkeypatch.setattr(heartbeat_daemon, "_reconcile_checkin_outcomes", nothing)
         monkeypatch.setattr(heartbeat_daemon, "_select_idle_agents_needing_heartbeat", empty_poll)
-        monkeypatch.setattr(heartbeat_daemon, "_backoff_deadlines", no_deadlines)
+        monkeypatch.setattr(heartbeat_daemon, "backoff_deadlines", no_deadlines)
     else:
         monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", liveness_pass)
     return lambda: rounds

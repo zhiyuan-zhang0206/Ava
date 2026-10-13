@@ -44,17 +44,17 @@ def _wire(
     holder's own (name, argv) for the listener-first direction. `answered`
     distinguishes a dial that got an HTTP response from one that got nothing."""
 
-    def _answer(_port: int) -> probe_mod._CdpAnswer:
-        return probe_mod._CdpAnswer(cdp, answered)
+    def _answer(_port: int) -> probe_mod.CdpAnswer:
+        return probe_mod.CdpAnswer(cdp, answered)
 
-    monkeypatch.setattr(probe_mod, "_cdp_unreachable", _answer)
+    monkeypatch.setattr(probe_mod, "cdp_unreachable", _answer)
     monkeypatch.setattr(probe_mod, "find_cluster_chrome", lambda _profile: chromes)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(probe_mod, "_listens_on", lambda pid, _port: listening[pid])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(probe_mod, "_listener_pid", lambda _port: holder)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "listens_on", lambda pid, _port: listening[pid])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "listener_pid", lambda _port: holder)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(probe_mod.macos_readiness, "degraded_wait_reason", lambda: None)
     if holder_facts is None:
         holder_facts = ("", None)
-    monkeypatch.setattr(probe_mod, "_process_facts", lambda _pid: holder_facts)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "process_facts", lambda _pid: holder_facts)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_alive_when_our_chrome_holds_the_port(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,7 +149,7 @@ def test_probe_always_returns_a_verdict(
     def _boom(_port: int) -> str | None:
         raise RuntimeError("nobody predicted this")
 
-    monkeypatch.setattr(probe_mod, "_cdp_unreachable", _boom)
+    monkeypatch.setattr(probe_mod, "cdp_unreachable", _boom)
     with caplog.at_level(logging.ERROR, logger="services.desktop.browser.probe"):
         verdict = probe_mod.probe_browser(9222, _PROFILE)
     assert verdict.verdict is ProbeVerdict.DOWN
@@ -185,7 +185,7 @@ def test_an_inspection_failure_is_unavailable_not_down(
 def test_the_holder_and_socket_reads_survive_the_psutil_race(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`_process_facts` is `_readable_facts` one pid at a time and `_listens_on`
+    """`process_facts` is `_readable_facts` one pid at a time and `listens_on`
     reads the same process: the race must come back as "cannot tell" —
     (("", None)) and None — never as an exception into the probe."""
     race = SystemError("<built-in function proc_cmdline> returned a result with an exception set")
@@ -201,8 +201,8 @@ def test_the_holder_and_socket_reads_survive_the_psutil_race(
             raise race
 
     monkeypatch.setattr(probe_mod.psutil, "Process", lambda _pid: _RacingProc())  # pyright: ignore[reportUnknownArgumentType]
-    assert probe_mod._process_facts(4242) == ("", None)
-    assert probe_mod._listens_on(4242, 9222) is None
+    assert probe_mod.process_facts(4242) == ("", None)
+    assert probe_mod.listens_on(4242, 9222) is None
 
 
 def test_the_listener_is_ours_even_when_the_walk_missed_it(
@@ -295,14 +295,14 @@ def test_cdp_200_with_empty_body_is_unreachable(monkeypatch: pytest.MonkeyPatch)
     and record that something answered, so identity (not the status) decides
     the verdict."""
     _wire_cdp_body(monkeypatch, b"")
-    answer = probe_mod._cdp_unreachable(9222)
+    answer = probe_mod.cdp_unreachable(9222)
     assert answer.reason is not None
     assert answer.answered is True
 
 
 def test_cdp_200_with_non_json_body_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire_cdp_body(monkeypatch, b"<html>not json</html>")
-    answer = probe_mod._cdp_unreachable(9222)
+    answer = probe_mod.cdp_unreachable(9222)
     assert answer.reason is not None
     assert answer.answered is True
 
@@ -311,7 +311,7 @@ def test_cdp_200_with_json_missing_browser_is_unreachable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _wire_cdp_body(monkeypatch, b'{"WebKit-Version": "537.36"}')
-    answer = probe_mod._cdp_unreachable(9222)
+    answer = probe_mod.cdp_unreachable(9222)
     assert answer.reason is not None
     assert answer.answered is True
 
@@ -333,7 +333,7 @@ def test_an_http_error_status_counts_as_answered(monkeypatch: pytest.MonkeyPatch
         )
 
     monkeypatch.setattr(probe_mod.urllib.request, "urlopen", _raise_502)  # pyright: ignore[reportUnknownArgumentType]
-    answer = probe_mod._cdp_unreachable(9222)
+    answer = probe_mod.cdp_unreachable(9222)
     assert answer.answered is True
     assert "502" in (answer.reason or "")
 
@@ -346,7 +346,7 @@ def test_a_refused_dial_is_unanswered(monkeypatch: pytest.MonkeyPatch) -> None:
         raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
 
     monkeypatch.setattr(probe_mod.urllib.request, "urlopen", _refuse)  # pyright: ignore[reportUnknownArgumentType]
-    answer = probe_mod._cdp_unreachable(9222)
+    answer = probe_mod.cdp_unreachable(9222)
     assert answer.reason is not None
     assert answer.answered is False
 
@@ -357,7 +357,7 @@ def test_cdp_200_with_valid_version_body_is_reachable(monkeypatch: pytest.Monkey
         b'"webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/x"}'
     )
     _wire_cdp_body(monkeypatch, body)
-    assert probe_mod._cdp_unreachable(9222).reason is None
+    assert probe_mod.cdp_unreachable(9222).reason is None
 
 
 def test_fake_alive_verdict_is_down_even_when_our_chrome_listens(
@@ -368,8 +368,8 @@ def test_fake_alive_verdict_is_down_even_when_our_chrome_listens(
     healthcheck's sweep + rebuild runs), never ALIVE."""
     _wire_cdp_body(monkeypatch, b"")
     monkeypatch.setattr(probe_mod, "find_cluster_chrome", lambda _profile: [42])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(probe_mod, "_listens_on", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(probe_mod, "_listener_pid", lambda _port: 42)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "listens_on", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "listener_pid", lambda _port: 42)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(probe_mod.macos_readiness, "degraded_wait_reason", lambda: None)
     verdict = probe_mod.probe_browser(9222, _PROFILE)
     assert verdict.verdict is ProbeVerdict.DOWN

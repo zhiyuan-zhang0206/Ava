@@ -237,7 +237,7 @@ def _maybe_sweep_stale_inbounds(
     return now_mono
 
 
-async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
+async def scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     """Observe pending inputs and retire stale rows; never re-publish wakes."""
     interval = settings.daemon.delivery_watchdog_interval_seconds
     alerted: set[int] = set()
@@ -285,7 +285,7 @@ async def run(
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
         scan = liveness.register("scan", _SCAN_LIVENESS_TIMEOUT_S)
-        await _scan_loop(pool, scan)
+        await scan_loop(pool, scan)
     finally:
         pool.close()
         await stop_health_server(health)

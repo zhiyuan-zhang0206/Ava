@@ -365,7 +365,7 @@ class TestNudgeBackoffB7:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        from services.wake.heartbeat.daemon import _backoff_max_level
+        from services.wake.heartbeat.daemon import backoff_max_level
 
         aid = _make_idle(
             db_conn,
@@ -375,7 +375,7 @@ class TestNudgeBackoffB7:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        max_level = _backoff_max_level(_THRESHOLD_S)
+        max_level = backoff_max_level(_THRESHOLD_S)
         self._set_level(db_conn, aid, max_level)
         noop: dict[int, int] = {aid: 2}
 

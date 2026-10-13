@@ -29,9 +29,9 @@ Three facts shape the design:
   target (a user opening a tab meanwhile, a popup) is reported and left
   ungrouped -- the module never guesses which tab is the agent's.
 - **Only the two target listings run under that lock.** They are short
-  (``_LISTING_TIMEOUT_S``). Everything else -- loading the extension, attaching
+  (``LISTING_TIMEOUT_S``). Everything else -- loading the extension, attaching
   to its worker, calling it -- runs in a background task with its own timeout
-  (``_GROUP_TIMEOUT_S``), so a slow or wedged Chrome costs the page creation
+  (``GROUP_TIMEOUT_S``), so a slow or wedged Chrome costs the page creation
   nothing. The tasks run one at a time (``_lock``, the grouping's own lock, not
   the daemon's): two grouping tasks of one agent both search the group by title
   and would otherwise each create it. ``cancel_pending()`` drops in-flight
@@ -58,7 +58,7 @@ from typing import Any
 import websockets
 
 from base.log import logger
-from services.desktop.browser.session import _cdp_call, _http_json
+from services.desktop.browser.session import cdp_call, http_json
 
 # The unpacked extension Chrome loads. Its service-worker file name carries a
 # hash of its content: Chrome caches an extension's worker script in the
@@ -69,15 +69,15 @@ EXTENSION_DIR = Path(__file__).resolve().parent / "extension"
 # Bound on each of the two target listings. The caller holds the daemon's serial
 # lock around them, so a wedged Chrome must not stall every agent's browser call
 # for longer than this; a local /json/list answers in milliseconds.
-_LISTING_TIMEOUT_S = 2.0
+LISTING_TIMEOUT_S = 2.0
 
 # Bound on one background grouping (load, attach, call), excluding the wait for
 # the grouping lock. It holds no daemon lock.
-_GROUP_TIMEOUT_S = 10.0
+GROUP_TIMEOUT_S = 10.0
 
 # How long to wait for the extension's service worker target to appear after
 # `loadUnpacked` (it normally is up within milliseconds).
-_WORKER_WAIT_S = 5.0
+WORKER_WAIT_S = 5.0
 _WORKER_POLL_S = 0.1
 
 
@@ -96,7 +96,7 @@ class _NoUniqueNewPageError(RuntimeError):
 
 
 async def _page_target_ids(cdp_port: int) -> frozenset[str]:
-    listing = await _http_json(f"http://127.0.0.1:{cdp_port}/json/list")
+    listing = await http_json(f"http://127.0.0.1:{cdp_port}/json/list")
     return frozenset(t["id"] for t in listing if t.get("type") == "page")
 
 
@@ -109,7 +109,7 @@ def _worker_file() -> str:
 async def _live_worker(ws: Any, ids: Any, extension_id: str) -> str | None:
     """The target id of this checkout's worker file running in ``extension_id``, if any."""
     url = f"chrome-extension://{extension_id}/{_worker_file()}"
-    infos = (await _cdp_call(ws, ids, "Target.getTargets", {}))["targetInfos"]
+    infos = (await cdp_call(ws, ids, "Target.getTargets", {}))["targetInfos"]
     return next(
         (i["targetId"] for i in infos if i["type"] == "service_worker" and i["url"] == url), None
     )
@@ -124,21 +124,21 @@ async def _worker_session(ws: Any, ids: Any) -> str:
     """
     loaded = [
         e
-        for e in (await _cdp_call(ws, ids, "Extensions.getExtensions", {}))["extensions"]
+        for e in (await cdp_call(ws, ids, "Extensions.getExtensions", {}))["extensions"]
         if Path(e["path"]) == EXTENSION_DIR
     ]
     target_id = await _live_worker(ws, ids, loaded[0]["id"]) if loaded else None
     if target_id is None:
         loaded_id = (
-            await _cdp_call(ws, ids, "Extensions.loadUnpacked", {"path": str(EXTENSION_DIR)})
+            await cdp_call(ws, ids, "Extensions.loadUnpacked", {"path": str(EXTENSION_DIR)})
         )["id"]
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + _WORKER_WAIT_S
+        deadline = loop.time() + WORKER_WAIT_S
         while (target_id := await _live_worker(ws, ids, loaded_id)) is None:
             if loop.time() >= deadline:
                 raise RuntimeError(f"extension {loaded_id} service worker target not found")
             await asyncio.sleep(_WORKER_POLL_S)
-    attached = await _cdp_call(
+    attached = await cdp_call(
         ws, ids, "Target.attachToTarget", {"targetId": target_id, "flatten": True}
     )
     session_id = attached["sessionId"]
@@ -153,10 +153,10 @@ async def _await_worker_script(ws: Any, ids: Any, session_id: str) -> None:
     run (measured on first load: ``avaGroup is not defined``).
     """
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + _WORKER_WAIT_S
-    # quiesce-exempt: bounded poll (_WORKER_WAIT_S) of a local browser; no database
+    deadline = loop.time() + WORKER_WAIT_S
+    # quiesce-exempt: bounded poll (WORKER_WAIT_S) of a local browser; no database
     while True:
-        probe = await _cdp_call(
+        probe = await cdp_call(
             ws,
             ids,
             "Runtime.evaluate",
@@ -194,7 +194,7 @@ class AgentTabGroups:
         stays ungrouped.
         """
         try:
-            return await asyncio.wait_for(_page_target_ids(self._cdp_port), _LISTING_TIMEOUT_S)
+            return await asyncio.wait_for(_page_target_ids(self._cdp_port), LISTING_TIMEOUT_S)
         except Exception as e:
             logger.opt(exception=True).warning(
                 "[browser-mcp] could not list Chrome page targets for tab grouping "
@@ -215,7 +215,7 @@ class AgentTabGroups:
         if before is None:
             return
         try:
-            target_id = await asyncio.wait_for(self._new_target(before), _LISTING_TIMEOUT_S)
+            target_id = await asyncio.wait_for(self._new_target(before), LISTING_TIMEOUT_S)
         except Exception as e:
             self._warn(agent_id, e)
             return
@@ -251,7 +251,7 @@ class AgentTabGroups:
         title = group_title(agent_id)
         try:
             async with self._lock:
-                await asyncio.wait_for(self._apply(title, target_id), _GROUP_TIMEOUT_S)
+                await asyncio.wait_for(self._apply(title, target_id), GROUP_TIMEOUT_S)
         except Exception as e:
             self._warn(agent_id, e)
 
@@ -267,12 +267,12 @@ class AgentTabGroups:
         )
 
     async def _apply(self, title: str, target_id: str) -> None:
-        version = await _http_json(f"http://127.0.0.1:{self._cdp_port}/json/version")
+        version = await http_json(f"http://127.0.0.1:{self._cdp_port}/json/version")
         ids = itertools.count(1)
         # Closing the websocket detaches the worker session opened below.
         async with websockets.connect(version["webSocketDebuggerUrl"]) as ws:
             session_id = await _worker_session(ws, ids)
-            outcome = await _cdp_call(
+            outcome = await cdp_call(
                 ws,
                 ids,
                 "Runtime.evaluate",

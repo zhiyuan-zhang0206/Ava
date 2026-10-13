@@ -17,7 +17,7 @@ from base.lm.catalog import ModelCatalog
 from tests.fixtures.units import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.
-_THRESHOLD_S = 300.0
+THRESHOLD_S = 300.0
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def pool(db_url: str):
         p.close()
 
 
-def _make_idle(
+def make_idle(
     db: psycopg.Connection,
     *,
     status_changed_s_ago: float,
@@ -82,7 +82,7 @@ def _make_idle(
     return aid
 
 
-def _lease(
+def lease(
     db: psycopg.Connection,
     agent_id: int,
     *,
