@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from base import config
+from base import config, log
 from base.config.service_read import ConfigAuthority
 
 _RUNNER_PW = "runner-secret-token"
@@ -109,7 +109,7 @@ def test_missing_url_refuses_before_boot_time_fallback(
         return read()
 
     monkeypatch.setattr(ConfigAuthority, "read_env_aliases", read_snapshot)
-    monkeypatch.setattr("base.log.logger.warning", warning)
+    monkeypatch.setattr(log.logger, "warning", warning)
     with pytest.raises(ValueError, match="AVA_DB_URL is missing") as caught:
         config.bootstrap_config_values(
             ConfigAuthority(config.settings, config.settings, tmp_path / ".env"),

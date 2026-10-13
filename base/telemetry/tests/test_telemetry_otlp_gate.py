@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from base import config
 from base.cluster import derive
 from base.cluster.machine import MachineNameMissing, MachineRoleInvalid, MachineRoleMissing
 from base.telemetry import observability
@@ -107,7 +108,7 @@ def test_invalid_roles_propagate_outside_transport_isolation(
 
 
 def test_each_backend_freezes_only_its_own_eligibility(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     decision = False
     calls: list[bool] = []
 
@@ -128,7 +129,7 @@ def test_each_backend_freezes_only_its_own_eligibility(monkeypatch: pytest.Monke
 def test_backend_does_not_cache_identity_defects_as_disabled(
     monkeypatch: pytest.MonkeyPatch, error: type[Exception]
 ) -> None:
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
 
     def invalid() -> bool:
         raise error("bad identity")
@@ -141,7 +142,7 @@ def test_backend_does_not_cache_identity_defects_as_disabled(
 
 
 def test_disabled_backend_does_not_read_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", False)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", False)
 
     def reject() -> bool:
         raise MachineNameMissing("identity remains cold")

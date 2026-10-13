@@ -10,6 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from base.config import get_field, settings
 from base.host.env.agent_slices import ModelOverrides
+from base.lm import factory
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import build_chat_model
 
@@ -123,7 +124,7 @@ def test_withdrawn_model_cannot_switch_provider_attempt(
         assert models is model_catalog.models
         return "claude-sonnet-5"
 
-    monkeypatch.setattr("base.lm.factory.resolve_available_model", replacement)
+    monkeypatch.setattr(factory, "resolve_available_model", replacement)
     with pytest.raises(ValueError, match="cannot change its frozen model"):
         build_chat_model(
             "gpt-6.1-sol",

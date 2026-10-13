@@ -370,8 +370,8 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return random_value
 
-        monkeypatch.setattr("base.host.net.resilience._agent_phase", self._fixed_phase)
-        monkeypatch.setattr("base.host.net.resilience.random.uniform", _uniform)
+        monkeypatch.setattr(resilience, "_agent_phase", self._fixed_phase)
+        monkeypatch.setattr(resilience.random, "uniform", _uniform)
         assert jittered(2.0, span=5.0, mode="phase") == 3.25
 
     def test_phase_mode_bounds(self) -> None:
@@ -387,7 +387,7 @@ class TestJitter:
             assert (low, high) == (-0.5, 0.5)
             return random_value
 
-        monkeypatch.setattr("base.host.net.resilience.random.uniform", _uniform)
+        monkeypatch.setattr(resilience.random, "uniform", _uniform)
         assert jittered(4.0, span=0.5, mode="relative") == expected
 
     def test_relative_mode_bounds(self) -> None:
@@ -399,7 +399,7 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return -2.0
 
-        monkeypatch.setattr("base.host.net.resilience.random.uniform", _uniform)
+        monkeypatch.setattr(resilience.random, "uniform", _uniform)
         assert jittered(0.5, span=2.0, mode="relative") == 0.0
 
     def test_relative_zero_span_returns_delay(self) -> None:
@@ -411,8 +411,8 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return 100.0
 
-        monkeypatch.setattr("base.host.net.resilience._agent_phase", self._fixed_phase)
-        monkeypatch.setattr("base.host.net.resilience.random.uniform", _uniform)
+        monkeypatch.setattr(resilience, "_agent_phase", self._fixed_phase)
+        monkeypatch.setattr(resilience.random, "uniform", _uniform)
         f = _Flaky(urllib.error.URLError("boom"), 1)
         assert retry(Policy(max_attempts=2, jitter="phase", jitter_span=5.0))(f) == "ok"
         assert retry_waits == [2.25]
@@ -426,8 +426,8 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return 0.5
 
-        monkeypatch.setattr("base.host.net.resilience._agent_phase", _unexpected_phase)
-        monkeypatch.setattr("base.host.net.resilience.random.uniform", _uniform)
+        monkeypatch.setattr(resilience, "_agent_phase", _unexpected_phase)
+        monkeypatch.setattr(resilience.random, "uniform", _uniform)
         f = _Flaky(urllib.error.URLError("boom"), 1)
         assert retry(Policy(max_attempts=2, jitter="relative", jitter_span=0.5))(f) == "ok"
         assert retry_waits == [1.5]

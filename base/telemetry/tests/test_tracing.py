@@ -11,6 +11,9 @@ from typing import Any
 
 import pytest
 
+from base import config
+from base.cluster import derive
+from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.identity_inputs import allow_identity, deny_identity, machine_identity
@@ -121,14 +124,15 @@ def _collector_up(monkeypatch: pytest.MonkeyPatch):
     the exporter/init logic, not the network probe (which is covered by its own
     telemetry_otlp tests)."""
     monkeypatch.setattr(
-        "base.telemetry.tracing.endpoint_reachable",
+        tracing_mod,
+        "endpoint_reachable",
         lambda _e: True,  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
 def test_disabled_returns_early(monkeypatch: pytest.MonkeyPatch):
     """When trace_enabled=False, initialize_tracing returns None and does not init the SDK."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", False)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", False)
     assert initialize_tracing(machine=machine_identity(), home=Path(".ava")) is None
     assert tracing_mod._state["initialized"] is False
 
@@ -137,7 +141,7 @@ def _under_watermark(monkeypatch: pytest.MonkeyPatch) -> None:
     """Disk usage below the watermark: initialize_tracing's auto-degrade guard
     must not skip recording in tests (the dev disk can be >90% full and would
     otherwise make every init-path test environment-dependent)."""
-    monkeypatch.setattr("base.telemetry.tracing._disk_usage", lambda: (0.1, 100 * 1024**3))
+    monkeypatch.setattr(tracing_mod, "_disk_usage", lambda: (0.1, 100 * 1024**3))
 
 
 def test_enabled_inits_traceloop_with_otlp_exporter(
@@ -147,10 +151,11 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     pointed at the LOCAL collector as the sole exporter (no api_endpoint/api_key
     network sink), batch on, traceloop's own telemetry off, plus the instruments
     set covering Anthropic/OpenAI/LangChain/Google."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_otlp_endpoint",
+        config.settings.observability,
+        "telemetry_otlp_endpoint",
         "http://127.0.0.1:4318",
     )
 
@@ -158,7 +163,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
         return ".ava-test"
 
     monkeypatch.setattr(tracing_mod, "cluster_label", label)
-    monkeypatch.setattr("base.cluster.derive.production_identity", deny_identity)
+    monkeypatch.setattr(derive, "production_identity", deny_identity)
     _under_watermark(monkeypatch)
 
     calls: list[dict] = []
@@ -198,7 +203,7 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
 ) -> None:
     home = tmp_path / ".ava-preview"
     home.mkdir()
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
@@ -222,10 +227,10 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     home = tmp_path / ".ava"
     home.mkdir()
     (home / "lgtm-host").touch()
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
-    monkeypatch.setattr("base.cluster.derive.production_identity", allow_identity)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path / "traces")
+    monkeypatch.setattr(derive, "production_identity", allow_identity)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path / "traces")
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
     _under_watermark(monkeypatch)
@@ -254,8 +259,8 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     """If Traceloop.init() itself raises on the arm thread, the failure is
     logged (not propagated — tracing is observability, not a boot blocker),
     _initialized stays False, and the wait resolves so turns still run."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
 
     def _raise(**_kw):
@@ -264,7 +269,8 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _raise)  # pyright: ignore[reportUnknownArgumentType]
     warnings: list[tuple] = []
     monkeypatch.setattr(
-        "base.telemetry.tracing.logger.warning",
+        tracing_mod.logger,
+        "warning",
         lambda *a, **kw: warnings.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
 
@@ -284,8 +290,8 @@ def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     """One arm attempt per process: after a failed init, a later call (e.g. a
     collector-retry re-entry) must NOT run Traceloop.init again — the
     TracerWrapper singleton would fake-succeed without the instrumentors."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
 
     calls: list[int] = []
@@ -309,8 +315,8 @@ def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Second call within the same process does not re-initialize."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -327,9 +333,9 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
 ) -> None:
     """One daemon loop retries a collector-unreachable preflight, logs the
     episode once, and exits after tracing initializes."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    monkeypatch.setattr("base.telemetry.tracing.COLLECTOR_RETRY_INTERVAL_S", 0.1)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(tracing_mod, "COLLECTOR_RETRY_INTERVAL_S", 0.1)
     _under_watermark(monkeypatch)
 
     reachable = iter((False, False, True))
@@ -340,7 +346,7 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
         attempts.append(result)
         return result
 
-    monkeypatch.setattr("base.telemetry.tracing.endpoint_reachable", endpoint_reachable)
+    monkeypatch.setattr(tracing_mod, "endpoint_reachable", endpoint_reachable)
     warnings: list[str] = []
 
     def capture_warning(message: str, *_args: object, **_kwargs: object) -> None:
@@ -375,8 +381,8 @@ def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_
     """The heavy part never blocks the boot path: initialize_tracing returns
     while Traceloop.init is still pending (the mock blocks until released),
     and ensure_init_resolved() is what the use sites wait on."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
 
     entered = threading.Event()
@@ -406,8 +412,8 @@ def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp
     #1065 delta attempt 1 flake). This test only has to leave one in flight;
     the _reset_init_flag teardown has to drain it, and the setup boundary
     check turns a leftover into a deterministic failure."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
 
     release = threading.Event()
@@ -437,8 +443,8 @@ def test_arm_tracing_skips_init_when_already_resolved(
     """
     from base.telemetry.tracing import _arm_tracing
 
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -464,8 +470,8 @@ def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_p
     """
     from base.telemetry.tracing import _arm_tracing
 
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
+    monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
 
     entered = threading.Event()
@@ -519,7 +525,7 @@ def test_turn_span_waits_for_pending_arm(monkeypatch: pytest.MonkeyPatch) -> Non
     """The first-turn contract: turn_span blocks while the arm thread is
     pending and opens the root span only after the arm resolves — a span
     opened against the unset proxy tracer would be silently lost."""
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     tracing_mod._state["initialized"] = False
     release = threading.Event()
     arm = threading.Thread(target=release.wait, daemon=True, name="fake-arm")
@@ -563,7 +569,7 @@ def test_ensure_init_resolved_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> N
     def _capture_warning(*a: object, **kw: object) -> None:
         warnings.append((a, kw))
 
-    monkeypatch.setattr("base.telemetry.tracing.logger.warning", _capture_warning)
+    monkeypatch.setattr(tracing_mod.logger, "warning", _capture_warning)
 
     ensure_init_resolved()  # times out -> one warning
     ensure_init_resolved()  # remembered -> instant return, no second warning

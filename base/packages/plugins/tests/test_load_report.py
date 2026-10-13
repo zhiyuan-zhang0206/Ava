@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from base import telemetry
 from base.packages.plugins.load_report import report_plugin_load_failure
 
 
@@ -18,7 +19,7 @@ def test_load_failure_report_carries_the_traceback(
     def _broken(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("telemetry down")
 
-    monkeypatch.setattr("base.telemetry.emit", _broken)
+    monkeypatch.setattr(telemetry, "emit", _broken)
     report_plugin_load_failure("demo", RuntimeError("boom"))
 
     record = next(r for r in loguru_records if "failed to load" in r["message"])

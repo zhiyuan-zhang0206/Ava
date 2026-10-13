@@ -10,8 +10,8 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.native_process import exec_domain, group_closure
 from base.native_process import exec_domain as _process
-from base.native_process import group_closure
 
 
 def _ended(identity: psutil.Process) -> bool:
@@ -268,7 +268,7 @@ def test_confirmed_domain_does_not_reobserve_reused_numeric_group(
     def unknown(_pid: int) -> bool:
         raise AssertionError("terminal domain cannot inspect a new numeric group")
 
-    monkeypatch.setattr("base.native_process.exec_domain._process_group_has_live_member", unknown)
+    monkeypatch.setattr(exec_domain, "_process_group_has_live_member", unknown)
     monkeypatch.setattr(group_closure, "group_members", unknown)
     domain.close_confirmed(time.monotonic() + 5)
 
@@ -329,7 +329,7 @@ def _late_listing_domain(
         return [root.pid, 0x7FFFFFFF] if late else [root.pid]
 
     monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr("base.native_process.exec_domain._process_group_has_live_member", empty)
+    monkeypatch.setattr(exec_domain, "_process_group_has_live_member", empty)
     monkeypatch.setattr(group_closure, "group_members", listing)
     return root, domain, events
 
