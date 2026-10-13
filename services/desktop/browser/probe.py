@@ -101,10 +101,13 @@ _log = logging.getLogger("services.desktop.browser.probe")
 # "dead" for watchdog purposes. Matches the healthcheck timeout it replaces.
 _CDP_TIMEOUT_S = 3.0
 
-# psutil exceptions meaning "gone, or not ours to read" — the same set
-# `orphan.py` skips on, for the same reason: a process we cannot read is one we
-# cannot identify.
-_UNREADABLE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
+# Exceptions meaning "gone, or not ours to read" — the same set `orphan.py` skips
+# on, for the same reason: a process we cannot read is one we cannot identify.
+# `SystemError` is psutil's macOS C-extension leak of that mid-scan race (see
+# orphan.py); `probe_browser` also reads this set as "the inspection itself
+# failed" — evidence about nothing, answered UNAVAILABLE for the round rather
+# than a restartable DOWN (see its docstring).
+_UNREADABLE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError, SystemError)
 
 
 def cdp_url(port: int) -> str:
@@ -251,9 +254,23 @@ def probe_browser(port: int | None = None, profile: Path | None = None) -> Daemo
 
     The total wrapper (the probe contract every healthcheck obeys); `_probe_browser`
     is the probe. Fails closed: an unforeseen failure is reported down, never alive.
+
+    The one sub-class of failure that does not read as down is an `_UNREADABLE`
+    escape: the inspection itself failed, so this round holds no evidence about
+    the browser and the verdict is UNAVAILABLE — reported, never restarted (the
+    supervisor respawns only on DOWN). A restart cannot clear an inspection
+    failure anyway, because the probe and the process table it reads live
+    outside the browser unit; for this unit a false restart costs the Chrome
+    generation and every agent's open pages (2026-10-12/13: a SystemError from
+    the profile walk restarted a healthy browser twice). UNAVAILABLE is
+    single-round and self-clearing — the next ordinary round re-observes, and
+    reads DOWN normally if the browser really is gone.
     """
     try:
         return _probe_browser(port, profile)
+    except _UNREADABLE as exc:
+        _log.exception("[probe_browser] inspection failed; reporting unavailable for this round")
+        return DaemonProbe.unavailable(f"inspection failed: {type(exc).__name__}: {exc}")
     except Exception as exc:
         _log.exception("[probe_browser] probe raised unexpectedly; treating as down")
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")

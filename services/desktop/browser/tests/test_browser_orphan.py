@@ -192,3 +192,60 @@ def test_reap_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(orphan.psutil, "process_iter", lambda: iter([]))
     assert orphan.reap_cluster_chrome() == []
     assert killed == [106]
+
+
+# --- the mid-scan psutil race (2026-10-13): an unreadable process is a skip ----
+
+# The two shapes the macOS sysctl race surfaces as (root.stderr.log, 2026-10-13).
+_RACE_SYSTEM_ERROR = "<built-in function proc_cmdline> returned a result with an exception set"
+_RACE_PERMISSION_ERROR = (
+    "[Errno 13] force permission denied (originated from sysctl(KERN_PROCARGS2) -> errno 0)"
+)
+
+
+class _RacingProc(_FakeProc):
+    """A process the scan cannot read: it diverged under psutil mid-walk.
+
+    Its name reads empty and `cmdline()` surfaces that race at the C boundary as
+    `SystemError`, or as the raw `PermissionError` it really is; either shape
+    must land in `_UNREADABLE` and skip the process. A `_FakeProc`, so one
+    fabricated table can mix readable and racing processes.
+    """
+
+    def __init__(self, pid: int, exc: Exception) -> None:
+        super().__init__(pid, "", [])
+        self._exc = exc
+
+    def cmdline(self) -> list[str]:
+        raise self._exc
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        pytest.param(SystemError(_RACE_SYSTEM_ERROR), id="system-error"),
+        pytest.param(PermissionError(_RACE_PERMISSION_ERROR), id="permission-error"),
+    ],
+)
+def test_a_process_the_scan_cannot_read_is_skipped_not_fatal(
+    monkeypatch: pytest.MonkeyPatch, exc: Exception
+) -> None:
+    """The observed restart shape: one process's facts exploding mid-walk must
+    skip that process, never fail the walk — the uncaught SystemError failed the
+    whole browser probe twice, and the root health monitor answered with a
+    browser restart."""
+    procs = [_RacingProc(999, exc), _FakeProc(106, "Google Chrome", _chrome())]
+    _table(monkeypatch, procs)
+    assert orphan.find_cluster_chrome() == [106]
+
+
+def test_reap_survives_a_process_the_scan_cannot_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The teardown carries past the race too: an `ava stop` sweep over a racing
+    table must still name ours and kill its tree."""
+    procs = [
+        _RacingProc(999, SystemError(_RACE_SYSTEM_ERROR)),
+        _FakeProc(106, "chrome", _chrome()),
+    ]
+    killed = _table(monkeypatch, procs)
+    assert orphan.reap_cluster_chrome() == [106]
+    assert killed == [106]
