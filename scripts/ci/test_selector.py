@@ -28,7 +28,12 @@ from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     build_impact,
     module_files,
     plugin_modules,
+    python_files,
     unknown_diagnostics,
+)
+from scripts.structure.imports.facts import (  # noqa: E402 - standalone script
+    UNANCHORED_READ,
+    Unknown,
 )
 from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone script
 
@@ -37,9 +42,7 @@ from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone s
 # per checkout (`Checkout.global_files`).
 _GLOBAL_FILES = frozenset(
     {
-        "pyproject.toml",  # interpreter, dependencies, pytest configuration
-        "meizel.toml",  # the declared top-level packages every scan and test host derives from
-        "meizel.policy.toml",  # the allowances every manifest is checked against
+        "pyproject.toml",  # interpreter, dependencies, pytest configuration, the test hosts
         "uv.lock",
         "conftest.py",  # root bootstrap: `pytest_plugins` loads for every test
         ".python-version",
@@ -53,6 +56,12 @@ _GLOBAL_PREFIXES = (
     "deploy/",  # operational configuration that tests read by path, not by import
     "commands/",  # slash-command prompt data read at runtime and by tests by path
 )
+# The root meizel manifests are declarations: `[roles]` names the top-level packages the
+# selector classifies by, `[uses]`/`[debt.*]` and the policy feed the meizel checks (the
+# structure job runs them over the whole tree on every CI run). No runtime behavior reads
+# them, so a change selects the tests that read them (`_manifest_tests`) instead of the full
+# suite. Test hosts come from pyproject.toml, which stays global.
+_MANIFEST_FILES = frozenset({"meizel.toml", "meizel.policy.toml"})
 # Repository-level configuration and tree-wide inputs: only the tree-scan tests
 # can observe them.
 _TREE_SCAN_ONLY_FILES = frozenset(
@@ -110,6 +119,7 @@ class PathClass(StrEnum):
     CONFTEST = "conftest"  # every collectable test below its directory
     PACKAGE = "package"  # runtime consumers plus the owning package's tests
     TREE_SCAN_ONLY = "tree-scan-only"  # repository-level input: tree-scan tests only
+    MANIFEST = "manifest"  # root meizel manifest: its readers' tests and meizel's own
     FRONTEND = "frontend"  # ui/ non-Python: the frontend job owns it
     GLOBAL = "global"  # applies to every test: full suite
     DELETED = "deleted"  # absent from head: use base facts or explicitly keep FULL
@@ -267,6 +277,8 @@ def classify_path(path: str, checkout: Checkout) -> PathClass:
 
 def _repository_class(path: str, checkout: Checkout) -> PathClass:
     """The class of an existing, non-test, non-conftest path."""
+    if path in _MANIFEST_FILES:
+        return PathClass.MANIFEST
     if path in _GLOBAL_FILES or path in checkout.global_files or path.startswith(_GLOBAL_PREFIXES):
         return PathClass.GLOBAL
     if path in _TREE_SCAN_ONLY_FILES or path.startswith(_TREE_SCAN_ONLY_PREFIXES):
@@ -338,10 +350,52 @@ def _path_tests(
         return _conftest_tests(path, checkout) | runtime
     if path_class is PathClass.PACKAGE:
         return runtime | package_tests(path, checkout)
+    if path_class is PathClass.MANIFEST:
+        return runtime | _manifest_tests(path, checkout, reverse_map)
     root = path.split("/", maxsplit=1)[0]
     if path_class is PathClass.TREE_SCAN_ONLY and root in _REFERENCED_ROOTS:
         return _referencing_tests(root, checkout) | runtime
     return runtime
+
+
+def _manifest_tests(
+    manifest: str, checkout: Checkout, reverse_map: dict[str, set[str]]
+) -> set[str]:
+    """The tests that can observe a root meizel manifest: meizel's own tests, every test whose
+    source names the file, and the runtime and package tests of every source module that does.
+
+    The readers are derived, not listed: a string constant equal to the file name in any
+    Python file under the code tops, outside docstrings (a comment or docstring reads nothing)."""
+    selected = {test for test in checkout.collectable if test.startswith("meizel/")}
+    for file in python_files(checkout.repo_root):
+        relative = file.relative_to(checkout.repo_root).as_posix()
+        if not _names_file(file, manifest):
+            continue
+        if relative in checkout.collectable:
+            selected.add(relative)
+        elif not _is_test_dir_path(relative, checkout.hosts):
+            selected |= _runtime_tests(relative, reverse_map) | package_tests(relative, checkout)
+    return selected
+
+
+def _names_file(file: Path, name: str) -> bool:
+    """Whether a Python file holds ``name`` as a string constant outside a docstring."""
+    text = file.read_text(encoding="utf-8")
+    if name not in text:
+        return False
+    tree = ast.parse(text, filename=str(file))
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+    }
+    return any(
+        isinstance(node, ast.Constant) and node.value == name and id(node) not in docstrings
+        for node in ast.walk(tree)
+    )
 
 
 def _runtime_tests(path: str, reverse_map: dict[str, set[str]]) -> set[str]:
@@ -489,15 +543,20 @@ def _runtime_candidates(
     """
     impact = build_impact(checkout.repo_root, checkout.collectable)
     reverse_map = impact.tests_by_input
-    diagnostics = list(unknown_diagnostics(impact, tree="head"))
-    tainted = _unbounded_tests(impact)
+    data_changed = any(_is_data_change(path) for path in classes)
+    diagnostics = list(
+        unknown_diagnostics(_blocking(impact, data_changed=data_changed), tree="head")
+    )
+    tainted = _unbounded_tests(impact, data_changed=data_changed)
     selected = _owner_tests(classes, checkout, reverse_map)
     if base_ref is not None:
         with base_checkout(checkout.repo_root, base_ref) as base_root:
             base = load_checkout(base_root)
             old_impact = build_impact(base_root, base.collectable & checkout.collectable)
-            diagnostics.extend(unknown_diagnostics(old_impact, tree="base"))
-            tainted.update(_unbounded_tests(old_impact))
+            diagnostics.extend(
+                unknown_diagnostics(_blocking(old_impact, data_changed=data_changed), tree="base")
+            )
+            tainted.update(_unbounded_tests(old_impact, data_changed=data_changed))
             old_classes = {path: classify_path(path, base) for path in classes}
             old_forced = _forced_full(old_classes, full_estimate)
             if old_forced is not None:
@@ -529,9 +588,29 @@ def _runtime_candidates(
     return selected, tainted, len(reverse_map), tuple(sorted(set(diagnostics)))
 
 
-def _unbounded_tests(impact: Impact) -> set[str]:
+def _is_data_change(path: str) -> bool:
+    """Whether a changed path is a data file a test could read: anything but Python source and
+    the meizel manifests (declarations that no runtime behavior reads)."""
+    return not path.endswith(".py") and Path(path).name not in _MANIFEST_FILES
+
+
+def _blocking(impact: Impact, *, data_changed: bool) -> tuple[Unknown, ...]:
+    """The gaps that keep a test from being certified for this change.
+
+    A load the analysis cannot resolve can run any code, so it always blocks. A read whose path
+    cannot be anchored can only matter to a data file (Python sources reach tests through the
+    import graph, and the tests that read source text are the pinned tree-scan family), so it
+    blocks only when the change includes one."""
+    return tuple(item for item in impact.unknown if data_changed or item.reason != UNANCHORED_READ)
+
+
+def _unbounded_tests(impact: Impact, *, data_changed: bool) -> set[str]:
     """Tests whose runtime graph reaches an input the analysis could not bound."""
-    return {test for item in impact.unknown for test in impact.tests_by_input.get(item.path, ())}
+    return {
+        test
+        for item in _blocking(impact, data_changed=data_changed)
+        for test in impact.tests_by_input.get(item.path, ())
+    }
 
 
 def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> SelectionResult | None:

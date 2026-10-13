@@ -24,6 +24,10 @@ from . import (
 __all__ = ["Evidence", "Fact", "FactKind", "FileExecution", "ResourceRead", "Unknown", "collect"]
 
 
+# The reason of a read whose path is tied to neither the checkout nor an outside root.
+UNANCHORED_READ = "Resource read has no proven repository or external path anchor"
+
+
 class FactKind(StrEnum):
     IMPORT = "import"
     DYNAMIC_IMPORT = "dynamic-import"
@@ -675,11 +679,7 @@ class _Collector(ast.NodeVisitor):
             return
         if self.scope.unmodified_origin(target) == "os.devnull":
             return
-        self.gap(
-            node,
-            "Resource read has no proven repository or external path anchor",
-            FactKind.RESOURCE,
-        )
+        self.gap(node, UNANCHORED_READ, FactKind.RESOURCE)
 
     def _read_operation(self, node: ast.Call, path: str) -> None:
         if Path(path).is_absolute() or ".." in Path(path).parts:

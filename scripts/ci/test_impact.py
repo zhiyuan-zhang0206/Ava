@@ -9,13 +9,14 @@ import subprocess
 import tarfile
 import tempfile
 from collections import deque
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from scripts.structure.imports.facts import FactKind, Unknown, collect
+from meizel.allowances import POLICY, Policy, parse
+from scripts.structure.imports.facts import UNANCHORED_READ, FactKind, Unknown, collect
 from scripts.structure.imports.fixture_scopes import declarations
 from scripts.structure.placement import CODE_TOPS, ModuleIndex
 
@@ -33,13 +34,17 @@ _MODULE_FACTS = frozenset(
 
 @dataclass(frozen=True)
 class Impact:
-    """Unpruned facts projected onto collectable tests, plus incomplete evidence."""
+    """Unpruned facts projected onto collectable tests, plus incomplete evidence.
+
+    ``unknown`` holds the gaps no declaration covers: a file the policy lists under ``[loads]``
+    or (outside test directories) ``[external]`` has declared its dynamic loads."""
 
     tests_by_input: dict[str, set[str]]
     unknown: tuple[Unknown, ...]
 
 
-def _python_files(root: Path) -> Iterator[Path]:
+def python_files(root: Path) -> Iterator[Path]:
+    """Every .py file under the code tops, in stable order, plus the root conftest."""
     for top in _TOPS:
         directory = root / top
         if directory.is_dir():
@@ -132,12 +137,44 @@ def plugin_modules(tree: ast.Module) -> tuple[str, ...]:
     return tuple(modules)
 
 
+def _policy(root: Path) -> Policy:
+    """The checkout's meizel policy: the declared dynamic loads and external capabilities."""
+    path = root / POLICY
+    if not path.is_file():
+        return Policy()
+    policy, problems = parse(path.read_text(encoding="utf-8"))
+    if problems:
+        raise ValueError(f"{POLICY} is invalid: {problems[0]}")
+    return policy
+
+
+# `importlib.util.find_spec` asks whether a module exists and executes none of it, so an
+# unbounded target is an existence probe, not an unbounded load.
+EXISTENCE_PROBE = "importlib.util.find_spec target is not bounded literal text"
+
+
+def _remaining_gaps(rel: str, gaps: tuple[Unknown, ...], policy: Policy) -> tuple[Unknown, ...]:
+    """The gaps of one file that its declarations do not account for.
+
+    ``[loads]`` (dynamic loads of named directories, which become dependency edges) and
+    ``[external]`` (content that is discovered at run time, with no edge) cover every gap
+    except an unanchored read, which is not a load. ``[external]`` is honored for sources
+    only: a test listed there may load an in-repository file by path, so it stays unbounded.
+    An existence probe (``EXISTENCE_PROBE``) loads nothing and is never a gap."""
+    gaps = tuple(gap for gap in gaps if gap.reason != EXISTENCE_PROBE)
+    in_tests = "tests" in rel.split("/")[:-1]
+    if rel in policy.loads or (rel in policy.external and not in_tests):
+        return tuple(gap for gap in gaps if gap.reason == UNANCHORED_READ)
+    return gaps
+
+
 def build_impact(root: Path, tests: frozenset[str]) -> Impact:
     """Follow every runtime import/resource fact through source, helpers and fixtures."""
+    policy = _policy(root)
     index = ModuleIndex(root)
     incomplete: dict[str, tuple[Unknown, ...]] = {}
     edges = _fixture_edges(root, tests, index, incomplete)
-    for file in _python_files(root):
+    for file in python_files(root):
         rel = file.relative_to(root).as_posix()
         tree = ast.parse(file.read_text(encoding="utf-8"), filename=rel)
         evidence = collect(tree, rel, index, tops=_TOPS)
@@ -152,7 +189,8 @@ def build_impact(root: Path, tests: frozenset[str]) -> Impact:
         dependencies.update(
             file for module in plugin_modules(tree) for file in module_files(module, index)
         )
-        incomplete[rel] = evidence.unknown
+        dependencies.update(policy.loads.get(rel, ()))
+        incomplete[rel] = _remaining_gaps(rel, evidence.unknown, policy)
 
     reverse = _tests_by_input(edges, tests)
     unknown = {item for dependency in reverse for item in incomplete.get(dependency, ())}
@@ -222,9 +260,8 @@ def base_checkout(root: Path, ref: str) -> Generator[Path, None, None]:
         yield base
 
 
-def unknown_diagnostics(impact: Impact, *, tree: str) -> tuple[str, ...]:
+def unknown_diagnostics(items: Iterable[Unknown], *, tree: str) -> tuple[str, ...]:
     """Stable, visible reasons why the runtime graph cannot certify a subset."""
     return tuple(
-        f"{tree}:{item.path}:{item.line}: {item.reason}: {item.expression}"
-        for item in impact.unknown
+        f"{tree}:{item.path}:{item.line}: {item.reason}: {item.expression}" for item in items
     )
