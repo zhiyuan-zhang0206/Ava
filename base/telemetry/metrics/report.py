@@ -95,7 +95,7 @@ def render_pctiles(title: str, p: Pctiles) -> str:
     )
 
 
-def _render_syntax_fix(data: dict[str, Any]) -> str:
+def render_syntax_fix(data: dict[str, Any]) -> str:
     text = render_counts(
         "syntax_fix trigger counts (per code block):", data["trigger_counts"], data["code_blocks"]
     )
@@ -109,7 +109,7 @@ def _render_syntax_fix(data: dict[str, Any]) -> str:
     return text
 
 
-def _render_exec(data: dict[str, Any]) -> str:
+def render_exec(data: dict[str, Any]) -> str:
     text = (
         f"exec: {data['exec_ok']} ok / {data['exec_failed']} failed  (success {data['success_rate_pct']}%)\n"
         + render_pctiles("executed-code length (chars):", data["code_len_chars"])
@@ -120,7 +120,7 @@ def _render_exec(data: dict[str, Any]) -> str:
     return text
 
 
-def _render_llm_turns(data: dict[str, Any]) -> str:
+def render_llm_turns(data: dict[str, Any]) -> str:
     text = (
         f"llm: {data['llm_calls']} calls  in={data['tokens_in']} out={data['tokens_out']} "
         f"cached={data['tokens_cached']} reason={data['tokens_reasoning']}\n"
@@ -139,7 +139,7 @@ def _render_llm_turns(data: dict[str, Any]) -> str:
     return text
 
 
-def _render_agent_activity(data: dict[str, Any]) -> str:
+def render_agent_activity(data: dict[str, Any]) -> str:
     text = (
         f"agents: {data['distinct_agents']} distinct  "
         f"{data['spawns_total']} spawns ({data['subagent_spawns']} subagents)  {data['idle_halts']} idle halts\n"
@@ -152,7 +152,7 @@ def _render_agent_activity(data: dict[str, Any]) -> str:
     return text
 
 
-def _render_plugin_activation(data: dict[str, Any]) -> str:
+def render_plugin_activation(data: dict[str, Any]) -> str:
     """Which plugin injection surfaces actually fired in the window.
 
     Philosophy §6 asks a shim to measure its own obsolescence, so the block
@@ -176,7 +176,7 @@ def _render_plugin_activation(data: dict[str, Any]) -> str:
     return text
 
 
-def _fix_kinds(fixes: str) -> list[str]:
+def fix_kinds(fixes: str) -> list[str]:
     """Parse a syntax_fix `fixes` payload, e.g. "ruff,chinese_punct(3)".
 
     Strips the per-block `(n)` count suffix, yielding the kind name only.

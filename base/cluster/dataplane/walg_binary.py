@@ -22,7 +22,7 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
-from base.cluster.dataplane.runtime_binaries import _download, runtime_root
+from base.cluster.dataplane.runtime_binaries import download, runtime_root
 from base.log import logger
 from base.native_process.child_env import daemon_process_env
 
@@ -32,7 +32,7 @@ _RELEASE_BASE = "https://github.com/wal-g/wal-g/releases/download"
 
 # platform key -> (release asset, pinned sha256 of the asset). The asset is the bare
 # executable (61,330,280 bytes), checked against the digest the release publishes.
-_WALG_ARTIFACTS: dict[str, tuple[str, str]] = {
+WALG_ARTIFACTS: dict[str, tuple[str, str]] = {
     "linux-x86_64": (
         "wal-g-pg-24.04-amd64",
         "8015836f246a978f27b31a2462eac7765312558ae5b11ac033322b555abf9e22",
@@ -45,7 +45,7 @@ _VERSION_PROBE_TIMEOUT_S = 30
 def _artifact() -> tuple[str, str]:
     system, machine = platform.system(), platform.machine()
     if system == "Linux" and machine in ("x86_64", "amd64"):
-        return _WALG_ARTIFACTS["linux-x86_64"]
+        return WALG_ARTIFACTS["linux-x86_64"]
     raise RuntimeError(f"no pinned wal-g artifact for {system.lower()}/{machine}")
 
 
@@ -124,7 +124,7 @@ def ensure_walg_binary() -> Path:
 
     url = f"{_RELEASE_BASE}/{WALG_VERSION}/{asset}"
     logger.info(f"[runtime] fetching wal-g {WALG_VERSION} from {url}")
-    blob = _download(url, what="wal-g")
+    blob = download(url, what="wal-g")
     actual = hashlib.sha256(blob).hexdigest()
     if actual != expected:
         raise RuntimeError(

@@ -102,7 +102,7 @@ class CodingSessionSocketError(RuntimeError):
     """No private, short-enough directory is available for an app-server socket."""
 
 
-def _private_socket_dir(*, base: Path | None = None) -> Path:
+def private_socket_dir(*, base: Path | None = None) -> Path:
     """``<short tmp>/ava-<uid>``: a real directory this user owns, mode 0700.
 
     A world-writable parent lets anyone pre-create the name, so a directory
@@ -140,7 +140,7 @@ def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
     A path that would still not fit ``sun_path`` fails here, before any launch.
     """
     name = f"codex-app-server.{key_digest(key)[:12]}-{generation.replace('-', '')[:8]}.sock"
-    path = _private_socket_dir() / name
+    path = private_socket_dir() / name
     size = len(os.fsencode(path))
     # sockaddr_un.sun_path includes its terminating NUL: 104 bytes on macOS, 108 on Linux.
     sun_path_bytes = 104 if is_macos() else 108

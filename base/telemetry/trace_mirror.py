@@ -27,14 +27,14 @@ from base.log import logger
 from base.paths import traces_dir
 
 __all__ = [
-    "_disk_usage",
-    "_disk_watermark_exceeded",
-    "_enforce_dir_cap",
-    "_gzip_old_mirror",
-    "_mirror_size",
-    "_prune_old_mirror",
+    "disk_usage",
+    "disk_watermark_exceeded",
+    "enforce_dir_cap",
+    "gzip_old_mirror",
     "mirror_day",
+    "mirror_size",
     "mirror_sort_key",
+    "prune_old_mirror",
 ]
 
 # Mirror filenames (sidecar file exporter layout since task #1266):
@@ -49,7 +49,7 @@ __all__ = [
 #                                          one-off): the collector keeps appending
 #                                          to the renamed inode until its next size
 #                                          rotation, then a fresh spans.jsonl is born
-#   <any of the above>.gz                — compressed by `_gzip_old_mirror` once the
+#   <any of the above>.gz                — compressed by `gzip_old_mirror` once the
 #                                          file stops being written; consumers
 #                                          (`ava trace ship`, inspect-a-trace) read
 #                                          these transparently
@@ -92,7 +92,7 @@ def _mirror_epoch(path: Path) -> int:
     return 0
 
 
-def _prune_old_mirror(retention_days: int) -> None:
+def prune_old_mirror(retention_days: int) -> None:
     """Delete mirror files whose day stamp is older than retention_days.
 
     Recording is always-on but shipping may be off, so the mirror grows
@@ -121,7 +121,7 @@ def _prune_old_mirror(retention_days: int) -> None:
         )
 
 
-def _gzip_old_mirror(grace_seconds: int = 60) -> int:
+def gzip_old_mirror(grace_seconds: int = 60) -> int:
     """gzip rotated (non-active) mirror files; return the number compressed.
 
     The collector's file exporter cannot compress its own rotated backups
@@ -195,13 +195,13 @@ def mirror_sort_key(p: Path) -> tuple[int, int]:
     return (2**31, 0)
 
 
-def _mirror_size(p: Path) -> int:
+def mirror_size(p: Path) -> int:
     """Size of a mirror file, 0 if it vanished between glob and stat.
 
     The traces dir is shared by every agent process on the host; a peer's
     prune can unlink a file this process already globbed, and a bare stat
     would then raise FileNotFoundError — out of the agent boot path, which
-    calls `_enforce_dir_cap` with no try/except (a peer pruning at the same
+    calls `enforce_dir_cap` with no try/except (a peer pruning at the same
     moment could kill an agent start).
     """
     try:
@@ -210,7 +210,7 @@ def _mirror_size(p: Path) -> int:
         return 0
 
 
-def _enforce_dir_cap(max_mb: int) -> int:
+def enforce_dir_cap(max_mb: int) -> int:
     """Delete oldest mirror files until the traces directory fits under `max_mb`.
 
     Iterates oldest-first by day stamp + epoch order (`mirror_sort_key`).
@@ -223,12 +223,12 @@ def _enforce_dir_cap(max_mb: int) -> int:
         return 0
     cap_bytes = max_mb * 1024 * 1024
     files = sorted(traces_dir().glob("spans*.jsonl*"), key=mirror_sort_key)
-    total = sum(_mirror_size(p) for p in files)
+    total = sum(mirror_size(p) for p in files)
     removed = 0
     for p in files:
         if total <= cap_bytes:
             break
-        total -= _mirror_size(p)
+        total -= mirror_size(p)
         p.unlink(missing_ok=True)
         removed += 1
     if removed:
@@ -241,7 +241,7 @@ def _enforce_dir_cap(max_mb: int) -> int:
     return removed
 
 
-def _disk_usage() -> tuple[float, int] | None:
+def disk_usage() -> tuple[float, int] | None:
     """(usage fraction, free bytes) of the traces dir's data disk.
 
     The mirror is written to $AVA_HOME/traces, so the data disk is the one that
@@ -255,12 +255,12 @@ def _disk_usage() -> tuple[float, int] | None:
     return usage.used / usage.total, usage.free
 
 
-def _disk_watermark_exceeded(watermark: float) -> bool:
+def disk_watermark_exceeded(watermark: float) -> bool:
     """True when the data disk's usage fraction exceeds the watermark.
 
     `watermark >= 1.0` disables the guard (the fraction can never exceed 1.0).
     """
     if watermark >= 1.0:
         return False
-    usage = _disk_usage()
+    usage = disk_usage()
     return usage is not None and usage[0] > watermark

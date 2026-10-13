@@ -37,7 +37,7 @@ def test_closure_restores_six_native_owners(
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import reap_impersonations
     from base.db import pool
-    from base.deploy.maintenance.cohort import _classify, _RuntimeRow
+    from base.deploy.maintenance.cohort import RuntimeRow, _classify
     from base.deploy.maintenance.state import MaintenanceHold
 
     host = uuid4()
@@ -106,7 +106,7 @@ def test_closure_restores_six_native_owners(
         "WHERE id=ANY(%s)",
         (owners,),
     ).fetchall()
-    hold = _classify([_RuntimeRow(*row) for row in rows], MaintenanceHold(), host, set())
+    hold = _classify([RuntimeRow(*row) for row in rows], MaintenanceHold(), host, set())
     assert set(hold.commands) == set(owners)
 
 

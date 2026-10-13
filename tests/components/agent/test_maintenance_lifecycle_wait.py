@@ -575,7 +575,7 @@ def test_parked_claim_guards_agree_on_waitability(
 ) -> None:
     """Both parked guards carry the same rule: ordinary work waits, maintenance refuses.
 
-    ``_require_resolved`` sits behind ``_refuse_inflight_lifecycle`` as the
+    ``require_resolved`` sits behind ``refuse_inflight_lifecycle`` as the
     second guard, and preparation's retry decision depends on the two staying
     consistent (task #4013).
     """
@@ -588,11 +588,11 @@ def test_parked_claim_guards_agree_on_waitability(
     hold = MaintenanceHold(parked=(agent,))
 
     with pytest.raises(cohort.LifecycleCollisionError) as collision_guard:
-        cohort._refuse_inflight_lifecycle(
+        cohort.refuse_inflight_lifecycle(
             db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
         )
     with pytest.raises(cohort.LifecycleCollisionError) as resolved_guard:
-        cohort._require_resolved(db_conn, hold)
+        cohort.require_resolved(db_conn, hold)
     assert collision_guard.value.waitable and resolved_guard.value.waitable
     assert collision_guard.value.agent_ids == resolved_guard.value.agent_ids == (agent,)
 
@@ -610,9 +610,9 @@ def test_parked_claim_guards_agree_on_waitability(
     db_conn.commit()
 
     with pytest.raises(cohort.LifecycleCollisionError) as collision_refused:
-        cohort._refuse_inflight_lifecycle(
+        cohort.refuse_inflight_lifecycle(
             db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
         )
     with pytest.raises(cohort.LifecycleCollisionError) as resolved_refused:
-        cohort._require_resolved(db_conn, hold)
+        cohort.require_resolved(db_conn, hold)
     assert not collision_refused.value.waitable and not resolved_refused.value.waitable

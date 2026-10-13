@@ -34,8 +34,8 @@ import pytest
 import yaml
 
 from base.events.contract import EVENTS, payload_keys, telemetry_events
-from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
-from base.telemetry.otlp.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
+from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
+from base.telemetry.otlp.telemetry_otlp_metrics import strip_unit_suffix, unit_for
 from tests.scripts.test_alert_rules_signals import SIGNALS
 
 _RULES = (
@@ -523,7 +523,7 @@ def _metric_kind(event: str, field: str) -> str | None:
     """The instrument kind for one payload field: the disposition override,
     then the runtime-kind pins, else the int->Counter / float->Histogram
     declared-type default. None = no metric."""
-    override = _METRIC_DISPOSITION.get((event, field), "default")
+    override = METRIC_DISPOSITION.get((event, field), "default")
     if override != "default":
         return override
     if (event, field) in _RUNTIME_KIND_FIELDS:
@@ -548,8 +548,8 @@ def _rendered_names(event: str, field: str) -> set[str]:
     kind = _metric_kind(event, field)
     if kind is None:
         return set()
-    base = f"ava_{event}_{_strip_unit_suffix(field)}"
-    unit = _unit_for(field)
+    base = f"ava_{event}_{strip_unit_suffix(field)}"
+    unit = unit_for(field)
     if kind == "gauge":
         return {base + _UNIT_RENDER[unit]}
     suffix = "" if unit == "1" else _UNIT_RENDER[unit]

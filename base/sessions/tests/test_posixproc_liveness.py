@@ -17,7 +17,7 @@ from base.sessions import posixproc
 
 
 def test_process_is_live_false_for_zombie(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_process_is_live counts a zombie as dead awaiting its parent's reap. The
+    """process_is_live counts a zombie as dead awaiting its parent's reap. The
     graceful verdict must not wait on init/launchd reap latency (macmini
     failure on #1301; #1303 class)."""
     import types
@@ -25,7 +25,7 @@ def test_process_is_live_false_for_zombie(monkeypatch: pytest.MonkeyPatch) -> No
     proc = types.SimpleNamespace()
     proc.is_running = lambda: True
     proc.status = lambda: psutil.STATUS_ZOMBIE
-    assert posixproc._process_is_live(proc) is False  # type: ignore[arg-type]
+    assert posixproc.process_is_live(proc) is False  # type: ignore[arg-type]
 
 
 def _group_exists(_pgid: int, _sig: int) -> None:

@@ -84,23 +84,23 @@ from base.telemetry.otlp.telemetry_otlp_gauges import (
     observable_gauge_callback,
     record_gauge,
 )
-from base.telemetry.otlp.telemetry_otlp_logs import _emit_log_record
+from base.telemetry.otlp.telemetry_otlp_logs import emit_log_record
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    _EVENT_LOOP_LAG_BUCKETS_MS as _EVENT_LOOP_LAG_BUCKETS_MS,
+    EVENT_LOOP_LAG_BUCKETS_MS as EVENT_LOOP_LAG_BUCKETS_MS,
 )
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    _LLM_LATENCY_BUCKETS_MS as _LLM_LATENCY_BUCKETS_MS,
+    LLM_LATENCY_BUCKETS_MS as LLM_LATENCY_BUCKETS_MS,
 )
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    _build_providers,
-    _strip_unit_suffix,
-    _unit_for,
+    EventDimensionResourceExporter as EventDimensionResourceExporter,
 )
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    _EventDimensionResourceExporter as _EventDimensionResourceExporter,
+    build_providers,
+    strip_unit_suffix,
+    unit_for,
 )
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    _metric_views as _metric_views,
+    metric_views as metric_views,
 )
 from base.telemetry.otlp.telemetry_otlp_worker import OtlpWorker
 
@@ -144,7 +144,7 @@ _MAX_METRIC_ATTR_CHARS = 64
 #     (OTel Counter.add takes floats; Prometheus counters are float64), so
 #     `increase(ava_llm_usage_cost_usd_total[...])` is the exact windowed
 #     spend at usage-time rates.
-_METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
+METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("event_log_drop", "last_dropped_at"): "gauge",
     ("llm_usage", "price_miss"): None,
     ("llm_usage", "price_hit"): None,
@@ -297,7 +297,7 @@ class OtlpBackend:
 
     ``providers`` is the test seam — an injected (LoggerProvider,
     MeterProvider) pair wired to in-memory exporters; production builds the
-    real OTLP/HTTP pair from settings (``_build_providers``).
+    real OTLP/HTTP pair from settings (``build_providers``).
     """
 
     def __init__(
@@ -586,7 +586,7 @@ class OtlpBackend:
                         "otlp_backend_disabled", reason="endpoint not answering", endpoint=endpoint
                     )
                     return False
-                worker.logs, worker.metrics = _build_providers(
+                worker.logs, worker.metrics = build_providers(
                     endpoint,
                     keep_logs=lambda provider: setattr(worker, "logs", provider),
                     keep_reader=lambda reader: setattr(worker, "metric_reader", reader),
@@ -620,7 +620,7 @@ class OtlpBackend:
         The mapping body lives in `base.telemetry.otlp.telemetry_otlp_logs` (split for the
         800-line ceiling); runs on the worker thread (or flush()).
         """
-        _emit_log_record(self._logs, event)
+        emit_log_record(self._logs, event)
 
     def _record_metrics(self, event: Event) -> None:
         """Map a telemetry event's numeric payload fields to OTLP instruments.
@@ -630,7 +630,7 @@ class OtlpBackend:
           a measurement.
         - int payload field -> Counter (token counts, event counts: things you
           sum). float -> Histogram (latencies/durations: things you
-          percentile). `_METRIC_DISPOSITION` overrides per field: a float that
+          percentile). `METRIC_DISPOSITION` overrides per field: a float that
           is really a sum (cost_usd) records as a Counter; an absolute state
           (resolution_status) records an ObservableGauge; a rate snapshot
           (price_*) records nothing.
@@ -647,7 +647,7 @@ class OtlpBackend:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
             default_kind = "counter" if isinstance(value, int) else "histogram"
-            kind = _METRIC_DISPOSITION.get((event.event_name, key), default_kind)
+            kind = METRIC_DISPOSITION.get((event.event_name, key), default_kind)
             if kind is None:
                 continue
             inst = self._instrument(event.event_name, key, kind)
@@ -703,18 +703,18 @@ class OtlpBackend:
         inst = self._instruments.get(key)
         if inst is not None:
             return inst
-        name = f"ava_{event_name}_{_strip_unit_suffix(field)}"
+        name = f"ava_{event_name}_{strip_unit_suffix(field)}"
         try:
             if kind == "counter":
                 inst = self._meter.create_counter(
                     name,
-                    unit=_unit_for(field),
+                    unit=unit_for(field),
                     description=f"{event_name}.{field} — OTLP-mapped from the unified event stream",
                 )
             elif kind == "histogram":
                 inst = self._meter.create_histogram(
                     name,
-                    unit=_unit_for(field),
+                    unit=unit_for(field),
                     description=f"{event_name}.{field} — OTLP-mapped from the unified event stream",
                 )
             else:
@@ -725,7 +725,7 @@ class OtlpBackend:
                             self._gauge_values, self._gauge_lock, (event_name, field)
                         )
                     ],
-                    unit=_unit_for(field),
+                    unit=unit_for(field),
                     description=f"{event_name}.{field} — OTLP-mapped absolute state from the unified event stream",
                 )
         except Exception as exc:  # report once per pair, skip the pair
@@ -743,12 +743,12 @@ class OtlpBackend:
         report_no_pipeline(f"[otlp-exporter] {message}")
 
 
-def _metrics_resource() -> Any:
+def metrics_resource() -> Any:
     """Build the metric resource through the legacy monkeypatch seam."""
     original_cluster_label = telemetry_otlp_metrics.cluster_label
     telemetry_otlp_metrics.cluster_label = cluster_label
     try:
-        return telemetry_otlp_metrics._metrics_resource()
+        return telemetry_otlp_metrics.metrics_resource()
     finally:
         telemetry_otlp_metrics.cluster_label = original_cluster_label
 

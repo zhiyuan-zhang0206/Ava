@@ -113,7 +113,7 @@ def _reset_init_flag(monkeypatch: pytest.MonkeyPatch):
     )
 
 
-def _wait_init_resolved(timeout: float = 5.0) -> None:
+def wait_init_resolved(timeout: float = 5.0) -> None:
     """Join the background arming pass: the armed-path tests assert on state
     the arm thread writes, so they must wait for it (deterministic, not a
     sleep — the event is set in the thread's finally)."""
@@ -141,11 +141,11 @@ def test_disabled_returns_early(monkeypatch: pytest.MonkeyPatch):
     assert tracing_mod._state["initialized"] is False
 
 
-def _under_watermark(monkeypatch: pytest.MonkeyPatch) -> None:
+def under_watermark(monkeypatch: pytest.MonkeyPatch) -> None:
     """Disk usage below the watermark: initialize_tracing's auto-degrade guard
     must not skip recording in tests (the dev disk can be >90% full and would
     otherwise make every init-path test environment-dependent)."""
-    monkeypatch.setattr(tracing_mod, "_disk_usage", lambda: (0.1, 100 * 1024**3))
+    monkeypatch.setattr(tracing_mod, "disk_usage", lambda: (0.1, 100 * 1024**3))
 
 
 def test_enabled_inits_traceloop_with_otlp_exporter(
@@ -168,13 +168,13 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
 
     monkeypatch.setattr(tracing_mod, "cluster_label", label)
     monkeypatch.setattr(derive, "production_identity", deny_identity)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
 
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing(machine=machine_identity(), home=Path(".ava"))
-    _wait_init_resolved()
+    wait_init_resolved()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
     kw = calls[0]
@@ -237,7 +237,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path / "traces")
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
     calls: list[dict[str, object]] = []
 
     def record_init(**kw: object) -> None:
@@ -247,7 +247,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
 
     machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
     initialize_tracing(machine=machine, home=home)
-    _wait_init_resolved()
+    wait_init_resolved()
 
     assert len(calls) == 1
     assert calls[0]["resource_attributes"] == {
@@ -265,7 +265,7 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     _initialized stays False, and the wait resolves so turns still run."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
 
     def _raise(**_kw):
         raise RuntimeError("boom: init failed")
@@ -281,7 +281,7 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     initialize_tracing(
         machine=machine_identity(), home=Path(".ava")
     )  # must not raise: the failure is the arm thread's
-    _wait_init_resolved()
+    wait_init_resolved()
 
     assert tracing_mod._state["initialized"] is False
     assert tracing_mod._state["arm_failed"] is True
@@ -296,7 +296,7 @@ def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     TracerWrapper singleton would fake-succeed without the instrumentors."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
 
     calls: list[int] = []
 
@@ -307,7 +307,7 @@ def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _fail_then_record)
 
     initialize_tracing(machine=machine_identity(), home=Path(".ava"))
-    _wait_init_resolved()
+    wait_init_resolved()
     assert tracing_mod._state["arm_failed"] is True
 
     initialize_tracing(
@@ -321,13 +321,13 @@ def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_pat
     """Second call within the same process does not re-initialize."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing(machine=machine_identity(), home=Path(".ava"))
     initialize_tracing(machine=machine_identity(), home=Path(".ava"))
-    _wait_init_resolved()
+    wait_init_resolved()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
 
@@ -340,7 +340,7 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     monkeypatch.setattr(tracing_mod, "COLLECTOR_RETRY_INTERVAL_S", 0.1)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
 
     reachable = iter((False, False, True))
     attempts: list[bool] = []
@@ -372,7 +372,7 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     assert tracing_mod._state["retry_thread"] is retry_thread
     assert initialized.wait(timeout=1.0)
     retry_thread.join(timeout=0.5)
-    _wait_init_resolved()
+    wait_init_resolved()
 
     assert attempts == [False, False, True]
     assert warnings == ["trace recording disabled — local OTel collector not answering"]
@@ -387,7 +387,7 @@ def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_
     and ensure_init_resolved() is what the use sites wait on."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
 
     entered = threading.Event()
     release = threading.Event()
@@ -405,7 +405,7 @@ def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_
     assert tracing_mod._state["initialized"] is False  # boot already returned; init pending
 
     release.set()
-    _wait_init_resolved()
+    wait_init_resolved()
     assert tracing_mod._state["initialized"] is True
 
 
@@ -418,7 +418,7 @@ def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp
     check turns a leftover into a deterministic failure."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
 
     release = threading.Event()
 
@@ -431,7 +431,7 @@ def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp
     arm_thread = tracing_mod._state["arm_thread"]
     assert isinstance(arm_thread, threading.Thread)
     assert arm_thread.is_alive()
-    # Intentionally no _wait_init_resolved(): the fixture teardown must drain.
+    # Intentionally no wait_init_resolved(): the fixture teardown must drain.
 
 
 def test_arm_tracing_skips_init_when_already_resolved(
@@ -449,7 +449,7 @@ def test_arm_tracing_skips_init_when_already_resolved(
 
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
@@ -476,7 +476,7 @@ def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
 
     entered = threading.Event()
     release = threading.Event()
@@ -567,7 +567,7 @@ def test_ensure_init_resolved_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> N
     arm = threading.Thread(target=release.wait, daemon=True, name="fake-arm")
     tracing_mod._state["arm_thread"] = arm
     arm.start()
-    monkeypatch.setattr(tracing_mod, "_INIT_RESOLVED_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(tracing_mod, "INIT_RESOLVED_TIMEOUT_S", 0.05)
     warnings: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _capture_warning(*a: object, **kw: object) -> None:
@@ -591,7 +591,7 @@ def test_ensure_init_resolved_bounded_wait(monkeypatch: pytest.MonkeyPatch) -> N
 # --- turn_span placeholder-root export timing (#1964) ------------------------------
 
 
-def _capture_otlp_json_posts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bytes, dict]]:
+def capture_otlp_json_posts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bytes, dict]]:
     """Route `httpx.post` into a list so exported OTLP/JSON batches can be decoded."""
     posts: list[tuple[str, bytes, dict]] = []
 
@@ -603,7 +603,7 @@ def _capture_otlp_json_posts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str,
     return posts
 
 
-def _spans_received(posts: list[tuple[str, bytes, dict]]) -> list[Any]:
+def spans_received(posts: list[tuple[str, bytes, dict]]) -> list[Any]:
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
         ExportTraceServiceRequest,
     )
@@ -618,7 +618,7 @@ def _spans_received(posts: list[tuple[str, bytes, dict]]) -> list[Any]:
     ]
 
 
-def _assert_turn_root_exported_at_start(spans: list[Any]) -> Any:
+def assert_turn_root_exported_at_start(spans: list[Any]) -> Any:
     assert len(spans) == 1, f"root must export at turn start, got {len(spans)}"
     root = spans[0]
     assert root.name == "ava-agent-7"
@@ -629,7 +629,7 @@ def _assert_turn_root_exported_at_start(spans: list[Any]) -> Any:
     return root
 
 
-def _assert_root_once_with_child_parented_under_it(spans: list[Any], root: Any) -> None:
+def assert_root_once_with_child_parented_under_it(spans: list[Any], root: Any) -> None:
     roots = [s for s in spans if not s.parent_span_id]
     assert len(roots) == 1, f"root must be exported exactly once, got {len(roots)}"
     assert roots[0].span_id == root.span_id
@@ -645,7 +645,7 @@ def _assert_root_once_with_child_parented_under_it(spans: list[Any], root: Any) 
 # --- turn_span -----------------------------------------------------------
 
 
-class _FakeSpan:
+class FakeSpan:
     def __init__(self):
         self.attributes: dict[str, object] = {}
         self.ended = False
@@ -657,8 +657,8 @@ class _FakeSpan:
         self.ended = True
 
 
-class _FakeTracer:
-    def __init__(self, span: _FakeSpan):
+class FakeTracer:
+    def __init__(self, span: FakeSpan):
         self._span = span
         self.opened: list[str] = []
 
@@ -677,7 +677,7 @@ class _FakeTracer:
 # --- claim idle-wait span -------------------------------------------------
 
 
-class _NodeFakeSpan:
+class NodeFakeSpan:
     """Fake of a LangChain node span (the SDK surface claim_idle_wait_span
     touches: name, is_recording, end)."""
 
@@ -696,7 +696,7 @@ class _NodeFakeSpan:
 # --- trace v2: content stripping --------------------------------------------
 
 
-def _otlp_with_attrs(attrs: dict[str, str]) -> dict:
+def otlp_with_attrs(attrs: dict[str, str]) -> dict:
     """Build a minimal OTLP export request with one span carrying the given
     attributes (keys -> string values)."""
     return {
@@ -723,4 +723,4 @@ def _otlp_with_attrs(attrs: dict[str, str]) -> dict:
 # --- trace v2: file governance -----------------------------------------------
 
 
-__all__ = ["_FakeTracer", "_NodeFakeSpan"]
+__all__ = ["FakeTracer", "NodeFakeSpan"]

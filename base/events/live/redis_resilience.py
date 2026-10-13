@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import socket
 
-_SOCKET_CONNECT_TIMEOUT_S = 5.0
-_HEALTH_CHECK_INTERVAL_S = 30
+SOCKET_CONNECT_TIMEOUT_S = 5.0
+HEALTH_CHECK_INTERVAL_S = 30
 
 
 def keepalive_options() -> dict[int, int]:

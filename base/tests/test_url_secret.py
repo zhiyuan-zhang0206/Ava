@@ -173,7 +173,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
-        monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
+        monkeypatch.setattr(data_plane, "unit_home", lambda: Path.home() / ".ava")
 
         with pytest.raises(ValueError, match="must receive a runner-class AVA_DB_URL"):
             _settings_with(
@@ -186,7 +186,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
-        monkeypatch.setattr(data_plane, "_unit_home", lambda: tmp_path / "test-home")
+        monkeypatch.setattr(data_plane, "unit_home", lambda: tmp_path / "test-home")
 
         s = _settings_with(
             db_url=_pg("STALE", host="127.0.0.1:5432", user="ava"),
@@ -213,7 +213,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
-        monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
+        monkeypatch.setattr(data_plane, "unit_home", lambda: Path.home() / ".ava")
 
         s = _settings_with(
             db_url=_pg("delivered", host="127.0.0.1:5432", user="ava_g4_runner"),
@@ -227,7 +227,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
-        monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
+        monkeypatch.setattr(data_plane, "unit_home", lambda: Path.home() / ".ava")
 
         with pytest.raises(ValueError, match="must receive a runner-class AVA_DB_URL"):
             _settings_with(
@@ -403,7 +403,7 @@ class TestPinIpv4Hostaddr:
     literal) — defense-in-depth for other libpq consumers (PgBouncer's
     upstream dial, psql/pg_dump). redis_url is untouched — redis has no
     hostaddr-equivalent; that fix is code-level
-    (base.events.live.redis_client._PinnedIPv4Connection)."""
+    (base.events.live.redis_client.PinnedIPv4Connection)."""
 
     def test_ipv4_literal_host_gets_hostaddr(self) -> None:
         # A foreign IPv4 host: hostaddr is appended, and (Task #1752) the

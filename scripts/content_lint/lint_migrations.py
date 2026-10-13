@@ -77,8 +77,8 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 from base.deploy.schema.migrations import (
-    _BASELINE_NAME,
-    _FILENAME_RE,
+    BASELINE_NAME,
+    FILENAME_RE,
 )
 from base.deploy.schema.rollback_snapshot import is_rollback_snapshot_table
 
@@ -320,7 +320,7 @@ def _collect_migrations() -> tuple[set[str], list[str]]:
         if not entry.name.endswith(".sql"):
             errors.append(f"non-.sql file: {entry.name}")
             continue
-        m = _FILENAME_RE.match(entry.name)
+        m = FILENAME_RE.match(entry.name)
         if not m:
             errors.append(f"non-conforming name: {entry.name} ({_FORMAT_HINT})")
             continue
@@ -336,10 +336,10 @@ def _collect_migrations() -> tuple[set[str], list[str]]:
         prefixes.add(prefix)
         if not _timestamp_valid(stem):
             errors.append(f"{entry.name}: timestamp prefix is not a valid datetime")
-        if stem == _BASELINE_NAME:
+        if stem == BASELINE_NAME:
             errors.append(
                 f"{entry.name}: name collides with the reserved baseline sentinel "
-                f"{_BASELINE_NAME!r} (the baseline is a schema.sql row, never a file)"
+                f"{BASELINE_NAME!r} (the baseline is a schema.sql row, never a file)"
             )
         ups.add(stem)
 
@@ -362,9 +362,9 @@ def _check_schema_seed() -> list[str]:
             "db/schema.sql still contains a `generate_series(...)` seed — the "
             "applied-set bootstrap stamps a single baseline row instead; remove it"
         )
-    if _BASELINE_NAME not in text:
+    if BASELINE_NAME not in text:
         errors.append(
-            f"db/schema.sql does not stamp the baseline sentinel {_BASELINE_NAME!r} "
+            f"db/schema.sql does not stamp the baseline sentinel {BASELINE_NAME!r} "
             "into schema_migrations — a fresh DB would then look un-baselined and "
             "base.deploy.schema.migrations would treat everything as pending"
         )
@@ -632,7 +632,7 @@ def _unseeded_ddl(
     facts: list[tuple[str, list[_DdlCandidate], list[tuple[int, int]]]] = []
     all_drops: _DropKeys = {k: set() for k in ("column", "table", "index", "constraint", "trigger")}
     for entry in sorted(MIGRATIONS_DIR.rglob("*")):
-        match = _FILENAME_RE.match(entry.name) if entry.name.endswith(".sql") else None
+        match = FILENAME_RE.match(entry.name) if entry.name.endswith(".sql") else None
         if not match or match.group(1) in seeded:
             continue
         masked, do_spans = _mask_nonstatic_sql(entry.read_text(encoding="utf-8"))
@@ -753,7 +753,7 @@ def _check_merged_migrations_immutable(base: str | None) -> list[str]:
     for record in result.stdout.split("\0"):
         metadata, separator, old_path = record.partition("\t")
         name = Path(old_path).name
-        if not separator or _FILENAME_RE.match(name) is None:
+        if not separator or FILENAME_RE.match(name) is None:
             continue
         path = current.get(name)
         if path is None:

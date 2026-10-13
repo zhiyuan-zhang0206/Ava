@@ -231,7 +231,7 @@ def _message_items(
         # list-of-blocks: thinking / text / tool_use each takes a slot;
         # one timeline item per block, block_idx = anthropic
         # content_block_index, aligned with streaming SSE item_id.
-        return list(_ai_message_items(msg, msg_idx, sdk_by_id))
+        return list(ai_message_items(msg, msg_idx, sdk_by_id))
     if isinstance(msg, HumanMessage):
         return [_fallback_human_item(msg_idx, content, created_at)]
     return []
@@ -490,7 +490,7 @@ def _fold_addl_reasoning_into_content(
     return content
 
 
-def _ai_message_items(
+def ai_message_items(
     msg: AIMessage,
     msg_idx: int,
     sdk_by_id: Mapping[str, list[SdkCall]],

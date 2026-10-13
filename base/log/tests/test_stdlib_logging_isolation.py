@@ -19,7 +19,7 @@ import logging
 
 import pytest
 
-from base.log import _FIRST_PARTY_LOGGER_NAMES, _install_stdlib_intercept, _StdlibInterceptHandler
+from base.log import FIRST_PARTY_LOGGER_NAMES, _install_stdlib_intercept, _StdlibInterceptHandler
 from base.tests.fixtures.stdlib_logging import stdlib_logging_isolated
 
 
@@ -44,7 +44,7 @@ def test_a_real_intercept_install_is_undone_level_for_level() -> None:
         _install_stdlib_intercept()
         # The leak is real: this is what the next test used to inherit.
         assert logging.getLogger().level == logging.INFO
-        assert all(logging.getLogger(n).level == logging.DEBUG for n in _FIRST_PARTY_LOGGER_NAMES)
+        assert all(logging.getLogger(n).level == logging.DEBUG for n in FIRST_PARTY_LOGGER_NAMES)
         assert any(isinstance(h, _StdlibInterceptHandler) for h in logging.getLogger().handlers)
 
     after = _all_levels()

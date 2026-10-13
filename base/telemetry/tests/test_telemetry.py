@@ -402,7 +402,7 @@ def test_drain_on_exit_lands_queued_events() -> None:
     in-flight batch) — the `service_started` event's own survival depends on it.
     This test stops its own writer; the next test owns its own fresh writer."""
     telemetry.emit("telemetry", "service_started", agent_id=_AGENT)
-    telemetry._drain_on_exit()  # flush + stop — no explicit telemetry.flush() here
+    telemetry.drain_on_exit()  # flush + stop — no explicit telemetry.flush() here
     assert _mirror_rows("service_started", _AGENT), "service_started must land in the mirror"
 
 

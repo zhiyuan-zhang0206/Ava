@@ -100,7 +100,7 @@ PG_STATEMENT_TIMEOUT_OPTIONS = f"-c statement_timeout={_STATEMENT_TIMEOUT_MS}"
 # 2026-09-02 P0 pooled read-only pollution rode the pre-fix era). The uniform
 # ceiling
 # therefore holds because every sanctioned pooled entry point restores the
-# baseline session on use (see _restore_pooled_session).
+# baseline session on use (see restore_pooled_session).
 # `connect()` / `pool()` issue it on every pooled dial/borrow;
 # `cli/commands/data_plane/pgbouncer.py` also runs it as the pooler's `connect_query` so
 # every pooled backend is bounded at birth regardless of the client's code path.
@@ -142,7 +142,7 @@ PG_POOLED_RESTORE_WITH_MIN_SQL: LiteralString = (
 )
 
 
-def _restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate) -> None:
+def restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate) -> None:
     """Scrub a pooled connection back to its baseline session state.
 
     PgBouncer transaction pooling hands any backend to any client transaction
@@ -187,10 +187,10 @@ def _restore_pooled_session(conn: psycopg.Connection, *, gate: ProcessDbGate) ->
     conn.commit()
 
 
-async def _restore_pooled_session_async(
+async def restore_pooled_session_async(
     conn: psycopg.AsyncConnection, *, gate: ProcessDbGate
 ) -> None:
-    """Async twin of `_restore_pooled_session`: `async_pool()`'s per-borrow check.
+    """Async twin of `restore_pooled_session`: `async_pool()`'s per-borrow check.
 
     The liveness check doubles as the baseline scrub — same RESET ALL +
     statement ceiling, same discard-on-failure semantics (psycopg_pool replaces
@@ -218,7 +218,7 @@ async def _restore_pooled_session_async(
 DEFAULT_POOL_TIMEOUT_S = 30.0
 
 
-def _statement_kwargs(url: str) -> dict[str, Any]:
+def statement_kwargs(url: str) -> dict[str, Any]:
     """The statement ceiling, after any startup options `url` carries itself: a
     psycopg keyword argument would otherwise replace the URL's `options`."""
     from psycopg.conninfo import conninfo_to_dict
@@ -247,7 +247,7 @@ def _refuse_placeholder(url: str) -> None:
         )
 
 
-def _guard_db_url(url: str, *, refusal: str | None = None) -> str:
+def guard_db_url(url: str, *, refusal: str | None = None) -> str:
     """Refuse the placeholder URL and an undelivered credential-free endpoint;
     return the url otherwise. The single point every settings-resolved connection
     passes through, so both footguns are caught once here rather than at each
@@ -331,7 +331,7 @@ def connect(
     plus the statement ceiling as an explicit `SET` (PgBouncer drops the
     `options` startup parameter and never resets backend session state between
     clients, so a borrowed backend may carry another client's session GUCs; see
-    _restore_pooled_session) — unless `unbounded=True`.
+    restore_pooled_session) — unless `unbounded=True`.
 
     `unbounded=True` (admin plane only — the migration applier) drops the
     statement-timeout ceiling entirely: migration DDL runs may legitimately
@@ -347,12 +347,12 @@ def connect(
         PlaceholderDbUrlError: the resolved db_url is the placeholder.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger and
             the resolved db_url is a credential-free endpoint this process was
-            given no login for (see `_guard_db_url`).
+            given no login for (see `guard_db_url`).
     """
     from base.config.domains.storage.data_plane import sslmode_for_url
 
     cfg = config or db_config_from_settings()
-    url = _guard_db_url(
+    url = guard_db_url(
         _dial_url(cfg, direct=direct, direct_url=direct_url),
         refusal=cfg.db_authority_refusal,
     )
@@ -376,7 +376,7 @@ def connect(
         # client's session-level SET must not reach this caller's writes
         # (2026-09-02 P0; direct dials already got the ceiling via options and
         # own their backend exclusively, so no scrub is needed there).
-        _restore_pooled_session(conn, gate=gate)
+        restore_pooled_session(conn, gate=gate)
     return conn
 
 
@@ -424,7 +424,7 @@ def connect_url(
 
 def _transport_kwargs(url: str, *, unbounded: bool) -> dict[str, Any]:
     """Keepalives always; the statement ceiling unless the dial is unbounded."""
-    return PG_KEEPALIVE_KWARGS if unbounded else _statement_kwargs(url)
+    return PG_KEEPALIVE_KWARGS if unbounded else statement_kwargs(url)
 
 
 def pool(
@@ -469,18 +469,18 @@ def pool(
     ceiling) at backend creation AND on every borrow — pgbouncer never resets
     backend session state between clients (2026-09-02 P0), so the borrow-time
     scrub is what keeps a backend polluted by another client's session-level
-    SET from failing this borrower's writes. See _restore_pooled_session.
+    SET from failing this borrower's writes. See restore_pooled_session.
 
     Raises:
         PlaceholderDbUrlError: the resolved db_url is the placeholder.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger and
             the resolved db_url is a credential-free endpoint this process was
-            given no login for (see `_guard_db_url`).
+            given no login for (see `guard_db_url`).
     """
     from base.config.domains.storage.data_plane import resolved_pool_size, sslmode_for_url
 
     cfg = config or db_config_from_settings()
-    url = _guard_db_url(
+    url = guard_db_url(
         _dial_url(cfg, direct=direct, direct_url=direct_url),
         refusal=cfg.db_authority_refusal,
     )
@@ -492,13 +492,13 @@ def pool(
         "prepare_threshold": None,
         **({"sslmode": sslmode} if sslmode else {}),
         **({} if direct else {"application_name": gate.application_name()}),
-        **_statement_kwargs(url),
+        **statement_kwargs(url),
     }
     if autocommit:
         connection_kwargs["autocommit"] = True
     if row_factory is not None:
         connection_kwargs["row_factory"] = row_factory
-    restore = partial(_restore_pooled_session, gate=gate)
+    restore = partial(restore_pooled_session, gate=gate)
     return ConnectionPool(
         url,
         min_size=min_size,
@@ -552,20 +552,20 @@ def async_pool(
     `PG_KEEPALIVE_KWARGS`, the configured sslmode when the URL is silent, and
     the baseline-session restore as the per-borrow `check`, which is also what
     delivers the statement ceiling (PgBouncer drops the `options` startup
-    parameter). See _restore_pooled_session.
+    parameter). See restore_pooled_session.
 
     Raises:
         PlaceholderDbUrlError: the resolved db_url is the placeholder.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger and
             the resolved db_url is a credential-free endpoint this process was
-            given no login for (see `_guard_db_url`).
+            given no login for (see `guard_db_url`).
     """
     from base.config.domains.storage.data_plane import sslmode_for_url
 
     cfg = config or db_config_from_settings()
     sslmode = sslmode_for_url(cfg.db_url, cfg.db_sslmode)
     return pool_class(
-        _guard_db_url(cfg.db_url, refusal=cfg.db_authority_refusal),
+        guard_db_url(cfg.db_url, refusal=cfg.db_authority_refusal),
         min_size=min_size,
         max_size=max_size,
         timeout=timeout,
@@ -577,6 +577,6 @@ def async_pool(
             "application_name": gate.application_name(),
             **PG_KEEPALIVE_KWARGS,
         },
-        check=partial(_restore_pooled_session_async, gate=gate),
+        check=partial(restore_pooled_session_async, gate=gate),
         **pool_kwargs,
     )

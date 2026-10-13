@@ -106,7 +106,7 @@ class CheckpointWalks:
 # keep the three composite-key request arrays around 12 KiB, including tiny
 # or empty writes. One indivisible oversized value is fetched intact; neither
 # guard truncates state or changes replay semantics, so these are not user knobs.
-_BODY_BATCH_BYTES = 256 * 1024
+BODY_BATCH_BYTES = 256 * 1024
 _BODY_BATCH_ROWS = 128
 
 _ANCESTOR_COLUMNS = """
@@ -163,7 +163,7 @@ def _body_batches(keys: _Rows) -> Generator[_Rows]:
     batch: _Rows = []
     size = 0
     for key in keys:
-        if batch and (size + key["size"] > _BODY_BATCH_BYTES or len(batch) >= _BODY_BATCH_ROWS):
+        if batch and (size + key["size"] > BODY_BATCH_BYTES or len(batch) >= _BODY_BATCH_ROWS):
             yield batch
             batch, size = [], 0
         batch.append(key)

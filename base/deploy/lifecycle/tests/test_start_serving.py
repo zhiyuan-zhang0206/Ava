@@ -121,7 +121,7 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
             raise RootClientError("native peer unreadable")
         return observed
 
-    monkeypatch.setattr(start_serving, "_observe_root", current)
+    monkeypatch.setattr(start_serving, "observe_root", current)
     assert start_serving.born_identity() is None
     assert not start_serving.is_serving()
     with start_serving.recovery_permitted() as permitted:
@@ -171,7 +171,7 @@ def test_birth_read_refuses_marker_replaced_during_native_observation(
         start_serving.begin_start()
         return serving_root
 
-    monkeypatch.setattr(start_serving, "_observe_root", raced)
+    monkeypatch.setattr(start_serving, "observe_root", raced)
     assert start_serving.born_identity() is None
 
 

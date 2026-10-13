@@ -30,15 +30,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-_MACOS_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+MACOS_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 _LINUX_CHROME_NAMES = ("google-chrome", "google-chrome-stable")
 NPX_INCAPABILITY_REASON = "no npx (install Node.js for chrome-devtools-mcp)"
 
 
-def _platform_chrome_binary() -> str | None:
+def platform_chrome_binary() -> str | None:
     """Resolve a platform-default Chrome binary without reading Settings."""
     if sys.platform == "darwin":
-        return _MACOS_CHROME if Path(_MACOS_CHROME).exists() else None
+        return MACOS_CHROME if Path(MACOS_CHROME).exists() else None
     if sys.platform.startswith("linux"):
         for name in _LINUX_CHROME_NAMES:
             found = shutil.which(name)
@@ -55,11 +55,11 @@ def resolve_chrome_binary(configured_chrome: str | None) -> str | None:
     - explicit ``configured_chrome`` override (``settings.services.chrome_binary``) -> returned **as-is** (no
       existence check; a caller that execs it fails loudly at exec time if the
       path is wrong, which is the intended fail-fast for the browser daemon).
-    - platform-default Chrome binary -> resolved by ``_platform_chrome_binary()``.
+    - platform-default Chrome binary -> resolved by ``platform_chrome_binary()``.
     """
     if configured_chrome:
         return configured_chrome
-    return _platform_chrome_binary()
+    return platform_chrome_binary()
 
 
 def default_chrome_user_data_dir() -> Path | None:
@@ -110,7 +110,7 @@ def display_available() -> bool:
 _GUI_PROBE_TIMEOUT_S = 5.0
 
 
-def _bounded_stdout(argv: list[str]) -> str | None:
+def bounded_stdout(argv: list[str]) -> str | None:
     """Run a fixed read-only query, bounded; return its stripped stdout or None.
 
     None is "no answer" — a missing binary, a timeout, a non-zero exit, or
@@ -140,7 +140,7 @@ def gui_session_domain() -> str | None:
     evidence either way."""
     if sys.platform != "darwin":
         return None
-    return _bounded_stdout(["/bin/launchctl", "managername"])
+    return bounded_stdout(["/bin/launchctl", "managername"])
 
 
 def gui_login_user() -> str | None:
@@ -151,7 +151,7 @@ def gui_login_user() -> str | None:
     GUI-domain verdict. None off macOS and when the answer is unavailable."""
     if sys.platform != "darwin":
         return None
-    return _bounded_stdout(["/usr/bin/stat", "-f%Su", "/dev/console"])
+    return bounded_stdout(["/usr/bin/stat", "-f%Su", "/dev/console"])
 
 
 def browser_incapability(configured_chrome: str | None) -> str | None:
@@ -186,7 +186,7 @@ def browser_deps_incapability() -> str | None:
     """
     if not display_available():
         return "no display (headless server)"
-    if _platform_chrome_binary() is None:
+    if platform_chrome_binary() is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
     if shutil.which("npx") is None:
         return NPX_INCAPABILITY_REASON

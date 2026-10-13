@@ -6,14 +6,14 @@ from pathlib import Path
 
 from pydantic import AliasChoices, Field
 
-from base.config.base import EnvSettings, _unit_home
+from base.config.base import EnvSettings, unit_home
 
 __all__ = [
-    "_ServiceRuntimeSettings",
+    "ServiceRuntimeSettings",
 ]
 
 
-class _ServiceRuntimeSettings(EnvSettings):
+class ServiceRuntimeSettings(EnvSettings):
     browser_enabled: bool = Field(
         default=True,
         alias="AVA_BROWSER_ENABLED",
@@ -171,7 +171,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_root: Path = Field(
-        default_factory=lambda: _unit_home() / "memory",
+        default_factory=lambda: unit_home() / "memory",
         alias="AVA_MEMORY_ROOT",
         description="Root directory of the ava.memory pool's markdown files; the memory indexer watches this path.",
         json_schema_extra={
@@ -424,7 +424,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_data_dir: Path = Field(
-        default_factory=lambda: _unit_home() / "memory-search",
+        default_factory=lambda: unit_home() / "memory-search",
         alias="AVA_MEMORY_SEARCH_DATA_DIR",
         description="Memory search on-disk data directory (vectors.npz).",
         json_schema_extra={
@@ -437,7 +437,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "memory_search.pid",
+        default_factory=lambda: unit_home() / "run" / "memory_search.pid",
         alias="AVA_MEMORY_SEARCH_PIDFILE",
         description="Memory search daemon pidfile path.",
         json_schema_extra={

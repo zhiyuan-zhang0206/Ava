@@ -17,13 +17,13 @@ from base.agents.history.checkpoint_postgres_walks import (
 )
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import (
-    _areconstruct_in_recovery,
-    _fold_history,
-    _ReadSpan,
-    _wrap_history_identity_reads,
+    ReadSpan,
     areconstruct_delta_messages,
+    areconstruct_in_recovery,
+    fold_history,
     reconstruct_delta_messages,
     recovery_reconstruction_scope,
+    wrap_history_identity_reads,
     wrap_saver_reads_with_delta_reconstruction,
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items
@@ -79,8 +79,8 @@ def test_legacy_walk_seed_and_writes_never_upgrade_after_reserialization(seed: s
         value = Overwrite([original]) if seed == "overwrite" else [original]
         entry["writes"] = [(0, "task", value)]
     serde = JsonPlusSerializer()
-    first = _fold_history(deepcopy(entry))
-    second = _fold_history(deepcopy(entry))
+    first = fold_history(deepcopy(entry))
+    second = fold_history(deepcopy(entry))
     assert first[0].additional_kwargs["ava_ephemeral_message_id"] is True
     if seed == "writes":
         assert first[0].id and first[0].id != second[0].id
@@ -175,7 +175,7 @@ async def test_real_postgres_plain_checkpoint_sync_async_provenance(
     assert raw is not None
     assert raw.checkpoint["channel_values"]["messages"][0].additional_kwargs == {}
     assert raw.checkpoint["channel_values"]["messages"][0].id is None
-    _wrap_history_identity_reads(cast(Any, saver))
+    wrap_history_identity_reads(cast(Any, saver))
     iterator = saver.list(config, limit=1)
     listed = next(iterator)
     assert (
@@ -216,7 +216,7 @@ async def test_history_iterators_preserve_laziness_arguments_and_source_marker()
 
     saver.list = tuples  # type: ignore[method-assign]
     saver.alist = atuples  # type: ignore[method-assign]
-    _wrap_history_identity_reads(saver)
+    wrap_history_identity_reads(saver)
     it = saver.list(None, limit=2)
     assert events == []
     first = next(it)
@@ -270,8 +270,8 @@ async def test_recovery_cache_hit_normalizes_newly_decoded_pending_writes() -> N
     second.checkpoint["id"] = first.checkpoint["id"]
     with recovery_reconstruction_scope(saver, "identity") as scope:
         assert scope is not None
-        await _areconstruct_in_recovery(saver, first, scope.generation, _ReadSpan(), scope)
-        await _areconstruct_in_recovery(saver, second, scope.generation, _ReadSpan(), scope)
+        await areconstruct_in_recovery(saver, first, scope.generation, ReadSpan(), scope)
+        await areconstruct_in_recovery(saver, second, scope.generation, ReadSpan(), scope)
     assert len(walks) == 1
     assert (
         second.checkpoint["channel_values"]["messages"][0].additional_kwargs[

@@ -8,10 +8,10 @@ from base.cluster import machines
 from base.cluster.tests.machines.setup import (
     MachineSetup,
     _db,
-    _read_description,
-    _read_machine,
-    _read_unit_up_since,
-    _read_up_since,
+    read_description,
+    read_machine,
+    read_unit_up_since,
+    read_up_since,
 )
 from base.cluster.tests.machines.setup import (
     _machine_setup as _machine_setup,
@@ -32,7 +32,7 @@ def test_mark_stopping_preserves_description(
     _machine_setup.machine.set(description="keep me")
     _machine_setup.register(_db(database_gate=database_gate), url="http://k:9000")
     machines.mark_stopping(_db(database_gate=database_gate), "keepdesc", "~/.ava")
-    assert _read_description("keepdesc") == "keep me"
+    assert read_description("keepdesc") == "keep me"
 
 
 def test_register_self_stamps_up_since_on_unit_and_composed_row(
@@ -47,8 +47,8 @@ def test_register_self_stamps_up_since_on_unit_and_composed_row(
     _machine_setup(name="stamp-host", role="agent-runner", home="~/.ava")
     _machine_setup.register(_db(database_gate=database_gate), url="http://stamp-host:9100")
 
-    (unit_up_since,) = _read_unit_up_since("stamp-host", "~/.ava")
-    (composed_up_since,) = _read_up_since("stamp-host")
+    (unit_up_since,) = read_unit_up_since("stamp-host", "~/.ava")
+    (composed_up_since,) = read_up_since("stamp-host")
     assert unit_up_since is not None
     assert composed_up_since == unit_up_since
 
@@ -67,9 +67,9 @@ def test_composed_up_since_is_the_max_over_live_units(
     _machine_setup(name="max-host", role="agent-runner", home="~/.ava")
     _machine_setup.register(_db(database_gate=database_gate), url="http://localhost:8600")
 
-    (gateway_unit,) = _read_unit_up_since("max-host", "~/.ava_gateway")
-    (runner_unit,) = _read_unit_up_since("max-host", "~/.ava")
-    (composed,) = _read_up_since("max-host")
+    (gateway_unit,) = read_unit_up_since("max-host", "~/.ava_gateway")
+    (runner_unit,) = read_unit_up_since("max-host", "~/.ava")
+    (composed,) = read_up_since("max-host")
     assert composed == max(gateway_unit, runner_unit)
 
 
@@ -97,9 +97,9 @@ def test_recompute_tolerates_a_unit_with_null_up_since(
     _machine_setup(name="skew-host", role="agent-runner", home="~/.ava")
     _machine_setup.register(_db(database_gate=database_gate), url="http://localhost:8600")
 
-    (runner_unit,) = _read_unit_up_since("skew-host", "~/.ava")
-    (composed,) = _read_up_since("skew-host")
+    (runner_unit,) = read_unit_up_since("skew-host", "~/.ava")
+    (composed,) = read_up_since("skew-host")
     # The fresh unit's stamp wins the max (the old unit contributes NULL).
     assert composed == runner_unit
-    _gateway_url, role, _desc, _stopped = _read_machine("skew-host")
+    _gateway_url, role, _desc, _stopped = read_machine("skew-host")
     assert role == ["agent-runner", "gateway"]
