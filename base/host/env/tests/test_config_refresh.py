@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from base import config
-from tests.fixtures.units import use_env_files
+from base.host.env.tests.env_files import use_env_files
 
 _IDENTITY_LINES = [
     f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
