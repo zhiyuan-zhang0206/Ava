@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 
 from services.entrypoints.im_bridge.adapters.tests.test_weixin_adapter import env as env
 from services.entrypoints.im_bridge.adapters.weixin import (
-    _ordinary_chat_key,
     load_account,
+    ordinary_chat_key,
     save_account,
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
@@ -35,7 +35,7 @@ def set_account(
 async def inbound_key(provider_id: object, text: str = "same") -> str | None:
     account = load_account()
     assert account is not None
-    return _ordinary_chat_key(
+    return ordinary_chat_key(
         base_url=account["base_url"],
         account_id=account["account_id"],
         sender_id="peer-1",
@@ -128,7 +128,7 @@ async def test_account_sender_and_endpoint_scope_separate_same_provider_id(env: 
     set_account(base_url="https://ILINKAI.WEIXIN.QQ.COM:443/")
     assert await inbound_key("123") == first
     assert (
-        _ordinary_chat_key(
+        ordinary_chat_key(
             base_url="https://ilinkai.weixin.qq.com",
             account_id="bot-id",
             sender_id="other-peer",
@@ -142,9 +142,9 @@ async def test_account_sender_and_endpoint_scope_separate_same_provider_id(env: 
 
 
 async def test_voice_transcript_is_ordinary_chat_with_event_identity(env: Path) -> None:
-    from services.entrypoints.im_bridge.adapters.weixin import _extract_text
+    from services.entrypoints.im_bridge.adapters.weixin import extract_text
 
-    text = _extract_text([{"type": 3, "voice_item": {"text": "transcript"}}])
+    text = extract_text([{"type": 3, "voice_item": {"text": "transcript"}}])
     assert text == "[voice transcript] transcript"
     assert await inbound_key("123", text) == await inbound_key("123")
 

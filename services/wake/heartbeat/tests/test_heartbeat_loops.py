@@ -65,7 +65,7 @@ def _patch_run(
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     patch_database(monkeypatch, pool=_Pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", loops["dispatch"])
-    monkeypatch.setattr(daemon, "_liveness_loop", loops["liveness"])
+    monkeypatch.setattr(daemon, "liveness_loop", loops["liveness"])
 
     async def digest_loop(
         pool: ConnectionPool,

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, _backoff_delay
+from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, backoff_delay
 from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
     FakeCore,
     FakeRestClient,
@@ -302,11 +302,11 @@ def test_poll_round_delay_all_chats_failed_backs_off(adapter: FeishuAdapter) -> 
 def test_backoff_delay_never_clamps_above_interval() -> None:
     """D2: the absolute cap never drops below the configured interval — a
     3600s interval keeps its own cadence instead of being clamped to 300s."""
-    assert _backoff_delay(3600.0, 0) == 3600.0
-    assert _backoff_delay(3600.0, 5) == 3600.0
-    assert _backoff_delay(1.0, 0) == 1.0
-    assert _backoff_delay(1.0, 5) == 32.0
-    assert _backoff_delay(300.0, 6) == 300.0
+    assert backoff_delay(3600.0, 0) == 3600.0
+    assert backoff_delay(3600.0, 5) == 3600.0
+    assert backoff_delay(1.0, 0) == 1.0
+    assert backoff_delay(1.0, 5) == 32.0
+    assert backoff_delay(300.0, 6) == 300.0
 
 
 async def test_poll_seed_anchors_newest_id_carrying_item(adapter: FeishuAdapter) -> None:

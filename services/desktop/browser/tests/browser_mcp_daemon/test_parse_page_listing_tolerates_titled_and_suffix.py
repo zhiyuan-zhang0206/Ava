@@ -13,12 +13,12 @@ from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import _text_of
 from services.desktop.browser.page_lifecycle import parse_page_listing
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
+    TitledListing,
     _daemon,
-    _expire,
-    _new_daemon,
-    _record_emits,
-    _TitledListing,
-    _ttl_remaining,
+    expire,
+    new_daemon,
+    record_emits,
+    ttl_remaining,
 )
 
 
@@ -54,10 +54,10 @@ async def test_new_page_registers_ttl_on_both_creation_paths() -> None:
     d, _up = _daemon()
     default = settings.daemon.chrome_page_default_ttl_seconds
     await d.call_tool_for_agent("new_page", {"url": "https://example.com/a"}, 7)
-    assert 0 < _ttl_remaining(d, 1) <= default
+    assert 0 < ttl_remaining(d, 1) <= default
     # the auto-created page on a cold-start navigate is the other half
     await d.call_tool_for_agent("navigate_page", {"url": "https://example.com/b"}, 8)
-    assert 0 < _ttl_remaining(d, 2) <= default
+    assert 0 < ttl_remaining(d, 2) <= default
 
 
 async def test_page_ttl_default_comes_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,7 +65,7 @@ async def test_page_ttl_default_comes_from_config(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings.daemon, "chrome_page_default_ttl_seconds", 120.0)
     d, _up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
-    assert 100 < _ttl_remaining(d, 1) <= 120
+    assert 100 < ttl_remaining(d, 1) <= 120
 
 
 async def test_reap_expired_pages_closes_only_expired_stack_pages() -> None:
@@ -77,7 +77,7 @@ async def test_reap_expired_pages_closes_only_expired_stack_pages() -> None:
     await d.call_tool_for_agent("new_page", {"url": "https://example.com/fresh"}, 8)
     up.pages[99] = "https://user.example.com/mine"  # the user's own tab
     up.calls.clear()
-    _expire(d, 1)
+    expire(d, 1)
 
     closed = await page_lifecycle.reap_expired_pages(d)
 
@@ -101,12 +101,12 @@ async def test_reap_expired_pages_closes_titled_isolated_page() -> None:
     TTL sweep. The titled/suffixed line used to parse to no URL, and the sweep
     dropped the slot as "already closed" without ever closing the tab
     (2026-09-15 19:04 shape, #3570)."""
-    up = _TitledListing()
-    d = _new_daemon(up)
+    up = TitledListing()
+    d = new_daemon(up)
     await d.call_tool_for_agent("new_page", {"url": "https://discord.com/app"}, 7)
     up.isolated[1] = "discord-reg-7"
     up.calls.clear()
-    _expire(d, 1)
+    expire(d, 1)
 
     closed = await page_lifecycle.reap_expired_pages(d)
 
@@ -137,7 +137,7 @@ async def test_reap_expired_pages_drops_slot_when_page_already_gone() -> None:
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
     del up.pages[1]  # closed underneath the daemon
     up.calls.clear()
-    _expire(d, 1)
+    expire(d, 1)
 
     assert await page_lifecycle.reap_expired_pages(d) == 0
     assert not [c for c in up.calls if c[0] == "close_page"]
@@ -149,7 +149,7 @@ async def test_reap_expired_pages_idempotent() -> None:
     d, up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
     up.calls.clear()
-    _expire(d, 1)
+    expire(d, 1)
 
     await page_lifecycle.reap_expired_pages(d)
     await page_lifecycle.reap_expired_pages(d)
@@ -172,7 +172,7 @@ async def test_renew_page_extends_deadline_and_sweep_keeps_it() -> None:
 
     assert not res.is_error
     assert "renewed" in _text_of(res)
-    assert 3500 < _ttl_remaining(d, 1) <= 3600
+    assert 3500 < ttl_remaining(d, 1) <= 3600
     assert await page_lifecycle.reap_expired_pages(d) == 0
     assert up.pages == {1: "x"}
 
@@ -185,7 +185,7 @@ async def test_renew_page_defaults_to_configured_ttl(monkeypatch: pytest.MonkeyP
     res = await d.call_tool_for_agent("renew_page", {}, 7)
 
     assert not res.is_error
-    assert 100 < _ttl_remaining(d, 1) <= 120
+    assert 100 < ttl_remaining(d, 1) <= 120
 
 
 async def test_renew_page_rejected_after_deadline() -> None:
@@ -193,7 +193,7 @@ async def test_renew_page_rejected_after_deadline() -> None:
     loses the renewal cleanly, and the sweep owns the page."""
     d, _up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
-    _expire(d, 1)
+    expire(d, 1)
 
     res = await d.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
 
@@ -247,7 +247,7 @@ async def test_ttl_expiry_surfaces_native_no_page_red_green() -> None:
     await d.call_tool_for_agent("new_page", {"url": "https://example.com/app"}, 7)
     ok = await d.call_tool_for_agent("take_snapshot", {}, 7)
     assert not ok.is_error  # green: usable before the deadline
-    _expire(d, 1)
+    expire(d, 1)
     assert await page_lifecycle.reap_expired_pages(d) == 1
 
     after = await d.call_tool_for_agent("take_snapshot", {}, 7)
@@ -274,7 +274,7 @@ async def test_expired_page_reaper_leaves_a_dead_localhost_page_until_its_deadli
     use: the tab stays open across passes until its deadline, then the expiry
     sweep closes it.
     """
-    monkeypatch.setattr(page_lifecycle, "_PAGE_SWEEP_INTERVAL_S", 0.01)
+    monkeypatch.setattr(page_lifecycle, "PAGE_SWEEP_INTERVAL_S", 0.01)
     d, up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "http://localhost:9/dev"}, 7)
     up.calls.clear()
@@ -285,7 +285,7 @@ async def test_expired_page_reaper_leaves_a_dead_localhost_page_until_its_deadli
         assert up.pages == {1: "http://localhost:9/dev"}
         assert not [call for call in up.calls if call[0] == "close_page"]
 
-        _expire(d, 1)
+        expire(d, 1)
         for _ in range(100):
             if not up.pages:
                 break
@@ -343,7 +343,7 @@ async def test_renew_page_emits_audit_event(monkeypatch: pytest.MonkeyPatch) -> 
     d, _up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
     emitted: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    monkeypatch.setattr(page_lifecycle.telemetry, "emit", _record_emits(emitted))
+    monkeypatch.setattr(page_lifecycle.telemetry, "emit", record_emits(emitted))
 
     res = await d.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
 
@@ -363,9 +363,9 @@ async def test_renew_page_emits_audit_event(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_expiry_emits_audit_event(monkeypatch: pytest.MonkeyPatch) -> None:
     d, _up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "https://example.com/old"}, 7)
-    _expire(d, 1)
+    expire(d, 1)
     emitted: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    monkeypatch.setattr(page_lifecycle.telemetry, "emit", _record_emits(emitted))
+    monkeypatch.setattr(page_lifecycle.telemetry, "emit", record_emits(emitted))
 
     assert await page_lifecycle.reap_expired_pages(d) == 1
 

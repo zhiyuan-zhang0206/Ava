@@ -19,7 +19,7 @@ from services.wake.delivery_watchdog import daemon
 _Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
 
 _LOOPS: dict[str, _Loop] = {
-    "scan": daemon._scan_loop,
+    "scan": daemon.scan_loop,
 }
 
 

@@ -35,19 +35,19 @@ def _macos_probes(
     def _account() -> tuple[str, Path]:
         return "ava", home
 
-    monkeypatch.setattr(readiness, "_current_account", _account)
+    monkeypatch.setattr(readiness, "current_account", _account)
 
-    def _run(argv: list[str]) -> readiness._ProbeResult:
+    def _run(argv: list[str]) -> readiness.ProbeResult:
         calls.append(argv)
         if argv[0] == "/usr/bin/stat":
-            return readiness._ProbeResult(0, "ava\n", "")
+            return readiness.ProbeResult(0, "ava\n", "")
         if argv[1:2] == ["managername"]:
-            return readiness._ProbeResult(managername_code, managername, "")
+            return readiness.ProbeResult(managername_code, managername, "")
         if argv[0] == "/bin/launchctl":
-            return readiness._ProbeResult(0, "", "")
-        return readiness._ProbeResult(keychain_code, "", "errSecInteractionNotAllowed")
+            return readiness.ProbeResult(0, "", "")
+        return readiness.ProbeResult(keychain_code, "", "errSecInteractionNotAllowed")
 
-    monkeypatch.setattr(readiness, "_run_probe", _run)
+    monkeypatch.setattr(readiness, "run_probe", _run)
     return calls
 
 
@@ -78,10 +78,10 @@ def test_macos_refuses_start_without_active_console_user(
 ) -> None:
     _macos_probes(monkeypatch, tmp_path)
 
-    def _console_root(_argv: list[str]) -> readiness._ProbeResult:
-        return readiness._ProbeResult(0, "root\n", "")
+    def _console_root(_argv: list[str]) -> readiness.ProbeResult:
+        return readiness.ProbeResult(0, "root\n", "")
 
-    monkeypatch.setattr(readiness, "_run_probe", _console_root)
+    monkeypatch.setattr(readiness, "run_probe", _console_root)
     result = readiness.probe_startup_readiness()
     assert result.ready is False
     assert result.reason is not None
@@ -140,7 +140,7 @@ def test_wait_loop_returns_when_ready_and_records_no_state(
 
     readiness.wait_for_browser_startup_readiness()
 
-    assert sleeps == [readiness._READINESS_RETRY_S]
+    assert sleeps == [readiness.READINESS_RETRY_S]
     assert sorted(tmp_path.rglob("*")) == []
 
 

@@ -10,7 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from services.desktop.browser.mcp_daemon import ChromeMcpDaemon, _handle_client
-from services.desktop.browser.tests.test_browser_mcp_daemon import FakeUpstream, _new_daemon
+from services.desktop.browser.tests.test_browser_mcp_daemon import FakeUpstream, new_daemon
 
 
 async def test_handle_client_renew_page_wire_roundtrip() -> None:
@@ -19,7 +19,7 @@ async def test_handle_client_renew_page_wire_roundtrip() -> None:
     import contextlib
 
     up = FakeUpstream()
-    daemon_ref: list[ChromeMcpDaemon | None] = [_new_daemon(up)]
+    daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
     sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
         lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
