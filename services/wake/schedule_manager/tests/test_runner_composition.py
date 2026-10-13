@@ -9,6 +9,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.clock import Clock
@@ -46,7 +47,7 @@ def test_actor_binding_failure_does_not_open_history(
         assert (unit_home / "schedules" / str(sid) / "schedule.py").read_text() == "pass"
         raise error
 
-    monkeypatch.setattr(runner.ava, "bind_context", bind)
+    monkeypatch.setattr(process_context, "bind_context", bind)
     with pytest.raises(RuntimeError) as caught:
         runner.run(sid)
     assert caught.value is error
@@ -178,7 +179,7 @@ def test_actor_failure_stays_primary_when_client_cleanup_fails(
         close(self, pipeline_timeout=pipeline_timeout)
         raise secondary
 
-    monkeypatch.setattr(runner.ava, "bind_context", bind)
+    monkeypatch.setattr(process_context, "bind_context", bind)
     monkeypatch.setattr(runner.engine, "run", execute)
     monkeypatch.setattr(ClientSet, "close", fail_close)
     with pytest.raises(RuntimeError) as caught:

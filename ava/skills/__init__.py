@@ -7,7 +7,7 @@ import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
-from ava.sdk_surface import skill_sources
+from ava.sdk_surface import process_context, skill_sources
 from base.log import logger
 from base.packages.skills.names import SkillIdentity, display_name, match_key
 from base.paths import skills_dir
@@ -625,11 +625,10 @@ def _note_skill_read(skill_identifier: str) -> None:
     covered. Plain strings only: this runs in the exec child, which must not import the
     agent state classes or the model stack. Outside an exec turn there is no state update to
     carry it and the read is not noted."""
-    import ava
 
-    if not ava.in_exec_turn():
+    if not process_context.in_exec_turn():
         return
-    update = ava.state_update
+    update = process_context.get_state_update()
     if not isinstance(update, dict):
         return  # agent code replaced the slot; the exec child reports that at exit
     reads: list[str] = update.setdefault("skill_reads", [])
@@ -650,10 +649,9 @@ def _record_skill_invoked(skill: Skill) -> None:
     kind: a failed write logs an error with its traceback and emits an
     `audit_write_failed` anomaly event instead of raising.
     """
-    import ava
     from ava.sdk_surface.agent_identity import require_agent_id
 
-    context = getattr(ava, "context", None)
+    context = process_context.ambient_context()
     try:
         agent = require_agent_id(context)
     except RuntimeError:

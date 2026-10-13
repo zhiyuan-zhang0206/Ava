@@ -15,6 +15,7 @@ from base.paths.home import resolve_ava_home
 from base.native_process.code_version import CodeVersion
 from base.telemetry import build_pipeline, process_name
 from base.daemon.schedules.inputs import ScheduleInputs
+from ava.sdk_surface import process_context
 
 __all__ = ["fresh_schedule_entry", "schedule_entry"]
 
@@ -48,7 +49,7 @@ def fresh_schedule_entry() -> Generator[ScheduleInputs]:
         pipeline_factory=lambda: build_pipeline(database=database, machine=machine, home=home),
     )
     prior = getattr(ava, "context", None)
-    ava.bind_context(
+    process_context.bind_context(
         AvaContext(
             clients=clients,
             machine=machine,
@@ -67,6 +68,6 @@ def fresh_schedule_entry() -> Generator[ScheduleInputs]:
         clients.close(pipeline_timeout=2)
     finally:
         if prior is None:
-            ava.unbind_context()
+            process_context.unbind_context()
         else:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)

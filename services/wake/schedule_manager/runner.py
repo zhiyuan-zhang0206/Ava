@@ -37,7 +37,7 @@ def _bind_schedule_actor(
     machine: MachineIdentity,
 ) -> None:
     """Attribute SDK operations to this schedule using the process's client owner."""
-    ava.bind_context(
+    process_context.bind_context(
         AvaContext(
             identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
             clients=clients,

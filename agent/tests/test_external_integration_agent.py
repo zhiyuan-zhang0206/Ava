@@ -19,7 +19,7 @@ from agent import state as state_module
 from agent.extensions.plugin_state_codec import decode_plugin_delta, load_snapshot
 from agent.messages import NoteTag, system_note_message
 from ava import external
-from ava.sdk_surface import agent_identity
+from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
@@ -58,8 +58,8 @@ def native_checkpoint(
     # The attachment builds its state class from the registry of the plugins loaded into the process.
     monkeypatch.setattr(extensions_registry, "build_registry", lambda: registry)
     pin_agent(None, owns_loop=True)
-    ava.unbind_exec_turn()
-    request.addfinalizer(ava.unbind_exec_turn)
+    process_context.unbind_exec_turn()
+    request.addfinalizer(process_context.unbind_exec_turn)
 
     installation = replace(model_installation, registry=registry, faces=True)
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)

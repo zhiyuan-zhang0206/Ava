@@ -8,6 +8,7 @@ matched", not "safe".
 
 import re
 
+from ava.sdk_surface import process_context
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.log import logger
 
@@ -108,9 +109,8 @@ def _record_finding(source: str, triggers: list[str]) -> None:
 
     if not agent_setting("security_scan_enabled"):
         return
-    import ava
 
-    if not ava.in_exec_turn():
+    if not process_context.in_exec_turn():
         logger.warning(
             "prompt-injection finding from {} ({}) not delivered: scan_content ran outside an "
             "exec turn, which has no state update to carry it",
@@ -118,7 +118,7 @@ def _record_finding(source: str, triggers: list[str]) -> None:
             ", ".join(triggers),
         )
         return
-    update = ava.state_update
+    update = process_context.get_state_update()
     if not isinstance(update, dict):
         raise TypeError(
             f"ava.state_update must stay a dict, got {type(update).__name__} (security finding)"
@@ -139,9 +139,8 @@ def finding_delivery_active() -> bool:
 
     if not agent_setting("security_scan_enabled"):
         return False
-    import ava
 
-    return ava.in_exec_turn()
+    return process_context.in_exec_turn()
 
 
 def record_model_finding(source: str, score: float) -> None:

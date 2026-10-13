@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import ava
+from ava.sdk_surface import process_context
 from ava.tests.understand.provider_support import ProviderCapture
 from ava.tests.understand.provider_support import fake_image as fake_image
 from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
@@ -22,14 +23,14 @@ pytestmark = pytest.mark.usefixtures("sdk_model_owner", "understand_clock")
 @pytest.fixture
 def exec_update() -> Iterator[dict[str, Any]]:
     """Bind a real exec turn and release its state slots after observing findings."""
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
     update: dict[str, Any] = {}
     ava.state = object()
     ava.state_update = update
     try:
         yield update
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 # ─── injection scan (audit round-2 up-security-trust P1-4) ────────────────

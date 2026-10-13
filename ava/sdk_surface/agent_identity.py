@@ -7,14 +7,14 @@ never an SDK identity source. Borrowed leases are validated on each identity use
 
 from __future__ import annotations
 
-import ava
+from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 
 
 def _bound(context: AvaContext | None = None) -> AgentIdentity | None:
     """Read an explicit host context or the SDK's process-local entry."""
-    context = context if context is not None else getattr(ava, "context", None)
+    context = context if context is not None else process_context.ambient_context()
     return None if context is None else context.identity
 
 

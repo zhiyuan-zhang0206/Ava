@@ -362,6 +362,7 @@ def _run_code(code: str, payload: Any) -> None:
         format_full_traceback,
         register_agent_source,
     )
+    from ava.sdk_surface import process_context
     from ava.sdk_surface.help import HelpRouter
     from ava.sdk_surface.installation import installed
     from base.agents.sdk import telemetry as sdk_usage_telemetry
@@ -382,15 +383,13 @@ def _run_code(code: str, payload: Any) -> None:
         "__name__": "__agent_code__",
         "__builtins__": builtins_map,
     }
-    import ava
-
     tally = sdk_usage_telemetry.SdkCallTally()
-    execution_context = ava.context
+    execution_context = process_context.current_context()
     installation = installed()
     sampling = (
         contextlib.nullcontext() if installation is None else installation.sampling.execution()
     )
-    ava.bind_context(replace(execution_context, sdk_calls=tally))
+    process_context.bind_context(replace(execution_context, sdk_calls=tally))
     try:
         # From here on the agent-authored code has run (or is about to) — the
         # envelope flag the parent uses to tell "the code never executed" from
@@ -425,7 +424,7 @@ def _run_code(code: str, payload: Any) -> None:
         sys.stdout.flush()
     finally:
         payload.sdk_calls = sdk_usage_telemetry.tally_entries(tally.snapshot())
-        ava.bind_context(execution_context)
+        process_context.bind_context(execution_context)
 
 
 def _finalize_telemetry(*, clients: Any = None) -> None:
@@ -505,10 +504,10 @@ def _bind_identity(
     request: RequestPayload, *, context: Any, clock_factory: Callable[[], Any]
 ) -> None:
     """Bind this child's `AvaContext` and the incarnation from its validated request."""
-    import ava
+    from ava.sdk_surface import process_context
     from base.agents.context import AvaContext
 
-    ava.bind_context(
+    process_context.bind_context(
         replace(
             AvaContext.from_description(
                 request.context,
@@ -667,8 +666,8 @@ def main() -> None:
         _deliver_envelope_telemetry(clients=clients)
     finally:
         # The connections this child opened (SQL, Redis, gateway, MCP) end with it.
-        sdk = sys.modules.get("ava")
-        context = None if sdk is None else sdk.unbind_context()
+        slot = sys.modules.get("ava.sdk_surface.process_context")
+        context = None if slot is None else slot.unbind_context()
         if context is not None and context.clients is not clients:
             context.clients.close()
         if clients is not None:

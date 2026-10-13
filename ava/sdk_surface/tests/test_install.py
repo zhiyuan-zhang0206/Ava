@@ -21,7 +21,7 @@ from unittest.mock import patch
 import pytest
 
 import ava
-from ava.sdk_surface import install, metering, sdk_disable, skill_sources, wraps
+from ava.sdk_surface import install, metering, process_context, sdk_disable, skill_sources, wraps
 from ava.sdk_surface import plugins as sdk_plugins
 from ava.sdk_surface.installation import installed
 from ava.sdk_surface.plugins import (
@@ -58,7 +58,7 @@ def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     prior = ava.context
     clients = ClientSet(pipeline_factory=lambda: EventPipeline(writer=lambda _events: None))
     with patch.dict(os.environ):
-        ava.bind_context(replace(prior, clients=clients))
+        process_context.bind_context(replace(prior, clients=clients))
         try:
             yield
         finally:
@@ -68,7 +68,7 @@ def _surface(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
                 try:
                     clients.close()
                 finally:
-                    ava.bind_context(prior)
+                    process_context.bind_context(prior)
 
 
 @pytest.fixture

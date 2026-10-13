@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 import ava
-from ava.sdk_surface import agent_identity
+from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface import settings as sdk_settings
 from ava.sdk_surface.injection_check import QUESTION, begin_check, page_probability, split_for_model
 from base.config import settings
@@ -62,14 +62,14 @@ class FakeDecide:
 @pytest.fixture
 def exec_update() -> Iterator[dict[str, Any]]:
     """Bind a real exec turn; findings land in the returned state update."""
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
     update: dict[str, Any] = {}
     ava.state = object()
     ava.state_update = update
     try:
         yield update
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 @pytest.fixture(autouse=True)
@@ -338,7 +338,7 @@ def test_no_call_is_made_when_security_scanning_is_off(
 
 def test_no_call_is_made_outside_an_agent_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _install(monkeypatch, 0.99)
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
 
     _check(_URL, "", "body")
 

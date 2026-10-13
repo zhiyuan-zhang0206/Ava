@@ -25,7 +25,7 @@ from unittest.mock import patch
 import pytest
 
 import ava
-from ava.sdk_surface import install, metering
+from ava.sdk_surface import install, metering, process_context
 from ava.sdk_surface.installation import Installation
 from base.agents.context import AvaContext
 from base.agents.context.identity import ExternalLease
@@ -47,14 +47,14 @@ def _execution_tally() -> Generator[SdkCallTally, None, None]:
     """A test execution explicitly owns its SDK tally through the local context."""
     previous = getattr(ava, "context", None)
     tally = SdkCallTally()
-    ava.bind_context(replace(previous or AvaContext(), sdk_calls=tally))
+    process_context.bind_context(replace(previous or AvaContext(), sdk_calls=tally))
     try:
         yield tally
     finally:
         if previous is None:
-            ava.unbind_context()
+            process_context.unbind_context()
         else:
-            ava.bind_context(previous)
+            process_context.bind_context(previous)
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
@@ -214,8 +214,8 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     machine = MachineIdentity(
         name=_raise, role=frozenset, host=lambda: "", description=lambda: None
     )
-    prior = ava.unbind_context()
-    ava.bind_context(AvaContext(machine=machine))
+    prior = process_context.unbind_context()
+    process_context.bind_context(AvaContext(machine=machine))
     try:
         # Cold SDK installation owns delivery environment changes in this test scope.
         with patch.dict(os.environ):
@@ -227,9 +227,9 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
             assert "self.compact" in fqs  # real functions still enumerated
             assert "self.MACHINE_SPEC" not in fqs  # dynamic constant skipped, not evaluated
     finally:
-        ava.unbind_context()
+        process_context.unbind_context()
         if prior is not None:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)
 
 
 # ── recorder wrapping (agent side; call / emit logic is in test_sdk_telemetry) ───
@@ -610,13 +610,13 @@ async def test_awaited_calls_retain_their_entry_identity(
     )
     pin_agent(41, machine=first_machine)
     first_tally = SdkCallTally()
-    ava.bind_context(replace(ava.context, sdk_calls=first_tally))
+    process_context.bind_context(replace(ava.context, sdk_calls=first_tally))
     first = asyncio.create_task(metering._make_recorder(held, "probe.held", sampling_owner)())
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
         pin_agent(42, machine=second_machine)
         second_tally = SdkCallTally()
-        ava.bind_context(replace(ava.context, sdk_calls=second_tally))
+        process_context.bind_context(replace(ava.context, sdk_calls=second_tally))
         metering._make_recorder(lambda: None, "probe.next", sampling_owner)()
         release.set()
         await first

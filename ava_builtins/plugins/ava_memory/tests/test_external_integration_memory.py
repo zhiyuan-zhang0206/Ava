@@ -18,6 +18,7 @@ import ava
 from agent import state as state_module
 from agent.extensions import registry as registry_module
 from ava import external
+from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
 from ava.sdk_surface.process_context import process_clients
 from base.agents import impersonation as leases
@@ -53,8 +54,8 @@ def native_checkpoint(
     machine_identity: MachineIdentity,
 ) -> Iterator[tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]]:
     pin_no_identity()
-    ava.unbind_exec_turn()
-    request.addfinalizer(ava.unbind_exec_turn)
+    process_context.unbind_exec_turn()
+    request.addfinalizer(process_context.unbind_exec_turn)
 
     def loader_stub(**_kwargs: object) -> None:
         """Accept the `surface` kwarg attach passes (ignored)."""

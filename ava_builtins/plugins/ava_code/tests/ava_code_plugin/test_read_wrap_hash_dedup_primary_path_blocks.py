@@ -17,6 +17,7 @@ from langgraph.runtime import Runtime
 
 import ava
 from agent.state import BaseAgentState, build_agent_state
+from ava.sdk_surface import process_context
 from ava_builtins.plugins.ava_code import agent_runtime
 from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
     _get_injected_context_notes,
@@ -38,7 +39,7 @@ def _cwd_runtime(agent_id: int = 11) -> Runtime[AvaContext]:
 @pytest.fixture
 def no_sdk_context() -> Iterator[None]:
     held = getattr(ava, "context", None)
-    ava.unbind_context()
+    process_context.unbind_context()
     try:
         yield
     finally:
@@ -137,7 +138,7 @@ def test_read_wrap_hash_dedup_primary_path_blocks_identical_copy(tmp_path: Path)
             # Zero NEW auto-injections: both copies are hash/path-deduped now
             assert len(_get_injected_context_notes(ava.state_update)) == 1
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_set_cwd_no_skills_clears_project_skills_note(tmp_path: Path):
@@ -152,7 +153,7 @@ def test_set_cwd_no_skills_clears_project_skills_note(tmp_path: Path):
         ava.cwd.set(tmp_path)
         assert ava.state.ava_code__project_skills_note is None  # type: ignore[union-attr]
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_empty_agents_md_not_recorded(tmp_path: Path):
@@ -177,7 +178,7 @@ def test_read_wrap_empty_agents_md_not_recorded(tmp_path: Path):
         notes = _get_injected_context_notes(ava.state_update)
         assert len(notes) == 0, f"empty AGENTS.md must not be injected, got: {notes}"
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_whitespace_only_agents_md_not_recorded(tmp_path: Path):
@@ -199,7 +200,7 @@ def test_read_wrap_whitespace_only_agents_md_not_recorded(tmp_path: Path):
         notes = _get_injected_context_notes(ava.state_update)
         assert len(notes) == 0, f"whitespace-only AGENTS.md must not be injected, got: {notes}"
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 async def test_after_init_hook_falls_back_when_cwd_missing(tmp_path: Path, unit_home: Path):
@@ -289,4 +290,4 @@ def test_read_wrap_flagged_agents_md_writes_security_finding(tmp_path: Path):
         assert findings[0].source == f"context-file:{agents_path}"
         assert "ignore previous instructions" in findings[0].triggers
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()

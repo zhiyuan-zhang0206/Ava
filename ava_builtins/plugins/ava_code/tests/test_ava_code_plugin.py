@@ -14,7 +14,7 @@ import pytest
 
 import ava
 from agent.state import BaseAgentState, CompactState, build_agent_state
-from ava.sdk_surface import install
+from ava.sdk_surface import install, process_context
 from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
 from base.config.service_read import ConfigAuthority
 from base.lm import factory
@@ -105,7 +105,7 @@ def test_get_cwd_returns_state_value(tmp_path: Path):
         assert result == Path(str(tmp_path))
         assert isinstance(result, Path)
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_files_module_docstring_keeps_core_path_claim(_load_ava_code_plugin):
@@ -132,13 +132,13 @@ def test_get_cwd_after_set_cwd_reads_new_value_without_changing_process_cwd(tmp_
         assert ava.cwd.get() == p2.resolve()
         assert Path.cwd() == process_cwd
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_get_cwd_outside_turn_raises():
     """Outside an exec turn there is no ava.state → PluginStateOutsideTurnError."""
-    assert not ava.in_exec_turn()
-    with pytest.raises(ava.PluginStateOutsideTurnError):
+    assert not process_context.in_exec_turn()
+    with pytest.raises(process_context.PluginStateOutsideTurnError):
         ava.cwd.get()
 
 
@@ -170,7 +170,7 @@ def test_set_cwd_writes_state_update(tmp_path: Path):
         ava.cwd.set(tmp_path)
         assert ava.state_update["ava_code__cwd"] == str(tmp_path.resolve())
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_set_cwd_nonexistent_raises(tmp_path: Path):
@@ -183,7 +183,7 @@ def test_set_cwd_nonexistent_raises(tmp_path: Path):
             ava.cwd.set(fake)
         assert "ava_code__cwd" not in ava.state_update
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_set_cwd_not_directory_raises(tmp_path: Path):
@@ -196,13 +196,13 @@ def test_set_cwd_not_directory_raises(tmp_path: Path):
         with pytest.raises(NotADirectoryError):
             ava.cwd.set(f)
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_set_cwd_outside_turn_raises(tmp_path: Path):
     """Outside exec turn set_cwd → PluginStateOutsideTurnError."""
-    assert not ava.in_exec_turn()
-    with pytest.raises(ava.PluginStateOutsideTurnError):
+    assert not process_context.in_exec_turn()
+    with pytest.raises(process_context.PluginStateOutsideTurnError):
         ava.cwd.set(tmp_path)
 
 
@@ -241,7 +241,7 @@ def test_read_wrap_injects_agents_md(tmp_path: Path):
         # injected_paths adds this AGENTS.md
         assert agents_path in ava.state_update["ava_code__injected_paths"]
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_injects_agents_and_claude(tmp_path: Path):
@@ -272,7 +272,7 @@ def test_read_wrap_injects_agents_and_claude(tmp_path: Path):
         assert agents_path in injected
         assert claude_path in injected
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_no_emoji_in_marker(tmp_path: Path):
@@ -293,7 +293,7 @@ def test_read_wrap_no_emoji_in_marker(tmp_path: Path):
                 ava.files.read("foo.py")
         assert "📎" not in buf.getvalue()  # emoji-ok: asserts the marker is emoji-free
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_dedup_via_injected_paths(tmp_path: Path):
@@ -319,7 +319,7 @@ def test_read_wrap_dedup_via_injected_paths(tmp_path: Path):
         # injected_paths unchanged → doesn't write update
         assert "ava_code__injected_paths" not in ava.state_update
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 # ── files.read wrap: line-range params (start/end/limit/with_line_numbers) ──
@@ -335,7 +335,9 @@ def test_read_wrap_forwards_line_range_fast_path(tmp_path: Path):
     start/end/limit/with_line_numbers to the underlying read."""
     p = tmp_path / "f.txt"
     p.write_text("one\ntwo\nthree\nfour\nfive\n")
-    assert not ava.in_exec_turn()  # plugin loaded by autouse fixture, but no active turn
+    assert (
+        not process_context.in_exec_turn()
+    )  # plugin loaded by autouse fixture, but no active turn
     assert ava.files.read(str(p), start=2, end=3) == "two\nthree\n"
     assert ava.files.read(str(p), start=2, limit=2) == "two\nthree\n"
     assert ava.files.read(str(p), start=3, with_line_numbers=True) == "3: three\n4: four\n5: five\n"
@@ -361,7 +363,7 @@ def test_read_wrap_forwards_line_range_in_turn(tmp_path: Path):
                 == "3: three\n4: four\n5: five\n"
             )
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_target_is_agents_md_marks_but_not_prints(tmp_path: Path):
@@ -392,7 +394,7 @@ def test_read_wrap_target_is_agents_md_marks_but_not_prints(tmp_path: Path):
         )  # no longer print marker (avoid double surface)
         assert str(agents_md.resolve()) in ava.state_update["ava_code__injected_paths"]
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_target_is_claude_md_marks_but_not_prints(tmp_path: Path):
@@ -417,7 +419,7 @@ def test_read_wrap_target_is_claude_md_marks_but_not_prints(tmp_path: Path):
         assert "Project CLAUDE.md from" not in buf.getvalue()  # no re-print marker
         assert str(claude_md.resolve()) in ava.state_update["ava_code__injected_paths"]
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_target_agents_md_via_symlink_still_primary(tmp_path: Path):
@@ -447,7 +449,7 @@ def test_read_wrap_target_agents_md_via_symlink_still_primary(tmp_path: Path):
         # injected_paths adds AGENTS.md (resolved real path)
         assert str(agents_md.resolve()) in ava.state_update["ava_code__injected_paths"]
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_target_agents_md_then_sibling_no_reinject(tmp_path: Path):
@@ -474,7 +476,7 @@ def test_read_wrap_target_agents_md_then_sibling_no_reinject(tmp_path: Path):
         assert "Project AGENTS.md from" not in buf.getvalue()
         assert "PROJECT" not in buf.getvalue()
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_compact_resets_injected_paths(tmp_path: Path):
@@ -508,7 +510,7 @@ def test_read_wrap_compact_resets_injected_paths(tmp_path: Path):
         assert "PROJECT" in notes[0]["content"]
         assert ava.state_update["ava_code__last_seen_compact"] == 1
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_compact_not_advanced_keeps_dedup(tmp_path: Path):
@@ -541,7 +543,7 @@ def test_read_wrap_compact_not_advanced_keeps_dedup(tmp_path: Path):
         assert "ava_code__last_seen_compact" not in ava.state_update
         assert "messages" not in ava.state_update
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_dedup_within_same_turn(tmp_path: Path):
@@ -569,7 +571,7 @@ def test_read_wrap_dedup_within_same_turn(tmp_path: Path):
         assert len(notes) == 1
         assert "PROJECT" in notes[0]["content"]
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path):
@@ -594,7 +596,7 @@ def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path):
         assert len(notes) == 1
         assert "X" in notes[0]["content"]
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_no_agents_md_no_op(tmp_path: Path):
@@ -615,14 +617,14 @@ def test_read_wrap_no_agents_md_no_op(tmp_path: Path):
         assert buf.getvalue() == ""  # no injection
         assert "messages" not in ava.state_update
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 # ── review-fix guard tests (I8/I9/I10) ──────────────────────────────────
 
 
 def test_read_wrap_outside_turn_passthrough(tmp_path: Path):
-    """not `ava.in_exec_turn()` (outside turn / test / dev) → wrap fast-path passthrough to original read,
+    """not `in_exec_turn()` (outside turn / test / dev) → wrap fast-path passthrough to original read,
     does not change path or inject. Aligned with plugin disabled behavior — avoid silent fallback to weird cwd.
 
     Use absolute path to verify "original read is actually called" — `ava.files.read` itself resolves relative paths
@@ -636,7 +638,7 @@ def test_read_wrap_outside_turn_passthrough(tmp_path: Path):
     target = repo / "foo.py"
     target.write_text("hi")
 
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
     buf = io.StringIO()
     with redirect_stdout(buf):
         content = ava.files.read(str(target))
@@ -672,7 +674,7 @@ def test_read_wrap_target_missing_still_injects(tmp_path: Path):
         agents_path = str((repo / "AGENTS.md").resolve())
         assert f"Project AGENTS.md from {agents_path}:" == notes[0]["prefix"]
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 # ── ava.ui.serve wrap ─────────────────────────────────────────────────────
@@ -749,4 +751,4 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
         assert str(files[0]) in notes[0]["content"]
         assert files[0].read_bytes() == big
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
