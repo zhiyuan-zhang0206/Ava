@@ -1,10 +1,20 @@
 """Repo-root pytest bootstrap: the suite's fixtures and session hooks load as plugins.
 
-Only `pytest_plugins` belongs here (pytest accepts it in a root conftest only).
+`pytest_plugins` (pytest accepts it in a root conftest only) and the re-export of
+the data-plane fixtures belong here.
 Living at the repo root, these plugins apply to every test file in the repository
 instead of just the `tests/` tree, so a test in any package directory gets the
 same isolation guards as one under `tests/`. Ordinary fixture dependencies
 admit configuration and throwaway resources only for their real consumers.
+
+The data-plane fixtures that tests outside `tests/` request are imported by name
+from `provisioning` (after `env_bootstrap`, the first statement of this file), so
+the root conftest is their lexical scope: a package's tests reach them as an
+ancestor conftest's fixtures and take no dependency on the `tests/` tree.
+`provisioning` stays a plugin as well, because it owns the session hooks and an
+autouse fixture whose registration order is fixed below. Only non-autouse fixtures
+may be imported here: this module registers before every plugin, which would put
+an autouse fixture ahead of `leak_guard`.
 
 Order is load-bearing:
 
@@ -31,6 +41,47 @@ Order is load-bearing:
 5. The remaining hook plugins and pytester subprocess harness follow.
    Opt-in unit, SDK, model, serving, logging and retry fixtures bind beside consumers.
 """
+
+import pytest
+
+# These plugins are imported below, ahead of the `pytest_plugins` pass that would have
+# marked them; registering them here keeps pytest's assertion rewriting for them.
+pytest.register_assert_rewrite(
+    "tests.fixtures.env_bootstrap",
+    "tests.fixtures.static_environment",
+    "tests.fixtures.provisioning",
+)
+
+import tests.fixtures.env_bootstrap  # noqa: E402, F401  # pyright: ignore[reportUnusedImport] -- isolation first
+from tests.fixtures.provisioning import (  # noqa: E402
+    adb_conn,
+    aops_pool,
+    cluster_defaults_unset,
+    database,
+    database_gate,
+    db_conn,
+    db_url,
+    event_bus,
+    gateway_data_plane,
+    insert_inbound,
+    publish_wake,
+    redis_url,
+)
+
+__all__ = [
+    "adb_conn",
+    "aops_pool",
+    "cluster_defaults_unset",
+    "database",
+    "database_gate",
+    "db_conn",
+    "db_url",
+    "event_bus",
+    "gateway_data_plane",
+    "insert_inbound",
+    "publish_wake",
+    "redis_url",
+]
 
 pytest_plugins = [
     "tests.fixtures.env_bootstrap",
