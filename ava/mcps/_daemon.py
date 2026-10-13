@@ -167,7 +167,7 @@ class SerialSession:
             return await self._session.call_tool(name, args)
 
 
-def _is_transport_error(exc: BaseException) -> bool:
+def is_mcp_transport_error(exc: BaseException) -> bool:
     """Return True when *exc* indicates the MCP server process or stdio pipe
     died and a reconnect + retry is appropriate.
 
@@ -372,7 +372,7 @@ async def _handle_call_tool(
     try:
         result = await session.call_tool(tool, args)
     except Exception as e:
-        if not _is_transport_error(e):
+        if not is_mcp_transport_error(e):
             raise
         await invalidate_session(server, scope)
         raise MCPCallError(
@@ -440,7 +440,7 @@ async def dispatch_with_retry(
             try:
                 return await _dispatch_request(req, req_id, method, params, server, scope)
             except Exception as e:
-                if _attempt == 2 or not _is_transport_error(e):
+                if _attempt == 2 or not is_mcp_transport_error(e):
                     raise
                 logger.opt(exception=True).warning(
                     "MCP server {} transport error (attempt {}); dropping its session and retrying",

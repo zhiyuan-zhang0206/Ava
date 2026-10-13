@@ -4,7 +4,3 @@ exports = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py",
 "health.py" = ["health_schema.py", "http_transport.py", "loop_health.py"]
 "round_loop.py" = ["loop_health.py"]
 "tests" = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py", "loop_health.py", "round_loop.py"]
-
-[debt.private-name]
-"tests/test_health_probe.py -> health.py#_probe_daemon" = 3
-"tests/test_health_probe.py -> health.py#_probe_home" = 3

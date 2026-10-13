@@ -71,13 +71,13 @@ class LifecycleOp:
     resumed_from: ResumedFrom | None = None
 
 
-def _path() -> Path:
+def journal_path() -> Path:
     return run_dir() / "lifecycle-op.json"
 
 
 def _write(op: LifecycleOp) -> None:
     """Atomic best-effort write; a failure is loud but never fails the op."""
-    path = _path()
+    path = journal_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         _fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".lifecycle-op.", suffix=".tmp")
@@ -252,7 +252,7 @@ def _parse_resumed_from(raw_resumed: object) -> ResumedFrom | None:
 def read() -> LifecycleOp | None:
     """The current journal, or None when absent or unreadable."""
     try:
-        raw = json.loads(_path().read_text())
+        raw = json.loads(journal_path().read_text())
     except (OSError, ValueError):
         return None
     if not isinstance(raw, dict):
@@ -285,4 +285,4 @@ def read() -> LifecycleOp | None:
 
 def status_path() -> Path:
     """The journal path, for printing the pointer line."""
-    return _path()
+    return journal_path()

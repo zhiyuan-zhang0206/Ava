@@ -31,7 +31,7 @@ from gateway.inspect.schemas import InspectMetricsMetadata
 _FAMILIES = ("cost", "turns", "activity", "lifecycle")
 
 
-def _historical(metadata: InspectMetricsMetadata, *, spawned_at: datetime) -> bool:
+def window_is_historical(metadata: InspectMetricsMetadata, *, spawned_at: datetime) -> bool:
     """Mirror of the read model's ``historical`` flag (window reaches before
     the observation collection started). A missing window start reads
     historical — the quiet side."""
@@ -72,7 +72,7 @@ def note_inspect_metrics_coverage(
     ``inspect_metrics_coverage_gap`` WARNING event. Never raises — see the
     module docstring."""
     try:
-        historical = _historical(metadata, spawned_at=spawned_at)
+        historical = window_is_historical(metadata, spawned_at=spawned_at)
         for family, condition, availability in conditions(metadata):
             if _unexpected(condition, historical=historical):
                 logger.warning(

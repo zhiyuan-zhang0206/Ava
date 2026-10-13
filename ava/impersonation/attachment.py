@@ -145,7 +145,7 @@ class Attachment:
         self._closed = False
         self._closing = False
         self._stack = ExitStack()
-        # The attached agent's pins and plugin-config view (`ava.sdk_surface.settings._attached` reads it through the lease), once loaded.
+        # The attached agent's pins and plugin-config view (`ava.sdk_surface.settings.attached_agent_view` reads it through the lease), once loaded.
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
         self._event_gate: Any = None
         self._call_lock = Lock()

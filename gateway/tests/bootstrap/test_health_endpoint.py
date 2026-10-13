@@ -6,7 +6,7 @@ contract with `base.daemon.health` and is pinned here rather than left to
 whatever the handler happens to return.
 
 `name` is the newest of those fields and the reason this module exists: it is
-step 1 of an expand-contract pair (#1038). Nothing reads it yet — `_probe_home`
+step 1 of an expand-contract pair (#1038). Nothing reads it yet — `probe_unit_home`
 gains the `name` arm only after every deployed gateway emits it — so without a
 test the field has no consumer to keep it alive and would be trimmed as dead
 weight by the next reader. That is exactly the failure the ordering guards

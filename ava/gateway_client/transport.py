@@ -104,7 +104,7 @@ def use_client(client: Any) -> Generator[Any]:
 # env override: `AVA_GATEWAY_MAX_RETRIES` / `AVA_GATEWAY_RETRY_DELAY_SECONDS`.
 
 
-def _max_retries(context: AvaContext | None = None) -> int:
+def request_max_retries(context: AvaContext | None = None) -> int:
     return _inputs(context).max_retries_reader()
 
 
@@ -374,7 +374,7 @@ def post(
     client's configured timeout" — there is deliberately no way to ask for an
     unbounded request.
 
-    `max_retries` overrides the module-wide attempt count (`_max_retries()`) for
+    `max_retries` overrides the module-wide attempt count (`request_max_retries()`) for
     this one call. The default fits routes the gateway works on directly, but
     a call whose failure mode is a *modelled, already-spent* response (e.g.
     memory search, where the gateway answers 503 only after consuming its own
@@ -404,7 +404,7 @@ def post(
         else None
     )
 
-    retries = _max_retries(context) if max_retries is None else max_retries
+    retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _http(context).post(
             path, json=json or {}, params=params, timeout=per_call, headers=headers
@@ -438,7 +438,7 @@ def get(
     import httpx
 
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else cast(httpx.Timeout, timeout)
-    retries = _max_retries(context) if max_retries is None else max_retries
+    retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _http(context).get(path, params=params, timeout=per_call), retries, context=context
     )
@@ -466,6 +466,6 @@ def patch(
     )
     return _request_with_retry(
         lambda: _http().patch(path, json=json or {}, headers=headers),
-        _max_retries(),
+        request_max_retries(),
         retryable=keyed or semantics is Idempotency.IDEMPOTENT,
     )

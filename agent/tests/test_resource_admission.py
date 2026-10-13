@@ -16,7 +16,7 @@ from base.agents.incarnation.resources import (
     IncarnationResources,
     decode_resources,
 )
-from base.agents.incarnation.tests.test_resources import _force
+from base.agents.incarnation.tests.test_resources import force_incarnation
 from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.pin_agent import exec_context
@@ -57,7 +57,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
                 writer.execute("SELECT set_config('search_path',%s,false)", (path[0],))
                 writer.commit()
                 with writer.transaction():
-                    commands.append(_force(writer, target))
+                    commands.append(force_incarnation(writer, target))
         except BaseException as exc:
             failures.append(exc)
         finally:

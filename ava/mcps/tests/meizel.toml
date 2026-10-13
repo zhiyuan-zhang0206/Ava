@@ -26,9 +26,6 @@
 "test_retry_classify.py#monkeypatch.setattr ava.mcps._daemon.get_session" = 1
 "test_retry_classify.py#monkeypatch.setattr ava.mcps._daemon.invalidate_session" = 1
 
-[debt.private-name]
-"test_mcps.py -> _mcps_helpers.py#_result" = 1
-
 [debt.stdlib-patch]
 "test_mcps_remote.py#monkeypatch.setattr socket.socket" = 1
 "test_retry_classify.py#monkeypatch.setattr socket.socket" = 1

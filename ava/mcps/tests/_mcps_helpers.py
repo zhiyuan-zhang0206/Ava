@@ -126,7 +126,9 @@ def content_image(b64: str) -> MagicMock:
     return c
 
 
-def _result(content: list, *, is_error: bool = False, structured: dict | None = None) -> MagicMock:
+def call_tool_result(
+    content: list, *, is_error: bool = False, structured: dict | None = None
+) -> MagicMock:
     r = MagicMock()
     r.content = content
     r.is_error = is_error
