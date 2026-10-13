@@ -78,7 +78,9 @@ violations pass, anything new fails, and the debt may only shrink
   pass the dependency in as an explicit parameter
   ([patching](../meizel/docs/checker/patching.ava.okf.md)). When a symbol is renamed, `debt carry
   --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
-  `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does.
+  `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. `debt sites --code <patch code>
+  --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
+  --by-target` reports what a change paid down per target; a codemod PR pastes the latter.
 - `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
   `[loads]` sites, default-argument injections) and every exemption of the lint rules in
   `meizel/` (ambient state, clock lattice, single owners, `os.environ`, per-agent settings,
