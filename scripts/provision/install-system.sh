@@ -8,7 +8,7 @@
 # has the toolchain.
 #
 # Server binaries only, NO initdb: the test suite spins throwaway native clusters
-# (tests/_containers.py), and a gateway unit's own per-cluster instance is
+# (base/deploy/tests/containers.py), and a gateway unit's own per-cluster instance is
 # provisioned under $AVA_HOME/pg by `ava start`.
 #
 # Idempotent, runs as root (or via sudo). macOS prod is provisioned via brew.

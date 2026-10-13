@@ -18,9 +18,9 @@ import redis
 from redis.exceptions import AuthenticationError, NoPermissionError
 
 from base.cluster import ensure_cluster_redis_acl, port_preflight
+from base.deploy.tests.containers import redis_server
 from base.host.net.url_secret import url_with_userinfo
 from base.native_process.ownership import OwnedProcess
-from tests._containers import redis_server
 
 _SECRET = "redisacltestsecret"  # noqa: S105 — test fixture, not a real credential
 

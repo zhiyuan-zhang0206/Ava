@@ -54,7 +54,7 @@ def _hung_archive_args(**_inputs: object) -> list[str]:
 
 def _private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, int]:
     from base.config import settings
-    from tests._containers import free_port
+    from base.deploy.tests.containers import free_port
 
     home = tmp_path / "home"
     home.mkdir()

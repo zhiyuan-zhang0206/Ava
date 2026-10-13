@@ -1,4 +1,4 @@
-exports = ["git", "lifecycle", "maintenance", "progress_timeout.py", "release", "schedule_timing.py", "schema", "state", "timing.py"]
+exports = ["git", "lifecycle", "maintenance", "progress_timeout.py", "release", "schedule_timing.py", "schema", "state", "tests", "timing.py"]
 
 [uses]
 "tests" = ["maintenance", "progress_timeout.py", "schema", "timing.py"]

@@ -9,7 +9,7 @@ from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster.dataplane import pooler
 from base.cluster.machine import MachineIdentity
-from tests._containers import postgres
+from base.deploy.tests.containers import postgres
 from tests.components.cli.test_pgbouncer_wire import (
     SECRET,
     pgbouncer_available,

@@ -20,7 +20,7 @@ def guard_health_port_gate(request: pytest.FixtureRequest, monkeypatch: pytest.M
     green with prod live. This fixture buys the weaker, residual property.
 
     `_free_port()` releases the port before anything binds it — the same race
-    `tests/_containers.py` accepts for pg/redis. Nothing in a test run ever binds
+    `base/deploy/tests/containers.py` accepts for pg/redis. Nothing in a test run ever binds
     these particular ports, so the window is the whole session, and an unrelated
     process that grabs one and answers 2xx on `/healthz` would be read as
     PORT_TAKEN: a start test failing for a reason no test caused. Rare, but the
