@@ -1,0 +1,2 @@
+[uses]
+"test_guarded_notice_resolution.py" = ["test_current_notice_receipts.py"]

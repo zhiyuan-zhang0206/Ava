@@ -574,6 +574,27 @@ repos:
       # a field with a missing/invalid scope, so the former standalone
       # lint-config-scope hook retired.)
 
+      # The locality gate (meizel). A commit judges the staged Python files and every
+      # manifest (`check --changed`, a few seconds); a push runs the whole check, which also
+      # finds stale declarations and the effect of a manifest edit on files that did not change.
+      # CI runs the whole check as its own step, so the per-file hook is skipped there. Recorded
+      # debt may only shrink: docs/contributing.md "Locality gate (meizel)".
+      - id: meizel-check-changed
+        name: meizel check --changed (locality of the staged files, every manifest)
+        entry: .venv/bin/python -m meizel check --changed
+        language: system
+        files: ^(.*\.py|(.*/)?meizel\.toml)$
+
+      - id: meizel-check-full
+        name: meizel check, full (locality of the whole repository)
+        entry: bash scripts/hooks/prepush-if-changed.sh '(\.py|(^|/)meizel\.toml)$' -- .venv/bin/python -m meizel check
+        language: system
+        stages: [pre-push]
+        verbose: true  # A skip must stay visible.
+        always_run: true
+        pass_filenames: false
+        require_serial: true
+
       # Import-direction contracts (config in pyproject [tool.importlinter];
       # the rules and their blind spots: docs/conventions/import-layering.md).
       # Analyzes the whole import graph, so pass_filenames: false + trigger on

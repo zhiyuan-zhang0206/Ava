@@ -1,0 +1,4 @@
+exports = ["constants.py", "packing.py"]
+
+[uses]
+"packing.py" = ["constants.py"]

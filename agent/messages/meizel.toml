@@ -1,0 +1,4 @@
+exports = ["guard.py"]
+
+[uses]
+"tests" = ["__init__.py", "guard.py"]

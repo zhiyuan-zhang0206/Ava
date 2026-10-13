@@ -1,0 +1,14 @@
+[uses]
+"test_context_binding.py" = ["test_exec_child.py"]
+"test_exec_child_signals.py" = ["test_exec_child.py"]
+"test_exec_slot.py" = ["test_exec_child.py"]
+"test_resource_admission.py" = ["test_exec_owner_entry.py"]
+
+[debt.private-name]
+"test_context_binding.py -> test_exec_child.py#_spawn" = 1
+"test_exec_child_signals.py -> test_exec_child.py#_AGENT_ID" = 1
+"test_exec_child_signals.py -> test_exec_child.py#_child_env" = 1
+"test_exec_slot.py -> test_exec_child.py#_spawn" = 1
+"test_resource_admission.py -> test_exec_owner_entry.py#_context" = 1
+"test_resource_admission.py -> test_exec_owner_entry.py#_ready" = 1
+"test_resource_admission.py -> test_exec_owner_entry.py#_start" = 1

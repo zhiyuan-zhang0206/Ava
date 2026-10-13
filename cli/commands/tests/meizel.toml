@@ -1,0 +1,8 @@
+exports = ["data_plane_records.py", "health_port_guard.py", "test_single_box.py"]
+
+[uses]
+"test_maintenance_recovery.py" = ["maintenance_cluster.py"]
+"test_unit_capability_commands.py" = ["test_single_box.py"]
+
+[debt.private-name]
+"test_unit_capability_commands.py -> test_single_box.py#_refused" = 1

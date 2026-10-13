@@ -1,2 +1,7 @@
+exports = ["staging.py", "worker_process.py"]
+
+[uses]
+"worker_process.py" = ["staging.py"]
+
 [loads]
 "worker_bootstrap.py" = ["services/backup/scheduler"]

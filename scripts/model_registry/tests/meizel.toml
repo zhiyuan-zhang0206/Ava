@@ -1,0 +1,2 @@
+[uses]
+"check_model_updates" = ["test_check_model_updates.py"]

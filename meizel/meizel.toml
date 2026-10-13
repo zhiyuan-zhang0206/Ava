@@ -1,0 +1,11 @@
+exports = ["budgets", "language", "lint_common.py", "owners", "roles.py", "state"]
+
+[uses]
+"__main__.py" = ["contracts"]
+"contracts" = ["graph", "language", "roles.py"]
+"language" = ["graph", "lint_common.py"]
+"lint_common.py" = ["roles.py"]
+"owners" = ["lint_common.py", "roles.py"]
+"roles.py" = ["graph"]
+"state" = ["lint_common.py", "roles.py"]
+"tests" = ["contracts", "graph", "lint_common.py", "roles.py"]

@@ -1,0 +1,5 @@
+[uses]
+"conftest.py" = ["output_inputs.py"]
+"test_exec_output.py" = ["output_inputs.py"]
+"test_exec_output_cap.py" = ["output_inputs.py"]
+"test_exec_output_crop.py" = ["output_inputs.py"]

@@ -1,0 +1,11 @@
+exports = ["api.py", "delivery.py", "ledger.py", "model.py", "unit.py"]
+
+[uses]
+"api.py" = ["delivery.py", "ledger.py", "model.py"]
+"delivery.py" = ["ledger.py", "model.py"]
+"ledger.py" = ["model.py"]
+"tests" = ["api.py", "ledger.py", "model.py"]
+"unit.py" = ["api.py", "delivery.py", "ledger.py", "model.py"]
+
+[debt.private-name]
+"tests/test_ledger.py -> ledger.py#_write" = 1

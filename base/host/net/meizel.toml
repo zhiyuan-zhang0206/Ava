@@ -1,0 +1,5 @@
+exports = ["auth.py", "http_dial.py", "predicates.py", "resilience.py", "url_secret.py"]
+
+[uses]
+"http_dial.py" = ["predicates.py"]
+"tests" = ["auth.py", "http_dial.py", "predicates.py", "resilience.py"]

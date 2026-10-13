@@ -1,0 +1,2 @@
+[uses]
+"test_entry_config_failure.py" = ["test_reconcile_embed_error_truncates_and_returns_false.py"]

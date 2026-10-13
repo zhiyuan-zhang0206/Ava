@@ -1,0 +1,4 @@
+[uses]
+"shutdown_daemon.py" = ["test_scheduler_shutdown.py"]
+"shutdown_worker.py" = ["test_scheduler_shutdown.py"]
+"test_operation_worker.py" = ["operation_support.py"]

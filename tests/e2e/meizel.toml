@@ -1,2 +1,15 @@
+exports = ["conftest.py", "fakes", "process_support.py", "visual"]
+
+[uses]
+"_credentials.py" = ["_ports.py"]
+"_db.py" = ["_ports.py"]
+"conftest.py" = ["_credentials.py", "_ports.py", "_truncate.py", "fixture_environment.py", "process_support.py"]
+"flow" = ["_credentials.py", "_db.py", "_ports.py", "_settings.py", "fakes", "fixture_environment.py", "process_support.py"]
+"lifecycle" = ["_credentials.py", "_db.py", "_ports.py", "fakes", "fixture_environment.py"]
+"plugins" = ["_db.py", "_ports.py", "fakes"]
+"process_support.py" = ["_credentials.py"]
+"state" = ["_db.py", "_settings.py", "fakes", "fixture_environment.py"]
+"visual" = ["_ports.py"]
+
 [loads]
 "process_support.py" = ["services/agent_runner"]

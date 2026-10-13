@@ -1,0 +1,4 @@
+exports = ["oss_fake.py"]
+
+[uses]
+"test_offsite.py" = ["oss_fake.py"]

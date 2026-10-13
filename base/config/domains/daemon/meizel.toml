@@ -1,0 +1,5 @@
+exports = ["settings.py"]
+
+[uses]
+"settings.py" = ["delivery_watchdog_fields.py"]
+"tests" = ["settings.py"]

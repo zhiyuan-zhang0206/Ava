@@ -1,2 +1,7 @@
+exports = ["cursor_fixture.py", "test_llm_helpers.py"]
+
+[uses]
+"llm_helpers" = ["test_llm_helpers.py"]
+
 [external]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"

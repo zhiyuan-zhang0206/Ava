@@ -1,0 +1,7 @@
+exports = ["migration_errors.py", "migration_layout.py", "migrations.py", "rollback_snapshot.py", "tests"]
+
+[uses]
+"migration_history.py" = ["migration_errors.py"]
+"migration_layout.py" = ["migration_errors.py"]
+"migrations.py" = ["migration_errors.py", "migration_history.py", "migration_layout.py"]
+"tests" = ["migration_history.py", "migration_layout.py", "migrations.py"]

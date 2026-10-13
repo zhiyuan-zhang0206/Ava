@@ -1,0 +1,5 @@
+exports = ["config_authority.py", "generation.py", "homes.py", "identity.py", "model_owner.py", "sdk.py", "workspace.py"]
+
+[uses]
+"sdk.py" = ["identity.py"]
+"tests" = ["homes.py", "identity.py", "sdk.py"]

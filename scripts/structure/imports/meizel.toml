@@ -1,0 +1,11 @@
+exports = ["bindings.py", "cache.py", "executed.py", "facts.py", "fixture_scopes.py"]
+
+[uses]
+"bindings.py" = ["__init__.py"]
+"cache.py" = ["__init__.py"]
+"executed.py" = ["bindings.py"]
+"facts.py" = ["__init__.py", "bindings.py", "executed.py", "file_loader.py", "mock_targets.py"]
+"file_loader.py" = ["bindings.py"]
+"mock_targets.py" = ["__init__.py", "bindings.py"]
+"style.py" = ["__init__.py"]
+"tests" = ["__init__.py", "bindings.py", "cache.py", "executed.py", "facts.py", "fixture_scopes.py", "style.py"]

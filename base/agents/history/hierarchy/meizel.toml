@@ -1,0 +1,20 @@
+exports = ["build.py", "chunk_consumer.py", "chunk_plan.py", "chunks.py", "group_consumer.py", "rebuild.py", "serve.py", "sessions.py", "store.py", "tests", "units.py", "usage.py"]
+
+[uses]
+"build.py" = ["chunk_plan.py", "chunks.py", "sessions.py"]
+"chunk_consumer.py" = ["chunk_generate.py", "chunks.py", "generate.py", "group_consumer.py", "rebuild.py", "units.py"]
+"chunk_generate.py" = ["chunks.py", "generate.py", "group.py", "leaf_groups.py", "units.py"]
+"chunk_plan.py" = ["chunks.py"]
+"chunks.py" = ["store.py"]
+"group.py" = ["generate.py"]
+"group_consumer.py" = ["generate.py", "group.py", "group_store.py"]
+"group_store.py" = ["group.py", "store.py"]
+"leaf_groups.py" = ["group.py", "units.py"]
+"rebuild.py" = ["chunks.py", "group_consumer.py"]
+"serve.py" = ["store.py", "units.py", "usage.py"]
+"sessions.py" = ["chunk_plan.py", "chunks.py", "units.py"]
+"store.py" = ["usage.py"]
+"tests" = ["build.py", "chunk_consumer.py", "chunk_generate.py", "chunks.py", "generate.py", "group.py", "group_consumer.py", "group_store.py", "leaf_groups.py", "rebuild.py", "serve.py", "sessions.py", "store.py", "units.py", "usage.py"]
+
+[debt.private-name]
+"tests/test_chunk_consumer.py -> chunk_consumer.py#_settle" = 2

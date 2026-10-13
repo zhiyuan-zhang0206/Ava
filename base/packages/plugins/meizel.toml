@@ -1,2 +1,18 @@
+exports = ["activation.py", "config_face.py", "config_registration.py", "config_view.py", "contributions.py", "data_registry.py", "enable_config.py", "extensions.py", "flags.py", "gate.py", "load_report.py", "loading", "manifest.py", "mcp_enabled.py", "plugin_errors.py", "pyproject_mirror.py", "surface", "tests"]
+
+[uses]
+"activation.py" = ["contributions.py"]
+"config_face.py" = ["extensions.py", "flags.py", "load_report.py"]
+"config_registration.py" = ["config_face.py", "config_view.py", "enable_config.py", "plugin_errors.py"]
+"config_view.py" = ["plugin_errors.py"]
+"data_registry.py" = ["extensions.py", "gate.py", "load_report.py", "surface"]
+"enable_config.py" = ["load_report.py"]
+"extensions.py" = ["contributions.py", "surface"]
+"gate.py" = ["extensions.py", "manifest.py"]
+"loading" = ["config_face.py", "enable_config.py", "extensions.py", "gate.py", "load_report.py", "manifest.py"]
+"manifest.py" = ["surface"]
+"pyproject_mirror.py" = ["manifest.py"]
+"tests" = ["config_face.py", "config_registration.py", "config_view.py", "data_registry.py", "enable_config.py", "extensions.py", "flags.py", "load_report.py", "manifest.py", "mcp_enabled.py", "plugin_errors.py", "pyproject_mirror.py", "surface"]
+
 [external]
 "config_face.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"

@@ -1,3 +1,11 @@
+exports = ["metrics.py"]
+
+[uses]
+"_escapes.py" = ["_punct.py"]
+"_ruff.py" = ["_imports.py"]
+"agent_runtime.py" = ["_deterministic_fixes.py", "_escapes.py", "_imports.py", "_llm_repair.py", "_punct.py", "_ruff.py"]
+"tests" = ["_deterministic_fixes.py", "_escapes.py", "_imports.py", "_llm_repair.py", "_punct.py", "agent_runtime.py"]
+
 [external]
 "_deterministic_fixes.py" = "the syntax repairer's oracle: compiles agent-authored code"
 "_llm_repair.py" = "the syntax repairer's oracle: compiles agent-authored code"

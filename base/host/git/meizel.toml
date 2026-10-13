@@ -1,0 +1,5 @@
+exports = ["gitenv.py", "host_version.py"]
+
+[uses]
+"host_version.py" = ["gitenv.py"]
+"tests" = ["gitenv.py", "host_version.py"]

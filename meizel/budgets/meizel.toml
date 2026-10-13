@@ -1,0 +1,5 @@
+exports = ["directory_budget.py", "limits.py"]
+
+[uses]
+"limits.py" = ["directory_budget.py"]
+"tests" = ["directory_budget.py", "limits.py"]

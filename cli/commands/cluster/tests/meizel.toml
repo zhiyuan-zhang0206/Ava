@@ -1,0 +1,10 @@
+exports = ["health_probe_inputs.py", "test_cluster_health.py"]
+
+[uses]
+"test_cluster_health.py" = ["health_probe_inputs.py"]
+"test_cluster_health_window.py" = ["health_probe_inputs.py", "test_cluster_health.py"]
+"test_cluster_service_probes.py" = ["health_probe_inputs.py"]
+"test_health_probe_maintenance.py" = ["health_probe_inputs.py"]
+
+[debt.private-name]
+"test_cluster_health_window.py -> test_cluster_health.py#_home" = 1

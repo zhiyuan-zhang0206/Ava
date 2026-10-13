@@ -1,0 +1,8 @@
+exports = ["agent_runtime.py", "plugin.py"]
+
+[uses]
+"_code_namespace.py" = ["_state_access.py"]
+"_state_access.py" = ["agent_runtime.py"]
+"agent_runtime.py" = ["_prompt_sections.py", "_state.py"]
+"plugin.py" = ["_code_namespace.py", "_state_access.py", "_walk.py"]
+"tests" = ["_code_namespace.py", "_prompt_sections.py", "_state.py", "_walk.py", "agent_runtime.py", "plugin.py"]

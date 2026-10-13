@@ -1,0 +1,11 @@
+[uses]
+"test_impersonation_consent.py" = ["test_impersonation.py"]
+"test_impersonation_integration.py" = ["handoff_inputs.py"]
+"test_impersonation_part2.py" = ["test_impersonation.py"]
+"test_impersonation_transport.py" = ["test_impersonation.py"]
+"test_impersonation_transport_integration.py" = ["handoff_inputs.py"]
+"test_successor_lease_binding.py" = ["test_impersonation.py"]
+
+[debt.private-name]
+"test_impersonation_consent.py -> test_impersonation.py#_session" = 1
+"test_impersonation_part2.py -> test_impersonation.py#_notes" = 1

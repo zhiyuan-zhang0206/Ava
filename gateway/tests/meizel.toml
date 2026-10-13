@@ -1,0 +1,14 @@
+exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency.py"]
+
+[uses]
+"agents" = ["test_agents_endpoints.py"]
+"bootstrap" = ["agents", "events"]
+"events" = ["test_idempotency.py", "test_sse.py"]
+"observability" = ["agents"]
+"receipts" = ["events"]
+"test_native_cancel.py" = ["test_idempotency.py"]
+"test_native_restart.py" = ["test_idempotency.py", "test_native_cancel.py"]
+"upload_delivery" = ["events"]
+
+[debt.private-name]
+"test_native_restart.py -> test_native_cancel.py#_headers" = 1

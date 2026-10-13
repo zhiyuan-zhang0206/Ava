@@ -1,0 +1,5 @@
+exports = ["registry_support.py", "task_registry"]
+
+[uses]
+"test_ava_fleet_plugin.py" = ["registry_support.py"]
+"test_task_registry.py" = ["task_registry"]

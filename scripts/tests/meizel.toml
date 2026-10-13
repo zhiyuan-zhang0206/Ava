@@ -1,0 +1,2 @@
+[debt.restricted-python]
+"test_test_selector.py#python -c source that imports first-party code" = 1

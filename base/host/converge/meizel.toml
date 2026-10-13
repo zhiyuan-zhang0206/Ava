@@ -1,0 +1,6 @@
+exports = ["accessibility.py", "browser_deps.py", "google_drive.py", "screen_capture.py"]
+
+[uses]
+"accessibility.py" = ["_status_file.py"]
+"screen_capture.py" = ["_status_file.py"]
+"tests" = ["accessibility.py", "browser_deps.py", "google_drive.py", "screen_capture.py"]

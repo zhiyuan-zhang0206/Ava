@@ -1,0 +1,4 @@
+exports = ["helpers.py", "provider_failures.py"]
+
+[uses]
+"test_emergency_compact_summary_raises_on_transient_exhaustion.py" = ["helpers.py"]

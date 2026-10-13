@@ -1,0 +1,11 @@
+[uses]
+"test_skills.py" = ["_skills_helpers.py"]
+"test_skills_attribution.py" = ["_skills_helpers.py"]
+"test_skills_mount.py" = ["_skills_helpers.py"]
+"test_skills_state_note.py" = ["_skills_helpers.py"]
+
+[debt.private-name]
+"test_skills.py -> _skills_helpers.py#_overlay_all_enabled" = 1
+"test_skills_attribution.py -> _skills_helpers.py#_overlay_all_enabled" = 1
+"test_skills_mount.py -> _skills_helpers.py#_overlay_all_enabled" = 1
+"test_skills_state_note.py -> _skills_helpers.py#_overlay_all_enabled" = 1

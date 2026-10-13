@@ -1,0 +1,9 @@
+exports = ["test_maintenance.py"]
+
+[uses]
+"test_maintenance_legacy_cold.py" = ["test_maintenance.py"]
+"test_maintenance_lifecycle_wait.py" = ["test_maintenance.py"]
+
+[debt.private-name]
+"test_maintenance_legacy_cold.py -> test_maintenance.py#_agent" = 1
+"test_maintenance_lifecycle_wait.py -> test_maintenance.py#_agent" = 1

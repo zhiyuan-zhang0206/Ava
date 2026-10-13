@@ -1,0 +1,68 @@
+exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand.py", "watcher.py"]
+
+[uses]
+"__init__.py" = ["agents", "boot.py", "files.py", "impersonation", "mcps", "sdk_surface", "self", "shell", "skills", "ui.py", "understand.py", "watcher.py", "web.py"]
+"agents" = ["gateway_client", "sdk_surface", "security.py", "skills"]
+"boot.py" = ["gateway_client", "mcps", "sdk_surface"]
+"files.py" = ["sdk_surface", "security.py", "skills"]
+"gateway_client" = ["sdk_surface"]
+"impersonation" = ["boot.py", "sdk_surface"]
+"mcps" = ["sdk_surface", "security.py"]
+"security.py" = ["sdk_surface"]
+"self" = ["boot.py", "files.py", "sdk_surface"]
+"shell" = ["agents", "impersonation", "sdk_surface", "security.py"]
+"skills" = ["sdk_surface"]
+"tests" = ["__init__.py", "agents", "boot.py", "files.py", "gateway_client", "impersonation", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand.py", "watcher.py", "web.py"]
+"ui.py" = ["boot.py", "gateway_client", "sdk_surface"]
+"understand.py" = ["files.py", "sdk_surface", "security.py"]
+"watcher.py" = ["sdk_surface", "shell"]
+"web.py" = ["sdk_surface", "security.py"]
+
+[debt.private-module]
+"tests/namespaces/shell/coding_tools/test_sdk_entry_counting.py -> shell/coding_tools/_common.py" = 1
+
+[debt.private-name]
+"agents/tests/test_agents_scan.py -> security.py#_record_finding" = 2
+"shell/tests/test_shell_scan.py -> security.py#_record_finding" = 1
+"tests/bootstrap/test_session_venv_projection.py -> watcher.py#_agent_id" = 2
+"tests/namespaces/gateway_client/test_gateway_client.py -> gateway_client/__init__.py#_MEMORY_SEARCH_TIMEOUT_MARGIN_S" = 2
+"tests/namespaces/gateway_client/test_gateway_client.py -> gateway_client/transport.py#_JITTER_SPAN_S" = 1
+"tests/namespaces/gateway_client/test_gateway_client.py -> gateway_client/transport.py#_agent_jitter_seconds" = 5
+"tests/namespaces/gateway_client/test_gateway_client.py -> gateway_client/transport.py#_base_retry_delay_s" = 1
+"tests/namespaces/gateway_client/test_gateway_client.py -> gateway_client/transport.py#_max_retries" = 1
+"tests/namespaces/gateway_client/test_gateway_client.py -> gateway_client/transport.py#_retry_delay_seconds" = 2
+"tests/namespaces/gateway_client/test_gateway_client_base_url.py -> gateway_client/transport.py#_agent_jitter_seconds" = 1
+"tests/namespaces/gateway_client/test_gateway_client_base_url.py -> gateway_client/transport.py#_http" = 7
+"tests/namespaces/gateway_client/test_strong_creation.py -> gateway_client/transport.py#_retry_delay_seconds" = 1
+"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_Constant" = 1
+"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_classify_dir_entry" = 1
+"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_module_attribute_annotations" = 1
+"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_module_attribute_docs" = 1
+"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_module_children" = 1
+"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/help.py#_format_docstring" = 1
+"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/help.py#_format_documented_const_stub" = 1
+"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/help.py#_format_signature" = 1
+"tests/namespaces/sdk_surface/test_install.py -> sdk_surface/sdk_disable.py#_DisabledSDKModule" = 1
+"tests/namespaces/sdk_surface/test_mcp_clients.py -> mcps/__init__.py#_list_tools" = 3
+"tests/namespaces/sdk_surface/test_metering.py -> mcps/__init__.py#_call_raw" = 1
+"tests/namespaces/sdk_surface/test_metering.py -> sdk_surface/metering.py#_instrument_targets" = 5
+"tests/namespaces/sdk_surface/test_metering.py -> sdk_surface/metering.py#_make_mcp_recorder" = 2
+"tests/namespaces/sdk_surface/test_metering.py -> sdk_surface/metering.py#_make_recorder" = 13
+"tests/namespaces/sdk_surface/test_wraps.py -> sdk_surface/metering.py#_make_recorder" = 1
+"tests/namespaces/shell/coding_tools/test_sdk_entry_counting.py -> sdk_surface/metering.py#_make_recorder" = 1
+"tests/namespaces/shell/test_shell.py -> shell/sessions.py#_handle" = 1
+"tests/namespaces/shell/test_shell_background.py -> shell/background.py#_OUTPUT_KEEP" = 3
+"tests/namespaces/shell/test_shell_ttl.py -> shell/sessions.py#_renewal_update" = 1
+"tests/namespaces/shell/test_shell_ttl.py -> shell/sessions.py#_validate_ttl" = 1
+"tests/test_metering_ava.py -> mcps/__init__.py#_call_raw" = 4
+"tests/test_validation_ava.py -> watcher.py#_spawn" = 2
+"tests/test_validation_ava.py -> web.py#_fetch_one" = 1
+"tests/test_validation_ava.py -> web.py#_search_one" = 1
+"tests/watcher/test_watcher.py -> watcher.py#_build_boot" = 8
+"tests/watcher/test_watcher.py -> watcher.py#_spawn" = 3
+"tests/watcher/test_watcher.py -> watcher.py#_watchers_dir" = 10
+"tests/watcher/test_watcher_commands.py -> watcher.py#_spawn" = 6
+"tests/watcher/test_watcher_files.py -> watcher.py#_prune_stale_watcher_files" = 1
+"tests/watcher/test_watcher_files.py -> watcher.py#_watchers_dir" = 6
+"tests/watcher/test_watcher_plugin_load.py -> watcher.py#_build_boot" = 1
+"tests/web/test_web_injection.py -> web.py#_answer" = 3

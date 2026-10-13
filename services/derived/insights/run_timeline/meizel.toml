@@ -1,0 +1,12 @@
+exports = ["history.py", "router.py", "schemas.py"]
+
+[uses]
+"context.py" = ["history.py", "schemas.py"]
+"links.py" = ["schemas.py"]
+"messages.py" = ["history.py", "schemas.py", "tokens.py"]
+"router.py" = ["context.py", "history.py", "links.py", "messages.py", "schemas.py", "tokens.py"]
+"tests" = ["context.py", "history.py", "links.py", "messages.py", "router.py", "tokens.py"]
+"tokens.py" = ["history.py"]
+
+[debt.private-name]
+"tests/test_history_cache.py -> history.py#_MAX_ENTRIES" = 1

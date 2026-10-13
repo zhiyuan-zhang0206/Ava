@@ -1,0 +1,5 @@
+exports = ["birth_config.py", "model_config.py", "model_overrides.py"]
+
+[uses]
+"model_config.py" = ["birth_config.py"]
+"tests" = ["birth_config.py", "model_config.py"]

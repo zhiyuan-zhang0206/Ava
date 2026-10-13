@@ -3,3 +3,6 @@
 
 [external]
 "test_structure_codegen.py" = "executes the selector script embedded in the CI workflow"
+
+[debt.restricted-python]
+"test_structure_codegen.py#string patch target" = 1

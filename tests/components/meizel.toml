@@ -1,0 +1,5 @@
+exports = ["agent", "base", "cli", "gateway", "lifecycle", "ops", "services"]
+
+[uses]
+"cli" = ["agent", "services"]
+"services" = ["agent"]

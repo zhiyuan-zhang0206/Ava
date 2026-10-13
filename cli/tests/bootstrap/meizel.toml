@@ -1,2 +1,10 @@
+exports = ["command_inputs.py"]
+
+[uses]
+"test_checkout_guard.py" = ["command_inputs.py"]
+"test_command_runtime.py" = ["command_inputs.py"]
+"test_python_install.py" = ["_python_install_fixture.py"]
+"test_start_identity.py" = ["_init_identity.py", "command_inputs.py"]
+
 [loads]
 "_logging_entry_child.py" = ["services/agent_runner/agent_ops"]

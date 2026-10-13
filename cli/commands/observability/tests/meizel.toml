@@ -1,0 +1,10 @@
+[uses]
+"converge_otel_collector" = ["test_converge_otel_collector.py"]
+"test_converge_lgtm.py" = ["lgtm_inputs.py"]
+"test_lgtm_station.py" = ["lgtm_inputs.py"]
+"test_otel_port_deviation.py" = ["test_converge_otel_collector.py"]
+
+[debt.private-name]
+"converge_otel_collector/test_session_filelog_receivers_are_disjoint_and_bound.py -> test_converge_otel_collector.py#_ChunkedResp" = 1
+"converge_otel_collector/test_session_filelog_receivers_are_disjoint_and_bound.py -> test_converge_otel_collector.py#_render_real_template" = 1
+"test_otel_port_deviation.py -> test_converge_otel_collector.py#_render_real_template" = 1

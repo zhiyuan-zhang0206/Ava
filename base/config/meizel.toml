@@ -1,0 +1,20 @@
+exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "profiles.py", "runtime_config.py", "service_read.py"]
+
+[uses]
+"__init__.py" = ["_full.py", "_lite.py", "admin", "config_registry.py", "profiles.py", "service_read.py"]
+"_full.py" = ["admin", "agent_pins.py", "config_registry.py", "domains", "profiles.py", "service_read.py"]
+"_lite.py" = ["_full.py", "config_registry.py", "profiles.py"]
+"admin" = ["config_registry.py", "service_read.py"]
+"agent_pins.py" = ["config_registry.py"]
+"config_registry.py" = ["base.py", "domains", "profiles.py"]
+"domains" = ["base.py"]
+"runtime_config.py" = ["__init__.py"]
+"service_read.py" = ["config_registry.py", "domains", "runtime_config.py"]
+"tests" = ["__init__.py", "_full.py", "_lite.py", "admin", "base.py", "config_registry.py", "runtime_config.py", "service_read.py"]
+
+[debt.manifest-cycle]
+"runtime_config.py -> __init__.py" = 1
+
+[debt.private-name]
+"tests/_boot_lite_child.py -> __init__.py#_FIELDS" = 1
+"tests/_boot_lite_child.py -> __init__.py#_boot_state" = 22

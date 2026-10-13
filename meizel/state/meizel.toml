@@ -1,0 +1,4 @@
+exports = ["ambient_state", "machine_role.py", "no_os_environ.py", "turn_scoped_config.py"]
+
+[uses]
+"tests" = ["no_os_environ.py", "turn_scoped_config.py"]

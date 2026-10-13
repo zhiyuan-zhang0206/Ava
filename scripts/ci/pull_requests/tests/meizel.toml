@@ -1,0 +1,8 @@
+[uses]
+"ci_monitor" = ["test_ci_monitor.py"]
+
+[debt.private-name]
+"ci_monitor/test_pre_expansion_cancellations_do_not_poison_the_verdict.py -> test_ci_monitor.py#_check" = 1
+"ci_monitor/test_queue_ops_exclusive_with_merge_wait.py -> test_ci_monitor.py#_check" = 1
+"ci_monitor/test_runs_probe_reads_only_incomplete_runs.py -> test_ci_monitor.py#_check" = 1
+"ci_monitor/test_runs_probe_reads_only_incomplete_runs.py -> test_ci_monitor.py#_completed" = 1

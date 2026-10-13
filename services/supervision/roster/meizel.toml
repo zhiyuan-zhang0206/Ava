@@ -1,2 +1,11 @@
+exports = ["healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
+
+[uses]
+"__init__.py" = ["healthz.py", "plugin_services.py", "service_spec.py"]
+"healthz.py" = ["service_spec.py"]
+"plugin_services.py" = ["service_spec.py"]
+"spec.py" = ["__init__.py", "plugin_services.py", "service_spec.py"]
+"tests" = ["__init__.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
+
 [external]
 "plugin_services.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"

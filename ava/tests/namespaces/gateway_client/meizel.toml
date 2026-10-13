@@ -1,0 +1,2 @@
+[uses]
+"test_strong_creation.py" = ["test_gateway_client.py"]

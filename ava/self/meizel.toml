@@ -1,0 +1,4 @@
+exports = ["wake.py"]
+
+[uses]
+"__init__.py" = ["wake.py"]

@@ -1,0 +1,8 @@
+exports = ["capabilities.py", "compaction.py", "context_notes.py", "conversation.py", "system_prompt.py"]
+
+[uses]
+"context_notes.py" = ["capabilities.py"]
+"system_prompt.py" = ["_base_prompt.py", "_codeact.py", "capabilities.py", "conversation.py"]
+
+[debt.private-name]
+"system_prompt.py -> capabilities.py#_CAPABILITY_SURFACES" = 1

@@ -1,0 +1,7 @@
+exports = ["admission.py", "cohort.py", "cold.py", "pause_owner.py", "state.py", "tests"]
+
+[uses]
+"admission.py" = ["pause_owner.py", "state.py"]
+"cohort.py" = ["admission.py", "cold.py", "pause_owner.py", "state.py"]
+"pause_owner.py" = ["state.py"]
+"tests" = ["admission.py", "pause_owner.py", "state.py"]

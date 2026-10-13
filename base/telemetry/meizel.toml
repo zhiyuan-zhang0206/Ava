@@ -1,0 +1,27 @@
+exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitter.py", "event_store.py", "lgtm_local.py", "loki_index_labels.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "trace_mirror.py", "tracing.py"]
+
+[uses]
+"__init__.py" = ["delivery", "emitter.py", "pipeline_build.py"]
+"audit_events.py" = ["__init__.py"]
+"converge_report.py" = ["emitter.py"]
+"emitter.py" = ["delivery", "observability.py"]
+"event_store.py" = ["delivery", "emitter.py"]
+"metrics" = ["delivery", "loki_index_labels.py"]
+"observability.py" = ["delivery"]
+"otlp" = ["delivery", "emitter.py", "metrics", "observability.py"]
+"pipeline_build.py" = ["delivery", "event_store.py", "metrics", "otlp"]
+"process_logging.py" = ["delivery", "emitter.py"]
+"tests" = ["__init__.py", "audit_events.py", "delivery", "emitter.py", "event_store.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "trace_mirror.py", "tracing.py"]
+"tracing.py" = ["delivery", "observability.py", "otlp", "trace_mirror.py"]
+
+[debt.private-name]
+"tests/_lower_exit_child.py -> tracing.py#_arm_tracing" = 1
+"tests/_lower_exit_child.py -> tracing.py#_state" = 2
+"tests/process_logging/test_event_pipeline_adapter.py -> process_logging.py#_event_sink" = 2
+"tests/test_telemetry_event_store.py -> event_store.py#_write" = 4
+"tests/test_tracing.py -> tracing.py#_arm_tracing" = 2
+"tests/test_tracing.py -> tracing.py#_state" = 35
+"tests/test_tracing_lifecycle.py -> tracing.py#_arm_tracing" = 2
+"tests/test_tracing_lifecycle.py -> tracing.py#_state" = 1
+"tests/tracing/test_arm_thread_base_exception_marks_attempt_spent.py -> tracing.py#_state" = 14
+"tests/tracing/test_strip_content_removes_llm_content_keeps_metadata.py -> tracing.py#_state" = 2

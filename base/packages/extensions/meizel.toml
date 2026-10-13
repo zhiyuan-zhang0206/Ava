@@ -1,0 +1,7 @@
+exports = ["adopt.py", "install_registry.py", "materialize.py", "registry.py"]
+
+[uses]
+"adopt.py" = ["install_registry.py", "registry.py"]
+"materialize.py" = ["install_registry.py", "registry.py"]
+"registry.py" = ["install_registry.py"]
+"tests" = ["install_registry.py", "materialize.py", "registry.py"]

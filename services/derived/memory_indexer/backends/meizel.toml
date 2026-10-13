@@ -1,0 +1,10 @@
+exports = ["base.py", "factory.py", "numpy.py", "pgvector.py", "probe.py"]
+
+[uses]
+"factory.py" = ["base.py", "numpy.py", "pgvector.py"]
+"numpy.py" = ["base.py"]
+"pgvector.py" = ["base.py"]
+"tests" = ["base.py", "factory.py", "numpy.py", "pgvector.py", "probe.py"]
+
+[debt.private-name]
+"tests/test_pgvector_backend.py -> pgvector.py#_TABLE" = 1
