@@ -152,7 +152,7 @@ def _reminder_digest_message(tasks: list[tuple[int, str, int, int, str]]) -> str
     return "\n".join(lines)
 
 
-def _run_reminders(
+def run_reminders(
     pool: ConnectionPool,
     db: Database,
     bus: EventBus,
@@ -210,7 +210,7 @@ def announce_reminder(
 # ── Escalate pass ────────────────────────────────────────────────────────────
 
 
-def _run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: int) -> int:
+def run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: int) -> int:
     """Accept current escalation state atomically, then announce committed work."""
     from ava_builtins.plugins.ava_fleet.task_maintenance.escalation import accept_escalations
 
@@ -289,8 +289,8 @@ async def _dispatch_loop(
     )
     while True:
         try:
-            _run_reminders(pool, db, bus, backoff_seconds)
-            _run_escalate(pool, db, bus, escalate_n)
+            run_reminders(pool, db, bus, backoff_seconds)
+            run_escalate(pool, db, bus, escalate_n)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:

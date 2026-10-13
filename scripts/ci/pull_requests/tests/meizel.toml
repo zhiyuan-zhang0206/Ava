@@ -29,12 +29,6 @@
 "test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.runs_export.emit_snapshot" = 1
 "test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.runs_export.save_json" = 1
 
-[debt.private-name]
-"ci_monitor/test_pre_expansion_cancellations_do_not_poison_the_verdict.py -> test_ci_monitor.py#_check" = 1
-"ci_monitor/test_queue_ops_exclusive_with_merge_wait.py -> test_ci_monitor.py#_check" = 1
-"ci_monitor/test_runs_probe_reads_only_incomplete_runs.py -> test_ci_monitor.py#_check" = 1
-"ci_monitor/test_runs_probe_reads_only_incomplete_runs.py -> test_ci_monitor.py#_completed" = 1
-
 [debt.stdlib-patch]
 "test_ci_owner_operations.py#monkeypatch.setattr urllib.request.urlopen" = 16
 

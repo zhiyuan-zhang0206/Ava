@@ -14,11 +14,11 @@ from base.config import settings
 from gateway.alerts import router as alerts_router
 from gateway.app import app
 from tests.components.gateway.test_alerts_api import (
-    _seed,
     alert,
     capture_im,
     ingest,
     native_sender,
+    seed_alert_rows,
     webhook,
 )
 from tests.components.gateway.test_alerts_api import (
@@ -32,7 +32,7 @@ from tests.components.gateway.test_alerts_api import (
 def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: TestClient) -> None:
     """List unresolved rows first, then recency; filters and counts ride meta."""
     now = datetime.now(UTC)
-    _seed(
+    seed_alert_rows(
         db_conn,
         [
             {
@@ -95,7 +95,7 @@ def test_live_alerts_never_age_out_and_history_uses_recovery_time(
 ) -> None:
     """A ten-day outage remains visible; its recent recovery belongs to history."""
     now = datetime.now(UTC)
-    _seed(
+    seed_alert_rows(
         db_conn,
         [
             {
@@ -138,7 +138,7 @@ def test_list_default_limit_comes_from_display_config(
     (``AVA_ALERTS_DEFAULT_LIMIT``); the literal 100 is only that field's
     default, not a hard-coded page size."""
     now = datetime.now(UTC)
-    _seed(
+    seed_alert_rows(
         db_conn,
         [
             {
@@ -161,7 +161,7 @@ def test_list_default_limit_comes_from_display_config(
 def test_list_unresolved_before_resolved(db_conn: psycopg.Connection, client: TestClient) -> None:
     """A resolved alert must not bury an unresolved one (2026-08-05 ruling)."""
     now = datetime.now(UTC)
-    _seed(
+    seed_alert_rows(
         db_conn,
         [
             {
@@ -225,7 +225,7 @@ def test_ingest_resolved_notifies_recovery(db_conn: psycopg.Connection) -> None:
 def test_list_returns_source(db_conn: psycopg.Connection, client: TestClient) -> None:
     """The list exposes source (provenance) per row."""
     now = datetime.now(UTC)
-    _seed(
+    seed_alert_rows(
         db_conn,
         [
             {

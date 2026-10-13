@@ -14,5 +14,4 @@ exports = ["node.py", "output.py", "protocol.py"]
 [debt.private-name]
 "tests/test_exec_attach_drain.py -> node.py#_exec_node_impl" = 1
 "tests/test_exec_node_timeout.py -> node.py#_exec_node_impl" = 1
-"tests/test_exec_process.py -> _subprocess.py#_spawn" = 1
 "tests/test_multiple_tool_calls.py -> node.py#_exec_node_impl" = 1
