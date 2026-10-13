@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import services.desktop.computer.ocr as ocr_mod
+from base.host.permissions_helper.client import PermissionsHelperClient
 from services.desktop.computer.screen import _capture_screen
 
 MAX_VISUAL = 40
@@ -44,9 +45,9 @@ class GapRead:
     error: str | None
 
 
-def read_screen(agent_id: int) -> GapRead:
+def read_screen(helper: PermissionsHelperClient, agent_id: int) -> GapRead:
     """Capture the screen and OCR it; an OCR failure is reported, not raised."""
-    path, _size, scale, _pixels = _capture_screen(agent_id)
+    path, _size, scale, _pixels = _capture_screen(helper, agent_id)
     try:
         return GapRead(ocr_mod.ocr_image(path), scale, None)
     except ocr_mod.OcrError as e:

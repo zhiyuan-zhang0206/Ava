@@ -25,7 +25,11 @@ import pytest
 
 import base.paths as base_paths
 from base.host.permissions_helper import client
-from base.host.permissions_helper.client import PermissionsHelperError, UserAbortError
+from base.host.permissions_helper.client import (
+    PermissionsHelperClient,
+    PermissionsHelperError,
+    UserAbortError,
+)
 
 
 def _read_line(conn: socket.socket) -> bytes:
@@ -114,7 +118,7 @@ def test_call_echoes_method_and_returns_result(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": {"path": req["path"], "bytes": 42}}
 
     path = fake_helper(handler)
-    out = client.screencapture_region(1, 2, 3, 4, "out.png", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    out = PermissionsHelperClient(path).screencapture_region(1, 2, 3, 4, "out.png")  # pyright: ignore[reportUnknownArgumentType]
     assert out == {"path": "out.png", "bytes": 42}
     assert seen["method"] == "screencapture_region"
     assert (seen["x"], seen["y"], seen["w"], seen["h"]) == (1, 2, 3, 4)
@@ -123,7 +127,7 @@ def test_call_echoes_method_and_returns_result(fake_helper) -> None:
 def test_ok_false_raises_with_server_error(fake_helper) -> None:
     path = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
     with pytest.raises(PermissionsHelperError, match="no focused window"):
-        client.ax_window_info("Finder", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).ax_window_info("Finder")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_user_abort_reply_raises_its_own_error(fake_helper) -> None:
@@ -136,27 +140,25 @@ def test_user_abort_reply_raises_its_own_error(fake_helper) -> None:
         }
     )
     with pytest.raises(UserAbortError, match="stopped by the user") as raised:
-        client.click(1, 2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
     # Existing handlers of helper failures still see it as one.
     assert isinstance(raised.value, PermissionsHelperError)
     # Any other failure stays a plain helper error.
     other = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
     with pytest.raises(PermissionsHelperError) as plain:
-        client.click(1, 2, sock_path=other)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(other).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
     assert not isinstance(plain.value, UserAbortError)
 
 
 def test_unreachable_socket_raises() -> None:
     with pytest.raises(PermissionsHelperError, match="not reachable"):
-        client.ping(sock_path="/tmp/ava-native-does-not-exist.sock")  # noqa: S108 — nonexistent path, asserts the unreachable error
+        PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").ping()  # noqa: S108 — nonexistent path, asserts the unreachable error
 
 
 def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
     from base import paths
-    from base.config import settings
 
-    monkeypatch.setattr(settings.services, "permissions_helper_port", 9999)
-    assert paths.permissions_helper_socket().name == "permissions-helper.9999.sock"
+    assert paths.permissions_helper_socket(9999).name == "permissions-helper.9999.sock"
 
 
 def test_permissions_helper_app_dir_is_stable_under_ava_home(
@@ -177,9 +179,9 @@ def test_method_name_mapping(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": {}}
 
     path = fake_helper(handler)
-    client.type_text("hi", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.click(1, 2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.ping(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).type_text("hi")  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).ping()  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["type", "click", "ping"]
 
 
@@ -196,7 +198,7 @@ def test_indicator_stop_needs_the_helper_capability(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": results[req["method"]]}
 
     path = fake_helper(handler)
-    assert client.indicator_stop(sock_path=path)["stopped"] is True  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).indicator_stop()["stopped"] is True  # pyright: ignore[reportUnknownArgumentType]
     assert seen == [{"method": "ping"}, {"method": "indicator_stop"}]
     # The helper shows the badge itself; there is no client call that asks it to.
     assert not hasattr(client, "indicator_hold")
@@ -204,7 +206,7 @@ def test_indicator_stop_needs_the_helper_capability(fake_helper) -> None:
     capable[0] = False
     seen.clear()
     with pytest.raises(PermissionsHelperError, match="capture_indicator_v1"):
-        client.indicator_stop(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).indicator_stop()  # pyright: ignore[reportUnknownArgumentType]
     assert seen == [{"method": "ping"}]
 
 
@@ -222,21 +224,20 @@ def test_nursery_method_requests_and_results(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": results[req["method"]]}
 
     path = fake_helper(handler)
-    assert client.spawn_process(
+    assert PermissionsHelperClient(path).spawn_process(  # pyright: ignore[reportUnknownArgumentType]
         "agent-demo",
         ["/usr/bin/env", "python"],
         {"AVA_HOME": "/Users/ava/.ava"},
         "/Users/ava/work",
         "/Users/ava/logs/stdout.log",
         "/Users/ava/logs/stderr.log",
-        sock_path=path,  # pyright: ignore[reportUnknownArgumentType]
     ) == {"pid": 4123, "reused": False}
-    assert client.session_list("agent-", sock_path=path) == [  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).session_list("agent-") == [  # pyright: ignore[reportUnknownArgumentType]
         {"name": "agent-demo", "pid": 4123, "alive": True}
     ]
-    assert client.session_has("agent-demo", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    assert client.signal_session(name="agent-demo", sig=2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    assert client.signal_session(pid=4123, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).session_has("agent-demo")  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).signal_session(name="agent-demo", sig=2)  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).signal_session(pid=4123)  # pyright: ignore[reportUnknownArgumentType]
 
     assert seen == [
         {
@@ -259,14 +260,13 @@ def test_spawn_process_preserves_reused_result(fake_helper) -> None:
     def handler(req: dict) -> dict:
         return {"id": req["id"], "ok": True, "result": {"pid": 4123, "reused": True}}
 
-    assert client.spawn_process(
+    assert PermissionsHelperClient(fake_helper(handler)).spawn_process(  # pyright: ignore[reportUnknownArgumentType]
         "agent-demo",
         ["/usr/bin/env", "python"],
         {},
         "/Users/ava/work",
         "/Users/ava/logs/stdout.log",
         "/Users/ava/logs/stderr.log",
-        sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
     ) == {"pid": 4123, "reused": True}
 
 
@@ -373,7 +373,7 @@ def test_root_seed_env_rejects_a_non_string_map() -> None:
 )
 def test_signal_session_requires_exactly_one_target(name: str | None, pid: int | None) -> None:
     with pytest.raises(ValueError, match="exactly one"):
-        client.signal_session(name=name, pid=pid)
+        PermissionsHelperClient("/unused.sock").signal_session(name=name, pid=pid)
 
 
 # SECURITY SYNC: mirrors the resolved-string boundary check in
@@ -675,7 +675,7 @@ def _install_env(
     monkeypatch.setattr(lifecycle, "_plist_path", lambda: plist_path)
     monkeypatch.setattr(lifecycle, "_is_loaded", lambda: loaded)
     monkeypatch.setattr(lifecycle, "logs_dir", lambda: log.parent)
-    monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: socket_path)
+    monkeypatch.setattr(lifecycle, "helper_socket", lambda: socket_path)
     run_calls: list[list[str]] = []
     probe_calls: list[list[str]] = []
 
@@ -747,7 +747,5 @@ def _retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 
     run.mkdir(parents=True)
     monkeypatch.setattr(lifecycle, "_agents_dir", lambda: agents)
     monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
-    monkeypatch.setattr(
-        lifecycle, "permissions_helper_socket", lambda: run / f"permissions-helper.{port}.sock"
-    )
+    monkeypatch.setattr(lifecycle, "helper_socket", lambda: run / f"permissions-helper.{port}.sock")
     return agents

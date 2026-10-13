@@ -8,7 +8,7 @@ import struct
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import PermissionsHelperClient, ScreenSize
 from base.paths import logs_dir
 
 from .errors import ComputerUseError
@@ -45,7 +45,7 @@ def _pixel_scale(pixels_w: int, logical_w: float) -> float:
     return pixels_w / logical_w
 
 
-def _current_scale(measured: float | None) -> float:
+def _current_scale(helper: PermissionsHelperClient, measured: float | None) -> float:
     """The physical->logical scale for coordinate conversion.
 
     Prefers the daemon's own measurement (last snapshot, ``_pixel_scale``);
@@ -64,7 +64,9 @@ def _snapshot_path(agent_id: int | None) -> Path:
     return directory / f"agent-{agent_id or 0}-{stamp}.png"
 
 
-def _capture_screen(agent_id: int) -> tuple[Path, helper.ScreenSize, float, tuple[int, int]]:
+def _capture_screen(
+    helper: PermissionsHelperClient, agent_id: int
+) -> tuple[Path, ScreenSize, float, tuple[int, int]]:
     """One full-screen capture: (PNG path, helper screen report, measured
     scale, physical pixel size).
 
@@ -81,7 +83,9 @@ def _capture_screen(agent_id: int) -> tuple[Path, helper.ScreenSize, float, tupl
     return path, size, _pixel_scale(pw, size["w"]), (pw, ph)
 
 
-def capture_region(agent_id: int, region: CaptureRegion) -> tuple[Path, float, tuple[int, int]]:
+def capture_region(
+    helper: PermissionsHelperClient, agent_id: int, region: CaptureRegion
+) -> tuple[Path, float, tuple[int, int]]:
     """Capture a main-display rectangle without changing whole-screen state.
 
     The helper's region capture can clip out-of-display rectangles silently.

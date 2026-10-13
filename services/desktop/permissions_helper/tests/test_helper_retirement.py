@@ -507,7 +507,9 @@ def test_unproven_shutdown_never_boots_out_native_job(
     def wait(_owner: OwnedProcess, _deadline: float) -> None:
         pass
 
-    def shutdown(run_dir: Path, *, sock_path: str | Path) -> client.HelperShutdownResult:
+    def shutdown(
+        _self: client.PermissionsHelperClient, run_dir: Path
+    ) -> client.HelperShutdownResult:
         requested[0] = True
         if fault != "missing-intent":
             marker = run_dir / "helper-stopped"
@@ -536,7 +538,7 @@ def test_unproven_shutdown_never_boots_out_native_job(
     monkeypatch.setattr(jobs, "_retirement_owner", capture)
     monkeypatch.setattr(jobs, "_wait_retirement_owner", wait)
     monkeypatch.setattr(jobs, "_retirement_command", command)
-    monkeypatch.setattr(client, "shutdown_helper", shutdown)
+    monkeypatch.setattr(client.PermissionsHelperClient, "shutdown_helper", shutdown)
     with pytest.raises(RuntimeError):
         jobs.unregister_helper(home, helper_port=23456)
     assert requested[0] and path.read_bytes() == original
@@ -671,7 +673,9 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
 
     from base.host.permissions_helper import client
 
-    def shutdown(run_dir: Path, *, sock_path: str | Path) -> client.HelperShutdownResult:
+    def shutdown(
+        _self: client.PermissionsHelperClient, run_dir: Path
+    ) -> client.HelperShutdownResult:
         assert run_dir == home / "run" / "ava-root"
         marker = run_dir / "helper-stopped"
         marker.write_bytes(b"stopped\n")
@@ -682,7 +686,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     def wait(captured: OwnedProcess, _deadline: float) -> None:
         assert captured == owner and not alive[0]
 
-    monkeypatch.setattr(client, "shutdown_helper", shutdown)
+    monkeypatch.setattr(client.PermissionsHelperClient, "shutdown_helper", shutdown)
     monkeypatch.setattr(jobs, "_wait_retirement_owner", wait)
 
     def command(args: list[str], _deadline: float) -> subprocess.CompletedProcess[bytes]:

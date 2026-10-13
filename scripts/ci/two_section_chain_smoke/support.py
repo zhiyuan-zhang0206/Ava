@@ -191,9 +191,9 @@ def _refusal(call: Callable[[], object]) -> str:
 _NOT_ANSWERING = (OSError, ValueError, RuntimeError)
 
 
-def _ping_or_none(helper_client, sock: Path):
+def _ping_or_none(helper_client):
     try:
-        return helper_client.ping(sock_path=sock)["pong"]
+        return helper_client.ping()["pong"]
     except _NOT_ANSWERING:
         return None
 

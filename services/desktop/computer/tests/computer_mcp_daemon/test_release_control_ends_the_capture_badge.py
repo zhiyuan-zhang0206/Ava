@@ -14,7 +14,6 @@ import pytest
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperError
 
-from ... import mcp_daemon as daemon_mod
 from ..test_computer_mcp_daemon import (
     FakeHelper,
     _call,
@@ -35,7 +34,7 @@ def _stops(fake_helper: FakeHelper) -> int:
 async def test_a_successful_release_ends_the_badge(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     assert (await _call(d, "type_text", {"text": "hi"}))["ok"] is True
     assert _stops(fake_helper) == 0, "an action alone must not talk to the badge"
     released = await _call(d, "release_control")
@@ -46,7 +45,7 @@ async def test_a_successful_release_ends_the_badge(
 async def test_a_refused_release_keeps_the_badge(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     assert (await _call(d, "type_text", {"text": "hi"}))["ok"] is True
     # Another agent cannot end this agent's badge by releasing a screen it does not hold.
     refused = await _call(d, "release_control", agent_id=8)
@@ -71,11 +70,8 @@ async def test_a_failed_stop_is_logged_and_the_release_still_succeeds(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    def stop(**_kw: Any) -> dict[str, Any]:
-        raise failure
-
-    monkeypatch.setattr(daemon_mod.helper, "indicator_stop", stop)
-    d = _daemon(database_gate=database_gate)
+    fake_helper.indicator_stop_error = failure
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     assert (await _call(d, "type_text", {"text": "hi"}))["ok"] is True
     released = await _call(d, "release_control")
     assert released["ok"] is True

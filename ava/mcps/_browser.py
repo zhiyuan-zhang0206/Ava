@@ -187,9 +187,10 @@ async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
     the session's CURRENT socket: on a desync the session re-dials internally,
     so the original writer may no longer be the live one.
     """
+    from base.config import settings
     from base.paths import chrome_mcp_socket
 
-    sock = str(chrome_mcp_socket())
+    sock = str(chrome_mcp_socket(settings.services.browser_cdp_port))
     reader, writer = await _dial_browser_mcp(sock)
     session = BrowserLineSession(reader, writer, sock=sock)
     stack = AsyncExitStack()
@@ -218,10 +219,13 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
     TTL sweep (24h by default).
     """
     try:
+        from base.config import settings
         from base.paths import chrome_mcp_socket
 
         return await asyncio.wait_for(
-            _release_roundtrip(str(chrome_mcp_socket()), agent_id),
+            _release_roundtrip(
+                str(chrome_mcp_socket(settings.services.browser_cdp_port)), agent_id
+            ),
             timeout=_RELEASE_TIMEOUT_S,
         )
     except (OSError, TimeoutError):

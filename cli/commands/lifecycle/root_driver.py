@@ -15,6 +15,7 @@ from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.log import logger
+from base.sessions.helperproc import helper_client
 from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
 from services.supervision.roster import service_spec
@@ -150,11 +151,11 @@ def _helper_spawn_committed() -> bool:
 
 def _helper_wire_ok() -> bool:
     """Whether the permission helper answers on this cluster's socket."""
-    from base.host.permissions_helper import client as helper_client
+    from base.host.permissions_helper.client import PermissionsHelperError
 
     try:
-        ping = helper_client.ping()
-    except (helper_client.PermissionsHelperError, OSError):
+        ping = helper_client().ping()
+    except (PermissionsHelperError, OSError):
         # Socket absent / refused / timed out / helper error reply: not answering.
         return False
     return all(ping.get(capability) is True for capability in _HELPER_PROTOCOLS)
@@ -164,7 +165,6 @@ def _require_root_owner(status: dict[str, Any]) -> None:
     """Bind every reused or stopped root to its required live native parent."""
     import psutil
 
-    from base.host.permissions_helper import client as helper_client
     from base.native_process.ownership import OwnedProcess
     from base.native_process.root_control.client import native_identity
     from base.paths import root_run_dir
@@ -174,14 +174,14 @@ def _require_root_owner(status: dict[str, Any]) -> None:
         raise _RootDriverError("recorded root native birth is no longer live")
     if not _helper_spawn_committed():
         return
-    ping = helper_client.ping()
+    ping = helper_client().ping()
     if not all(ping.get(capability) is True for capability in _HELPER_PROTOCOLS):
         raise _RootDriverError(f"required helper lacks lifecycle protocols: {_HELPER_PROTOCOLS}")
     helper_pid = ping.get("pid")
     if isinstance(helper_pid, bool) or not isinstance(helper_pid, int) or helper_pid <= 1:
         raise _RootDriverError("required helper omitted its native process")
     helper = OwnedProcess.capture(psutil.Process(helper_pid))
-    keeper = helper_client.root_status()
+    keeper = helper_client().root_status()
     if (
         keeper.get("pid") != root.pid
         or keeper.get("run_dir") != str(root_run_dir())
@@ -305,12 +305,12 @@ def _seed_via_helper(
     runtime: StartRuntime | None = None,
 ) -> None:
     """Seed the root keeper and wait for it to report the root `running`."""
-    from base.host.permissions_helper import client as helper_client
+    from base.host.permissions_helper.client import RootSeedConfig
 
     try:
         from base.host.atomic_io import write_text_atomic
 
-        seed: helper_client.RootSeedConfig = {
+        seed: RootSeedConfig = {
             "argv": _root_argv(run_dir, manifests, runtime),
             "cwd": str(repo if runtime is None else runtime.cwd),
             "run_dir": str(run_dir),
@@ -319,7 +319,7 @@ def _seed_via_helper(
             "env": env,
         }
         write_text_atomic(run_dir / "seed.json", json.dumps(seed), mode=0o600, sync_parent=True)
-        wire = helper_client.seed_root(seed)
+        wire = helper_client().seed_root(seed)
     except Exception as exc:
         raise _RootDriverError(f"root_seed over the helper failed: {exc}") from exc
     deadline = time.monotonic() + _ROOT_READY_TIMEOUT_S
@@ -341,7 +341,7 @@ def _seed_via_helper(
             raise _RootDriverError(f"the root keeper rejected the seed: {seed_error}")
         _poll_sleep(_READY_POLL_INTERVAL_S)
         try:
-            wire = helper_client.root_status()
+            wire = helper_client().root_status()
         except Exception as exc:
             raise _RootDriverError(f"root_status over the helper failed: {exc}") from exc
     raise _RootDriverError(
@@ -408,10 +408,9 @@ def _stop_root_process(
                 "signal a helper-seeded root directly (the keeper would restart it); stop it "
                 "through the helper"
             )
-        from base.host.permissions_helper import client as helper_client
 
         try:
-            reply = helper_client.stop_root()
+            reply = helper_client().stop_root()
         except Exception as exc:
             raise _RootDriverError(f"root_stop over the helper failed: {exc}") from exc
         if reply.get("stop_requested") is not True:
@@ -727,7 +726,7 @@ def _stop_dormant_helper_root(deadline: float) -> None:
     """Revoke a pending keeper restart even when no root IPC is serving."""
     if not _helper_spawn_committed():
         return
-    from base.host.permissions_helper import client as helper_client
+    from base.host.permissions_helper.client import PermissionsHelperError
     from services.desktop.permissions_helper.launchd_job import (
         helper_job_domain,
         helper_job_label,
@@ -735,8 +734,8 @@ def _stop_dormant_helper_root(deadline: float) -> None:
     )
 
     try:
-        keeper = helper_client.root_status()
-    except helper_client.PermissionsHelperError as exc:
+        keeper = helper_client().root_status()
+    except PermissionsHelperError as exc:
         target = f"{helper_job_domain()}/{helper_job_label()}"
         if retirement_query(target, deadline) is None:
             return
@@ -747,7 +746,7 @@ def _stop_dormant_helper_root(deadline: float) -> None:
         return
     if keeper.get("pid") is not None or keeper["state"] == "conflict":
         raise _RootDriverError("helper owns a root without usable IPC; custody requires recovery")
-    if not _helper_wire_ok() or helper_client.stop_root().get("stop_requested") is not True:
+    if not _helper_wire_ok() or helper_client().stop_root().get("stop_requested") is not True:
         raise _RootDriverError("helper did not persist stop of its dormant root")
     require_root_absent()
 

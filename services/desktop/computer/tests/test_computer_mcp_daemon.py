@@ -18,9 +18,8 @@ import pytest
 from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.permissions_helper.client import UserAbortError
+from base.host.permissions_helper.client import PermissionsHelperClient, UserAbortError
 
-from .. import mcp_daemon as daemon_mod
 from .. import ocr as ocr_mod
 from .. import ocr_text as ocr_text_mod
 from .. import screen as screen_mod
@@ -30,11 +29,17 @@ from ..protocol import Request, Response
 from .slices import computer_use_config
 
 
-def _daemon(*, database_gate: ProcessDbGate, **config: Any) -> ComputerMcpDaemon:
+def _daemon(
+    *,
+    database_gate: ProcessDbGate,
+    helper: PermissionsHelperClient | None = None,
+    **config: Any,
+) -> ComputerMcpDaemon:
     return ComputerMcpDaemon(
         computer_use_config(**config),
         Database.from_settings(gate=database_gate),
         sock="/nonexistent-test.sock",
+        helper=helper if helper is not None else FakeHelper(),
     )
 
 
@@ -57,11 +62,16 @@ def _req(
 # ── helper fakes ────────────────────────────────────────────────────────────
 
 
-class FakeHelper:
+class FakeHelper(PermissionsHelperClient):
     """Records calls; frontmost app + screen geometry are scriptable."""
 
     def __init__(self) -> None:
+        super().__init__("/nonexistent-test-helper.sock")
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        # Errors the next clicks raise (one per call, in pop order), and the one every
+        # indicator_stop raises: scripted failures need no patching of the fake.
+        self.click_errors: list[Exception] = []
+        self.indicator_stop_error: Exception | None = None
         self.frontmost = "Finder"
         self.cursor = {"x": 321.0, "y": 123.0}
         self.screen = {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
@@ -69,15 +79,15 @@ class FakeHelper:
         # a stale-helper regression sets it to the 1x 1920x1080 shape.
         self.png_size: tuple[int, int] = (3024, 1964)
 
-    def cursor_position(self, **kw: Any) -> dict[str, float]:
+    def cursor_position(self, **kw: Any) -> dict[str, float]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("cursor_position", {}))
         return self.cursor
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:
+    def screen_size(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("screen_size", {}))
         return self.screen
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
+    def frontmost_app(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("frontmost_app", {}))
         return {"app": self.frontmost}
 
@@ -94,57 +104,48 @@ class FakeHelper:
             )
         return {"path": path, "bytes": 42}
 
-    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:
+    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("click", {"x": x, "y": y, **kw}))
+        if self.click_errors:
+            raise self.click_errors.pop()
         return {"clicked": {"x": x, "y": y}, "double": bool(kw.get("double"))}
 
-    def type_text(self, text: str, **kw: Any) -> dict[str, Any]:
+    def type_text(self, text: str, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("type_text", {"text": text}))
         return {"typed": len(text)}
 
-    def key(self, code: int, **kw: Any) -> dict[str, Any]:
+    def key(self, code: int, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         # Mirrors main.swift's real echo shape {"key": code, "cmd": ...} — the
         # daemon maps it to the MCP "pressed" contract.
         self.calls.append(("key", {"code": code, **kw}))
         return {"key": code, "cmd": bool(kw.get("cmd"))}
 
-    def scroll(self, x: float, y: float, dy: int, **kw: Any) -> dict[str, Any]:
+    def scroll(self, x: float, y: float, dy: int, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("scroll", {"x": x, "y": y, "dy": dy}))
         return {"scrolled": dy}
 
-    def indicator_stop(self, **kw: Any) -> dict[str, Any]:
+    def indicator_stop(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("indicator_stop", {}))
+        if self.indicator_stop_error is not None:
+            raise self.indicator_stop_error
         return {"stopped": False}
 
-    def ax_window_info(self, app: str, **kw: Any) -> dict[str, Any]:
+    def ax_window_info(self, app: str, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("ax_window_info", {"app": app}))
         return {"app": app, "x": 0.0, "y": 0.0, "w": 800.0, "h": 600.0}
 
-    def window_info(self, owner: str, **kw: Any) -> dict[str, Any]:
+    def window_info(self, owner: str, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("window_info", {"owner": owner}))
         return {"owner": owner, "x": 0.0, "y": 0.0, "w": 800.0, "h": 600.0}
 
-    def session_info(self, **kw: Any) -> dict[str, Any]:
+    def session_info(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("session_info", {}))
         return {"locked": False, "on_console": True}
 
 
 @pytest.fixture
-def fake_helper(monkeypatch: pytest.MonkeyPatch) -> FakeHelper:
-    fh = FakeHelper()
-    monkeypatch.setattr(daemon_mod.helper, "screen_size", fh.screen_size)
-    monkeypatch.setattr(daemon_mod.helper, "frontmost_app", fh.frontmost_app)
-    monkeypatch.setattr(daemon_mod.helper, "screencapture_region", fh.screencapture_region)
-    monkeypatch.setattr(daemon_mod.helper, "click", fh.click)
-    monkeypatch.setattr(daemon_mod.helper, "type_text", fh.type_text)
-    monkeypatch.setattr(daemon_mod.helper, "key", fh.key)
-    monkeypatch.setattr(daemon_mod.helper, "scroll", fh.scroll)
-    monkeypatch.setattr(daemon_mod.helper, "cursor_position", fh.cursor_position)
-    monkeypatch.setattr(daemon_mod.helper, "indicator_stop", fh.indicator_stop)
-    monkeypatch.setattr(daemon_mod.helper, "ax_window_info", fh.ax_window_info)
-    monkeypatch.setattr(daemon_mod.helper, "window_info", fh.window_info)
-    monkeypatch.setattr(daemon_mod.helper, "session_info", fh.session_info)
-    return fh
+def fake_helper() -> FakeHelper:
+    return FakeHelper()
 
 
 @pytest.fixture
@@ -248,7 +249,7 @@ async def test_click_executes_and_converts_coordinates(
     database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     resp = await _call(d, "click", {"x": 100, "y": 200})
     assert resp["ok"] is True
     # physical -> logical: divide by the 2x backing scale
@@ -262,17 +263,11 @@ async def test_user_abort_is_an_error_and_is_never_retried_or_replayed(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    refusals = ["Stopped by the user: the mouse is parked in the top-left corner"]
-
-    def click(x: float, y: float, **kw: Any) -> dict[str, Any]:
-        fake_helper.calls.append(("click", {"x": x, "y": y, **kw}))
-        if refusals:
-            raise UserAbortError(refusals.pop())
-        return {"clicked": {"x": x, "y": y}, "double": False}
-
-    monkeypatch.setattr(daemon_mod.helper, "click", click)
+    fake_helper.click_errors = [
+        UserAbortError("Stopped by the user: the mouse is parked in the top-left corner")
+    ]
     monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     refused = await _call(d, "click", {"x": 100, "y": 200})
     assert refused["ok"] is False
     assert "Stopped by the user" in refused["error"]
@@ -300,7 +295,7 @@ async def test_snapshot_returns_path_and_geometry(
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     result = await _ok_result(d, "snapshot", {"include_ax": True})
     assert result["path"] == "/tmp/snap-test.png"  # noqa: S108
     assert result["screen"] == {"width": 1512.0, "height": 982.0, "scale": 2.0}
@@ -330,7 +325,7 @@ async def test_snapshot_and_click_measure_scale_not_helper_claim(
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-1x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     snap = await _ok_result(d, "snapshot", {})
     assert snap["screen"] == {"width": 1920.0, "height": 1080.0, "scale": 1.0}
     assert snap["pixels"] == {"width": 1920, "height": 1080}
@@ -360,7 +355,7 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-2x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     snap = await _ok_result(d, "snapshot", {"include_ax": True})
     assert snap["screen"]["scale"] == 2.0
     assert snap["pixels"] == {"width": 3024, "height": 1964}
@@ -377,7 +372,7 @@ async def test_click_before_any_snapshot_falls_back_to_helper_scale(
 ) -> None:
     """Before the first snapshot the daemon has no measurement; it uses the
     helper's live screen report (also the only sane cold-start behavior)."""
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     await _call(d, "click", {"x": 100, "y": 200})
     assert ("click", {"x": 50.0, "y": 100.0, "double": False}) in fake_helper.calls
 
@@ -399,7 +394,7 @@ async def test_snapshot_include_ocr_adds_text_boxes(
         "ocr_image",
         lambda _path: [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}],  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     result = await _ok_result(d, "snapshot", {"include_ocr": True})
     assert result["ocr"] == [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}]
     assert "ocr_error" not in result
@@ -422,7 +417,7 @@ async def test_snapshot_include_ocr_failure_degrades(
         raise ocr_mod.OcrError("swiftc missing")
 
     monkeypatch.setattr(ocr_mod, "ocr_image", _boom)  # pyright: ignore[reportUnknownArgumentType]
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     result = await _ok_result(d, "snapshot", {"include_ocr": True})
     assert result["ocr"] == []
     assert result["ocr_error"] == "swiftc missing"
@@ -447,7 +442,7 @@ async def test_snapshot_without_include_ocr_skips_ocr(
         return []
 
     monkeypatch.setattr(ocr_mod, "ocr_image", _ocr)  # pyright: ignore[reportUnknownArgumentType]
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     result = await _ok_result(d, "snapshot", {})
     assert called == []
     assert "ocr" not in result
@@ -546,7 +541,7 @@ async def test_find_text_returns_matching_boxes(
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     result = await _ok_result(d, "find_text", {"text": "search"})
     assert result["query"] == "search"
     assert result["match"] == "contains"
@@ -572,7 +567,7 @@ async def test_find_text_reuses_last_ocr_when_asked(
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     snap = await _ok_result(d, "snapshot", {"include_ocr": True})
     assert len(snap["ocr"]) == 5
     result = await _ok_result(d, "find_text", {"text": "hello", "snapshot_fresh": False})
@@ -598,7 +593,7 @@ async def test_find_text_fresh_then_stale_share_one_capture(
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     first = await _ok_result(d, "find_text", {"text": "search"})
     assert first["fresh"] is True
     second = await _ok_result(d, "find_text", {"text": "search", "snapshot_fresh": False})
@@ -623,7 +618,7 @@ async def test_find_text_stale_with_empty_cache_captures(
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     result = await _ok_result(d, "find_text", {"text": "search", "snapshot_fresh": False})
     assert result["fresh"] is True
     assert result["count"] == 2
@@ -647,7 +642,7 @@ async def test_find_text_ocr_failure_is_an_error(
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     fake_ocr.error = "swiftc missing"
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     resp = await _call(d, "find_text", {"text": "search"})
     assert resp["ok"] is False
     assert "ocr failed" in resp["error"]
@@ -657,7 +652,7 @@ async def test_find_text_ocr_failure_is_an_error(
 async def test_find_text_requires_text_argument(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     resp = await _call(d, "find_text", {})
     assert resp["ok"] is False
     assert "find_text requires argument 'text'" in resp["error"]
@@ -681,7 +676,7 @@ async def test_click_text_ocrs_locates_and_clicks(
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     result = await _ok_result(d, "click_text", {"text": "search"})
     # topmost "Search" box (y=100): center (540, 112) physical → (270, 56) logical
     assert result["text"] == "Search"
@@ -705,7 +700,7 @@ async def test_click_text_index_selects_among_matches(
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     # index 1 = the lower "search" box (y=200): center (140, 212) → (70, 106)
     result = await _ok_result(d, "click_text", {"text": "search", "index": 1})
     assert result["text"] == "search"
@@ -729,7 +724,7 @@ async def test_click_text_failures_are_readable_and_never_click(
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     resp = await _call(d, "click_text", {"text": "zzz"})
     assert resp["ok"] is False
     assert "no on-screen text matching 'zzz'" in resp["error"]
@@ -759,7 +754,7 @@ async def test_click_text_audits_the_clicked_center(
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
-    d = _daemon(database_gate=database_gate)
+    d = _daemon(database_gate=database_gate, helper=fake_helper)
     await _call(d, "click_text", {"text": "search"})
     actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
     assert len(actions) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -785,4 +780,4 @@ async def test_click_text_audits_the_clicked_center(
 # ── Phase 2: screen session coordination ────────────────────────────────────
 
 
-SHORT_SESSION = {"computer_use_lease_s": 1.0, "computer_use_queue_timeout_s": 0.05}
+SHORT_SESSION: dict[str, Any] = {"computer_use_lease_s": 1.0, "computer_use_queue_timeout_s": 0.05}

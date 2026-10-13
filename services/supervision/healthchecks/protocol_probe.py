@@ -38,11 +38,12 @@ def probe_protocol(protocol: Callable[[], bool | DaemonProbe]) -> DaemonProbe:
 
 
 def _observe(service: str) -> DaemonProbe:
+    from base.config import settings
     from base.paths import chrome_mcp_socket, computer_mcp_socket, mcp_daemon_shared_socket
     from base.sessions.pty.paths import service_socket_path
 
     sockets = {
-        "browser-mcp": chrome_mcp_socket,
+        "browser-mcp": lambda: chrome_mcp_socket(settings.services.browser_cdp_port),
         "computer-mcp": computer_mcp_socket,
         "mcp-daemon": mcp_daemon_shared_socket,
         "pty-sessions": service_socket_path,

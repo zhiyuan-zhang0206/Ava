@@ -527,14 +527,14 @@ def test_helper_ping_settles_until_cold_start_answers(
     ]
     sleeps: list[float] = []
 
-    def ping() -> dict[str, object]:
+    def ping(_self: client.PermissionsHelperClient) -> dict[str, object]:
         reply = replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
         assert isinstance(reply, dict)
         return reply
 
-    monkeypatch.setattr(client, "ping", ping)
+    monkeypatch.setattr(client.PermissionsHelperClient, "ping", ping)
     monkeypatch.setattr(time, "sleep", sleeps.append)
 
     assert lifecycle._helper_answers_ping()
@@ -578,9 +578,9 @@ def test_unloaded_helper_bootstraps_and_must_answer_ping(
 
     app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=False, matching_plist=False)
     monkeypatch.setattr(
-        client,
+        client.PermissionsHelperClient,
         "ping",
-        lambda: {
+        lambda _self: {  # pyright: ignore[reportUnknownArgumentType]
             "pong": True,
             "preflight_screen": True,
             "ax_trusted": True,

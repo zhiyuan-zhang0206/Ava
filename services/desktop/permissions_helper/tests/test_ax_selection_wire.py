@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperClient
 
 
 def roundtrip(
@@ -38,9 +39,9 @@ def roundtrip(
             worker.start()
             try:
                 result = (
-                    client.ax_tree(sock_path=path, **kwargs)
+                    PermissionsHelperClient(path).ax_tree(**kwargs)
                     if tree
-                    else client.ax_act("Mail", 7, sock_path=path, **kwargs)
+                    else PermissionsHelperClient(path).ax_act("Mail", 7, **kwargs)
                 )
             finally:
                 worker.join(timeout=3)
