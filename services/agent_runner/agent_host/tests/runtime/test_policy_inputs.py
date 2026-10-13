@@ -5,9 +5,9 @@ from dataclasses import replace
 
 from services.agent_runner.agent_host.runtime import HostCachePolicy
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from services.agent_runner.agent_host.tests.test_agent_host import _Build, _Row
-from services.agent_runner.agent_host.tests.test_agent_host import host_plugin as host_plugin
-from services.agent_runner.agent_host.tests.test_agent_host import wired as wired
+from services.agent_runner.agent_host.tests.runtime.host_support import _Build, _Row
+from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
+from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
 
 
 async def test_host_capacity_is_independent_and_fixed_at_construction(wired: _Build) -> None:

@@ -16,11 +16,11 @@ from services.agent_runner.agent_host import dispatcher, settlement
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.runtime import _config_fingerprint
-from services.agent_runner.agent_host.tests.test_agent_host import _Build, _Model, _Row
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import _Build, _Model, _Row
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     host_plugin as host_plugin,
 )
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
 from tests.components.base.poll_until import poll_until_async

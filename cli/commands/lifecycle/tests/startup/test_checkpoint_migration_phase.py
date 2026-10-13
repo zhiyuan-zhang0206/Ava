@@ -389,7 +389,7 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
 ) -> None:
     from base.cluster import provision
     from base.deploy.schema.migration_layout import required_migration_set
-    from base.deploy.tests.migration_support import _git, _init_repo
+    from base.deploy.schema.tests.migration_support import _git, _init_repo
 
     _init_repo(tmp_path)
     name = "20990101T000000_checkpoint-v10"
@@ -411,7 +411,7 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
 
     from base.cluster import provision
     from base.deploy.schema.migration_layout import required_migration_set
-    from base.deploy.tests.migration_support import _init_repo
+    from base.deploy.schema.tests.migration_support import _init_repo
 
     name = "20990101T000000_checkpoint-v10"
     hour = tmp_path / "2099/01/01/00"
