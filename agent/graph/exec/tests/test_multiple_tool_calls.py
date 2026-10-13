@@ -14,8 +14,8 @@ from agent.graph.exec._result import ExecDone
 from agent.graph.exec.node import _exec_node_impl
 from agent.graph.interrupt import InterruptEvent
 from agent.graph.tool_calls import normalize_tool_calls
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity

@@ -28,18 +28,18 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.claim.tests.claim_support import (
+    insert_inbound_kind,
+    make_fake_llm,
+    make_runtime,
+    thread_config,
+)
 from agent.graph.hooks.compact import compose_summary_message
 from agent.graph.prompt import context_notes
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from agent.tests.claim.claim_support import (
-    _fake_llm,
-    insert_inbound_kind,
-    make_runtime,
-    thread_config,
-)
 from base.agents.context import AvaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -246,7 +246,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
         ]
     )
 
-    fake_llm = _fake_llm("LLM-generated summary")
+    fake_llm = make_fake_llm("LLM-generated summary")
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),

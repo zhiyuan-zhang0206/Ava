@@ -13,8 +13,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.hooks import Hook
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings

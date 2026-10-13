@@ -17,8 +17,8 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.hooks import Hook, make_hook_runner
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings

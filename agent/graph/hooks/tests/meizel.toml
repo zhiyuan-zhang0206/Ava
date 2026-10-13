@@ -1,4 +1,10 @@
+exports = ["cancel_fixture.py"]
+
+[uses]
+"conftest.py" = ["cancel_fixture.py"]
+
 [debt.first-party-patch]
+"cancel_fixture.py#monkeypatch.setattr agent.graph.hooks.compact.subscribe_interrupt" = 1
 "test_capabilities_drift.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
 "test_capabilities_drift.py#monkeypatch.setattr base.config.settings.agent.sdk_disable" = 1
 "test_capabilities_drift.py#monkeypatch.setattr base.config.settings.agent.skills_to_inject_into_system_prompt" = 3

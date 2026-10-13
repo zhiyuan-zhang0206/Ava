@@ -25,8 +25,8 @@ from langgraph.types import Command
 from agent.graph import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.graph.prompt._base_prompt import capture_ava_overview, get_ava_overview
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings

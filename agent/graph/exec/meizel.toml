@@ -1,4 +1,4 @@
-exports = ["node.py", "output.py", "protocol.py"]
+exports = ["node.py", "output.py", "protocol.py", "tests"]
 
 [uses]
 "_child_boundary.py" = ["_result.py", "_stream.py", "protocol.py"]

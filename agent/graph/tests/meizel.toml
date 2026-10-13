@@ -1,7 +1,7 @@
-exports = ["cursor_fixture.py", "test_llm_helpers.py"]
+exports = ["cancel_fixture.py", "test_llm_helpers.py"]
 
 [uses]
-"llm_helpers" = ["test_llm_helpers.py"]
+"llm_helpers" = ["cancel_fixture.py", "test_llm_helpers.py"]
 
 [external]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
@@ -11,7 +11,6 @@ exports = ["cursor_fixture.py", "test_llm_helpers.py"]
 "test_exec_timeout_note.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
 
 [debt.first-party-patch]
-"cursor_fixture.py#monkeypatch.setattr agent.graph.node_log.SNAPSHOT_CURSOR" = 1
 "test_build_with_extensions.py#monkeypatch.setattr ava.sdk_surface.metering.install" = 1
 "test_build_with_extensions.py#monkeypatch.setattr base.packages.plugin_providers.build_model_catalog" = 1
 "test_build_with_extensions.py#monkeypatch.setattr base.packages.plugins.loading.plugin_loader.load_plugin_module" = 2

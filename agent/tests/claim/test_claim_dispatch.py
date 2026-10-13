@@ -12,11 +12,11 @@ from psycopg_pool import AsyncConnectionPool
 
 import ava
 from agent.graph import claim_node
-from agent.graph.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
+from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
+from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import _set_agent_status, committed_publishes
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
