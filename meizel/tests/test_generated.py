@@ -134,7 +134,7 @@ def test_tests_docs_and_meizel_are_outside_the_rule(make_repo: RepoFactory) -> N
     assert enumerations.violations(root) == []
 
 
-def test_a_toml_array_is_reported_unless_generated_or_pending_removal(
+def test_a_toml_array_is_reported_unless_generated(
     make_repo: RepoFactory,
 ) -> None:
     root = repo(
@@ -142,7 +142,6 @@ def test_a_toml_array_is_reported_unless_generated_or_pending_removal(
         {
             "copy.toml": 'items = ["a", "b", "c"]\n',
             "gen.toml": toml_with("names application"),
-            "lint.toml": '[tool.importlinter]\nroot_packages = ["a", "b", "c"]\n',
         },
     )
     generated.write(root)

@@ -74,5 +74,4 @@ facts, and the LCA reads exact dependency locations without scanning production
 imports or evaluating Python. Package-local tests remain outside this gate's
 scope; this capability does not force unrelated historical tests to move.
 
-Parent: [[scripts/lint/docs/lint.ava.okf.md|lint]]. Related:
-[[scripts/lint/docs/patch-targets.ava.okf.md|patch-target lint]].
+Parent: [[scripts/lint/docs/lint.ava.okf.md|lint]].

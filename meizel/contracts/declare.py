@@ -15,9 +15,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from meizel.contracts.analysis import Analysis, analyze
-from meizel.contracts.manifest import manifest_path
+from meizel.contracts.manifest import first, manifest_path, within
 from meizel.contracts.manifest_text import add_exports, add_uses
-from meizel.contracts.rule import Projection, is_private
+from meizel.contracts.rule import Projection, is_private, relative
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Fact, MeizelError
 
@@ -98,42 +98,91 @@ def _cycle_problem(graph: dict[str, set[str]], proj: Projection) -> str | None:
     )
 
 
+Pairs = dict[str, list[tuple[str, str]]]
+
+
+def _edge_action(pairs: list[tuple[str, str]], proj: Projection) -> tuple[str, str] | str | None:
+    """What a fact needs declared: None (covered), `(source, target)` to write, or a reason not to.
+
+    A child pair that has no declaration is declared plainly. When the edge exists only for
+    narrowed endpoints, a fact from a source those declarations already authorise gets its target
+    added to that source; a fact from any other source is left for a person to judge, so narrowing
+    is never widened silently.
+    """
+    src, dst = relative(proj)
+    if any(within(src, s) and within(dst, d) for s, d in pairs):
+        return None
+    narrowed = [(s, d) for s, d in pairs if (first(s), first(d)) == (proj.cf, proj.ct)]
+    if not narrowed:
+        return (proj.cf, proj.ct)
+    authorised = [s for s, _ in narrowed if within(src, s)]
+    if not authorised:
+        listing = ", ".join(f"{s} -> {d}" for s, d in narrowed)
+        return (
+            f"is declared only for narrowed endpoints ({listing}) and its source is outside them: "
+            "decide whether to widen the declaration"
+        )
+    source = max(authorised, key=len)
+    depth = max(len(d.split("/")) for s, d in narrowed if s == source)
+    return (source, "/".join(dst.split("/")[:depth]))
+
+
 def _accept(
     plan: Plan,
     graphs: dict[str, dict[str, set[str]]],
+    pairs: Pairs,
     proj: Projection,
-    *,
-    needs_edge: bool,
+    edge: tuple[str, str] | None,
     needs_exports: list[tuple[str, str]],
 ) -> None:
-    if needs_edge:
+    if edge is not None:
+        source, target = edge
         graphs[proj.lca].setdefault(proj.cf, set()).add(proj.ct)
-        plan.uses.setdefault(proj.lca, {}).setdefault(proj.cf, set()).add(proj.ct)
-        plan.lines.append(f"{manifest_path(proj.lca)}: declared {proj.cf} -> {proj.ct}")
+        pairs[proj.lca].append(edge)
+        plan.uses.setdefault(proj.lca, {}).setdefault(source, set()).add(target)
+        plan.lines.append(f"{manifest_path(proj.lca)}: declared {source} -> {target}")
     for directory, child in needs_exports:
         plan.exports.setdefault(directory, set()).add(child)
         plan.lines.append(f"{manifest_path(directory)}: exported {child}")
 
 
+def _judge(
+    analysis: Analysis,
+    plan: Plan,
+    graphs: dict[str, dict[str, set[str]]],
+    pairs: Pairs,
+    proj: Projection,
+) -> tuple[tuple[str, str] | None, list[tuple[str, str]], str | None] | None:
+    """`(edge to declare, exports to add, why not)` for one fact edge, or None when it needs nothing."""
+    action = _edge_action(pairs[proj.lca], proj)
+    edge = action if isinstance(action, tuple) else None
+    needs_exports = _missing_exports(analysis, plan, proj)
+    if action is None and not needs_exports:
+        return None
+    problem = action if isinstance(action, str) else _unfixable(proj)
+    if problem is None and edge is not None and edge == (proj.cf, proj.ct):
+        problem = _cycle_problem(graphs[proj.lca], proj)
+    return edge, needs_exports, problem
+
+
 def _plan(analysis: Analysis, targets: list[str]) -> Plan:
     plan = Plan()
     graphs: dict[str, dict[str, set[str]]] = defaultdict(dict)
+    pairs: Pairs = defaultdict(list)
     for directory, manifest in analysis.manifests.items():
-        graphs[directory] = {cf: set(cts) for cf, cts in manifest.uses.items()}
+        graphs[directory] = {cf: set(cts) for cf, cts in manifest.graph().items()}
+        pairs[directory] = manifest.pairs()
     ordered = sorted(
         (p for p in analysis.projections if not p.exempt and _within(p.fact.src, targets)),
         key=lambda p: (p.lca, p.cf, p.ct, p.fact.src, p.fact.line),
     )
     for proj in ordered:
-        needs_edge = proj.ct not in graphs[proj.lca].get(proj.cf, set())
-        needs_exports = _missing_exports(analysis, plan, proj)
-        if not needs_edge and not needs_exports:
+        judged = _judge(analysis, plan, graphs, pairs, proj)
+        if judged is None:
             continue
-        problem = _unfixable(proj) or (
-            _cycle_problem(graphs[proj.lca], proj) if needs_edge else None
-        )
+        edge, needs_exports, problem = judged
         if problem is None:
-            _accept(plan, graphs, proj, needs_edge=needs_edge, needs_exports=needs_exports)
+            _accept(plan, graphs, pairs, proj, edge, needs_exports)
         else:
             plan.left.append(f"{_describe(proj.fact)}: left as an error, it {problem}")
     return plan

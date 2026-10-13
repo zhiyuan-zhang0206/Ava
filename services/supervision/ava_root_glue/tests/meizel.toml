@@ -1,6 +1,9 @@
 [external]
 "test_plugin_services.py" = "imports the plugin module the test writes under tmp_path"
 
+[debt.env-patch]
+"test_brew_pin.py#monkeypatch.setenv os.environ.PATH" = 2
+
 [debt.first-party-patch]
 "test_ava_root_glue.py#monkeypatch.setattr services.supervision.ava_root_glue.glue.ConfigBoot" = 1
 "test_ava_root_glue.py#monkeypatch.setattr services.supervision.ava_root_glue.glue.Database" = 1
@@ -33,3 +36,6 @@
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.ava_root_glue.diagnostic_probes.is_macos" = 4
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.ava_root_glue.diagnostic_probes.settings" = 4
 "test_root_diagnostics.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.ping" = 1
+
+[debt.unresolved-patch]
+"test_root_diagnostics.py#monkeypatch.setattr probe._module._station_answers" = 1

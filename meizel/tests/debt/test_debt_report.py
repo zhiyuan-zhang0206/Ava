@@ -18,7 +18,7 @@ TREE = {
     "base/sub/__init__.py": "",
     "base/sub/meizel.toml": '[debt.private-module]\n"a.py -> b.py" = 4\n',
     "ava/__init__.py": "",
-    "ava/meizel.toml": '[debt.manifest-cycle]\n"x.py -> y.py" = 1\n',
+    "ava/meizel.toml": '[debt.cycle-edge]\n"x.py -> y.py" = 3\n',
     "clean/__init__.py": "",
     "meizel.toml": '[debt.undeclared-edge]\n"ava -> base" = 5\n',
     "broken/__init__.py": "",
@@ -32,9 +32,9 @@ def test_summary_counts_by_code_top_level_directory_and_mode(
     root = make_repo(TREE)
     assert run(root, "debt", "--json") == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["total"] == 16
+    assert report["total"] == 18
     assert report["by_code"] == {
-        "manifest-cycle": 1,
+        "cycle-edge": 3,
         "private-module": 4,
         "private-name": 4,
         "restricted-python": 2,
@@ -54,7 +54,7 @@ def test_summary_text_names_the_modes_and_the_counts(
 ) -> None:
     assert run(make_repo(TREE), "debt") == 0
     out = capsys.readouterr().out
-    assert "16 recorded locality debts" in out
+    assert "18 recorded locality debts" in out
     assert "4 strict-to-be directories" in out
     assert "2 strict directories" in out
     assert "private-name" in out
@@ -171,3 +171,58 @@ def test_an_unknown_ref_stops_the_tool(
     root = base_repo(make_repo)
     assert run(root, "debt", "diff", "--against", "no-such-ref", "--on-growth", "fail") == 2
     assert "no-such-ref" in capsys.readouterr().err
+
+
+WAIVE = (
+    "--on-growth",
+    "fail",
+    "--waive-if-changed",
+    ":(glob)rules/**/*.py",
+    ":(exclude,glob)rules/**/tests/**",
+)
+
+
+def test_growth_is_only_a_warning_when_the_change_touches_the_rules(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(make_repo)
+    write(
+        root,
+        {
+            "a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 4\n',
+            "rules/engine.py": "RULE = 1\n",
+        },
+    )
+    assert diff(root, *WAIVE) == 0
+    out = capsys.readouterr()
+    assert "this change edits the rules (rules/engine.py)" in out.out
+    assert "warning" in out.err
+
+
+def test_a_test_under_the_rules_does_not_waive_growth(make_repo: RepoFactory) -> None:
+    root = base_repo(make_repo)
+    write(
+        root,
+        {
+            "a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 4\n',
+            "rules/tests/test_engine.py": "def test_a(): ...\n",
+        },
+    )
+    assert diff(root, *WAIVE) == 1
+
+
+def test_a_ref_that_records_a_retired_code_still_counts(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            "a/__init__.py": "",
+            "a/meizel.toml": '[debt.manifest-cycle]\n"x.py -> y.py" = 2\n\n[debt.private-name]\n"x.py -> y.py#_n" = 3\n',
+        }
+    )
+    commit(root)
+    write(root, {"a/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 3\n'})
+    assert diff(root, "--on-growth", "fail") == 0
+    out = capsys.readouterr().out
+    assert "manifest-cycle" in out
+    assert "-2" in out

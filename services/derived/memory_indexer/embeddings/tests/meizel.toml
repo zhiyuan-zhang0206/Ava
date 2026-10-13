@@ -4,6 +4,9 @@ exports = ["test_embeddings.py"]
 "embeddings" = ["test_embeddings.py"]
 "test_explicit_inputs.py" = ["test_embeddings.py"]
 
+[debt.env-patch]
+"test_explicit_inputs.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_embeddings.py#monkeypatch.setattr base.config.settings.lm.gemini_api_key" = 2
 "test_embeddings.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 1
@@ -20,3 +23,7 @@ exports = ["test_embeddings.py"]
 "embeddings/test_worst_case_single_attempt_has_no_sleep.py -> test_embeddings.py#_dummy_gemini_key" = 1
 "embeddings/test_worst_case_single_attempt_has_no_sleep.py -> test_embeddings.py#_provider" = 1
 "test_explicit_inputs.py -> test_embeddings.py#_AsyncClient" = 1
+
+[debt.third-party-patch]
+"test_embeddings.py#monkeypatch.setattr httpx.AsyncClient" = 5
+"test_embeddings.py#monkeypatch.setattr opentelemetry.trace.get_tracer" = 1

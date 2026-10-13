@@ -3,6 +3,9 @@ exports = ["fake_provider.py"]
 [uses]
 "test_memory_indexer_config.py" = ["fake_provider.py"]
 
+[debt.env-patch]
+"test_memory_search_reconcile.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_memory_indexer_config.py#monkeypatch.setattr services.derived.memory_indexer.daemon.asyncio.sleep" = 1
 "test_memory_indexer_config.py#monkeypatch.setattr services.derived.memory_indexer.daemon.get_backend" = 1
@@ -20,3 +23,9 @@ exports = ["fake_provider.py"]
 "test_memory_search_reconcile.py#monkeypatch.setattr services.derived.memory_indexer.memory_search_reconcile.process_name" = 1
 "test_memory_search_reconcile.py#monkeypatch.setattr services.derived.memory_indexer.memory_search_reconcile.sample_queries" = 2
 "test_memory_search_reconcile.py#monkeypatch.setattr services.derived.memory_indexer.memory_search_reconcile.sys.stdin" = 4
+
+[debt.stdlib-patch]
+"test_memory_search_reconcile.py#monkeypatch.setattr sys.argv" = 8
+
+[debt.third-party-patch]
+"test_memory_indexer_config.py#monkeypatch.setattr httpx.Client" = 1

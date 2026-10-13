@@ -25,13 +25,8 @@ _REGISTERED = {
     "tests/components/base/test_x.py": ("contract", "a registered test the fixtures start from")
 }
 _PYPROJECT = """\
-[tool.importlinter]
-root_packages = ["agent", "ops", "base"]
-
-[[tool.importlinter.contracts]]
-name = "Layers"
-type = "layers"
-layers = ["agent | ops", "base"]
+[project]
+name = "sample"
 """
 _SOURCES = {
     "pyproject.toml": _PYPROJECT,
@@ -351,16 +346,6 @@ def test_registered_checks_do_not_load_the_placement_rule(repo: pathlib.Path) ->
 
 
 # ------------------------------------------------------------------ the shipped registry
-
-
-def test_by_design_covers_the_placement_policy_and_keeps_to_one_line_reasons() -> None:
-    by_design = tests_location_allowed.BY_DESIGN
-    for prefix in placement.TOP_LEVEL_PREFIXES:
-        assert prefix in by_design
-    for rel in placement.TOP_LEVEL_FILES:
-        if tl.is_top_level_test(rel):
-            assert tl.stays_by_design(rel) is not None, rel
-    assert all(reason.strip() and "\n" not in reason for reason in by_design.values())
 
 
 def test_every_shipped_entry_has_a_known_category_and_a_reason() -> None:

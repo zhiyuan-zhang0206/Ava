@@ -38,7 +38,7 @@ three or more, so a new package is declared in one place or the check says where
   the universe of tracked files, graph algorithms, name scopes and import
   access; `language/` the restricted Python forms, pytest fixture requests and
   the file scanner that composes them with import access; `contracts/` the
-  `meizel.toml` manifests, the rule, analysis, recorded debt and the commands
+  `meizel.toml` manifests, the rule, analysis, recorded debt, the policy file and the commands
   (`python -m meizel`). The layers form a DAG: `contracts` -> `language` -> `graph`.
 
 - `lint_common.py` — the shared scan vocabulary of the standalone lints: the

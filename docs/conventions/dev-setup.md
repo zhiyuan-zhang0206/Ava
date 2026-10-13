@@ -14,7 +14,7 @@ notes, not here. The placeholders to fill in: a gateway is reached at
 ## Tool caches
 
 Every tool's cache lives under `.cache/<tool>/` (`.cache/pytest`,
-`.cache/ruff`, `.cache/import-linter`, ...), ignored by the single root
+`.cache/ruff`, ...), ignored by the single root
 `/.cache/` line in `.gitignore`. Configure a newly added tool the same way
 instead of letting it drop a cache dir at the repo root.
 

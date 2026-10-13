@@ -3,6 +3,9 @@
 "test_web_injection.py" = ["_web_helpers.py"]
 "test_web_search.py" = ["_web_helpers.py"]
 
+[debt.env-patch]
+"test_web_search.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_web.py#monkeypatch.setattr base.config.settings.lm.llm_invoke_retry_attempts" = 1
 "test_web.py#monkeypatch.setattr base.config.settings.web.jina_api_key" = 28

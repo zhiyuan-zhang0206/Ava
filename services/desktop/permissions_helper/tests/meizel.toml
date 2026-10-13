@@ -5,6 +5,11 @@
 "test_native_input.py" = ["support.py"]
 "test_native_mouse_hold.py" = ["support.py"]
 
+[debt.env-patch]
+"test_build_dir_follows_variable.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_os_jobs_gate.py#monkeypatch.setenv os.environ.AVA_HOME" = 5
+"test_permissions_helper.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_ax_tree_wire.py#monkeypatch.setattr base.host.permissions_helper.client._call" = 1
 "test_helper_retirement.py#monkeypatch.setattr base.host.permissions_helper.client.shutdown_helper" = 2
@@ -74,3 +79,13 @@
 "permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_stage_bundle" = 1
 "permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_test_dr" = 1
 "permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_write_current_build_state" = 1
+
+[debt.stdlib-patch]
+"test_os_jobs_gate.py#monkeypatch.setattr shutil.which" = 2
+
+[debt.third-party-patch]
+"test_helper_retirement.py#monkeypatch.setattr psutil.Process" = 1
+
+[debt.unresolved-patch]
+"test_os_jobs_gate.py#monkeypatch.setattr module.register_platform_job" = 2
+"test_os_jobs_gate.py#monkeypatch.setattr module.unregister_platform_job" = 2

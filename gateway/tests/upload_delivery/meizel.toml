@@ -26,3 +26,7 @@
 "test_upload_delivery_recovery.py#monkeypatch.setattr gateway.upload_delivery.worker.UploadRecovery.start" = 1
 "test_upload_delivery_recovery.py#monkeypatch.setattr ops.upload_delivery.MAX_AGENT_UPLOAD_BYTES" = 1
 "test_upload_delivery_recovery.py#monkeypatch.setattr ops.upload_delivery.current_unit" = 2
+
+[debt.stdlib-patch]
+"test_upload_delivery_lifecycle.py#monkeypatch.setattr pathlib.Path.home" = 1
+"test_upload_delivery_recovery.py#monkeypatch.setattr pathlib.Path.home" = 1

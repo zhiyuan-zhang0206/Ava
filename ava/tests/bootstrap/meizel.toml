@@ -1,3 +1,16 @@
+[debt.env-patch]
+"test_external_caller_ava.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_external_caller_ava.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 2
+"test_packages_refresh_ava.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_session_venv_projection.py#monkeypatch.delenv os.environ.AVA_LAUNCHER_PROFILE" = 6
+"test_session_venv_projection.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 4
+"test_session_venv_projection.py#monkeypatch.setenv os.environ" = 1
+"test_session_venv_projection.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_session_venv_projection.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 3
+"test_session_venv_projection.py#monkeypatch.setitem os.environ.AVA_CLUSTER_SECRET" = 4
+"test_session_venv_projection.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 6
+"test_session_venv_projection.py#monkeypatch.setitem os.environ.AVA_REDIS_URL" = 7
+
 [debt.first-party-patch]
 "test_connect_fail_fast.py#monkeypatch.setattr ava.sdk_surface.agent_identity.agent_id" = 2
 "test_connect_fail_fast.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
@@ -15,3 +28,10 @@
 "test_session_venv_projection.py#monkeypatch.setattr ava.shell.sessions.shell_sessions" = 1
 "test_session_venv_projection.py#monkeypatch.setattr ava.shell.sessions.workspace_dir" = 1
 "test_session_venv_projection.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 3
+
+[debt.third-party-patch]
+"test_connect_fail_fast.py#monkeypatch.setattr psycopg.connect" = 1
+"test_sdk_redis_resilience.py#monkeypatch.setattr redis.Redis.from_url" = 1
+
+[debt.unresolved-patch]
+"test_session_venv_projection.py#monkeypatch.setattr backend.new_session" = 1

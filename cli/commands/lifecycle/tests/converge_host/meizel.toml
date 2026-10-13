@@ -5,6 +5,13 @@ exports = ["context_inputs.py"]
 "test_converge_selection.py" = ["context_inputs.py"]
 "test_migration_warning.py" = ["context_inputs.py"]
 
+[debt.env-patch]
+"context_inputs.py#monkeypatch.setenv os.environ.HOME" = 1
+"context_inputs.py#monkeypatch.setenv os.environ.SHELL" = 1
+"test_bare_ava.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_converge.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_converge.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "context_inputs.py#monkeypatch.setattr base.cluster.get_record" = 1
 "context_inputs.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 1
@@ -73,3 +80,6 @@ exports = ["context_inputs.py"]
 "test_os_jobs_config.py#monkeypatch.setattr base.host.system.pr_flow_job.register_pr_flow_job" = 1
 "test_os_jobs_config.py#monkeypatch.setattr base.host.system.walg_job.register_walg_job" = 1
 "test_os_jobs_config.py#monkeypatch.setattr base.host.system.walg_job.unregister_walg_job" = 1
+
+[debt.stdlib-patch]
+"test_converge_firewall.py#monkeypatch.setattr time.sleep" = 1

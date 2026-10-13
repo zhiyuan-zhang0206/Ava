@@ -6,6 +6,11 @@ exports = ["creation"]
 "test_sdk_task_assignment.py" = ["test_task_assignments.py"]
 "test_task_assignment_races.py" = ["test_task_assignments.py"]
 
+[debt.env-patch]
+"test_agent_launch_visibility.py#patch.dict os.environ" = 1
+"test_spawn_forward.py#patch.dict os.environ" = 1
+"test_task_assignments.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_agent_launch_visibility.py#monkeypatch.setattr base.agents.birth.transaction.insert_spawn_prompt_in_transaction" = 1
 "test_agent_launch_visibility.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 4
@@ -45,3 +50,9 @@ exports = ["creation"]
 "test_task_assignments.py#monkeypatch.setattr gateway.agents.task_assignment.router.find_creation" = 1
 "test_task_assignments.py#monkeypatch.setattr gateway.agents.task_assignment.router.save_assignment" = 1
 "test_terminate_hints.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 1
+
+[debt.unresolved-patch]
+"test_resurrect_forward.py#monkeypatch.setattr forward._LIFECYCLE_DISPATCH_DEADLINE_S" = 1
+"test_resurrect_forward.py#monkeypatch.setattr forward._cluster_rpc.dispatch_to_machine" = 2
+"test_task_assignment_races.py#monkeypatch.setattr owner" = 1
+"test_terminate_hints.py#monkeypatch.setattr pool.connection" = 1

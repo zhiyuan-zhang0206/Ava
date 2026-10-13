@@ -8,6 +8,10 @@ exports = ["slices.py"]
 "test_computer_loop_liveness.py" = ["slices.py"]
 "test_computer_mcp_daemon.py" = ["slices.py"]
 
+[debt.env-patch]
+"test_computer_mcp_wrapper.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
+"test_computer_mcp_wrapper.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 2
+
 [debt.first-party-patch]
 "test_computer_ax_act.py#monkeypatch.setattr base.agents.impersonation.manifest.emit_recorded_central_event" = 1
 "test_computer_ax_act.py#monkeypatch.setattr base.host.permissions_helper.client" = 1

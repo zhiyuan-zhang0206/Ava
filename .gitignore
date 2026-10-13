@@ -21,8 +21,7 @@ venv/
 dist/
 build/
 
-# Tool caches: every tool writes under `.cache/<tool>/` (pytest, ruff,
-# import-linter, ...) — see conventions/dev-setup.md "Tool caches".
+# Tool caches: every tool writes under `.cache/<tool>/` (pytest, ruff, ...) — see conventions/dev-setup.md "Tool caches".
 /.cache/
 
 # Secrets

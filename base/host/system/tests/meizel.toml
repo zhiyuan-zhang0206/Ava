@@ -1,3 +1,19 @@
+[debt.env-patch]
+"test_autostart.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_autostart.py#monkeypatch.setenv os.environ.HOME" = 2
+"test_cron.py#monkeypatch.setenv os.environ.HOME" = 2
+"test_cron.py#monkeypatch.setenv os.environ.XPC_SERVICE_NAME" = 4
+"test_job_readers.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_logs_job.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_macos_firewall.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_packages_job.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_pr_flow_job.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_probes.py#monkeypatch.delenv os.environ.DISPLAY" = 2
+"test_probes.py#monkeypatch.delenv os.environ.WAYLAND_DISPLAY" = 1
+"test_probes.py#monkeypatch.setenv os.environ.DISPLAY" = 1
+"test_probes.py#monkeypatch.setenv os.environ.WAYLAND_DISPLAY" = 1
+"test_walg_job.py#monkeypatch.setenv os.environ.HOME" = 1
+
 [debt.first-party-patch]
 "test_autostart.py#monkeypatch.setattr base.host.system.autostart.ava_binary_path" = 1
 "test_autostart.py#monkeypatch.setattr base.host.system.autostart.subprocess.run" = 1
@@ -95,3 +111,6 @@
 "test_walg_job.py#monkeypatch.setattr base.host.system.cron.skip_os_job" = 1
 "test_walg_job.py#monkeypatch.setattr base.host.system.cron.subprocess.run" = 4
 "test_walg_job.py#monkeypatch.setattr base.host.system.cron.unregister_platform_job" = 1
+
+[debt.stdlib-patch]
+"test_cron.py#monkeypatch.setattr shutil.which" = 6

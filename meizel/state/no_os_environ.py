@@ -135,7 +135,6 @@ _ALLOWED_FILES = frozenset(
         "services/agent_runner/page_server/server.py",  # reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it
         "meizel/state/no_os_environ.py",  # this script itself has "os.environ" in strings
         "scripts/model_registry/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
-        "scripts/structure/patch_points.py",  # recognizes a test's patch of "os.environ" by its AST text; it matches the string and never reads the environment
         "scripts/lint/fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
         "meizel/state/ambient_state/scan.py",  # same reason: it MATCHES the strings "os.environ" / "os.getenv" against a module's AST to find an import-time read; it never reads the environment
         "base/sessions/env_forwarding.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded

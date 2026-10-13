@@ -1,0 +1,4 @@
+[debt.unresolved-patch]
+"test_state_rejects_entries_outside_the_persisted_contract.py#monkeypatch.setattr bare_tracker._environment_value" = 5
+"test_state_rejects_entries_outside_the_persisted_contract.py#monkeypatch.setattr bare_tracker.fetch_json" = 2
+"test_state_rejects_entries_outside_the_persisted_contract.py#monkeypatch.setattr bare_tracker.fetch_provider_models" = 5

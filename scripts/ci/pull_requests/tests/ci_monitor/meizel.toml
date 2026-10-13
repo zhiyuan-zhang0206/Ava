@@ -1,3 +1,8 @@
+[debt.env-patch]
+"test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setenv os.environ.TRUNK_API_TOKEN" = 4
+"test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.delenv os.environ.TRUNK_API_TOKEN" = 1
+"test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setenv os.environ.TRUNK_API_TOKEN" = 10
+
 [debt.first-party-patch]
 "test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setattr scripts.ci.pull_requests.commands.DEFAULT_LEDGER" = 2
 "test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setattr scripts.ci.pull_requests.owner_operations.queue_cooldown_seconds" = 1
@@ -12,3 +17,7 @@
 "test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.status.subprocess.run" = 6
 "test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.status.time.sleep" = 1
 "test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr scripts.ci.pull_requests.status.time.time" = 1
+
+[debt.stdlib-patch]
+"test_queue_ops_exclusive_with_merge_wait.py#monkeypatch.setattr urllib.request.urlopen" = 1
+"test_runs_probe_reads_only_incomplete_runs.py#monkeypatch.setattr urllib.request.urlopen" = 10

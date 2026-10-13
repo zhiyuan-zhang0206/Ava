@@ -130,7 +130,7 @@ def test_record_chooses_back_edges_that_leave_the_graph_acyclic(make_repo: RepoF
     root = make_repo(files)
     assert failures(root) == {("manifest-cycle", "pkg/meizel.toml")}
     assert record(root, ".") == 0
-    recorded = debt_of(root, "pkg")["manifest-cycle"]
+    recorded = debt_of(root, "pkg")["cycle-edge"]
     assert recorded == {"c.py -> a.py": 1}
     assert failures(root) == set()
 
@@ -149,9 +149,9 @@ def test_record_keeps_the_back_edges_it_chooses_down_to_the_ones_needed(
     root = make_repo({**files, "pkg/meizel.toml": "[uses]\n" + uses})
     assert record(root, ".") == 0
     assert failures(root) == set()
-    assert len(debt_of(root, "pkg")["manifest-cycle"]) == 6
+    assert len(debt_of(root, "pkg")["cycle-edge"]) == 6
     assert run(root, "debt", "prune") == 0
-    assert len(debt_of(root, "pkg")["manifest-cycle"]) == 6
+    assert len(debt_of(root, "pkg")["cycle-edge"]) == 6
 
 
 def test_record_leaves_what_it_cannot_record_failing(
@@ -226,7 +226,7 @@ def test_prune_pays_cycle_back_edges_one_at_a_time(make_repo: RepoFactory) -> No
     }
     root = make_repo(files)
     assert record(root, ".") == 0
-    assert len(debt_of(root, "pkg")["manifest-cycle"]) == 1
+    assert len(debt_of(root, "pkg")["cycle-edge"]) == 1
     write(root, {"pkg/b.py": "VALUE = 1\n", "pkg/meizel.toml": '[uses]\n"a.py" = ["b.py"]\n'})
     assert run(root, "debt", "prune") == 0
     assert debt_of(root, "pkg") == {}
@@ -289,3 +289,39 @@ def test_untracked_work_is_not_seen_by_the_baseline_until_staged(make_repo: Repo
     assert record(root, "app") == 0
     git(root, "reset", "-q", "app/meizel.toml")
     assert ("restricted-python", "app/run.py") in failures(root)
+
+
+def test_record_counts_every_fact_on_a_back_edge_and_never_lowers_a_count(
+    make_repo: RepoFactory,
+) -> None:
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/a.py": "from pkg import b\n",
+        "pkg/b.py": "from pkg import a\nfrom pkg import a as again\n",
+        "pkg/meizel.toml": '[uses]\n"a.py" = ["b.py"]\n"b.py" = ["a.py"]\n',
+    }
+    root = make_repo(files)
+    assert record(root, ".") == 0
+    assert debt_of(root, "pkg")["cycle-edge"] == {"b.py -> a.py": 2}
+    write(root, {"pkg/b.py": "from pkg import a\n"})
+    assert record(root, ".") == 0
+    assert debt_of(root, "pkg")["cycle-edge"] == {"b.py -> a.py": 2}
+    assert run(root, "debt", "prune") == 0
+    assert debt_of(root, "pkg")["cycle-edge"] == {"b.py -> a.py": 1}
+
+
+def test_a_new_fact_on_a_recorded_back_edge_is_recorded_only_by_record(
+    make_repo: RepoFactory,
+) -> None:
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/a.py": "from pkg import b\n",
+        "pkg/b.py": "from pkg import a\n",
+        "pkg/meizel.toml": '[uses]\n"a.py" = ["b.py"]\n"b.py" = ["a.py"]\n',
+    }
+    root = make_repo(files)
+    assert record(root, ".") == 0
+    write(root, {"pkg/b.py": "from pkg import a\nfrom pkg import a as again\n"})
+    assert ("cycle-edge", "pkg/b.py") in failures(root)
+    assert record(root, ".") == 0
+    assert debt_of(root, "pkg")["cycle-edge"] == {"b.py -> a.py": 2}

@@ -3,6 +3,17 @@ exports = ["converge_host", "startup", "stop"]
 [uses]
 "identity" = ["test_root_driver.py"]
 
+[debt.env-patch]
+"test_collector_admission.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 3
+"test_collector_admission.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_commands_status.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_commands_status.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
+"test_pg_owner_authority.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
+"test_root_driver.py#monkeypatch.delenv os.environ" = 1
+"test_root_driver.py#monkeypatch.setenv os.environ" = 2
+"test_root_driver.py#monkeypatch.setenv os.environ.PATH" = 2
+"test_unit_capability_lifecycle.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_collector_admission.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.root_client" = 1
 "test_collector_admission.py#monkeypatch.setattr cli.commands.observability.otel_collector.ensure_otel_collector" = 4
@@ -89,3 +100,9 @@ exports = ["converge_host", "startup", "stop"]
 "test_start_data_plane.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.ensure_cluster_storage" = 3
 "test_start_data_plane.py#monkeypatch.setattr cli.start_identity.needs_provision" = 1
 "test_unit_capability_lifecycle.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 1
+
+[debt.stdlib-patch]
+"test_commands_status.py#monkeypatch.setattr subprocess.run" = 7
+
+[debt.third-party-patch]
+"test_commands_status.py#monkeypatch.setattr httpx.get" = 5

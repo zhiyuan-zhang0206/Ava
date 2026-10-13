@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from meizel.contracts.analysis import Analysis
+from meizel.contracts.manifest import first
 from meizel.graph.model import Fact, MeizelError
 from meizel.graph.universe import MANIFEST, parent_of
 
@@ -34,11 +35,16 @@ def _local_graph(analysis: Analysis, node: str) -> list[str]:
     where = f"{parent or '.'}/{MANIFEST}"
     if manifest is None:
         return [f"parent {parent or '.'} has no {MANIFEST}: no local edges, exports only its door"]
-    users = sorted(src for src, targets in manifest.uses.items() if name in targets)
+    users = sorted(
+        src for src, targets in manifest.uses.items() if any(first(t) == name for t in targets)
+    )
+    uses = sorted(
+        t for src, targets in manifest.uses.items() if first(src) == name for t in targets
+    )
     exported = "yes" if name in manifest.exports else "no"
     return [
         f"parent {parent or '.'} ({where})",
-        f"  declared to use: {', '.join(manifest.uses.get(name, ())) or '-'}",
+        f"  declared to use: {', '.join(uses) or '-'}",
         f"  declared to be used by: {', '.join(users) or '-'}",
         f"  exported by parent: {exported}",
     ]

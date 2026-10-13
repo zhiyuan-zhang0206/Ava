@@ -1,6 +1,15 @@
 [uses]
 "test_rpc_result_domains.py" = ["test_agents_cmd.py"]
 
+[debt.env-patch]
+"test_external_caller_cli.py#monkeypatch.delenv os.environ.AVA_CALLER_IDENTITY" = 4
+"test_external_caller_cli.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_impersonation.py#monkeypatch.delenv os.environ.DSH_AVA_RELAY_STUB" = 1
+"test_impersonation.py#monkeypatch.setenv os.environ.AVA_IMPERSONATION_RELAY_STUB" = 2
+"test_impersonation.py#monkeypatch.setenv os.environ.DSH_AVA_RELAY_STUB" = 1
+"test_impersonation_agents.py#monkeypatch.delenv os.environ.AVA_IMPERSONATION_RELAY_TOKEN" = 1
+"test_impersonation_agents.py#monkeypatch.setenv os.environ.AVA_IMPERSONATION_RELAY_TOKEN" = 1
+
 [debt.first-party-patch]
 "test_agents_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
 "test_agents_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
@@ -65,3 +74,10 @@
 "test_rpc_result_domains.py#monkeypatch.setattr base.host.net.http_dial.get" = 1
 "test_rpc_result_domains.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
 "test_shell_kill_timing.py#monkeypatch.setattr base.host.net.http_dial.post" = 2
+
+[debt.stdlib-patch]
+"test_impersonation_agents.py#monkeypatch.setattr sys.stdin" = 1
+
+[debt.third-party-patch]
+"test_agents_cmd.py#monkeypatch.setattr httpx.get" = 6
+"test_agents_cmd.py#monkeypatch.setattr httpx.post" = 2

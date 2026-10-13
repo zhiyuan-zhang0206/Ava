@@ -1,5 +1,9 @@
 exports = ["test_pgbouncer_wire.py"]
 
+[debt.env-patch]
+"test_otel_bootstrap_relay.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_otel_bootstrap_relay.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.gateway.gateway_port" = 1
@@ -39,3 +43,11 @@ exports = ["test_pgbouncer_wire.py"]
 "test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr services.backup.dump.local_owner_authority" = 1
 "test_pgbouncer_wire.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 7
+
+[debt.third-party-patch]
+"test_converge_redis_bridge.py#monkeypatch.setattr redis.Redis.from_url" = 3
+
+[debt.unresolved-patch]
+"test_converge_redis_bridge.py#monkeypatch.setattr command_runtime.machine.host" = 1
+"test_converge_redis_bridge.py#monkeypatch.setattr machine.host" = 1
+"test_pgbouncer_wire.py#monkeypatch.setattr dp.db_url" = 2

@@ -6,6 +6,10 @@ exports = ["cursor_fixture.py", "test_llm_helpers.py"]
 [external]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
 
+[debt.env-patch]
+"test_build_with_extensions.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_exec_timeout_note.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
+
 [debt.first-party-patch]
 "cursor_fixture.py#monkeypatch.setattr agent.graph.node_log.SNAPSHOT_CURSOR" = 1
 "test_build_with_extensions.py#monkeypatch.setattr ava.sdk_surface.metering.install" = 1
@@ -41,3 +45,12 @@ exports = ["cursor_fixture.py", "test_llm_helpers.py"]
 "test_model_interrupt_owner.py#monkeypatch.setattr agent.graph.interrupt.watch_for_interrupt" = 4
 "test_node_log.py#monkeypatch.setattr agent.graph.node_log.build_timeline_items" = 2
 "test_node_log.py#monkeypatch.setattr base.config.settings.agent.node_stall_dump_seconds" = 5
+
+[debt.stdlib-patch]
+"test_node_log.py#monkeypatch.setattr faulthandler.cancel_dump_traceback_later" = 3
+"test_node_log.py#monkeypatch.setattr faulthandler.dump_traceback_later" = 3
+"test_node_log.py#monkeypatch.setattr sys.__stderr__" = 1
+"test_node_log.py#monkeypatch.setattr sys.stderr" = 1
+
+[debt.unresolved-patch]
+"test_build_with_extensions.py#monkeypatch.setattr sys.modules[dotted].MARK" = 1

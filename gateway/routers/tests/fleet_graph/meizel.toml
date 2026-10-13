@@ -8,3 +8,6 @@
 "test_fleet_graph.py#monkeypatch.setattr gateway.app.app.state.db_pool" = 2
 "test_fleet_graph_resilience.py#monkeypatch.setattr base.telemetry.emit" = 1
 "test_fleet_graph_resilience.py#monkeypatch.setattr gateway.app.app.state.db_pool" = 1
+
+[debt.unresolved-patch]
+"test_route_degradation.py#monkeypatch.setattr app.state.db_pool" = 1

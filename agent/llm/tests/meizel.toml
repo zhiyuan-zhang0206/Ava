@@ -2,3 +2,9 @@
 "test_invoke.py#monkeypatch.setattr base.config.settings.lm.llm_compact_timeout_seconds" = 1
 "test_llm_usage.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 2
 "test_llm_usage.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 2
+
+[debt.stdlib-patch]
+"test_llm_usage.py#monkeypatch.setattr time.time_ns" = 1
+
+[debt.third-party-patch]
+"test_llm_usage.py#monkeypatch.setattr opentelemetry.trace.get_tracer" = 2

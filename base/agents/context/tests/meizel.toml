@@ -1,2 +1,6 @@
 [debt.first-party-patch]
 "test_clients_database.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+
+[debt.unresolved-patch]
+"test_clients.py#monkeypatch.setattr clients._connect_redis" = 1
+"test_clients.py#monkeypatch.setattr clients._connect_sql" = 1

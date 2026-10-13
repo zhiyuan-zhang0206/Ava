@@ -6,3 +6,6 @@ exports = ["capture_inputs.py"]
 "test_uploads.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 2
 "test_uploads.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_uploads.py#monkeypatch.setattr base.host.net.http_dial.get" = 3
+
+[debt.stdlib-patch]
+"test_uploads.py#monkeypatch.setattr pathlib.Path.home" = 4

@@ -15,9 +15,22 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "tests" = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "impersonation_process.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py"]
 "turn" = ["db", "graph", "impersonation_handoff.py", "startup", "state.py", "state_channels.py"]
 
-[debt.manifest-cycle]
-"graph -> tests" = 1
-"hooks -> tests" = 1
+[debt.cycle-edge]
+"graph/claim/tests/test_claim_dispatch_guards.py -> tests/claim/claim_support.py" = 1
+"graph/claim/tests/test_claim_markers_and_idle.py -> tests/claim/claim_support.py" = 1
+"graph/exec/tests/test_cancel.py -> tests/_fakes.py" = 1
+"graph/exec/tests/test_exec_attach_drain.py -> tests/_fakes.py" = 1
+"graph/exec/tests/test_exec_node_timeout.py -> tests/_fakes.py" = 1
+"graph/exec/tests/test_multiple_tool_calls.py -> tests/_fakes.py" = 1
+"graph/llm/tests/test_llm_stream_stall.py -> tests/_fakes.py" = 1
+"graph/llm/tests/test_llm_turn_end.py -> tests/_fakes.py" = 1
+"graph/llm/tests/test_stop_reason_validation.py -> tests/_fakes.py" = 1
+"graph/tests/llm_helpers/test_security_findings.py -> tests/_fakes.py" = 1
+"graph/tests/test_graph_stream.py -> tests/_fakes.py" = 1
+"graph/tests/test_llm_helpers.py -> tests/_fakes.py" = 1
+"graph/tests/test_llm_understanding_wiring.py -> tests/_fakes.py" = 1
+"hooks/tests/test_hook_base.py -> tests/_fakes.py" = 1
+"hooks/tests/test_hooks.py -> tests/_fakes.py" = 1
 
 [debt.private-module]
 "graph/exec/tests/test_cancel.py -> tests/_fakes.py" = 1

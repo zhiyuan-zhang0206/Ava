@@ -6,6 +6,10 @@ exports = ["host_support.py", "hosted_resources.py", "test_agent_host_shutdown.p
 "test_policy_inputs.py" = ["host_support.py"]
 "test_settlement_reconciles.py" = ["host_support.py"]
 
+[debt.env-patch]
+"test_agent_host_background_loops.py#patch.dict os.environ" = 1
+"test_agent_host_identity_probe.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "host_support.py#monkeypatch.setattr base.agents.incarnation.hosted_force.original_host_force" = 1
 "host_support.py#monkeypatch.setattr services.agent_runner.agent_host.host.AgentEventPublisher" = 1
@@ -78,3 +82,8 @@ exports = ["host_support.py", "hosted_resources.py", "test_agent_host_shutdown.p
 
 [debt.private-name]
 "test_host_pool_isolation.py -> host_support.py#_FakePool" = 1
+
+[debt.unresolved-patch]
+"test_resource_join.py#monkeypatch.setattr host._clients.close" = 1
+"test_settlement_reconciles.py#monkeypatch.setattr host._drive_turns" = 1
+"test_settlement_reconciles.py#monkeypatch.setattr host._runtime_for" = 1

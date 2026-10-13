@@ -453,15 +453,15 @@ def test_if_changed_rejects_invalid_pattern(tmp_path: Path) -> None:
     assert "skipping" not in result.stdout
 
 
-def test_patch_targets_full_scan_is_gated_on_python_changes() -> None:
+def test_the_whole_meizel_check_is_gated_on_python_and_manifest_changes() -> None:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
-    hook = {h["id"]: h for r in config["repos"] for h in r["hooks"]}["lint-patch-targets-full"]
+    hook = {h["id"]: h for r in config["repos"] for h in r["hooks"]}["meizel-check-full"]
     assert hook["stages"] == ["pre-push"]
     assert hook["always_run"] is True  # the gate lives in the entry, which sees deletions
     assert hook["verbose"] is True
     assert shlex.split(hook["entry"]) == [
-        "bash", "scripts/hooks/prepush-if-changed.sh", r"\.py$", "--",
-        ".venv/bin/python", "scripts/lint/patch_targets.py",
+        "bash", "scripts/hooks/prepush-if-changed.sh", r"(\.py|(^|/)meizel\.toml)$", "--",
+        ".venv/bin/python", "-m", "meizel", "check",
     ]  # fmt: skip
 
 

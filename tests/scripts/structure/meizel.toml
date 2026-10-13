@@ -1,0 +1,2 @@
+[debt.env-patch]
+"test_placement_contract.py#monkeypatch.setenv os.environ.PYTEST_DISABLE_PLUGIN_AUTOLOAD" = 1

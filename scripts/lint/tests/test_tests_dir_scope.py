@@ -148,21 +148,13 @@ import sys
 from typing import TYPE_CHECKING
 
 from base.cluster.machine import machine_role
-from base.other._private import hidden
 
 if TYPE_CHECKING:
     import decimal
 
 sys.path.insert(0, "/somewhere")
 machine_role()
-hidden()
 """
-
-
-def _private_owner(root: pathlib.Path) -> None:
-    """A real package with a private module, so Rule 4 has something to reach into."""
-    _module(root / "base/other/__init__.py")
-    _module(root / "base/other/_private.py", "def hidden() -> None: ...\n")
 
 
 @pytest.mark.parametrize(
@@ -176,7 +168,6 @@ def _private_owner(root: pathlib.Path) -> None:
 def test_ast_rules_do_not_govern_a_package_tests_directory(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
 ) -> None:
-    _private_owner(tmp_path)
     _module(tmp_path / location, _BREAKS_EVERY_AST_RULE)
     assert lcs.main([], repo_root=tmp_path) == 0
     assert capsys.readouterr().out == ""
@@ -187,13 +178,11 @@ def test_the_same_source_outside_tests_is_governed(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
 ) -> None:
     """The control: the exemption is the location, not a weakened rule."""
-    _private_owner(tmp_path)
     _module(tmp_path / location, _BREAKS_EVERY_AST_RULE)
     assert lcs.main([], repo_root=tmp_path) == 1
     out = capsys.readouterr().out
     assert "`if TYPE_CHECKING:` is banned" in out
     assert "machine_role() is retired" in out
-    assert "reaches private `base.other._private`" in out  # Rule 4
 
 
 def test_path_import_rule_skips_test_files_at_any_depth() -> None:

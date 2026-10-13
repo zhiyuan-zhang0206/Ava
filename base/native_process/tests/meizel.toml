@@ -1,3 +1,8 @@
+[debt.env-patch]
+"test_child_env.py#monkeypatch.setenv os.environ" = 1
+"test_child_env.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
+"test_loaded_commit.py#monkeypatch.delenv os.environ" = 1
+
 [debt.first-party-patch]
 "test_exec_domain_confirmation.py#monkeypatch.setattr base.native_process.exec_domain.process_group_has_live_member" = 2
 "test_exec_domain_confirmation.py#monkeypatch.setattr base.native_process.group_closure.group_members" = 3
@@ -16,3 +21,20 @@
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.ownership.sys" = 5
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd._api" = 1
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd.sys" = 1
+
+[debt.stdlib-patch]
+"test_exec_domain_confirmation.py#monkeypatch.setattr os.killpg" = 6
+"test_group_closure.py#monkeypatch.setattr os.killpg" = 2
+"test_loaded_commit.py#monkeypatch.setattr subprocess.run" = 5
+"test_os_platform.py#monkeypatch.setattr sys.stdout" = 1
+"test_proc_tree_identity.py#monkeypatch.delattr os.pidfd_open" = 2
+"test_proc_tree_identity.py#monkeypatch.delattr signal.pidfd_send_signal" = 2
+"test_proc_tree_identity.py#monkeypatch.setattr ctypes.CDLL" = 1
+
+[debt.third-party-patch]
+"test_hosted_force_quiescence_native_process.py#monkeypatch.setattr psutil.process_iter" = 1
+"test_proc_tree_identity.py#monkeypatch.setattr psutil.Process.children" = 1
+
+[debt.unresolved-patch]
+"test_proc_tree.py#monkeypatch.setattr psosx.INIT_BOOT_TIME" = 3
+"test_proc_tree_identity.py#monkeypatch.setattr unrelated.create_time" = 1

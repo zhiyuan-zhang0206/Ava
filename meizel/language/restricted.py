@@ -85,12 +85,6 @@ class RestrictedForms(ImportAccess):
             if form:
                 self.restrict(line, form)
 
-    def string_target(self, target: ast.expr | None, line: int) -> None:
-        """A string patch target hides a dependency only when it names first-party code."""
-        text = None if target is None else self.string_value(target)
-        if text is None or self.u.is_first_party_name(text):
-            self.restrict(line, "string patch target", text or "")
-
     # --- sys.modules ---------------------------------------------------------------
 
     def is_sys_modules(self, expr: ast.expr) -> bool:

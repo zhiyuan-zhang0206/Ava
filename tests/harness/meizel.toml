@@ -1,3 +1,8 @@
+[debt.env-patch]
+"test_helperproc.py#monkeypatch.delenv os.environ.AVA_PERMISSIONS_HELPER_PID" = 1
+"test_helperproc.py#monkeypatch.setenv os.environ.AVA_PERMISSIONS_HELPER_PID" = 9
+"test_os_job_leak_guard.py#monkeypatch.setenv os.environ.HOME" = 1
+
 [debt.first-party-patch]
 "test_asyncio_stall_probe.py#monkeypatch.setattr tests._asyncio_stall_probe.DUMP_MARGIN_SECONDS" = 2
 "test_helperproc.py#monkeypatch.setattr base.config.settings" = 1
@@ -10,3 +15,13 @@
 "test_helperproc.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.parent_chain_intact" = 1
 "test_os_job_leak_guard.py#monkeypatch.setattr tests._os_jobs.crontab_jobs" = 1
 "test_os_job_leak_guard.py#monkeypatch.setattr tests._os_jobs.subprocess.run" = 1
+
+[debt.stdlib-patch]
+"test_ci_rerun_workflow.py#monkeypatch.setattr subprocess.run" = 1
+"test_e2e_residue_sweep.py#monkeypatch.setattr os.kill" = 1
+"test_e2e_residue_sweep.py#monkeypatch.setattr os.killpg" = 3
+"test_e2e_residue_sweep.py#monkeypatch.setattr subprocess.run" = 1
+"test_e2e_residue_sweep.py#monkeypatch.setattr sys.platform" = 1
+"test_e2e_residue_sweep.py#monkeypatch.setattr time.sleep" = 3
+"test_helperproc.py#monkeypatch.setattr os._exit" = 1
+"test_home_isolation.py#monkeypatch.setattr os.environ" = 1

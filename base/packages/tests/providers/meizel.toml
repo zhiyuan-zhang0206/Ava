@@ -1,5 +1,23 @@
 exports = ["test_provider_plugins.py"]
 
+[debt.env-patch]
+"test_validate_model_config.py#monkeypatch.delenv os.environ.ANTHROPIC_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.delenv os.environ.DASHSCOPE_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.delenv os.environ.DEEPSEEK_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.delenv os.environ.GEMINI_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.delenv os.environ.GLM_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.delenv os.environ.MIMO_API_KEY" = 2
+"test_validate_model_config.py#monkeypatch.delenv os.environ.MOONSHOT_API_KEY" = 2
+"test_validate_model_config.py#monkeypatch.delenv os.environ.OPENAI_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.setenv os.environ.DASHSCOPE_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.setenv os.environ.DEEPSEEK_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.setenv os.environ.GEMINI_API_KEY" = 3
+"test_validate_model_config.py#monkeypatch.setenv os.environ.GLM_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.setenv os.environ.MIMO_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.setenv os.environ.MOONSHOT_API_KEY" = 1
+"test_validate_model_config.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
+
 [debt.first-party-patch]
 "test_model_registry.py#monkeypatch.setattr base.config.settings.lm.llm_stream_total_timeout_seconds" = 2
 "test_model_registry.py#monkeypatch.setattr base.config.settings.lm.llm_stream_ttft_timeout_seconds" = 2

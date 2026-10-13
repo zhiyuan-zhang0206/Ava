@@ -67,15 +67,6 @@ def _commit_baseline(repo: pathlib.Path, message: str) -> None:
     _git(repo, "commit", "--quiet", "--allow-empty", "-m", message)
 
 
-def test_a_private_reach_in_fails_directly(
-    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _write(_repo, "base/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from base._priv import mod\n")
-    assert lcs.main([], repo_root=_repo) == 1
-    assert "gateway/importer.py:1: reaches private `base._priv`" in capsys.readouterr().out
-
-
 def test_a_new_dial_in_a_governed_module_fails_directly(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -107,16 +98,16 @@ def test_current_retired_fields_cannot_permit_sites(
     assert f"unknown section '{kind}'" in capsys.readouterr().err
 
 
-def test_renaming_a_private_reach_in_still_fails_directly(
+def test_renaming_an_owner_bypass_still_fails_directly(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write(_repo, "base/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from base._priv import mod\n")
+    dial = "import psycopg\ndef dial():\n    psycopg.connect('dsn')\n"
+    _write(_repo, "gateway/importer.py", dial)
     _commit_baseline(_repo, "No locality allowance")
     _git(_repo, "add", "-A")
-    _git(_repo, "commit", "--quiet", "-m", "Original reach-in")
+    _git(_repo, "commit", "--quiet", "-m", "Original bypass")
     _git(_repo, "mv", "gateway/importer.py", "gateway/importer_moved.py")
     assert lcs.main([], repo_root=_repo) == 1
     output = capsys.readouterr().out
-    assert "gateway/importer_moved.py:1: reaches private `base._priv`" in output
+    assert "gateway/importer_moved.py:3: bypasses the single owner of `postgres-dial`" in output
     assert "migrate the baseline" not in output

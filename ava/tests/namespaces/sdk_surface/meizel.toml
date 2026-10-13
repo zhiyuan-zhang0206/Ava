@@ -1,6 +1,14 @@
 [external]
 "test_help_renderer.py" = "executes generated module source to render help for it"
 
+[debt.env-patch]
+"test_install.py#patch.dict os.environ" = 1
+"test_metering.py#patch.dict os.environ" = 5
+"test_process_clients.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_process_clients.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 3
+"test_process_clients.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 2
+"test_process_clients.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_impersonation_capture_rebinding.py#monkeypatch.setattr ava.__all_for_ava__" = 1
 "test_impersonation_capture_rebinding.py#monkeypatch.setattr ava.receipt_probe" = 1
@@ -39,3 +47,13 @@
 "test_metering.py#monkeypatch.setattr base.telemetry.emit" = 2
 "test_wraps.py#monkeypatch.setattr base.packages.plugins.activation.emit" = 1
 "test_wraps.py#monkeypatch.setattr base.packages.plugins.activation.record" = 1
+
+[debt.stdlib-patch]
+"test_install.py#patch.dict sys.modules" = 1
+
+[debt.third-party-patch]
+"test_process_clients.py#monkeypatch.setattr psycopg.connect" = 1
+
+[debt.unresolved-patch]
+"test_metering.py#monkeypatch.setattr type(ava.skills).__all_for_ava__" = 1
+"test_wraps.py#monkeypatch.setattr namespace.target" = 1

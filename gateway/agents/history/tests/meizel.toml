@@ -1,6 +1,9 @@
 [uses]
 "timeline" = ["test_timeline.py"]
 
+[debt.env-patch]
+"test_timeline.py#patch.dict os.environ" = 2
+
 [debt.first-party-patch]
 "test_timeline.py#monkeypatch.setattr base.agents.history.checkpoint_postgres_walks.HistoryPostgresSaver.get_tuple" = 1
 "test_timeline.py#monkeypatch.setattr gateway.agents.history.timeline.build_timeline_items" = 1

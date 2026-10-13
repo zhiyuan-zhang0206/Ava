@@ -1,3 +1,7 @@
+[debt.env-patch]
+"test_test_selector.py#monkeypatch.delenv os.environ.TEST_SELECTION_MODE" = 1
+"test_test_selector.py#monkeypatch.setenv os.environ.TEST_SELECTION_MODE" = 1
+
 [debt.first-party-patch]
 "test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.MAX_LIST_PAGES" = 1
 "test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export._emit_events" = 1
@@ -14,3 +18,7 @@
 
 [debt.restricted-python]
 "test_test_selector.py#python -c source that imports first-party code" = 1
+
+[debt.stdlib-patch]
+"test_pr_flow_export.py#monkeypatch.setattr pathlib.Path.replace" = 1
+"test_understanding_replay_entry.py#monkeypatch.setattr sys.argv" = 2

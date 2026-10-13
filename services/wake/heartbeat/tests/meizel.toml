@@ -50,3 +50,6 @@
 "test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.init_gateway_process" = 2
 "test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.resolve_target" = 1
 "test_station_healthcheck.py#monkeypatch.setattr services.wake.heartbeat.station_probe.settings.observability.telemetry_otlp_port" = 1
+
+[debt.stdlib-patch]
+"test_station_healthcheck.py#monkeypatch.setattr urllib.request.urlopen" = 4

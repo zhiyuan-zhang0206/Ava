@@ -4,3 +4,7 @@
 "test_commands_cluster_status_parsers.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
 "test_logs_retention.py#monkeypatch.setattr base.config.settings.observability.log_retention_days" = 1
 "test_logs_retention.py#monkeypatch.setattr cli.commands.observability.logs.os.scandir" = 1
+
+[debt.stdlib-patch]
+"test_logs_retention.py#monkeypatch.setattr pathlib.Path.unlink" = 1
+"test_parser_contract.py#monkeypatch.setattr sys.argv" = 1

@@ -1,3 +1,6 @@
+[debt.env-patch]
+"test_google_drive.py#patch.dict os.environ" = 3
+
 [debt.first-party-patch]
 "test_accessibility.py#monkeypatch.setattr base.host.converge.accessibility.ava_home" = 1
 "test_browser_deps.py#monkeypatch.setattr base.host.converge.browser_deps.node_install_command" = 3

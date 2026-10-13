@@ -16,6 +16,10 @@ exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed
 "test_maintenance_prior_failure.py" = ["host_policy.py", "test_maintenance_receipt_grading.py"]
 "test_turn_dispatcher.py" = ["turn_dispatcher"]
 
+[debt.env-patch]
+"test_boot_sdk_posture.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_boot_sdk_posture.py#patch.dict os.environ" = 2
+
 [debt.first-party-patch]
 "test_boot_sdk_posture.py#monkeypatch.setattr ava.sdk_surface.process_context.bind_host_process" = 1
 "test_boot_sdk_posture.py#monkeypatch.setattr base.config.Settings" = 1
@@ -39,3 +43,8 @@ exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed
 "native_cancel/test_checkpoint.py -> history/test_hosted_compact_failure.py#_prepare_graph" = 1
 "native_cancel/test_interrupt.py -> history/test_hosted_compact_failure.py#_prepare_graph" = 1
 "native_restart/test_return.py -> native_cancel/test_continuation.py#_install_faults" = 1
+
+[debt.unresolved-patch]
+"guarded_compact_support.py#monkeypatch.setattr host._runtime_for" = 1
+"test_maintenance_prior_failure.py#monkeypatch.setattr host._drive_turns" = 1
+"test_maintenance_prior_failure.py#monkeypatch.setattr host._runtime_for" = 1

@@ -11,6 +11,19 @@ exports = ["weixin_native.py"]
 "test_weixin_ingress_recovery.py" = ["weixin_native.py"]
 "test_weixin_ingress_runtime.py" = ["weixin_native.py"]
 
+[debt.env-patch]
+"test_feishu_adapter.py#monkeypatch.delenv os.environ" = 1
+"test_feishu_adapter.py#monkeypatch.delenv os.environ.HTTPS_PROXY" = 1
+"test_feishu_adapter.py#monkeypatch.setenv os.environ.ALL_PROXY" = 1
+"test_feishu_adapter.py#monkeypatch.setenv os.environ.HTTPS_PROXY" = 3
+"test_feishu_owner_seed.py#monkeypatch.setenv os.environ.AVA_HOME" = 7
+"test_im_bridge_telegram.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_segment_retry_safety.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_services_weixin_adapter.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_telegram_adapter.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_weixin_adapter.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"weixin_native.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_feishu_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.feishu.logger" = 2
 "test_prepared_timeline.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 2
@@ -20,3 +33,25 @@ exports = ["weixin_native.py"]
 
 [debt.private-name]
 "test_prepared_timeline.py -> test_telegram_adapter.py#_config" = 1
+
+[debt.stdlib-patch]
+"test_weixin_adapter.py#monkeypatch.setattr os.replace" = 2
+
+[debt.third-party-patch]
+"test_feishu_adapter.py#monkeypatch.setattr lark_oapi.Client.builder" = 1
+"test_feishu_adapter.py#monkeypatch.setattr lark_oapi.ws.client._ws_connect_kwargs" = 1
+"test_feishu_adapter.py#monkeypatch.setattr websockets.connect" = 1
+
+[debt.unresolved-patch]
+"test_feishu_owner_seed.py#monkeypatch.setattr adapter.send" = 1
+"test_weixin_ingress_account_fencing.py#monkeypatch.setattr core._ensure_subscription" = 1
+"test_weixin_ingress_account_fencing.py#monkeypatch.setattr core._handle_command" = 1
+"test_weixin_ingress_account_fencing.py#monkeypatch.setattr runtime.recover_subscriptions" = 2
+"test_weixin_ingress_account_fencing.py#monkeypatch.setattr runtime.store.guard_claim_in_transaction" = 2
+"test_weixin_ingress_recovery.py#monkeypatch.setattr core._handle_command" = 1
+"test_weixin_ingress_recovery.py#monkeypatch.setattr core._send" = 1
+"test_weixin_ingress_recovery.py#monkeypatch.setattr ingress.dispatch" = 4
+"test_weixin_ingress_recovery.py#monkeypatch.setattr ingress.store.claim" = 1
+"test_weixin_ingress_recovery.py#monkeypatch.setattr ingress.store.finish" = 2
+"weixin_native.py#monkeypatch.setattr core._ensure_subscription" = 1
+"weixin_native.py#monkeypatch.setattr core._start_typing" = 1

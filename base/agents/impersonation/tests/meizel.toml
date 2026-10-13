@@ -3,6 +3,9 @@ exports = ["test_history.py", "test_host_transport.py"]
 [uses]
 "test_event_log.py" = ["test_history.py"]
 
+[debt.env-patch]
+"test_host_transport.py#monkeypatch.setenv os.environ.CODEX_HOME" = 1
+
 [debt.first-party-patch]
 "test_event_log.py#monkeypatch.setattr base.agents.impersonation.event_log.MAX_LOG_ENTRIES" = 1
 "test_event_log.py#monkeypatch.setattr base.agents.impersonation.history.workspace_dir" = 1
@@ -20,3 +23,6 @@ exports = ["test_history.py", "test_host_transport.py"]
 "test_impersonation_database_attestation.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 1
 "test_impersonation_database_attestation.py#monkeypatch.setattr base.native_process.ownership.stable_create_time" = 1
 "test_transport_lifecycle.py#monkeypatch.setattr base.agents.impersonation.host_transport.live_submit" = 5
+
+[debt.third-party-patch]
+"test_impersonation_database_attestation.py#monkeypatch.setattr psutil.Process" = 1

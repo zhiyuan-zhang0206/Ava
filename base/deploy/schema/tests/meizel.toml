@@ -4,6 +4,9 @@ exports = ["migration_support.py"]
 "test_migration_layout.py" = ["migration_support.py"]
 "test_migration_reset.py" = ["migration_support.py"]
 
+[debt.env-patch]
+"test_migration_reset.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_migration_layout.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 5
 "test_migration_reset.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 10

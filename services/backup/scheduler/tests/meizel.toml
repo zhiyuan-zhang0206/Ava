@@ -3,6 +3,9 @@
 "shutdown_worker.py" = ["test_scheduler_shutdown.py"]
 "test_operation_worker.py" = ["operation_support.py"]
 
+[debt.env-patch]
+"test_backup_scheduler_daemon.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "operation_support.py#monkeypatch.setattr services.backup.scheduler.operation.worker_process.subprocess.Popen" = 1
 "test_backup_scheduler_daemon.py#monkeypatch.setattr base.config.settings.services.backup_hour" = 1

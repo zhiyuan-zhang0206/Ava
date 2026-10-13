@@ -7,6 +7,9 @@
 "test_syntax_fix.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "test_syntax_fix_part2.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 
+[debt.env-patch]
+"test_syntax_fix.py#monkeypatch.setenv os.environ.PATH" = 1
+
 [debt.first-party-patch]
 "test_multiple_tool_calls_ava_syntax_fix.py#monkeypatch.setattr ava_builtins.plugins.ava_syntax_fix.agent_runtime.apply_fix_pipeline" = 3
 "test_multiple_tool_calls_ava_syntax_fix.py#monkeypatch.setattr ava_builtins.plugins.ava_syntax_fix.agent_runtime.llm_repair_syntax" = 2
@@ -15,3 +18,7 @@
 "test_syntax_fix_part2.py#monkeypatch.setattr ava_builtins.plugins.ava_syntax_fix.agent_runtime.emit_syntax_fix_event" = 3
 "test_syntax_fix_part2.py#monkeypatch.setattr ava_builtins.plugins.ava_syntax_fix.agent_runtime.logger.info" = 1
 "test_syntax_fix_part2.py#patch.object ava_builtins.plugins.ava_syntax_fix.agent_runtime.llm_repair_syntax" = 1
+
+[debt.stdlib-patch]
+"test_syntax_fix.py#monkeypatch.setattr tokenize.generate_tokens" = 1
+"test_syntax_fix.py#patch subprocess.run" = 20

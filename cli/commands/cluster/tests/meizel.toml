@@ -6,6 +6,12 @@ exports = ["health_probe_inputs.py", "test_cluster_health.py"]
 "test_cluster_service_probes.py" = ["health_probe_inputs.py"]
 "test_health_probe_maintenance.py" = ["health_probe_inputs.py"]
 
+[debt.env-patch]
+"health_probe_inputs.py#patch.dict os.environ" = 1
+"test_cluster_lifecycle.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_cluster_service_probes.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_cluster_service_probes.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+
 [debt.first-party-patch]
 "health_probe_inputs.py#monkeypatch.setattr cli.commands.cluster.health.agent_population" = 1
 "health_probe_inputs.py#monkeypatch.setattr cli.commands.cluster.health.disk_usage_failure" = 1
@@ -86,3 +92,20 @@ exports = ["health_probe_inputs.py", "test_cluster_health.py"]
 
 [debt.private-name]
 "test_cluster_health_window.py -> test_cluster_health.py#_home" = 1
+
+[debt.stdlib-patch]
+"test_cluster_health.py#monkeypatch.setattr subprocess.run" = 1
+"test_cluster_health_window.py#monkeypatch.setattr subprocess.run" = 1
+"test_cluster_lifecycle.py#monkeypatch.setattr builtins.input" = 2
+"test_cluster_lifecycle.py#monkeypatch.setattr sys.stderr" = 1
+"test_cluster_lifecycle.py#monkeypatch.setattr sys.stdin" = 1
+"test_cluster_lifecycle.py#monkeypatch.setattr sys.stdout" = 1
+"test_health_probe_maintenance.py#monkeypatch.setattr subprocess.run" = 1
+
+[debt.third-party-patch]
+"test_commands_cluster_status.py#monkeypatch.setattr httpx.get" = 6
+"test_provider_guard.py#monkeypatch.setattr httpx.get" = 1
+
+[debt.unresolved-patch]
+"test_cluster_lifecycle.py#monkeypatch.setattr module" = 1
+"test_cluster_lifecycle.py#monkeypatch.setattr target" = 2
