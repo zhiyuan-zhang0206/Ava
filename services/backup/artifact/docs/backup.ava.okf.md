@@ -42,6 +42,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 ## Entry Points
 - `services/backup/scheduler/daemon.py` — scheduled due-check, retry, and health state
 - `services/backup/dump.py` — `run_backup()` dumps, publishes and prunes in-process; `run_backup(staging=...)` writes the scheduler worker's artifact into its private controls. `python -m services.backup.dump --publish-offsite ARTIFACT [--offsite-root PREFIX]` publishes one existing artifact and, like the scheduled leg, prints its result on stderr
+- `services/backup/restore_drill.py` (`python -m services.backup.restore_drill [ARTIFACT]`) — decrypts a managed database backup, restores it into throwaway Postgres, and verifies schema, table counts, and a readable checkpoint conversation without touching the live database; scratch files and the throwaway cluster are removed afterwards
 - `services/backup/scheduler/worker.py` — the dump and logical restore-drill operation kinds, their sanitizers, and `commit_scheduled_backup()`
 - `services/backup/artifact/intermediates.py` — `sweep_closed_partials()`, the closed-intermediate sweep every backup run applies to the backup directory
 - `services/backup/artifact/names.py` — the managed-dump name grammar and the off-site namespace root (`ava-logical`)

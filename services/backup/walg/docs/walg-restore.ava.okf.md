@@ -54,7 +54,7 @@ one code path with two callers.
 - [[walg.ava.okf.md|WAL-G]] — the runner, `postgres_command` (the shared archive/restore command builder), the probe
 - [[walg-tick.ava.okf.md|WAL-G daily tick]] — runs the weekly drill and owns the state file and lock
 - `base/cluster/dataplane/pg_foreground.py`, `pg_throwaway_base.py` — native scratch-postmaster shutdown and base selection
-- `scripts/data_plane_ops/restore_drill.py` — `verify_restored_database`, shared with the logical drill
+- `services/backup/restore_drill.py` — `verify_restored_database`, shared with the logical drill
 
 ## Entry Points
 - `services/backup/walg/restore.py` — `restored_instance()`

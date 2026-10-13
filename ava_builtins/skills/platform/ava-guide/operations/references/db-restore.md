@@ -26,8 +26,8 @@ Never restore an artifact into the live database.
 From the checkout that owns the backup cluster, run either command:
 
 ```bash
-.venv/bin/python scripts/data_plane_ops/restore_drill.py
-.venv/bin/python scripts/data_plane_ops/restore_drill.py /absolute/path/to/<db>-<utc>.dump.enc
+.venv/bin/python -m services.backup.restore_drill
+.venv/bin/python -m services.backup.restore_drill /absolute/path/to/<db>-<utc>.dump.enc
 ```
 
 The first command selects the newest managed local artifact. The script creates

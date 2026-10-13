@@ -224,7 +224,7 @@ def _execute(
         )
         return {"artifact": artifact.name, "sha256": _sha256(artifact)}
     if request == {"kind": "restore", "now": None}:
-        from scripts.data_plane_ops.restore_drill import run_drill
+        from services.backup.restore_drill import run_drill
 
         scratch = work / "scratch"
         scratch.mkdir(mode=0o700)

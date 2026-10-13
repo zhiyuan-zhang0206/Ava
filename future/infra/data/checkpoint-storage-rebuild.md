@@ -363,7 +363,7 @@ shapes throughout):
    `get_tuple`/`aget_tuple` (folded values injected); `base/agents/history/checkpoint.py` readers
    (messages / count with reconstruct fallback / segment / full / by-trace);
    `ava/external/state.py:load_snapshot`; fork chain copy (`copy_checkpoint_chain` (`base.agents.history.checkpoint_copy`), writes
-   chain included); `agent/startup/__init__.py` inbound reconciliation; `scripts/data_plane_ops/restore_drill.py`;
+   chain included); `agent/startup/__init__.py` inbound reconciliation; `services/backup/restore_drill.py`;
    the self-evolution recorder.
 2. **Wrapper retirement (PR #2322).** Delta threads bypass the N-step
    throttle; vanilla threads keep it bit-for-bit.
