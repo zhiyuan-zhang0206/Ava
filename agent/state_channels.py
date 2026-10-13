@@ -83,21 +83,28 @@ class AttachState(BaseModel):
 class MemoryState(BaseModel):
     """Passive-recall bookkeeping, nested under `BaseAgentState.memory`.
 
-    `injected_paths` are memory-pool note paths already surfaced by passive
-    recall this session, union-accumulated across turns (see
-    `memory_state_merge`) so the same note is not re-injected for the agent's
-    life. Gated by `passive_memory_recall_enabled`; stays
-    empty when recall is off.
+    `injected_paths` are the memory-pool note paths passive recall surfaced in the
+    current context window, union-accumulated across turns (see
+    `memory_state_merge`) so the same note is not re-injected while it is still in
+    front of the agent. `window` is the `compact.version` the record belongs to: a
+    compaction summarizes the injected notes away, and the recall hook, seeing the
+    version past `window`, replaces the record with an empty one for the new window.
+    The record is the request's `exclude` list, so it must stay bounded by one window.
+    Gated by `passive_memory_recall_enabled`; stays empty when recall is off.
     """
 
     injected_paths: set[str] = Field(default_factory=set)
+    window: int = 0
 
 
 def memory_state_merge(old: MemoryState, new: MemoryState) -> MemoryState:
-    """Reducer for the `memory` channel: union the injected-path sets. The recall
-    hook writes only the fresh paths each turn; this accumulates them across turns
-    so a note recalled once stays deduped."""
-    return MemoryState(injected_paths=old.injected_paths | new.injected_paths)
+    """Reducer for the `memory` channel. Within one window it unions the injected-path
+    sets: the recall hook writes only the fresh paths each turn, and this accumulates
+    them so a note recalled once stays deduped. A write for a later window replaces the
+    record, which is how a compaction empties it."""
+    if new.window > old.window:
+        return new
+    return MemoryState(injected_paths=old.injected_paths | new.injected_paths, window=old.window)
 
 
 class CapabilitiesState(BaseModel):
