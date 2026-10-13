@@ -19,12 +19,11 @@ from base.packages.plugin_config_images import (
 )
 from base.packages.plugins import config_registration
 from base.packages.plugins.config_registration import (
-    InvalidConfigData,
-    SchemaDriftError,
     bind_plugin_config,
     disk_image_path,
     get_plugin_config,
 )
+from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 
 
 class BootConfig(BaseModel):

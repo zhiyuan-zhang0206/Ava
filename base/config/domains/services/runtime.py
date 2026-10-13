@@ -229,8 +229,11 @@ class _ServiceRuntimeSettings(EnvSettings):
         default=15.0,
         alias="AVA_MEMORY_SEARCH_DEADLINE_SECONDS",
         description=(
-            "Wall-clock budget for one POST /api/memory/search, covering the embed and "
-            "the memory-search service round-trip. Must stay below the SDK's gateway HTTP timeout, or "
+            "Wall-clock budget for one POST /api/memory/search, covering the embed, the "
+            "memory-search service round-trip and the ranking. A request may carry a "
+            "shorter budget of its own (the caller's deadline); it cannot lengthen this one. "
+            "The search also stops, and its ranking requests are cancelled, when the caller "
+            "disconnects. Must stay below the SDK's gateway HTTP timeout, or "
             "the caller reads out first and the server-side deadline never bites. Also "
             "the anchor of the SDK client's per-attempt timeout (deadline + 3s) and of "
             "memory_search_acquire_timeout_seconds, which must stay below this for the "
@@ -301,8 +304,10 @@ class _ServiceRuntimeSettings(EnvSettings):
         description=(
             "How many notes vector search hands to the decision model per memory search "
             "(each represented by its best-matching chunk), one decision request each. "
-            "More candidates raise the ranking's recall, its cost and its latency; a "
-            "search asking for more results than this ranks that many instead. The "
+            "More candidates raise the ranking's recall, its cost and its latency. This is "
+            "the most decision requests one search issues, whatever result count it asks "
+            "for (a search asking for more results than this returns at most this many) "
+            "and however many notes it excludes. The "
             "default of 30 matched 50 on passive-recall precision and nearly on search "
             "ranking quality in the 2026-10-11 benchmark, at about 60% of the cost and "
             "a shorter ranking wait."
@@ -325,8 +330,9 @@ class _ServiceRuntimeSettings(EnvSettings):
             "How many notes vector search hands to the decision model when the search checks "
             "a note an agent just wrote for duplicates (purpose 'dedup'), one decision request "
             "each. Only the closest few notes can be duplicates of it, so this is much smaller "
-            "than memory_rerank_candidates, which still applies to recall and search; a search "
-            "asking for more results than this ranks that many instead."
+            "than memory_rerank_candidates, which still applies to recall and search. As for "
+            "those, it is the most decision requests such a check issues, whatever result "
+            "count it asks for."
         ),
         json_schema_extra={
             "restart_required": "gateway",

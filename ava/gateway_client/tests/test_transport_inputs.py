@@ -57,7 +57,7 @@ def test_contexts_keep_live_deadlines_and_rebuild_inputs_without_an_sdk_installa
         with first.clients.using_gateway(client):
             assert memory_search("query", 3, purpose="search", timeout=4.0, context=first) == []
         assert first.clients.get(GatewayTransportInputs) is not previous
-    assert seen == [11.0, 24.0, 15.0, 24.0, 4.0]
+    assert seen == [11.0, 24.0, 15.0, 24.0, 7.0]
     assert reads == ["first", "second", "first", "second"]
     assert builds == ["first", "second", "first"]
     second.clients.close()

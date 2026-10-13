@@ -10,12 +10,13 @@ from base import paths
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import config_face
 from base.packages.plugins.config_registration import (
-    InvalidConfigOverlay,
     overlay_config_classes,
+    plugin_bootstrap_config,
     resolve_overlay_targets,
     validate_config_overlay,
 )
 from base.packages.plugins.enable_config import write_local
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
 _FACE = (
     "from pydantic import BaseModel, Field\n"
@@ -152,13 +153,13 @@ def test_bootstrap_packet_reads_fresh_authority_and_only_declared_cluster_fields
 
     _plugin("probe", _cluster_face())
     image = disk_image_path("probe")
-    assert json.loads(config_face.plugin_bootstrap_config()) == {"probe": {"marker": ".git"}}
+    assert json.loads(plugin_bootstrap_config()) == {"probe": {"marker": ".git"}}
     assert not image.exists()
     image.parent.mkdir(parents=True)
     image.write_text('{"marker":"first","fixed":2}')
-    assert json.loads(config_face.plugin_bootstrap_config()) == {"probe": {"marker": "first"}}
+    assert json.loads(plugin_bootstrap_config()) == {"probe": {"marker": "first"}}
     image.write_text('{"marker":"second","fixed":3}')
-    assert json.loads(config_face.plugin_bootstrap_config()) == {"probe": {"marker": "second"}}
+    assert json.loads(plugin_bootstrap_config()) == {"probe": {"marker": "second"}}
 
 
 def test_bootstrap_packet_rejects_sensitive_cluster_declarations(
@@ -166,22 +167,19 @@ def test_bootstrap_packet_rejects_sensitive_cluster_declarations(
 ) -> None:
     _plugin("probe", _cluster_face(sensitive=True))
     with pytest.raises(ValueError, match=r"probe\.marker may not carry secrets"):
-        config_face.plugin_bootstrap_config()
+        plugin_bootstrap_config()
 
 
 @pytest.mark.parametrize("content", ['{"marker":"only"}', '{"marker":1,"fixed":2}', "bad json"])
 def test_bootstrap_packet_preserves_authority_schema_admission(
     bootstrap_authority_home: None, content: str
 ) -> None:
-    from base.packages.plugins.config_registration import (
-        InvalidConfigData,
-        SchemaDriftError,
-        disk_image_path,
-    )
+    from base.packages.plugins.config_registration import disk_image_path
+    from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 
     _plugin("probe", _cluster_face())
     image = disk_image_path("probe")
     image.parent.mkdir(parents=True)
     image.write_text(content)
     with pytest.raises((InvalidConfigData, SchemaDriftError)):
-        config_face.plugin_bootstrap_config()
+        plugin_bootstrap_config()

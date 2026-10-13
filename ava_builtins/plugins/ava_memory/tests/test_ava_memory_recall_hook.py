@@ -177,7 +177,7 @@ async def test_gateway_error_leaves_the_turn_running(
 
     request = httpx.Request("POST", "http://gateway.test/api/memory/search")
 
-    def _boom(_query: str, _k: int, *, purpose: str, context: AvaContext):
+    def _boom(_query: str, _k: int, *, context: AvaContext, **_search: Any):
         raise httpx.HTTPStatusError(
             "Server error '500'", request=request, response=httpx.Response(500, request=request)
         )

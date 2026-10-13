@@ -11,11 +11,15 @@ from unittest.mock import Mock
 
 import pytest
 
+import base.log as base_log
+from base import telemetry
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
+from base.host import proc
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.ownership import OwnedProcess
+from base.telemetry import process_logging
 from base.telemetry.delivery.pipeline import EventPipeline
 from services.supervision.ava_root.failure_state import UnitFailureFacts
 from services.supervision.ava_root.health import HealthMonitor, ProbeRunner
@@ -54,9 +58,9 @@ def _no_op(**_kwargs: object) -> None:
 @pytest.fixture
 def events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
-    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", _no_op)
-    monkeypatch.setattr("base.telemetry.sync", _no_op)
-    monkeypatch.setattr("base.log.logger", _EventLog(records))
+    monkeypatch.setattr(process_logging, "init_gateway_process", _no_op)
+    monkeypatch.setattr(telemetry, "sync", _no_op)
+    monkeypatch.setattr(base_log, "logger", _EventLog(records))
     return records
 
 
@@ -302,7 +306,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
         assert producer() is clients.event_pipeline()
         seen.append(image)
 
-    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", initialize)
+    monkeypatch.setattr(process_logging, "init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
@@ -336,7 +340,7 @@ async def test_logging_startup_error_stops_its_constructed_writer(
         clients.event_pipeline()
         raise error
 
-    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", initialize)
+    monkeypatch.setattr(process_logging, "init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
@@ -445,7 +449,7 @@ def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(
     def missing(*_args: object, **_kwargs: object) -> NoReturn:
         raise FileNotFoundError("brew")
 
-    monkeypatch.setattr("base.host.proc.run_bounded", missing)
+    monkeypatch.setattr(proc, "run_bounded", missing)
     with pytest.raises(FileNotFoundError):
         probes.brew_pins()  # ProbeRunner maps inspection failure to UNAVAILABLE.
 

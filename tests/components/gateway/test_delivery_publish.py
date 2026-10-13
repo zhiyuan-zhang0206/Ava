@@ -14,6 +14,7 @@ from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+import ops.agents.delivery as agents_delivery
 from base.api_contracts.agent_contract import AgentStatus
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -107,7 +108,7 @@ async def test_unknown_badge_error_exposes_committed_delivery(
     def _boom_badge(_bus: object, _agent_id: int) -> None:
         raise RuntimeError("lifecycle hint failed")
 
-    monkeypatch.setattr("ops.agents.delivery.publish_agent_updated_sync", _boom_badge)
+    monkeypatch.setattr(agents_delivery, "publish_agent_updated_sync", _boom_badge)
     with _sync_pool() as pool, pytest.raises(RuntimeError, match="lifecycle hint failed"):
         await deliver_chat_inbound(
             pool,
@@ -455,7 +456,7 @@ async def test_badge_publish_happens_after_commit(
         finally:
             probe.close()
 
-    monkeypatch.setattr("ops.agents.delivery.publish_agent_updated_sync", _spy_publish)
+    monkeypatch.setattr(agents_delivery, "publish_agent_updated_sync", _spy_publish)
 
     def _prepare(conn: psycopg.Connection) -> None:
         # A write inside the delivery txn, no inbound content (so the txn commits

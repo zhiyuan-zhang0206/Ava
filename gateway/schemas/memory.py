@@ -3,13 +3,25 @@
 from typing import Annotated, Literal
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
     StringConstraints,
 )
 
-from base.api_contracts.memory_search import MemorySearchPurpose
+from base.api_contracts.memory_search import (
+    MEMORY_SEARCH_MAX_EXCLUDE,
+    MEMORY_SEARCH_MAX_PATH_CHARS,
+    MemorySearchPurpose,
+    validate_pool_path,
+)
+
+ExcludedPath = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=MEMORY_SEARCH_MAX_PATH_CHARS),
+    AfterValidator(validate_pool_path),
+]
 
 
 class MemorySearchRequest(BaseModel):
@@ -18,13 +30,40 @@ class MemorySearchRequest(BaseModel):
     query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Field(
         ..., description="natural-language query"
     )
-    k: int = Field(default=5, ge=1, le=100, description="result count")
+    k: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description=(
+            "most results wanted; never more than the candidates the purpose ranks "
+            "(`memory_rerank_candidates`, `memory_dedup_candidates` for 'dedup')"
+        ),
+    )
     purpose: MemorySearchPurpose = Field(
         ...,
         description=(
             "why the query was issued: 'recall' (passive recall; the query is the recent "
             "conversation), 'search' (an agent's own search) or 'dedup' (the duplicate check on "
             "a note an agent just wrote; the query is that note); selects the ranking question"
+        ),
+    )
+    exclude: list[ExcludedPath] = Field(
+        default_factory=list,
+        max_length=MEMORY_SEARCH_MAX_EXCLUDE,
+        description=(
+            "memory-pool-relative note paths to leave out: they are dropped from the vector "
+            "candidates before ranking, so they neither cost a ranking request nor take a "
+            "candidate slot"
+        ),
+    )
+    deadline_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        description=(
+            "how long the caller waits, in seconds: the search stops, and the ranking requests "
+            "still running are cancelled, when this passes. Can only shorten the gateway's own "
+            "search deadline. Omitted: the gateway's deadline applies"
         ),
     )
 

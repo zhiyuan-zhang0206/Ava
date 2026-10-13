@@ -1,7 +1,7 @@
 """`ava plugins` subcommands.
 
 - `update`              — auto-merge plugin config disk image schema diff
-                          (logic in `base.packages.plugins.enable_config.update_all_disk_images`).
+                          (logic in `base.packages.plugin_config_admin.update_all_disk_images`).
 - `install <url>`       — install an external package from a git source and
                           record it in the install registry (`base.packages.extensions.install_registry`).
                           A bare **skill** (SKILL.md at the package root) lands in
@@ -45,10 +45,10 @@ from ._pkg_source import cleanup_temp, clone_git
 def cmd_plugins_update() -> int:
     """`ava plugins update` — scan all plugins, auto-merge disk image schema diff.
 
-    Actual scan + merge logic lives in `base.packages.plugins.enable_config.update_all_disk_images`;
+    Actual scan + merge logic lives in `base.packages.plugin_config_admin.update_all_disk_images`;
     this function only formats the structured result for printing.
     """
-    from base.packages.plugins.enable_config import update_all_disk_images
+    from base.packages.plugin_config_admin import update_all_disk_images
 
     result = update_all_disk_images()
     if not result.entries:

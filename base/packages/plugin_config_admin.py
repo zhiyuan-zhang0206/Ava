@@ -7,9 +7,10 @@ schema, while the image remains the sole persisted authority.
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from base.config.admin.metadata import ConfigFieldMeta, env_override_values, get_config_metadata
 from base.config.service_read import ConfigAuthority
@@ -21,17 +22,17 @@ from base.packages.plugin_config_images import (
 )
 from base.packages.plugins.config_face import declared_config_class
 from base.packages.plugins.config_registration import (
-    InvalidConfigOverlay,
     config_from_image,
     disk_image_path,
+    merge_disk_image_schema,
     read_config_image,
 )
+from base.packages.plugins.enable_config import discover_plugins
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
 
 def config_owners() -> dict[str, PluginConfigOwner]:
     """Discover declared plugin schemas independently of agent enable state."""
-    from base.packages.plugins.enable_config import discover_plugins
-
     owners: dict[str, PluginConfigOwner] = {}
     for name, directory in discover_plugins().items():
         cls = declared_config_class(name, directory)
@@ -173,4 +174,61 @@ def panel_overrides(*, authority: ConfigAuthority, local: bool = False) -> dict[
         local=local,
         plugin_metadata=plugin_metadata(),
         plugin_values=plugin_overrides(),
+    )
+
+
+class PluginUpdateEntry(BaseModel):
+    """Result for a single plugin after disk-image schema merge."""
+
+    name: str
+    status: Literal["updated", "no_diff", "skipped", "error"]
+    added: list[str] = []
+    removed: list[str] = []
+    detail: str | None = None  # reason for skipped; exception message for error
+
+
+class PluginUpdateResult(BaseModel):
+    """Response body of `update_all_disk_images()`."""
+
+    entries: list[PluginUpdateEntry]
+
+
+def update_all_disk_images() -> PluginUpdateResult:
+    """Scan all plugins, auto-merge disk-image schema diff, return structured result.
+
+    Driven by the `ava plugins update` CLI (`cli/commands/extensions/plugins.py`); the
+    `ava start` converge step runs the same path. There is no gateway endpoint
+    for it. Each plugin goes through
+    `base.packages.plugins.config_registration.merge_disk_image_schema(name, Cls)`:
+      - disk image missing -> write default
+      - new field -> fill into disk image with cls default
+      - removed field -> dropped from the disk image (so the image converges to
+        the current schema and agent spawns stop hitting SchemaDriftError)
+      - type incompatible -> that entry status='error'; does not
+        interrupt other plugins
+
+    Takes each plugin's class from the `contribute()` of its `default_config.py` config face
+    (`base.packages.plugins.config_face`); `plugin.py` is never imported.
+    """
+    entries = [
+        _update_one_disk_image(name, plugin_dir)
+        for name, plugin_dir in sorted(discover_plugins().items())
+    ]
+    return PluginUpdateResult(entries=entries)
+
+
+def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
+    """Merge the config class one plugin declares into its disk image; never raises."""
+    try:
+        cls = declared_config_class(name, plugin_dir)
+        if cls is None:
+            return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
+        added, removed = merge_disk_image_schema(name, cls)
+    except Exception as e:
+        return PluginUpdateEntry(name=name, status="error", detail=str(e))
+
+    if not added and not removed:
+        return PluginUpdateEntry(name=name, status="no_diff")
+    return PluginUpdateEntry(
+        name=name, status="updated", added=sorted(added), removed=sorted(removed)
     )

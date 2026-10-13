@@ -273,7 +273,7 @@ def install(
         raise RuntimeError(
             "the SDK surface is already installed; uninstall() it before installing another registry"
         )
-    from base.packages.plugins import config_registration, flags
+    from base.packages.plugins import flags, plugin_errors
 
     from . import metering, sdk_disable
 
@@ -297,8 +297,8 @@ def install(
                 _plugins.RegisterNamespaceError,
                 wraps.WrapTargetError,
                 flags.PluginFlagError,
-                config_registration.SchemaDriftError,
-                config_registration.InvalidConfigData,
+                plugin_errors.SchemaDriftError,
+                plugin_errors.InvalidConfigData,
             ) as exc:
                 partial = build.undo[mark:]
                 del build.undo[mark:]

@@ -17,11 +17,13 @@ from fastapi.testclient import TestClient
 from base.cluster.authority.api import AcceptanceCache
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
+from base.lm import usage
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.routers.memory import MemorySearchInputs
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
+from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from tests.fixtures.unit.gateway_auth import gateway_credentials
 
@@ -108,9 +110,7 @@ def _patch_provider(monkeypatch: pytest.MonkeyPatch, provider: object) -> None:
         del name, catalog, timeout_reader, api_key_reader
         return provider
 
-    monkeypatch.setattr(
-        "services.derived.memory_indexer.embeddings.factory.get_provider", construct
-    )
+    monkeypatch.setattr(factory, "get_provider", construct)
 
 
 class _StubProvider:
@@ -404,8 +404,8 @@ class TestRerank:
                 "/api/memory/search", json={"query": "q", "k": 5, "purpose": "search"}
             ).json() == {"results": []}
             client.post("/api/memory/search", json={"query": "q", "k": 60, "purpose": "search"})
-        # at least k notes are always retrieved, even above the candidate count
-        assert [k for k, _timeout in asked] == [40, 60]
+        # a `k` above the candidate count does not widen the retrieval
+        assert [k for k, _timeout in asked] == [40, 40]
 
     def test_dedup_asks_for_its_own_candidate_count(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -418,8 +418,8 @@ class TestRerank:
         with TestClient(app) as client:
             for purpose, k in (("dedup", 5), ("dedup", 9), ("recall", 5), ("search", 5)):
                 client.post("/api/memory/search", json={"query": "q", "k": k, "purpose": purpose})
-        # dedup ranks its own count (never fewer than k); recall and search keep the shared one
-        assert [k for k, _timeout in asked] == [7, 9, 40, 40]
+        # dedup ranks its own count whatever `k` is; recall and search keep the shared one
+        assert [k for k, _timeout in asked] == [7, 7, 40, 40]
 
     def test_dedup_candidate_count_defaults_to_five(self) -> None:
         assert settings.services.memory_dedup_candidates == 5
@@ -600,13 +600,18 @@ async def test_query_usage_failure_propagates_without_network_replay(
         seen.append(catalog)
         raise failure
 
-    monkeypatch.setattr("base.lm.usage.log_usage_fields", fail_usage)
+    monkeypatch.setattr(usage, "log_usage_fields", fail_usage)
     state = SimpleNamespace(
         catalog=model_catalog,
         memory_search_gate=asyncio.Semaphore(1),
         memory_search_inputs=_memory_inputs(),
     )
-    request = Request({"type": "http", "app": SimpleNamespace(state=state)})
+
+    async def stays_connected() -> dict[str, str]:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    request = Request({"type": "http", "app": SimpleNamespace(state=state)}, stays_connected)
     with pytest.raises(error_type) as caught:
         await memory.post_memory_search(
             request, MemorySearchRequest(query="hello", k=1, purpose="search")

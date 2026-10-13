@@ -86,9 +86,9 @@ reporting through one reporter: a plugin's `provider.py`
 (`gateway/inspect/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/inspect/_plugin_widgets.py`). The config face `default_config.py` is read by two more processes through
 `base/packages/plugins/config_face.py` (never importing `plugin.py`): `ava plugins update`
-(`enable_config.update_all_disk_images`, a failing face is an `error`-status entry on its result, off the
+(`plugin_config_admin.update_all_disk_images`; a failing face is an `error` entry on its result, off the
 reporter) and the gateway/ops overlay validation (`config_registration.overlay_config_classes`, the enabled
-plugins' declared classes, reported fail-soft).
+plugins' declared classes, fail-soft).
 
 Child `ava.ensure_plugins_loaded` enters the same loader. Module-import containment remains separate;
 escaping errors abort boot unchanged and are re-raised on later access, without retry. Faces are marked

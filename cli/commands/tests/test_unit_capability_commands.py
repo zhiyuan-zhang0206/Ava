@@ -15,7 +15,7 @@ from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import _MACHINE, _issue, _open
 from base.config.service_read import ConfigAuthority, served_db_endpoint
 from base.packages.plugin_providers import build_model_catalog
-from base.packages.plugins.config_face import plugin_bootstrap_config
+from base.packages.plugins.config_registration import plugin_bootstrap_config
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.tests import test_single_box as _single_box

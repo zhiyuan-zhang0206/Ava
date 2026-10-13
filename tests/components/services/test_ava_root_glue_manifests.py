@@ -25,7 +25,7 @@ _REPO = Path("/checkout/repo")
 def _declared_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Give the real roster private configuration, without a native backend install."""
     from base import paths
-    from base.packages.plugins.enable_config import update_all_disk_images
+    from base.packages.plugin_config_admin import update_all_disk_images
     from base.telemetry.lgtm_local import BACKENDS, service_input_paths
     from services.supervision import roster
 

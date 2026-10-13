@@ -10,6 +10,7 @@ import psycopg
 import pytest
 
 import base.db
+from base.agents.inbox import insert
 from base.api_contracts.agent_contract import ForkCheckpointNotFound
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -553,7 +554,7 @@ class TestSpawnFork:
                 )
                 seen.append(cur.fetchall())  # pyright: ignore[reportUnknownMemberType]
 
-        monkeypatch.setattr("base.agents.inbox.insert.publish_inbound_wake", _spy_wake)
+        monkeypatch.setattr(insert, "publish_inbound_wake", _spy_wake)
         _spawn_agent(
             fork_from=source,
             fork_checkpoint="ck",

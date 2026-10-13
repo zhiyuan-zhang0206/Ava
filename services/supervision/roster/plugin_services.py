@@ -37,7 +37,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     follow, since they derive from `build_services()`.
 
     The ``services.py`` module is loaded by FILE PATH (like
-    `base.packages.plugins.enable_config.update_all_disk_images` loads `default_config.py`) so an
+    `base.packages.plugin_config_admin.update_all_disk_images` loads `default_config.py`) so an
     external plugin under ``~/.ava/plugins/`` — off the ``plugins.`` package path —
     can register too; it must import only light deps (ops / base), never its
     own `plugin.py`, so this load does not drag the agent kernel into the ops
