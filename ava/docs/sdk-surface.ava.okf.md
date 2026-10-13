@@ -50,7 +50,7 @@ and owns no second HTTP connection.
 ### Tools & External
 - [[ava/mcps/docs/mcps.ava.okf.md]] — MCP tool servers (determined by config; built-in chrome + servers installed via `ava mcp install` beyond core)
 - [[web.ava.okf.md]] — Web access: search + fetch (concurrent)
-- [[understand.ava.okf.md]] — Multimodal understanding primitive: understand(targets) → list[str], each target carrying prompt + text|paths
+- [[ava/understand/docs/understand.ava.okf.md]] — Multimodal understanding primitive: understand(targets) → list[str], each target carrying prompt + text|paths
 - [[ava/watcher/docs/watcher.ava.okf.md|watcher]] — Background listener: at / cron / launch (wake self = `ava.agents.send_message`)
 
 ### Context

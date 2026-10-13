@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import datetime
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -243,19 +242,15 @@ class TestWebEntries:
 
 
 class TestUnderstandEntries:
-    def test_effort_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava.understand import understand
+    def test_effort_unwraps(self) -> None:
+        from ava.understand import plans
 
-        async def fake_batch(
-            targets: list[Any], fn: Any, max_concurrent: int | None, *, after: Any = None
-        ) -> list[Any]:
-            return [fn(t) for t in targets]
-
-        understand_module = sys.modules["ava.understand"]  # the module, not the same-named function
-        monkeypatch.setattr(understand_module, "run_batch", fake_batch)
-        monkeypatch.setattr(understand_module, "_understand_one", lambda **kw: kw["effort"])  # pyright: ignore[reportUnknownArgumentType]
-        out = understand([{"prompt": "p", "text": "t"}], effort=("low",))  # pyright: ignore[reportArgumentType, reportCallIssue]
-        assert out == ["low"]
+        plan = plans.normalize(
+            [{"prompt": "p", "text": "t"}],
+            ("low",),  # pyright: ignore[reportArgumentType]
+            None,
+        )
+        assert plan.effort == "low"
 
     def test_effort_multi_element_type_errors(self) -> None:
         from ava.understand import understand
