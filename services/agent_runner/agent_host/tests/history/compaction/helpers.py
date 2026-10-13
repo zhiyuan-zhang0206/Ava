@@ -17,7 +17,7 @@ from services.agent_runner.agent_host.invocation.compact.source import produce_s
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
     _prepare_graph,
 )
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
 async def source(

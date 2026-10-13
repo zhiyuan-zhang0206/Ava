@@ -6,8 +6,8 @@ import json
 import psycopg
 import pytest
 
-from services.entrypoints.im_bridge.adapters.tests.weixin_native import NativeWeixin, message
 from services.entrypoints.im_bridge.ingress.types import IngressIdentityConflictError, IngressStatus
+from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin, message
 
 
 async def test_actual_core_chat_and_unknown_slash_share_atomic_native_owner(

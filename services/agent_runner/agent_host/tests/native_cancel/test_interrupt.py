@@ -32,7 +32,7 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
     _prepare_graph,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 from tests.fixtures.pin_agent import exec_context
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 

@@ -27,7 +27,7 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
     _prepare_graph,
     cold_reader,
 )
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
 async def test_checkpoint_flush_ack_and_retained_terminal_receipt(

@@ -1,6 +1,6 @@
 """A plugin service's own gate flows through the annotated roster view.
 
-Split out of `services/supervision/roster/tests/test_plugin_services.py`: it writes the fleet plugin's real `FleetConfig` disk image, so it lives with the fleet plugin."""
+Split out of `services/supervision/ava_root_glue/tests/test_plugin_services.py`: it writes the fleet plugin's real `FleetConfig` disk image, so it lives with the fleet plugin."""
 
 from __future__ import annotations
 

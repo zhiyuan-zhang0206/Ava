@@ -6,7 +6,7 @@ import secrets
 import pytest
 
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
-from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
+from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeCore,
     FakeWsClient,
     PatchingAdapter,

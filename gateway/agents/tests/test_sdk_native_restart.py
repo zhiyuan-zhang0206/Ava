@@ -22,7 +22,7 @@ from gateway.agents import lifecycle
 from gateway.app import app
 from gateway.tests.test_idempotency import client as client
 from ops.lifecycle.native_restart import restart_native_work_op
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
 @pytest.mark.usefixtures("retry_waits")

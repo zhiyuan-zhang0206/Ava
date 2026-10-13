@@ -420,7 +420,7 @@ def test_im_bridge_gated_when_disabled(
         # the gateway pop must not run against a service that is not gateway-only.
         (frozenset({"gateway", "agent-runner"}), None),
         # No capabilities is no longer a spec that can exist: construction refuses it
-        # (`services/supervision/roster/tests/test_healthz_daemon.py`).
+        # (`services/supervision/ava_root_glue/tests/test_healthz_daemon.py`).
     ],
 )
 def test_profile_marker_derives_from_capabilities(
