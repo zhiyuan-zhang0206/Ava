@@ -70,7 +70,7 @@ def fake_flag(
     one paused signal", not which storage (the old-signal sweep, PR5, retired the
     real flag file).
     The gateway middleware reads the local journal through the async
-    `gateway.app._cluster_is_paused`, so its bound name uses an async stand-in;
+    `gateway.app.cluster_is_paused`, so its bound name uses an async stand-in;
     the status/cluster routers still read the sync `is_paused`."""
     flag = tmp_path / "cluster_paused"
 
@@ -83,7 +83,7 @@ def fake_flag(
         assert machine_name == machine_identity.name
         return flag.exists()
 
-    monkeypatch.setattr(gateway_app, "_cluster_is_paused", _paused)
+    monkeypatch.setattr(gateway_app, "cluster_is_paused", _paused)
 
     def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
         assert machine_name == machine_identity.name

@@ -51,7 +51,7 @@ from gateway.inspect.schemas import MetricPoint, PluginMetricResult
 
 # The shipped-plugin metrics directory — every ENABLED plugin dir with a metrics.py is part of the
 # in-process registry (the generator's import set, task #180 PR D).
-_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
+PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
 
 # The inspector's fixed recent window: the templates' `$__timeFilter(ts)` /
 # `$__timeGroup(ts, $__interval)` render to this window (24h in 1h buckets =
@@ -88,13 +88,13 @@ _MACRO_INTERVAL_LOKI = "1h"
 _MACRO_RANGE_LOKI = f"{_INSPECTOR_WINDOW_HOURS}h"
 
 
-def _plugin_metric_modules() -> list[Path]:
+def plugin_metric_modules() -> list[Path]:
     """``metrics.py`` of every ENABLED shipped plugin, sorted — the import set of one registry
     build (the same enable rule the widget loader applies)."""
-    return enabled_face_files(_PLUGINS_DIR, "metrics.py")
+    return enabled_face_files(PLUGINS_DIR, "metrics.py")
 
 
-def _load_plugin_metrics() -> list[MetricSpec]:
+def load_plugin_metrics() -> list[MetricSpec]:
     """The in-process metric registry: every ENABLED shipped plugin's ``metrics.py``
     declaration (``contribute()``) admitted into a data registry, plus the core
     definition modules — plugin metrics first, then core, the order the old
@@ -119,13 +119,13 @@ def _load_plugin_metrics() -> list[MetricSpec]:
             ),
             (path.parent, data_registry.METRICS_KEY),
         )
-        for path in _plugin_metric_modules()
+        for path in plugin_metric_modules()
     ]
     registry, _refused = data_registry.build_data_registry(declared)
     return [*registry.metrics(), *catalog.collect_core_metrics()]
 
 
-def _render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:
+def render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:
     """Render one template for the inspector surface and re-validate the result.
 
     Rendering substitutes {event_name}/{category} as literals (double-quoted
@@ -166,7 +166,7 @@ def _render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:
     return query
 
 
-def _translate_macros(sql: str, *, logql: bool = False) -> str:
+def translate_macros(sql: str, *, logql: bool = False) -> str:
     """Substitute the Grafana time macros with the inspector's fixed window.
 
     The registry templates are written for Grafana, which injects
@@ -225,7 +225,7 @@ def _execute_metric(
     try:
         with conn.transaction():
             # The query is the rendered + re-validated template (see
-            # _render_metric_query) — a str that psycopg's typing only accepts
+            # render_metric_query) — a str that psycopg's typing only accepts
             # as LiteralString; the cast documents that the injection safety
             # was established by validate_metric_sql, not by psycopg.
             cur.execute(cast(LiteralString, query))
@@ -292,7 +292,7 @@ def metrics_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[PluginMe
     on the pooled connection object after return, so a later borrower could
     inherit a read-only session and its writes would fail. The SET TRANSACTION
     form leaves nothing behind when the transaction rolls back."""
-    specs = [s for s in _load_plugin_metrics() if "inspector" in s.output]
+    specs = [s for s in load_plugin_metrics() if "inspector" in s.output]
     results: list[PluginMetricResult] = []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SET TRANSACTION READ ONLY")
@@ -300,8 +300,8 @@ def metrics_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[PluginMe
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
         for spec in specs:
-            query = _translate_macros(
-                _render_metric_query(spec, agent_id), logql=spec.query_type == "logql"
+            query = translate_macros(
+                render_metric_query(spec, agent_id), logql=spec.query_type == "logql"
             )
             results.append(_execute_metric(conn, cur, spec, query))
     return results

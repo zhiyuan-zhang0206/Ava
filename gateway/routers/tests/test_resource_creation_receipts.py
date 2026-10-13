@@ -96,10 +96,10 @@ def test_concurrent_creation_commits_one_resource_and_receipt(
 
         def create(_worker: int) -> tuple[Any, ...]:
             if kind == "preset":
-                return presets._create_blocking(
+                return presets.create_blocking(
                     pool, presets.PresetCreate(name="concurrent", label="worker"), "create"
                 )
-            return schedules._create_blocking(
+            return schedules.create_blocking(
                 pool, schedules.ScheduleCreate(name="concurrent", script="pass"), "create"
             )
 
@@ -144,7 +144,7 @@ def test_receipt_failure_rolls_back_created_resource_and_version(
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(RuntimeError, match="receipt failed"),
     ):
-        schedules._create_blocking(
+        schedules.create_blocking(
             pool, schedules.ScheduleCreate(name="rollback", script="pass"), "rollback"
         )
     assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == (0,)
@@ -172,10 +172,10 @@ def test_creation_identity_is_bound_to_verified_principal(
         return creation_receipts.operation_key(request)
 
     with base.db.pool(gate=database_gate) as pool:
-        first = presets._create_blocking(
+        first = presets.create_blocking(
             pool, presets.PresetCreate(name="one", label="worker"), scoped_key("one")
         )
-        second = presets._create_blocking(
+        second = presets.create_blocking(
             pool, presets.PresetCreate(name="two", label="worker"), scoped_key("two")
         )
     assert first[0] != second[0]

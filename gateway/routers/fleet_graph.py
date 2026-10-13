@@ -49,7 +49,7 @@ router = APIRouter()
 _CACHE_TTL_SECONDS = 60
 
 
-def _cache_key(
+def cache_key(
     *, include_terminated: bool, hours: StatsWindowHours | None, decay_lambda: float
 ) -> str:
     return (
@@ -261,7 +261,7 @@ def get_fleet_graph(
     not_terminated: LiteralString = "" if include_terminated else "WHERE a.status != 'terminated'"
     win_start = now - window_delta(hours) if hours is not None else None
 
-    key = _cache_key(include_terminated=include_terminated, hours=hours, decay_lambda=decay_lambda)
+    key = cache_key(include_terminated=include_terminated, hours=hours, decay_lambda=decay_lambda)
     bus: EventBus = request.app.state.bus
     cached = _read_cached_graph(bus, key)
     if cached is not None:

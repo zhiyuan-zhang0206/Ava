@@ -36,7 +36,7 @@ def test_concurrent_restart_uses_one_desired_revision(
     ):
 
         def restart(_worker: int) -> tuple[tuple[Any, ...], bool]:
-            return router._control_blocking(pool, sid, "restart", "one-restart")
+            return router.control_blocking(pool, sid, "restart", "one-restart")
 
         results = list(workers.map(restart, range(4)))
     assert sum(changed for _, changed in results) == 1

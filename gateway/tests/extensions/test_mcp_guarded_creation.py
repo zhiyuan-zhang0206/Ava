@@ -12,10 +12,10 @@ from psycopg import sql
 from gateway.agents import creation
 from gateway.app import app
 from gateway.tests.extensions.test_mcp_endpoint import (
-    _ACCEPT,
-    _create_token,
-    _tool_call,
-    _tool_result,
+    ACCEPT,
+    create_token,
+    tool_call,
+    tool_result,
 )
 from gateway.tests.extensions.test_mcp_endpoint import (
     _enable_endpoint as _enable_endpoint,
@@ -37,13 +37,13 @@ def test_response_loss_replays_one_original_birth(
 
     monkeypatch.setattr(creation, "create_and_launch_agent", lose_response)
     with TestClient(app) as client:
-        token = _create_token(client)
-        lost = _tool_call(client, token, TOOL, ARGS)
+        token = create_token(client)
+        lost = tool_call(client, token, TOOL, ARGS)
         assert lost["result"].get("isError") is True
         original = db_conn.execute("SELECT id FROM agents").fetchone()
         assert original is not None
         monkeypatch.setattr(creation, "create_and_launch_agent", create)
-        replay = _tool_result(_tool_call(client, token, TOOL, ARGS))
+        replay = tool_result(tool_call(client, token, TOOL, ARGS))
     assert replay["id"] == original[0]
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
@@ -61,8 +61,8 @@ def test_historical_replay_never_wakes_successor_work(
         "placed": "UPDATE agents_meta SET machine='later-placement' WHERE id=%s",
     }
     with TestClient(app) as client:
-        token = _create_token(client)
-        original = _tool_result(_tool_call(client, token, TOOL, ARGS))
+        token = create_token(client)
+        original = tool_result(tool_call(client, token, TOOL, ARGS))
         agent_id = original["id"]
         if mutation == "rotated":
             db_conn.execute(
@@ -80,7 +80,7 @@ def test_historical_replay_never_wakes_successor_work(
 
         monkeypatch.setattr(creation, "spawn_prechecks_blocking", no_preflight)
         monkeypatch.setattr(creation, "forward_spawn_to_remote", no_launch)
-        replay = _tool_result(_tool_call(client, token, TOOL, ARGS))
+        replay = tool_result(tool_call(client, token, TOOL, ARGS))
     assert replay["id"] == agent_id
     assert replay["accepted"] is True
     assert replay["execution_observed"] is False
@@ -90,10 +90,10 @@ def test_historical_replay_never_wakes_successor_work(
 
 def test_concurrent_retries_accept_one_agent_and_prompt(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
+        token = create_token(client)
 
         def submit(index: int) -> int:
-            receipt = _tool_result(_tool_call(client, token, TOOL, ARGS, req_id=index + 10))
+            receipt = tool_result(tool_call(client, token, TOOL, ARGS, req_id=index + 10))
             return int(receipt["id"])
 
         with ThreadPoolExecutor(max_workers=3) as executor:
@@ -112,23 +112,23 @@ def test_missing_or_invalid_key_is_rejected_before_birth(
     db_conn: psycopg.Connection, args: dict[str, str]
 ) -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
-        response = _tool_call(client, token, TOOL, args)
+        token = create_token(client)
+        response = tool_call(client, token, TOOL, args)
     assert response["result"].get("isError") is True
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (0,)
 
 
 def test_keys_are_scoped_to_tool_and_verified_client(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
-        first = _create_token(client, name="first")
-        second = _create_token(client, name="second")
-        guarded = _tool_result(_tool_call(client, first, TOOL, ARGS))
-        replay = _tool_result(_tool_call(client, first, TOOL, ARGS))
+        first = create_token(client, name="first")
+        second = create_token(client, name="second")
+        guarded = tool_result(tool_call(client, first, TOOL, ARGS))
+        replay = tool_result(tool_call(client, first, TOOL, ARGS))
         assert replay["id"] == guarded["id"]
-        changed = _tool_call(client, first, TOOL, {**ARGS, "prompt": "different intent"})
+        changed = tool_call(client, first, TOOL, {**ARGS, "prompt": "different intent"})
         assert changed["result"].get("isError") is True
-        other = _tool_result(_tool_call(client, second, TOOL, ARGS))
-        retired = _tool_call(client, first, "spawn_agent", ARGS)
+        other = tool_result(tool_call(client, second, TOOL, ARGS))
+        retired = tool_call(client, first, "spawn_agent", ARGS)
         assert retired["result"].get("isError") is True
     assert len({guarded["id"], other["id"]}) == 2
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (2,)
@@ -137,8 +137,8 @@ def test_keys_are_scoped_to_tool_and_verified_client(db_conn: psycopg.Connection
 
 def test_read_scope_cannot_create_or_recover_a_birth(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
-        token = _create_token(client, scope="read")
-        response = _tool_call(client, token, TOOL, ARGS)
+        token = create_token(client, scope="read")
+        response = tool_call(client, token, TOOL, ARGS)
     assert response["result"].get("isError") is True
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (0,)
 
@@ -150,8 +150,8 @@ def test_identity_arguments_cannot_override_verified_client(
     db_conn: psycopg.Connection, field: str
 ) -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
-        response = _tool_call(client, token, TOOL, {**ARGS, field: "pretend-client"})
+        token = create_token(client)
+        response = tool_call(client, token, TOOL, {**ARGS, field: "pretend-client"})
     assert "error" in response
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (0,)
 
@@ -159,7 +159,7 @@ def test_identity_arguments_cannot_override_verified_client(
 def test_revoked_credential_cannot_recover_original_birth(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
         credential = create_mcp_client(client, "revoked", "write").json()
-        original = _tool_result(_tool_call(client, credential["token"], TOOL, ARGS))
+        original = tool_result(tool_call(client, credential["token"], TOOL, ARGS))
         assert client.post(f"/api/mcp/clients/{credential['id']}/revoke").status_code == 200
         response = client.post(
             "/mcp",
@@ -169,7 +169,7 @@ def test_revoked_credential_cannot_recover_original_birth(db_conn: psycopg.Conne
                 "method": "tools/call",
                 "params": {"name": TOOL, "arguments": ARGS},
             },
-            headers={"Accept": _ACCEPT, "Authorization": f"Bearer {credential['token']}"},
+            headers={"Accept": ACCEPT, "Authorization": f"Bearer {credential['token']}"},
         )
     assert response.status_code == 401
     assert db_conn.execute("SELECT id FROM agents").fetchall() == [(original["id"],)]

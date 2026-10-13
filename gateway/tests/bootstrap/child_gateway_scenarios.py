@@ -57,9 +57,9 @@ def _checkout_move(source: str, repo: str) -> None:
 
 
 def _server_shutdown() -> None:
-    from gateway.tests.bootstrap.test_server_shutdown import _run_child
+    from gateway.tests.bootstrap.test_server_shutdown import run_child
 
-    _run_child()
+    run_child()
 
 
 if __name__ == "__main__":

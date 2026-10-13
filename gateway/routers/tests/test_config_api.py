@@ -181,7 +181,7 @@ def test_get_self_browser_disabled_when_no_display(monkeypatch: pytest.MonkeyPat
 # ── machines-table seeding helper ──
 
 
-def _seed_machine(name: str) -> None:
+def seed_machine(name: str) -> None:
     """Insert a minimal agent-runner row so `_assert_machine_known` finds it.
 
     role defaults to 'agent-runner'; gateway_url is nullable. The per-test
@@ -205,7 +205,7 @@ def test_get_remote_machine_composes_host_from_dispatch(
     """GET ?machine=<remote>: host fields reflect the remote config_read result,
     cluster fields reflect local metadata, raw_overrides == the remote host
     overrides."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     # The GET composer iterates every host-scope meta and indexes the result, so
     # the canned host_fields must answer for all of them — fill the explicit ones
     # plus a neutral stub for the rest.
@@ -295,7 +295,7 @@ def test_get_unknown_machine_404() -> None:
 
 def test_get_offline_machine_503(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET ?machine=<known-but-offline>: ops server unreachable -> 503."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
 
@@ -307,7 +307,7 @@ def test_get_offline_machine_503(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_get_remote_failed_503(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET ?machine=<known>: the remote op fails (row marked failed) -> 503."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpFailed({"error": "boom"}))
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
 
