@@ -1,6 +1,6 @@
 """The schedule process composes SDK inputs at the execution boundaries."""
 
-from tests.fixtures.unit.homes import unit_home as unit_home
+from base.tests.fixtures.homes import unit_home as unit_home
 import sys
 import threading
 from collections.abc import Callable

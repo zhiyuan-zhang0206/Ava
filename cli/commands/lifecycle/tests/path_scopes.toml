@@ -11,8 +11,8 @@
     "test_root_driver.py",
     "test_start_data_plane.py",
 ]
-"tests.fixtures.unit.generation" = ["."]
-"tests.fixtures.unit.homes" = ["."]
+"base.tests.fixtures.generation" = ["."]
+"base.tests.fixtures.homes" = ["."]
 "base.deploy.lifecycle.tests.serving_root" = [
     "identity/test_commands_restart_stop.py",
 ]
