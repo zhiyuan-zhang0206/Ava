@@ -5,7 +5,7 @@ from uuid import UUID
 
 from ava.gateway_client import transport
 from base.api_contracts.idempotency import validate_idempotency_key
-from ops.rpc_schemas.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
+from base.api_contracts.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
 
 
 def get_launch_attempt(agent_id: int) -> UUID:

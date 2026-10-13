@@ -190,8 +190,8 @@ def test_native_repeat_rejects_superseded_target(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
+    from base.api_contracts.launch_retry import LaunchReconcileRequest
     from ops.lifecycle import launch_reconcile
-    from ops.rpc_schemas.launch_retry import LaunchReconcileRequest
 
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
@@ -250,8 +250,8 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
+    from base.api_contracts.launch_retry import LaunchReconcileRequest
     from ops.lifecycle import launch_reconcile
-    from ops.rpc_schemas.launch_retry import LaunchReconcileRequest
 
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
@@ -313,8 +313,8 @@ def test_reconcile_holds_row_fence_until_publication(
 ) -> None:
     from threading import Event
 
+    from base.api_contracts.launch_retry import LaunchReconcileRequest
     from ops.lifecycle import launch_reconcile
-    from ops.rpc_schemas.launch_retry import LaunchReconcileRequest
 
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
