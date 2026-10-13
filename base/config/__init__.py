@@ -405,4 +405,4 @@ def __getattr__(name: str) -> Any:
 # Prepare the boot-lite state (or go eager now with `AVA_CONFIG_BOOT=eager`).
 # A settings-lite process (`AVA_CONFIG_FETCH=skip`) degrades to the deferred
 # load: nothing happens until the first config read.
-_lite.boot()
+_lite.boot(globals(), apply_cluster_timezone)

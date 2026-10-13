@@ -92,11 +92,21 @@ def direct_db_url(
 
 
 def _gateway_url_host() -> str:
-    # Imported at call time so importing this module (every composition root does) does not
-    # pull the eager config chain; resolving a direct dial has loaded it by then anyway.
-    from base.config.domains.storage.data_plane import gateway_url_host
+    """The host this process dials as its gateway (`AVA_GATEWAY_URL`), lowercased and
+    unbracketed; "" when the gateway domain is not constructed in this process's profile (or
+    unset). It tells a split agent-runner's URL, which names the GATEWAY's pooler (a foreign
+    host whose direct-exemption warning is meaningful), apart from a remote/SaaS plane URL,
+    which is direct by definition and must dial silently (Task #1752).
 
-    return gateway_url_host()
+    Imported at call time so importing this module (every composition root does) does not
+    pull the eager config chain; resolving a direct dial has loaded it by then anyway."""
+    from base.config import settings
+
+    try:
+        url = settings.gateway.gateway_url
+    except AttributeError:
+        return ""
+    return (urlsplit(url).hostname or "").lower().removeprefix("[").removesuffix("]")
 
 
 def _from_record(url: str, port: int) -> str | None:
