@@ -1,39 +1,13 @@
-[uses]
-"test_rpc_result_domains.py" = ["test_agents_cmd.py"]
-
 [debt.env-patch]
-"test_external_caller_cli.py#monkeypatch.delenv os.environ.AVA_CALLER_IDENTITY" = 4
-"test_external_caller_cli.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
-"test_impersonation.py#monkeypatch.delenv os.environ.DSH_AVA_RELAY_STUB" = 1
-"test_impersonation.py#monkeypatch.setenv os.environ.AVA_IMPERSONATION_RELAY_STUB" = 2
-"test_impersonation.py#monkeypatch.setenv os.environ.DSH_AVA_RELAY_STUB" = 1
 "test_impersonation_agents.py#monkeypatch.delenv os.environ.AVA_IMPERSONATION_RELAY_TOKEN" = 1
 "test_impersonation_agents.py#monkeypatch.setenv os.environ.AVA_IMPERSONATION_RELAY_TOKEN" = 1
 
 [debt.first-party-patch]
-"test_agents_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
-"test_agents_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
-"test_agents_cmd.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_kill" = 1
-"test_agents_cmd.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_ls" = 1
-"test_agents_cmd.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_terminate" = 1
 "test_delivery.py#monkeypatch.setattr base.agents.impersonation.delivery.publish_agent_updated_sync" = 1
 "test_delivery.py#monkeypatch.setattr base.agents.impersonation.delivery.publish_impersonation_changed_sync" = 1
 "test_delivery.py#monkeypatch.setattr base.agents.impersonation.delivery.publish_inbound_wake" = 1
 "test_delivery.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 "test_delivery.py#monkeypatch.setattr cli.commands.agents.impersonation_relay._MIN_EMIT_INTERVAL_SECONDS" = 1
-"test_external_caller_cli.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
-"test_external_caller_cli.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
-"test_external_caller_cli.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.ack" = 1
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.get" = 1
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.history.public_session" = 1
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.host_transport.default_control_endpoint" = 2
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.release" = 1
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.require_active" = 1
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.sessions.private_id" = 4
-"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.sessions.request" = 7
-"test_impersonation.py#monkeypatch.setattr cli.commands.agents.control.send_agent_message" = 1
-"test_impersonation.py#monkeypatch.setattr cli.commands.agents.timeline.cmd_agents_timeline" = 1
 "test_impersonation_adapters.py#monkeypatch.setattr base.agents.impersonation.host_transport.default_control_endpoint" = 2
 "test_impersonation_adapters.py#monkeypatch.setattr base.host.proc.run_bounded" = 1
 "test_impersonation_adapters.py#monkeypatch.setattr cli.commands.agents.impersonation_adapters.live_submit" = 2
@@ -47,13 +21,6 @@
 "test_impersonation_bridge.py#monkeypatch.setattr cli.commands.agents.impersonation_relay._MIN_EMIT_INTERVAL_SECONDS" = 2
 "test_impersonation_bridge.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.asyncio.sleep" = 3
 "test_impersonation_bridge.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.loop_time" = 1
-"test_impersonation_bridge_parsers.py#monkeypatch.setattr base.agents.impersonation.relay_get" = 1
-"test_impersonation_bridge_parsers.py#monkeypatch.setattr base.agents.impersonation.relay_heartbeat" = 1
-"test_impersonation_bridge_parsers.py#monkeypatch.setattr base.agents.impersonation.relay_inbox" = 1
-"test_impersonation_bridge_parsers.py#monkeypatch.setattr base.events.live.redis_listener.RedisInboundListener" = 2
-"test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation.relay_token_from_env" = 2
-"test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation_adapters.live_submit" = 2
-"test_impersonation_bridge_parsers.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.reserve_delivery" = 2
 "test_impersonation_bridge_part2.py#monkeypatch.setattr cli.commands.agents.impersonation_relay._MIN_EMIT_INTERVAL_SECONDS" = 1
 "test_impersonation_bridge_part2.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.asyncio.sleep" = 1
 "test_impersonation_bridge_part2.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.loop_time" = 1
@@ -71,13 +38,7 @@
 "test_relay_heartbeat_ownership.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.write_heartbeat" = 1
 "test_relay_status.py#monkeypatch.setattr base.agents.impersonation.relay_get" = 2
 "test_relay_status.py#monkeypatch.setattr base.agents.impersonation.relay_inbox" = 2
-"test_rpc_result_domains.py#monkeypatch.setattr base.host.net.http_dial.get" = 1
-"test_rpc_result_domains.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
 "test_shell_kill_timing.py#monkeypatch.setattr base.host.net.http_dial.post" = 2
 
 [debt.stdlib-patch]
 "test_impersonation_agents.py#monkeypatch.setattr sys.stdin" = 1
-
-[debt.third-party-patch]
-"test_agents_cmd.py#monkeypatch.setattr httpx.get" = 6
-"test_agents_cmd.py#monkeypatch.setattr httpx.post" = 2

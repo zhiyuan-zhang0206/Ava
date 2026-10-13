@@ -32,14 +32,14 @@ from cli.commands.lifecycle.tests.identity.restart_inputs import (
     root_stop_boundary as root_stop_boundary,
 )
 from cli.database.runtime import CommandRuntime
-from cli.tests._commands_helpers import (
+from cli.database.tests.command_fakes import (
     _FakeResponse,
     _FakeResult,
     _git_aware,
     _patch_gateway_http,
 )
-from cli.tests._commands_helpers import hermetic_gateway_base as hermetic_gateway_base
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.desktop.browser import orphan
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline

@@ -2,8 +2,8 @@
 
 import pytest
 
+from agent.graph.exec.tests.cancel_fixture import fake_cancel_event as fake_cancel_event
 from agent.graph.exec.tests.output_inputs import CropConfig
-from agent.graph.llm.tests.cancel_fixture import fake_cancel_event as fake_cancel_event
 from base.clock import Clock, ClockConfig
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths.tests.homes import unit_home as unit_home

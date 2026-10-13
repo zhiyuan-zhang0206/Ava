@@ -26,7 +26,7 @@ from cli.commands.cluster.tests.health_probe_inputs import (
 from cli.commands.cluster.tests.test_cluster_health import (
     isolated_cluster_home as isolated_cluster_home,
 )
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 @pytest.mark.parametrize(

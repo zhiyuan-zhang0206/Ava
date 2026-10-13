@@ -29,9 +29,9 @@ from agent.graph.claim._dispatch import (
     STRIP_ON_FORK_TAGS,
 )
 from agent.graph.claim.node import claim_node
+from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.messages import NoteTag
 from agent.state import AgentState
-from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority

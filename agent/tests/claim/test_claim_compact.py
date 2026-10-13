@@ -12,8 +12,15 @@ from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.claim.tests.claim_support import (
+    await_inbound_visible,
+    insert_inbound_kind,
+    make_fake_llm,
+    make_runtime,
+    thread_config,
+)
+from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.graph.hooks.compact import compose_summary_message
-from agent.graph.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState, CompactState
 from agent.tests.claim.claim_status_support import (
     _set_agent_status,
@@ -22,13 +29,6 @@ from agent.tests.claim.claim_status_support import (
     pair_compact_cycles,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from agent.tests.claim.claim_support import (
-    _fake_llm,
-    await_inbound_visible,
-    insert_inbound_kind,
-    make_runtime,
-    thread_config,
-)
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -112,7 +112,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     ]
     state = AgentState(messages=initial_msgs)
 
-    fake_llm = _fake_llm("LLM should not be called")
+    fake_llm = make_fake_llm("LLM should not be called")
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
@@ -158,7 +158,7 @@ async def test_claim_compact_summary_bumps_compact_version(
         state,
         make_runtime(
             ops_pool=aops_pool,
-            llm=_fake_llm("LLM should not be called"),
+            llm=make_fake_llm("LLM should not be called"),
             database_gate=database_gate,
         ),
         thread_config(
@@ -196,7 +196,7 @@ async def test_claim_compact_request_calls_backend_llm(
     ]
     state = AgentState(messages=initial_msgs)
 
-    fake_llm = _fake_llm("LLM-generated summary")
+    fake_llm = make_fake_llm("LLM-generated summary")
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
@@ -243,7 +243,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
         state,
         make_runtime(
             ops_pool=aops_pool,
-            llm=_fake_llm("LLM-generated summary"),
+            llm=make_fake_llm("LLM-generated summary"),
             event_publisher=publisher,
             database_gate=database_gate,
         ),
@@ -337,7 +337,7 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
             *(HumanMessage(content=f"history-{i}") for i in range(8)),
         ]
     )
-    llm = _fake_llm("llm-generated summary")
+    llm = make_fake_llm("llm-generated summary")
     publisher = MagicMock()
 
     cmd = await claim_node(
@@ -390,7 +390,7 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
         state,
         make_runtime(
             ops_pool=aops_pool,
-            llm=_fake_llm("never applied"),
+            llm=make_fake_llm("never applied"),
             event_publisher=publisher,
             database_gate=database_gate,
         ),
@@ -430,7 +430,7 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
     sys_msg = SystemMessage(content="<test sys prompt>")
     state = AgentState(messages=[sys_msg])  # only the system prompt, no conversation
 
-    fake_llm = _fake_llm("should not be generated")
+    fake_llm = make_fake_llm("should not be generated")
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
@@ -681,7 +681,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
     insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await await_inbound_visible(aops_pool, restart_id)
-    llm = _fake_llm()
+    llm = make_fake_llm()
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),

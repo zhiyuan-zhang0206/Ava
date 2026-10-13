@@ -30,8 +30,8 @@ import pytest
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.machine import MachineIdentity
 from cli.commands.data_plane import pgbouncer as _pb
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
 _ADMIN = "pooler-admin-fixture"

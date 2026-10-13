@@ -1,13 +1,6 @@
 exports = ["bootstrap"]
 
 [uses]
-"_commands_helpers.py" = ["bootstrap"]
-"extensions" = ["bootstrap"]
-"test_cluster_health_parser.py" = ["bootstrap"]
-"test_main_log_init.py" = ["bootstrap"]
-"test_plugin_scaffold.py" = ["bootstrap"]
-"test_start_gate.py" = ["bootstrap"]
-"test_stop_parser.py" = ["bootstrap"]
 "test_unit_capability_cli.py" = ["bootstrap"]
 
 [debt.env-patch]
@@ -39,9 +32,6 @@ exports = ["bootstrap"]
 "test_unit_capability_cli.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"_commands_helpers.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 2
-"_commands_helpers.py#monkeypatch.setattr base.sessions.backend.get_backend" = 1
-"_commands_helpers.py#monkeypatch.setattr base.sessions.backend.get_shell_backend" = 1
 "test_cluster_health_parser.py#monkeypatch.setattr cli.commands.cluster.health.cmd_health_probe" = 1
 "test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.alerts.grafana_admin_password" = 2
 "test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.observability.telemetry_grafana_url" = 1
@@ -84,11 +74,11 @@ exports = ["bootstrap"]
 "test_pty_commands.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.resume" = 1
 "test_schedules_parser.py#monkeypatch.setattr cli.commands.management.schedules.h_schedules_update" = 1
 "test_start_gate.py#monkeypatch.setattr base.cluster.port_free" = 1
+"test_start_gate.py#monkeypatch.setattr cli.commands.cluster.unit_join.join_gateway" = 1
 "test_start_gate.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.complete_boot_start" = 1
 "test_start_gate.py#monkeypatch.setattr cli.commands.lifecycle.start.cmd_start" = 1
-"test_start_gate.py#monkeypatch.setattr cli.main.init_cli_logging" = 1
 "test_start_gate.py#monkeypatch.setattr cli.start_intent._checkout" = 1
-"test_start_gate.py#monkeypatch.setattr cli.unit_join.join_gateway" = 1
+"test_start_gate.py#monkeypatch.setattr cli.startup_support.init_cli_logging" = 1
 "test_unit_capability_cli.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_unit_capability_cli.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
 "test_unit_capability_cli.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1

@@ -24,6 +24,7 @@ from base.host.net.predicates import is_loopback_host
 from base.native_process.os_platform import file_lock
 from base.paths.private_dir import ensure_private_dir
 from cli import start_intent
+from cli.commands.cluster.unit_join import join_gateway
 from cli.start_identity import (
     CAP_ARGS,
     IDENTITY_FIELDS,
@@ -35,7 +36,6 @@ from cli.start_identity import (
     resume_claim,
     stored_values,
 )
-from cli.unit_join import join_gateway
 
 # Every flag a run can carry; an interrupted claim resumes from its recorded payload
 # and takes none of them.

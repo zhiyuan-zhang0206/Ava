@@ -12,8 +12,8 @@ from psycopg_pool import AsyncConnectionPool
 
 import ava
 from agent.graph import claim_node
+from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.state import AgentState
-from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity

@@ -17,7 +17,7 @@ from base.events.live import redis_listener
 from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")

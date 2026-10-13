@@ -1,1 +1,4 @@
-exports = ["runtime.py"]
+exports = ["runtime.py", "tests"]
+
+[uses]
+"tests" = ["runtime.py"]

@@ -42,8 +42,8 @@ from cli import parsers, preflight, start_identity, start_intent
 from cli.commands.lifecycle import stop
 from cli.database import OperatorDatabaseFactory, operator_database_factory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

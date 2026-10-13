@@ -430,8 +430,8 @@ def cmd_db_authority_install_unit(*, bundle: str) -> int:
     from base.host.db_authority.model import AuthorityRefusedError
     from base.host.env.bootstrap import BootstrapFetchError
     from base.paths.home import resolve_ava_home
+    from cli.commands.cluster.unit_join import join_gateway
     from cli.start_identity import require_initialized, stored_values
-    from cli.unit_join import join_gateway
 
     home = resolve_ava_home().resolve()
     try:

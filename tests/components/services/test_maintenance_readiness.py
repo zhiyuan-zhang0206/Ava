@@ -181,7 +181,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     middleware stack."""
     from base.host.db_authority import unit
     from base.host.env import bootstrap
-    from cli import unit_join
+    from cli.commands.cluster import unit_join
 
     secret = _authenticated(monkeypatch)
     complete = settings if settings.profile is None else config.Settings(profile=None)
