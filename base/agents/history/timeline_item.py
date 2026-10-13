@@ -64,7 +64,7 @@ class TimelineItem(BaseModel):
     inbound_id: int | None = None
     # Durable source coordinates; item_id remains the frontend position key.
     # Missing/ephemeral source IDs are excluded. Only an explicitly embedded
-    # inbound row ID qualifies; positional legacy UI anchors do not.
+    # inbound row ID qualifies.
     source_message_id: str | None = None
     source_inbound_id: int | None = None
     source_block_idx: int | None = None

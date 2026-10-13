@@ -17,6 +17,5 @@ def test_dispatch_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(RuntimeError, match="simulated message dispatch failure"):
         timeline.build_timeline_items(
             [AIMessage(content="hello")],
-            [],
             inputs=TimelineReadInputs(fail_dispatch, lambda: False),
         )

@@ -125,7 +125,7 @@ def system_note_message(
 
     Distinguished from inbound_message by `ava_msg_type='system_note'`; the
     timeline read side renders it as a system_marker keyed on `tag`. Carries no
-    inbound id and does not advance the chat anchor. `tag` is a NoteTag —
+    inbound id. `tag` is a NoteTag —
     pyright statically catches a wrong/typo'd value.
 
     additional_kwargs:

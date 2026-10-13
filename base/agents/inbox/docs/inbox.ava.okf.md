@@ -28,7 +28,7 @@ the database layer imports none of them.
 - `live.py` — `ALIVE_STATUSES` / `ALIVE_SQL` / `agent_is_alive` (the one alive predicate: status
   plus an unexpired lease), `list_live_agent_ids` and `signal_live_agents_restart` (the fleet
   update's quiesce signal).
-- `rows.py` — `InboundRow` / `ChatAnchor`, `list_pending_inbounds`, `list_chat_anchors` and
+- `rows.py` — `InboundRow`, `list_pending_inbounds` and
   `NOTICE_FYI_TTL_DAYS`, the open-feed lifetime of FYI notices.
 
 ## Key dependencies

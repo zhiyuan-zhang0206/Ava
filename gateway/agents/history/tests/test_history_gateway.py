@@ -134,7 +134,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
             message_key=str(number),
             local_machine=machine_identity.name(),
         )
-    items, count = build_timeline_items([marker], [], inputs=_TIMELINE_INPUTS)
+    items, count = build_timeline_items([marker], inputs=_TIMELINE_INPUTS)
     page = hydrate(database, items, owner.agent_id, limit=5)
     assert count == 1
     assert len(page) == 7  # marker + limit+1 lookahead
@@ -147,7 +147,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     assert page[-1].impersonation is not None
     assert page[-1].impersonation.executor_name == "Codex: thoughtful squirrel"
     archived, _ = build_timeline_items(
-        [marker], [], segment_prefix="s2.checkpoint", inputs=_TIMELINE_INPUTS
+        [marker], segment_prefix="s2.checkpoint", inputs=_TIMELINE_INPUTS
     )
     archive_page = hydrate(database, archived, owner.agent_id, limit=5)
     assert archive_page[-1].item_id.startswith("s2.checkpoint.0.")

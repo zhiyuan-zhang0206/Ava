@@ -165,7 +165,7 @@ def test_inbound_attachments_survive_timeline_and_handoff(
         local_machine=machine_identity.name(),
     )
     items, _ = build_timeline_items(
-        [start_marker(lease, notes=_handoff_notes())], [], inputs=_TIMELINE_INPUTS
+        [start_marker(lease, notes=_handoff_notes())], inputs=_TIMELINE_INPUTS
     )
     projected = hydrate(database, items, owner.agent_id, limit=5)
     image_item = next(item for item in projected if item.inbound_id == inserted[0])

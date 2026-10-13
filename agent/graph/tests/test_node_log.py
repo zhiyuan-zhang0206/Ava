@@ -45,11 +45,10 @@ def _exit_records(records):
 def _wrap(node: str, msg_count: int, pub=None):
     """Construct a node_lifecycle context with a stub event publisher (emit is
     the only call site) + `msg_count` SystemMessages (used here purely as filler
-    counted toward msg_count) + ops_pool=None (no inbound anchors needed)."""
+    counted toward msg_count)."""
     return node_lifecycle(
         node,
         messages=[SystemMessage(content="x")] * msg_count,
-        ops_pool=None,
         event_publisher=pub if pub is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -332,7 +331,6 @@ async def test_node_lifecycle_first_snapshot_carries_system_prompt_then_drops_it
     async with node_lifecycle(
         "llm",
         messages=msgs,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -347,7 +345,6 @@ async def test_node_lifecycle_first_snapshot_carries_system_prompt_then_drops_it
     async with node_lifecycle(
         "llm",
         messages=msgs2,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -384,7 +381,6 @@ async def test_node_lifecycle_incremental_second_enter_emits_only_new_messages()
     async with node_lifecycle(
         "llm",
         messages=[SystemMessage(content="prompt"), AIMessage(content="first")],
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -401,7 +397,6 @@ async def test_node_lifecycle_incremental_second_enter_emits_only_new_messages()
             AIMessage(content="first"),
             AIMessage(content="second"),
         ],
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -446,7 +441,6 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
     async with node_lifecycle(
         "llm",
         messages=msgs,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -460,7 +454,6 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
     async with node_lifecycle(
         "llm",
         messages=[],
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -480,7 +473,6 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
     async with node_lifecycle(
         "llm",
         messages=[SystemMessage(content="x"), AIMessage(content="b")],
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -497,7 +489,6 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
     async with node_lifecycle(
         "llm",
         messages=[SystemMessage(content="x")],
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -511,76 +502,6 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
     assert snaps[1]["msg_count"] == 1
 
 
-async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_messages(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The full-window path must not query chat inbound anchors when no
-    message in the history needs them (all-modern = every inbound carries its
-    own ava_created_at). The post-compact rebuilt history is exactly such a
-    case — skipping the query removes a DB round trip from the snapshot the
-    frontend is waiting on after compact_done (seconds on remote machines).
-    """
-    from langchain_core.messages import HumanMessage
-
-    import agent.graph.node_log as nl
-    from base.agents.messages.kwargs import AvaMsgType
-
-    queried: list[int] = []
-
-    async def fake_anchors(pool, agent_id):
-        queried.append(agent_id)  # pyright: ignore[reportUnknownArgumentType]
-        return []
-
-    monkeypatch.setattr(nl, "list_chat_inbound_anchors", fake_anchors)  # pyright: ignore[reportUnknownArgumentType]
-    pool = MagicMock()
-
-    # All-modern history: inbound carries ava_created_at → no query.
-    modern = HumanMessage(
-        content="hi",
-        additional_kwargs={
-            "ava_msg_type": AvaMsgType.INBOUND.value,
-            "ava_created_at": "2026-08-02T00:00:00+00:00",
-        },
-    )
-    pub = MagicMock()
-    async with node_lifecycle(
-        "llm",
-        messages=[SystemMessage(content="x"), modern],
-        ops_pool=pool,
-        event_publisher=pub,
-        agent_id=7,
-        turn_progress=TurnProgress(),
-        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
-        timeline_inputs=_TIMELINE_INPUTS,
-        limit_reader=lambda: settings.display.timeline_default_limit,
-    ):
-        pass
-    assert queried == [], f"anchors queried for an all-modern history: {queried}"
-    snaps = _snapshots_from(pub)
-    assert len(snaps) == 1  # pyright: ignore[reportUnknownArgumentType]
-
-    # Legacy inbound (no ava_created_at) → query still happens. Fresh agent
-    # id so the enter takes the full-window path (agent 7's cursor already
-    # advanced past it).
-    legacy = HumanMessage(
-        content="old", additional_kwargs={"ava_msg_type": AvaMsgType.INBOUND.value}
-    )
-    pub2 = MagicMock()
-    async with node_lifecycle(
-        "llm",
-        messages=[SystemMessage(content="x"), legacy],
-        ops_pool=pool,
-        event_publisher=pub2,
-        agent_id=8,
-        turn_progress=TurnProgress(),
-        read_stall_seconds=lambda: settings.agent.node_stall_dump_seconds,
-        timeline_inputs=_TIMELINE_INPUTS,
-        limit_reader=lambda: settings.display.timeline_default_limit,
-    ):
-        pass
-    assert queried == [8]
-
-
 async def test_node_lifecycle_cursor_reset_after_shrink_forces_full_window() -> None:
     """Compaction shrinks history below the cursor — the next enter must
     degrade to the full-window path (and the shrink is detectable)."""
@@ -591,7 +512,6 @@ async def test_node_lifecycle_cursor_reset_after_shrink_forces_full_window() -> 
     async with node_lifecycle(
         "llm",
         messages=msgs42,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -605,7 +525,6 @@ async def test_node_lifecycle_cursor_reset_after_shrink_forces_full_window() -> 
     async with node_lifecycle(
         "llm",
         messages=msgs3,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -632,7 +551,6 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
     async with node_lifecycle(
         "llm",
         messages=msgs,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -645,7 +563,6 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
     async with node_lifecycle(
         "llm",
         messages=msgs,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         full_window=True,
@@ -663,7 +580,6 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
     async with node_lifecycle(
         "llm",
         messages=msgs,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -698,7 +614,6 @@ async def test_node_lifecycle_render_failure_does_not_advance_cursor(
         async with node_lifecycle(
             "llm",
             messages=msgs,
-            ops_pool=None,
             event_publisher=pub,
             agent_id=1,
             turn_progress=TurnProgress(),
@@ -712,7 +627,6 @@ async def test_node_lifecycle_render_failure_does_not_advance_cursor(
     async with node_lifecycle(
         "llm",
         messages=msgs,
-        ops_pool=None,
         event_publisher=pub,
         agent_id=1,
         turn_progress=TurnProgress(),
@@ -750,7 +664,6 @@ async def test_stall_guards_keep_two_roots_and_live_reads_separate(
         async with node_lifecycle(
             "llm",
             messages=[],
-            ops_pool=None,
             event_publisher=MagicMock(),
             agent_id=1,
             turn_progress=TurnProgress(),

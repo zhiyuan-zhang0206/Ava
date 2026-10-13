@@ -94,7 +94,7 @@ def get_run_timeline_messages(
     text_max = request.app.state.config.run_timeline_message_text_max
     stop = min(end, start + limit - 1)
     items, _ = build_timeline_items(
-        messages[start : stop + 1], [], inputs=request.app.state.timeline_inputs
+        messages[start : stop + 1], inputs=request.app.state.timeline_inputs
     )
     by_message: dict[int, list[TimelineItem]] = {}
     for item in items:

@@ -182,7 +182,7 @@ async def _claim_node_impl(
 
     # ── END snapshot ──
     if outcome.publish_end_snapshot:
-        await publish_end_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        publish_end_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     # ── Turn/exit stamping (once, for every decide outcome) ──
     # A dispatched batch means this invocation is mid-turn: stamp turn_active
@@ -235,7 +235,6 @@ async def claim_node(
     async with node_lifecycle(
         CLAIM,
         messages=state.messages,
-        ops_pool=runtime.context.ops_pool,
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=runtime.context.turn_progress,

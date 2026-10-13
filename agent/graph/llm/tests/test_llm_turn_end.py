@@ -35,8 +35,8 @@ from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _runtime_with_redis(hosted_resources: HostedTurnResources, catalog: ModelCatalog):
-    """MagicMock runtime + functional ops_pool (node_lifecycle reads chat
-    anchors on enter; subscribe_interrupt's watcher reads pending interrupts)."""
+    """MagicMock runtime + functional ops_pool (subscribe_interrupt's watcher
+    reads pending interrupts)."""
     runtime = MagicMock()
     runtime.execution_info = None
     runtime.context = AvaContext(
