@@ -133,7 +133,7 @@ async def _slow(seconds: float = 1.0) -> PlainTextResponse:
     return PlainTextResponse("slow-done")
 
 
-def _run_child() -> None:
+def run_child() -> None:
     """Child entry: a real uvicorn server from the production launch assembly."""
     kwargs = _server.serve_kwargs(host="127.0.0.1", app=f"{__name__}:app")
     kwargs["port"] = int(os.environ[_PORT_ENV])
@@ -233,7 +233,7 @@ def _connect_with_retry(port: int, *, timeout_s: float = 15.0) -> http.client.HT
     pytest.fail(f"gateway child never accepted a connection on 127.0.0.1:{port}: {last_error}")
 
 
-# The child's entry script imports this module's `_run_child` statically, so test
+# The child's entry script imports this module's `run_child` statically, so test
 # selection can read the import.
 _CHILD_ENTRY = Path(__file__).with_name("child_gateway_scenarios.py")
 

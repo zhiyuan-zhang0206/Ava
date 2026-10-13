@@ -91,7 +91,7 @@ def test_expected_limit_logs_at_debug_and_emits_no_event(
     ],
 )
 def test_condition_classification(evidence: MetricEvidence, condition: str) -> None:
-    assert imh._conditions(_md(turns=evidence)) == [("turns", condition, evidence.availability)]
+    assert imh.conditions(_md(turns=evidence)) == [("turns", condition, evidence.availability)]
 
 
 def test_unexpected_missing_durations_emits_the_gap_event_on_every_read(

@@ -63,7 +63,7 @@ from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWrite
 router = APIRouter()
 
 
-def _request_actor(request: Request) -> tuple[str | None, str | None]:
+def request_actor(request: Request) -> tuple[str | None, str | None]:
     """The audit actor + trace id for a config write, from middleware-owned state.
 
     `source_verified_by` (`cluster_bearer` / `user_session`) is bound by the auth
@@ -721,7 +721,7 @@ async def put_config(
     show inline failures + the per-machine restart banner.
     """
     target = machine or request.app.state.machine.name()
-    actor, trace_id = _request_actor(request)
+    actor, trace_id = request_actor(request)
     await asyncio.to_thread(
         _assert_machine_known,
         target,

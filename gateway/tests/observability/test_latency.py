@@ -22,9 +22,9 @@ from gateway.http.middleware import latency
 def _clean_accumulator() -> Iterator[None]:
     """The middleware is registered on the shared app — reset the module
     accumulator around every test so samples never leak across tests."""
-    latency._accumulator.clear()
+    latency.accumulator.clear()
     yield
-    latency._accumulator.clear()
+    latency.accumulator.clear()
 
 
 @pytest.fixture

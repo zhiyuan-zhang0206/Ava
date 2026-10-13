@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.cluster import ops_monitor
-from gateway.cluster.ops_series import _GRID_ORIGIN, _bucket_starts
+from gateway.cluster.ops_series import GRID_ORIGIN, _bucket_starts
 
 
 def _add(
@@ -42,8 +42,8 @@ def _add(
 
 def _grid_index(ts: datetime, anchor: datetime, window_s: int, bucket_s: int) -> int:
     """Position of `ts`'s bucket within the API's bucket_starts grid."""
-    elapsed = int((ts - _GRID_ORIGIN).total_seconds())
-    bucket = _GRID_ORIGIN + timedelta(seconds=elapsed - (elapsed % bucket_s))
+    elapsed = int((ts - GRID_ORIGIN).total_seconds())
+    bucket = GRID_ORIGIN + timedelta(seconds=elapsed - (elapsed % bucket_s))
     starts = _bucket_starts(anchor, window_s, bucket_s)
     return starts.index(bucket)
 
