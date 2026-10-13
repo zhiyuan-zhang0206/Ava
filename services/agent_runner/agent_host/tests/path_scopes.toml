@@ -9,7 +9,7 @@
 "tests.path_scoped.services_tests" = [
     "test_turn_dispatcher.py",
 ]
-"tests.fixtures.unit.homes" = ["."]
+"base.paths.tests.homes" = ["."]
 "tests.fixtures.model_catalog" = [
     "test_agent_host.py",
     "test_circuit_breaker.py",
