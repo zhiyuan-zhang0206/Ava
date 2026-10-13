@@ -18,7 +18,7 @@ from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
 def _overlay(request: NativeRestartRequest) -> dict[str, object] | None:

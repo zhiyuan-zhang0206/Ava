@@ -19,7 +19,7 @@ private SDK disconnect request on the SDK loop. It does not wait for that loop t
 execute or finish the request, or join the worker. The daemon exits after owned
 cleanup even when the SDK loop is unresponsive.
 
-`services/entrypoints/im_bridge/adapters/tests/test_feishu_worker_exit.py` runs the real
+`services/entrypoints/im_bridge/tests/adapters/test_feishu_worker_exit.py` runs the real
 daemon main in child processes and retains the 10-second exit bound. A responsive
 fixture explicitly acknowledges request execution before observing its marker;
 a separate wedged-loop fixture proves cleanup and exit without that execution.

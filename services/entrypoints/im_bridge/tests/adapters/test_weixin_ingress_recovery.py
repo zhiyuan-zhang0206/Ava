@@ -7,13 +7,13 @@ from typing import Any
 import psycopg
 import pytest
 
-from services.entrypoints.im_bridge.adapters.tests.weixin_native import NativeWeixin, message
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.ingress.types import (
     IngressStatus,
     StalePollBindingError,
 )
+from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin, message
 
 
 async def replace_account(native: NativeWeixin, account_id: str) -> WeixinAdapter:

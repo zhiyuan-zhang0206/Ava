@@ -14,7 +14,7 @@ from base.packages.plugin_providers import build_model_catalog
 from gateway.tests.test_idempotency import client as client
 from gateway.tests.test_native_cancel import _headers
 from ops.lifecycle.native_restart import restart_native_work_op
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
 async def test_committed_acceptance_response_loss_replays_before_routing(

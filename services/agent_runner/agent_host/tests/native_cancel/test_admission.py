@@ -18,7 +18,7 @@ from base.agents.inbox.native_cancel import (
 )
 from base.agents.incarnation.native_work_models import NativeCancelPendingError, NativeWorkTarget
 from base.db.code_version_gate import ProcessDbGate
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
 async def test_receipt_precedes_mutable_work_and_owner_state(

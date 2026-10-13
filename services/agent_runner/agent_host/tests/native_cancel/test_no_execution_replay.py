@@ -26,7 +26,7 @@ from services.agent_runner.agent_host.invocation.native_work import (
     invoke_prepared_graph,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 

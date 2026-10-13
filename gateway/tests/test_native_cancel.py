@@ -18,7 +18,7 @@ from gateway.agents import lifecycle
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.settlement import close_hosted_turn
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
     blocked_host,
 )

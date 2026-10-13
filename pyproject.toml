@@ -1567,11 +1567,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/entrypoints/im_bridge/adapters/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "services/entrypoints/im_bridge/ingress/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

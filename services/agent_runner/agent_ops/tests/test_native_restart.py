@@ -21,7 +21,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.lifecycle.native_restart import restart_native_work_op
 from ops.rpc_schemas import OpStatus
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_request_identity import pool as pool
 from tests.fixtures.unit.identity import machine_identity as machine_identity

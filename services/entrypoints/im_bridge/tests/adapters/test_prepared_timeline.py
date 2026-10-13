@@ -7,8 +7,8 @@ import httpx
 import pytest
 
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
-from services.entrypoints.im_bridge.adapters.tests.test_telegram_adapter import FakeCore, _config
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
+from services.entrypoints.im_bridge.tests.adapters.test_telegram_adapter import FakeCore, _config
 from services.entrypoints.im_bridge.types import SendNotStartedError
 
 

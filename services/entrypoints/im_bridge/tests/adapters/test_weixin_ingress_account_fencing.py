@@ -6,12 +6,12 @@ from typing import Any
 import psycopg
 import pytest
 
-from services.entrypoints.im_bridge.adapters.tests.test_weixin_ingress_recovery import (
-    replace_account,
-)
-from services.entrypoints.im_bridge.adapters.tests.weixin_native import NativeWeixin, message
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
 from services.entrypoints.im_bridge.ingress.types import StalePollBindingError
+from services.entrypoints.im_bridge.tests.adapters.test_weixin_ingress_recovery import (
+    replace_account,
+)
+from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin, message
 
 
 async def test_registration_before_new_poll_rejects_old_runtime_without_effects(

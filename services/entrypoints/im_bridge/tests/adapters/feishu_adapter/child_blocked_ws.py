@@ -7,7 +7,7 @@ Configuration comes from `DAEMON_SHUTDOWN_TEST_MARKERS` and
 import os
 from pathlib import Path
 
-from services.entrypoints.im_bridge.adapters.tests.test_feishu_worker_exit import (
+from services.entrypoints.im_bridge.tests.adapters.test_feishu_worker_exit import (
     run_blocked_ws_child,
 )
 

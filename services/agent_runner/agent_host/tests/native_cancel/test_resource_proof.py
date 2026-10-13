@@ -15,7 +15,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.lifecycle.termination import _force_terminate_transaction
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
 @pytest.mark.parametrize(
