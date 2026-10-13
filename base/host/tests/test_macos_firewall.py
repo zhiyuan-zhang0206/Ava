@@ -33,8 +33,6 @@ from pathlib import Path
 import pytest
 
 import base.host.macos_firewall as fw
-from base.cluster.machine import MachineIdentity
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # Real `--listapps` output from the macmini running macOS 15.3.1, trimmed to four
 # entries with a Block state substituted into one. The exact two-line-per-rule
@@ -290,8 +288,6 @@ def _stub_manifest(monkeypatch: pytest.MonkeyPatch, entries: tuple) -> None:
 def test_manifest_paths_resolves_globs_and_drops_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
 ) -> None:
     """Version-stamped families resolve to whatever is installed; an absent
     version contributes nothing (it needs no rule and causes no popup)."""
@@ -304,15 +300,13 @@ def test_manifest_paths_resolves_globs_and_drops_absent(
         monkeypatch,
         (fw.ManifestEntry("pg", (f"{tmp_path}/pg/*/bin/postgres",), "Accept Postgres clients"),),
     )
-    got = fw.manifest_paths(machine=machine_identity)
+    got = fw.manifest_paths(machine_name="test-machine")
     assert [p.name for p in got] == ["postgres", "postgres"]
 
 
 def test_manifest_paths_filters_machine_scoped_entries(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
 ) -> None:
     """User-app entries apply only on the machine they name."""
     app = tmp_path / "app" / "bin" / "app"
@@ -322,15 +316,11 @@ def test_manifest_paths_filters_machine_scoped_entries(
         monkeypatch,
         (fw.ManifestEntry("app", (str(app),), "Accept app clients", machine="machine-1"),),
     )
-    machine_identity.set(name="otherhost")
-    assert fw.manifest_paths(machine=machine_identity) == ()
-    machine_identity.set(name="machine-1")
-    assert fw.manifest_paths(machine=machine_identity) == (app,)
+    assert fw.manifest_paths(machine_name="otherhost") == ()
+    assert fw.manifest_paths(machine_name="machine-1") == (app,)
 
 
-def test_manifest_paths_skips_config_shims(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
-) -> None:
+def test_manifest_paths_skips_config_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """`python3.12-config` matches the `python3.*` glob but never listens."""
     (tmp_path / "bin").mkdir()
     real = tmp_path / "bin" / "python3.12"
@@ -340,14 +330,12 @@ def test_manifest_paths_skips_config_shims(
         monkeypatch,
         (fw.ManifestEntry("py", (f"{tmp_path}/bin/python3.*",), "Run Python listeners"),),
     )
-    assert fw.manifest_paths(machine=machine_identity) == (real,)
+    assert fw.manifest_paths(machine_name="test-machine") == (real,)
 
 
 def test_observability_manifest_entries_resolve_installed_globs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
 ) -> None:
     """A Grafana/Loki/otelcol install under the stable Ava paths is discovered.
 
@@ -367,7 +355,7 @@ def test_observability_manifest_entries_resolve_installed_globs(
     assert {entry.id for entry in entries} == ids
     monkeypatch.setenv("HOME", str(tmp_path))
     _stub_manifest(monkeypatch, entries)
-    assert set(paths).issubset(fw.manifest_paths(machine=machine_identity))
+    assert set(paths).issubset(fw.manifest_paths(machine_name="test-machine"))
 
 
 def test_stale_manifest_rules_only_touches_managed_absent_paths(
@@ -407,8 +395,6 @@ def test_stale_manifest_rules_covers_legacy_family(
 def test_render_manifest_status_shows_entry_patterns_paths_and_states(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
 ) -> None:
     allow = _existing(tmp_path, "allowed")
     block = _existing(tmp_path, "blocked")
@@ -425,7 +411,7 @@ def test_render_manifest_status_shows_entry_patterns_paths_and_states(
         ),
     )
     rendered = fw.render_manifest_status(
-        {str(allow): True, str(block): False}, machine=machine_identity
+        {str(allow): True, str(block): False}, machine_name="test-machine"
     )
     assert "listeners — Accept inbound test traffic" in rendered
     assert f"pattern: {allow}" in rendered

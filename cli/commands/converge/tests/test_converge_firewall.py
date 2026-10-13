@@ -157,8 +157,8 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
     assert capsys.readouterr().err == ""
 
 
-def _empty_manifest(*, machine: MachineIdentity) -> tuple[Path, ...]:
-    assert isinstance(machine, MachineIdentity)
+def _empty_manifest(*, machine_name: str | None) -> tuple[Path, ...]:
+    assert machine_name is None or isinstance(machine_name, str)
     return ()
 
 
@@ -328,8 +328,8 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
     state = {str(stale): True}
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: dict(state))
 
-    def manifest(*, machine: MachineIdentity) -> tuple[Path, ...]:
-        assert isinstance(machine, MachineIdentity)
+    def manifest(*, machine_name: str | None) -> tuple[Path, ...]:
+        assert machine_name is None or isinstance(machine_name, str)
         return (missing,)
 
     monkeypatch.setattr(fw, "manifest_paths", manifest)
@@ -430,8 +430,8 @@ def test_firewall_status_renders_manifest_details(
     )
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: {"/bin/listener": True})
 
-    def render_manifest_status(rules: dict[str, bool], *, machine: MachineIdentity) -> str:
-        assert machine is command_runtime.machine
+    def render_manifest_status(rules: dict[str, bool], *, machine_name: str | None) -> str:
+        assert machine_name is None or isinstance(machine_name, str)
         return f"  rendered manifest with {len(rules)} rule"
 
     monkeypatch.setattr(fw, "render_manifest_status", render_manifest_status)

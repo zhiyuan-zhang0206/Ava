@@ -240,7 +240,11 @@ def test_status_shows_browser_skip_reason(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(roster_spec, "browser_incapability", lambda: "no display (headless)")
+    monkeypatch.setattr(
+        roster_spec,
+        "browser_incapability",
+        lambda _chrome: "no display (headless)",  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")

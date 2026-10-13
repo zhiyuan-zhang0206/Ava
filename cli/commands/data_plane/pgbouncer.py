@@ -52,8 +52,9 @@ import psutil
 from base.cluster import ownership, port_preflight
 from base.cluster.authority import POOLER_ADMIN
 from base.cluster.dataplane import pooler
-from base.cluster.dataplane.pg_tools import brew_prefix, is_macos
+from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.machine import MachineIdentity
+from base.host.brew_pin import brew_prefix
 from base.host.proc import process_alive
 from base.native_process.child_env import daemon_process_env
 from base.native_process.os_platform import LockTimeoutError

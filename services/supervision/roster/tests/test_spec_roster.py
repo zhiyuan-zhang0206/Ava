@@ -344,8 +344,8 @@ def test_browser_mcp_gated_out_when_browser_is(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """An incapable browser host also drops browser-mcp, with the browser reason."""
-    monkeypatch.setattr(probes, "browser_incapability", lambda: "no display (headless)")
-    monkeypatch.setattr(spec, "browser_incapability", lambda: "no display (headless)")
+    monkeypatch.setattr(probes, "browser_incapability", lambda _chrome: "no display (headless)")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: "no display (headless)")  # pyright: ignore[reportUnknownArgumentType]
     annotated = _agent_runner_annotated(monkeypatch, local_machine=machine_identity)
     assert annotated["browser"] == "no display (headless)"
     assert annotated["browser-mcp"] == "no display (headless)"

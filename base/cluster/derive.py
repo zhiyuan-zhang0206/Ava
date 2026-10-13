@@ -44,18 +44,6 @@ def swap_db(url: str, db_name: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, f"/{db_name}", parts.query, parts.fragment))
 
 
-def default_home() -> Path:
-    """The default (prod) cluster home, `~/.ava` — the one home whose initialization
-    uses the fixed default port block and whose checkout anchors without a
-    pointer."""
-    return Path.home() / ".ava"
-
-
-def is_default_home(home: Path) -> bool:
-    """Whether `home` is the default prod home (`~/.ava`)."""
-    return Path(home).expanduser().resolve() == default_home().resolve()
-
-
 def home_label(home: Path) -> str:
     """The human-facing label for a cluster — its home's basename, computed on
     the fly (pure display; renaming the directory changes only the label)."""

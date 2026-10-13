@@ -476,7 +476,7 @@ def ensure_signing_cert() -> None:
 
 def _build_directory(destination: Path | None) -> Path:
     """Choose an immutable artifact destination outside the installed bundle tree."""
-    from base.cluster import default_home
+    from base.paths.home import default_home
 
     installed = base.paths.permissions_helper_app_dir()
     build_dir = installed if destination is None else destination

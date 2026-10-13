@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from base.config import field_domain
+from base.config import field_domain, settings
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
 from base.config.service_read import ConfigAuthority
@@ -63,7 +63,9 @@ def config_read_op(*, authority: ConfigAuthority, local_machine: str) -> ConfigR
         value = meta.current_value
         if meta.sensitive and value:
             value = SENSITIVE_MASK
-        cap = config_validators.read_time_capability(meta.name)
+        cap = config_validators.read_time_capability(
+            meta.name, chrome_binary=settings.services.chrome_binary
+        )
         host_fields[meta.name] = HostConfigField(
             value=value,
             overridden=meta.name in set_fields,
@@ -121,7 +123,7 @@ def _field_verdicts(
             except (ValueError, TypeError):
                 results[field] = FieldWriteResult(ok=False, reason="invalid declared scalar")
             continue
-        vr = config_validators.validate(field, value)
+        vr = config_validators.validate(field, value, chrome_binary=settings.services.chrome_binary)
         results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
     return results
 

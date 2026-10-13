@@ -52,9 +52,6 @@ from base.cluster.derive import (
     db_identity as db_identity,
 )
 from base.cluster.derive import (
-    default_home as default_home,
-)
-from base.cluster.derive import (
     derive_env as derive_env,
 )
 from base.cluster.derive import (
@@ -74,9 +71,6 @@ from base.cluster.derive import (
 )
 from base.cluster.derive import (
     inbound_channel as inbound_channel,
-)
-from base.cluster.derive import (
-    is_default_home as is_default_home,
 )
 from base.cluster.derive import (
     per_cluster_base_urls as per_cluster_base_urls,
