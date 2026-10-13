@@ -177,8 +177,8 @@ os.environ["AVA_OS_JOBS_ENABLED"] = "false"
 # the sentinel even with no AVA_DB_URL in the environment (CI / a fresh clone),
 # and a stray connection that bypasses a provisioning fixture fails loudly
 # instead of hitting a real database. load_dotenv(override=False) won't clobber
-# these. The real per-session URLs are injected by the `_provisioned_db` /
-# `_provisioned_redis` fixtures, which start throwaway native pg/redis (tests/_containers.py).
+# these. The real per-session URLs are injected by the `provisioned_db` /
+# `provisioned_redis` fixtures, which start throwaway native pg/redis (tests/_containers.py).
 UNPROVISIONED_DB_URL = "postgresql://unprovisioned@127.0.0.1:1/unprovisioned"
 UNPROVISIONED_REDIS_URL = "redis://127.0.0.1:1/0"
 os.environ["AVA_DB_URL"] = UNPROVISIONED_DB_URL

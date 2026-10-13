@@ -67,7 +67,7 @@ _previous_secret = ""
 def mint_credentials(home: Path) -> E2ECredentials:
     """Seed `home`'s ledger with an active generation and mint its human secret, which
     becomes this process's configured cluster secret until `forget_credentials`."""
-    global _current, _previous_secret  # noqa: PLW0603 — package-scoped, set once by `_e2e_process_env`
+    global _current, _previous_secret  # noqa: PLW0603 — package-scoped, set once by `e2e_process_env`
     tokens = seed_active_generation(home).api
     _previous_secret = settings.data_plane.cluster_secret
     _current = E2ECredentials(
@@ -81,7 +81,7 @@ def mint_credentials(home: Path) -> E2ECredentials:
 
 def current_credentials() -> E2ECredentials:
     if _current is None:
-        raise RuntimeError("the e2e credentials are minted by the `_e2e_process_env` fixture")
+        raise RuntimeError("the e2e credentials are minted by the `e2e_process_env` fixture")
     return _current
 
 

@@ -24,7 +24,7 @@ _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 # Survival witness written into plugin state before the restart; the test
 # asserts the checkpoint still carries it after the silent respawn. Derived
-# from the e2e worker's own `$AVA_HOME` (tests/e2e/conftest.py:_e2e_process_env)
+# from the e2e worker's own `$AVA_HOME` (tests/e2e/conftest.py:e2e_process_env)
 # instead of a fixed /tmp path (audit L-1): every e2e session gets its own
 # witness dir, and the pre/post-restart processes agree because both inherit
 # the same AVA_HOME. Teardown of the e2e home cleans it up.

@@ -135,7 +135,7 @@ def test_enum_field_exposes_type_and_choices() -> None:
 
 
 @pytest.fixture
-def _stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+def stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force the browser_enabled read-time capability to a deterministic verdict:
     the aggregate browser_capable() gate reports capable -> can_enable True.
 
@@ -144,7 +144,7 @@ def _stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome: True)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_get_self_host_fields_carry_capability_hint(_stub_browser_capability: None) -> None:
+def test_get_self_host_fields_carry_capability_hint(stub_browser_capability: None) -> None:
     """GET self: host fields carry a can_enable/reason hint where one exists
     (browser_enabled), cluster fields carry null for both."""
     with TestClient(app) as client:
@@ -337,7 +337,7 @@ def test_get_local_unreachable_503_no_in_process_fallback(
 
 
 @pytest.fixture
-def _clean_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+def clean_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Redirect this gateway's .env (the single config store) to a fresh tmp file,
     so a PUT in these tests writes there instead of the real unit .env. The PUT no
     longer mutates the in-memory Settings (strict persist-and-signal), so there is
@@ -346,7 +346,7 @@ def _clean_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_put_self_returns_write_result_and_routes_scopes(_clean_overrides: Path) -> None:
+def test_put_self_returns_write_result_and_routes_scopes(clean_overrides: Path) -> None:
     """PUT self with a good cluster + host mix -> 200 + ConfigWriteResult,
     applied True, both stores written, restart_required is the union."""
     with TestClient(app) as client:
@@ -372,7 +372,7 @@ def test_put_self_returns_write_result_and_routes_scopes(_clean_overrides: Path)
     assert aliases["AVA_OPS_CONCURRENCY"] == "4"
 
 
-def test_put_self_capability_failure_writes_nothing(_clean_overrides: Path) -> None:
+def test_put_self_capability_failure_writes_nothing(clean_overrides: Path) -> None:
     """PUT self where a host field fails the capability validator -> applied
     False, results[field].ok False with a reason, and NOTHING written locally."""
     with TestClient(app) as client:
@@ -388,7 +388,7 @@ def test_put_self_capability_failure_writes_nothing(_clean_overrides: Path) -> N
     assert dotenv_file.read_env_aliases() == {}
 
 
-def test_put_rejects_agent_scope_field(_clean_overrides: Path) -> None:
+def test_put_rejects_agent_scope_field(clean_overrides: Path) -> None:
     """An agent-scope field is writable=False, so the writable gate rejects it.
 
     sdk_disable has scope="agent" and writable=False; a PUT carrying it is
@@ -403,14 +403,14 @@ def test_put_rejects_agent_scope_field(_clean_overrides: Path) -> None:
     assert dotenv_file.read_env_aliases() == {}
 
 
-def test_put_rejects_unknown_field(_clean_overrides: Path) -> None:
+def test_put_rejects_unknown_field(clean_overrides: Path) -> None:
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"not_a_field": 1})
     assert resp.status_code == 400, resp.text
     assert "unknown or read-only" in resp.json()["detail"]
 
 
-def test_put_accepts_valid_enum_value(_clean_overrides: Path) -> None:
+def test_put_accepts_valid_enum_value(clean_overrides: Path) -> None:
     """A cluster enum field accepts a value inside its choices and lands in .env."""
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"agent_reply_reminder_cadence": "every_time"})
@@ -419,7 +419,7 @@ def test_put_accepts_valid_enum_value(_clean_overrides: Path) -> None:
     assert dotenv_file.read_env_aliases()["AVA_AGENT_REPLY_REMINDER_CADENCE"] == "every_time"
 
 
-def test_put_rejects_invalid_enum_value(_clean_overrides: Path) -> None:
+def test_put_rejects_invalid_enum_value(clean_overrides: Path) -> None:
     """A value outside the enum's choices 400s atomically (nothing written), so an
     unknown enum can never reach .env and blow up Settings at the next restart."""
     with TestClient(app) as client:
@@ -429,7 +429,7 @@ def test_put_rejects_invalid_enum_value(_clean_overrides: Path) -> None:
     assert dotenv_file.read_env_aliases() == {}
 
 
-def test_get_self_sensitive_raw_override_is_sentinel(_clean_overrides: Path) -> None:
+def test_get_self_sensitive_raw_override_is_sentinel(clean_overrides: Path) -> None:
     """A sensitive cluster field set in .env appears in raw_overrides as the
     unchanged-sentinel, never its cleartext (no secret on the wire)."""
     from base.config import CONFIG_UNCHANGED_SENTINEL
@@ -442,7 +442,7 @@ def test_get_self_sensitive_raw_override_is_sentinel(_clean_overrides: Path) -> 
     assert "sk-REAL-SECRET" not in resp.text
 
 
-def test_put_sentinel_preserves_secret(_clean_overrides: Path) -> None:
+def test_put_sentinel_preserves_secret(clean_overrides: Path) -> None:
     """Round-tripping the sentinel for an untouched secret keeps its .env value;
     a real edit to another field still lands."""
     from base.config import CONFIG_UNCHANGED_SENTINEL
@@ -459,7 +459,7 @@ def test_put_sentinel_preserves_secret(_clean_overrides: Path) -> None:
     assert aliases["AVA_MODEL"] == "m2"
 
 
-def test_put_absent_key_preserves_secret(_clean_overrides: Path) -> None:
+def test_put_absent_key_preserves_secret(clean_overrides: Path) -> None:
     """Reducer semantics: a PUT that does NOT mention a secret leaves it in place.
 
     This is the exact incident that once wiped a cluster's keys — a single-field
@@ -478,7 +478,7 @@ def test_put_absent_key_preserves_secret(_clean_overrides: Path) -> None:
     assert aliases["AVA_MODEL"] == "m2"
 
 
-def test_put_replaces_one_secret_leaves_others(_clean_overrides: Path) -> None:
+def test_put_replaces_one_secret_leaves_others(clean_overrides: Path) -> None:
     """The API-key replace flow: the frontend PUTs a real new value for the ONE
     secret being replaced and the unchanged-sentinel for every other set secret
     (that is what raw_overrides carries). The named secret is rewritten; the others
@@ -513,7 +513,7 @@ def test_put_replaces_one_secret_leaves_others(_clean_overrides: Path) -> None:
     assert aliases["AVA_MODEL"] == "m1"
 
 
-def test_put_null_unsets_cluster_field(_clean_overrides: Path) -> None:
+def test_put_null_unsets_cluster_field(clean_overrides: Path) -> None:
     """Reducer semantics: a cluster field mapped to null is unset (reverted to its
     default); other set fields are untouched. Deletion is explicit, never by
     omission."""
@@ -526,7 +526,7 @@ def test_put_null_unsets_cluster_field(_clean_overrides: Path) -> None:
     assert aliases["DEEPSEEK_API_KEY"] == "sk-X"  # untouched
 
 
-def test_put_host_failure_leaves_cluster_unwritten(_clean_overrides: Path) -> None:
+def test_put_host_failure_leaves_cluster_unwritten(clean_overrides: Path) -> None:
     """Atomic across scopes: a rejected host field means the cluster .env is not
     touched (host is written/validated first)."""
     with TestClient(app) as client:
@@ -540,7 +540,7 @@ def test_put_host_failure_leaves_cluster_unwritten(_clean_overrides: Path) -> No
 
 
 def test_put_rejects_bad_scalar(
-    _clean_overrides: Path, *, config_authority: ConfigAuthority
+    clean_overrides: Path, *, config_authority: ConfigAuthority
 ) -> None:
     """A non-numeric value for a cluster int/float field 400s before any write,
     rather than landing in .env and crashing Settings at the next restart."""
@@ -559,7 +559,7 @@ def test_put_rejects_bad_scalar(
 
 
 def test_put_rejects_bool_for_int_field(
-    _clean_overrides: Path, *, config_authority: ConfigAuthority
+    clean_overrides: Path, *, config_authority: ConfigAuthority
 ) -> None:
     """A JSON bool for an int field is rejected (it would otherwise pass int() and
     persist as 'true', breaking Settings at the next restart)."""
@@ -576,7 +576,7 @@ def test_put_rejects_bool_for_int_field(
     assert dotenv_file.read_env_aliases() == {}
 
 
-def test_put_nonsensitive_field_can_hold_literal_sentinel(_clean_overrides: Path) -> None:
+def test_put_nonsensitive_field_can_hold_literal_sentinel(clean_overrides: Path) -> None:
     """The sentinel-skip is gated on `sensitive`, so a non-sensitive field can be
     set to the literal sentinel string (no silent drop)."""
     from base.config import CONFIG_UNCHANGED_SENTINEL
@@ -588,7 +588,7 @@ def test_put_nonsensitive_field_can_hold_literal_sentinel(_clean_overrides: Path
 
 
 def test_put_self_edits_writable_host_capability_field(
-    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
+    clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A writable host capability field (cross_machine_transfer_backend, not
     remote_writable) is editable on the self/Cluster view — the local write honors
@@ -654,7 +654,7 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
     assert writes == []
 
 
-def test_put_self_rejects_readonly_identity_field(_clean_overrides: Path) -> None:
+def test_put_self_rejects_readonly_identity_field(clean_overrides: Path) -> None:
     """An identity / connection field (machine_name) is read-only now — rejected by
     the writable gate, same as any other read-only field; nothing written."""
     with TestClient(app) as client:
@@ -665,7 +665,7 @@ def test_put_self_rejects_readonly_identity_field(_clean_overrides: Path) -> Non
 
 
 def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
-    _clean_overrides: Path,
+    clean_overrides: Path,
 ) -> None:
     """Self GET raw_overrides includes a writable host capability field (editable on
     the host's own panel) but excludes a now-read-only identity field, even when both
@@ -682,7 +682,7 @@ def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
 
 
 def test_put_explicit_self_edits_remote_writable_host_toggle(
-    _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """On a dual-role box, `?machine=<self>` is a host view (remote_writable gate),
     NOT the Cluster view — so a gateway-capability host toggle that is
@@ -712,7 +712,7 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
 # ── PUT remote ──
 
 
-def test_plugin_config_owner_metadata_and_mixed_patch_rejection(_clean_overrides: Path) -> None:
+def test_plugin_config_owner_metadata_and_mixed_patch_rejection(clean_overrides: Path) -> None:
     """A mixed request cannot partly commit Core env and a Fleet image."""
     from base.packages.plugins.config_registration import disk_image_path
 
@@ -731,7 +731,7 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(_clean_overrides
     assert (image.read_bytes() if image.exists() else None) == before_image
 
 
-def test_fleet_cluster_write_goes_only_to_owned_image(_clean_overrides: Path) -> None:
+def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> None:
     from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
 

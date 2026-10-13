@@ -109,7 +109,7 @@ def client() -> Any:
 
 
 @pytest.fixture(autouse=True)
-def _alerts_auth_and_im(monkeypatch: pytest.MonkeyPatch) -> None:
+def alerts_auth_and_im(monkeypatch: pytest.MonkeyPatch) -> None:
     """Webhook token set (loopback trust off) + IM fan-out mocked."""
 
     monkeypatch.setattr(settings.alerts, "webhook_token", SecretStr("test-token"))

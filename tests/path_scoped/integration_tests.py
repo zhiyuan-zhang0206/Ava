@@ -16,12 +16,12 @@ from tests.fixtures.gateway_config import gateway_test_client
 
 # The provider-key mock and the in-process spawn stand-in are defined once (the ava and
 # gateway tests take them too); imported here so they register for this module's paths.
-from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
-from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
+from tests.path_scoped.api_keys import mock_api_keys as mock_api_keys
 from tests.path_scoped.gateway_tests import gateway_config_owner as gateway_config_owner
+from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 # DB/Redis env (AVA_DB_URL / AVA_REDIS_URL) for spawned-subprocess inheritance is
-# synced by the `_provisioned_db` / `_provisioned_redis` session fixtures when a
+# synced by the `provisioned_db` / `provisioned_redis` session fixtures when a
 # test pulls them (via db_conn / provisioned_redis) — no import-time capture here,
 # which would otherwise freeze the unreachable sentinel before provisioning runs.
 

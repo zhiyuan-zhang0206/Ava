@@ -24,7 +24,7 @@ from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
+from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
 @pytest.fixture

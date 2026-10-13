@@ -23,7 +23,7 @@ from ops.lifecycle.launch import _validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
+from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
 @pytest.mark.usefixtures("retry_waits")

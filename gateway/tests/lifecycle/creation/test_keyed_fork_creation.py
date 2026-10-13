@@ -16,7 +16,7 @@ from gateway.agents import creation as agent_creation
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, PATH
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import _response, sdk
-from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
+from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
 def _checkpoint(conn: psycopg.Connection, agent_id: int, checkpoint_id: str) -> None:

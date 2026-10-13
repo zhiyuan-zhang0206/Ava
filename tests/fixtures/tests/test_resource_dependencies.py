@@ -34,12 +34,12 @@ def failed_redis(redis_url):
     raise RuntimeError("redis-setup-failed")
 
 @pytest.fixture(scope="session")
-def drained_tail(_provisioned_db):
+def drained_tail(provisioned_db):
     yield
     import psycopg
     # Session ownership outlives the function's driver and URL windows. A real
     # producer's queued tail must have reached Postgres before that window shut.
-    with psycopg.connect(_provisioned_db) as conn:
+    with psycopg.connect(provisioned_db) as conn:
         assert conn.execute(
             "SELECT count(*) FROM telemetry_events WHERE machine = 'resource-tail'"
         ).fetchone() == (1,)

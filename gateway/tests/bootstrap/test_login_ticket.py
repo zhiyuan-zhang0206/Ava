@@ -26,7 +26,7 @@ _REDEEM = "/api/auth/login-ticket/redeem"
 
 
 @pytest.fixture(autouse=True)
-def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """A known secret and anonymous clients: each test says what credential it presents."""
     disable_default_gateway_credentials(monkeypatch)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)

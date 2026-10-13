@@ -22,7 +22,7 @@ from gateway.tests.bootstrap.test_auth import (
     request_with_origin,
     session_cookie,
 )
-from gateway.tests.bootstrap.test_auth import _patch_secret as _patch_secret
+from gateway.tests.bootstrap.test_auth import patch_secret as patch_secret
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

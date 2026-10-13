@@ -2259,7 +2259,7 @@ jobs:
   e2e-env-guard:
     # Trimmed per task #2446 (analysis #2411): the home-isolation leak detectors
     # only speak when something ran before them in the SAME pytest process, and
-    # their warmup minimum is (a) the e2e package fixture _e2e_process_env firing
+    # their warmup minimum is (a) the e2e package fixture e2e_process_env firing
     # and (b) one AVA_LLM_OVERRIDE scenario fixture (scenario_env) having run —
     # one representative scenario-marked test provides both. The alerts-desktop
     # test is the chosen representative: fast, process-shaped, drives gateway +
@@ -2327,7 +2327,7 @@ jobs:
 
       - name: Run env-guard warmup + home-isolation in one serial process
         id: pytest-env-guard
-        # The whole point is ONE process: the package-scoped _e2e_process_env
+        # The whole point is ONE process: the package-scoped e2e_process_env
         # fixture must fire and its teardown must land BEFORE the isolation
         # detectors read the environment. One scenario-marked test covers the
         # warmup minimum (package fixture + AVA_LLM_OVERRIDE scenario fixture);

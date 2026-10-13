@@ -41,7 +41,7 @@ def _write_leak_package(tmp_path: Path) -> Path:
         "import os\n\n"
         "import pytest\n\n"
         "# The 2026-07-29 leak shape: a session-scoped fixture mutates the process\n"
-        "# env and has no restore. The package-scoped _e2e_process_env restore\n"
+        "# env and has no restore. The package-scoped e2e_process_env restore\n"
         "# fires when pytest leaves tests/e2e/, so a session-scoped mutation\n"
         "# persists past every package boundary — the class of leak the sentinels\n"
         "# exist to catch.\n"

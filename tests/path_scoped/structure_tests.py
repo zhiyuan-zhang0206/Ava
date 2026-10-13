@@ -11,7 +11,7 @@ from meizel.state.ambient_state import allowlist as ambient_allowlist
 
 
 @pytest.fixture(autouse=True)
-def _synthetic_decision_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
+def synthetic_decision_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the real repository's single-owner exemptions out of synthetic roots.
 
     These tests point the gate at a temporary repository, where the real
@@ -26,7 +26,7 @@ def _synthetic_decision_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _synthetic_ambient_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
+def synthetic_ambient_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the real repository's ambient-state lists out of synthetic roots, for the same
     reason: their paths and sites do not exist in a temporary repository and would read as
     stale. A test about a list installs its own entries."""
