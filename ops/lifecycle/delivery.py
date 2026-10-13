@@ -30,7 +30,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
-from ops import lifecycle as _ops
+from ops import lifecycle as ops
 from ops.agents import get_agent_status
 
 
@@ -129,10 +129,10 @@ async def _finish_chat_delivery(
                 await asyncio.to_thread(
                     publish_inbound_wake, db, bus, agent_id, str(receipt.inbound_id)
                 )
-            await _ops.publish_inbound_arrived(
+            await ops.publish_inbound_arrived(
                 bus, agent_id, receipt.inbound_id, "chat", source, content
             )
-            status = await _ops.resurrect_if_terminated(
+            status = await ops.resurrect_if_terminated(
                 db,
                 bus,
                 agent_id,
