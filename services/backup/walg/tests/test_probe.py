@@ -335,7 +335,7 @@ def test_the_admin_dial_is_custody_checked_and_bounded(
     assert seen["kwargs"] == {
         "expected_data_dir": sandbox.home / "pg",
         "autocommit": True,
-        "connect_timeout": probe._CONNECT_TIMEOUT_S,
+        "connect_timeout": probe.CONNECT_TIMEOUT_S,
     }
     assert seen["statement"].startswith("SET statement_timeout")
 
@@ -448,7 +448,7 @@ def test_before_any_tick_the_time_since_enabling_is_what_counts() -> None:
 
 def test_the_enabling_time_is_the_key_pins_mtime(sandbox: Sandbox) -> None:
     walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
-    assert probe._enabled_since() is not None
+    assert probe.enabled_since() is not None
     pinned_at = datetime(2026, 10, 1, 0, 0, tzinfo=UTC).timestamp()
     os.utime(walg_config.key_id_path(), (pinned_at, pinned_at))
 
@@ -457,7 +457,7 @@ def test_the_enabling_time_is_the_key_pins_mtime(sandbox: Sandbox) -> None:
 
 
 def test_without_a_pin_there_is_no_enabling_time(sandbox: Sandbox) -> None:
-    assert probe._enabled_since() is None
+    assert probe.enabled_since() is None
     assert probe.tick_failure(now=NOW) is None
 
 

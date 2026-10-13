@@ -190,25 +190,25 @@ def _view(*units: dict[str, object]) -> dict[str, object]:
 
 
 def test_drill_liveness_probe_reads_the_raw_tree() -> None:
-    dead = drill._liveness_probe(
+    dead = drill.liveness_probe(
         _TreeStub(_view({"id": "u1", "state": "running", "pid": 999_999_999})), "u1"
     )
     assert dead().verdict.value == "down"  # claimed running, pid not alive
 
-    live = drill._liveness_probe(
+    live = drill.liveness_probe(
         _TreeStub(_view({"id": "u1", "state": "running", "pid": os.getpid()})), "u1"
     )
     assert live().verdict.value == "alive"
 
-    stopped = drill._liveness_probe(
+    stopped = drill.liveness_probe(
         _TreeStub(_view({"id": "u1", "state": "stopped", "pid": None})), "u1"
     )
     assert stopped().verdict.value == "down"
 
-    missing = drill._liveness_probe(_TreeStub(_view()), "u1")
+    missing = drill.liveness_probe(_TreeStub(_view()), "u1")
     assert missing().verdict.value == "down"
 
-    broken = drill._liveness_probe(_TreeStub(error=RuntimeError("no tree")), "u1")
+    broken = drill.liveness_probe(_TreeStub(error=RuntimeError("no tree")), "u1")
     assert broken().verdict.value == "unavailable"
 
 
@@ -217,7 +217,7 @@ def test_drill_heartbeat_probe_requires_freshness(tmp_path: Path) -> None:
     heartbeat_dir.mkdir()
     beat = heartbeat_dir / "u1.beat"
     beat.touch()
-    probe = drill._liveness_probe(
+    probe = drill.liveness_probe(
         _TreeStub(_view({"id": "u1", "state": "running", "pid": os.getpid()})),
         "u1",
         heartbeat_dir=heartbeat_dir,

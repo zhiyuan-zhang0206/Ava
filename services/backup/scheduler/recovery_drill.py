@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from base.clock import Clock
 from base.host.private_storage import write_private_bytes
-from services.backup.dump import _cluster_tz, backup_dir
+from services.backup.dump import backup_dir, cluster_tz
 
 _WEEKLY_RESTORE_WEEKDAY = 6
 _SUCCESS_MARKER = ".logical-restore-drill.json"
@@ -27,7 +27,7 @@ def local_dump_restore_due(
     if now.tzinfo is None:
         raise ValueError("recovery drill needs a TZ-aware current time")
     scheduled = _weekly_window(
-        now, _cluster_tz(clock_factory=clock_factory), hour_reader=hour_reader
+        now, cluster_tz(clock_factory=clock_factory), hour_reader=hour_reader
     )
     if now < scheduled:
         return False

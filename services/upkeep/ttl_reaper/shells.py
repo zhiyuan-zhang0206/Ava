@@ -74,7 +74,7 @@ def dispatch_deadline_s() -> float:
     return cluster_rpc.worst_case_dispatch_seconds(_SHELL_KILL_TIMEOUT_S)
 
 
-def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[dict[str, Any]]:
+def expired_shell_rows_blocking(pool: ConnectionPool) -> list[dict[str, Any]]:
     """TTL-expired shell tracking rows with their owner's home machine, oldest
     deadline first.
 
@@ -96,7 +96,7 @@ def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[dict[str, Any]]:
         return [dict(row) for row in cur.fetchall()]
 
 
-def _claim_still_expired(cur: psycopg.Cursor[Any], agent_id: int, session_id: int) -> bool:
+def claim_still_expired(cur: psycopg.Cursor[Any], agent_id: int, session_id: int) -> bool:
     """The claim UPDATE; True only while the row is STILL expired.
 
     The guard compares against ``clock_timestamp()`` — the statement time,
@@ -114,7 +114,7 @@ def _claim_still_expired(cur: psycopg.Cursor[Any], agent_id: int, session_id: in
     return cur.rowcount == 1
 
 
-def _claim_shell_row_still_expired(pool: ConnectionPool, agent_id: int, session_id: int) -> bool:
+def claim_shell_row_still_expired(pool: ConnectionPool, agent_id: int, session_id: int) -> bool:
     """Re-verify one expired shell row just before dispatching its kill.
 
     The expired-row select and the kill dispatch are separated by the other
@@ -128,10 +128,10 @@ def _claim_shell_row_still_expired(pool: ConnectionPool, agent_id: int, session_
     time.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        return _claim_still_expired(cur, agent_id, session_id)
+        return claim_still_expired(cur, agent_id, session_id)
 
 
-def _human_ttl(seconds: float) -> str:
+def human_ttl(seconds: float) -> str:
     """A TTL duration as a compact human string: 1h, 30m, 90s."""
     seconds = max(0, int(seconds))
     if seconds >= 3600 and seconds % 3600 == 0:
@@ -141,7 +141,7 @@ def _human_ttl(seconds: float) -> str:
     return f"{seconds}s"
 
 
-def _wall_clock(dt: datetime) -> str:
+def wall_clock(dt: datetime) -> str:
     """Local wall-clock for the notice: HH:MM, or MM-DD HH:MM when the moment
     is not on the cluster's today (a TTL can cross midnight).
 
@@ -191,11 +191,11 @@ def delete_shell_row(
             detail = ""
             if expires_at is not None:
                 ttl = (
-                    f", TTL {_human_ttl((expires_at - created_at).total_seconds())}"
+                    f", TTL {human_ttl((expires_at - created_at).total_seconds())}"
                     if created_at is not None
                     else ""
                 )
-                detail = f" at {_wall_clock(expires_at)}{ttl}"
+                detail = f" at {wall_clock(expires_at)}{ttl}"
             notify_owner(
                 conn,
                 db,
@@ -209,7 +209,7 @@ class _MachineAbsent:
     """Local registry evidence, never a verdict accepted from a runner payload."""
 
 
-async def _dispatch_shell_kill(
+async def dispatch_shell_kill(
     db: Database, machine: str, agent_id: int, session_id: int
 ) -> dict[str, Any] | _MachineAbsent | None:
     """One ``shell_kill`` dispatch; None means "defer to the next round".
@@ -249,19 +249,19 @@ async def _dispatch_shell_kill(
         return None
 
 
-async def _reclaim_row(
+async def reclaim_row(
     pool: ConnectionPool, db: Database, bus: EventBus, machine: str, row: dict[str, Any]
 ) -> tuple[int, int] | None:
     """Reclaim one expired shell on `machine`; the (agent, session) when its row
     was settled, None when the row is left for the next round."""
     agent_id = row["agent_id"]
     session_id = row["session_id"]
-    if not await asyncio.to_thread(_claim_shell_row_still_expired, pool, agent_id, session_id):
+    if not await asyncio.to_thread(claim_shell_row_still_expired, pool, agent_id, session_id):
         # Renewed between the select and this dispatch — the deadline moved
         # forward, so the session is no longer reaper business.
         _log.info("[ttl-reaper] shell %s of agent %s was renewed — skipping", session_id, agent_id)
         return None
-    result = await _dispatch_shell_kill(db, machine, agent_id, session_id)
+    result = await dispatch_shell_kill(db, machine, agent_id, session_id)
     if result is None:
         return None
     if isinstance(result, _MachineAbsent):
@@ -320,7 +320,7 @@ async def reap_expired_shells(
     owner has no usable home machine is left for the next round. All DB work
     runs via to_thread: the event loop never blocks on psycopg.
     """
-    rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
+    rows = await asyncio.to_thread(expired_shell_rows_blocking, pool)
     by_machine: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         machine = row["machine"]
@@ -336,7 +336,7 @@ async def reap_expired_shells(
 
     async def reclaim_machine(machine: str, machine_rows: list[dict[str, Any]]) -> None:
         for row in machine_rows:
-            settled = await _reclaim_row(pool, db, bus, machine, row)
+            settled = await reclaim_row(pool, db, bus, machine, row)
             if settled is not None:
                 reaped.append(settled)
             progress.beat()

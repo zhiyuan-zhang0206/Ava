@@ -22,7 +22,7 @@ from base.log import logger
 from services.desktop.browser.probe import cdp_url
 
 
-class _CanaryResult(NamedTuple):
+class CanaryResult(NamedTuple):
     """One canary round: ``ok``/``timeout``/``error``, or ``skip`` when no
     reachability verdict is possible (CDP control plane unusable)."""
 
@@ -30,12 +30,12 @@ class _CanaryResult(NamedTuple):
     detail: str
 
 
-class _HostResult(NamedTuple):
+class HostResult(NamedTuple):
     ok: bool
     detail: str
 
 
-def _read_json(url: str, timeout_s: float) -> dict[str, Any]:
+def read_json(url: str, timeout_s: float) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310 — loopback CDP URL
         parsed: object = json.loads(response.read())
     if not isinstance(parsed, dict):
@@ -55,17 +55,17 @@ async def _cdp_call(
     return resp.get("result") or {}
 
 
-async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
+async def canary_async(port: int, url: str, timeout_s: float) -> CanaryResult:
     """The browser-path canary: hidden target in the shared context, one fetch, closed."""
     deadline = time.monotonic() + timeout_s
 
     def left() -> float:
         return max(0.05, deadline - time.monotonic())
 
-    version = await asyncio.to_thread(_read_json, cdp_url(port), left())
+    version = await asyncio.to_thread(read_json, cdp_url(port), left())
     browser_ws_url = version.get("webSocketDebuggerUrl")
     if not isinstance(browser_ws_url, str) or not browser_ws_url:
-        return _CanaryResult("skip", "CDP /json/version carried no browser websocket")
+        return CanaryResult("skip", "CDP /json/version carried no browser websocket")
 
     ids = itertools.count(1)  # request ids are per connection
     # close_timeout is bounded so a wedged browser cannot stall the round.
@@ -81,7 +81,7 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
         )
         target_id = created.get("targetId")
         if not isinstance(target_id, str) or not target_id:
-            return _CanaryResult("skip", "Target.createTarget returned no targetId")
+            return CanaryResult("skip", "Target.createTarget returned no targetId")
         try:
             expression = (
                 f"fetch({json.dumps(url)}, {{mode: 'no-cors', cache: 'no-store'}})"
@@ -101,13 +101,13 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
                         left(),
                     )
                 except TimeoutError:
-                    return _CanaryResult("timeout", f"fetch did not settle within {timeout_s:.1f}s")
+                    return CanaryResult("timeout", f"fetch did not settle within {timeout_s:.1f}s")
             value = cast("dict[str, Any]", result.get("result") or {}).get("value")
             if value == "ok":
-                return _CanaryResult("ok", "fetch settled")
+                return CanaryResult("ok", "fetch settled")
             if isinstance(value, str) and value.startswith("error:"):
-                return _CanaryResult("error", f"fetch rejected ({value})")
-            return _CanaryResult("skip", f"unexpected evaluate payload: {value!r}")
+                return CanaryResult("error", f"fetch rejected ({value})")
+            return CanaryResult("skip", f"unexpected evaluate payload: {value!r}")
         finally:
             # The canary must never become a new occupant.
             try:
@@ -119,25 +119,25 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
                 )
 
 
-def canary(port: int, url: str, timeout_s: float) -> _CanaryResult:
+def canary(port: int, url: str, timeout_s: float) -> CanaryResult:
     """Total wrapper: the canary never raises — an unforeseen failure is a
     ``skip`` (no verdict), never a false reachability claim."""
     try:
-        return asyncio.run(_canary_async(port, url, timeout_s))
+        return asyncio.run(canary_async(port, url, timeout_s))
     except Exception as exc:
-        return _CanaryResult("skip", f"canary raised {type(exc).__name__}: {exc}")
+        return CanaryResult("skip", f"canary raised {type(exc).__name__}: {exc}")
 
 
-def host_probe(url: str, timeout_s: float) -> _HostResult:
+def host_probe(url: str, timeout_s: float) -> HostResult:
     """The same-machine contrast read: any HTTP answer counts as reachability."""
     started = time.monotonic()
     try:
         with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310 — cluster URL from settings
             status = response.status
-        return _HostResult(ok=True, detail=f"HTTP {status} in {time.monotonic() - started:.2f}s")
+        return HostResult(ok=True, detail=f"HTTP {status} in {time.monotonic() - started:.2f}s")
     except urllib.error.HTTPError as exc:
-        return _HostResult(ok=True, detail=f"HTTP {exc.code} in {time.monotonic() - started:.2f}s")
+        return HostResult(ok=True, detail=f"HTTP {exc.code} in {time.monotonic() - started:.2f}s")
     except Exception as exc:
-        return _HostResult(
+        return HostResult(
             ok=False, detail=f"{type(exc).__name__} after {time.monotonic() - started:.2f}s"
         )

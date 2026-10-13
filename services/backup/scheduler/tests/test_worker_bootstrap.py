@@ -1,6 +1,6 @@
 """The operation worker's bootstrap runs the real backup worker module.
 
-`worker_process._BOOTSTRAP` names the packages it requires inside the
+`worker_process.BOOTSTRAP` names the packages it requires inside the
 controller's code root before it runs a worker. Naming a package that does not
 exist makes EVERY scheduled dump and restore drill exit at start (the 2026-10
 inventory's R1): the attempt fails without publishing an artifact, and the daily
@@ -37,7 +37,7 @@ def _bootstrap(bootstrap: Path, root: Path, module: str) -> subprocess.Completed
 
 
 def _required_names() -> list[str]:
-    match = re.search(r"for name in \((.*?)\):", worker_process._BOOTSTRAP.read_text())
+    match = re.search(r"for name in \((.*?)\):", worker_process.BOOTSTRAP.read_text())
     assert match is not None, "the bootstrap no longer names the packages it requires"
     return [item.strip().strip("\"'") for item in match.group(1).split(",")]
 
@@ -45,7 +45,7 @@ def _required_names() -> list[str]:
 def test_the_real_bootstrap_reaches_the_backup_worker() -> None:
     """Every required name resolves inside the code root and the worker module
     imports completely: the only complaint left is the missing request."""
-    proc = _bootstrap(worker_process._BOOTSTRAP, _ROOT, "services.backup.scheduler.worker")
+    proc = _bootstrap(worker_process.BOOTSTRAP, _ROOT, "services.backup.scheduler.worker")
 
     assert "code root mismatch" not in proc.stderr, proc.stderr
     assert proc.returncode != 0
@@ -65,7 +65,7 @@ def test_every_required_name_is_a_package_of_this_checkout() -> None:
 
 def test_a_required_name_that_resolves_nowhere_stops_the_worker_at_start(tmp_path: Path) -> None:
     """The failure R1 describes: a stale name makes the bootstrap refuse the worker."""
-    source = worker_process._BOOTSTRAP.read_text()
+    source = worker_process.BOOTSTRAP.read_text()
     changed = source.replace('"services.backup.scheduler.operation"', '"services.retired_package"')
     assert changed != source
     stale = tmp_path / "stale_bootstrap.py"
@@ -78,7 +78,7 @@ def test_a_required_name_that_resolves_nowhere_stops_the_worker_at_start(tmp_pat
 
 
 def test_the_bootstrap_still_refuses_code_outside_its_root(tmp_path: Path) -> None:
-    proc = _bootstrap(worker_process._BOOTSTRAP, tmp_path, "services.backup.scheduler.worker")
+    proc = _bootstrap(worker_process.BOOTSTRAP, tmp_path, "services.backup.scheduler.worker")
 
     assert proc.returncode != 0
     assert "code root mismatch" in proc.stderr
