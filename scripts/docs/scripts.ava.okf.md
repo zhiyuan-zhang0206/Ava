@@ -51,7 +51,7 @@ Host side, stdlib only: `boundary.py` (what both recipes share: the start profil
 
 ## Key Dependencies
 
-- [[../../cli/docs/cli.ava.okf.md]] — `ava start` owns cluster identity and service readiness; `converge/host.py` applies host wiring and plugin scaffolds.
+- [[../../cli/docs/cli.ava.okf.md]] — `ava start` owns cluster identity and service readiness; `lifecycle/converge_host.py` applies host wiring and plugin scaffolds.
 - [[../../tests/docs/tests.ava.okf.md]] — many lint scripts have corresponding `tests/test_lint_*.py`
 
 ## Notes

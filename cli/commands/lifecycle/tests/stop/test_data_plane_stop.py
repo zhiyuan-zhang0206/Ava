@@ -22,16 +22,18 @@ from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.maintenance import admission
 from base.native_process import pid_starttime_ticks
+from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
+from cli.commands.data_plane.stop_waits import deadline_after, wait_for_exit
 from cli.commands.lifecycle import service_stop as stop
-from cli.commands.lifecycle.tests.stop_support import Launcher, PtyServiceProcess
-from cli.commands.lifecycle.tests.stop_support import home as home
-from cli.commands.lifecycle.tests.stop_support import launch as launch
-from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
+from cli.commands.lifecycle.tests.stop.stop_support import Launcher, PtyServiceProcess
+from cli.commands.lifecycle.tests.stop.stop_support import home as home
+from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
+from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -82,7 +84,7 @@ def test_linux_ticks_win_over_changed_epoch_birth(
     import base.native_process.ownership
 
     monkeypatch.setattr(base.native_process.ownership, "pid_starttime_ticks", read_tick)
-    identity = stop.OwnedProcess(proc.pid, 0, 123)
+    identity = OwnedProcess(proc.pid, 0, 123)
     assert identity.live()
     tick = 124
     assert not identity.live()
@@ -104,7 +106,7 @@ def test_wait_for_exit_converges_when_a_tracked_entry_vanishes(
     pid = child.pid
     starttime = pid_starttime_ticks(pid)
     assert starttime is not None
-    identity = stop.OwnedProcess(pid, 0.5, starttime)
+    identity = OwnedProcess(pid, 0.5, starttime)
     real_read = pid_starttime_ticks
 
     def reaping_read(reading_pid: int) -> int | None:
@@ -117,7 +119,7 @@ def test_wait_for_exit_converges_when_a_tracked_entry_vanishes(
 
     monkeypatch.setattr(base.native_process.ownership, "pid_starttime_ticks", reaping_read)
     try:
-        stop.wait_for_exit({identity}, stop.deadline_after(5))
+        wait_for_exit({identity}, deadline_after(5))
     finally:
         if child.poll() is None:
             child.kill()
@@ -139,7 +141,7 @@ def pending_pooler_pidfile(home: Path, monkeypatch: pytest.MonkeyPatch) -> Itera
     config = home / "pgbouncer/pgbouncer.ini"
     read_text = Path.read_text
     pending = True
-    captured: list[stop.OwnedProcess] = []
+    captured: list[OwnedProcess] = []
 
     def read(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
         nonlocal pending
@@ -211,9 +213,7 @@ def test_real_redis_stops_owned_instance_only(
         monkeypatch.setattr(ownership, "redis_data_dir", lambda: data)
         assert stop.stop_data_plane(3, producer=operator_pipeline) == ["redis"]
         assert (
-            not stop.OwnedProcess.capture(psutil.Process(pid)).live()
-            if psutil.pid_exists(pid)
-            else True
+            not OwnedProcess.capture(psutil.Process(pid)).live() if psutil.pid_exists(pid) else True
         )
         with redis.Redis.from_url(sibling_url) as sibling:  # pyright: ignore[reportUnknownMemberType] — redis stubs
             assert sibling.ping()  # pyright: ignore[reportUnknownMemberType] — redis stubs
@@ -275,9 +275,9 @@ def test_foreign_redis_directory_refuses_before_local_signals(
             assert client.ping()  # pyright: ignore[reportUnknownMemberType] — redis stubs
 
 
-def _dead_shell(launch: Launcher) -> stop.OwnedProcess:
+def _dead_shell(launch: Launcher) -> OwnedProcess:
     proc = launch("dead-shell")
-    identity = stop.OwnedProcess.capture(psutil.Process(proc.pid))
+    identity = OwnedProcess.capture(psutil.Process(proc.pid))
     proc.kill()
     proc.wait(timeout=5)
     return identity
@@ -291,7 +291,7 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
     journal = home / "run/lifecycle-op.json"
     assert not journal.exists()
     job = launch("surviving-job", term="ignore")
-    member = stop.OwnedProcess.capture(psutil.Process(job.pid))
+    member = OwnedProcess.capture(psutil.Process(job.pid))
     ledger.write(
         ledger_path(), [closure.Target("ava-agent-123-shell-1", _dead_shell(launch), (member,))]
     )
@@ -364,14 +364,14 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
     subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
     _wait_port(port, timeout=5)
     pid = _wait_pidfile()
-    identity = stop.OwnedProcess.capture(psutil.Process(pid))
+    identity = OwnedProcess.capture(psutil.Process(pid))
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
     seen_alive: list[bool] = []
 
     def note_liveness(_identity: object, _report: object) -> None:
         seen_alive.append(identity.live())
 
-    monkeypatch.setattr(plane, "_report_pooler_clients", note_liveness)
+    monkeypatch.setattr(plane, "report_pooler_clients", note_liveness)
     try:
         assert stop.stop_data_plane(3, producer=operator_pipeline) == ["pgbouncer"]
         assert seen_alive == [True], "the clients are listed once, before the pooler is signalled"
@@ -423,7 +423,7 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
     subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
     _wait_port(port, timeout=5)
     pid = _wait_pidfile()
-    identity = stop.OwnedProcess.capture(psutil.Process(pid))
+    identity = OwnedProcess.capture(psutil.Process(pid))
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
     try:
         with psycopg.connect(
@@ -446,7 +446,7 @@ def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
 ) -> None:
     from tests._containers import _free_port
 
-    identity = stop.OwnedProcess.capture(psutil.Process())
+    identity = OwnedProcess.capture(psutil.Process())
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
     # The scanner sees an exact owned pooler but its pidfile is absent. No stop
     # signal can be justified; the test's actual process must remain untouched.
@@ -457,7 +457,7 @@ def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
         yield process
 
     monkeypatch.setattr(plane.psutil, "process_iter", processes)
-    monkeypatch.setattr(plane.pooler, "_pid_is_our_pooler", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType] — constant identity fixture
+    monkeypatch.setattr(plane.pooler, "pid_is_our_pooler", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType] — constant identity fixture
     monkeypatch.setattr(plane.OwnedPooler, "stop", forbidden)
     with pytest.raises(RuntimeError, match="unrecorded or replacement"):
         stop.stop_data_plane(1, producer=operator_pipeline)
@@ -615,7 +615,7 @@ def test_real_start_retains_pooler_with_held_client(
     port, role, secret, pid = _launch_incident_shape_pooler(
         home, monkeypatch, command_machine=command_machine
     )
-    old = stop.OwnedProcess.capture(psutil.Process(pid))
+    old = OwnedProcess.capture(psutil.Process(pid))
     config = (base_pooler.ini_path().read_bytes(), pb._userlist_path().read_bytes())
     try:
         with psycopg.connect(

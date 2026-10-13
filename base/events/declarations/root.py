@@ -352,7 +352,7 @@ EVENTS: dict[str, EventSpec] = {
         "archive command)",
         tier="anomaly",
         site=(
-            "cli/commands/lifecycle/service_stop.py:report_postgres_stop_escalation "
+            "cli/commands/data_plane/stop_waits.py:report_postgres_stop_escalation "
             'telemetry.emit("telemetry", ...)'
         ),
     ),

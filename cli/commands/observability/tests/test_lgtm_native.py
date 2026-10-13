@@ -36,7 +36,7 @@ def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """These existing lifecycle cases exercise the Darwin implementation."""
     monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(lgtm_native, "_verify_loki", _skip_binary_verification)
+    monkeypatch.setattr(lgtm_native, "verify_loki", _skip_binary_verification)
 
 
 def _repo() -> Path:
@@ -49,7 +49,7 @@ def _native_dir(home: Path) -> Path:
 
 def _mark_current(home: Path) -> None:
     native_dir = _native_dir(home)
-    for name, spec in lgtm_native._load_versions(_repo()).items():
+    for name, spec in lgtm_native.native_versions(_repo()).items():
         (native_dir / f"version-{name}").parent.mkdir(parents=True, exist_ok=True)
         (native_dir / f"version-{name}").write_text(spec["version"] + "\n", encoding="utf-8")
 
@@ -126,7 +126,7 @@ def test_ensure_skips_download_when_markers_match(
 
     monkeypatch.setattr(
         lgtm_native,
-        "_download_and_verify",
+        "download_and_verify",
         fail_download,
     )
 
@@ -163,7 +163,7 @@ def test_ensure_downloads_when_a_marker_is_stale(
 
     monkeypatch.setattr(
         lgtm_native,
-        "_download_and_verify",
+        "download_and_verify",
         record_download,
     )
 
@@ -187,10 +187,10 @@ def test_download_refuses_an_archive_with_the_wrong_sha256(
     def fake_download(_url: str, archive: Path) -> None:
         archive.write_bytes(b"untrusted")
 
-    monkeypatch.setattr(lgtm_native, "_download_with_retry", fake_download)
+    monkeypatch.setattr(lgtm_native, "download_with_retry", fake_download)
 
     with pytest.raises(RuntimeError, match="SHA256 mismatch"):
-        lgtm_native._download_and_verify(
+        lgtm_native.download_and_verify(
             "loki",
             "3.7.6",
             {"url": "https://example.invalid/loki.zip", "sha256": "0" * 64},
@@ -212,9 +212,9 @@ def test_download_retry_preserves_sleep_and_stderr(
         if calls == 1:
             raise ValueError("bad payload")
 
-    monkeypatch.setattr(lgtm_native, "_stream_download", fail_then_succeed)
+    monkeypatch.setattr(lgtm_native, "stream_download", fail_then_succeed)
     monkeypatch.setattr(lgtm_native.time, "monotonic", lambda: 10.0)
-    lgtm_native._download_with_retry("https://example.invalid/loki.zip", tmp_path / "loki.zip")
+    lgtm_native.download_with_retry("https://example.invalid/loki.zip", tmp_path / "loki.zip")
 
     assert calls == 2
     assert retry_waits == [5.0]
@@ -235,11 +235,11 @@ def test_download_retry_preserves_final_error_and_chain(
         raise errors.pop(0)
 
     final_error = errors[-1]
-    monkeypatch.setattr(lgtm_native, "_stream_download", fail)
+    monkeypatch.setattr(lgtm_native, "stream_download", fail)
     monkeypatch.setattr(lgtm_native.time, "monotonic", lambda: 10.0)
     url = "https://example.invalid/loki.zip"
     with pytest.raises(RuntimeError) as caught:
-        lgtm_native._download_with_retry(url, tmp_path / "loki.zip")
+        lgtm_native.download_with_retry(url, tmp_path / "loki.zip")
 
     assert str(caught.value) == (
         f"failed to download native LGTM backend from {url} after 3 attempts (0s total): reset 3"
@@ -454,7 +454,7 @@ def test_render_configs_validates_loki_before_writing(
     command_runtime: CommandRuntime,
 ) -> None:
     validated: list[dict[str, object]] = []
-    write_if_changed = lgtm_native._write_if_changed
+    write_if_changed = lgtm_native.write_if_changed
 
     def record_validation(config: dict[str, object]) -> None:
         validated.append(config)
@@ -465,9 +465,9 @@ def test_render_configs_validates_loki_before_writing(
         write_if_changed(path, content)
 
     monkeypatch.setattr(lgtm_native, "validate_loki_deploy_config", record_validation)
-    monkeypatch.setattr(lgtm_native, "_write_if_changed", verify_validation_precedes_write)
+    monkeypatch.setattr(lgtm_native, "write_if_changed", verify_validation_precedes_write)
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         _repo(),
         tmp_path / "native",
         tmp_path / "home",
@@ -685,7 +685,7 @@ def test_native_listener_ports_are_independent_of_external_query_urls(
         monkeypatch.setattr(settings.observability, f"lgtm_{name}_port", port)
     monkeypatch.setattr(settings.observability, "telemetry_loki_url", "https://query.example/loki")
     repo = Path(__file__).resolve().parents[4]
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native,
         home,
@@ -720,7 +720,7 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
     native.mkdir(parents=True)
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "linux_amd64")
     repo = Path(__file__).resolve().parents[4]
-    assets = lgtm_native._load_versions(repo)
+    assets = lgtm_native.native_versions(repo)
     for name, asset in assets.items():
         (native / f"version-{name}").write_text(asset["version"])
         (native / f"platform-{name}").write_text("darwin_arm64")
@@ -732,7 +732,7 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
             assert "linux-amd64" in asset["member"]
         downloads.append(name)
 
-    monkeypatch.setattr(lgtm_native, "_download_and_verify", download)
+    monkeypatch.setattr(lgtm_native, "download_and_verify", download)
     lgtm_native.ensure_lgtm_native(
         repo,
         home,
@@ -777,11 +777,11 @@ def test_native_preparation_downloads_only_selected_backend(
         pytest.fail("Unselected Loki must not require its executable or validator")
 
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(lgtm_native, "_load_versions", assets)
-    monkeypatch.setattr(lgtm_native, "_download_and_verify", download)
-    monkeypatch.setattr(lgtm_native, "_render_configs", render)
-    monkeypatch.setattr(lgtm_native, "_verify_loki", no_loki)
-    monkeypatch.setattr(lgtm_native, "_render_grafana_admin_password", no_loki)
+    monkeypatch.setattr(lgtm_native, "native_versions", assets)
+    monkeypatch.setattr(lgtm_native, "download_and_verify", download)
+    monkeypatch.setattr(lgtm_native, "render_configs", render)
+    monkeypatch.setattr(lgtm_native, "verify_loki", no_loki)
+    monkeypatch.setattr(lgtm_native, "render_grafana_admin_password", no_loki)
     lgtm_native.ensure_lgtm_native(
         tmp_path,
         tmp_path / "home",

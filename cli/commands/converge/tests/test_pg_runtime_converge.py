@@ -16,8 +16,8 @@ from base.cluster.dataplane import pg_runtime, runtime_binaries
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
-from cli.commands.converge._steps import _ensure_pg_binaries_step
 from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.converge.steps import ensure_pg_binaries_step
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -78,7 +78,7 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    _ensure_pg_binaries_step(
+    ensure_pg_binaries_step(
         ConvergeCtx(
             installed.parent,
             installed.parent,
@@ -107,7 +107,7 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
     config.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/ava")
     config.set_field("redis_url", "redis://127.0.0.1:6380/0")
     monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", forbidden)
-    _ensure_pg_binaries_step(
+    ensure_pg_binaries_step(
         ConvergeCtx(
             tmp_path,
             tmp_path,
@@ -147,12 +147,12 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 machine=machine_from_boot(config),
             )
         )
-    _ensure_pg_binaries_step(contexts[0])
-    _ensure_pg_binaries_step(contexts[1])
+    ensure_pg_binaries_step(contexts[0])
+    ensure_pg_binaries_step(contexts[1])
     assert calls == ["local"]
 
     local.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/ava")
     remote.set_field("db_url", "postgresql://test:test@127.0.0.1:5433/ava")
-    _ensure_pg_binaries_step(contexts[0])
-    _ensure_pg_binaries_step(contexts[1])
+    ensure_pg_binaries_step(contexts[0])
+    ensure_pg_binaries_step(contexts[1])
     assert calls == ["local", "local"]

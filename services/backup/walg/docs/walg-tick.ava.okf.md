@@ -57,7 +57,7 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
 ## Entry Points
 - `services/backup/walg/tick.py` — `run_tick()`
 - `cli/commands/data_plane/walg.py` — `cmd_walg_run()` and the tick lines of `status`
-- `cli/commands/converge/_os_jobs.py` — `ensure_walg_job`
+- `cli/commands/converge/os_jobs.py` — `ensure_walg_job`
 
 ## Notes
 - Operator procedure and the alert texts: [WAL-G operations](operations.md).

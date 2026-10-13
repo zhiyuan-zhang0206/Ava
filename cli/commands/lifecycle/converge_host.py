@@ -30,9 +30,13 @@ from base.host.system.probes import browser_incapability
 from base.paths.home import is_default_home, resolve_ava_home
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
-from cli.commands.converge._brew_pin import ensure_brew_pin
-from cli.commands.converge._frontend_env import ensure_no_frontend_env_overrides
-from cli.commands.converge._os_jobs import (
+from cli.commands.converge.brew_pin import ensure_brew_pin
+from cli.commands.converge.firewall import ensure_firewall_allowlist
+from cli.commands.converge.frontend_env import ensure_no_frontend_env_overrides
+from cli.commands.converge.health_preflight import (
+    ensure_health_preflight as _ensure_health_preflight,
+)
+from cli.commands.converge.os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
     ensure_logs_maintenance,
@@ -40,31 +44,27 @@ from cli.commands.converge._os_jobs import (
     ensure_pr_flow_job,
     ensure_walg_job,
 )
-from cli.commands.converge._ownership_preflight import (
+from cli.commands.converge.ownership_preflight import (
     ensure_ownership_preflight as _ensure_ownership_preflight,
-)
-from cli.commands.converge._steps import (
-    _PATH_BEGIN as _PATH_BEGIN,
-)
-from cli.commands.converge._steps import (
-    _PATH_END as _PATH_END,
-)
-from cli.commands.converge._steps import (
-    _ensure_ava_home_dirs,
-    _ensure_ava_on_path,
-    _ensure_local_bin_on_path,
-    _ensure_pg_binaries_step,
-    ensure_local_git_hooks,
-)
-from cli.commands.converge._steps import (
-    _shell_rc_path as _shell_rc_path,
-)
-from cli.commands.converge.firewall import ensure_firewall_allowlist
-from cli.commands.converge.health_preflight import (
-    ensure_health_preflight as _ensure_health_preflight,
 )
 from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
+from cli.commands.converge.steps import (
+    PATH_BEGIN as PATH_BEGIN,
+)
+from cli.commands.converge.steps import (
+    PATH_END as PATH_END,
+)
+from cli.commands.converge.steps import (
+    ensure_ava_home_dirs,
+    ensure_ava_on_path,
+    ensure_local_bin_on_path,
+    ensure_local_git_hooks,
+    ensure_pg_binaries_step,
+)
+from cli.commands.converge.steps import (
+    shell_rc_path as shell_rc_path,
+)
 from cli.commands.converge.walg import converge_walg
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
 from cli.commands.extensions.external_skills import converge_external_agent_skill
@@ -301,9 +301,9 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # Warning-only ownership preflight must run before every write-capable step:
     # root-owned paths otherwise fail before converge can print the exact repair.
     ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
-    ConvergeStep("ava on PATH", _ensure_ava_on_path, host_global=True),
-    ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
-    ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
+    ConvergeStep("ava on PATH", ensure_ava_on_path, host_global=True),
+    ConvergeStep("~/.local/bin on PATH", ensure_local_bin_on_path, host_global=True),
+    ConvergeStep("$AVA_HOME dir skeleton", ensure_ava_home_dirs),
     # Codex and Claude Code own their global homes. This prod-only host step
     # contributes exactly the Ava operator skill when those homes already exist.
     # The private ownership ledger lives under the skeleton created above.
@@ -324,7 +324,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # distribution when no installation exists. Gateway-only.
     ConvergeStep(
         "PostgreSQL 17 + pgvector runtime",
-        _ensure_pg_binaries_step,
+        ensure_pg_binaries_step,
         roles=frozenset({"gateway"}),
     ),
     # WAL archiving, when AVA_WALG_CONFIG_FILE switches it on: the pinned binary, a

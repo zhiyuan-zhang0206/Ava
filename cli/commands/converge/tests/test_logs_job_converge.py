@@ -24,7 +24,7 @@ def test_converge_registers_logs_maintenance(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    from cli.commands.converge._os_jobs import ensure_logs_maintenance
+    from cli.commands.converge.os_jobs import ensure_logs_maintenance
 
     calls: list[str] = []
 

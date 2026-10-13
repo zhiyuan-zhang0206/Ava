@@ -29,7 +29,7 @@ from cli.commands.lifecycle import _stop_extras
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
-from cli.commands.lifecycle.tests.stop_support import (
+from cli.commands.lifecycle.tests.stop.stop_support import (
     Launcher,
     PtyServiceProcess,
     busy_session,
@@ -37,10 +37,10 @@ from cli.commands.lifecycle.tests.stop_support import (
     drained,
     record_root_stops,
 )
-from cli.commands.lifecycle.tests.stop_support import home as home
-from cli.commands.lifecycle.tests.stop_support import launch as launch
-from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
-from cli.commands.lifecycle.tests.stop_support import written as written
+from cli.commands.lifecycle.tests.stop.stop_support import home as home
+from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
+from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
+from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops import agent_pause, pty_close_notices

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cli.commands.converge import host as converge_host
+from cli.commands.lifecycle import converge_host
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 

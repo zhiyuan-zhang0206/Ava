@@ -321,7 +321,7 @@ entry_modules = [
     "cli.tests.bootstrap.command_inputs",
     "cli.commands.lifecycle.tests.identity.restart_inputs",
     "cli.commands.observability.tests.lgtm_inputs",
-    "cli.commands.converge.tests.context_inputs",
+    "cli.commands.lifecycle.tests.converge_host.context_inputs",
 ]
 
 [[tool.importlinter.contracts]]

@@ -270,7 +270,7 @@ def _cold_report(
         args.no_notify = False
         return schedules_verify.h_schedules_verify(args)
     if name == "stop":
-        from cli.commands.lifecycle.service_stop import report_postgres_stop_escalation
+        from cli.commands.data_plane.stop_waits import report_postgres_stop_escalation
 
         notes: list[str] = []
         report_postgres_stop_escalation(

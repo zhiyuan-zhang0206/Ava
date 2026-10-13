@@ -28,19 +28,19 @@ from base.native_process.ownership import OwnedProcess
 from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty import closure
 from base.sessions.record import SessionRecord
-from cli.commands.lifecycle import _maintenance_stop_report as report
+from cli.commands.data_plane import maintenance_stop_report as report
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as stop
-from cli.commands.lifecycle.tests.stop_support import (
+from cli.commands.lifecycle.tests.stop.stop_support import (
     Launcher,
     closed_session,
     identity_of,
     launched_processes,
     stub_closure,
 )
-from cli.commands.lifecycle.tests.stop_support import home as home
-from cli.commands.lifecycle.tests.stop_support import launch as launch
-from cli.commands.lifecycle.tests.stop_support import written as written
+from cli.commands.lifecycle.tests.stop.stop_support import home as home
+from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
+from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.components.agent.test_maintenance import WHEN

@@ -19,18 +19,11 @@ from base.deploy.lifecycle.status_journal import begin, finish, phase, status_pa
 from base.deploy.maintenance import admission
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
-from base.native_process.ownership import retain_processes
+from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
-from cli.commands.lifecycle.service_stop import (
-    OwnedProcess,
-    capture_tree,
-    close_terminals,
-    deadline_after,
-    remaining,
-    stop_data_plane,
-    wait_for_exit,
-)
+from cli.commands.data_plane.stop_waits import deadline_after, remaining, wait_for_exit
+from cli.commands.lifecycle.service_stop import close_terminals, stop_data_plane
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause.probe import ops_quiescent
 from services.supervision.roster import build_services
