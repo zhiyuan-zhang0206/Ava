@@ -17,15 +17,15 @@ import pytest
 from playwright.sync_api import Page
 
 from scripts.post_deploy_visual import matrix as matrix
+from scripts.post_deploy_visual.layout_assertions import (
+    structural_failures,
+    wait_for_minimum_visible_counts,
+)
 from scripts.post_deploy_visual.matrix import (
     measure_structure,
     structural_minimum_counts,
 )
 from scripts.post_deploy_visual.policy import STRUCTURAL_SPECS
-from tests.e2e.visual._layout_assertions import (
-    structural_failures,
-    wait_for_minimum_visible_counts,
-)
 
 ASIDE = "#main-content aside"
 

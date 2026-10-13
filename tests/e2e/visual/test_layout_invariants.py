@@ -33,14 +33,16 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser, Locator, Page, expect
 
-from tests.e2e._ports import FRONTEND_URL
-from tests.e2e.visual._layout_assertions import (
-    OVERRIDE_BASE_URL,
+from scripts.post_deploy_visual.layout_assertions import (
     all_elements_within_parents,
     element_within_parent,
     element_within_viewport,
-    new_context,
     no_document_horizontal_overflow,
+)
+from tests.e2e._ports import FRONTEND_URL
+from tests.e2e.visual.stubbed_home import (
+    OVERRIDE_BASE_URL,
+    new_context,
     open_page,
     wait_layout_settled,
 )

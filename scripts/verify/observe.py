@@ -193,7 +193,7 @@ def execution_completed(items: list[dict[str, Any]], reply: str) -> bool:
 
 def check_scripted_agent(home: Path, _source: Path) -> Detail:
     from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
-    from tests.e2e.fakes.scenarios.message_flow import REPLY_TEXT
+    from scripts.verify.scripted_reply import REPLY_TEXT
 
     with httpx.Client(base_url=f"http://127.0.0.1:{_ports(home)['gateway']}", timeout=30) as client:
         created = client.post(
