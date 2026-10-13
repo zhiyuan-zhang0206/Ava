@@ -71,7 +71,6 @@ def _repo(tmp_path: Path) -> Path:
         ".github/workflows/ci.yml": "",
         ".agents/skills/demo/SKILL.md": "",
         ".pre-commit-config.yaml": "",
-        ".test_durations.source.json": "{}\n",
         "LICENSE": "",
     }
     for relative_path, content in files.items():
@@ -209,8 +208,6 @@ def test_a_frontend_file_adds_no_backend_test(tmp_path: Path) -> None:
     "path",
     [
         ".pre-commit-config.yaml",
-        ".test_durations",
-        ".test_durations.source.json",
         "LICENSE",
         "tests/e2e/test_browser.py",
         "tests/e2e/conftest.py",
@@ -272,9 +269,21 @@ def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> N
         assert set(expectations[".github/workflows/ci.yml"]) <= set(result.tests)
     else:
         assert result.decision == "FULL"
-        assert result.reason in {"incomplete-impact", "subset-too-close"}
+        assert result.reason in {"incomplete-impact", "subset-too-close", "no-durations"}
         if result.reason == "incomplete-impact":
             assert result.diagnostics
+
+
+def test_a_run_without_timings_keeps_the_full_suite(tmp_path: Path) -> None:
+    """The 80% guard compares two sums of timings; with no timing cache both are zero, so a
+    subset would pass it. It must not."""
+    repo_root = _repo(tmp_path)
+    assert _select(repo_root, "base/lm/engine.py").decision == "SELECTED"
+    (repo_root / ".test_durations").unlink()
+
+    result = _select(repo_root, "base/lm/engine.py")
+
+    assert (result.decision, result.reason) == ("FULL", "no-durations")
 
 
 def test_an_unowned_path_is_the_full_suite_safety_net(tmp_path: Path) -> None:

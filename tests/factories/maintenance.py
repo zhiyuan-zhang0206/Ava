@@ -1,6 +1,6 @@
 """Real maintenance admission fixtures shared by caller and hosted-runtime tests.
 
-Depends on `base` only; `maintenance_cluster` holds the part that drives the CLI start path.
+Depends on `base` only; `cli/commands/tests/maintenance_cluster.py` holds the part that drives the CLI start path.
 """
 
 from datetime import UTC, datetime

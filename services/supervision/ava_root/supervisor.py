@@ -44,7 +44,7 @@ from services.supervision.ava_root.manifest import (
     UnknownUnitError,
 )
 from services.supervision.ava_root.stopping import StoppingMixin, SupervisorConfig
-from services.supervision.ava_root.unit_records import _Generation, _UnitRuntime
+from services.supervision.ava_root.unit_records import Generation, UnitRuntime
 
 _log = logging.getLogger(__name__)
 
@@ -84,8 +84,8 @@ class Supervisor(StoppingMixin):
         self._run_dir = run_dir
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
-        self._units: dict[str, _UnitRuntime] = {
-            manifest.id: _UnitRuntime(manifest=manifest) for manifest in registry.units
+        self._units: dict[str, UnitRuntime] = {
+            manifest.id: UnitRuntime(manifest=manifest) for manifest in registry.units
         }
         self._lock = asyncio.Lock()
         self._started_at: float | None = None
@@ -95,7 +95,7 @@ class Supervisor(StoppingMixin):
         self._metrics: MetricsSource | None = None
         self._runtime_identity: LoadedRuntimeIdentity | None = None
         self._home: Path | None = None
-        self._watches: dict[asyncio.Task[None], _Generation] = {}
+        self._watches: dict[asyncio.Task[None], Generation] = {}
         self._watch_errors: list[BaseException] = []
 
     # ── lifecycle ────────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ class Supervisor(StoppingMixin):
         """Actual live watcher identities, including refused children still being reaped."""
         return tuple(task for task in self._watches if not task.done())
 
-    def _retain_watch(self, task: asyncio.Task[None], generation: _Generation) -> None:
+    def _retain_watch(self, task: asyncio.Task[None], generation: Generation) -> None:
         """Transfer the actual Task synchronously before another generation can replace it."""
         self._watches[task] = generation
         task.add_done_callback(self._watch_completed)
@@ -437,20 +437,20 @@ class Supervisor(StoppingMixin):
 
     # ── internals ────────────────────────────────────────────────────────────
 
-    def _set_intent(self, runtime: _UnitRuntime, intent: UnitIntent, source: IntentSource) -> None:
+    def _set_intent(self, runtime: UnitRuntime, intent: UnitIntent, source: IntentSource) -> None:
         """Record a unit's policy fact and persist it for the next root."""
         runtime.intent = intent
         runtime.intent_source = source
         self._write_record(runtime)
 
-    def _write_record(self, runtime: _UnitRuntime) -> None:
+    def _write_record(self, runtime: UnitRuntime) -> None:
         intent_store.write(
             self._run_dir,
             runtime.manifest.id,
             IntentRecord(runtime.intent, runtime.intent_source, runtime.restart_failed),
         )
 
-    def _boot_intent(self, runtime: _UnitRuntime) -> None:
+    def _boot_intent(self, runtime: UnitRuntime) -> None:
         """Merge this unit's stored record into a fresh root generation."""
         record = intent_store.read(self._run_dir, runtime.manifest.id)
         merged = merge_record_for_boot(record)
@@ -467,7 +467,7 @@ class Supervisor(StoppingMixin):
             self._write_record(runtime)
 
     def _record_restart_failure(
-        self, runtime: _UnitRuntime, stage: RestartStage, detail: str
+        self, runtime: UnitRuntime, stage: RestartStage, detail: str
     ) -> None:
         """Record one member's failed replacement half; store first, then signal."""
         previous = runtime.restart_failed
@@ -478,7 +478,7 @@ class Supervisor(StoppingMixin):
         if previous is None or previous.stage is not stage:
             self._emit_restart_failed(runtime, failure)
 
-    def _clear_restart_failure(self, runtime: _UnitRuntime) -> None:
+    def _clear_restart_failure(self, runtime: UnitRuntime) -> None:
         """Clear a recorded failure once a fresh generation proved it gone."""
         previous = runtime.restart_failed
         if previous is None:
@@ -488,7 +488,7 @@ class Supervisor(StoppingMixin):
         self._emit_restart_cleared(runtime, previous)
 
     @staticmethod
-    def _emit_restart_failed(runtime: _UnitRuntime, failure: RestartFailure) -> None:
+    def _emit_restart_failed(runtime: UnitRuntime, failure: RestartFailure) -> None:
         try:
             from base.log import logger
 
@@ -506,7 +506,7 @@ class Supervisor(StoppingMixin):
             _log.exception("unit %s: restart-failure event fan-out failed", runtime.manifest.id)
 
     @staticmethod
-    def _emit_restart_cleared(runtime: _UnitRuntime, failure: RestartFailure) -> None:
+    def _emit_restart_cleared(runtime: UnitRuntime, failure: RestartFailure) -> None:
         try:
             from base.log import logger
 
@@ -520,7 +520,7 @@ class Supervisor(StoppingMixin):
         except Exception:
             _log.exception("unit %s: restart-cleared event fan-out failed", runtime.manifest.id)
 
-    async def _start_unit(self, runtime: _UnitRuntime) -> None:
+    async def _start_unit(self, runtime: UnitRuntime) -> None:
         """Spawn a stopped unit; a spawn failure is recorded, never raised.
 
         A fresh active generation is the only proof that a recorded replacement
@@ -537,7 +537,7 @@ class Supervisor(StoppingMixin):
             return
         self._clear_restart_failure(runtime)
 
-    async def _spawn(self, runtime: _UnitRuntime) -> None:
+    async def _spawn(self, runtime: UnitRuntime) -> None:
         """Fork+exec one fresh generation of `runtime`.
 
         The caller holds the mutation lock. Units are spawned as plain
@@ -572,7 +572,7 @@ class Supervisor(StoppingMixin):
             identity = OwnedProcess.capture(psutil.Process(proc.pid))
         except psutil.NoSuchProcess:
             identity = None
-        generation = _Generation(
+        generation = Generation(
             proc=proc,
             started_at=monotonic(),
             identity=identity,
@@ -590,7 +590,7 @@ class Supervisor(StoppingMixin):
             " ".join(manifest.exec),
         )
 
-    async def _watch(self, runtime: _UnitRuntime, generation: _Generation) -> None:
+    async def _watch(self, runtime: UnitRuntime, generation: Generation) -> None:
         """Reap one direct child and make an unexpected exit eligible for replacement."""
         returncode = await generation.proc.wait()
         if runtime.generation is generation:
@@ -602,7 +602,7 @@ class Supervisor(StoppingMixin):
         generation.exited.set()
 
     @staticmethod
-    def _is_active(runtime: _UnitRuntime) -> bool:
+    def _is_active(runtime: UnitRuntime) -> bool:
         """True when the unit has a live generation process."""
         generation = runtime.generation
         return generation is not None and generation.proc.returncode is None
@@ -612,7 +612,7 @@ class Supervisor(StoppingMixin):
             raise RuntimeError("root supervisor admission closed")
 
     @staticmethod
-    def _pid(runtime: _UnitRuntime) -> int | None:
+    def _pid(runtime: UnitRuntime) -> int | None:
         """The live generation's pid, or None when nothing is running."""
         generation = runtime.generation
         if generation is None or generation.proc.returncode is not None:
@@ -620,7 +620,7 @@ class Supervisor(StoppingMixin):
         return generation.proc.pid
 
     @staticmethod
-    def _unit_result(runtime: _UnitRuntime, action: str) -> dict[str, object]:
+    def _unit_result(runtime: UnitRuntime, action: str) -> dict[str, object]:
         """One per-unit entry for a control-verb response."""
         result: dict[str, object] = {
             "id": runtime.manifest.id,

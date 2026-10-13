@@ -37,6 +37,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+from cli.commands.tests.maintenance_cluster import start_cluster_through_ready_gate
 from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
@@ -44,7 +45,6 @@ from services.agent_runner.agent_host.tests.host_policy import configured_machin
 from tests.factories.maintenance import WHEN, maintenance_agent
 from tests.factories.maintenance import isolate as isolate
 from tests.factories.maintenance import maintenance_agent as _agent
-from tests.factories.maintenance_cluster import start_cluster_through_ready_gate
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

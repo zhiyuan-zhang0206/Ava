@@ -259,7 +259,7 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-def _loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
+def loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
     """Project each registered loop tracker into the shared health envelope."""
     now = time.time()
     records: list[dict[str, object]] = []
@@ -307,7 +307,7 @@ async def _sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
         remaining -= step
 
 
-async def _maintenance_with_liveness(
+async def maintenance_with_liveness(
     pool: ConnectionPool,
     progress: LoopProgress,
     run: Callable[[ConnectionPool], None],
@@ -356,7 +356,7 @@ async def _dispatch_loop(
     while True:
         try:
             if not admission.quiesced():
-                await _maintenance_with_liveness(
+                await maintenance_with_liveness(
                     pool,
                     progress,
                     lambda target_pool: _run_maintenance(target_pool, progress, config, db),
@@ -388,7 +388,7 @@ async def _dispatch_loop(
         await _sleep_with_liveness(progress, interval)
 
 
-async def _resolution_loop(
+async def resolution_loop(
     pool: ConnectionPool,
     progress: LoopProgress,
     config: EventsMaintenanceConfig,
@@ -413,7 +413,7 @@ async def _resolution_loop(
     while True:
         try:
             if not admission.quiesced():
-                await _maintenance_with_liveness(
+                await maintenance_with_liveness(
                     pool,
                     progress,
                     lambda target_pool: _run_resolution(target_pool, progress, config, cadence),
@@ -486,7 +486,7 @@ async def run(
         "events_maintenance",
         endpoint.health_port,
         liveness=liveness,
-        components=lambda: _loop_components(liveness),
+        components=lambda: loop_components(liveness),
         image=image,
     )
     _log.info("[events-maintenance] healthz listening on :%s", endpoint.health_port)
@@ -500,7 +500,7 @@ async def run(
         # the blocking executor thread.
         async with asyncio.TaskGroup() as loops:
             loops.create_task(_dispatch_loop(pool, dispatch_progress, config, db, tasks=loops))
-            loops.create_task(_resolution_loop(pool, resolution_progress, config, tasks=loops))
+            loops.create_task(resolution_loop(pool, resolution_progress, config, tasks=loops))
             loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
             if alert_progress is not None:
                 bus = EventBus(

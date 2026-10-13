@@ -10,7 +10,7 @@ from base.daemon.health import DaemonProbe
 _TIMEOUT_S = 3.0
 
 
-def _post_search(
+def post_search(
     uri: str, *, embedding_name_reader: Callable[[], str]
 ) -> dict[str, object] | DaemonProbe:
     """One POST /search with a zero vector — the body dict when it
@@ -37,7 +37,7 @@ def _probe() -> DaemonProbe:
     """Alive when the service answers a real search with a hits payload."""
     config = ConfigBoot()
     config.read_process_environment()
-    payload = _post_search(
+    payload = post_search(
         config.view.services.memory_search_uri,
         embedding_name_reader=lambda: config.view.services.embedding_backend,
     )

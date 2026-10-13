@@ -43,7 +43,7 @@ Launch is **relative path direct launch** for the declared command, never `uv ru
 
 ## Gating / Lifecycle
 - Gated together with the browser service (`AVA_BROWSER_ENABLED` + display / Chrome / npx capability) — see [[browser.ava.okf.md|Browser service]].
-- The `.mcp.json` declares `requires: {display}`; the daemon's own gate (`services/supervision/roster/spec.py:_gate_reason` → `browser_incapability()`) is the same as the browser service's.
+- The `.mcp.json` declares `requires: {display}`; the daemon's own gate (`services/supervision/roster/spec.py:gate_reason` → `browser_incapability()`) is the same as the browser service's.
 - The browser-mcp daemon establishes one upstream per process. Upstream death logs an error and exits after cleanup; there is no internal reconnect loop. The root retains its bounded process restart policy. Reattachment can lose page affinity; continuity is not guaranteed.
 
 ## Key Dependencies

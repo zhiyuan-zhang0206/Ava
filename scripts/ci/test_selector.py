@@ -60,8 +60,6 @@ _TREE_SCAN_ONLY_FILES = frozenset(
         ".gitignore",
         ".gitattributes",
         ".gitleaks.toml",
-        ".test_durations",  # shard balancing only
-        ".test_durations.source.json",
         "LICENSE",
         "NOTICE",
     }
@@ -425,10 +423,11 @@ def select_tests(
     owned.update(tree_scan_tests(repo_root))
     tests = tuple(sorted((owned | tainted) & checkout.collectable))
     estimate = estimate_seconds(tests, durations, reference_paths=set(checkout.collectable))
-    if not tests:
+    no_basis = _no_basis_reason(tests, durations)
+    if no_basis is not None:
         return _result(
             "FULL",
-            "no-tests",
+            no_basis,
             full_estimate=full_estimate,
             map_source_count=source_count,
             diagnostics=diagnostics,
@@ -461,6 +460,18 @@ def select_tests(
         map_source_count=source_count,
         diagnostics=diagnostics,
     )
+
+
+def _no_basis_reason(tests: tuple[str, ...], durations: dict[str, float]) -> str | None:
+    """Why there is nothing to compare against the 80% guard, or None when there is.
+
+    No tests leaves nothing to run; no timings leave both sums of the guard at zero, which
+    any subset would pass, so a run without the timing cache keeps the full suite."""
+    if not tests:
+        return "no-tests"
+    if not durations:
+        return "no-durations"
+    return None
 
 
 def _runtime_candidates(

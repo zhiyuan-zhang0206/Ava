@@ -196,7 +196,7 @@ def _publish_copy(staged: Path, target: Path, digest: str) -> None:
         copy.unlink(missing_ok=True)
 
 
-def _execute(
+def execute(
     request: dict[str, object],
     work: Path,
     *,
@@ -267,7 +267,7 @@ def main() -> None:
     )
     publish_result(
         output,
-        _execute(
+        execute(
             request,
             output.parent,
             config=config,

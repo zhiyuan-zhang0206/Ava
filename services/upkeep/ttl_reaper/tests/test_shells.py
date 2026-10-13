@@ -22,7 +22,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops.rpc_schemas import ShellKillResult
 from services.upkeep.ttl_reaper import shells
-from services.upkeep.ttl_reaper.shells import _claim_shell_row_still_expired, reap_expired_shells
+from services.upkeep.ttl_reaper.shells import claim_shell_row_still_expired, reap_expired_shells
 
 
 def _progress() -> LoopProgress:
@@ -437,7 +437,7 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
     def _stale_select(_pool: ConnectionPool) -> list[dict[str, object]]:
         return stale_rows
 
-    monkeypatch.setattr(shells, "_expired_shell_rows_blocking", _stale_select)
+    monkeypatch.setattr(shells, "expired_shell_rows_blocking", _stale_select)
     dispatched: list[tuple[str, object]] = []
 
     async def _dispatch(
@@ -465,7 +465,7 @@ def test_claim_still_expired_true_for_expired_row(
 ) -> None:
     aid = _running_agent(db_conn)
     _insert_shell_row(db_conn, aid, 41, expires_at=datetime.now(UTC) - timedelta(minutes=1))
-    assert _claim_shell_row_still_expired(reaper_pool, aid, 41)
+    assert claim_shell_row_still_expired(reaper_pool, aid, 41)
 
 
 def test_claim_still_expired_false_for_renewed_row(
@@ -475,7 +475,7 @@ def test_claim_still_expired_false_for_renewed_row(
     the claim — the deadline moved forward, no kill may be dispatched."""
     aid = _running_agent(db_conn)
     _insert_shell_row(db_conn, aid, 42, expires_at=datetime.now(UTC) + timedelta(hours=1))
-    assert not _claim_shell_row_still_expired(reaper_pool, aid, 42)
+    assert not claim_shell_row_still_expired(reaper_pool, aid, 42)
 
 
 def test_claim_still_expired_evaluates_at_statement_time(
@@ -501,7 +501,7 @@ def test_claim_still_expired_evaluates_at_statement_time(
         # The transaction starts before the deadline passes.
         cur.execute("SET TRANSACTION READ WRITE")
         time.sleep(2.0)
-        assert shells._claim_still_expired(cur, aid, 45)
+        assert shells.claim_still_expired(cur, aid, 45)
     db_conn.rollback()
 
 
@@ -509,20 +509,20 @@ def test_claim_still_expired_false_for_missing_row(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool
 ) -> None:
     aid = _running_agent(db_conn)
-    assert not _claim_shell_row_still_expired(reaper_pool, aid, 43)
+    assert not claim_shell_row_still_expired(reaper_pool, aid, 43)
 
 
 def test_human_ttl_formats_compact_durations() -> None:
     """The notice's TTL duration reads compactly: whole hours/months as h/m,
     anything else in seconds; negative (clock-skewed) durations clamp to 0s."""
-    from services.upkeep.ttl_reaper.shells import _human_ttl
+    from services.upkeep.ttl_reaper.shells import human_ttl
 
-    assert _human_ttl(3600) == "1h"
-    assert _human_ttl(2 * 3600) == "2h"
-    assert _human_ttl(1800) == "30m"
-    assert _human_ttl(90) == "90s"
-    assert _human_ttl(0) == "0s"
-    assert _human_ttl(-61) == "0s"
+    assert human_ttl(3600) == "1h"
+    assert human_ttl(2 * 3600) == "2h"
+    assert human_ttl(1800) == "30m"
+    assert human_ttl(90) == "90s"
+    assert human_ttl(0) == "0s"
+    assert human_ttl(-61) == "0s"
 
 
 def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -538,11 +538,11 @@ def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) ->
     # A specific wall-clock moment on the cluster's today: the same instant
     # fed in as UTC must render the Shanghai wall clock, no date prefix.
     at = now.replace(hour=23, minute=59, second=0, microsecond=0)
-    assert shells._wall_clock(at.astimezone(UTC)) == "23:59"
+    assert shells.wall_clock(at.astimezone(UTC)) == "23:59"
 
     # A moment on the cluster's tomorrow (TTL crossing midnight) carries the MM-DD prefix.
     cross = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
-    assert shells._wall_clock(cross) == cross.strftime("%m-%d %H:%M")
+    assert shells.wall_clock(cross) == cross.strftime("%m-%d %H:%M")
 
 
 def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -560,7 +560,7 @@ def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch
         .replace(hour=12, minute=0, second=0, microsecond=0)
         .astimezone(UTC)
     )
-    assert shells._wall_clock(dt) == dt.astimezone(None).strftime("%H:%M")
+    assert shells.wall_clock(dt) == dt.astimezone(None).strftime("%H:%M")
 
 
 @pytest.mark.parametrize(

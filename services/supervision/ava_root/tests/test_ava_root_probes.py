@@ -128,13 +128,13 @@ def test_register_ref_missing_attribute_and_non_callable(
 def test_ref_resolution_is_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_probe_module(tmp_path, monkeypatch, "tmp_probe_cached")
     calls: list[str] = []
-    real_resolve = probes._resolve_ref
+    real_resolve = probes.resolve_ref
 
     def counting(ref: str) -> Callable[[], DaemonProbe]:
         calls.append(ref)
         return real_resolve(ref)
 
-    monkeypatch.setattr(probes, "_resolve_ref", counting)
+    monkeypatch.setattr(probes, "resolve_ref", counting)
     registry = ProbeRegistry()
     registry.register_ref("alpha", "tmp_probe_cached:probe")
     assert registry.resolve("alpha") is registry.resolve("alpha")
