@@ -10,10 +10,9 @@ A leaked environment key,
 markers documented on the fixture that honours them.
 """
 
-import contextlib
 import os
 import sys
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import psycopg
@@ -22,6 +21,8 @@ import redis
 import redis.asyncio
 from redis.asyncio.connection import AbstractConnection as AsyncRedisConnection
 from redis.connection import AbstractConnection as RedisConnection
+
+from base.tests.fixtures.stdlib_logging import stdlib_logging_isolated
 
 __all__ = ["refuse_native_data_plane", "stub_everywhere"]
 
@@ -246,7 +247,7 @@ def _guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def _guard_service_readiness(
+def guard_service_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The CLI owner's guard: `cli.commands.lifecycle.root_driver.wait_for_service_tree` reports every
@@ -273,7 +274,7 @@ def _guard_service_readiness(
 
 
 @pytest.fixture
-def _test_homes_get_their_own_ports(
+def homes_get_their_own_ports(
     monkeypatch: pytest.MonkeyPatch, session_ports: dict[str, int]
 ) -> None:
     """Autouse: a home born inside a test records this session's own ports.
@@ -387,53 +388,6 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(base.host.env.bootstrap, "dial_get", _boom)
-
-
-# Loggers `base.log._install_stdlib_intercept()` gives a level of its own besides the
-# first-party names and the root: the psycopg pool gate and the uvicorn trio.
-_INTERCEPT_LEVELED_THIRD_PARTY = ("psycopg.pool", "uvicorn", "uvicorn.error", "uvicorn.access")
-
-
-@contextlib.contextmanager
-def stdlib_logging_isolated() -> Generator[None]:
-    """Run a block with the loguru->telemetry bridge off the root logger, then put stdlib
-    logging back as it was: the root handlers AND the level of every logger the intercept
-    sets.
-
-    `_install_stdlib_intercept()` sets the root to INFO and each first-party logger to
-    DEBUG (plus the psycopg pool and uvicorn loggers). Levels live on the process-global
-    `logging.Logger.manager`, so restoring only the handlers left them set for every later
-    test in the same xdist worker. A stdlib call whose format string cannot consume its
-    arguments raises out of pytest's capture handler only when the record passes the level
-    gate, so the leak made such a bug fail only in the runs where an intercept test had
-    come earlier in the worker.
-    """
-    import logging
-
-    root = logging.getLogger()
-    saved_handlers = root.handlers[:]
-    saved_levels = {
-        name: logger.level
-        for name, logger in logging.Logger.manager.loggerDict.items()
-        if isinstance(logger, logging.Logger)
-    }
-    root_level = root.level
-    root.handlers = [
-        handler
-        for handler in saved_handlers
-        if not (
-            type(handler).__module__ == "base.log.sinks"
-            and type(handler).__name__ == "_StdlibInterceptHandler"
-        )
-    ]
-    try:
-        yield
-    finally:
-        root.handlers = saved_handlers
-        root.setLevel(root_level)
-        for name, logger in logging.Logger.manager.loggerDict.items():
-            if isinstance(logger, logging.Logger):
-                logger.setLevel(saved_levels.get(name, logging.NOTSET))
 
 
 @pytest.fixture(autouse=True)

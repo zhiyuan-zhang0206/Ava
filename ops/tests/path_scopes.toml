@@ -13,5 +13,4 @@
     "test_cluster_status_op.py",
     "test_cross_machine_dispatch.py",
     "test_inventory_ops.py",
-    "test_stub_everywhere_alias_scan.py"
 ]
