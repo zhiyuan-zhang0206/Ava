@@ -7,8 +7,6 @@ exports = ["cancel_fixture.py"]
 "test_explicit_retry_inputs.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"cancel_fixture.py#monkeypatch.setattr agent.graph.exec.node.subscribe_interrupt" = 1
-"cancel_fixture.py#monkeypatch.setattr agent.graph.hooks.compact.subscribe_interrupt" = 1
 "cancel_fixture.py#monkeypatch.setattr agent.graph.llm._cancel.subscribe_interrupt" = 1
 "test_explicit_retry_inputs.py#monkeypatch.setattr agent.graph.llm._retry.random.uniform" = 1
 "test_llm_decode_ms.py#monkeypatch.setattr agent.graph.llm._stream.time.monotonic" = 3

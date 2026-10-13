@@ -2,8 +2,6 @@ exports = ["claim"]
 
 [uses]
 "compact" = ["claim", "test_compact.py"]
-"history" = ["claim"]
-"impersonation" = ["_fakes.py"]
 "state_slot" = ["test_state_slot.py"]
 "test_external.py" = ["impersonation"]
 

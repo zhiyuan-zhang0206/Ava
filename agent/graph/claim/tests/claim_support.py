@@ -25,7 +25,7 @@ from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 __all__ = ["insert_inbound_kind", "make_runtime", "thread_config"]
 
 
-def _fake_llm(summary: str = "synthetic compaction summary") -> Any:
+def make_fake_llm(summary: str = "synthetic compaction summary") -> Any:
     """Mock LLM — bind_tools(...).ainvoke returns AIMessage(content=summary),
     matching the call shape of generate_summary (same tool binding as the main llm node)."""
     llm = MagicMock()
@@ -58,7 +58,7 @@ def make_runtime(
         original_incarnation=retained.original_incarnation,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         ops_pool=ops_pool,
-        llm=llm if llm is not None else _fake_llm(),
+        llm=llm if llm is not None else make_fake_llm(),
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)

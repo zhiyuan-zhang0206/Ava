@@ -1,9 +1,4 @@
-"""Shared cancel-race fixture owned by the LLM cancellation package.
-
-Consumer-local conftests and existing file scopes bind this opt-in fixture to
-its LLM, exec and compact consumers. Tests execute their real node logic while
-controlling the durable-interrupt subscription event.
-"""
+"""Cancel-race fixture for the LLM package: tests control the durable-interrupt subscription event."""
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -11,8 +6,6 @@ from contextlib import asynccontextmanager
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.exec import node
-from agent.graph.hooks import compact
 from agent.graph.interrupt import InterruptEvent
 from agent.graph.llm import _cancel
 from base.agents.incarnation.native_work_models import NativeWorkTarget
@@ -20,9 +13,8 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 
 
-@pytest.fixture
-def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
-    event = InterruptEvent()
+def install_cancel_event(monkeypatch: pytest.MonkeyPatch, event: InterruptEvent) -> None:
+    """Make this package's durable-interrupt subscription yield `event`."""
 
     @asynccontextmanager
     async def fake_subscribe(
@@ -36,6 +28,10 @@ def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
         yield event
 
     monkeypatch.setattr(_cancel, "subscribe_interrupt", fake_subscribe)
-    monkeypatch.setattr(node, "subscribe_interrupt", fake_subscribe)
-    monkeypatch.setattr(compact, "subscribe_interrupt", fake_subscribe)
+
+
+@pytest.fixture
+def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
+    event = InterruptEvent()
+    install_cancel_event(monkeypatch, event)
     return event
