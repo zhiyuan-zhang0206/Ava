@@ -1,5 +1,2 @@
-[loads]
-"_plugin_scaffold.py" = ["ava_builtins/plugins"]
-
 [external]
-"_plugin_scaffold.py" = "also loads operator-installed plugins from $AVA_HOME/plugins, outside the repository"
+"_plugin_scaffold.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
