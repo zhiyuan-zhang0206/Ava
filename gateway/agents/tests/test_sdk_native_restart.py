@@ -17,12 +17,12 @@ from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.plugin_providers import build_model_catalog
+from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from gateway.agents import lifecycle
 from gateway.app import app
 from gateway.tests.test_idempotency import client as client
 from ops.lifecycle.native_restart import restart_native_work_op
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
-from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 
 @pytest.mark.usefixtures("retry_waits")

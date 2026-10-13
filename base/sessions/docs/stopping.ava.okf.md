@@ -61,7 +61,7 @@ the unit stopped. Records without a `pgid` reap as before.
 
 A held stop that runs its deadline out must not leave the operator with a bare
 pid list — that is a diagnosis no one can act on, and the only remaining move
-is a blind rerun (issue #2162). `cli/commands/lifecycle/_maintenance_stop_report.py`
+is a blind rerun (issue #2162). `cli/commands/data_plane/maintenance_stop_report.py`
 builds the failure report instead: for every process still alive (and every
 member of a recorded process group that is still occupied, even one that
 appeared after the capture) it records the owning recorded session, whether the
@@ -90,7 +90,7 @@ Not every process Ava stops is a named session: the pooler, an orphan holding a 
 
 ## Entry points
 
-- `cli/commands/lifecycle/_maintenance_stop_report.py` — the deadline survivor report (raise, render, journal payload)
+- `cli/commands/data_plane/maintenance_stop_report.py` — the deadline survivor report (raise, render, journal payload)
 - `base/sessions/protocol.py:SessionBackend.kill_session` — the session stop, per backend
 - `base/host/proc.py:process_alive` / `request_stop` / `force_kill` — the non-session trio
 - `base/host/proc.py:kill_process_tree` / `run_bounded` — tree teardown and a bounded run

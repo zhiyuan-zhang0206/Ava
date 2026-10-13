@@ -10,8 +10,8 @@ from base.config import settings
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
-from tests.factories.data_plane import remote_cluster_record
-from tests.factories.data_plane import remote_urls as remote_urls
+from cli.commands.tests.data_plane_records import remote_cluster_record
+from cli.commands.tests.data_plane_records import remote_urls as remote_urls
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

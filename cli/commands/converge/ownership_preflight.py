@@ -16,12 +16,12 @@ def collect_ownership_warnings(ctx: ConvergeCtx) -> list[str]:
     current_uid = os.getuid()
     warnings: list[str] = []
     for path in _key_paths(ctx.ava_home):
-        owner_uid = _owner_uid(path)
+        owner_uid = path_owner_uid(path)
         if owner_uid == current_uid:
             continue
         warnings.append(
             f"{path}: owned by uid {owner_uid}, current uid {current_uid}; repair with: "
-            f"{_repair_command(path)}"
+            f"{repair_command(path)}"
         )
     return warnings
 
@@ -61,11 +61,11 @@ def _key_paths(ava_home: Path) -> tuple[Path, ...]:
     return tuple(path for path in paths if path.exists())
 
 
-def _owner_uid(path: Path) -> int:
+def path_owner_uid(path: Path) -> int:
     return path.stat().st_uid
 
 
-def _repair_command(path: Path) -> str:
+def repair_command(path: Path) -> str:
     import grp
     import pwd
 

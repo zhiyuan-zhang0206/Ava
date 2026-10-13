@@ -186,10 +186,10 @@ class _ReaderFacts(ast.NodeVisitor):
         if field in self.fields:
             valid = self.fields[field] == domain
         else:
-            from base.config import Settings
+            from base.config.service_read import domain_model_classes
 
-            owner = Settings.model_fields.get(domain)
-            valid = owner is not None and hasattr(owner.annotation, field)
+            owner = domain_model_classes().get(domain)
+            valid = owner is not None and hasattr(owner, field)
         assert valid, f"config read names an undeclared field: {domain}.{field}"
 
     def visit_Attribute(self, node: ast.Attribute) -> None:

@@ -104,7 +104,7 @@ def _prepare_cold_start(
 ) -> int:
     """Prepare storage/configuration only with no prior live application root."""
     import cli.commands._repo as _repo_commands
-    import cli.commands.converge.host as converge_host
+    from cli.commands.lifecycle import converge_host
 
     # 1) converge host state (symlink / PATH / $AVA_HOME dirs / plugin config
     # images). Memory initialization is explicit (`ava memory init`).

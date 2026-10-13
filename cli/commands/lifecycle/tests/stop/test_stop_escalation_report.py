@@ -9,7 +9,7 @@ import pytest
 
 from base.deploy.lifecycle import status_journal
 from cli.commands.lifecycle import _temporary_stop as command
-from cli.commands.lifecycle.tests.stop_support import home as home
+from cli.commands.lifecycle.tests.stop.stop_support import home as home
 
 NOTE = "postgres fast shutdown did not complete within 277s; killed leftover processes: 4242"
 

@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-import cli.commands.converge._brew_pin as cbp
-import cli.commands.converge.host as cv
+import cli.commands.converge.brew_pin as cbp
+import cli.commands.lifecycle.converge_host as cv
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host import brew_pin

@@ -53,7 +53,7 @@ def _render(
     command_runtime: CommandRuntime,
 ) -> dict[str, str | None]:
     native = tmp_path / "native"
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         Path(__file__).resolve().parents[4],
         native,
         tmp_path,
@@ -215,7 +215,7 @@ def test_real_grafana_launcher_preserves_webhook_url_literal(
     monkeypatch.setattr(settings.observability, "observability_url", "http://observatory.test")
     monkeypatch.setattr(settings.gateway, "gateway_url", base)
     native = tmp_path / "lgtm/native"
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         Path(__file__).resolve().parents[4],
         native,
         tmp_path,

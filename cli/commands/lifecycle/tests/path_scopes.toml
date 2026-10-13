@@ -1,17 +1,15 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.cli_tests" = [
+    "test_collector_admission.py",
+    "test_lgtm_toggle.py",
     "identity/test_commands_restart_stop.py",
     "identity/test_root_driver_signals.py",
     "test_commands_status.py",
-    "test_maintenance_stop_report.py",
     "test_remote_data_plane.py",
     "test_rollout_robustness.py",
     "test_root_driver.py",
     "test_start_data_plane.py",
-    "test_stop.py",
-    "test_stop_extras.py",
-    "test_stop_terminals.py",
 ]
 "tests.fixtures.unit.generation" = ["."]
 "tests.fixtures.unit.homes" = ["."]
@@ -19,6 +17,7 @@
     "identity/test_commands_restart_stop.py",
 ]
 "tests.fixtures.unit.sdk" = [
+    "test_lgtm_toggle.py",
     "startup/test_commands_start.py",
     "startup/test_extension_materialize_ordering.py",
     "startup/test_start_health_port_gate.py",
@@ -29,12 +28,7 @@
     "identity/test_commands_restart_stop.py",
     "test_commands_status.py",
     "test_hold_report.py",
-    "test_maintenance_stop_report.py",
     "test_remote_data_plane.py",
     "test_rollout_robustness.py",
     "test_start_data_plane.py",
-    "test_stop.py",
-    "test_stop_close_notices.py",
-    "test_stop_escalation_report.py",
-    "test_stop_terminals.py"
 ]

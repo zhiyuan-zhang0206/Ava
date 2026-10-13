@@ -25,7 +25,7 @@ def test_converge_registers_the_refresh_job(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    from cli.commands.converge._os_jobs import ensure_packages_refresh_job
+    from cli.commands.converge.os_jobs import ensure_packages_refresh_job
 
     calls: list[str] = []
 

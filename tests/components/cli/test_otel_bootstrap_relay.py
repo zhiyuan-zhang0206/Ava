@@ -21,7 +21,7 @@ from base.host.env import dotenv_file
 from cli.commands.observability import otel_collector as collector
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from gateway.app import app
-from tests.fixtures.unit.gateway_auth import without_credentials
+from gateway.tests.agents.gateway_auth import without_credentials
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 

@@ -54,7 +54,7 @@ def test_remaining_clients_are_named_in_stderr_and_the_report(
     console.extend([_client(7), _client(8)])
     report: list[str] = []
 
-    plane._report_pooler_clients(SimpleNamespace(), report)  # pyright: ignore[reportArgumentType]
+    plane.report_pooler_clients(SimpleNamespace(), report)  # pyright: ignore[reportArgumentType]
 
     err = capsys.readouterr().err
     assert "2 client(s) still connected when the pooler stops" in err
@@ -67,7 +67,7 @@ def test_a_long_list_is_cut_with_a_count(
 ) -> None:
     console.extend(_client(n) for n in range(25))
 
-    plane._report_pooler_clients(SimpleNamespace(), None)  # pyright: ignore[reportArgumentType]
+    plane.report_pooler_clients(SimpleNamespace(), None)  # pyright: ignore[reportArgumentType]
 
     err = capsys.readouterr().err
     assert "25 client(s)" in err and "; +15 more" in err
@@ -79,7 +79,7 @@ def test_no_clients_says_nothing(
 ) -> None:
     report: list[str] = []
 
-    plane._report_pooler_clients(SimpleNamespace(), report)  # pyright: ignore[reportArgumentType]
+    plane.report_pooler_clients(SimpleNamespace(), report)  # pyright: ignore[reportArgumentType]
 
     assert capsys.readouterr().err == "" and report == []
 
@@ -95,7 +95,7 @@ def test_an_unreadable_console_is_reported_as_unreadable_not_as_empty(
     monkeypatch.setattr(plane, "read_pooler_admin", unreadable)
     report: list[str] = []
 
-    plane._report_pooler_clients(SimpleNamespace(), report)  # pyright: ignore[reportArgumentType]
+    plane.report_pooler_clients(SimpleNamespace(), report)  # pyright: ignore[reportArgumentType]
 
     assert "could not be listed before the pooler stop" in capsys.readouterr().err
     assert len(report) == 1 and "no admin secret" in report[0]

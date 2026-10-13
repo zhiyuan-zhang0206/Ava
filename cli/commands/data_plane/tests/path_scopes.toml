@@ -3,7 +3,6 @@
 "tests.path_scoped.cli_tests" = [
     "test_cluster_instance_bind.py",
     "test_pg_authentication.py",
-    "test_maintenance_stop.py",
     "test_pg_socket_dir.py",
     "test_pgbouncer_reachable_bind_wait.py",
     "test_pgbouncer_stop_isolation.py",
@@ -16,6 +15,5 @@
     "test_native_storage_diagnostics.py",
 ]
 "tests.fixtures.unit.sdk" = [
-    "test_maintenance_stop.py",
     "test_walg_cmd.py"
 ]

@@ -35,11 +35,11 @@ from base.deploy.maintenance import admission
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import SERVICE_UNIT, ledger_path
 from base.telemetry import EventPipeline
+from cli.commands.data_plane.maintenance_stop_report import StopIncompleteError
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as strict
 from cli.commands.lifecycle import stop as entry
-from cli.commands.lifecycle._maintenance_stop_report import StopIncompleteError
-from cli.commands.lifecycle.tests.stop_support import (
+from cli.commands.lifecycle.tests.stop.stop_support import (
     Launcher,
     PtyServiceProcess,
     busy_session,
@@ -50,10 +50,10 @@ from cli.commands.lifecycle.tests.stop_support import (
     stop_env,
     stub_closure,
 )
-from cli.commands.lifecycle.tests.stop_support import home as home
-from cli.commands.lifecycle.tests.stop_support import launch as launch
-from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
-from cli.commands.lifecycle.tests.stop_support import written as written
+from cli.commands.lifecycle.tests.stop.stop_support import home as home
+from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
+from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
+from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
