@@ -275,7 +275,7 @@ async def test_real_runner_compaction_wins_no_note(
     _pin_compact_budget(monkeypatch, hard_tokens=1)
 
     # The compact hook wrapper lives directly in agent.graph.hooks.compact.
-    from agent.graph.hooks.compact import _compact_reminder
+    from agent.graph.hooks.compact import compact_reminder
 
     # Long enough to clear the auto-compact retry floor on the first attempt.
     long_summary = "compacted summary " * 100
@@ -288,7 +288,7 @@ async def test_real_runner_compaction_wins_no_note(
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
 
-    compact_hook = _compact_reminder
+    compact_hook = compact_reminder
     reminder_hook = _loaded.sdk_reminder_agent_reply_before_llm
 
     reminder_entry = ("ava_sdk_reminder", reminder_hook)

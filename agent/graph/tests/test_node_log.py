@@ -271,7 +271,7 @@ async def test_dump_async_tasks_names_the_full_await_chain(monkeypatch: pytest.M
     Reads from sys.__stderr__ (the real process stderr the dump targets), not
     the swappable sys.stderr the exec stream redirects — so the dump still lands
     when a leaked redirect has replaced sys.stderr."""
-    from agent.graph.node_log import _dump_async_tasks
+    from agent.graph.node_log import dump_async_tasks
 
     sink = io.StringIO()
     monkeypatch.setattr(sys, "__stderr__", sink)
@@ -285,7 +285,7 @@ async def test_dump_async_tasks_names_the_full_await_chain(monkeypatch: pytest.M
     task = asyncio.create_task(_outer_wrapper(), name="stall-probe-target")
     await asyncio.sleep(0)  # let the task reach its suspension point
     try:
-        _dump_async_tasks()
+        dump_async_tasks()
     finally:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

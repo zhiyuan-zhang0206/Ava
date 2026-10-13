@@ -16,7 +16,7 @@ by the batch-claim / kind-dispatch / lifecycle-routing axes, behavior preserved)
 - `_decide.py`    — decision: post-dispatch short-circuit rules → single Command
 - `_present.py`   — display: SSE publishing for the frontend timeline
 
-Pipeline (see _claim_node_impl): container early-return → first SELECT →
+Pipeline (see claim_node_impl): container early-return → first SELECT →
 idle wait (if halted / no conversation) → routing → dispatch → decide → END
 snapshot. The full dispatch-by-kind behavior spec and the routing winner
 semantics are preserved in the submodule docstrings above.
@@ -35,7 +35,7 @@ agent_id read from RunnableConfig (LangGraph checkpointer standard).
 State type hint (`state: _state.AgentState`): static only; see `agent/graph/exec/node.py` — the
 graph build, not the annotation, decides which state class a node receives.
 
-Refactored (2026-08): _Routing + resolve_routing, _BatchState + per-kind
+Refactored (2026-08): _Routing + resolve_routing, BatchState + per-kind
 handlers, _Outcome + decide extracted; display logic moved to _present.py;
 file split by axis under Task #1006. cc 70 → ~8-10 per module.
 """
@@ -65,14 +65,14 @@ from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.incarnation.native_work_models import NativeCancelPendingError
 
 from ._decide import decide
-from ._dispatch import _BatchState, dispatch_batch
+from ._dispatch import BatchState, dispatch_batch
+from ._dispatch import _handle_heartbeat as _handle_heartbeat
 
 # Names moved to co-located submodules during the Task #1006 split, re-exported
 # here so existing `from agent.graph.claim.node import ...` call sites (tests)
 # keep working unchanged. New code should import from the submodule that owns them.
-from ._dispatch import _by_who as _by_who
-from ._dispatch import _handle_heartbeat as _handle_heartbeat
-from ._dispatch import _render_restart_completed_marker as _render_restart_completed_marker
+from ._dispatch import by_who as by_who
+from ._dispatch import render_restart_completed_marker as render_restart_completed_marker
 from ._present import publish_end_timeline_snapshot, publish_inbound_committed
 from ._routing import ClaimGoto, resolve_routing
 
@@ -95,7 +95,7 @@ def claim_will_idle(state: _state.AgentState) -> bool:
     )
 
 
-async def _claim_node_impl(
+async def claim_node_impl(
     state: _state.AgentState,
     runtime: Runtime[AvaContext],
     config: RunnableConfig,
@@ -169,7 +169,7 @@ async def _claim_node_impl(
     routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]
 
     # ── Dispatch: run every item through its handler ──
-    st = _BatchState(
+    st = BatchState(
         update_initiated=state.update_initiated,
     )
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)  # pyright: ignore[reportUnknownArgumentType]
@@ -211,7 +211,7 @@ async def claim_node(
     runtime: Runtime[AvaContext],
     config: RunnableConfig,
 ) -> Command[ClaimGoto]:
-    """Public entry point: wraps _claim_node_impl with node-lifecycle logging.
+    """Public entry point: wraps claim_node_impl with node-lifecycle logging.
 
     This is the node registered in the LangGraph state graph.  Its signature
     and return type are part of the public graph contract and MUST NOT change.
@@ -227,7 +227,7 @@ async def claim_node(
     # deltas): the incremental snapshots in this design cover commits only, so
     # without it a reconnect GET could read a lagging checkpoint and the tail
     # of the turn would never appear. The shared `claim_will_idle` predicate is
-    # the same call _claim_node_impl's idle branch makes, so the two cannot drift.
+    # the same call claim_node_impl's idle branch makes, so the two cannot drift.
     # If a batch wakes the
     # claim right after, the snapshot is still a legal view of the committed
     # state — the next node's incremental snapshot covers the new messages.
@@ -250,4 +250,4 @@ async def claim_node(
             "display", "timeline_default_limit"
         ),
     ):
-        return await _claim_node_impl(state, runtime, config)
+        return await claim_node_impl(state, runtime, config)

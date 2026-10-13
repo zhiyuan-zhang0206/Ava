@@ -1,8 +1,8 @@
 """Lifecycle routing for the claim node: where a pass may go + who wins.
 
 Holds the ClaimGoto vocabulary (the four targets claim itself routes to), the
-routing-gated kinds (_ROUTING_KINDS), and the single batch-winner resolution
-(_Routing / resolve_routing). Extracted from agent/graph/claim/node.py (Task
+routing-gated kinds (ROUTING_KINDS), and the single batch-winner resolution
+(Routing / resolve_routing). Extracted from agent/graph/claim/node.py (Task
 #1006 split — the lifecycle-routing axis).
 
 Routing semantics (preserved verbatim from the original claim module):
@@ -53,7 +53,7 @@ from base.agents.messages.inbound import InboundKind
 ClaimGoto = Literal["before_llm", "claim", "__end__", "init_context"]
 
 # Kinds whose dispatch is gated on the routing winner.
-_ROUTING_KINDS: frozenset[InboundKind] = frozenset(
+ROUTING_KINDS: frozenset[InboundKind] = frozenset(
     {
         InboundKind.COMPACT_REQUEST,
         InboundKind.TERMINATE,
@@ -64,7 +64,7 @@ _ROUTING_KINDS: frozenset[InboundKind] = frozenset(
 
 
 @dataclass(frozen=True)
-class _Routing:
+class Routing:
     """Resolved routing for one claimed batch — winner + veto, decided once.
 
     exit_kind is the winning exit (TERMINATE or RESTART), or None when no exit
@@ -104,7 +104,7 @@ class _Routing:
         return self.exit_kind is None and not self.has_revive
 
 
-def _durable_routing(batch: list[ClaimedInbound]) -> _Routing | None:
+def _durable_routing(batch: list[ClaimedInbound]) -> Routing | None:
     """The routing of a durable lifecycle command; None for an ordinary batch."""
     if not any(item.durable_lifecycle for item in batch):
         return None
@@ -116,7 +116,7 @@ def _durable_routing(batch: list[ClaimedInbound]) -> _Routing | None:
     # Acceptance already serialized this command against the target owner.
     # A later pending message cannot veto it and strand the durable pointer.
     # The effect still rechecks the pointer and incarnation in its own CAS.
-    return _Routing(
+    return Routing(
         exit_kind=InboundKind(batch[0].kind),
         has_revive=False,
         terminate_vetoed_by_pending=False,
@@ -151,7 +151,7 @@ async def resolve_routing(
     ctx: AvaContext,
     agent_id: int,
     batch: list[ClaimedInbound],
-) -> _Routing:
+) -> Routing:
     """Resolve the single batch winner: max-id exit vs revive, plus veto logic.
 
     All DB I/O is injected via *ctx* so the function is testable with mocks
@@ -188,7 +188,7 @@ async def resolve_routing(
             ctx, agent_id, batch, latest_exit
         )
 
-    return _Routing(
+    return Routing(
         exit_kind=exit_kind,
         has_revive=latest_revive is not None,
         terminate_vetoed_by_pending=terminate_vetoed_by_pending,

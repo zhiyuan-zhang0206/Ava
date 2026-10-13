@@ -15,7 +15,7 @@ it stays a pending row and the next claim pass dispatches it. This node only
 terminate -> goto END) stays in the claim node, the single owner of inbound
 semantics.
 
-The watcher polls `inbound_messages` on a short cadence (`_INTERRUPT_POLL_S`)
+The watcher polls `inbound_messages` on a short cadence (`INTERRUPT_POLL_S`)
 instead of sharing the agent's Redis inbound listener with the claim node's
 idle wait. Sharing was the root cause of a lost-wake class of incidents: the
 watcher's cancellation could be swallowed in the cancel-vs-completion race,
@@ -122,7 +122,7 @@ async def interruptible_model[T](
     return outcome[0]
 
 
-async def _watch_for_interrupt(
+async def watch_for_interrupt(
     pool: AsyncConnectionPool,
     event: InterruptEvent,
     agent_id: int,
@@ -133,7 +133,7 @@ async def _watch_for_interrupt(
 ) -> None:
     """Set `event` as soon as a pending cancel/terminate row exists for agent_id.
 
-    Polls `pending_interrupt_reason` on `_INTERRUPT_POLL_S` cadence. Deliberately
+    Polls `pending_interrupt_reason` on `INTERRUPT_POLL_S` cadence. Deliberately
     does NOT touch the Redis inbound listener: that listener is owned by the
     claim node's idle wait, and a watcher sharing it can starve the claim wait
     of wakes (module docstring — the 2026-08-02 lost-wake incident). Between
@@ -158,7 +158,7 @@ async def _watch_for_interrupt(
                 event.set(reason)
             return
         with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=_INTERRUPT_POLL_S)
+            await asyncio.wait_for(stop.wait(), timeout=INTERRUPT_POLL_S)
 
 
 # How long exit waits for the cancelled watcher to unwind. Cancellation lands
@@ -168,13 +168,13 @@ async def _watch_for_interrupt(
 # turn for that long after the model already finished. The watcher does
 # nothing after cancel besides unwinding (the stop flag is already set).
 # The original service still owns its actual task and eventual result.
-_WATCHER_EXIT_TIMEOUT_S = 5.0
+WATCHER_EXIT_TIMEOUT_S = 5.0
 
-# Poll cadence for the interrupt watcher (see `_watch_for_interrupt`). 2s
+# Poll cadence for the interrupt watcher (see `watch_for_interrupt`). 2s
 # bounds cancel/terminate abort latency for an in-flight llm/exec; the old
 # shared pub/sub listener woke instantly but coupled the watcher to the claim
 # node's idle wait — the coupling was the bug.
-_INTERRUPT_POLL_S = 2.0
+INTERRUPT_POLL_S = 2.0
 
 
 class _InterruptWatch:
@@ -198,7 +198,7 @@ class _InterruptWatch:
     ) -> None:
         cancelled = False
         try:
-            await _watch_for_interrupt(
+            await watch_for_interrupt(
                 pool, self.event, self.agent_id, self.stop, incarnation=incarnation, work=work
             )
         except asyncio.CancelledError:
@@ -237,7 +237,7 @@ class _InterruptWatch:
         self.stop.set()
         task.cancel()
         # wait_for waits for cancelled cleanup; wait preserves the five-second return.
-        deadline = asyncio.get_running_loop().time() + _WATCHER_EXIT_TIMEOUT_S
+        deadline = asyncio.get_running_loop().time() + WATCHER_EXIT_TIMEOUT_S
         cancellation: asyncio.CancelledError | None = None
         while not task.done() and asyncio.get_running_loop().time() < deadline:
             try:
@@ -253,7 +253,7 @@ class _InterruptWatch:
             logger.info(
                 "subscribe_interrupt watcher did not unwind {timeout}s after cancel "
                 "(agent_id={agent_id}) — retained by its service; wedged await chain:\n{chain}",
-                timeout=_WATCHER_EXIT_TIMEOUT_S,
+                timeout=WATCHER_EXIT_TIMEOUT_S,
                 agent_id=self.agent_id,
                 chain=chain,
             )
@@ -283,7 +283,7 @@ async def subscribe_interrupt(
 
     Yields an `asyncio.Event` the node races its work against. On body exit
     (completion / exception / cancel) the watcher task is cancelled; if it does
-    not unwind within `_WATCHER_EXIT_TIMEOUT_S`, its original service keeps
+    not unwind within `WATCHER_EXIT_TIMEOUT_S`, its original service keeps
     the task through stop/join before pool close. Unknown in-flight failure
     reaches the caller; late failure is reported immediately and raised by
     that service at stop/join, without cancelling sibling agents.

@@ -10,7 +10,7 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.state import AgentState
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.inbox.native_restart import accept_native_restart, native_restart_progress
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
@@ -45,7 +45,7 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
     machine_identity.set(name="claim-test")
     async with hosted_scope() as resources:
         incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-        _insert(db_conn, initial.agent_id)
+        insert(db_conn, initial.agent_id)
         entered, release = asyncio.Event(), asyncio.Event()
         calls = 0
 
@@ -96,7 +96,7 @@ async def test_cancel_and_restart_both_orders_settle_without_second_invocation(
                 else:
                     accepted = await restart()
                     cancelled = await cancel()
-                queued = _insert(db_conn, initial.agent_id)
+                queued = insert(db_conn, initial.agent_id)
                 release.set()
                 if fault_site != "none":
                     with pytest.raises(psycopg.OperationalError):
@@ -146,7 +146,7 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
         from agent.tests.claim.test_inbound_ownership import _admit
 
         incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-        _insert(db_conn, initial.agent_id)
+        insert(db_conn, initial.agent_id)
         entered, release = asyncio.Event(), asyncio.Event()
         calls = 0
         injected = False
@@ -203,7 +203,7 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
                     llm_override=config_authority.all_domains.lm.llm_override,
                     default_model=config_authority.all_domains.lm.llm_model,
                 )
-                queued = _insert(db_conn, initial.agent_id)
+                queued = insert(db_conn, initial.agent_id)
                 release.set()
                 with pytest.raises(psycopg.OperationalError):
                     await asyncio.wait_for(running, 10)

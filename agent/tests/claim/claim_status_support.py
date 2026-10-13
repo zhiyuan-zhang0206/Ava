@@ -40,7 +40,7 @@ def committed_publishes(pub: MagicMock) -> list[dict[str, Any]]:
     ]
 
 
-async def _await_status(pool: AsyncConnectionPool, agent_id: int, expected: str) -> None:
+async def await_status(pool: AsyncConnectionPool, agent_id: int, expected: str) -> None:
     """Poll `agents_meta.status` on `pool` until it equals `expected`.
 
     The restart arm flips status through `ctx.ops_pool` (= `aops_pool`); read it
@@ -148,7 +148,7 @@ def _events_with_role(pub: MagicMock, role: str) -> list[dict[str, Any]]:
     ]
 
 
-def _pair_compact_cycles(pub: MagicMock) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+def pair_compact_cycles(pub: MagicMock) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     """Pair every compact_started with its exactly-one compact_finished.
 
     Task #3323's completeness invariant: a started run reaches exactly one

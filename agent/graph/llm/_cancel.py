@@ -21,7 +21,7 @@ from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
 from agent.graph.llm_errors import (
     LLMStreamError,
-    _classify_and_log_provider_error,
+    classify_and_log_provider_error,
 )
 from agent.nodes import AFTER_EXEC
 from base.agents.context import AvaContext
@@ -103,7 +103,7 @@ async def race_stream_vs_cancel(
             # instead of exhausting the full backoff budget and dying into
             # terminated. TRANSIENT errors reach the explicit retry predicate;
             # UNKNOWN errors propagate once with their original traceback.
-            fatal = _classify_and_log_provider_error(
+            fatal = classify_and_log_provider_error(
                 e, ctx.require_agent(), catalog=ctx.require_catalog()
             )
             if fatal is not None:

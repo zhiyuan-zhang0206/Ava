@@ -37,18 +37,18 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import LlmLedger, exec_node, llm_node
 from agent.graph.exec import node
 from agent.graph.exec.node import (
-    _ExecCancelled,
-    _ExecCrashed,
-    _ExecDone,
-    _ExecLifecycle,
-    _ExecTimedOut,
+    ExecCancelled,
+    ExecCrashed,
+    ExecDone,
+    ExecLifecycle,
+    ExecTimedOut,
 )
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 
-# Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a
+# Most tests here drive exec_node/llm_node with mocked run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.
 from base.config import settings
 from base.db import Database, create_agent
@@ -306,7 +306,7 @@ async def test_llm_node_cancel_event_race_normal_completion(
 
 
 # ---------------------------------------------------------------------------
-# exec_node cancel_event race (mock _run_in_subprocess returns sum-type variant + payload)
+# exec_node cancel_event race (mock run_in_subprocess returns sum-type variant + payload)
 # ---------------------------------------------------------------------------
 
 
@@ -341,13 +341,13 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
         cancel_event: asyncio.Event,
         *args: object,
         **kwargs: object,
-    ) -> tuple[_ExecCancelled, None]:
+    ) -> tuple[ExecCancelled, None]:
         nonlocal calls
         calls += 1
         await asyncio.wait_for(cancel_event.wait(), timeout=5)
-        return (_ExecCancelled(output="external side effect already happened\n"), None)
+        return (ExecCancelled(output="external side effect already happened\n"), None)
 
-    monkeypatch.setattr(node, "_run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
     result = await exec_node(
         AgentState(messages=[_ai_with_code("pass")], halted=False),
         _make_runtime(
@@ -379,9 +379,9 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     async def _fake_cancelled(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
-        return (_ExecCancelled(output="partial work\n"), None)
+        return (ExecCancelled(output="partial work\n"), None)
 
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
 
     pub = MagicMock()
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
@@ -416,9 +416,9 @@ async def test_exec_node_cancel_event_race_normal_completion(
     async def _fake_normal(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
-        return (_ExecDone(output="hello\n"), None)
+        return (ExecDone(output="hello\n"), None)
 
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("hello")')], halted=False)
 
@@ -457,9 +457,9 @@ async def test_exec_node_timeout_path(
     async def _fake_timed_out(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
-        return (_ExecTimedOut(output="partial work\n"), None)
+        return (ExecTimedOut(output="partial work\n"), None)
 
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("long task")')], halted=False)
 
@@ -489,9 +489,9 @@ async def test_exec_node_timeout_empty_output(
     async def _fake_empty_timeout(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
-        return (_ExecTimedOut(output=""), None)
+        return (ExecTimedOut(output=""), None)
 
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
 
@@ -595,7 +595,7 @@ async def test_exec_node_dispatch_system_halt(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """_ExecLifecycle(SystemHalt) → halted=True + NO output write-back.
+    """ExecLifecycle(SystemHalt) → halted=True + NO output write-back.
 
     ava.self.compact commits the compact_summary inbound before raising
     SystemHalt, and the claim node applies it in the same turn — REMOVE_ALL
@@ -610,10 +610,10 @@ async def test_exec_node_dispatch_system_halt(
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
-        return (_ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
+        return (ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
 
     emitter = MagicMock()
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('ava.self.compact("s")')], halted=False)
     runtime = _make_runtime(
         hosted_resources=hosted_resources, event_publisher=emitter, database_gate=database_gate
@@ -637,15 +637,15 @@ async def test_exec_node_dispatch_agent_termination(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """_ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
+    """ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
     from ava.self import AgentTermination
 
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
-        return (_ExecLifecycle(output="", exc=AgentTermination()), None)
+        return (ExecLifecycle(output="", exc=AgentTermination()), None)
 
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.terminate()")], halted=False)
     runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
@@ -663,16 +663,16 @@ async def test_exec_node_dispatch_agent_restart(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """_ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
+    """ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
     with AgentTermination path)."""
     from ava.self import AgentRestart
 
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
-        return (_ExecLifecycle(output="", exc=AgentRestart()), None)
+        return (ExecLifecycle(output="", exc=AgentRestart()), None)
 
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.restart()")], halted=False)
     runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
@@ -687,21 +687,21 @@ async def test_exec_node_dispatch_ordinary_exception(
     loguru_records,
     database_gate: ProcessDbGate,
 ) -> None:
-    """_ExecCrashed → halted=False + event=exec_failed at INFO (agent
+    """ExecCrashed → halted=False + event=exec_failed at INFO (agent
     trial-and-error is not an operator alert; metrics aggregate by event)."""
 
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
         return (
-            _ExecCrashed(
+            ExecCrashed(
                 output="Traceback...\nValueError: boom\n",
                 exc=ValueError("boom"),
             ),
             None,
         )
 
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('raise ValueError("boom")')], halted=False)
     runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
@@ -733,9 +733,9 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     async def _fake(
         _db: object, code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
     ):
-        return (_ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
+        return (ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
 
-    monkeypatch.setattr(node, "_run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("...")], halted=False)
     runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
 

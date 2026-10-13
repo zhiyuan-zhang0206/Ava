@@ -20,7 +20,7 @@ from base.native_process.exec_domain import ExecProcessDomain as ExecProcessDoma
 
 from ._output_pipe import ExecOutputPipe
 
-_READER_JOIN_TIMEOUT_S = 5.0
+READER_JOIN_TIMEOUT_S = 5.0
 _EMERGENCY_SETTLE_TIMEOUT_S = 5.0
 _ROOT_EXIT_POLL_S = 0.05
 _RESOURCE_SETTLE_TIMEOUT_S = 3 * _EMERGENCY_SETTLE_TIMEOUT_S
@@ -156,11 +156,11 @@ class DomainCloseOwner:
 
     async def _join_after_reap(self, reap_task: asyncio.Task[int], reader: ExecOutputPipe) -> None:
         await asyncio.wait({reap_task})
-        await reader.finish(_READER_JOIN_TIMEOUT_S)
+        await reader.finish(READER_JOIN_TIMEOUT_S)
         if not reader.closed:
             raise RuntimeError(
                 f"exec reader for pid {self.pid} remained alive after its process "
-                f"domain closed and {_READER_JOIN_TIMEOUT_S}s join elapsed"
+                f"domain closed and {READER_JOIN_TIMEOUT_S}s join elapsed"
             )
 
     def start_teardown(
@@ -410,7 +410,7 @@ def settle_cancelled_owners(
 
 
 __all__ = [
-    "_READER_JOIN_TIMEOUT_S",
+    "READER_JOIN_TIMEOUT_S",
     "DomainCloseOwner",
     "ExecProcessDomain",
     "ExecTeardownError",

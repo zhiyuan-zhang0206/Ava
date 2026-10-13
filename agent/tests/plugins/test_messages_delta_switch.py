@@ -24,13 +24,13 @@ from pydantic import BaseModel, Field
 
 from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 from agent.state import (
-    _MESSAGES_DELTA_CHANNEL,
-    _MESSAGES_DELTA_SNAPSHOT_FREQUENCY,
+    MESSAGES_DELTA_CHANNEL,
+    MESSAGES_DELTA_SNAPSHOT_FREQUENCY,
     BaseAgentState,
-    _accumulate_delta,
-    _is_messages_reducer_form,
-    _messages_annotation_key,
     _resolve_reducer,
+    accumulate_delta,
+    is_messages_reducer_form,
+    messages_annotation_key,
 )
 
 PLUGIN_SPELLING = Annotated[list[AnyMessage], add_messages]
@@ -43,13 +43,13 @@ def test_base_annotation_is_the_delta_form() -> None:
     channel = meta[0]
     assert isinstance(channel, DeltaChannel)
     assert channel.reducer is guarded_delta_reducer
-    assert channel.snapshot_frequency == _MESSAGES_DELTA_SNAPSHOT_FREQUENCY
+    assert channel.snapshot_frequency == MESSAGES_DELTA_SNAPSHOT_FREQUENCY
 
 
 def test_annotation_keys_equivalent_across_spellings() -> None:
-    base_key = _messages_annotation_key(BaseAgentState.__annotations__["messages"])
-    assert _messages_annotation_key(PLUGIN_SPELLING) == base_key
-    assert _messages_annotation_key(GUARDED_SPELLING) == base_key
+    base_key = messages_annotation_key(BaseAgentState.__annotations__["messages"])
+    assert messages_annotation_key(PLUGIN_SPELLING) == base_key
+    assert messages_annotation_key(GUARDED_SPELLING) == base_key
 
 
 def test_resolve_reducer_never_falls_back_for_the_delta_form() -> None:
@@ -69,18 +69,18 @@ def test_resolve_reducer_ignores_foreign_delta_channels() -> None:
 def test_accumulate_delta_concatenates_for_every_messages_spelling() -> None:
     acc = [HumanMessage(content="a", id="a")]
     new = [HumanMessage(content="b", id="b")]
-    # The delta form is a sanctioned spelling (see _is_messages_reducer_form);
+    # The delta form is a sanctioned spelling (see is_messages_reducer_form);
     # the parameter's Callable type cannot express that runtime contract.
-    for reducer in (add_messages, guarded_add_messages, _MESSAGES_DELTA_CHANNEL):
-        merged = _accumulate_delta(acc, new, reducer)  # pyright: ignore[reportArgumentType]
+    for reducer in (add_messages, guarded_add_messages, MESSAGES_DELTA_CHANNEL):
+        merged = accumulate_delta(acc, new, reducer)  # pyright: ignore[reportArgumentType]
         assert [m.id for m in merged] == ["a", "b"]
 
 
 def test_is_messages_reducer_form_membership() -> None:
-    assert _is_messages_reducer_form(add_messages)
-    assert _is_messages_reducer_form(guarded_add_messages)
-    assert _is_messages_reducer_form(_MESSAGES_DELTA_CHANNEL)
-    assert not _is_messages_reducer_form(lambda _old, new: new)
+    assert is_messages_reducer_form(add_messages)
+    assert is_messages_reducer_form(guarded_add_messages)
+    assert is_messages_reducer_form(MESSAGES_DELTA_CHANNEL)
+    assert not is_messages_reducer_form(lambda _old, new: new)
 
 
 class _FlippedState(BaseAgentState):
@@ -112,7 +112,7 @@ def _build(saver: Any) -> Any:
 
 
 async def test_flipped_channel_writes_delta_and_resumes_folded() -> None:
-    from agent.startup import _delta_evidence
+    from agent.startup import delta_evidence
 
     saver = InMemorySaver()
     graph = _build(saver)
@@ -124,7 +124,7 @@ async def test_flipped_channel_writes_delta_and_resumes_folded() -> None:
 
     tup = await saver.aget_tuple(cfg)
     assert tup is not None
-    assert "messages" in _delta_evidence(tup.checkpoint, tup.metadata)
+    assert "messages" in delta_evidence(tup.checkpoint, tup.metadata)
 
     final2 = await graph.ainvoke({"n": 6, "target": 6}, cfg)
     ids2 = [m.id for m in final2["messages"]]

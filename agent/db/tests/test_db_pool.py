@@ -211,5 +211,5 @@ async def test_claim_pool_timeout_uses_bound_and_releases_borrow() -> None:
     with pytest.raises(PoolTimeout, match="injected claim timeout"):
         await claim_inbound_batch(pool, 42, incarnation=None, work=None)
 
-    assert fake.timeout == db._claim_db_acquire_timeout_s()
+    assert fake.timeout == db.claim_db_acquire_timeout_s()
     assert fake.held == 0

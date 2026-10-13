@@ -88,7 +88,7 @@ from agent.state_channels import (
     ContextReset,
     MemoryState,
     SkillRecallState,
-    _memory_state_merge,
+    memory_state_merge,
 )
 from base.agents.compaction.models import CompactMarker
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
@@ -105,9 +105,9 @@ AttachEntry = _AttachEntry
 
 # The messages channel's delta form and snapshot cadence (write switch,
 # task #3180 — see BaseAgentState.messages).
-_MESSAGES_DELTA_SNAPSHOT_FREQUENCY = 1000
-_MESSAGES_DELTA_CHANNEL = DeltaChannel(
-    guarded_delta_reducer, snapshot_frequency=_MESSAGES_DELTA_SNAPSHOT_FREQUENCY
+MESSAGES_DELTA_SNAPSHOT_FREQUENCY = 1000
+MESSAGES_DELTA_CHANNEL = DeltaChannel(
+    guarded_delta_reducer, snapshot_frequency=MESSAGES_DELTA_SNAPSHOT_FREQUENCY
 )
 
 
@@ -123,7 +123,7 @@ class BaseAgentState(BaseModel):
     # The messages channel is a LangGraph DeltaChannel since the 2026-09-14
     # write switch (task #3180): each super-step appends its messages delta
     # to `checkpoint_writes` (periodic `_DeltaSnapshot` blobs at
-    # _MESSAGES_DELTA_SNAPSHOT_FREQUENCY); readers fold at read time, and the
+    # MESSAGES_DELTA_SNAPSHOT_FREQUENCY); readers fold at read time, and the
     # read-compat layer keeps pre-switch threads readable through rollback
     # (base/agents/history/delta_read_compat.py). The reducer is the delta form of the
     # append-only guard — guarded_delta_reducer replays stored writes through
@@ -132,7 +132,7 @@ class BaseAgentState(BaseModel):
     # is allowed; see agent/messages/guard.py) holds on every replay. The
     # single-merge form (guarded_add_messages) stays the working-copy /
     # plugin-update merge.
-    messages: Annotated[list[AnyMessage], _MESSAGES_DELTA_CHANNEL] = Field(default_factory=list)
+    messages: Annotated[list[AnyMessage], MESSAGES_DELTA_CHANNEL] = Field(default_factory=list)
     pending_exec_notes: list[AnyMessage] = Field(default_factory=list)
     """Notes/media deferred until all tool results; recovery drains after repair."""
     security_findings: Annotated[list[SecurityFindingEntry], operator.add] = Field(
@@ -184,7 +184,7 @@ class BaseAgentState(BaseModel):
     attach: AttachState = Field(default_factory=AttachState)
     """Pending files — nested last-value channel (see AttachState)."""
 
-    memory: Annotated[MemoryState, _memory_state_merge] = Field(default_factory=MemoryState)
+    memory: Annotated[MemoryState, memory_state_merge] = Field(default_factory=MemoryState)
     """Passive-recall bookkeeping — nested union-reducer channel (see MemoryState)."""
 
     context_reset: ContextReset = Field(default_factory=ContextReset)
@@ -291,11 +291,11 @@ def _validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) ->
 
 
 # Canonical sentinel for the messages-channel reducer in annotation
-# comparisons (see _messages_annotation_key).
+# comparisons (see messages_annotation_key).
 _MESSAGES_REDUCER = object()
 
 
-def _is_messages_reducer_form(m: Any) -> bool:
+def is_messages_reducer_form(m: Any) -> bool:
     """Every spelling of the messages-channel reducer contract: plain
     `add_messages` (what plugins declare), `guarded_add_messages` (the
     pre-switch channel reducer), and the delta form the channel runs since
@@ -306,7 +306,7 @@ def _is_messages_reducer_form(m: Any) -> bool:
     return isinstance(m, DeltaChannel) and m.reducer is guarded_delta_reducer
 
 
-def _messages_annotation_key(annotation: Any) -> tuple[Any, ...]:
+def messages_annotation_key(annotation: Any) -> tuple[Any, ...]:
     """Canonical key for comparing base-field annotations: the messages
     reducer may be spelled `add_messages` (the contract plugins declare in
     their own BaseModel), `guarded_add_messages` (the pre-switch channel
@@ -319,7 +319,7 @@ def _messages_annotation_key(annotation: Any) -> tuple[Any, ...]:
         origin = getattr(annotation, "__origin__", None)
         return (
             origin,
-            *(_MESSAGES_REDUCER if _is_messages_reducer_form(m) else m for m in meta),
+            *(_MESSAGES_REDUCER if is_messages_reducer_form(m) else m for m in meta),
         )
     return (annotation,)
 
@@ -355,7 +355,7 @@ def _resolve_reducer(field: FieldInfo) -> Callable[[Any, Any], Any]:
     return lambda _old, new: new  # last-value (overwrite)
 
 
-def _accumulate_delta(acc: Any, new: Any, reducer: Callable[[Any, Any], Any]) -> Any:
+def accumulate_delta(acc: Any, new: Any, reducer: Callable[[Any, Any], Any]) -> Any:
     """Merge a fresh delta into the turn's accumulated delta for one channel.
 
     The accumulated value is what the LangGraph reducer sees at commit
@@ -376,7 +376,7 @@ def _accumulate_delta(acc: Any, new: Any, reducer: Callable[[Any, Any], Any]) ->
     reducer(state, xs + ys)`); the commit side processes the concatenated
     list in order and produces exactly the working copy.
     """
-    if _is_messages_reducer_form(reducer):
+    if is_messages_reducer_form(reducer):
         acc_list = acc if isinstance(acc, list) else [acc]
         new_list = new if isinstance(new, list) else [new]
         return acc_list + new_list
@@ -409,7 +409,7 @@ class PluginStateHandle[T: BaseModel]:
     again on the commit side (with the accumulated delta as reducer input,
     producing the same result as the working copy — reducers must be
     batching-invariant, i.e. merging deltas then applying once must equal
-    applying them in sequence; `_accumulate_delta` implements the merge).
+    applying them in sequence; `accumulate_delta` implements the merge).
     Outside an exec turn `read()` / `update()` raise `PluginStateOutsideTurnError`.
 
     Base field reuse: if a plugin BaseModel declares a field with the same
@@ -529,9 +529,9 @@ class PluginStateHandle[T: BaseModel]:
             # Accumulate the raw delta into ava.state_update: overwriting it dropped every
             # earlier delta to a reducer field in one turn (two `update({"seen": ...})` calls
             # committed only the last while read() saw both). A last-value field's reducer is
-            # overwrite, so it still collapses to the latest delta (see `_accumulate_delta`).
+            # overwrite, so it still collapses to the latest delta (see `accumulate_delta`).
             if channel_key in accumulated:
-                accumulated[channel_key] = _accumulate_delta(
+                accumulated[channel_key] = accumulate_delta(
                     accumulated[channel_key], new, self._reducers[field]
                 )
             else:
@@ -607,7 +607,7 @@ def plugin_state_schema(extensions: ExtensionRegistry) -> PluginStateSchema:
             # + `model_field.metadata` (Annotated's extras list); reconstruct the full Annotated to
             # compare with the original on BaseAgentState.model_fields (the messages channel may be
             # spelled by its delta form or the guarded reducer; the comparison normalizes the
-            # contract spellings — see _messages_annotation_key). Don't read
+            # contract spellings — see messages_annotation_key). Don't read
             # `cls.__annotations__`: under `from __future__ import annotations` those are strings,
             # while Pydantic already evaluated them into model_field.
             if model_field.metadata:
@@ -624,7 +624,7 @@ def plugin_state_schema(extensions: ExtensionRegistry) -> PluginStateSchema:
                         f"(write a private <plugin>__{name} field or contribute via a hook instead)"
                     )
                 base_raw = BaseAgentState.__annotations__[name]
-                if _messages_annotation_key(raw_annotation) != _messages_annotation_key(base_raw):
+                if messages_annotation_key(raw_annotation) != messages_annotation_key(base_raw):
                     raise ValueError(
                         f"plugin {plugin!r} declared base field '{name}' with type "
                         f"{raw_annotation!r} differing from BaseAgentState's {base_raw!r} — "

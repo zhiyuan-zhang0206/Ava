@@ -20,10 +20,10 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from agent.graph.hooks.framework import framework_hooks
 from agent.hooks import repair as repair_module
 from agent.hooks.repair import (
-    _redundant_tool_results,
-    _unpaired_tool_calls,
     dangling_tool_pairing_repairs,
+    redundant_tool_results,
     repair_dangling_tool_pairing,
+    unpaired_tool_calls,
 )
 from base.agents.messages.kwargs import ExecStatus
 
@@ -47,7 +47,7 @@ def _full_rebuild(repairs: list[Any]) -> list[Any]:
 
 def _interrupted_tool_result(tool_call_id: str, message_id: str) -> ToolMessage:
     return ToolMessage(
-        content=repair_module._INTERRUPTED_TOOL_RESULT,
+        content=repair_module.INTERRUPTED_TOOL_RESULT,
         tool_call_id=tool_call_id,
         id=message_id,
     )
@@ -80,7 +80,7 @@ def test_interleaved_result_is_valid_no_repair() -> None:
         HumanMessage(content="intervening message"),
         ToolMessage(content="out", tool_call_id="c1"),
     ]
-    assert _redundant_tool_results(messages) == []
+    assert redundant_tool_results(messages) == []
     assert dangling_tool_pairing_repairs(messages) == []
 
 
@@ -99,7 +99,7 @@ def test_repair_tolerates_empty_tool_call_id_and_drops_other_orphan() -> None:
 
     repairs = dangling_tool_pairing_repairs(messages)
 
-    assert _redundant_tool_results(messages) == [2]
+    assert redundant_tool_results(messages) == [2]
     rebuilt = _full_rebuild(repairs)
     assert rebuilt == [empty_id_use, empty_id_result]
     assert rebuilt[0] is empty_id_use
@@ -122,8 +122,8 @@ def test_duplicate_results_drop_all_but_tail_real() -> None:
     assert rebuilt == [use, later, real]
     merged = cast("list[AnyMessage]", add_messages(messages, repairs))  # type: ignore[arg-type]
     assert merged == [use, later, real]
-    assert _unpaired_tool_calls(merged) == []
-    assert _redundant_tool_results(merged) == []
+    assert unpaired_tool_calls(merged) == []
+    assert redundant_tool_results(merged) == []
 
 
 def test_duplicate_results_drop_a_synthetic_after_a_real() -> None:
@@ -258,7 +258,7 @@ def test_rebuild_applies_through_real_add_messages_reducer() -> None:
     synthetic = merged[2]
     assert isinstance(synthetic, ToolMessage)
     assert synthetic.tool_call_id == "call_x"
-    assert _unpaired_tool_calls(merged) == []
+    assert unpaired_tool_calls(merged) == []
 
 
 def test_orphan_tool_result_at_tail_rebuilds_and_drops_it_through_reducer() -> None:
@@ -317,8 +317,8 @@ def test_orphan_and_dangling_tool_use_are_repaired_in_one_atomic_rebuild() -> No
         "list[AnyMessage]",
         add_messages(messages, repairs),  # type: ignore[arg-type]
     )
-    assert _unpaired_tool_calls(merged) == []
-    assert repair_module._redundant_tool_results(merged) == []
+    assert unpaired_tool_calls(merged) == []
+    assert repair_module.redundant_tool_results(merged) == []
 
 
 def test_5333_kill_mid_exec_repair_converges_after_one_rebuild() -> None:
@@ -336,8 +336,8 @@ def test_5333_kill_mid_exec_repair_converges_after_one_rebuild() -> None:
     assert rebuilt[2].tool_call_id == "KaN9"
 
     merged = cast("list[AnyMessage]", add_messages(messages, repairs))  # type: ignore[arg-type]
-    assert _unpaired_tool_calls(merged) == []
-    assert repair_module._redundant_tool_results(merged) == []
+    assert unpaired_tool_calls(merged) == []
+    assert repair_module.redundant_tool_results(merged) == []
     assert dangling_tool_pairing_repairs(merged) == []
 
 

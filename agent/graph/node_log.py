@@ -90,7 +90,7 @@ def awaiter_chain_lines(task: asyncio.Task) -> list[str]:
     return lines
 
 
-def _dump_async_tasks() -> None:
+def dump_async_tasks() -> None:
     """Print every asyncio task's full await chain to stderr. The faulthandler
     dump shows thread frames only — an event loop parked in `select()` looks
     identical no matter which await it is waiting on. The await chains carry
@@ -167,7 +167,7 @@ def _stall_dump_guard(
     # stderr but from different threads (loop vs faulthandler's watchdog), so
     # firing them together interleaves the outputs into garbage.
     faulthandler.dump_traceback_later(threshold + 2.0, repeat=False, file=stderr)
-    timer = asyncio.get_running_loop().call_later(threshold, _dump_async_tasks)
+    timer = asyncio.get_running_loop().call_later(threshold, dump_async_tasks)
     try:
         yield
     finally:
@@ -182,7 +182,7 @@ def _stall_dump_guard(
 # means "never published in this process" (first enter / process restart /
 # fork) and forces a full-window snapshot. A cursor past the current history
 # (len(messages) < cursor — compaction REMOVE_ALL) also forces full-window.
-_SNAPSHOT_CURSOR: dict[int, int] = {}
+SNAPSHOT_CURSOR: dict[int, int] = {}
 
 # Normal graph turns visit several nodes, so emitting each successful exit as a
 # separate event makes lifecycle bookkeeping dominate the noise tier. Buffer
@@ -271,7 +271,7 @@ async def node_lifecycle(
         # node's turn-end fallback) renders the whole tail window; every other
         # enter renders just messages[cursor:] — O(new commits) instead of
         # O(history).
-        cursor = _SNAPSHOT_CURSOR.get(agent_id, 0)
+        cursor = SNAPSHOT_CURSOR.get(agent_id, 0)
         if full_window or cursor == 0 or len(messages) < cursor:
             # Full-window render.
             items, msg_count = build_timeline_items(messages, inputs=timeline_inputs)
@@ -361,7 +361,7 @@ async def node_lifecycle(
         # (fail-loud raise) propagates → node fails → process restarts →
         # cursor resets to 0 → the next enter full-window recovers. Never
         # advancing past a failed render keeps the retry honest.
-        _SNAPSHOT_CURSOR[agent_id] = len(messages)
+        SNAPSHOT_CURSOR[agent_id] = len(messages)
         t0 = time.monotonic()
         logger.info(
             "[node enter {node}] msgs={msg_count}",

@@ -345,7 +345,7 @@ async def read_last_active_at(pool: AsyncConnectionPool, agent_id: int) -> datet
     `MAX(inbound_messages.created_at)` (`base/agents/observation/snapshot.py`) and goes
     stale during exactly the long turns where "is it wedged?" is a real
     question — issue #183. This column is written on every completed LLM step
-    (`agent/graph/llm/node.py:_persist_last_active`).
+    (`agent/graph/llm/node.py:persist_last_active`).
 
     Returns None when the row is gone; raising is left to the caller's
     best-effort wrapper, which runs on the shutdown path.

@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from pydantic import ValidationError
 
 from agent.db import claim_inbound_batch
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.inbox.native_cancel import (
     NativeCancelConflictError,
     accept_native_cancel,
@@ -98,7 +98,7 @@ async def test_preparing_refused_and_cancel_claim_guard_leaves_chat_pending(
             "UPDATE native_graph_work SET phase='active' WHERE id=%s", (target.work_id,)
         )
         db_conn.commit()
-        chat = _insert(db_conn, target.agent_id)
+        chat = insert(db_conn, target.agent_id)
         await asyncio.to_thread(accept_native_cancel, pool, "ready", target.agent_id, target)
         with pytest.raises(NativeCancelPendingError):
             await claim_inbound_batch(

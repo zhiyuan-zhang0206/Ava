@@ -106,7 +106,7 @@ def resume_note_pending(state: Any) -> bool:
     return getattr(messages[-1], "id", None) == f"impersonation-handoff:{receipt}"
 
 
-def _save_document(
+def save_document(
     db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation
 ) -> tuple[str, str]:
     from psycopg.types.json import Jsonb
@@ -181,7 +181,7 @@ async def deliver_handoff(
     when present, the note names it right after the session-end sentence.
     """
     # Keep the truthful pending record while the durable native handoff proceeds.
-    summary, path = await asyncio.to_thread(_save_document, db, session, incarnation)
+    summary, path = await asyncio.to_thread(save_document, db, session, incarnation)
     config = {"configurable": {"thread_id": str(incarnation.agent_id)}}
     snapshot = await graph.aget_state(config)
     receipt = f"{session['agent_id']}:{session['session_id']}"

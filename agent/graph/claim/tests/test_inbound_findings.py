@@ -57,7 +57,7 @@ def _scan_on_with_fresh_snapshot_cursor(monkeypatch: pytest.MonkeyPatch) -> None
     """Scanning on; the node-enter snapshot cursor (per-process state, not under
     test) starts fresh."""
     monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-    monkeypatch.setattr(_node_log, "_SNAPSHOT_CURSOR", {})
+    monkeypatch.setattr(_node_log, "SNAPSHOT_CURSOR", {})
 
 
 async def _claim(

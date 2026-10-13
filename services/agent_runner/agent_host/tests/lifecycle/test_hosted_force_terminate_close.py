@@ -26,7 +26,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 import services.agent_runner.agent_host.host as agent_host_host
-from agent.graph.exec._subprocess import _run_in_subprocess
+from agent.graph.exec._subprocess import run_in_subprocess
 from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.agents.context import AvaContext
@@ -554,7 +554,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    from agent.graph.exec._result import _ExecCrashed
+    from agent.graph.exec._result import ExecCrashed
     from base.native_process.exec_domain import ExecProcessDomain
     from base.native_process.turn_identity import HostedTurnResources
 
@@ -572,7 +572,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     monkeypatch.setattr(ExecProcessDomain, "close_confirmed", failed_close)
     scope = HostedTurnResources()
     ctx = replace(ctx_of(agent_id), original_incarnation=incarnation, hosted_resources=scope)
-    outcome, _ = await _run_in_subprocess(
+    outcome, _ = await run_in_subprocess(
         database,
         "print('resource-proof')",
         ctx,
@@ -583,7 +583,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     )
     (domain,) = closed_domains
     try:
-        assert isinstance(outcome, _ExecCrashed)
+        assert isinstance(outcome, ExecCrashed)
         assert "teardown failure" in outcome.output
         assert len(scope.unresolved) == 1
         path, owner = next(iter(scope.unresolved.items()))

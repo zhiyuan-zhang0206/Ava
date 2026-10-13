@@ -10,7 +10,7 @@ length survives into the banner and the instrumentation log line, and the
 overflow archive stops claiming to hold the full output once the middle is gone.
 
 The other half of the contract — that the run is truncated, never killed — is
-pinned end-to-end through `_run_in_subprocess` (the budget lives in the
+pinned end-to-end through `run_in_subprocess` (the budget lives in the
 parent's accumulator; the child ships raw chunks).
 """
 
@@ -146,7 +146,7 @@ def _overflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     def overflow_dir(_agent_id: int) -> Path:
         return tmp_path / "overflow"
 
-    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
+    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
     return tmp_path / "overflow"
 
 
@@ -297,16 +297,16 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     database: Database,
 ) -> None:
     """The whole point of truncate-over-kill: a runaway loop comes back as a
-    normal `_ExecDone` with bounded output and an explicit marker, so the model
+    normal `ExecDone` with bounded output and an explicit marker, so the model
     stays in the loop and can self-correct. The exec result taxonomy is
     unchanged — no new failure kind."""
-    from agent.graph.exec._subprocess import _run_in_subprocess
-    from agent.graph.exec.node import _ExecDone
+    from agent.graph.exec._subprocess import run_in_subprocess
+    from agent.graph.exec.node import ExecDone
 
     budget = 5000
     # The parent receives this budget explicitly; the child ships raw chunks.
 
-    result, _payload = await _run_in_subprocess(
+    result, _payload = await run_in_subprocess(
         database,
         code="for i in range(20000): print('spam', i)\nprint('DONE_MARKER')",
         context=exec_context(1),
@@ -316,7 +316,7 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
         accumulation_max_chars=budget,
     )
 
-    assert isinstance(result, _ExecDone), f"the run must not be killed, got {type(result).__name__}"
+    assert isinstance(result, ExecDone), f"the run must not be killed, got {type(result).__name__}"
     assert result.stream_cap is not None, "the cap must have engaged"
     assert result.stream_cap.produced_chars > 100_000
     assert len(result.output) < budget + 300, f"output not bounded: {len(result.output)} chars"

@@ -12,7 +12,7 @@ their imports.
 `ExecChildError` is the one variant carrier: a real exception cannot
 cross a process boundary, so a crashed child ships `exc_type` / `exc_msg` /
 `full_traceback` as strings in the result envelope, and the parent wraps them
-in this Exception subclass. `_ExecCrashed.full_traceback` (optional) carries
+in this Exception subclass. `ExecCrashed.full_traceback` (optional) carries
 the child-formatted text; when it is None (a parent-side construction failure
 — spawn error, unserializable state) the dispatcher falls back to
 `format_full_traceback(exc)`.
@@ -52,7 +52,7 @@ class ExecChildError(Exception):
 
 
 @dataclass(frozen=True)
-class _ExecDone:
+class ExecDone:
     """Execution completed, no exception."""
 
     output: str
@@ -60,7 +60,7 @@ class _ExecDone:
 
 
 @dataclass(frozen=True)
-class _ExecCancelled:
+class ExecCancelled:
     """External abort -> child interruption and owned-resource cleanup;
     `output` contains accumulated partial output + KeyboardInterrupt traceback."""
 
@@ -70,7 +70,7 @@ class _ExecCancelled:
 
 
 @dataclass(frozen=True)
-class _ExecTimedOut:
+class ExecTimedOut:
     """Deadline -> child got SIGTERM -> TimeoutError -> exit (or was SIGKILLed
     past the grace period)."""
 
@@ -79,7 +79,7 @@ class _ExecTimedOut:
 
 
 @dataclass(frozen=True)
-class _ExecLifecycle:
+class ExecLifecycle:
     """Agent actively called `ava.self.{terminate,restart,compact}`, raising a
     `LifecycleExit` subclass inside the child — lifecycle takes priority over
     cancel/timeout. The exception is reconstructed parent-side from the
@@ -91,7 +91,7 @@ class _ExecLifecycle:
 
 
 @dataclass(frozen=True)
-class _ExecCrashed:
+class ExecCrashed:
     """Non-lifecycle exception (SyntaxError / NameError / missing import /
     SystemExit subclasses / user code raising KeyboardInterrupt|TimeoutError,
     etc.). Traceback is already in output; exec_node logs at INFO +
@@ -111,7 +111,7 @@ class _ExecCrashed:
     stream_cap: StreamCap | None = None
 
 
-type _ExecResult = _ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle | _ExecCrashed
+type ExecResult = ExecDone | ExecCancelled | ExecTimedOut | ExecLifecycle | ExecCrashed
 
 # The fixed set of lifecycle classes the child can report by name. The subprocess
 # parent turns a missing name into an ExecChildError crash; the dispatcher's
@@ -132,7 +132,7 @@ def lifecycle_exception_from_name(name: str) -> LifecycleExit | None:
     return cls() if cls is not None else None
 
 
-def _construct_exec_result(
+def construct_exec_result(
     output: str,
     exc: BaseException | None,
     *,
@@ -140,24 +140,22 @@ def _construct_exec_result(
     timed_out: bool,
     stream_cap: StreamCap | None = None,
     code_reached: bool | None = None,
-) -> _ExecResult:
+) -> ExecResult:
     """Dispatch priority: lifecycle > cancel > timeout > crashed > done.
 
     Lifecycle always wins (the agent actively calling terminate/restart/compact
     has higher semantic priority than "was interrupted"; SDK already INSERTed
     inbound). Cancel > timeout (CLAUDE design: cancel always wins).
 
-    `code_reached` rides the crash variant only (see `_ExecCrashed`): the
+    `code_reached` rides the crash variant only (see `ExecCrashed`): the
     child's envelope reports whether the agent-authored code ever started.
     """
     if isinstance(exc, LifecycleExit):
-        return _ExecLifecycle(output=output, exc=exc, stream_cap=stream_cap)
+        return ExecLifecycle(output=output, exc=exc, stream_cap=stream_cap)
     if cancelled:
-        return _ExecCancelled(output=output, stream_cap=stream_cap)
+        return ExecCancelled(output=output, stream_cap=stream_cap)
     if timed_out:
-        return _ExecTimedOut(output=output, stream_cap=stream_cap)
+        return ExecTimedOut(output=output, stream_cap=stream_cap)
     if exc is not None:
-        return _ExecCrashed(
-            output=output, exc=exc, stream_cap=stream_cap, code_reached=code_reached
-        )
-    return _ExecDone(output=output, stream_cap=stream_cap)
+        return ExecCrashed(output=output, exc=exc, stream_cap=stream_cap, code_reached=code_reached)
+    return ExecDone(output=output, stream_cap=stream_cap)

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import ModelInterruptedError
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.agents.tests.guarded_compact.host.admission import admit
@@ -72,6 +72,6 @@ async def test_actual_generation_cancel_has_one_attempt_closed_work_and_next_cha
         "SELECT phase,ended_at IS NOT NULL FROM native_graph_work WHERE id=%s",
         (status["execution"]["work_id"],),
     ).fetchone() == ("active", False)
-    _insert(db_conn, accepted.agent)
+    insert(db_conn, accepted.agent)
     await accepted.host.run_turn(accepted.agent)
     assert calls == ["original"] and len(accepted.ordinary) == 1

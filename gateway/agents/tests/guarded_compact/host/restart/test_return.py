@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
 from base.agents.inbox.native_restart import accept_native_restart, native_restart_progress
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
@@ -93,7 +93,7 @@ async def test_original_compact_restart_without_second_ordinary_work(
                 cancelled = await asyncio.to_thread(
                     accept_native_cancel, pool, "compact-cancel", accepted.agent, target
                 )
-            queued = _insert(db_conn, accepted.agent)
+            queued = insert(db_conn, accepted.agent)
             release.set()
             await assert_return_outcome(
                 running,
