@@ -32,7 +32,7 @@ def _probe() -> bool:
         sock.close()
 
 
-def _is_alive() -> bool:
+def is_alive() -> bool:
     """True when the daemon answers a ping; ANY probe failure means "not alive".
 
     Same contract as the browser-mcp healthcheck: a bool, not an exception, so

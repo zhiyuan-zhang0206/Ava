@@ -110,7 +110,7 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
             raise asyncio.CancelledError
 
     monkeypatch.setattr(daemon, "maintenance_with_liveness", execute_pass)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", stop_after_two)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", stop_after_two)
     for expected_scans in (1, 2):
         async with asyncio.TaskGroup() as tasks:
             with pytest.raises(asyncio.CancelledError):

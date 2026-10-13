@@ -2,7 +2,7 @@
 "test_ocr_home_follows_variable.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
 
 [debt.first-party-patch]
-"test_computer_ocr.py#monkeypatch.setattr services.desktop.computer.ocr._SOURCE" = 1
+"test_computer_ocr.py#monkeypatch.setattr services.desktop.computer.ocr.SOURCE" = 1
 "test_computer_ocr.py#monkeypatch.setattr services.desktop.computer.ocr.bin_path" = 2
 "test_computer_ocr.py#monkeypatch.setattr services.desktop.computer.ocr.run_bounded" = 4
 "test_computer_ocr.py#monkeypatch.setattr services.desktop.computer.ocr.shutil.which" = 2

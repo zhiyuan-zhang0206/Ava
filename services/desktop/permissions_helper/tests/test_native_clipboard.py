@@ -43,7 +43,7 @@ final class NSPasteboard {
 
 
 def _sources() -> str:
-    source = lifecycle._SOURCE.read_text()
+    source = lifecycle.SOURCE.read_text()
     unknown = (
         "func rejectUnknownFields("
         + source.split("func rejectUnknownFields(", 1)[1].split("func logIndicator(", 1)[0]

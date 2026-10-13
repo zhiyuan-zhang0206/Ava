@@ -89,7 +89,7 @@ def _close_row(conn: psycopg.Connection, agent_id: int, name: str) -> None:
     conn.commit()
 
 
-def _reconcile(
+def reconcile(
     pool: ConnectionPool,
     managed: dict[tuple[int, str], psd.ServerHandle],
 ) -> None:
@@ -128,7 +128,7 @@ def test_open_row_creates_persistent_page_session_and_persists_token(
     insert_page_row(db_conn, agent_id, "My_Page", 12001, tmp_path)
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     token, page_session = _token_and_session(db_conn, agent_id, "My_Page")
     assert page_session == f"ava-agent-{agent_id}-shell-0-page-my-page"
@@ -142,7 +142,7 @@ def test_open_row_creates_persistent_page_session_and_persists_token(
         )
     ]
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
     assert _token_and_session(db_conn, agent_id, "My_Page") == (token, page_session)
     assert len(backend.new_calls) == 1
 
@@ -190,7 +190,7 @@ def test_new_row_session_created_before_slow_housekeeping(
     backend.new_session = _new
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert events[0] == "create"
     assert "occupants" in events
@@ -247,7 +247,7 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     backend.has_session = _has
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert set(managed) == {key}
     assert backend.new_calls == []
@@ -287,7 +287,7 @@ def test_healthy_page_is_not_resent(
     monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert set(managed) == {(agent_id, "live")}
     assert backend.new_calls == []
@@ -315,10 +315,10 @@ def test_closed_row_kills_its_page_session(
     insert_page_row(db_conn, agent_id, "closed", 12006, tmp_path)
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
     page_session = managed[(agent_id, "closed")].session_name
     _close_row(db_conn, agent_id, "closed")
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert backend.killed == [page_session]
     assert managed == {}
@@ -354,7 +354,7 @@ def test_stale_snapshot_never_creates_session_for_closed_row(
     monkeypatch.setattr(psd, "open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert backend.new_calls == []
     assert backend.killed == []
@@ -405,7 +405,7 @@ def test_stale_snapshot_skips_row_re_registered_mid_pass(
     monkeypatch.setattr(psd, "open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert backend.new_calls == []
     assert managed == {}
@@ -454,7 +454,7 @@ def test_session_rolled_back_when_row_expires_during_create(
     monkeypatch.setattr(psd, "row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert backend.new_calls == []
     assert backend.killed == []
@@ -493,7 +493,7 @@ def test_session_created_for_row_closed_during_create_is_rolled_back(
     monkeypatch.setattr(psd, "row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert backend.new_calls == []
     assert backend.killed == []
@@ -523,13 +523,13 @@ def test_terminated_agent_keeps_daemon_page_session(
     insert_page_row(db_conn, agent_id, key[1], 12016, tmp_path)
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
     page_session = managed[key].session_name
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
     db_conn.commit()
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert backend.killed == []
     assert backend.sessions == {page_session}
@@ -562,7 +562,7 @@ def test_daemon_restart_kills_the_persisted_session_of_a_closed_row(
     )
     _close_row(db_conn, agent_id, "closed-after-restart")
 
-    _reconcile(sync_pool, {})
+    reconcile(sync_pool, {})
 
     assert backend.killed == [page_session]
 
@@ -598,7 +598,7 @@ def test_lost_page_session_is_closed_without_relaunch_or_agent_notice(
         "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)
     ).fetchone()
     for _ in range(3):
-        _reconcile(sync_pool, {})  # New in-memory state, as after a daemon restart.
+        reconcile(sync_pool, {})  # New in-memory state, as after a daemon restart.
     assert backend.new_calls == []
     assert db_conn.execute(
         "SELECT closed_at IS NOT NULL FROM agent_pages WHERE agent_id = %s AND name = 'lost'",

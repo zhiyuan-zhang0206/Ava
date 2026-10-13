@@ -1,6 +1,6 @@
 """TTL reaper daemon — enforces every wall-clock deadline the cluster hands out.
 
-Two resident sequential loops under one `TaskGroup` (`_run_loops`):
+Two resident sequential loops under one `TaskGroup` (`run_loops`):
 
 - `sweep` (`services.upkeep.ttl_reaper.sweep`): database-only reclaims — expired pages,
   browser sessions, notices and impersonation leases — plus the slow maintenance
@@ -78,7 +78,7 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-async def _run_loops(
+async def run_loops(
     pool: ConnectionPool, db: Database, bus: EventBus, liveness: LivenessGroup
 ) -> None:
     """Own the two resident loops; one that raises ends the process."""
@@ -117,7 +117,7 @@ async def run(
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
-        await _run_loops(pool, db, EventBus.from_settings(), liveness)
+        await run_loops(pool, db, EventBus.from_settings(), liveness)
     finally:
         pool.close()
         await stop_health_server(health)

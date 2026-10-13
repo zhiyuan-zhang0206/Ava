@@ -186,7 +186,7 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
 
     with (
         patch.object(daemon, "_is_running", return_value=False),
-        patch.object(daemon, "_write_pidfile", write_pidfile),
+        patch.object(daemon, "write_pidfile", write_pidfile),
         patch.object(daemon, "_remove_pidfile", remove_pidfile),
         patch.object(daemon, "start_health_server", AsyncMock(return_value=object())),
         patch.object(daemon, "stop_health_server", AsyncMock()),

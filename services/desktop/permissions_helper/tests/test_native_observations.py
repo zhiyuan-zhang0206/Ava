@@ -17,7 +17,7 @@ from .. import lifecycle
     sys.platform != "darwin" or shutil.which("swift") is None, reason="needs Swift on macOS"
 )
 def test_native_inventory_and_window_capture_identity(tmp_path: Path) -> None:
-    source = lifecycle._SOURCE.read_text()
+    source = lifecycle.SOURCE.read_text()
     inventory = (
         "private func refreshAppKit("
         + source.split("private func refreshAppKit(", 1)[1].split(

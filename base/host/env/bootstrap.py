@@ -306,7 +306,7 @@ def fetch_bootstrap_config(
     return retry(policy)(_fetch_once)
 
 
-def _snapshot_path() -> Path:
+def snapshot_path() -> Path:
     """The unit's config snapshot path, under this process's home."""
     from base.paths.home import resolve_ava_home
 
@@ -320,7 +320,7 @@ def read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
     re-enrolled runner must not reuse another gateway's values), carry the
     current version, and hold a flat ``{str: str}`` map. Absent / unreadable /
     malformed reads as None — the caller falls through to the fetch."""
-    path = _snapshot_path()
+    path = snapshot_path()
     try:
         raw = json.loads(path.read_text())
     except (OSError, ValueError):
@@ -348,7 +348,7 @@ def _write_config_snapshot(base_url: str, values: dict[str, str]) -> None:
     The snapshot carries cluster credentials, so it is 0600 like the rest of
     the unit's private storage. It never raises and never fails the boot: it
     is a cache, and the worst case of losing it is one extra fetch next time."""
-    path = _snapshot_path()
+    path = snapshot_path()
     payload = json.dumps(
         {
             "v": SNAPSHOT_VERSION,

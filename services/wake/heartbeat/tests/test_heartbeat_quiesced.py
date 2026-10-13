@@ -34,7 +34,7 @@ async def _run_briefly(
     async def short_sleep(_progress: LoopProgress, _total_s: float) -> None:
         await asyncio.sleep(0.01)
 
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", short_sleep)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", short_sleep)
     task = asyncio.create_task(loop(cast("ConnectionPool", pool), LoopProgress("loop", 60.0)))
     try:
         await asyncio.sleep(0.2)
@@ -50,7 +50,7 @@ async def test_a_quiesced_unit_sends_no_check_in_pass(
     pool = MagicMock()
     await _run_briefly(
         monkeypatch,
-        lambda pool, progress: daemon._dispatch_loop(
+        lambda pool, progress: daemon.dispatch_loop(
             pool, Database.from_settings(gate=database_gate), EventBus.from_settings(), progress
         ),
         pool,

@@ -48,7 +48,7 @@ MAX_AGE_SECONDS = 600.0
 # One agent's view is its whole history, about 12 KB per message measured on the preview
 # (a 4.6k-message agent retains ~49 MB, a 200-message worker ~3 MB). The agent view puts
 # several agents on one screen, so one page load needs all of them cached at once.
-_MAX_ENTRIES = 16
+MAX_ENTRIES = 16
 
 
 @dataclass(frozen=True)
@@ -159,7 +159,7 @@ class HistoryViewCache:
             with self._lock:
                 self._entries.pop(agent_id, None)
                 self._entries[agent_id] = _Entry(time.monotonic(), head, view)
-                while len(self._entries) > _MAX_ENTRIES:
+                while len(self._entries) > MAX_ENTRIES:
                     evicted = next(iter(self._entries))
                     self._entries.pop(evicted)
                     if evicted != agent_id:

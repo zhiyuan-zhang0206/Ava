@@ -194,7 +194,7 @@ async def test_run_keeps_health_before_pool_and_closes_after_dispatch(
 
     captured, fleet = image, config
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "_write_pidfile", lambda: stages.append("pidfile"))
+    monkeypatch.setattr(daemon, "write_pidfile", lambda: stages.append("pidfile"))
     monkeypatch.setattr(daemon, "_remove_pidfile", lambda: stages.append("pidfile-close"))
     monkeypatch.setattr(
         daemon,
@@ -204,7 +204,7 @@ async def test_run_keeps_health_before_pool_and_closes_after_dispatch(
     monkeypatch.setattr(daemon, "start_health_server", start)
     monkeypatch.setattr(daemon, "stop_health_server", stop)
     monkeypatch.setattr(daemon.EventBus, "from_settings", lambda: bus)
-    monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
+    monkeypatch.setattr(daemon, "dispatch_loop", dispatch)
     if failure is None:
         await daemon.run(config, database=database, image=image)
     else:

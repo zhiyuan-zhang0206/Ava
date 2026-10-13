@@ -17,7 +17,7 @@ from services.desktop.permissions_helper import lifecycle
     reason="native Swift child ownership contract",
 )
 def test_helper_native_reaping_cannot_race_owned_signal_delivery(tmp_path: Path) -> None:
-    source = lifecycle._SOURCE.read_text()
+    source = lifecycle.SOURCE.read_text()
     # Compile the actual spawn/session and root-keeper implementations without
     # the GUI server. Test barriers widen the old race, without runtime hooks.
     children = source.split("/// Resolve an allowed path", 1)[0]

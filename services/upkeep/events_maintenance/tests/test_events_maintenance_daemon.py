@@ -148,7 +148,7 @@ async def test_failed_rollup_still_waits_before_retry(
         raise asyncio.CancelledError  # break the otherwise-infinite loop after one sleep
 
     monkeypatch.setattr(daemon, "run_maintenance", boom)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", fake_sleep)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", fake_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=5.0)
     beat_at: list[float] = []
@@ -162,7 +162,7 @@ async def test_failed_rollup_still_waits_before_retry(
     config = events_maintenance_config(process_config)
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(asyncio.CancelledError):
-            await daemon._dispatch_loop(
+            await daemon.dispatch_loop(
                 _FAKE_POOL,
                 progress,
                 config,
@@ -198,11 +198,11 @@ async def test_wedged_dispatch_parks_without_entering_retry_sleep(
 
     monkeypatch.setattr(daemon, "maintenance_with_liveness", wedge)
     monkeypatch.setattr(daemon.asyncio, "sleep", forbidden_park)
-    monkeypatch.setattr(daemon, "_sleep_with_liveness", forbidden_retry_sleep)
+    monkeypatch.setattr(daemon, "sleep_with_liveness", forbidden_retry_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=1.0)
     async with asyncio.TaskGroup() as tasks:
-        await daemon._dispatch_loop(
+        await daemon.dispatch_loop(
             _FAKE_POOL,
             progress,
             events_maintenance_config(process_config),
@@ -482,7 +482,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
@@ -504,7 +504,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(
         return pool
 
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
-    monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
+    monkeypatch.setattr(daemon, "dispatch_loop", dispatch)
     monkeypatch.setattr(daemon, "resolution_loop", resolution)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", gauge)
 
@@ -582,7 +582,7 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         return closed.append("pidfile")
@@ -595,7 +595,7 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
         return _RunPool()
 
     monkeypatch.setattr(daemon.Database, "pool", pool)
-    monkeypatch.setattr(daemon, "_dispatch_loop", loop("dispatch"))
+    monkeypatch.setattr(daemon, "dispatch_loop", loop("dispatch"))
     monkeypatch.setattr(daemon, "resolution_loop", loop("resolution"))
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", loop("registry_gauge"))
 
@@ -654,7 +654,7 @@ def _run_with_alert_loop(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         pass
@@ -676,7 +676,7 @@ def _run_with_alert_loop(
         return _RunPool()
 
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
-    monkeypatch.setattr(daemon, "_dispatch_loop", parked)
+    monkeypatch.setattr(daemon, "dispatch_loop", parked)
     monkeypatch.setattr(daemon, "resolution_loop", parked)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", parked)
     monkeypatch.setattr(daemon.alert_reconciler, "reconciliation_loop", alert_loop)

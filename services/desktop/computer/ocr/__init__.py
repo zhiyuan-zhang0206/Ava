@@ -32,7 +32,7 @@ from pathlib import Path
 from base.host.proc import run_bounded
 from base.paths import logs_dir
 
-_SOURCE = Path(__file__).with_name("ocr.swift")
+SOURCE = Path(__file__).with_name("ocr.swift")
 # A 4K full-screen run takes ~0.5-2s; 30s is generous but bounded.
 _OCR_TIMEOUT_S = 30.0
 
@@ -49,13 +49,13 @@ def bin_path() -> Path:
 def _binary() -> Path:
     """The compiled OCR binary, built on demand (source-newer check)."""
     binary = bin_path()
-    if not binary.exists() or _SOURCE.stat().st_mtime > binary.stat().st_mtime:
+    if not binary.exists() or SOURCE.stat().st_mtime > binary.stat().st_mtime:
         binary.parent.mkdir(parents=True, exist_ok=True)
         swiftc = shutil.which("swiftc")
         if swiftc is None:
             raise OcrError("swiftc not found on PATH — cannot build the OCR helper")
         built = run_bounded(
-            [swiftc, "-o", str(binary), str(_SOURCE)], timeout=120, capture_output=True, text=True
+            [swiftc, "-o", str(binary), str(SOURCE)], timeout=120, capture_output=True, text=True
         )
         if built.returncode != 0:
             raise OcrError(f"swiftc failed: {built.stderr.strip()[:300]}")

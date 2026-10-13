@@ -105,7 +105,7 @@ var abortStops = 0
 def helper_source() -> str:
     from services.desktop.permissions_helper import lifecycle
 
-    return lifecycle._SOURCE.read_text()
+    return lifecycle.SOURCE.read_text()
 
 
 def between(source: str, start: str, end: str) -> str:

@@ -646,7 +646,7 @@ def test_source_mtime_change_does_not_rebuild_identical_content(
     _write_current_build_state(app, lifecycle._source_content_hash())
     exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
     newer = exe.stat().st_mtime + 60
-    os.utime(lifecycle._SOURCE, (newer, newer))
+    os.utime(lifecycle.SOURCE, (newer, newer))
 
     assert lifecycle.build_and_sign() == (app, False)
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))

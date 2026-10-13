@@ -32,7 +32,7 @@ def test_source_content_change_forces_rebuild(
     app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
     recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
     _write_current_build_state(app, lifecycle._source_content_hash())
-    lifecycle._SOURCE.write_text("// changed swift")
+    lifecycle.SOURCE.write_text("// changed swift")
 
     before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):

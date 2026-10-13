@@ -230,7 +230,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
         raise asyncio.CancelledError
 
     monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", fake_pass)
-    monkeypatch.setattr(heartbeat_daemon, "_sleep_with_liveness", fake_sleep)
+    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", fake_sleep)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
@@ -260,7 +260,7 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
             raise asyncio.CancelledError
 
     monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", failing_pass)
-    monkeypatch.setattr(heartbeat_daemon, "_sleep_with_liveness", sleep)
+    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", sleep)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(

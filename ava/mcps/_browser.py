@@ -24,7 +24,7 @@ from base.host.net.resilience import Policy, aretry
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
 # line; lift the stream buffer cap well above StreamReader's 64KiB default
 # (same limit as the wrapper and the browser daemon).
-_LINE_LIMIT = 64 * 1024 * 1024
+LINE_LIMIT = 64 * 1024 * 1024
 
 # The browser-mcp service is a supervised daemon that should already be up; a
 # fresh agent may still race it on a cold cluster start, so retry the connect
@@ -169,7 +169,7 @@ async def _dial_browser_mcp(
     )
 
     async def once() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
+        return await asyncio.open_unix_connection(path=sock, limit=LINE_LIMIT)
 
     last: OSError | None = None
     try:
@@ -234,7 +234,7 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
 
 async def _release_roundtrip(sock: str, agent_id: int) -> bool:
     """One dial -> request -> reply round-trip; the caller owns the timeout."""
-    reader, writer = await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
+    reader, writer = await asyncio.open_unix_connection(path=sock, limit=LINE_LIMIT)
     try:
         writer.write(
             (

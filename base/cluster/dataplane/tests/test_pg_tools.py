@@ -287,7 +287,7 @@ def test_stall_guard_reports_a_probe_that_does_not_join(
         return instance
 
     monkeypatch.setattr(guard, "PROBE_INTERVAL_S", 0.01)
-    monkeypatch.setattr(guard, "_PROBE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(guard, "PROBE_TIMEOUT_S", 0.01)
     monkeypatch.setattr(guard, "StallWatchdog", owned_watcher)
     monkeypatch.setattr(psycopg, "connect", blocked_connect)
     try:
