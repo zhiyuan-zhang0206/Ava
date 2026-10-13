@@ -31,14 +31,14 @@ async def test_a_quiesced_unit_borrows_no_connection(
     database_gate: ProcessDbGate,
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
-    monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.01)
     pool = MagicMock()
     task = asyncio.create_task(
         daemon._dispatch_loop(
             cast("ConnectionPool", pool),
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
-            Liveness(daemon._LIVENESS_TIMEOUT_S),
+            Liveness(daemon.LIVENESS_TIMEOUT_S),
             daemon.labeler_config(),
             catalog=model_catalog,
             llm_override=config_authority.runtime.lm.llm_override,

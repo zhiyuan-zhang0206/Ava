@@ -23,7 +23,7 @@ HTTP call.
   attaches an idempotency key to the envelope: the ops server dedupes by key
   and replays the first run's stored outcome instead of re-executing, so a
   lost response cannot duplicate the effect (see
-  `services/agent_runner/agent_ops/daemon.py:_dispatch_idempotent`). A spawn-launch payload
+  `services/agent_runner/agent_ops/daemon.py:dispatch_idempotent`). A spawn-launch payload
   business id gives a target-scoped, canonical-payload key for cross-call
   dedup; every other automatic key is fresh unless its caller supplies one.
 

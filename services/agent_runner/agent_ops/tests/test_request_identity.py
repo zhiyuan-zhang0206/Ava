@@ -57,7 +57,7 @@ def dispatches(monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool) -> list[di
         return OpStatus.COMPLETED, {"accepted": True}
 
     monkeypatch.setattr(daemon, "_dispatch", dispatch)
-    monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 1)
+    monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 1)
 
     async def sleep(_seconds: float) -> None:
         return None
@@ -83,7 +83,7 @@ async def test_changed_kind_or_payload_fails_without_dispatch(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    await daemon._dispatch_idempotent_pass(
+    await daemon.dispatch_idempotent_pass(
         "status_probe",
         {"target": 1},
         "intent",
@@ -97,7 +97,7 @@ async def test_changed_kind_or_payload_fails_without_dispatch(
         image=ops_image,
         local_machine=machine_identity,
     )
-    status, result = await daemon._dispatch_idempotent_pass(
+    status, result = await daemon.dispatch_idempotent_pass(
         kind,
         payload,
         "intent",
@@ -127,7 +127,7 @@ async def test_key_order_does_not_change_request_identity(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    first = await daemon._dispatch_idempotent_pass(
+    first = await daemon.dispatch_idempotent_pass(
         "status_probe",
         {"a": 1, "b": 2},
         "intent",
@@ -141,7 +141,7 @@ async def test_key_order_does_not_change_request_identity(
         image=ops_image,
         local_machine=machine_identity,
     )
-    second = await daemon._dispatch_idempotent_pass(
+    second = await daemon.dispatch_idempotent_pass(
         "status_probe",
         {"b": 2, "a": 1},
         "intent",
@@ -194,7 +194,7 @@ async def test_effect_then_exception_keeps_uncertain_claim(
 
     monkeypatch.setattr(daemon, "_dispatch", crash)
     with pytest.raises(RuntimeError, match="after effect"):
-        await daemon._dispatch_idempotent_pass(
+        await daemon.dispatch_idempotent_pass(
             "lifecycle",
             {},
             "intent",
@@ -208,7 +208,7 @@ async def test_effect_then_exception_keeps_uncertain_claim(
             image=ops_image,
             local_machine=machine_identity,
         )
-    status, result = await daemon._dispatch_idempotent_pass(
+    status, result = await daemon.dispatch_idempotent_pass(
         "lifecycle",
         {},
         "intent",
@@ -270,7 +270,7 @@ async def test_owner_cancellation_never_frees_its_key(
 
     monkeypatch.setattr(daemon, "_dispatch", interrupted)
     owner = asyncio.create_task(
-        daemon._dispatch_idempotent_pass(
+        daemon.dispatch_idempotent_pass(
             "lifecycle",
             {},
             "intent",
@@ -289,7 +289,7 @@ async def test_owner_cancellation_never_frees_its_key(
     owner.cancel()
     with pytest.raises(asyncio.CancelledError):
         await owner
-    status, result = await daemon._dispatch_idempotent_pass(
+    status, result = await daemon.dispatch_idempotent_pass(
         "lifecycle",
         {},
         "intent",
@@ -320,7 +320,7 @@ async def test_old_ops_receipt_does_not_expire_into_fresh_execution(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    first = await daemon._dispatch_idempotent_pass(
+    first = await daemon.dispatch_idempotent_pass(
         "status_probe",
         {},
         "intent",
@@ -336,7 +336,7 @@ async def test_old_ops_receipt_does_not_expire_into_fresh_execution(
     )
     db_conn.execute("UPDATE api_idempotency SET completed_at=now()-interval '8 days'")
     db_conn.commit()
-    second = await daemon._dispatch_idempotent_pass(
+    second = await daemon.dispatch_idempotent_pass(
         "status_probe",
         {},
         "intent",
@@ -371,7 +371,7 @@ async def test_unknown_legacy_identity_fails_closed(
         "VALUES ('intent','ops','status_probe','completed','{}')"
     )
     db_conn.commit()
-    status, result = await daemon._dispatch_idempotent_pass(
+    status, result = await daemon.dispatch_idempotent_pass(
         "status_probe",
         {},
         "intent",
@@ -409,7 +409,7 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
     db_conn.commit()
     try:
         with pytest.raises(psycopg.errors.CheckViolation):
-            await daemon._dispatch_idempotent_pass(
+            await daemon.dispatch_idempotent_pass(
                 "lifecycle",
                 {},
                 "intent",
@@ -426,7 +426,7 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
     finally:
         db_conn.execute("ALTER TABLE api_idempotency DROP CONSTRAINT reject_test_result")
         db_conn.commit()
-    status, result = await daemon._dispatch_idempotent_pass(
+    status, result = await daemon.dispatch_idempotent_pass(
         "lifecycle",
         {},
         "intent",

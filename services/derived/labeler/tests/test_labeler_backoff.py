@@ -46,7 +46,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
     monkeypatch.setattr(settings.lm, "labeler_model", "deepseek-v4-flash")
     config = daemon.labeler_config()
-    monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.0)
+    monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.0)
 
     a = create_agent(db_conn)
     _seed_chat(db_conn, a)
@@ -79,7 +79,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
                 p,
                 labeler_db(database_gate=database_gate),
                 event_bus,
-                Liveness(daemon._LIVENESS_TIMEOUT_S),
+                Liveness(daemon.LIVENESS_TIMEOUT_S),
                 config,
                 catalog=model_catalog,
                 llm_override=config_authority.runtime.lm.llm_override,
@@ -102,11 +102,11 @@ def test_select_unlabeled_excludes_attempted_ids(db_conn: psycopg.Connection) ->
 
     with db_conn.cursor() as cur:
         # Empty attempted -> the array param is `'{}'::bigint[]`, excludes nothing.
-        all_ids = {tid for tid, _prompt in daemon._select_unlabeled(cur, [])}
+        all_ids = {tid for tid, _prompt in daemon.select_unlabeled(cur, [])}
         assert {a, b} <= all_ids
 
         # a is attempted -> excluded; b still selectable.
-        remaining = {tid for tid, _prompt in daemon._select_unlabeled(cur, [a])}
+        remaining = {tid for tid, _prompt in daemon.select_unlabeled(cur, [a])}
         assert a not in remaining
         assert b in remaining
 
@@ -144,7 +144,7 @@ def test_select_unlabeled_treats_empty_label_as_unset(db_conn: psycopg.Connectio
     _set_label(db_conn, c, "already labeled")
 
     with db_conn.cursor() as cur:
-        picked = {tid for tid, _prompt in daemon._select_unlabeled(cur, [])}
+        picked = {tid for tid, _prompt in daemon.select_unlabeled(cur, [])}
     assert a in picked
     assert b not in picked
     assert c not in picked
@@ -168,7 +168,7 @@ def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connect
     db_conn.commit()
 
     with db_conn.cursor() as cur:
-        rows = dict(daemon._select_unlabeled(cur, []))
+        rows = dict(daemon.select_unlabeled(cur, []))
     assert rows[a] == 'Task #2669 "ava.ui docs gap" is now assigned to you.'
     assert b not in rows
 

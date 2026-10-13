@@ -219,8 +219,8 @@ async def test_description_row_hit_is_shown_as_its_excerpt(
 
 
 def test_excerpt_is_capped_in_the_state() -> None:
-    candidate = rerank._Candidate("n.md", "z" * 5000, "d", [])
-    state = rerank._pair_state("q", candidate, "search")
+    candidate = rerank.Candidate("n.md", "z" * 5000, "d", [])
+    state = rerank.pair_state("q", candidate, "search")
     assert state.count("z") == 1800
 
 
@@ -394,7 +394,7 @@ def test_description_and_tags_survive_malformed_frontmatter(tmp_path: Path) -> N
         *(_hit(tmp_path, n) for n in ("bad_yaml.md", "plain.md")),
     ]
 
-    scalar, bad_yaml, plain = rerank._load_candidates(hits, tmp_path, frozenset(), 30)
+    scalar, bad_yaml, plain = rerank.load_candidates(hits, tmp_path, frozenset(), 30)
 
     assert (scalar.description, scalar.tags, scalar.chunk) == ("123", [], "123")
     assert (bad_yaml.description, bad_yaml.tags) == ("", [])
@@ -416,7 +416,7 @@ async def test_no_candidates_asks_no_question(
 async def test_requests_run_concurrently_up_to_the_cap(
     tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    count = rerank._MAX_CONCURRENT_DECISIONS * 2 + 3
+    count = rerank.MAX_CONCURRENT_DECISIONS * 2 + 3
     hits: list[ChunkHit] = []
     for i in range(count):
         _write(tmp_path, f"n{i}.md", f"---\ntype: Memory\n---\n\nbody {i}")
@@ -428,14 +428,14 @@ async def test_requests_run_concurrently_up_to_the_cap(
 
     assert len(judge.calls) == count
     assert len(ranked) == count
-    assert 1 < judge.max_in_flight <= rerank._MAX_CONCURRENT_DECISIONS
+    assert 1 < judge.max_in_flight <= rerank.MAX_CONCURRENT_DECISIONS
 
 
 def test_default_candidates_all_go_out_together() -> None:
     """The default depth (30, from the calibration benchmark) fits under the concurrency cap, so a
     default search sends every request at once."""
     assert settings.services.memory_rerank_candidates == 30
-    assert settings.services.memory_rerank_candidates <= rerank._MAX_CONCURRENT_DECISIONS
+    assert settings.services.memory_rerank_candidates <= rerank.MAX_CONCURRENT_DECISIONS
 
 
 # ── failure ──

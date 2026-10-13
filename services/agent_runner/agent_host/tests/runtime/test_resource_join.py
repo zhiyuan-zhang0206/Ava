@@ -106,7 +106,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
     assert events == ["clients", "pools"]
 
 
-def _exercise_unfinished_main() -> None:
+def exercise_unfinished_main() -> None:
     """Production main's existing hard exit must skip a still-owned async task."""
     from base.deploy.schema import migrations
 

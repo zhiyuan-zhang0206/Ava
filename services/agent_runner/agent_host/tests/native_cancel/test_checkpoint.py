@@ -24,8 +24,8 @@ from services.agent_runner.agent_host.invocation.native_work import (
     settle_native_invocation,
 )
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
-    _cold_reader,
     _prepare_graph,
+    cold_reader,
 )
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 
@@ -45,7 +45,7 @@ async def test_checkpoint_flush_ack_and_retained_terminal_receipt(
     assert await settle_native_invocation(
         aops_pool, saver, graph, incarnation, target, config, resources=None
     )
-    cold = _cold_reader(aops_pool)
+    cold = cold_reader(aops_pool)
     cold.serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
     checkpoint_id = await cold_cancel_checkpoint(cold, marker)
     assert checkpoint_id is not None

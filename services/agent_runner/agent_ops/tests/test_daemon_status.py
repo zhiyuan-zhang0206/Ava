@@ -53,7 +53,7 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         return "completed", {"paused": False}
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)
-    status, body, ctype = await daemon._ops_route(
+    status, body, ctype = await daemon.ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -83,7 +83,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """status_probe through the real _dispatch must survive _ops_route's json.dumps
+    """status_probe through the real _dispatch must survive ops_route's json.dumps
     even when ClusterStatus carries datetime values nested inside it.
 
     Regression: a python-mode model_dump left datetime objects in the result and
@@ -125,7 +125,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
         )
 
     monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
-    status, body, ctype = await daemon._ops_route(
+    status, body, ctype = await daemon.ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -182,7 +182,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
 
     monkeypatch.setattr(cluster_ops, "cluster_status_op", _degraded_status)
 
-    status, body, ctype = await daemon._ops_route(
+    status, body, ctype = await daemon.ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
         dispatch_sem=dispatch_sem,

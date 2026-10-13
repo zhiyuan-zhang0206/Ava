@@ -6,15 +6,15 @@ from collections.abc import Awaitable
 import pytest
 
 from services.agent_runner.agent_host.invocation.compact import source as compact_source
-from services.agent_runner.agent_host.tests.runtime.host_support import _Build, _Row
+from services.agent_runner.agent_host.tests.runtime.host_support import Build, Row
 from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
 
 
 async def test_business_error_remains_primary_when_settlement_also_fails(
-    wired: _Build, monkeypatch: pytest.MonkeyPatch
+    wired: Build, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    host, _, _ = wired({7: _Row()})
+    host, _, _ = wired({7: Row()})
     primary = ValueError("original hosted business failure")
     cleanup = RuntimeError("original hosted settlement failure")
 
@@ -37,9 +37,9 @@ async def test_business_error_remains_primary_when_settlement_also_fails(
 
 
 async def test_root_cancellation_cancels_work_and_retains_finite_settlement(
-    wired: _Build, monkeypatch: pytest.MonkeyPatch
+    wired: Build, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    host, _, _ = wired({7: _Row()})
+    host, _, _ = wired({7: Row()})
     work_entered, work_release = asyncio.Event(), asyncio.Event()
     settle_entered, settle_release = asyncio.Event(), asyncio.Event()
     actual_work: asyncio.Task[object] | None = None

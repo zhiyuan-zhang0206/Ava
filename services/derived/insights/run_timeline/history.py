@@ -40,11 +40,11 @@ from base.db import Database
 
 # Short enough that a live agent's growth shows within a click or two; the cache
 # only has to absorb the burst of requests one page interaction makes.
-_TTL_SECONDS = 5.0
+TTL_SECONDS = 5.0
 # A view is rebuilt for a node it does not reach at most this often.
 _REFRESH_SECONDS = 2.0
 # A view whose checkpoint id is unchanged is kept this long at most, however often it is re-validated.
-_MAX_AGE_SECONDS = 600.0
+MAX_AGE_SECONDS = 600.0
 # One agent's view is its whole history, about 12 KB per message measured on the preview
 # (a 4.6k-message agent retains ~49 MB, a 200-message worker ~3 MB). The agent view puts
 # several agents on one screen, so one page load needs all of them cached at once.
@@ -101,9 +101,9 @@ class _Entry:
 class HistoryViewCache:
     """A few agents' views; one instance lives on the app (`app.state.run_timeline_views`).
 
-    Key: the agent id. A view is served untouched for `_TTL_SECONDS`; after that one cheap
+    Key: the agent id. A view is served untouched for `TTL_SECONDS`; after that one cheap
     read of the agent's newest checkpoint id says whether the history moved: an unchanged id
-    keeps the view (up to `_MAX_AGE_SECONDS`), a new one rebuilds it. Builds are single-flight
+    keeps the view (up to `MAX_AGE_SECONDS`), a new one rebuilds it. Builds are single-flight
     per agent, so the burst of requests one page load makes costs one checkpoint read, not one each.
     """
 
@@ -114,7 +114,7 @@ class HistoryViewCache:
         self._building: dict[int, threading.Lock] = {}
 
     def _fresh(self, hit: _Entry | None, now: float, needs: int) -> HistoryView | None:
-        if hit is None or now - hit.at > _TTL_SECONDS:
+        if hit is None or now - hit.at > TTL_SECONDS:
             return None
         behind = len(hit.view.history.messages) < needs
         return hit.view if not behind or now - hit.at < _REFRESH_SECONDS else None
@@ -143,7 +143,7 @@ class HistoryViewCache:
                 hit is not None
                 and head == hit.head
                 and len(hit.view.history.messages) >= needs
-                and now - hit.at <= _MAX_AGE_SECONDS
+                and now - hit.at <= MAX_AGE_SECONDS
             ):
                 with self._lock:
                     self._entries[agent_id] = _Entry(now, head, hit.view)

@@ -21,11 +21,11 @@ from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.fake_provider import DIM, FINGERPRINT, FakeProvider
 from services.derived.memory_search.tests.store_backend import StoreBackend
 from services.derived.memory_search.tests.test_memory_indexer import (
-    _liveness_timeout,
-    _long_note,
+    _watched_root as _watched_root,
 )
 from services.derived.memory_search.tests.test_memory_indexer import (
-    _watched_root as _watched_root,
+    liveness_timeout,
+    long_note,
 )
 from services.derived.memory_search.tests.test_memory_indexer import (
     store_backend as store_backend,
@@ -64,8 +64,8 @@ def test_reconcile_embed_error_truncates_and_returns_false(
         assert roles == machine_identity.role()
         return root
 
-    monkeypatch.setattr(daemon, "_memory_root", memory_root_for_roles)
-    monkeypatch.setattr(daemon, "_RECONCILE_CHUNK_PATHS", 2)  # 6 files -> 3 chunks
+    monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
+    monkeypatch.setattr(daemon, "RECONCILE_CHUNK_PATHS", 2)  # 6 files -> 3 chunks
 
     calls: list[int] = []
 
@@ -80,7 +80,7 @@ def test_reconcile_embed_error_truncates_and_returns_false(
         calls.append(len(paths))
         raise EmbeddingAPIError("embed boom")
 
-    monkeypatch.setattr(daemon, "_process_paths", failing_process_paths)
+    monkeypatch.setattr(daemon, "process_paths", failing_process_paths)
 
     liveness = Liveness(600.0)
     with caplog.at_level(logging.ERROR, logger="services.derived.memory_indexer.daemon"):
@@ -103,7 +103,7 @@ def test_split_note_extracts_description_and_body() -> None:
         "---\ntype: Memory\ndescription: A note about the user's health\n"
         "---\n\n# Health\n\nbody content"
     )
-    desc, body = chunking._split_note(content)
+    desc, body = chunking.split_note(content)
     assert desc == "A note about the user's health"
     assert "# Health" in body
     assert "description" not in body
@@ -111,26 +111,26 @@ def test_split_note_extracts_description_and_body() -> None:
 
 def test_split_note_no_frontmatter_returns_full_body() -> None:
     content = "# Just a heading\n\nNo YAML."
-    desc, body = chunking._split_note(content)
+    desc, body = chunking.split_note(content)
     assert desc is None
     assert body == content
 
 
 def test_split_note_blank_description_is_none() -> None:
-    desc, body = chunking._split_note("---\ndescription: \n---\n\nbody")
+    desc, body = chunking.split_note("---\ndescription: \n---\n\nbody")
     assert desc is None
     assert body == "\nbody"  # the shared parser keeps the blank line after the fence
 
 
 def test_chunk_body_short_text_single_chunk() -> None:
-    assert chunking._chunk_body("short body") == ["short body"]
-    assert chunking._chunk_body("  \n\n  ") == []
+    assert chunking.chunk_body("short body") == ["short body"]
+    assert chunking.chunk_body("  \n\n  ") == []
 
 
 def test_chunk_body_splits_at_paragraph_boundaries() -> None:
     paras = [f"paragraph-{i} " + "word " * 80 for i in range(6)]  # 412 chars each
     body = "\n\n".join(paras)
-    chunks = chunking._chunk_body(body, max_chars=1800, overlap_chars=200)
+    chunks = chunking.chunk_body(body, max_chars=1800, overlap_chars=200)
     assert len(chunks) == 2
     assert all(len(c) <= 1800 for c in chunks)
     assert chunks[0].startswith("paragraph-0")
@@ -142,7 +142,7 @@ def test_chunk_body_splits_at_paragraph_boundaries() -> None:
 def test_chunk_body_overlap_carries_trailing_paragraphs() -> None:
     paras = [f"paragraph-{i} " + "word " * 80 for i in range(6)]
     body = "\n\n".join(paras)
-    chunks = chunking._chunk_body(body, max_chars=1400, overlap_chars=600)
+    chunks = chunking.chunk_body(body, max_chars=1400, overlap_chars=600)
     # the previous chunk's tail paragraph re-opens the next chunk
     assert chunks[1].startswith("paragraph-2")
     assert "paragraph-2" in chunks[0]
@@ -150,7 +150,7 @@ def test_chunk_body_overlap_carries_trailing_paragraphs() -> None:
 
 def test_chunk_body_hard_splits_oversized_paragraph() -> None:
     para = "x" * 3000
-    chunks = chunking._chunk_body(para, max_chars=1000, overlap_chars=100)
+    chunks = chunking.chunk_body(para, max_chars=1000, overlap_chars=100)
     assert chunks == ["x" * 1000, "x" * 1000, "x" * 1000, "x" * 300]
 
 
@@ -185,11 +185,11 @@ def test_process_paths_indexes_desc_and_body_chunks(
         encoding="utf-8",
     )
 
-    daemon._process_paths(
+    daemon.process_paths(
         store_backend,
         {f.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
     assert str(f.resolve()) in store_backend.all_meta()
@@ -207,23 +207,23 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
     """Issue #1946: after a file shrinks, the rows it no longer produces
     (old body tail) are gone — every remaining chunk matches current content."""
     f = tmp_path / "long.md"
-    f.write_text(_long_note(12), encoding="utf-8")
+    f.write_text(long_note(12), encoding="utf-8")
     backend = store_backend
-    daemon._process_paths(
+    daemon.process_paths(
         backend,
         {f.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
 
-    f.write_text(_long_note(3), encoding="utf-8")
-    daemon._process_paths(
+    f.write_text(long_note(3), encoding="utf-8")
+    daemon.process_paths(
         backend,
         {f.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
@@ -241,21 +241,21 @@ def test_process_paths_removes_desc_row_when_description_deleted(
     f = tmp_path / "note.md"
     f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
     backend = store_backend
-    daemon._process_paths(
+    daemon.process_paths(
         backend,
         {f.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
     f.write_text("body text", encoding="utf-8")
-    daemon._process_paths(
+    daemon.process_paths(
         backend,
         {f.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
     assert store_backend.rows(f) == {("body", 0)}
@@ -273,21 +273,21 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
     f = tmp_path / "note.md"
     f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
     backend = store_backend
-    daemon._process_paths(
+    daemon.process_paths(
         backend,
         {f.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
     f.write_text("", encoding="utf-8")
-    daemon._process_paths(
+    daemon.process_paths(
         backend,
         {f.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
     assert store_backend.rows(f) == set()
@@ -312,14 +312,14 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
     first.write_text("---\ndescription: first description\n---\nfirst body", encoding="utf-8")
     second = tmp_path / "second.md"
     second.write_text("second body", encoding="utf-8")
-    monkeypatch.setattr(daemon, "_BATCH_SIZE", 2)
+    monkeypatch.setattr(daemon, "BATCH_SIZE", 2)
     backend = _RecordingBackend()
 
-    daemon._process_paths(
+    daemon.process_paths(
         backend,
         {first.resolve(), second.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
 
@@ -354,13 +354,13 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
 
     note = tmp_path / "note.md"
     note.write_text("---\ndescription: description\n---\nbody", encoding="utf-8")
-    monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
+    monkeypatch.setattr(daemon, "BATCH_SIZE", 1)
     backend = _RecordingBackend()
-    daemon._process_paths(
+    daemon.process_paths(
         backend,
         {note.resolve()},
         FakeProvider(),
-        Liveness(_liveness_timeout()),
+        Liveness(liveness_timeout()),
         machine=machine_identity,
     )
     old_meta = backend.all_meta()
@@ -368,11 +368,11 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
     note.write_text("---\ndescription: new description\n---\nnew body", encoding="utf-8")
     backend.calls.clear()
     with pytest.raises(EmbeddingAPIError, match="second batch failed"):
-        daemon._process_paths(
+        daemon.process_paths(
             backend,
             {note.resolve()},
             _FailSecondBatchProvider(),
-            Liveness(_liveness_timeout()),
+            Liveness(liveness_timeout()),
             machine=machine_identity,
         )
 
@@ -397,7 +397,7 @@ def test_complete_file_still_commits_when_another_fails(
                 raise EmbeddingAPIError("third batch failed")
             return super().embed_batch(texts)
 
-    monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
+    monkeypatch.setattr(daemon, "BATCH_SIZE", 1)
     backend = store_backend
     complete = tmp_path / "complete.md"
     complete.write_text("complete body", encoding="utf-8")
@@ -405,11 +405,11 @@ def test_complete_file_still_commits_when_another_fails(
     partial.write_text("---\ndescription: p\n---\nbody", encoding="utf-8")
 
     with pytest.raises(EmbeddingAPIError, match="third batch failed"):
-        daemon._process_paths(
+        daemon.process_paths(
             backend,
             {complete.resolve(), partial.resolve()},
             _FailOnSecondFileProvider(),
-            Liveness(_liveness_timeout()),
+            Liveness(liveness_timeout()),
             machine=machine_identity,
         )
 
@@ -430,7 +430,7 @@ async def test_failed_drain_batch_stays_incomplete_until_a_new_file_event(
 
     file = tmp_path / "failed.md"
     file.write_text("old content")
-    daemon._process_paths(
+    daemon.process_paths(
         store_backend, {file.resolve()}, FakeProvider(), Liveness(600), machine=machine_identity
     )
     old_meta = store_backend.all_meta()[str(file.resolve())]
@@ -456,7 +456,7 @@ async def test_failed_drain_batch_stays_incomplete_until_a_new_file_event(
 
     monkeypatch.setattr(daemon.asyncio, "sleep", poll)
     with pytest.raises(asyncio.CancelledError):
-        await daemon._drain_loop(
+        await daemon.drain_loop(
             store_backend, dirty, Liveness(600), FailingOnce(), machine=machine_identity
         )
     assert store_backend.all_meta()[str(file.resolve())][1] == content_hash("new content")

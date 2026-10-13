@@ -54,11 +54,11 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 
 _log = logging.getLogger("services.derived.labeler.daemon")
 
-_POLL_INTERVAL_S = 1.0
+POLL_INTERVAL_S = 1.0
 # Liveness staleness ceiling — generous because one iteration may make up
 # to 10 LLM label calls; beating per-item keeps a slow-but-legit call from
 # tripping it, while a genuine wedge still flips /healthz 503 -> respawn.
-_LIVENESS_TIMEOUT_S = 120.0
+LIVENESS_TIMEOUT_S = 120.0
 
 
 def labeler_config() -> LabelerConfig:
@@ -108,7 +108,7 @@ _PROMPT_INBOUND_CONDITION = (
 )
 
 
-def _select_unlabeled(cur: psycopg.Cursor, attempted: list[int]) -> list[tuple[int, str | None]]:
+def select_unlabeled(cur: psycopg.Cursor, attempted: list[int]) -> list[tuple[int, str | None]]:
     """Poll up to 10 newest agents that still need a label, returning each
     `(agent_id, first_eligible_prompt)`.
 
@@ -183,7 +183,7 @@ async def _dispatch_loop(
     overrides: ModelOverrides,
 ) -> None:
     """Main loop: every second, poll the newest unlabeled agents
-    (`_select_unlabeled`, excluding previous attempts) -> grab first prompt ->
+    (`select_unlabeled`, excluding previous attempts) -> grab first prompt ->
     generate label. Each eligible row is attempted once per process; failure leaves its label unset.
 
     False generation results are logged without scheduling another attempt. Escaping exceptions,
@@ -198,11 +198,11 @@ async def _dispatch_loop(
     attempted: set[int] = set()
     while True:
         liveness.beat()
-        await asyncio.sleep(_POLL_INTERVAL_S)
+        await asyncio.sleep(POLL_INTERVAL_S)
         if admission.quiesced():
             continue
         with pool.connection() as conn, conn.cursor() as cur:
-            rows = _select_unlabeled(cur, list(attempted))
+            rows = select_unlabeled(cur, list(attempted))
         for tid, prompt in rows:
             liveness.beat()  # per-item: a slow LLM call must not look like a wedge
             if not prompt:
@@ -243,7 +243,7 @@ async def run(
     _write_pidfile(process_config, runtime=runtime)
     _log.info("[labeler] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
-    liveness = Liveness(_LIVENESS_TIMEOUT_S)
+    liveness = Liveness(LIVENESS_TIMEOUT_S)
     endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "labeler", endpoint.health_port, liveness=liveness, image=image
