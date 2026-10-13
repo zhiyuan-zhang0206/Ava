@@ -32,7 +32,6 @@ from tests.factories.maintenance import isolate as isolate
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _MINUTE_AGO = datetime.now(UTC) - timedelta(minutes=1)
-_IN_A_MINUTE = datetime.now(UTC) + timedelta(minutes=1)
 
 
 @pytest.fixture
@@ -155,7 +154,7 @@ def _allocation() -> ExecAllocation:
     [
         pytest.param({"status": "running"}, id="running turn"),
         pytest.param({"pid": 4242}, id="native process recorded"),
-        pytest.param({"lease": _IN_A_MINUTE}, id="lease still live"),
+        pytest.param({"live_lease": True}, id="lease still live"),
         pytest.param({"managed_exec": True}, id="exec allocation outstanding"),
         pytest.param({"own_owner": True}, id="released by the live host itself"),
     ],
@@ -177,7 +176,8 @@ def test_work_in_flight_without_a_live_owner_is_still_refused(
         agent,
         departed_host,
         status=work.get("status", "idling"),
-        lease=work.get("lease"),
+        # Taken now, not at import: a shard collects minutes before it reaches this test.
+        lease=datetime.now(UTC) + timedelta(minutes=1) if work.get("live_lease") else None,
         pid=work.get("pid"),
         requests=requests,
         owner=live_host if work.get("own_owner") else None,
