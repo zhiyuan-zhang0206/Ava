@@ -49,16 +49,16 @@ from base.api_contracts.metric_spec import (
 )
 from base.telemetry.metrics.logql import validate_logql_template
 from base.telemetry.metrics.plugin_metrics_sql import (
-    _DOUBLE_QUOTED_OK,
-    _QUOTED_RE,
-    _SQL_DENIED_KEYWORDS,
-    _SQL_FUNCTIONS,
-    _SQL_KEYWORDS,
-    _SQL_OPS,
-    _TOKEN_RE,
+    DOUBLE_QUOTED_OK,
+    QUOTED_RE,
+    SQL_DENIED_KEYWORDS,
+    SQL_FUNCTIONS,
+    SQL_KEYWORDS,
+    SQL_OPS,
+    TOKEN_RE,
     InvalidMetricQuery,
     PluginMetricError,
-    _check_from_clauses,
+    check_from_clauses,
 )
 
 # ── errors ────────────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ def _single_statement_body(sql: str) -> str:
     body = sql.rstrip()
     if body.endswith(";"):
         body = body[:-1]
-    blanked = _QUOTED_RE.sub("''", body)
+    blanked = QUOTED_RE.sub("''", body)
     if "--" in blanked or "/*" in blanked:
         raise InvalidMetricQuery(
             f"SQL comments are not allowed in metric queries (found '--' or '/* */'): {sql!r}"
@@ -107,7 +107,7 @@ def _tokenize_metric_sql(sql: str, body: str) -> list[tuple[str, str]]:
     """Tokenize; every character must belong to a recognized token."""
     tokens: list[tuple[str, str]] = []  # (kind, value)
     pos = 0
-    for m in _TOKEN_RE.finditer(body):
+    for m in TOKEN_RE.finditer(body):
         if m.start() != pos:
             bad = body[pos : m.start()]
             raise InvalidMetricQuery(
@@ -146,14 +146,14 @@ def _classify_tokens(
             continue
         if kind == "ident":
             inner = value[1:-1]
-            if not _DOUBLE_QUOTED_OK.match(inner):
+            if not DOUBLE_QUOTED_OK.match(inner):
                 raise InvalidMetricQuery(
                     f"quoted identifier {value!r} contains characters outside "
                     f"the allowed set: {sql!r}"
                 )
             continue
         if kind == "op":
-            if value not in _SQL_OPS:
+            if value not in SQL_OPS:
                 raise InvalidMetricQuery(f"operator {value!r} is not on the whitelist: {sql!r}")
             continue
         assert kind == "word"  # noqa: S101
@@ -166,12 +166,12 @@ def _check_word(
     """One bare word: a denied keyword raises; an unlisted word may only be a column / alias."""
     value = tokens[i][1]
     upper = value.upper()
-    if upper in _SQL_DENIED_KEYWORDS:
+    if upper in SQL_DENIED_KEYWORDS:
         raise InvalidMetricQuery(
             f"keyword {value!r} is not allowed in metric query templates "
-            f"(denied set: {sorted(_SQL_DENIED_KEYWORDS)}): {sql!r}"
+            f"(denied set: {sorted(SQL_DENIED_KEYWORDS)}): {sql!r}"
         )
-    if upper in _SQL_KEYWORDS or upper in _SQL_FUNCTIONS:
+    if upper in SQL_KEYWORDS or upper in SQL_FUNCTIONS:
         return
     # A bare word that is not whitelisted is only allowed as a column
     # reference / alias WITHOUT a call — a following `(` means a function
@@ -182,7 +182,7 @@ def _check_word(
     if i + 1 < len(tokens) and tokens[i + 1] == ("op", "(") and i not in from_alias_positions:
         raise InvalidMetricQuery(
             f"function call {value!r}(...) is not on the whitelist — only "
-            f"{sorted(_SQL_FUNCTIONS)} may be called: {sql!r}"
+            f"{sorted(SQL_FUNCTIONS)} may be called: {sql!r}"
         )
 
 
@@ -216,7 +216,7 @@ def validate_metric_sql(sql: str) -> None:
     #    identifier whitelist below still applies to everything else).
     #    FROM aliases are exempted from the function-call check below (an
     #    alias column list `AS g(time)` must not read as a call `g(...)`).
-    from_alias_positions = _check_from_clauses(tokens, sql)
+    from_alias_positions = check_from_clauses(tokens, sql)
 
     _classify_tokens(tokens, sql, from_alias_positions)
 

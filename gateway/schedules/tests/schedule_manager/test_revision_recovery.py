@@ -339,7 +339,7 @@ def test_newer_edit_during_launch_is_not_acknowledged_as_applied(
 
         def edit_during_launch(name: str, cmd: str, cwd: object, *, env: dict[str, str]) -> bool:
             result = allocate(name, cmd, cwd, env=env)
-            router._update_blocking(pool, sid, {"script": "print(2)"})
+            router.update_blocking(pool, sid, {"script": "print(2)"})
             return result
 
         monkeypatch.setattr(backend, "new_session", edit_during_launch)

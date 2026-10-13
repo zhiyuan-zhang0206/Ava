@@ -22,7 +22,7 @@ from ava.sdk_surface import ava_module, process_context
 
 from .const import is_documented_const
 from .discovery import (
-    _Constant,
+    Constant,
     agent_visible_names,
     children,
     is_container,
@@ -170,7 +170,7 @@ def _target_body(target: Any, fqn: str, render: _Render = _DEFAULT_RENDER) -> st
         terminal = fqn.rsplit(".", 1)[-1] if "." in fqn else fqn
         return _format_function_stub(terminal, target)
     if is_documented_const(target):
-        return _format_documented_const_stub(_resolve_const_name(target), target)
+        return format_documented_const_stub(_resolve_const_name(target), target)
     return f"<{type(target).__name__}> {target!r}"
 
 
@@ -287,7 +287,7 @@ def _format_module_stub(
         if is_skill_object(mod):
             pieces.append(doc)
         else:
-            pieces.append(_format_docstring(doc, indent=""))
+            pieces.append(format_docstring(doc, indent=""))
     for name, child in _skill_aware_children(mod, render):
         pieces.append(_format_child(name, child, render))
     return "\n\n".join(pieces)
@@ -331,8 +331,8 @@ def _child_formatter(child: Any) -> Callable[[str, Any], str] | None:
     if is_namespace(child):
         return _format_submodule_ref
     if is_documented_const(child):
-        return _format_documented_const_stub
-    if isinstance(child, _Constant):
+        return format_documented_const_stub
+    if isinstance(child, Constant):
         return _format_pep224_const
     if inspect.isclass(child):
         return _format_class_stub
@@ -340,11 +340,11 @@ def _child_formatter(child: Any) -> Callable[[str, Any], str] | None:
 
 
 def _format_function_stub(name: str, fn: Any) -> str:
-    sig = _format_signature(fn)
+    sig = format_signature(fn)
     doc = inspect.getdoc(fn)
     if not doc:
         return f"def {name}{sig}: ..."
-    return f"def {name}{sig}:\n{_format_docstring(doc, indent='    ')}"
+    return f"def {name}{sig}:\n{format_docstring(doc, indent='    ')}"
 
 
 def _format_submodule_ref(name: str, mod: Any) -> str:
@@ -352,7 +352,7 @@ def _format_submodule_ref(name: str, mod: Any) -> str:
     lines = [f"from . import {name}"]
     doc = inspect.getdoc(mod)
     if doc:
-        lines.append(_format_docstring(doc, indent=""))
+        lines.append(format_docstring(doc, indent=""))
     return "\n".join(lines)
 
 
@@ -374,15 +374,15 @@ def _format_skill_child(name: str, child: Any) -> str:
     return f"{heading}\n\n{desc}" if desc else heading
 
 
-def _format_pep224_const(name: str, const: "_Constant") -> str:
+def _format_pep224_const(name: str, const: "Constant") -> str:
     annotation = f": {const.type_str}" if const.type_str else ""
     lines = [f"{name}{annotation}"]
     if const.doc:
-        lines.append(_format_docstring(const.doc, indent=""))
+        lines.append(format_docstring(const.doc, indent=""))
     return "\n".join(lines)
 
 
-def _format_documented_const_stub(name: str, const: Any) -> str:
+def format_documented_const_stub(name: str, const: Any) -> str:
     """`ava.const()`-wrapped value: `name: BaseType = value` + docstring.
 
     A multi-line string constant (e.g. a skill body) renders as a triple-quoted
@@ -391,7 +391,7 @@ def _format_documented_const_stub(name: str, const: Any) -> str:
     """
     base = type(const).__bases__[0]
     value = _home_relative(str(const)) if isinstance(const, Path) else str(const)
-    doc = _format_docstring(const.__doc__, indent="") if const.__doc__ else None
+    doc = format_docstring(const.__doc__, indent="") if const.__doc__ else None
     if isinstance(const, str) and "\n" in value:
         return _format_multiline_const_block(name, base, value, doc)
     lines = [f"{name}: {base.__name__} = {value}"]
@@ -431,7 +431,7 @@ def _format_class_stub(name: str, cls: type[Any], render: _Render = _DEFAULT_REN
         # Enum members are the contract (legal values) — always keep them.
         parts.extend(f"    {m.name} = {m.value!r}" for m in cls)
     else:
-        # Compact mode keeps field annotations (_Constant children) so the
+        # Compact mode keeps field annotations (Constant children) so the
         # agent sees attribute names, but drops methods and nested classes.
         parts.extend(_format_class_members(cls, render))
     if not parts:
@@ -456,7 +456,7 @@ def _class_doc_parts(name: str, cls: type) -> list[str]:
         return []
     if not own_doc:
         return []
-    return [_format_docstring(inspect.cleandoc(own_doc), indent="    ")]
+    return [format_docstring(inspect.cleandoc(own_doc), indent="    ")]
 
 
 def _is_synthesized_dataclass_doc(name: str, cls: type, own_doc: Any) -> bool:
@@ -466,10 +466,10 @@ def _is_synthesized_dataclass_doc(name: str, cls: type, own_doc: Any) -> bool:
 
 def _format_class_members(cls: type, render: _Render = _DEFAULT_RENDER) -> list[str]:
     """Indented member entries of a class, honoring compact mode: field
-    annotations (_Constant children) stay, methods and nested classes drop."""
+    annotations (Constant children) stay, methods and nested classes drop."""
     parts: list[str] = []
     for child_name, child in children(cls):
-        if render.compact_classes and not isinstance(child, _Constant):
+        if render.compact_classes and not isinstance(child, Constant):
             continue
         parts.append(_indent(_format_child(child_name, child, render), "    "))
     return parts
@@ -486,7 +486,7 @@ def _resolve_const_name(const: Any) -> str:
     return name if isinstance(name, str) else "value"
 
 
-def _format_docstring(doc: str, *, indent: str) -> str:
+def format_docstring(doc: str, *, indent: str) -> str:
     # Render `doc` as a triple-quoted Python literal at `indent`. Single-line
     # docstring → one-line form. Multi-line → first line on opening triple,
     # dedented body indented under, closing triple on its own line.
@@ -501,7 +501,7 @@ def _format_docstring(doc: str, *, indent: str) -> str:
     return f"{indent}{triple}{lines[0]}\n{indented_body}\n{indent}{triple}"
 
 
-def _format_signature(target: Any) -> str:
+def format_signature(target: Any) -> str:
     """Stringified signature, cleaned up:
     - `from __future__ import annotations` quote noise on annotations:
       `: 'str | None'` → `: str | None`, `-> 'int'` → `-> int`. The closing

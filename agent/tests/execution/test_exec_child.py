@@ -33,10 +33,10 @@ from ava.sdk_surface.installation import Installation
 from tests.fixtures.pin_agent import exec_context
 
 # Fixed test identity — the child never dials a real DB/Redis here.
-_AGENT_ID = 424242
+AGENT_ID = 424242
 
 
-def _child_env(
+def child_env(
     tmp_path: Path,
     request_path: Path,
     result_path: Path,
@@ -50,7 +50,7 @@ def _child_env(
     env.update(
         {
             "AVA_HOME": str(tmp_path / "home"),
-            "AVA_AGENT_ID": str(_AGENT_ID),
+            "AVA_AGENT_ID": str(AGENT_ID),
             "AVA_PROCESS_PROFILE": "agent",
             "AVA_EXEC_REQUEST_FILE": str(request_path),
             "AVA_EXEC_RESULT_FILE": str(result_path),
@@ -79,10 +79,10 @@ def _spawn(
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Write a request, run the real child, return (proc, request, result)."""
     exec_dir = tmp_path / "exec"
-    request_path = make_request_path(exec_dir, agent_id=_AGENT_ID)
-    result_path = make_result_path(exec_dir, agent_id=_AGENT_ID)
+    request_path = make_request_path(exec_dir, agent_id=AGENT_ID)
+    result_path = make_result_path(exec_dir, agent_id=AGENT_ID)
     if write_request_file:
-        desc = context or exec_context(_AGENT_ID).describe()
+        desc = context or exec_context(AGENT_ID).describe()
         write_request(
             request_path,
             code=code,
@@ -95,7 +95,7 @@ def _spawn(
         [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
         capture_output=True,
         text=True,
-        env=_child_env(
+        env=child_env(
             tmp_path,
             request_path,
             result_path,
@@ -124,7 +124,7 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
 def test_child_context_matches_the_hosts_context(tmp_path: Path) -> None:
     """The child rebuilds the host's context from the envelope, and agent code (a thread pool
     included) reads the identity the host's `AvaContext` carries as `ava.context`."""
-    host = exec_context(_AGENT_ID, actor="schedule:3")
+    host = exec_context(AGENT_ID, actor="schedule:3")
     code = (
         "import json\nfrom concurrent.futures import ThreadPoolExecutor\nimport ava\n"
         "who = ava.context.identity\n"
@@ -136,7 +136,7 @@ def test_child_context_matches_the_hosts_context(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     assert read_result(result).kind == "done"
     seen = json.loads(proc.stdout.strip().splitlines()[-1])
-    assert seen == [_AGENT_ID, True, "schedule:3", True, [_AGENT_ID] * 3]
+    assert seen == [AGENT_ID, True, "schedule:3", True, [AGENT_ID] * 3]
 
 
 def test_child_sdk_call_tally_reports_real_executions(tmp_path: Path) -> None:
@@ -278,7 +278,7 @@ def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
         raise OSError("synthetic protocol write failure")
 
     monkeypatch.setattr(protocol, "write_result", fail_write_result)
-    exec_child._write_crashed_result(str(result), ValueError("fallback boom"))
+    exec_child.write_crashed_result(str(result), ValueError("fallback boom"))
 
     payload = read_result(result)
     assert payload.kind == "crashed"
@@ -615,7 +615,7 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setattr(process_boot, "_apply_per_agent_sdk_disable", fake_sdk_disable)
     monkeypatch.setattr(process_boot, "_apply_per_agent_eval_isolation", fake_eval_isolation)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
-    monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
+    monkeypatch.setattr(exec_child, "run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr(boot, "ensure_plugins_loaded", fake_plugins_loaded)
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
@@ -630,7 +630,7 @@ def test_child_overlay_phases_framework_then_plugin(
         events.append(f"apply:{scope}")
         return bool(birth or overlay)
 
-    monkeypatch.setattr(exec_child, "_apply_overlay_scope", fake_apply_scope)
+    monkeypatch.setattr(exec_child, "apply_overlay_scope", fake_apply_scope)
     monkeypatch.setenv("AVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "x"}))
     monkeypatch.setenv(
         "AVA_AGENT_BIRTH_CONFIG", json.dumps({"llm_stream_ttft_timeout_seconds": 1.0})

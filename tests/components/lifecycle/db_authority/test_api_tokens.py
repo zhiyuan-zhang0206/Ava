@@ -56,7 +56,7 @@ def _unadmit(home: Path) -> None:
     """The state of a birth that has minted its generation but not admitted it:
     the generation is pending, nothing is active."""
     current = ledger.require_ledger(home)
-    ledger._write(home, ledger._replace(current, active=None, pending=current.active))
+    ledger.write(home, ledger._replace(current, active=None, pending=current.active))
 
 
 @pytest.fixture

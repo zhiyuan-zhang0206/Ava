@@ -34,7 +34,7 @@ from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
-from base.agents.observation.relay_supervision import terminate_relay as _terminate_relay
+from base.agents.observation.relay_supervision import terminate_relay as terminate_relay
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -456,7 +456,7 @@ def _establish_codex_relay(
         if _heartbeat_fresh(latest["relay_heartbeat_at"]):
             return True
         time.sleep(_RELAY_READY_POLL_S)
-    _terminate_relay(child)
+    terminate_relay(child)
     relays.children.pop(incarnation.agent_id, None)
     return _roll_back_relay_failure(
         db, bus, session, incarnation, fail_acceptance, "relay did not become ready in time"
@@ -478,7 +478,7 @@ def _roll_back_relay_failure(
     return False
 
 
-def _provider_anchor_states(process_metadata: object) -> list[str]:
+def provider_anchor_states(process_metadata: object) -> list[str]:
     """The lease's recorded provider anchors classified against the live table."""
     from base.agents.impersonation import provider_anchor_states
 
@@ -553,7 +553,7 @@ async def supervise_relay(
             if terminal is not None and ImpersonationStatus(terminal[0]) not in OPEN:
                 if relays.children.get(agent_id) is child:
                     relays.children.pop(agent_id, None)
-                await asyncio.to_thread(_terminate_relay, child)
+                await asyncio.to_thread(terminate_relay, child)
                 await _send_ended_notice(db, agent_id, child.lease_id)
         return
     if session["status"] != ImpersonationStatus.ACTIVE:
@@ -578,7 +578,7 @@ async def _executor_verdict_stops(
     incarnation: RuntimeIncarnation | None,
 ) -> bool:
     """Component A: the executor's recorded process chain. True when supervision ends here."""
-    states = _provider_anchor_states(session.get("process_metadata")) or ["unknown"]
+    states = provider_anchor_states(session.get("process_metadata")) or ["unknown"]
     if "alive" in states:
         return False
     if set(states) <= {"dead", "reused"}:

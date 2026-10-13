@@ -68,7 +68,7 @@ def test_concurrent_identical_edits_append_one_version(
     ):
 
         def edit(_worker: int) -> tuple[tuple[object, ...], bool]:
-            return router._update_blocking(pool, sid, {"script": "print(2)\n"})
+            return router.update_blocking(pool, sid, {"script": "print(2)\n"})
 
         results = list(workers.map(edit, range(4)))
     assert sum(needs_sync for _, needs_sync in results) == 1
@@ -97,7 +97,7 @@ def test_enqueue_failure_rolls_back_config_and_version(
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(RuntimeError, match="queue unavailable"),
     ):
-        router._update_blocking(pool, sid, {"script": "print(2)\n"})
+        router.update_blocking(pool, sid, {"script": "print(2)\n"})
     assert db_conn.execute("SELECT script FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "print(1)\n",
     )

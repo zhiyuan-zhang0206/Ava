@@ -29,7 +29,7 @@ from ava.sdk_surface.plugins import (
     InvalidNamespaceNameError,
     PluginNamespaceConflictError,
 )
-from ava.sdk_surface.sdk_disable import _DisabledSDKModule
+from ava.sdk_surface.sdk_disable import DisabledSDKModule
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
@@ -329,7 +329,7 @@ def test_a_namespace_disabled_by_the_sdk_disable_sentinel_refuses_the_plugin(
     with patch.dict(sys.modules):
         sdk_disable.apply_entries(["disabled_ns"])
         sentinel = sys.modules["ava.disabled_ns"]
-        assert isinstance(sentinel, _DisabledSDKModule)
+        assert isinstance(sentinel, DisabledSDKModule)
         admitted = install.install(
             _registry(
                 (

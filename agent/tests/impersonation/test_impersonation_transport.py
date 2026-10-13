@@ -158,7 +158,7 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
     db_conn.commit()
     current = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert current is not None
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     spawn = Mock()
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     relays = RelaySupervision()
@@ -199,7 +199,7 @@ async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_no
     conn.execute.return_value.fetchone.return_value = ("expired",)
     db = MagicMock()
     db.connect.return_value.__enter__.return_value = conn
-    monkeypatch.setattr(impersonation, "_terminate_relay", Mock())
+    monkeypatch.setattr(impersonation, "terminate_relay", Mock())
     send = Mock(return_value=error)
     monkeypatch.setattr(terminal_notices, "send_ended_notice", send)
     # Every later pass finds no child left to announce for: there is no retry.

@@ -515,7 +515,7 @@ def test_external_delta_rejects_full_history_reset_before_any_mutation(
             # A persisted envelope must pass the same check before native replay.
             import base64
 
-            encoding, payload = plugin_state_codec._serializer().dumps_typed(delta)
+            encoding, payload = plugin_state_codec.serializer().dumps_typed(delta)
             decode_plugin_delta(
                 {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")},
                 ExampleState,

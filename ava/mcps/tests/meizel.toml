@@ -18,8 +18,8 @@
 "test_daemon.py#monkeypatch.setattr ava.mcps._daemon.connect_server" = 12
 "test_daemon.py#monkeypatch.setattr ava.mcps._daemon.reap_stale_daemons" = 1
 "test_daemon.py#monkeypatch.setattr ava.mcps.config.builtin_mcp_paths" = 1
-"test_mcps.py#monkeypatch.setattr ava.mcps._remote._socket_path_for" = 2
 "test_mcps.py#monkeypatch.setattr ava.mcps._remote.daemon_socket_path" = 3
+"test_mcps.py#monkeypatch.setattr ava.mcps._remote.socket_path_for" = 2
 "test_mcps_remote.py#monkeypatch.setattr ava.mcps._remote.daemon_socket_path" = 1
 "test_mcps_remote.py#monkeypatch.setattr ava.mcps._remote.time.time" = 3
 "test_retry_classify.py#monkeypatch.setattr ava.mcps._daemon.asyncio.sleep" = 1
@@ -27,12 +27,7 @@
 "test_retry_classify.py#monkeypatch.setattr ava.mcps._daemon.invalidate_session" = 1
 
 [debt.private-name]
-"daemon/test_handle_client_agent_id_none_without_identity.py -> test_daemon.py#_content" = 1
 "daemon/test_handle_client_agent_id_none_without_identity.py -> test_daemon.py#_no_reap_stale_daemons" = 1
-"daemon/test_handle_client_agent_id_none_without_identity.py -> test_daemon.py#_write_config" = 1
-"daemon/test_handle_client_retry_sleeps_exponential_backoff.py -> test_daemon.py#_content" = 1
 "daemon/test_handle_client_retry_sleeps_exponential_backoff.py -> test_daemon.py#_no_reap_stale_daemons" = 1
-"daemon/test_handle_client_retry_sleeps_exponential_backoff.py -> test_daemon.py#_write_config" = 1
 "daemon/test_run_daemon_clears_stale_socket_on_startup.py -> test_daemon.py#_no_reap_stale_daemons" = 1
-"daemon/test_run_daemon_clears_stale_socket_on_startup.py -> test_daemon.py#_write_config" = 1
 "test_mcps.py -> _mcps_helpers.py#_result" = 1

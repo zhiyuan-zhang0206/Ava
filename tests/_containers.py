@@ -39,13 +39,13 @@ _SCHEMA_SQL = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
 _TMPFS_BASE = "/dev/shm" if Path("/dev/shm").is_dir() else None  # noqa: S108 — deliberate tmpfs for throwaway server data
 
 
-def _free_port() -> int:
+def free_port() -> int:
     """Ask the OS for an unused localhost TCP port, closed immediately.
 
     The release-to-bind window is the same TOCTOU class `base/pg_tools` fixed
     for throwaway Postgres (PR #1216): a parallel xdist worker can be handed the
     same port before the server binds it, and the collision surfaces as the
-    spawned server dying (then `_wait_port` times out). Accepted here: the
+    spawned server dying (then `wait_port` times out). Accepted here: the
     window is the server's own bind latency (~ms, no initdb in between), the
     allocation count is small (one per worker, not per fixture), and no caller
     retries — callers that need determinism should use the pg_tools allocator."""
@@ -54,7 +54,7 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _wait_port(port: int, timeout: float = 30.0, host: str = "127.0.0.1") -> None:
+def wait_port(port: int, timeout: float = 30.0, host: str = "127.0.0.1") -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
@@ -115,7 +115,7 @@ def redis_server() -> Generator[str]:
     """Start a throwaway redis-server on an ephemeral port, yield its URL.
     The process + data dir are destroyed on context exit."""
     tmp = Path(tempfile.mkdtemp(prefix="ava-redis-", dir=_TMPFS_BASE))
-    port = _free_port()
+    port = free_port()
     proc = subprocess.Popen(  # noqa: S603 — argv is the static redis-server path + flags
         [
             "redis-server",
@@ -134,7 +134,7 @@ def redis_server() -> Generator[str]:
         stderr=subprocess.DEVNULL,
     )
     try:
-        _wait_port(port)
+        wait_port(port)
         url = f"redis://127.0.0.1:{port}/0"
         with redis.Redis.from_url(url) as r:
             r.ping()

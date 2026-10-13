@@ -41,7 +41,7 @@ from base.paths import workspace_dir
 _OUTPUT_DIRNAME = ".shell_logs"
 # Ring: keep the most recent N logs per workspace, prune older ones so the dir
 # does not grow unbounded across a long-lived agent.
-_OUTPUT_KEEP = 20
+OUTPUT_KEEP = 20
 
 # Characters that stay shell-active inside a double-quoted string.
 _DQUOTE_UNSAFE = re.compile(r'[$`"\\]')
@@ -75,7 +75,7 @@ def allocate_output_path(session_id: int, name: str) -> Path:
     path.touch()
     live = set(_sessions.list())
     existing = sorted(d.glob("*.log"), key=lambda p: p.stat().st_mtime)
-    for old in existing[:-_OUTPUT_KEEP]:
+    for old in existing[:-OUTPUT_KEEP]:
         sid = old.name.split("_", 1)[0]
         if sid.isdigit() and int(sid) in live:
             continue
