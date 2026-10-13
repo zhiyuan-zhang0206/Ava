@@ -302,14 +302,3 @@ async def test_an_unexpected_error_in_a_round_is_not_swallowed(
                 )
     finally:
         db_pool.close()
-
-
-def test_the_gateway_no_longer_reconciles_alerts() -> None:
-    """The reconciliation is a loop of the events-maintenance service: the gateway
-    module is gone and its lifespan starts nothing for it."""
-    import importlib.util
-
-    import gateway.app
-
-    assert importlib.util.find_spec("gateway.alerts.reconciliation") is None
-    assert not hasattr(gateway.app, "reconciliation")

@@ -9,7 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.tests.events.test_notices_endpoint import _insert_notice
-from services.entrypoints.im_bridge.adapters.tests.weixin_native import NativeWeixin, message
+from services.entrypoints.im_bridge.adapters.tests.weixin_native import (
+    NativeWeixin,
+    message,
+)
+from services.entrypoints.im_bridge.adapters.tests.weixin_native import (
+    native_weixin as native_weixin,
+)
 from services.entrypoints.im_bridge.ingress.types import IngressStatus
 from services.entrypoints.im_bridge.types import SpawnDraft
 from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys

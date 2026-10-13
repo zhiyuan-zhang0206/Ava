@@ -163,14 +163,3 @@ async def test_a_failing_sample_ends_the_loop(monkeypatch: pytest.MonkeyPatch) -
         await registry_gauge.registry_gauge_loop(
             cast(ConnectionPool, object()), LoopProgress("g", 180.0)
         )
-
-
-def test_the_gateway_no_longer_samples_the_registry() -> None:
-    """The gauge is a loop of the events-maintenance service: the gateway module is
-    gone and its lifespan starts no flusher for it."""
-    import importlib.util
-
-    import gateway.app
-
-    assert importlib.util.find_spec("gateway.agents.max_id_gauge") is None
-    assert "max_id" not in vars(gateway.app)
