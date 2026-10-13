@@ -139,12 +139,12 @@ without a manifest has no local edges and exports its door.
 ## When it fails
 
 Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
-`cycle-edge`, `restricted-python`, the patch codes ([[meizel/docs/checker/patching.ava.okf.md|patching]]),
+`cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching.ava.okf.md|patching]]),
 `unresolved-import`, `unlisted-allowance`,
 `stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
 (`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,
 stale-edge, debt, roles). An undeclared edge that would close a cycle says so; the way out is
-a public door or an injected collaborator.
+a public door or injection.
 
 ## Layout
 
