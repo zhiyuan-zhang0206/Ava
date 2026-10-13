@@ -22,6 +22,7 @@ class WindowTotals(NamedTuple):
     in_total: int
     out_total: int
     cache_read: int
+    cache_input: int
     cost_usd: float
     turn_seconds: float
     turn_count: int
@@ -45,7 +46,9 @@ def window_totals(
           COALESCE(sum({numeric(LLM_USAGE_KEYS["cache_read"])}) FILTER (WHERE {usage}), 0),
           COALESCE(sum({numeric(LLM_USAGE_KEYS["cost_usd"])}) FILTER (WHERE {usage}), 0),
           COALESCE(sum({numeric(TURN_END_KEYS["duration_seconds"])}) FILTER (WHERE {turn}), 0),
-          count(*) FILTER (WHERE {turn})
+          count(*) FILTER (WHERE {turn}),
+          COALESCE(sum({numeric(LLM_USAGE_KEYS["in_total"])}) FILTER (
+              WHERE {usage} AND {numeric(LLM_USAGE_KEYS["cache_read"])} IS NOT NULL), 0)
         FROM telemetry_events
         WHERE event_name IN ('llm_usage', 'turn_end')
           AND (cluster = %s OR cluster = '')
@@ -60,4 +63,5 @@ def window_totals(
         cost_usd=float(row[3]),
         turn_seconds=float(row[4]),
         turn_count=int(row[5]),
+        cache_input=round(row[6]),
     )

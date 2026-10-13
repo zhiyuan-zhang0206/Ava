@@ -262,3 +262,39 @@ def test_lifecycle_intervals_follow_transactional_status_not_telemetry(
         "SELECT count(*), count(*) FILTER (WHERE ended_at IS NULL) "
         "FROM agent_lifecycle_intervals WHERE agent_id=71"
     ).fetchone() == (2, 1)
+
+
+@pytest.mark.parametrize("cached", [None, 0, 80])
+def test_projection_preserves_cache_metered_input(cached: int | None) -> None:
+    fact = metrics.observe_event(
+        _event(
+            "llm_usage",
+            in_total=100,
+            cost_usd=1,
+            **({"cache_read": cached} if cached is not None else {}),
+        )
+    )
+    assert fact is not None
+    assert fact.tokens_in == 100
+    assert fact.tokens_cache_input == (0 if cached is None else 100)
+    assert fact.tokens_cached == (0 if cached is None else cached)
+    assert fact.cost_usd == 1
+
+
+def test_new_unmetered_usage_preserves_a_legacy_days_cache_denominator(
+    db_conn: psycopg.Connection,
+) -> None:
+    _agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agent_metric_days(agent_id,day,usage_calls,tokens_in,tokens_cached,last_observed_at) "
+        "VALUES (71,%s,1,100,80,%s)",
+        (_AT.date(), _AT),
+    )
+    fact = metrics.observe_event(_event("llm_usage", in_total=5000, cost_usd=2))
+    assert fact is not None
+    assert metrics.write_observations([fact], db=db_conn) == 1
+    assert db_conn.execute(
+        "SELECT usage_calls,tokens_in,tokens_cached,tokens_cache_input "
+        "FROM agent_metric_days WHERE agent_id=71"
+    ).fetchone() == (2, 5100, 80, 100)
+    assert metrics.write_observations([fact], db=db_conn) == 0

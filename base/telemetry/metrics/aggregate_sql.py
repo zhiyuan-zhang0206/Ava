@@ -204,6 +204,17 @@ class LlmCostSums(NamedTuple):
     unpriced: int
 
 
+def _llm_cache_input(scope: _Scope, conn: psycopg.Connection[Any]) -> dict[int | None, int]:
+    """Input denominator from the same calls that report numeric cache reads."""
+    rows = scope.run(
+        conn,
+        f"t.agent_id, COALESCE(sum({_n(LLM_USAGE_KEYS['in_total'])}), 0)::bigint",
+        f"t.event_name = 'llm_usage' AND {_n(LLM_USAGE_KEYS['cache_read'])} IS NOT NULL",
+        "GROUP BY t.agent_id",
+    ).fetchall()
+    return {int(a) if a is not None else None: int(i) for a, i in rows}
+
+
 def _llm_cost_sums(
     scope: _Scope, conn: psycopg.Connection[Any]
 ) -> dict[int | None, dict[str, LlmCostSums]]:
@@ -238,7 +249,8 @@ def _llm_position(scope: _Scope, conn: psycopg.Connection[Any]) -> dict[str, tup
             "count(*) OVER (PARTITION BY t.agent_id) AS total, "
             f"COALESCE({_n(LLM_USAGE_KEYS['cache_read'])}, 0) AS cached, "
             f"COALESCE({_n(LLM_USAGE_KEYS['in_total'])}, 0) AS tin "
-            f"FROM {scope.from_sql} WHERE {scope.where_sql} AND t.event_name = 'llm_usage') r) s "
+            f"FROM {scope.from_sql} WHERE {scope.where_sql} AND t.event_name = 'llm_usage' "
+            f"AND {_n(LLM_USAGE_KEYS['cache_read'])} IS NOT NULL) r) s "
             "GROUP BY bucket",
         ),
         scope.params,
@@ -334,6 +346,7 @@ def read_window(
         "failure_types": _failure_types(scope, conn),
         "lengths": _lengths(scope, conn),
         "llm_per_agent": llm_per_agent,
+        "llm_cache_input": _llm_cache_input(scope, conn),
         "llm_costs": _llm_cost_sums(scope, conn),
         "llm_position": _llm_position(scope, conn),
         "fix_events": _fix_events(scope, conn),
@@ -357,5 +370,6 @@ def read_agent_window(
     return {
         "per_agent": _per_agent_counters(scope, conn),
         "llm_per_agent": _llm_sums(scope, conn),
+        "llm_cache_input": _llm_cache_input(scope, conn),
         "llm_costs": _llm_cost_sums(scope, conn),
     }

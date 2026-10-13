@@ -389,3 +389,30 @@ def test_main_conversation_usage_refuses_missing_identity() -> None:
         cast(Any, log_llm_usage)(
             msg, model="deepseek-v4-pro", agent_id=None, catalog=build_model_catalog()
         )
+
+
+@pytest.mark.parametrize("cached", [None, 0, 800])
+def test_missing_cache_metering_differs_from_a_measured_zero(
+    cached: int | None, loguru_records: list[dict[str, Any]]
+) -> None:
+    msg = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 10,
+            "total_tokens": 1010,
+            "input_token_details": {} if cached is None else {"cache_read": cached},
+        },
+    )
+    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
+    record = next(r for r in loguru_records if r["extra"].get("event") == "llm_usage")
+    extra = record["extra"]
+    assert extra["in_total"] == 1000
+    assert extra["cost_usd"] > 0
+    if cached is None:
+        assert "cache_read" not in extra
+        assert "cache_write_5m" not in extra
+        assert "cached=" not in record["message"]
+    else:
+        assert extra["cache_read"] == cached
+        assert f"cached={cached}" in record["message"]
