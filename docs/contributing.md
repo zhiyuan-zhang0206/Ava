@@ -59,7 +59,8 @@ violations pass, anything new fails, and the debt may only shrink
   legal new dependencies of your changed files and prunes stale ones). An edge
   that closes a cycle, a private name, an underscore module or a restricted form
   is not declared; change the code. Run `python -m meizel debt prune` for
-  `debt-paid`.
+  `debt-paid`. After moving a file, stage the move and run `python -m meizel debt
+  carry` so its recorded debt follows it (it relocates entries, never adds one).
 - `python -m meizel debt record` is for a deliberate exception that has been
   discussed with the maintainers and is explained in the PR. It is never the way
   to make a failing check pass.

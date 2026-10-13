@@ -23,7 +23,7 @@ files. Run from the repository root.
 
 ```
 python -m meizel check [paths... | --changed files...] [--limit N]
-python -m meizel debt [--json] | record <paths...> | prune | diff --against <ref> --on-growth fail|warn
+python -m meizel debt [--json] | record <paths...> | prune | carry | diff --against <ref> --on-growth fail|warn
 python -m meizel explain <path>
 python -m meizel sync [--prune] [--declare [paths...]]
 python -m meizel bootstrap --out <dir>
