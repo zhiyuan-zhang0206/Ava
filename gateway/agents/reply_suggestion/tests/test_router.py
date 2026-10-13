@@ -11,9 +11,10 @@ from fastapi.testclient import TestClient
 
 from base.api_contracts.agent_contract import AgentNotFound
 from base.lm.catalog import ModelCatalog
-from gateway.agents.reply_suggestion.router import router, run_until_disconnect
+from gateway.agents.reply_suggestion.router import router
 from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
 from gateway.agents.reply_suggestion.tests.support import Harness
+from gateway.http.disconnect import run_until_disconnect
 
 
 class StubService:
@@ -89,6 +90,28 @@ async def test_the_work_exception_reaches_a_connected_client() -> None:
 
     with pytest.raises(ValueError, match="boom"):
         await run_until_disconnect(work(), connected)
+
+
+async def test_work_that_fails_while_the_disconnect_check_absorbs_cancellation_still_ends() -> None:
+    """Starlette's `is_disconnected` polls inside an anyio cancel scope that can absorb a
+    cancellation; the failed work must still end the request."""
+
+    async def absorbing() -> bool:
+        try:
+            await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            return False
+        return False
+
+    async def work() -> str:
+        raise ValueError("boom")
+
+    request = asyncio.ensure_future(run_until_disconnect(work(), absorbing))
+    done, _pending = await asyncio.wait({request}, timeout=5)
+
+    assert done, "the failed work left the request open"
+    with pytest.raises(ValueError, match="boom"):
+        request.result()
 
 
 async def test_a_disconnect_cancels_the_work() -> None:
