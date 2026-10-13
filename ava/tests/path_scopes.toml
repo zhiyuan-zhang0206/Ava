@@ -21,7 +21,7 @@
     "test_core.py",
     "test_security.py",
 ]
-"tests.fixtures.unit.model_owner" = [
+"ava.sdk_surface.tests.fixtures.model_owner" = [
     "test_attachment_transport.py",
     "test_core.py",
     "test_security.py",
