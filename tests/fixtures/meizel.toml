@@ -1,4 +1,4 @@
-exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guards.py", "identity_restore.py", "leak_guard.py", "model_catalog.py", "path_scopes.py", "pin_agent.py", "plugin_registrations.py", "provisioning.py", "static_environment.py", "unit", "units.py"]
+exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guards.py", "identity_restore.py", "leak_guard.py", "model_catalog.py", "path_scopes.py", "pin_agent.py", "plugin_registrations.py", "provisioning.py", "static_environment.py", "unit"]
 
 [uses]
 "guards.py" = ["env_bootstrap.py"]
@@ -13,7 +13,6 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 [debt.env-patch]
 "provisioning.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
 "provisioning.py#monkeypatch.setitem os.environ.AVA_REDIS_URL" = 1
-"units.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 
 [debt.first-party-patch]
 "guards.py#monkeypatch.setattr base.cluster.new_home_ports" = 1

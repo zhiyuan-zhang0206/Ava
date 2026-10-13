@@ -1,7 +1,12 @@
+exports = ["env_files.py"]
+
 [uses]
-"test_dotenv_boot_launcher_context.py" = ["test_dotenv_boot.py"]
+"test_config_refresh.py" = ["env_files.py"]
+"test_dotenv_boot.py" = ["env_files.py"]
+"test_dotenv_boot_launcher_context.py" = ["env_files.py", "test_dotenv_boot.py"]
 
 [debt.env-patch]
+"env_files.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 "test_agent_slices.py#patch.dict os.environ" = 1
 "test_bootstrap_fetch.py#monkeypatch.delitem os.environ" = 1
 "test_bootstrap_fetch.py#monkeypatch.delitem os.environ.AVA_DB_URL" = 2
