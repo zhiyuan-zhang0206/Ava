@@ -12,7 +12,7 @@ The "right" fix when this fires is either:
 - Move the field to a gateway-scope domain (services, daemon, gateway)
 - Move the read to a different process (agent-side code should not run in gateway)
 - Consume a popped value with the .env-file fallback when the read must stay in
-  a gateway process (base.host.env.runtime_config.read_env_aliases) and register it in
+  a gateway process (base.host.env.dotenv_file.read_env_aliases) and register it in
   _FALLBACK_CONSUMED_READS — an explicit, pinned exemption, never a blanket skip
 
 This is the structural enforcement the orchestrator asked for — the consumption
@@ -257,7 +257,7 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
 # Reads of a popped alias that are deliberately fallback-consumed: the module
 # reads the Settings value and — when the gateway profile has popped the
 # env var (Task #856) — falls back to this unit's `.env` file via
-# `base.host.env.runtime_config.read_env_aliases()`, the sanctioned gateway-side
+# `base.host.env.dotenv_file.read_env_aliases()`, the sanctioned gateway-side
 # source (same shape as base/lm/factory.py::_ensure_provider_key). Each
 # entry is an explicit, reviewable exemption keyed by (module, field); the
 # companion test below pins every entry to fallback code that actually
@@ -514,7 +514,7 @@ def _closure_domains(closure: set[Path]) -> set[str]:
     classified as non-domain facts.
     """
     from base.config import Settings
-    from base.host.env.config_registry import DOMAIN_ATTRS
+    from base.config.config_registry import DOMAIN_ATTRS
     from cli.commands.lifecycle.tests.startup.config_read_facts import explicit_config_reads
 
     aggregate_facts = {

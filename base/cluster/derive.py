@@ -250,7 +250,7 @@ def runner_db_url_projection() -> str:
     unit capability instead (`base.host.db_authority.unit`).
     """
     from base.host.env.bootstrap import config_source_is_local
-    from base.host.env.runtime_config import read_env_aliases
+    from base.host.env.dotenv_file import read_env_aliases
 
     if not config_source_is_local():
         raise RuntimeError(

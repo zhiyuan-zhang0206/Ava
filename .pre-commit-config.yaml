@@ -739,7 +739,7 @@ repos:
         entry: .venv/bin/python scripts/codegen/gen_config_lite_table.py --check
         language: system
         # base/config/tests/ is not a config source, so it does not trigger the check.
-        files: ^(base/host/env/config_registry\.py$|base/config/(?!(?:.*/)?tests/).*\.py$|scripts/codegen/gen_config_lite_table\.py$|base/host/env/config_lite_table\.json$)
+        files: ^(base/config/(?!(?:.*/)?tests/).*\.py$|scripts/codegen/gen_config_lite_table\.py$|base/host/env/config_lite_table\.json$)
         pass_filenames: false
 
       # The `executionEnvironments` entries that hold each package's tests/ directory to the

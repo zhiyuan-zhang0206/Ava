@@ -30,7 +30,7 @@ def test_browser_present_on_agent_runner_when_enabled_and_capable(
 ) -> None:
     """browser_enabled=True AND host is capable -> browser starts."""
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(spec, "browser_incapability", lambda: None)
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
     assert "browser" in _sessions("agent-runner", machine=command_machine)
 
 
@@ -39,7 +39,7 @@ def test_browser_absent_when_disabled(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(settings.services, "browser_enabled", False)
-    monkeypatch.setattr(spec, "browser_incapability", lambda: None)
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
     assert "browser" not in _sessions("agent-runner", machine=command_machine)
 
 
@@ -50,7 +50,7 @@ def test_browser_absent_when_enabled_but_not_capable(
     """browser_enabled=True but host not capable (no display/Chrome/npx)
     -> browser dropped from the start roster."""
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(spec, "browser_incapability", lambda: "no display (headless)")
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: "no display (headless)")  # pyright: ignore[reportUnknownArgumentType]
     assert "browser" not in _sessions("agent-runner", machine=command_machine)
 
 
@@ -59,7 +59,7 @@ def test_browser_never_on_gateway(
     command_machine: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(spec, "browser_incapability", lambda: None)
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
     assert "browser" not in _sessions("gateway", machine=command_machine)
 
 
@@ -70,7 +70,7 @@ def test_annotated_keeps_browser_with_incapability_reason(
     """The diagnostic view keeps a capability-gated browser WITH its reason, even
     though the start roster drops it — so `ava status` shows why, not nothing."""
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr(spec, "browser_incapability", lambda: "no display (headless)")
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: "no display (headless)")  # pyright: ignore[reportUnknownArgumentType]
     annotated = _annotated("agent-runner", machine=command_machine)
     assert annotated["browser"] == "no display (headless)"
     assert "browser" not in _sessions(
@@ -85,7 +85,7 @@ def test_annotated_browser_disabled_reason(
     """Disabled (operator opt-out) is distinct from incapable, and is surfaced
     as its own reason rather than conflated with a missing display."""
     monkeypatch.setattr(settings.services, "browser_enabled", False)
-    monkeypatch.setattr(spec, "browser_incapability", lambda: None)
+    monkeypatch.setattr(spec, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
     assert (
         _annotated("agent-runner", machine=command_machine)["browser"]
         == "disabled (AVA_BROWSER_ENABLED off)"

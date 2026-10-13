@@ -1,6 +1,6 @@
 """`$AVA_HOME/.env` is the single config source of truth.
 
-`base/host/env/runtime_config.py` reads/writes `.env` by each field's env alias.
+`base/config/runtime_config.py` reads/writes `.env` by each field's env alias.
 
 `fake_ava_home` redirects `_ava_home()` (and so `.env`) to tmp_path.
 """
@@ -11,13 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from base.host.env import runtime_config as rt
+from base.config import runtime_config as rt
+from base.host.env import dotenv_file
 
 
 @pytest.fixture
 def fake_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Redirect _ava_home (and so this unit's .env) to tmp_path."""
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     return tmp_path
 
 
@@ -31,7 +32,7 @@ def _seed_env(home: Path, lines: dict[str, str]) -> None:
 class TestEnvRoundtrip:
     def test_write_then_read_alias(self, fake_ava_home: Path) -> None:
         rt.write_fields({"llm_model": "m1"}, set())
-        assert rt.read_env_aliases()["AVA_MODEL"] == "m1"
+        assert dotenv_file.read_env_aliases()["AVA_MODEL"] == "m1"
 
     def test_write_fields_pins_env_file_0600(self, fake_ava_home: Path) -> None:
         """.env is the only on-disk copy of a cluster's secrets — a fresh write
@@ -62,17 +63,17 @@ class TestEnvRoundtrip:
 
     def test_bool_stringified_lowercase(self, fake_ava_home: Path) -> None:
         rt.write_fields({"browser_enabled": True}, set())
-        assert rt.read_env_aliases()["AVA_BROWSER_ENABLED"] == "true"
+        assert dotenv_file.read_env_aliases()["AVA_BROWSER_ENABLED"] == "true"
 
     def test_removal_unsets_only_that_key(self, fake_ava_home: Path) -> None:
         rt.write_fields({"llm_model": "m1", "deepseek_api_key": "sk-x"}, set())
         rt.write_fields({}, {"deepseek_api_key"})
-        aliases = rt.read_env_aliases()
+        aliases = dotenv_file.read_env_aliases()
         assert "DEEPSEEK_API_KEY" not in aliases
         assert aliases["AVA_MODEL"] == "m1"  # untouched
 
     def test_absent_env_reads_empty(self, fake_ava_home: Path) -> None:
-        assert rt.read_env_aliases() == {}
+        assert dotenv_file.read_env_aliases() == {}
         assert rt.env_set_field_names() == set()
 
     def test_write_fields_snapshots_prior_state(self, fake_ava_home: Path) -> None:
@@ -82,11 +83,11 @@ class TestEnvRoundtrip:
         rt.write_fields({"deepseek_api_key": "sk-new"}, set())
         backups = sorted((fake_ava_home / "backups" / "env").glob(".env.*"))
         assert any("sk-orig" in b.read_text() for b in backups)
-        assert rt.read_env_aliases()["DEEPSEEK_API_KEY"] == "sk-new"
+        assert dotenv_file.read_env_aliases()["DEEPSEEK_API_KEY"] == "sk-new"
 
     def test_write_preserves_unrelated_lines(self, fake_ava_home: Path) -> None:
         _seed_env(fake_ava_home, {"AVA_DB_URL": "postgresql://x@127.0.0.1:1/x"})
         rt.write_fields({"llm_model": "m1"}, set())
-        aliases = rt.read_env_aliases()
+        aliases = dotenv_file.read_env_aliases()
         assert aliases["AVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
         assert aliases["AVA_MODEL"] == "m1"

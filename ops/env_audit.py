@@ -33,7 +33,7 @@ _AUDIT_TAIL_BYTES = 64 * 1024
 
 def _env_path() -> Path:
     """Resolve the unit `.env` without adding a runtime-config import cycle."""
-    from base.host.env.runtime_config import env_file_path
+    from base.host.env.dotenv_file import env_file_path
 
     return env_file_path()
 
@@ -61,7 +61,7 @@ def _env_key_names(env_path: Path) -> list[str]:
 
 
 def _load_alias_metadata() -> dict[str, tuple[str, bool]]:
-    from base.host.env.config_registry import field_alias, fields, schema_extra
+    from base.config.config_registry import field_alias, fields, schema_extra
 
     metadata: dict[str, tuple[str, bool]] = {}
     for name, ref in fields().items():

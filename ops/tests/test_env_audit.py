@@ -15,7 +15,8 @@ import pytest
 
 from base import telemetry
 from base.cluster.machine import MachineIdentity
-from base.host.env import runtime_config as runtime_config
+from base.config import runtime_config as runtime_config
+from base.host.env import dotenv_file
 from base.telemetry import Event
 from ops import env_audit as audit
 from ops.env_audit import (
@@ -30,7 +31,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 @pytest.fixture
 def audit_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Redirect the audited unit `.env` to a scratch home."""
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     return tmp_path
 
 
@@ -452,7 +453,7 @@ def test_alias_metadata_projects_declarations_without_runtime_values(
 def test_alias_metadata_does_not_cache_a_separate_declaration_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from base.host.env import config_registry
+    from base.config import config_registry
 
     declarations = deepcopy(config_registry.fields())
     info = declarations["llm_model"].info
@@ -469,7 +470,7 @@ def test_alias_metadata_does_not_cache_a_separate_declaration_image(
 def test_alias_metadata_rejects_invalid_sensitivity_declarations(
     monkeypatch: pytest.MonkeyPatch, sensitive: object
 ) -> None:
-    from base.host.env import config_registry
+    from base.config import config_registry
 
     declarations = deepcopy(config_registry.fields())
     info = declarations["llm_model"].info
@@ -482,7 +483,7 @@ def test_alias_metadata_rejects_invalid_sensitivity_declarations(
 def test_alias_metadata_rejects_ambiguous_declarations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from base.host.env import config_registry
+    from base.config import config_registry
 
     declarations = deepcopy(config_registry.fields())
     declarations["gateway_url"].info.serialization_alias = "AVA_MODEL"

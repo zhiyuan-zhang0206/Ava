@@ -20,7 +20,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
 from base import paths
-from base.host.env import runtime_config
+from base.host.env import dotenv_file
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import factory, pricing, provider_api
 from base.lm.catalog import CatalogBuilder, ModelCatalog
@@ -462,12 +462,12 @@ def test_plugin_model_validation_and_key_check(
     provider_plugin()
     catalog = build_model_catalog()
 
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
     with pytest.raises(ValueError, match="TESTP_API_KEY"):
         validate_model_config(model="testp-1", catalog=catalog, llm_override="")
 
     monkeypatch.setattr(
-        runtime_config,
+        dotenv_file,
         "read_env_aliases",
         lambda: {"TESTP_API_KEY": "sk-test"},
     )

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
-from base.host.env import runtime_config
+from base.host.env import dotenv_file
 from base.packages.plugin_config_admin import (
     patch_owner,
     plugin_metadata,
@@ -24,7 +24,7 @@ from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
 @pytest.fixture(autouse=True)
 def preserve_env_file() -> Generator[None]:
-    env = runtime_config.env_file_path()
+    env = dotenv_file.env_file_path()
     previous = env.read_bytes() if env.exists() else None
     try:
         yield

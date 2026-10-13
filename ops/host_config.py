@@ -14,12 +14,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from base.config import field_domain, settings
+from base.config import field_domain, runtime_config, settings
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
-from base.host.env import runtime_config
 from base.packages.plugin_config_admin import (
     panel_metadata,
     panel_overrides,

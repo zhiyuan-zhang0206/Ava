@@ -6,10 +6,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.config import settings
+from base.config import runtime_config, settings
 from base.config.domains.display import DisplaySettings
 from base.config.domains.tests.test_display_config import DISPLAY_RANGES
-from base.host.env import runtime_config
+from base.host.env import dotenv_file
 from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import _seed_agent
 
@@ -18,7 +18,7 @@ from gateway.tests.events.test_notices_endpoint import _seed_agent
 def test_config_write_rejects_invalid_default_without_changing_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, minimum: int, maximum: int
 ) -> None:
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     runtime_config.write_fields({"notices_open_default_limit": 200}, set())
     env_path = tmp_path / ".env"
     before = env_path.read_bytes()
@@ -34,14 +34,14 @@ def test_config_write_rejects_invalid_default_without_changing_file(
 def test_config_write_accepts_boundary_defaults_without_clamping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, minimum: int, maximum: int
 ) -> None:
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     alias = DisplaySettings.model_fields[name].alias
     assert isinstance(alias, str)
     with TestClient(app) as client:
         for value in (minimum, maximum):
             response = client.put("/api/config", json={name: value})
             assert response.status_code == 200, response.text
-            assert runtime_config.read_env_aliases()[alias] == str(value)
+            assert dotenv_file.read_env_aliases()[alias] == str(value)
 
 
 @pytest.mark.parametrize(("open_limit", "resolved_limit"), ((1, 1), (500, 100)))

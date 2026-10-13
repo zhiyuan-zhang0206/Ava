@@ -25,8 +25,8 @@ fails explicitly; a read never constructs a second Settings image.
 
 from typing import Any
 
+from base.config.config_registry import DOMAIN_ATTRS
 from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS
-from base.host.env.config_registry import DOMAIN_ATTRS
 
 
 class PluginFlagError(Exception):

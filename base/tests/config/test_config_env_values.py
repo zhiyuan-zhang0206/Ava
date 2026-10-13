@@ -51,9 +51,10 @@ def test_current_field_values_coerces_secretstr(
     — `.get_secret_value()` consumers crash on a plain str."""
     from pydantic import SecretStr
 
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"anthropic_api_key": "sk-ant-abc"}, set())
 
     secret = authority.current_field_values()["anthropic_api_key"]
@@ -65,9 +66,10 @@ def test_current_field_values_coerces_bool(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """A bool field written to .env round-trips through the field type unchanged."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"trace_enabled": True}, set())
 
     assert authority.current_field_values()["trace_enabled"] is True
@@ -79,10 +81,11 @@ def test_bootstrap_serves_comma_list_not_repr(
 ):
     """A NoDecode comma-list field set in .env reaches an agent as the raw "a,b"
     env text, not a Python list repr (which the agent would split into garbage)."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
     from base.host.env.dotenv_file import upsert_env
 
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
     upsert_env(tmp_path / ".env", {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
 
@@ -95,9 +98,10 @@ def test_current_field_values_decodes_nodecode_comma_list(
 ):
     """A NoDecode comma-list field reads back as a list (split like the model's
     _split_comma_list validator), not a silently mis-typed raw string."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
 
     v = authority.current_field_values()["skills_to_inject_into_system_prompt"]
@@ -112,10 +116,11 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
     "cannot be decoded" warning — it fired on every panel read / agent spawn
     for AVA_IM_DISABLED_ADAPTERS='weixin,feishu' — and a list[float] field must
     come back floats, not a wrong-typed string split."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
     rec = _patch_logger(monkeypatch)
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields(
         {
             "im_disabled_adapters": ["weixin", "feishu"],
@@ -137,10 +142,11 @@ def test_current_field_values_decodes_json_array_spelling(
 ):
     """The JSON-array spelling the model validators also accept must decode
     through the panel path too — both spellings, not just the comma list."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
     rec = _patch_logger(monkeypatch)
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"im_disabled_adapters": '["weixin", "feishu"]'}, set())
 
     values = authority.current_field_values()
@@ -154,10 +160,11 @@ def test_current_field_values_decodes_empty_nodecode_list(
 ):
     """An empty NoDecode list value decodes to [] (nothing disabled), matching
     Settings construction."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
     rec = _patch_logger(monkeypatch)
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"im_disabled_adapters": []}, set())
 
     values = authority.current_field_values()
@@ -229,10 +236,11 @@ def test_current_field_values_rejects_undecodable_env_value(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """Invalid file values fail at the explicit reader without serving boot defaults."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
     rec = _patch_logger(monkeypatch)
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"trace_enabled": "banana"}, set())
 
     with pytest.raises(ValidationError):
@@ -244,10 +252,11 @@ def test_current_field_values_rejects_bad_nodecode_list_value(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ):
     """Invalid file values fail at the explicit reader without serving boot defaults."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
     rec = _patch_logger(monkeypatch)
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"im_send_retry_delays": "banana,apple"}, set())
 
     with pytest.raises(ValidationError):
@@ -259,7 +268,8 @@ def test_current_field_values_serves_the_explicit_runner_db_projection(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ) -> None:
     """The default-home agent owns a delivered runner login, not its file's owner URL."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -269,7 +279,7 @@ def test_current_field_values_serves_the_explicit_runner_db_projection(
     runtime.data_plane.cluster_secret = secrets.token_urlsafe(16)
     runtime.data_plane.db_url = "postgresql://ava_g0_runner@127.0.0.1:5433/ava?hostaddr=127.0.0.1"
     authority = ConfigAuthority(runtime, config.settings, home / ".env")
-    monkeypatch.setattr(rt, "_ava_home", lambda: home)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: home)
     boot = authority.current_field_values()["db_url"]
     rt.write_fields({"db_url": "postgresql://ava_main:owner-pw@127.0.0.1:5433/ava"}, set())
 
@@ -284,7 +294,8 @@ def test_current_field_values_rejects_bad_db_url_with_runner_projection(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, authority: ConfigAuthority
 ) -> None:
     """The runner projection never hides malformed file URLs."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
     rec = _patch_logger(monkeypatch)
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -294,7 +305,7 @@ def test_current_field_values_rejects_bad_db_url_with_runner_projection(
     runtime.data_plane.cluster_secret = secrets.token_urlsafe(16)
     runtime.data_plane.db_url = "postgresql://ava_g0_runner@127.0.0.1:5433/ava?hostaddr=127.0.0.1"
     authority = ConfigAuthority(runtime, config.settings, home / ".env")
-    monkeypatch.setattr(rt, "_ava_home", lambda: home)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: home)
     rt.write_fields({"db_url": "postgresql://[::1"}, set())
 
     with pytest.raises(ValidationError):
@@ -310,10 +321,11 @@ def test_current_field_values_isolates_bad_env_from_good_file_value(
     file). The decode payload covers every field, so model_validate never reads
     os.environ — the old retry did, dropped the good file value, and served
     the boot value instead."""
-    from base.host.env import runtime_config as rt
+    from base.config import runtime_config as rt
+    from base.host.env import dotenv_file
 
     rec = _patch_logger(monkeypatch)
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     rt.write_fields({"im_disabled_adapters": ["weixin", "feishu"]}, set())
     # setitem, not setenv: the lint bans setenv on Settings aliases (the
     # singleton never re-reads env); this plants the bad value for the decode

@@ -43,6 +43,7 @@ def test_explicit_config_authority_import_stays_lite(tmp_path: Path) -> None:
     assert result["config_modules"] == [
         "base.config",
         "base.config._lite",
+        "base.config.config_registry",
         "base.config.profiles",
         "base.config.service_read",
     ]

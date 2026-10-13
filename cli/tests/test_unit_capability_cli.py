@@ -37,9 +37,9 @@ def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAut
     """Serve bootstrap from `born`'s `.env`. The single-box gateway binds
     loopback (empty bearer), so its served endpoint must stay on loopback for
     the co-located runner under test."""
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: born.home)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: born.home)
     monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
     complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
