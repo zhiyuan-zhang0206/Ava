@@ -19,7 +19,7 @@ from cli import start_runtime
 from cli.commands.data_plane import bringup
 from cli.commands.lifecycle import converge_host, start
 from cli.database.runtime import CommandRuntime
-from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from cli.tests._commands_helpers import hermetic_gateway_base as hermetic_gateway_base
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline

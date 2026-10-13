@@ -503,7 +503,6 @@ frontend = ["ui"]
 "tests/components/base/plugin_restart_probe.py -> services/agent_runner/agent_host/daemon.py#_watch_plugins_for_restart" = 1
 "tests/components/base/test_uvicorn_stdlib_intercept.py -> base/log/__init__.py#_install_stdlib_intercept" = 1
 "tests/components/cli/test_converge_redis_bridge.py -> services/redis_bridge/relay.py#_INITIAL_REBIND_DELAY_S" = 1
-"tests/components/cli/test_maintenance_readiness.py -> cli/commands/lifecycle/tests/startup/test_start_readiness_gate.py#_hermetic_start" = 1
 "tests/components/ops/resurrection_support.py -> ops/lifecycle/termination.py#_force_terminate_transaction" = 1
 "tests/components/ops/test_resurrection_admission.py -> ops/agents/wake.py#_transition_terminated_to_unclaimed_idling" = 1
 "tests/components/ops/test_schema_mismatch.py -> cli/commands/cluster/control.py#_schema_mismatch_banner" = 1

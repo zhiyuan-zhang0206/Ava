@@ -16,7 +16,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.telemetry import EventPipeline
 from cli.commands._setup import collect_setup_values as _real_collect_setup_values
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
-    _hermetic_start as _hermetic_start,
+    hermetic_start as hermetic_start,
 )
 from cli.database.runtime import CommandRuntime
 from cli.tests._commands_helpers import _FakeResult, _git_aware

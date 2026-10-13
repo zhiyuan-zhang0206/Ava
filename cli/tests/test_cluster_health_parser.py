@@ -19,7 +19,7 @@ from cli.commands.cluster.tests.health_probe_inputs import (
     signals as signals,
 )
 from cli.commands.cluster.tests.test_cluster_health import (
-    _home as _home,
+    isolated_cluster_home as isolated_cluster_home,
 )
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
