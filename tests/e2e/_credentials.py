@@ -111,7 +111,16 @@ def gateway_client_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
 
 def _gateway_serving() -> bool:
     """True once the gateway answers HTTP. The retained listening socket accepts
-    connections before any process serves them, so only a response proves it."""
+    connections before any process serves them, so only a response proves it.
+
+    A session that never minted credentials runs without the stack (the
+    visual-baselines workflow renders its stubbed pages standalone), so there is
+    nothing to log in to, and the probe must answer without a request: the
+    autouse client-credential hook intercepts this probe's own call and would
+    fail it for the missing mint.
+    """
+    if _current is None:
+        return False
     try:
         return httpx.get(f"{GATEWAY_URL}/api/health", timeout=1.0).is_success
     except httpx.HTTPError:
