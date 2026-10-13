@@ -11,12 +11,12 @@ import pytest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from services.desktop.computer import mcp_daemon as daemon
-from tests.fixtures.configuration import snapshot_process_config
 
 
 @pytest.mark.parametrize("sha", ["captured-computer", None])

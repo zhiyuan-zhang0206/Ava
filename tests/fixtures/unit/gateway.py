@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
-from tests.fixtures.configuration import snapshot_process_config
+from base.config.tests.configuration import snapshot_process_config
 
 
 @pytest.fixture

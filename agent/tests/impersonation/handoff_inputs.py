@@ -42,6 +42,7 @@ from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -49,7 +50,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from tests.impersonation_support import attested_caller, recorded_tree
 

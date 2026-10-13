@@ -7,9 +7,9 @@ import pytest
 
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from services.agent_runner.agent_ops import boot
-from tests.fixtures.configuration import snapshot_process_config
 
 
 def test_pool_and_bus_read_the_same_live_owner(database: Database, tmp_path: Path) -> None:

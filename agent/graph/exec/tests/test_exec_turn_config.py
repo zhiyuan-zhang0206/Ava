@@ -23,13 +23,13 @@ from base.agents.messages.kwargs import ExecStatus, read_ava_kwargs
 from base.clock import Clock
 from base.config import ConfigBoot, settings
 from base.config.agent_pins import resolve_agent_config_pins
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import workspace_dir_readonly
-from tests.fixtures.configuration import snapshot_process_config
 
 
 def _plugin(unit_home: Path) -> None:

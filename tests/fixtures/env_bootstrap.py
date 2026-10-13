@@ -581,7 +581,7 @@ def session_ports() -> dict[str, int]:
 def process_config():
     """Prepare configuration only for a consumer, before its function-scoped home."""
     from base.config import set_field
-    from tests.fixtures.configuration import snapshot_process_config
+    from base.config.tests.configuration import snapshot_process_config
 
     set_field("permissions_helper_port", permissions_helper_port)
     return snapshot_process_config()
