@@ -15,11 +15,11 @@ from base.agents.context.identity import AgentIdentity
 from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
-from base.telemetry.process_logging import _message_to_params
+from base.telemetry.process_logging import message_to_params
 
 
 class _FakeMessage:
-    """The shape `_message_to_params` reads off a loguru message."""
+    """The shape `message_to_params` reads off a loguru message."""
 
     def __init__(self, extra: dict[str, object]) -> None:
         from datetime import UTC, datetime
@@ -34,7 +34,7 @@ class _FakeMessage:
 
 
 def _agent_id_of(extra: dict[str, object]) -> int | None:
-    _ts, agent_id, _level, _event, _payload, _source = _message_to_params(_FakeMessage(extra))  # pyright: ignore[reportArgumentType]
+    _ts, agent_id, _level, _event, _payload, _source = message_to_params(_FakeMessage(extra))  # pyright: ignore[reportArgumentType]
     return agent_id
 
 
@@ -54,7 +54,7 @@ def test_missing_required_log_field_fails() -> None:
 
 
 def test_transport_source_preserves_usage_payload_source() -> None:
-    _ts, _agent_id, _level, _event, payload, source = _message_to_params(
+    _ts, _agent_id, _level, _event, payload, source = message_to_params(
         _FakeMessage(  # pyright: ignore[reportArgumentType]
             {
                 "agent_id": "-",
@@ -75,11 +75,11 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
     def producer() -> EventPipeline:
         raise AssertionError("the mocked sink must not construct a pipeline")
 
-    monkeypatch.setattr(slog, "_init_done", False)
+    monkeypatch.setattr(slog, "init_done", False)
     ava.context = replace(ava.context, identity=AgentIdentity(42, True))
     with (
         mock.patch.object(slog.logger, "add"),
-        mock.patch.object(slog, "_add_file_sink"),
+        mock.patch.object(slog, "add_file_sink"),
         mock.patch.object(plog, "add_event_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
         mock.patch.object(slog.logger, "info") as boot_log,
@@ -109,13 +109,13 @@ def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
     import base.log.process as slog
     import base.telemetry.process_logging as plog
 
-    monkeypatch.setattr(slog, "_init_done", False)
+    monkeypatch.setattr(slog, "init_done", False)
     producer = mock.Mock(side_effect=AssertionError("the logger must pass its root's factory"))
     machine = mock.Mock(return_value="owned-machine")
     image = cast(Any, SimpleNamespace(sha="already-loaded"))
     with (
         mock.patch.object(slog.logger, "add"),
-        mock.patch.object(slog, "_add_file_sink"),
+        mock.patch.object(slog, "add_file_sink"),
         mock.patch.object(plog, "add_event_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
         mock.patch.object(

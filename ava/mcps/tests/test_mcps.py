@@ -372,7 +372,7 @@ def test_daemon_socket_path_none_when_identity_unset(monkeypatch: pytest.MonkeyP
 def test_daemon_socket_path_none_when_socket_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(remote_mod, "_socket_path_for", lambda: str(tmp_path / "absent.sock"))
+    monkeypatch.setattr(remote_mod, "socket_path_for", lambda: str(tmp_path / "absent.sock"))
     assert remote_mod.daemon_socket_path() is None
 
 
@@ -381,7 +381,7 @@ def test_daemon_socket_path_returns_path_when_socket_present(
 ) -> None:
     sock = tmp_path / "present.sock"
     sock.touch()
-    monkeypatch.setattr(remote_mod, "_socket_path_for", lambda: str(sock))
+    monkeypatch.setattr(remote_mod, "socket_path_for", lambda: str(sock))
     assert remote_mod.daemon_socket_path() == str(sock)
 
 

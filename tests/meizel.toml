@@ -26,8 +26,6 @@ exports = ["components", "e2e", "factories", "fixtures", "impersonation_support.
 "ui/test_visual_snapshot.py -> e2e/visual/_visual_snapshot.py" = 1
 
 [debt.private-name]
-"components/cli/test_pgbouncer_wire.py -> _containers.py#_free_port" = 1
-"components/cli/test_pgbouncer_wire.py -> _containers.py#_wait_port" = 1
 "e2e/conftest.py -> fixtures/provisioning.py#_provisioned_db" = 1
 "e2e/conftest.py -> fixtures/provisioning.py#_provisioned_redis" = 1
 "harness/test_home_isolation.py -> e2e/conftest.py#_e2e_process_env" = 1

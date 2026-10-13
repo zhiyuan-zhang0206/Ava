@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 
 from agent.graph.prompt.system_prompt import (
-    _CAPABILITY_SURFACES,
-    _discover_all_namespaces,
-    _sdk_expand_section,
+    CAPABILITY_SURFACES,
+    discover_all_namespaces,
     effective_sdk_expand,
+    sdk_expand_section,
 )
 from ava.sdk_surface import install, sdk_disable
 from ava.sdk_surface.installation import installed
@@ -91,7 +91,7 @@ def test_wildcard_expands_all_public_namespaces(monkeypatch: pytest.MonkeyPatch)
     )
     assert set(result) >= FRAMEWORK_NAMESPACES
     assert "shell.sessions" in result  # nested namespace discovered recursively
-    assert result == _discover_all_namespaces(
+    assert result == discover_all_namespaces(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ).prompt.sdk_disable
@@ -115,7 +115,7 @@ def test_wildcard_excludes_functions_and_private_names(
     assert "help" not in result
     assert "understand" not in result
     assert "impersonation" not in result
-    assert "## ava.impersonation" not in _sdk_expand_section(
+    assert "## ava.impersonation" not in sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -138,9 +138,9 @@ def test_wildcard_skips_capability_surfaces(
         ).prompt.sdk_disable,
         configured_expansions=settings.agent.sdk_expand_in_system_prompt,
     )
-    assert {"skills", "mcps"} == _CAPABILITY_SURFACES
-    assert not (_CAPABILITY_SURFACES & set(result))
-    text = _sdk_expand_section(
+    assert {"skills", "mcps"} == CAPABILITY_SURFACES
+    assert not (CAPABILITY_SURFACES & set(result))
+    text = sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -165,7 +165,7 @@ def test_capability_surface_expands_when_named_explicitly(
         ).prompt.sdk_disable,
         configured_expansions=settings.agent.sdk_expand_in_system_prompt,
     )
-    text = _sdk_expand_section(
+    text = sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -210,7 +210,7 @@ def test_member_of_a_capability_surface_is_refused(
         ).prompt.sdk_disable,
         configured_expansions=settings.agent.sdk_expand_in_system_prompt,
     )
-    text = _sdk_expand_section(
+    text = sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -310,7 +310,7 @@ def test_missing_unregistered_expand_path_warns(
     monkeypatch.setattr(sdk_disable, "applied_entries", frozenset)
 
     with caplog.at_level("WARNING", logger="agent.graph.prompt.system_prompt"):
-        text = _sdk_expand_section(
+        text = sdk_expand_section(
             AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
             ),
@@ -350,7 +350,7 @@ def test_section_renders_all_wildcard_namespaces(
     """The rendered section carries one `## ava.<name>` contract per discovered
     namespace and no heading for the skipped top-level functions."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    text = _sdk_expand_section(
+    text = sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -413,7 +413,7 @@ def test_section_hides_attach_for_text_only_model(
     the member is unavailable to it (user ruling 2026-08-28)."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
-    text = _sdk_expand_section(
+    text = sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -430,7 +430,7 @@ def test_section_keeps_attach_for_media_capable_model(
     contract unchanged (user ruling 2026-08-28)."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
-    text = _sdk_expand_section(
+    text = sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),

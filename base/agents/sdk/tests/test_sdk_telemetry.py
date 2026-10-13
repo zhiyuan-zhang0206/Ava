@@ -364,7 +364,7 @@ async def test_invalid_policy_blocks_sdk_side_effects(
             return SamplingPolicy(sample_every=0)
         raise TypeError("policy reader bug")
 
-    monkeypatch.setattr(call_policy, "_read_policy", invalid)
+    monkeypatch.setattr(call_policy, "read_policy", invalid)
     cache.refresh()
 
     def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
@@ -432,7 +432,7 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
         return current()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-    monkeypatch.setattr(call_policy, "_read_policy", invalid)
+    monkeypatch.setattr(call_policy, "read_policy", invalid)
     nested: list[str] = []
 
     def body() -> None:

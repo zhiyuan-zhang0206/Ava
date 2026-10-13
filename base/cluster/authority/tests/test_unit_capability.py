@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from base.cluster.authority.tests.unit_capability_support import (
-    _ENDPOINT,
+    ENDPOINT,
     MACHINE,
     _open,
     install,
@@ -122,13 +122,13 @@ def test_install_binds_the_unit_and_the_served_endpoint(
     bundle = _open(issued)
     with pytest.raises(unit.UnitCapabilityError, match="issued for"):
         unit.install_bundle(
-            runner_home, bundle, machine="other", served_endpoint=_ENDPOINT, probe=no_probe
+            runner_home, bundle, machine="other", served_endpoint=ENDPOINT, probe=no_probe
         )
     elsewhere = (tmp_path / "elsewhere").resolve()
     elsewhere.mkdir()
     with pytest.raises(unit.UnitCapabilityError, match="issued for"):
         unit.install_bundle(
-            elsewhere, bundle, machine=MACHINE, served_endpoint=_ENDPOINT, probe=no_probe
+            elsewhere, bundle, machine=MACHINE, served_endpoint=ENDPOINT, probe=no_probe
         )
     with pytest.raises(unit.UnitCapabilityError, match="another database endpoint"):
         install(runner_home, issued, served_endpoint="postgresql://ava@10.0.0.8:6433/ava")

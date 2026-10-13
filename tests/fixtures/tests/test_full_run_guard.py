@@ -116,6 +116,6 @@ def test_full_run_guard_decision(
     selected_file.parent.mkdir(parents=True)
     selected_file.touch()
 
-    message = provisioning._full_run_guard_message(rootpath, args, env, invocation_dir)
+    message = provisioning.full_run_guard_message(rootpath, args, env, invocation_dir)
 
     assert (message is not None) is blocked

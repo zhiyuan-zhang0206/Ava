@@ -23,7 +23,7 @@ from base.paths import workspace_dir
 
 from ._codeact import codeact_section
 from .capabilities import (
-    _CAPABILITY_SURFACES,
+    CAPABILITY_SURFACES,
     capabilities_section,
     capability_index_is_empty,
     disabled_by_sdk_config,
@@ -53,14 +53,14 @@ def _resolved(setting: str, slices: AgentSlices, catalog: ModelCatalog) -> Any:
 
 
 # --- SDK detail: expanded contracts for the highest-frequency namespaces ---
-def _discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
+def discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
     """Public ava namespaces the `"*"` expand entry stands for: every name in `help(ava)` that is
     itself a namespace (a module / namespace object), plus public nested submodules reachable
     through parent `__all_for_ava__` lists. Top-level functions (`help`, `understand`) are
     intentionally NOT discovered: the SDK overview already prints their full signature + docstring,
     so re-expanding them would only duplicate — the expanded reference earns its place only for
     namespaces, which the overview shows as a bare `from . import X` line. The capability surfaces
-    (`_CAPABILITY_SURFACES`) are skipped for the same anti-duplication reason: `# Capabilities` is
+    (`CAPABILITY_SURFACES`) are skipped for the same anti-duplication reason: `# Capabilities` is
     their index. Private names (leading underscore, e.g. a stray `_settings`) and any name removed
     via AVA_SDK_DISABLE are excluded too — a disabled namespace must never be expanded back into the
     prompt. Returned sorted so the rendered order is deterministic. Discovery is recursive: any
@@ -74,7 +74,7 @@ def _discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
         # agent_visible_names already drops underscore-prefixed names.
         for name in ava.agent_visible_names(parent):
             full = f"{prefix}.{name}" if prefix else name
-            if full in _CAPABILITY_SURFACES or disabled_by_sdk_config(full, sdk_disable):
+            if full in CAPABILITY_SURFACES or disabled_by_sdk_config(full, sdk_disable):
                 continue
             attr = getattr(parent, name, None)
             if inspect.ismodule(attr) or isinstance(attr, SimpleNamespace):
@@ -98,8 +98,8 @@ def effective_sdk_expand(
     consults this same view for its promote-vs-skip dedup.
 
     A `"*"` entry in the configured list is replaced in place by every public
-    namespace discovered recursively through `_discover_all_namespaces`
-    (sorted, minus the `_CAPABILITY_SURFACES` the Capabilities section indexes);
+    namespace discovered recursively through `discover_all_namespaces`
+    (sorted, minus the `CAPABILITY_SURFACES` the Capabilities section indexes);
     explicit entries on either side of it survive and are deduped
     keep-first, so `["*", "shell.sessions"]` naturally dedupes — the wildcard
     already discovers `shell.sessions` and the explicit entry is dropped.
@@ -115,7 +115,7 @@ def effective_sdk_expand(
     configured: list[str] = []
     for entry in configured_expansions:
         if entry == "*":
-            configured.extend(_discover_all_namespaces(sdk_disable))
+            configured.extend(discover_all_namespaces(sdk_disable))
         else:
             configured.append(entry)
 
@@ -140,7 +140,7 @@ def effective_sdk_expand(
     return resolved
 
 
-def _sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Render the effective expand list (plugin registrations + env
     AVA_SDK_EXPAND, see `effective_sdk_expand`) as full `ava.help(ava.<path>)`
     stubs, directly after the SDK overview. Selection is frequency-driven
@@ -613,7 +613,7 @@ def _long_running_operation_section(_slices: AgentSlices) -> str:
 
 # The framework-owned sections, in reading order. Plugin sections follow them.
 FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
-    _sdk_expand_section,
+    sdk_expand_section,
     _prefer_sdk_section,
     codeact_section,
     keep_it_simple_section,
@@ -682,7 +682,7 @@ def build_system_prompt(
         capabilities_section,
     )
     catalog_sections = (
-        _sdk_expand_section,
+        sdk_expand_section,
         _prefer_sdk_section,
         keep_it_simple_section,
         communication_style_section,

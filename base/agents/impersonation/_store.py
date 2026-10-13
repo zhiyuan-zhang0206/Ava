@@ -214,7 +214,7 @@ def _valid_boot_id(boot: object) -> bool:
         return False
 
 
-def _same_process(anchor: dict[str, Any], node: dict[str, Any]) -> bool:
+def same_process(anchor: dict[str, Any], node: dict[str, Any]) -> bool:
     recorded, observed = _process_identity(anchor), _process_identity(node)
     if recorded is None or observed is None:
         return False
@@ -285,7 +285,7 @@ def verify_caller(lease: Mapping[str, Any], caller: object) -> None:
             "side (restart/stop) or let its TTL expire."
         )
     live = _metadata_nodes(caller)
-    if any(_same_process(anchor, node) for anchor in anchors for node in live):
+    if any(same_process(anchor, node) for anchor in anchors for node in live):
         return
     states = {classify_anchor(anchor) for anchor in anchors}
     if states & {"alive"}:

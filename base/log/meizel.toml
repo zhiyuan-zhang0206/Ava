@@ -7,13 +7,10 @@ exports = ["process.py", "sinks.py", "tests"]
 
 [debt.private-name]
 "__init__.py -> sinks.py#_StdlibInterceptHandler" = 1
-"__init__.py -> sinks.py#_add_file_sink" = 1
 "__init__.py -> sinks.py#_install_stdlib_intercept" = 1
-"process.py -> sinks.py#_add_file_sink" = 1
 "process.py -> sinks.py#_install_stdlib_intercept" = 1
 "tests/test_genai_no_parts_warning_filter.py -> __init__.py#_StdlibInterceptHandler" = 1
 "tests/test_genai_no_parts_warning_filter.py -> __init__.py#_install_stdlib_intercept" = 1
-"tests/test_log_diagnose.py -> sinks.py#_add_file_sink" = 1
 "tests/test_stdlib_first_party_debug.py -> __init__.py#_install_stdlib_intercept" = 1
 "tests/test_stdlib_logging_isolation.py -> __init__.py#_StdlibInterceptHandler" = 1
 "tests/test_stdlib_logging_isolation.py -> __init__.py#_install_stdlib_intercept" = 1

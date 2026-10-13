@@ -11,9 +11,9 @@ from playwright.sync_api import Browser
 
 from scripts.post_deploy_visual.check import expected_capture_names
 from tests.e2e.visual.test_preview_visual_gate import (
-    _crop_results,
-    _mint_goldens,
-    _structural_failures,
+    crop_results,
+    mint_goldens,
+    structural_failures,
 )
 
 
@@ -32,7 +32,7 @@ def test_mint_goldens_copies_all_captures_and_writes_provenance(tmp_path: Path) 
     _write_captures(captures)
     golden_root = tmp_path / "preview-gate"
 
-    _mint_goldens(cast(Browser, _FakeBrowser()), [], captures, golden_root=golden_root)
+    mint_goldens(cast(Browser, _FakeBrowser()), [], captures, golden_root=golden_root)
 
     golden_dir = golden_root / "captures"
     expected = {name.replace("-current-", "-golden-") for name in expected_capture_names()}
@@ -46,7 +46,7 @@ def test_mint_goldens_refuses_a_structurally_broken_run(tmp_path: Path) -> None:
     _write_captures(captures)
 
     with pytest.raises(AssertionError, match="structurally broken"):
-        _mint_goldens(
+        mint_goldens(
             cast(Browser, _FakeBrowser()),
             [{"kind": "visible-panel", "selector": "form"}],
             captures,
@@ -59,7 +59,7 @@ def test_mint_goldens_refuses_an_incomplete_capture_set(tmp_path: Path) -> None:
     _write_captures(captures, {next(iter(expected_capture_names()))})
 
     with pytest.raises(AssertionError, match="incomplete capture set"):
-        _mint_goldens(
+        mint_goldens(
             cast(Browser, _FakeBrowser()), [], captures, golden_root=tmp_path / "preview-gate"
         )
 
@@ -78,11 +78,11 @@ def test_result_flatteners_keep_surface_viewport_theme_context() -> None:
         }
     ]
 
-    structural = _structural_failures(combinations)
+    structural = structural_failures(combinations)
     assert structural[0]["surface"] == "login"
     assert structural[0]["viewport"] == "desktop"
     assert structural[0]["theme"] == "light"
 
-    crops = _crop_results(combinations)
+    crops = crop_results(combinations)
     assert len(crops) == 2
     assert [crop["status"] for crop in crops] == ["drift", "match"]

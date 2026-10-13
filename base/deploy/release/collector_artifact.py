@@ -89,7 +89,7 @@ def binary_name() -> str:
     return "otelcol-contrib"
 
 
-def _stream_download(url: str, dest: Path) -> None:
+def stream_download(url: str, dest: Path) -> None:
     """Stream ``url`` into ``dest`` with the issue #172 fetch discipline.
 
     A bounded, loud download: per-read socket timeout, a wall-clock cap on the
@@ -130,8 +130,8 @@ def _stream_download(url: str, dest: Path) -> None:
     )
 
 
-def _download_with_retry(url: str, tarball: Path) -> None:
-    """Bounded retry around ``_stream_download``; a final failure names the
+def download_with_retry(url: str, tarball: Path) -> None:
+    """Bounded retry around ``stream_download``; a final failure names the
     URL and total elapsed time so the operator knows exactly what to fix."""
     started = time.monotonic()
     attempt = 0
@@ -140,7 +140,7 @@ def _download_with_retry(url: str, tarball: Path) -> None:
         nonlocal attempt
         attempt += 1
         try:
-            _stream_download(url, tarball)
+            stream_download(url, tarball)
         except Exception as exc:  # URLError / TimeoutError / OSError
             elapsed = time.monotonic() - started
             _report(
@@ -166,7 +166,7 @@ def download_and_verify(tag: str, dest_dir: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tarball = Path(tmp) / "otelcol-contrib.tar.gz"
         _report(f"  · otel-collector: downloading {url}")
-        _download_with_retry(url, tarball)
+        download_with_retry(url, tarball)
         digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
         if digest != expected:
             raise RuntimeError(

@@ -212,7 +212,7 @@ _BASE_FIELDS: frozenset[str] = frozenset(BaseAgentState.model_fields.keys())
 #       (cross-plugin isolation)
 #   base_declared: core fields some plugin declared in its BaseModel (only `messages`): "plugin
 #       explicitly updates the base channel" is legal, a base-field write without a declaration is
-#       a missing-prefix typo and `_validate_plugin_state_keys` rejects it
+#       a missing-prefix typo and `validate_plugin_state_keys` rejects it
 #   classes: the declared BaseModel classes — the msgpack allowlist must cover them
 _StateFieldSpec = tuple[Any, FieldInfo]
 
@@ -229,7 +229,7 @@ class PluginStateSchema:
 # contract; exec._notes.merge_exec_notes puts the tool result first and notes after it, per the
 # Anthropic adjacency constraint). Every other BaseAgentState field is framework-managed: declaring
 # one is rejected by `plugin_state_schema`, and writing one through ava.state_update is rejected
-# by _validate_plugin_state_keys (except `SDK_WRITTEN_BASE_FIELDS`, which the SDK itself writes).
+# by validate_plugin_state_keys (except `SDK_WRITTEN_BASE_FIELDS`, which the SDK itself writes).
 _PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = PLUGIN_WRITABLE_BASE_FIELDS
 
 # BaseAgentState built-in fields. `messages` is the one a plugin may modify (only when it declares
@@ -240,7 +240,7 @@ _PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = PLUGIN_WRITABLE_BASE_FIELDS
 _BASE_STATE_FIELDS: frozenset[str] = _BASE_FIELDS
 
 
-def _validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
+def validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
     """fail-fast: plugin writing to ava.state_update with illegal keys must raise.
 
     Two classes of abuse raise — AGENTS.md "fail-fast / no silent fallback":
@@ -324,7 +324,7 @@ def messages_annotation_key(annotation: Any) -> tuple[Any, ...]:
     return (annotation,)
 
 
-def _resolve_reducer(field: FieldInfo) -> Callable[[Any, Any], Any]:
+def resolve_reducer(field: FieldInfo) -> Callable[[Any, Any], Any]:
     """Extract the LangGraph reducer function from Pydantic FieldInfo.metadata; returns last-value if none.
 
     LangGraph Annotated[T, reducer] stuffs reducer as metadata into BaseModel
@@ -438,7 +438,7 @@ class PluginStateHandle[T: BaseModel]:
         # validates), so extracting what the plugin wrote gives the same
         # reducer as base; no need to look up base separately.
         self._reducers: dict[str, Callable[[Any, Any], Any]] = {
-            name: _resolve_reducer(field) for name, field in cls.model_fields.items()
+            name: resolve_reducer(field) for name, field in cls.model_fields.items()
         }
 
     def view(self, state: object) -> T:

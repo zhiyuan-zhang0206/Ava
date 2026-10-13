@@ -160,14 +160,14 @@ def store_events(db: Database, events: Sequence[Event]) -> None:
         if _disabled or time.monotonic() < retry_at:
             return
         try:
-            _write(db, records)
+            write(db, records)
         except Exception as exc:
             _failed(exc, len(records))
         else:
             failures = 0
 
 
-def _write(db: Database, records: list[dict[str, Any]]) -> None:
+def write(db: Database, records: list[dict[str, Any]]) -> None:
     global _ensured_month  # noqa: PLW0603
     from base.db.transaction import write_transaction
 

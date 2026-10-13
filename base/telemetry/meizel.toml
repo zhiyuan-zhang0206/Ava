@@ -18,7 +18,6 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 "tests/_lower_exit_child.py -> tracing.py#_arm_tracing" = 1
 "tests/_lower_exit_child.py -> tracing.py#_state" = 2
 "tests/process_logging/test_event_pipeline_adapter.py -> process_logging.py#_event_sink" = 2
-"tests/test_telemetry_event_store.py -> event_store.py#_write" = 4
 "tests/test_tracing.py -> tracing.py#_arm_tracing" = 2
 "tests/test_tracing.py -> tracing.py#_state" = 35
 "tests/test_tracing_lifecycle.py -> tracing.py#_arm_tracing" = 2

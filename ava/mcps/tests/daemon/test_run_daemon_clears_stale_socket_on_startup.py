@@ -20,11 +20,11 @@ from ava.mcps.tests.test_daemon import (
     ORIG_REAP,
     FakeProc,
     FakeWriter,
-    _write_config,
     is_daemon_cmdline_cases,
     make_reader,
     make_session,
     wait_for_daemon_socket,
+    write_config,
     writer_arg,
 )
 from ava.mcps.tests.test_daemon import (
@@ -299,7 +299,7 @@ async def test_connect_server_enforces_requires_before_connecting(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A server whose `requires` is unmet raises BEFORE any stdio launch."""
-    _write_config(fake_home, {"chrome": {"command": "npx", "requires": {"display": True}}})
+    write_config(fake_home, {"chrome": {"command": "npx", "requires": {"display": True}}})
     import ava.mcps.config as _cfg
 
     # display_available is imported into mcp_config from base.host.system.probes;
@@ -333,7 +333,7 @@ async def test_overlay_error_or_disabled_server_never_starts_a_process(
 ) -> None:
     import mcp.client.stdio
 
-    _write_config(fake_home, {"fs": {"command": "must-not-run"}})
+    write_config(fake_home, {"fs": {"command": "must-not-run"}})
     (fake_home / "mcp_enabled.json").write_text(overlay)
     launch = MagicMock(side_effect=AssertionError("server startup must not be reached"))
     monkeypatch.setattr(mcp.client.stdio, "stdio_client", launch)
@@ -440,7 +440,7 @@ async def test_invalidate_session_removes_cached_session_and_closes_stack(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """Session is removed from both dicts and its stack is aclose()'d."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     session = make_session()
     stack = MagicMock()
     stack.aclose = AsyncMock()
@@ -465,7 +465,7 @@ async def test_handle_client_retries_on_transport_error_and_succeeds(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """Safe tool listing still retries after a transport failure."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     call_count = 0
@@ -500,7 +500,7 @@ async def test_handle_client_does_not_retry_non_transport_error(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """ValueError is not a transport error → no retry, error propagates."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
 
     call_count = 0
 
@@ -533,7 +533,7 @@ async def test_handle_client_gives_up_after_max_retries(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """After 3 transport errors, error propagates."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     call_count = 0
@@ -567,7 +567,7 @@ async def test_handle_client_retry_reconnects_after_invalidation(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """A safe list_tools retry rebuilds the dead session."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     connect_count = 0
@@ -601,7 +601,7 @@ async def test_handle_client_retries_on_mcp_error_connection_closed(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """A listing retries SDK CONNECTION_CLOSED after rebuilding its session."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     from mcp import MCPError
@@ -644,7 +644,7 @@ async def test_handle_client_does_not_retry_tool_level_mcp_error(
     """A server-returned JSON-RPC error (MCPError with INVALID_PARAMS) is not a
     transport death: no invalidate / no retry, so a side-effectful tool is never
     double-run."""
-    _write_config(fake_home, {"fs": {"command": "x"}})
+    write_config(fake_home, {"fs": {"command": "x"}})
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", AsyncMock())  # skip real retry backoff
 
     from mcp import MCPError

@@ -25,7 +25,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission
-from base.deploy.maintenance.cohort import _applied_capture, verify_drained
+from base.deploy.maintenance.cohort import applied_capture, verify_drained
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -378,7 +378,7 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     assert recorded == [(aid, command)]
     hold = MaintenanceHold(MaintenancePhase.DRAINED, {aid: command}, drained=(aid,))
     operation = _DRAIN["maintenance"]
-    assert _applied_capture(
+    assert applied_capture(
         db_conn,
         hold,
         incarnation.owner,

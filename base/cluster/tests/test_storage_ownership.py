@@ -68,7 +68,7 @@ def _pg_receipt(data: Path, *, state: str = "captured") -> pg.Receipt:
 
 
 def test_pending_postgres_is_never_recovered_from_a_pidfile(pg_data: Path) -> None:
-    pg._write(pg_data, _pg_receipt(pg_data, state="pending"))
+    pg.write(pg_data, _pg_receipt(pg_data, state="pending"))
     with pytest.raises(RuntimeError, match="unresolved"):
         pg.observe(pg_data)
 
@@ -78,7 +78,7 @@ def test_postgres_birth_uses_ticks_despite_wall_clock_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt = _pg_receipt(pg_data)
-    pg._write(pg_data, receipt)
+    pg.write(pg_data, receipt)
     (pg_data / "postmaster.pid").write_text(f"123\n{pg_data}\n987654321\n15433\n")
     process = SimpleNamespace(
         cmdline=lambda: ["postgres", "-D", str(pg_data)],
@@ -128,7 +128,7 @@ def test_prior_boot_never_donates_reused_pid_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt = _pg_receipt(pg_data).model_copy(update={"boot_id": "prior-boot"})
-    pg._write(pg_data, receipt)
+    pg.write(pg_data, receipt)
     monkeypatch.setattr(
         pg.OwnedProcess, "live", Mock(side_effect=AssertionError("old boot PID observed"))
     )
@@ -142,7 +142,7 @@ def test_dead_postmaster_with_surviving_worker_refuses_restart(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
 ) -> None:
-    pg._write(pg_data, _pg_receipt(pg_data))
+    pg.write(pg_data, _pg_receipt(pg_data))
     monkeypatch.setattr(pg.OwnedProcess, "live", Mock(return_value=False))
     worker = SimpleNamespace(
         info={"pid": 124},
@@ -163,7 +163,7 @@ def test_closed_postgres_with_unknown_scan_refuses_restart(
     pg_data: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pg._write(pg_data, _pg_receipt(pg_data))
+    pg.write(pg_data, _pg_receipt(pg_data))
     monkeypatch.setattr(pg.OwnedProcess, "live", Mock(return_value=False))
 
     def unknown(_data: Path, _receipt: pg.Receipt | None) -> None:

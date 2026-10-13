@@ -13,7 +13,7 @@ from base.host.db_authority import delivery, unit
 from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env import dotenv_boot
 
-_ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
+ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
 MACHINE = "mini"
 HUMAN = "gateway-human-secret-" + "s" * 32
 
@@ -41,7 +41,7 @@ def issue(
     gateway: Path,
     home: Path,
     *,
-    endpoint: str = _ENDPOINT,
+    endpoint: str = ENDPOINT,
     cluster_secret: str = HUMAN,
     ttl_s: float = 600.0,
     now: float | None = None,
@@ -62,7 +62,7 @@ def _open(issued: unit.IssuedBundle) -> unit.Bundle:
 
 
 def install(home: Path, issued: unit.IssuedBundle, **kwargs: Any) -> unit.UnitCapability:
-    kwargs.setdefault("served_endpoint", _ENDPOINT)
+    kwargs.setdefault("served_endpoint", ENDPOINT)
     kwargs.setdefault("probe", no_probe)
     return unit.install_bundle(home, _open(issued), machine=MACHINE, **kwargs)
 

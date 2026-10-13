@@ -101,7 +101,7 @@ _VALUE_OPTIONS = frozenset(
 )
 
 
-def _full_run_guard_message(
+def full_run_guard_message(
     rootpath: Path, args: list[str], env: Mapping[str, str], cwd: Path
 ) -> str | None:
     if env.get("GITHUB_ACTIONS") == "true":
@@ -152,7 +152,7 @@ Do not use this override without user approval."""
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    message = _full_run_guard_message(
+    message = full_run_guard_message(
         config.rootpath, config.args, os.environ, config.invocation_params.dir
     )
     if message is not None:

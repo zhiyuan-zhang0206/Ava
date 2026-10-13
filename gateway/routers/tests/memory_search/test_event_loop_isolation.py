@@ -15,11 +15,11 @@ from base.cluster.machine import MachineRoles
 from gateway.app import app
 from gateway.routers.tests.test_memory_search import (
     SEARCH_PERMITS,
-    _asgi_client,
-    _patch_provider,
     _search,
+    asgi_client,
     assert_semaphore_locked,
     never_returns,
+    patch_provider,
     stub_search_backend,
 )
 from gateway.routers.tests.test_memory_search import (
@@ -62,7 +62,7 @@ class TestEventLoopIsolation:
                 await asyncio.sleep(1.0)
                 return [0.0] * 768
 
-        _patch_provider(monkeypatch, _SlowProvider)
+        patch_provider(monkeypatch, _SlowProvider)
 
         class _FakeBackend:
             def __init__(self, *args: object, **kwargs: object) -> None:
@@ -121,7 +121,7 @@ class TestWedgedBackendReleasesPermits:
     ) -> None:
         stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
-        async with _asgi_client() as client:
+        async with asgi_client() as client:
             resp = await asyncio.wait_for(_search(client), timeout=10)
 
         assert resp.status_code == 503
@@ -134,7 +134,7 @@ class TestWedgedBackendReleasesPermits:
         `acquire`, which the deadline has to cover too."""
         stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
-        async with _asgi_client() as client:
+        async with asgi_client() as client:
             responses = await asyncio.wait_for(
                 asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
@@ -158,9 +158,9 @@ class TestWedgedBackendReleasesPermits:
             embed_query_async = never_returns
 
         stub_search_backend(monkeypatch, tmp_path, search=never_returns)
-        _patch_provider(monkeypatch, _StuckProvider)
+        patch_provider(monkeypatch, _StuckProvider)
 
-        async with _asgi_client() as client:
+        async with asgi_client() as client:
             responses = await asyncio.wait_for(
                 asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
@@ -188,7 +188,7 @@ class TestWedgedBackendReleasesPermits:
 
         sem = stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
-        async with _asgi_client() as client:
+        async with asgi_client() as client:
             holders = [asyncio.create_task(_search(client)) for _ in range(SEARCH_PERMITS)]
             # Without this the test could pass vacuously, cancelling requests
             # that had not yet taken a permit.
@@ -223,7 +223,7 @@ class TestWedgedBackendReleasesPermits:
 
         stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
-        async with _asgi_client() as client:
+        async with asgi_client() as client:
             await asyncio.wait_for(
                 asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
@@ -269,7 +269,7 @@ class TestAcquireFastFail:
         monkeypatch.setattr(settings.services, "memory_search_acquire_timeout_seconds", 0.05)
         monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", 5.0)
 
-        async with _asgi_client() as client:
+        async with asgi_client() as client:
             holder = asyncio.create_task(_search(client))
             await assert_semaphore_locked(sem)
             start = time.monotonic()

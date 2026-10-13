@@ -27,7 +27,7 @@ from base.db import Database
 from base.packages.plugins.loading import registry as extensions_registry
 
 
-def _serializer() -> JsonPlusSerializer:
+def serializer() -> JsonPlusSerializer:
     return JsonPlusSerializer(
         allowed_msgpack_modules=agent_state.checkpoint_msgpack_allowlist(
             extensions_registry.loaded_state_classes()
@@ -50,31 +50,31 @@ def _validate_messages_delta(delta: dict[str, Any]) -> None:
 
 def encode_plugin_delta(delta: dict[str, Any], state_cls: type[Any]) -> dict[str, str]:
     """Serialize a reducer input validated against `state_cls`, without coercing it to a field value."""
-    checked = agent_state._validate_plugin_state_keys(delta, state_cls)
+    checked = agent_state.validate_plugin_state_keys(delta, state_cls)
     _validate_messages_delta(checked)
-    encoding, payload = _serializer().dumps_typed(checked)
+    encoding, payload = serializer().dumps_typed(checked)
     return {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
 
 
 def decode_plugin_delta(encoded: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
     """Decode the checkpoint codec envelope, rejecting channels `state_cls` does not have."""
-    payload = _serializer().loads_typed(
+    payload = serializer().loads_typed(
         (encoded["encoding"], base64.b64decode(encoded["data"], validate=True))
     )
     if not isinstance(payload, dict):
         raise TypeError("external plugin delta must decode to a dict")
-    checked = agent_state._validate_plugin_state_keys(cast(dict[str, Any], payload), state_cls)
+    checked = agent_state.validate_plugin_state_keys(cast(dict[str, Any], payload), state_cls)
     _validate_messages_delta(checked)
     return checked
 
 
 def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
     """Replay one journal entry through the registered field reducers."""
-    agent_state._validate_plugin_state_keys(delta, cast("type[Any]", type(state)))
+    agent_state.validate_plugin_state_keys(delta, cast("type[Any]", type(state)))
     _validate_messages_delta(delta)
     for name, value in delta.items():
         field = cast(FieldInfo, state.__class__.model_fields[name])
-        reducer = agent_state._resolve_reducer(field)
+        reducer = agent_state.resolve_reducer(field)
         setattr(state, name, reducer(getattr(state, name), value))
 
 
@@ -94,7 +94,7 @@ def load_snapshot(
         ).fetchone()
         if row is None:
             raise LookupError(f"agent {agent_id} not found")
-        saver = PostgresSaver(conn=typed_conn, serde=_serializer())
+        saver = PostgresSaver(conn=typed_conn, serde=serializer())
         snapshot = saver.get_tuple({"configurable": {"thread_id": str(agent_id)}})
         if snapshot is not None:
             # Transition layer (tasks #3180/#3181): attach with reconstructed
