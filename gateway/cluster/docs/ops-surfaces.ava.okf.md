@@ -59,9 +59,10 @@ included).
 
 ### Alert classes — `GET /api/stats/alert-classes?hours=` and `.../samples`
 
-The sidebar's Warnings / Errors card counts **classes**, not events (19,629 events can
-be a handful of classes): one class per `(level, event_name, source, process)` of the
-window, with its event count, first and last occurrence and the `dismissal_id` of the
+The sidebar's Warnings / Errors card displays the dashboard's raw event totals,
+separately from formal Grafana alerts. The diagnostic API groups one class per
+`(level, event_name, source, process)` of the window, with its event count, first and
+last occurrence and the `dismissal_id` of the
 active `event_dismissals` row that cancels it (None = active). The dismissal match is
 `resolution.matching_dismissal` — the daemon's: the emission category is ignored, an
 exact `process` row or a wildcard row (`process = ''`, task #4329 B5) cancels the class,
@@ -70,9 +71,8 @@ dashboard's `alert_classes_active` / `alert_classes_dismissed` count the same ro
 (`warnings` / `errors` stay raw event totals, critical folded into errors). The list is
 most-frequent-first, capped at 200 rows (`total_classes` / `total_events` are uncapped).
 `/samples?level&event_name&source&process&hours` returns the newest five events of one
-class (`attributes.msg` as `message`, plus the full attributes); it is read only when a
-row is opened. Dismiss and reopen are the existing `POST /api/event-resolutions[/{id}/reopen]`
-calls, made per class from the card. Both reads run under an 8-second statement timeout
+class (`attributes.msg` as `message`, plus the full attributes). Dismiss and reopen use `POST /api/event-resolutions[/{id}/reopen]`
+calls, scoped per class. Both reads run under an 8-second statement timeout
 (a timeout is a retriable 503).
 
 `GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, stats,

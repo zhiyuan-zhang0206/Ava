@@ -108,6 +108,10 @@
 # The ruleUID label pins parse_rule_uid to the stable rule uid so synthetic
 # DatasourceNoData/DatasourceError instances never collide on the
 # alertname-derived dedup key.
+# Grafana owns episode recovery. A condition must remain healthy for 5m before
+# resolving; a refire during recovery stays in the same episode. Missing series
+# retain their identity for the corresponding evaluation budget (1m / 5m groups).
+# Native YAML aliases share these settings without a second policy registry.
 apiVersion: 1
 groups:
   - orgId: 1
@@ -120,6 +124,8 @@ groups:
         title: "Event health: WARNING+ERROR+CRITICAL spike"
         condition: F
         for: 5m
+        keepFiringFor: &recovery-window 5m
+        missing_series_evals_to_resolve: &fast-missing-evals 6
         noDataState: OK
         execErrState: OK
         labels:
@@ -225,6 +231,8 @@ groups:
         title: "Event-pipeline drop backlog (sse_drop / event_log_drop)"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -298,6 +306,8 @@ groups:
         title: "LLM latency p95 above threshold"
         condition: D
         for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -368,6 +378,8 @@ groups:
         title: "Delivery fresh backlog (delivery_stalled fresh)"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -443,6 +455,8 @@ groups:
         title: "Event stream stalled (no events in Loki)"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -523,6 +537,8 @@ groups:
         title: "Event stream below low-water mark"
         condition: D
         for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -595,6 +611,8 @@ groups:
         title: "Host CPU saturated"
         condition: D
         for: 15m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -667,6 +685,8 @@ groups:
         title: "Host memory pressure"
         condition: D
         for: 15m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -748,12 +768,16 @@ groups:
       # desktop-app update: on 2026-09-18, /Volumes/Monsora* on company-air
       # and macbook-air and /private/tmp/monsora154 on company-mini alerted
       # at 0.99 — DMG images read ~100% full by construction (task #3958).
-      # The Ava data plane (root volume, /System/Volumes/Data,
+      # Read-only mounts and optical-image filesystem types are excluded regardless
+      # of path: installation ISOs also mount beneath /Users (2026-10-13).
+      # The Ava data plane (writable root volume, /System/Volumes/Data,
       # /Users/*/OrbStack on macOS; / on Linux) keeps its watermark.
       - uid: ava-ops-host-disk-watermark
         title: "Filesystem over watermark"
         condition: D
         for: 15m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -781,9 +805,9 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: >-
+              expr: &writable-disk >-
                 round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
+                (system_filesystem_utilization_ratio{mode!="ro", type!~"iso9660|udf|cd9660", mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -828,6 +852,8 @@ groups:
         title: "Filesystem approaching Loki WAL hard stop"
         condition: D
         for: 15m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -852,9 +878,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: >-
-                round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
+              expr: *writable-disk
               instant: true
               range: false
             relativeTimeRange:
@@ -894,6 +918,8 @@ groups:
         title: "Filesystem at Loki WAL hard stop"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -919,9 +945,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               editorMode: code
-              expr: >-
-                round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
+              expr: *writable-disk
               instant: true
               range: false
             relativeTimeRange:
@@ -965,6 +989,8 @@ groups:
         title: "checkpoint_blobs physical size above 2.5 GiB"
         condition: D
         for: 2h
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1029,6 +1055,8 @@ groups:
         title: "checkpoint_blobs physical size above 4 GiB"
         condition: D
         for: 2h
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1098,6 +1126,8 @@ groups:
         title: "checkpoint_blobs size telemetry silent (2h)"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1168,6 +1198,8 @@ groups:
         title: "checkpoint_blobs grew more than 1 GiB in 6 hours"
         condition: D
         for: 1h
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1244,6 +1276,8 @@ groups:
         title: "Postgres connection saturation"
         condition: D
         for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1318,6 +1352,8 @@ groups:
         title: "Redis memory above threshold"
         condition: D
         for: 15m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1390,6 +1426,8 @@ groups:
         title: "OTel Collector exporter queue pressure"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1461,6 +1499,8 @@ groups:
         title: "Telemetry events lost"
         condition: D
         for: 0s
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1531,6 +1571,8 @@ groups:
         title: "OTel Collector rejected telemetry"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1606,6 +1648,8 @@ groups:
         # The query's 5m absence window is already the debounce. A second 5m
         # `for` would turn the documented 5m detection into ~10m.
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1684,6 +1728,8 @@ groups:
         title: "Prometheus dropped too-old OTLP samples"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1755,6 +1801,8 @@ groups:
         title: "Root stopped completing health rounds"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1851,6 +1899,8 @@ groups:
         title: "Gateway metrics stream silent (gateway_latency heartbeat)"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1926,6 +1976,8 @@ groups:
         title: "Memory search rows above soft threshold"
         condition: D
         for: 2h
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1992,6 +2044,8 @@ groups:
         title: "Memory search rows above hard cap"
         condition: D
         for: 2h
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2061,6 +2115,8 @@ groups:
         title: "Scheduled recovery drill failed"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2132,6 +2188,8 @@ groups:
         title: "Scheduled logical dump failed"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2199,6 +2257,8 @@ groups:
         title: "Machine offline (agent-runner unreachable)"
         condition: D
         for: 3m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2268,6 +2328,8 @@ groups:
         title: "Machine offline 10+ minutes (agent-runner unreachable)"
         condition: D
         for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2334,6 +2396,8 @@ groups:
         title: "Exec child boot failed"
         condition: D
         for: 0s
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2402,6 +2466,8 @@ groups:
         title: "Inspector metrics recorder gap"
         condition: D
         for: 0s
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2472,6 +2538,8 @@ groups:
         title: "Impersonation event log waiting on an open source"
         condition: D
         for: 0s
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2541,6 +2609,8 @@ groups:
         title: "Impersonation event capture failed"
         condition: D
         for: 0s
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2610,6 +2680,8 @@ groups:
         title: "IM push link failing (weixin)"
         condition: D
         for: 0s
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2679,6 +2751,8 @@ groups:
         title: "Feishu owner chat not restored at bridge boot"
         condition: D
         for: 0s
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2746,6 +2820,8 @@ groups:
         title: "Chat delivery stalled (delivery_stalled event)"
         condition: D
         for: 1m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2815,6 +2891,8 @@ groups:
         title: "DB pool borrows slow (db_pool_acquire_slow)"
         condition: D
         for: 2m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2885,6 +2963,8 @@ groups:
         title: "Root unit replacement failed"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2953,6 +3033,8 @@ groups:
         title: "Root unit automatic restarts exhausted"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3021,6 +3103,8 @@ groups:
         title: "Root unit not revivable"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3089,6 +3173,8 @@ groups:
         title: "Root venv diagnostic failing"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3097,7 +3183,7 @@ groups:
           metric: root_diagnostic_venv
           team: ava-ops
         annotations:
-          summary: "Root venv diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
+          summary: "{{ $labels.machine }}: Root venv diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
           description: >-
             The root checkout's dependency/import check returned down or unavailable on at least two samples
             in three minutes (60s cadence). Two consecutive samples filter single deadline misses under host
@@ -3113,7 +3199,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
+                sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
                 cluster=".ava" | category="telemetry" | attributes_diagnostic="venv" |
                 attributes_verdict!="alive" [3m]))
               instant: true
@@ -3156,6 +3242,8 @@ groups:
         title: "Root brew-pin diagnostic failing"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3164,7 +3252,7 @@ groups:
           metric: root_diagnostic_brew_pin
           team: ava-ops
         annotations:
-          summary: "Root brew-pin diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
+          summary: "{{ $labels.machine }}: Root brew-pin diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
           description: >-
             Approved Homebrew formulae are unpinned, or the brew inspection was unavailable, on at least two
             samples in three minutes (60s cadence). Two samples filter a single host-stall deadline miss.
@@ -3180,7 +3268,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
+                sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
                 cluster=".ava" | category="telemetry" | attributes_diagnostic="brew-pin" |
                 attributes_verdict!="alive" [3m]))
               instant: true
@@ -3223,6 +3311,8 @@ groups:
         title: "Cluster health probe failing (3 min)"
         condition: D
         for: 3m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3293,6 +3383,8 @@ groups:
         title: "Cluster health probe failing (10 min)"
         condition: D
         for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3361,6 +3453,8 @@ groups:
         title: "Cluster health probe silent"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3429,6 +3523,8 @@ groups:
         title: "Non-critical service not ready after start"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3496,6 +3592,8 @@ groups:
         title: "Boot-time ava start gave up"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3564,6 +3662,8 @@ groups:
         title: "Schedule scripts fail dry-import"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3633,6 +3733,8 @@ groups:
         title: "Agent continuation failed at a maintenance hold"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3701,6 +3803,8 @@ groups:
         title: "Impersonation ended-lease notice not delivered"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3785,6 +3889,8 @@ groups:
         title: "Trace recording disabled (data disk over watermark)"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: &slow-missing-evals 2
         noDataState: OK
         execErrState: OK
         labels:
@@ -3866,6 +3972,8 @@ groups:
         title: "LLM provider rate-limit burst"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3964,6 +4072,8 @@ groups:
         title: "LLM provider billing/quota failure"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4046,6 +4156,8 @@ groups:
         title: "Gateway latency: fast route p95 above 3s"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4117,6 +4229,8 @@ groups:
         title: "Gateway latency: fast route p95 above 10s"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4190,6 +4304,8 @@ groups:
         title: "Turn duration p95 above 75s"
         condition: D
         for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4261,6 +4377,8 @@ groups:
         title: "Gateway latency: slow route p95 above 5000ms"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4332,6 +4450,8 @@ groups:
         title: "Gateway latency: slow route p95 above 10000ms"
         condition: D
         for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4401,6 +4521,8 @@ groups:
         title: Tempo backend unreachable
         condition: D
         for: 1h
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4462,6 +4584,8 @@ groups:
         title: "Lifecycle pointer stuck"
         condition: D
         for: 0s
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4533,6 +4657,8 @@ groups:
         title: "Root browser-reach diagnostic failing"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4541,7 +4667,7 @@ groups:
           metric: root_diagnostic_browser_reach
           team: ava-ops
         annotations:
-          summary: "Root browser-reach diagnostic non-alive on 3+ consecutive probes ({{ $values.C }} in 16m)"
+          summary: "{{ $labels.machine }}: Root browser-reach diagnostic non-alive on 3+ consecutive probes ({{ $values.C }} in 16m)"
           description: >-
             The browser canary (CDP page fetch of the gateway URL) failed while the host baseline succeeded,
             or its prerequisite was unavailable, on at least three samples in sixteen minutes. The sample
@@ -4559,7 +4685,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
+                sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
                 cluster=".ava" | category="telemetry" | attributes_diagnostic="browser-reach" |
                 attributes_verdict!="alive" [16m]))
               instant: true
@@ -4602,6 +4728,8 @@ groups:
         title: "Schedule has had no live session for 2h"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4669,6 +4797,8 @@ groups:
         title: "Schedule manager gave up converging a schedule"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4737,6 +4867,8 @@ groups:
         title: "Maintenance hold in place for over the alert age"
         condition: D
         for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
         execErrState: OK
         labels:

@@ -61,7 +61,37 @@ address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
 The rules are split between `ava-ops` (evaluated every minute) and
 `ava-ops-slow` (evaluated every five minutes). Each rule retains its own
-`for` window. The table below names the configured conditions.
+`for` window and threshold. `rules.yml` is the condition catalog: events without a
+matching rule do not create an alert of their own (aggregate rules may still count
+them). The Warning / Error statistics card counts events separately.
+The table below names the configured conditions.
+
+## Episode recovery and grouping
+
+Grafana owns episode identity and recovery. Every rule uses the native file field
+`keepFiringFor: 5m`, shared by a YAML alias in `rules.yml`: a healthy evaluation
+enters Recovering, and another failure during recovery continues the same episode.
+The setting does not delay the initial firing or change severity thresholds.
+A real recovery followed by a later failure starts a new episode; the gateway and
+frontend do not merge independent episodes by timestamp.
+
+Missing series use Grafana's native `missing_series_evals_to_resolve` as well:
+six evaluations for the 1m group and two for the 5m group retain a disappearing
+instance for at least five minutes from its first missing evaluation. This avoids
+a peer recovering early while another peer still returns data. NoData/OK handling
+also follows Grafana's native recovery state machine. Root diagnostic queries keep
+`machine`, so samples from different hosts cannot combine into a failure streak.
+
+Alertmanager grouping and notification timing live in `contact.yml`:
+`group_by: [alertname]`, initial wait 30s, group updates every 5m and unchanged
+repeats every 4h; critical retains 0s / 1m / 1h. The notification interval is
+separate from the recovery period. Warning and error tiers remain separate rules
+with their existing pending periods.
+
+References: [Grafana evaluation](https://grafana.com/docs/grafana/latest/alerting/fundamentals/alert-rule-evaluation/),
+[file schema for the pinned Grafana](https://github.com/grafana/grafana/blob/v13.2.3/pkg/services/provisioning/alerting/rules_types.go).
+
+## Rule conditions
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
@@ -100,7 +130,7 @@ thresholds are deployment facts, not framework constants — what counts as
 |-----|--------|-----------|-------|----------|
 | `ava-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
 | `ava-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
-| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
+| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding read-only/optical-image filesystems and /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
 | `ava-ops-host-disk-watermark-93` | filesystem utilization | same series > 0.93 — approaching the Loki WAL hard stop (Prometheus) | 15m | warning |
 | `ava-ops-host-disk-watermark-95` | filesystem utilization | same series > 0.95 — at the Loki WAL hard stop (Prometheus) | 5m | critical |
 | `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |

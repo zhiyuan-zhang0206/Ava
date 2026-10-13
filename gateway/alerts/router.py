@@ -201,7 +201,9 @@ def list_alerts(
     effective_limit = limit if limit is not None else settings.display.alerts_default_limit
     since = datetime.now(UTC) - _WINDOWS[window]
     params: list[Any] = [since]
-    where = ["starts_at > %s"]
+    # Live problems never age out. The window limits recovery history, including
+    # long-running incidents that ended recently.
+    where = ["(status = 'unresolved' OR COALESCE(ends_at, starts_at) > %s)"]
     if status is not None:
         where.append("status = %s")
         params.append(status)
@@ -211,17 +213,17 @@ def list_alerts(
     where_sql = " AND ".join(where)
 
     # meta counts (one connection, two cheap queries):
-    # - unresolved: same window/severity scope, always unresolved. Trivially
+    # - unresolved: every live instance in the severity scope. Trivially
     #   0 when the caller already scopes to resolved.
     # - total: rows matching the filters before the limit.
     with request.app.state.db_pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         if status == "resolved":
             unresolved_count = 0
         else:
-            base = [w for w in where if w != "status = %s"]
-            base.append("status = 'unresolved'")
-            base_params: list[Any] = [since]
+            base = ["status = 'unresolved'"]
+            base_params: list[Any] = []
             if severity is not None:
+                base.append("severity = %s")
                 base_params.append(severity)
             cur.execute(
                 f"SELECT count(*) AS n FROM alerts WHERE {' AND '.join(base)}",  # noqa: S608 — fixed fragments
