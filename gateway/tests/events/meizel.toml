@@ -3,3 +3,17 @@ exports = ["test_notices_endpoint.py"]
 [uses]
 "test_notices_resolve_history_live.py" = ["test_notices_endpoint.py"]
 "test_weixin_ingress_command_http.py" = ["test_notices_endpoint.py"]
+
+[debt.first-party-patch]
+"test_event_resolutions_api.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_event_resolutions_api.py#monkeypatch.setattr gateway.events.resolutions.telemetry.emit" = 1
+"test_events_api.py#monkeypatch.setattr base.config.settings.display.events_default_limit" = 1
+"test_events_api.py#monkeypatch.setattr gateway.events.telemetry_rows.count_events" = 1
+"test_events_api.py#monkeypatch.setattr gateway.events.telemetry_rows.query_events" = 2
+"test_idempotency_http.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_idempotency_http.py#monkeypatch.setattr base.config.settings.gateway.session_cookie_secure" = 1
+"test_messages.py#monkeypatch.setattr gateway.app.build_model_catalog" = 1
+"test_notices_resolve_history_live.py#monkeypatch.setattr base.config.settings.display.notices_open_default_limit" = 2
+"test_notices_resolve_history_live.py#monkeypatch.setattr base.config.settings.display.notices_resolved_default_page" = 1
+"test_notices_resolve_history_live.py#monkeypatch.setattr ops.lifecycle.publish_notice_resolved" = 1
+"test_sse_throttled.py#monkeypatch.setattr gateway.events.system.throttled_event_stream" = 1

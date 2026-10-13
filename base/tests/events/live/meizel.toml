@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_announce.py#monkeypatch.setattr base.agents.observation.snapshot.select_one" = 1

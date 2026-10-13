@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_agent_model_config.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1

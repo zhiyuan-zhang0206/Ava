@@ -1,1 +1,5 @@
 exports = ["provider_plugin_support.py"]
+
+[debt.first-party-patch]
+"test_lm_billing.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 2
+"test_lm_billing.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 1

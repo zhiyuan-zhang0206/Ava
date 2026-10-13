@@ -6,3 +6,10 @@
 "test_sms.py" = ["ava_builtins/skills"]
 "test_telegram_send_file.py" = ["ava_builtins/skills"]
 "test_youtube_feed.py" = ["ava_builtins/skills"]
+
+[debt.first-party-patch]
+"test_self_evolution_collect.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_self_evolution_collect_auth.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_telegram_send_file.py#monkeypatch.setattr base.config.settings.telegram.telegram_bot_token" = 4
+"test_telegram_send_file.py#monkeypatch.setattr base.config.settings.telegram.telegram_owner_id" = 4
+"test_web_ai_webchat.py#monkeypatch.setattr ava.mcps.chrome" = 1

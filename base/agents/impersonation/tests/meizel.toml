@@ -2,3 +2,21 @@ exports = ["test_history.py", "test_host_transport.py"]
 
 [uses]
 "test_event_log.py" = ["test_history.py"]
+
+[debt.first-party-patch]
+"test_event_log.py#monkeypatch.setattr base.agents.impersonation.event_log.MAX_LOG_ENTRIES" = 1
+"test_event_log.py#monkeypatch.setattr base.agents.impersonation.history.workspace_dir" = 1
+"test_history.py#monkeypatch.setattr base.agents.impersonation.history.workspace_dir" = 2
+"test_host_transport.py#monkeypatch.setattr base.agents.impersonation.host_transport.default_control_socket" = 1
+"test_impersonation_attestation.py#monkeypatch.setattr base.agents.impersonation._store.native_boot_id" = 4
+"test_impersonation_attestation.py#monkeypatch.setattr base.agents.impersonation._store.psutil.Process" = 4
+"test_impersonation_attestation.py#monkeypatch.setattr base.agents.impersonation._store.sys" = 6
+"test_impersonation_attestation.py#monkeypatch.setattr base.native_process.ownership.native_boot_id" = 1
+"test_impersonation_attestation.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 5
+"test_impersonation_attestation.py#monkeypatch.setattr base.native_process.ownership.psutil.Process" = 1
+"test_impersonation_attestation.py#monkeypatch.setattr base.native_process.ownership.psutil.pid_exists" = 1
+"test_impersonation_attestation.py#monkeypatch.setattr base.native_process.ownership.stable_create_time" = 1
+"test_impersonation_attestation.py#monkeypatch.setattr base.native_process.ownership.sys" = 4
+"test_impersonation_database_attestation.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 1
+"test_impersonation_database_attestation.py#monkeypatch.setattr base.native_process.ownership.stable_create_time" = 1
+"test_transport_lifecycle.py#monkeypatch.setattr base.agents.impersonation.host_transport.live_submit" = 5

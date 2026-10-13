@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_lazy_plugin_load.py#monkeypatch.setattr ava.sdk_surface.extensions.load_extensions" = 4
+"test_lazy_plugin_load.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_lazy_plugin_load.py#monkeypatch.setattr base.packages.plugins.loading.faces.load_agent_faces" = 1

@@ -1,0 +1,15 @@
+[debt.first-party-patch]
+"test_bootstrap_admission.py#monkeypatch.setattr base.config.service_read.ConfigAuthority.read_env_aliases" = 1
+"test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_control_pool_max_size" = 1
+"test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_db_pool_max_size" = 1
+"test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_max_concurrent_turns" = 1
+"test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_bootstrap_admission.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 2
+"test_bootstrap_admission.py#monkeypatch.setattr base.host.env.bootstrap.os" = 2
+"test_bootstrap_admission.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status._cluster_rpc.dispatch_to_url" = 6
+"test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status.cluster_is_paused" = 2
+"test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status.prod_source_head_sha" = 2
+"test_roster_snapshots.py#monkeypatch.setattr base.config.settings.gateway.status_probe_timeout_seconds" = 1
+"test_roster_snapshots.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_url" = 5
+"test_status_services.py#monkeypatch.setattr gateway.cluster.status.check_pidfile" = 1

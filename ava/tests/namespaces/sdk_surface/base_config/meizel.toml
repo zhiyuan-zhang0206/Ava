@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_plugin_config_ownership.py#monkeypatch.setattr base.packages.plugins.load_report.report_plugin_load_failure" = 1

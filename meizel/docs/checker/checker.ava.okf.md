@@ -124,9 +124,8 @@ makes an edge. Other restricted forms (`sys.modules` writes, `python -c` imports
 string patches) still apply. The reason must be non-empty; an entry whose file
 has none of the exempt forms is `stale-external`.
 
-Plugin and schedule-script discovery is `[external]`, never `[loads]`: built-in plugins
-and `$AVA_HOME/plugins/` alike are discovered content core does not depend on, as is
-`schedules/` for the schedule engine.
+Plugin and schedule-script discovery is `[external]`, never `[loads]`: it is
+discovered content that core does not depend on.
 
 ## Manifest
 
@@ -139,7 +138,7 @@ budget. A directory without a manifest has no local edges and exports its door.
 ## When it fails
 
 Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`,
-`private-name`, `restricted-python`, `unresolved-import` (a first-party import
+`private-name`, `restricted-python`, `first-party-patch` ([[meizel/docs/checker/patching.ava.okf.md|patching]]), `unresolved-import` (a first-party import
 naming no tracked module), `stale-load`, `stale-external`, and the manifest codes
 `manifest-syntax`, `manifest-unknown-key`, `manifest-unknown-child`,
 `manifest-duplicate`, `manifest-self-edge`, `manifest-cycle`,

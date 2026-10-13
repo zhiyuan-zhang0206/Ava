@@ -1,0 +1,12 @@
+[debt.first-party-patch]
+"test_chunk_threshold.py#monkeypatch.setattr agent.hooks.understanding_chunks.enqueue_chunk" = 1
+"test_chunk_threshold.py#monkeypatch.setattr base.config.settings.agent.understanding_chunk_ratio" = 1
+"test_chunk_threshold.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 1
+"test_hooks.py#monkeypatch.setattr base.packages.plugins.activation.record" = 2
+"test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.SNAPSHOT_POLL_SECONDS" = 1
+"test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.SNAPSHOT_WAIT_SECONDS" = 1
+"test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.chunk_threshold" = 1
+"test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.enqueue_chunk" = 10
+"test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.newest_checkpoint_ts" = 1
+"test_understanding_chunks.py#monkeypatch.setattr agent.hooks.understanding_chunks.telemetry.emit" = 3
+"test_understanding_chunks.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 5

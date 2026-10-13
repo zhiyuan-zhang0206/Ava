@@ -1,0 +1,9 @@
+[debt.first-party-patch]
+"test_upload_batch_faults.py#monkeypatch.setattr gateway.routers.upload.batches.publish_files" = 1
+"test_upload_batch_faults.py#monkeypatch.setattr gateway.routers.upload.batches.write_transaction" = 1
+"test_upload_batch_identity.py#monkeypatch.setattr base.lm.factory.model_supports_vision" = 1
+"test_upload_batch_identity.py#monkeypatch.setattr gateway.routers.upload.batches.publish_files" = 4
+"test_upload_batch_identity.py#monkeypatch.setattr gateway.routers.upload.router.MAX_AGENT_UPLOAD_BYTES" = 1
+"test_upload_endpoint.py#monkeypatch.setattr gateway.routers.upload.router.MAX_AGENT_UPLOAD_BYTES" = 3
+"test_upload_endpoint.py#monkeypatch.setattr gateway.routers.upload.router.MAX_AGENT_UPLOAD_FILES" = 2
+"test_upload_endpoint.py#monkeypatch.setattr gateway.routers.upload.router.MAX_UPLOAD_BYTES" = 1

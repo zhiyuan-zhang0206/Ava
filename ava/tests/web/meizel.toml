@@ -2,3 +2,23 @@
 "test_web.py" = ["_web_helpers.py"]
 "test_web_injection.py" = ["_web_helpers.py"]
 "test_web_search.py" = ["_web_helpers.py"]
+
+[debt.first-party-patch]
+"test_web.py#monkeypatch.setattr base.config.settings.lm.llm_invoke_retry_attempts" = 1
+"test_web.py#monkeypatch.setattr base.config.settings.web.jina_api_key" = 28
+"test_web.py#monkeypatch.setattr base.config.settings.web.web_fetch_model" = 1
+"test_web.py#monkeypatch.setattr base.config.settings.web.web_fetch_reasoning" = 2
+"test_web.py#monkeypatch.setattr base.config.settings.web.web_jina_reader_base" = 1
+"test_web.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 2
+"test_web.py#patch.object ava.web.urllib.request.urlopen" = 27
+"test_web_injection.py#monkeypatch.setattr ava.web._answer" = 3
+"test_web_injection.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2
+"test_web_injection.py#monkeypatch.setattr base.config.settings.web.jina_api_key" = 2
+"test_web_injection.py#monkeypatch.setattr base.config.settings.web.web_fetch_injection_check_enabled" = 1
+"test_web_injection.py#monkeypatch.setattr base.lm.decision.call.decide" = 5
+"test_web_injection.py#patch.object ava.web.urllib.request.urlopen" = 1
+"test_web_search.py#monkeypatch.setattr ava.__plugin_installation__" = 2
+"test_web_search.py#monkeypatch.setattr base.config.service_read.ConfigAuthority.service_field_value" = 1
+"test_web_search.py#monkeypatch.setattr base.config.settings.web.brave_api_key" = 19
+"test_web_search.py#monkeypatch.setattr base.config.settings.web.web_brave_search_endpoint" = 1
+"test_web_search.py#patch.object ava.web.urllib.request.urlopen" = 18

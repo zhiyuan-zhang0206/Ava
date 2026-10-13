@@ -12,6 +12,7 @@ __all__ = [
     "Fact",
     "FactKind",
     "MeizelError",
+    "Patch",
     "Problem",
     "Restricted",
 ]
@@ -50,6 +51,7 @@ class Code(StrEnum):
     MANIFEST_ROLES = "manifest-roles"
     MANIFEST_DEBT = "manifest-debt"
     DEBT_PAID = "debt-paid"
+    FIRST_PARTY_PATCH = "first-party-patch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +76,15 @@ class Restricted:
     line: int
     form: str
     detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Patch:
+    """A test (or fixture) patching first-party code: `form` applied to `target`, a dotted name."""
+
+    line: int
+    form: str
+    target: str
 
 
 @dataclass(frozen=True, slots=True)
