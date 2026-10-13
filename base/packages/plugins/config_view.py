@@ -1,9 +1,7 @@
-"""One agent's plugin overrides over an explicitly supplied boot config image.
+"""Plugin-config routing for one agent: pins by owner, and the cluster policy overlay.
 
-The host receives the installer's resolved image and creates one view per
-agent turn, carrying it on ``AgentSlices``. An exec child applies its overlay
-at boot; an external attachment owns its agent's view. Overrides affect only
-that view. Frozen plugin instances are memoized per view, never globally.
+The per-agent view itself (``PluginConfigView``) lives beside ``AgentSlices``
+(``base/host/env/agent_slices.py``), which carries it.
 
 Plugin fields have no birth_config: an explicit overlay pins them; otherwise
 another process start reads the current authority image. See
@@ -16,45 +14,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel
-
-
-class PluginConfigView:
-    """One agent's plugin overrides plus the instances built from them.
-
-    The cache is per view (the host resolves one view per agent turn, on its `AgentSlices`).
-    Concurrent first reads may build the same instance twice; both are equal frozen models and the last write wins,
-    which is why this needs no lock.
-    """
-
-    __slots__ = ("_cache", "_configs", "_overrides")
-
-    def __init__(
-        self, configs: Mapping[str, BaseModel], overrides: Mapping[str, Mapping[str, Any]]
-    ) -> None:
-        self._configs = configs
-        self._overrides = {p: dict(fields) for p, fields in overrides.items()}
-        self._cache: dict[str, BaseModel] = {}
-
-    def flat(self) -> dict[str, Any]:
-        """The overrides as the flat execution-child overlay."""
-        return {key: value for fields in self._overrides.values() for key, value in fields.items()}
-
-    def config_for(self, plugin: str) -> BaseModel:
-        """This agent's instance, or its supplied base when no override is set."""
-        base = self._configs[plugin]
-        updates = self._overrides.get(plugin)
-        if not updates:
-            return base
-        cached = self._cache.get(plugin)
-        if cached is not None and type(cached) is type(base):
-            return cached
-        built = type(base)(**{**base.model_dump(), **updates})
-        self._cache[plugin] = built
-        return built
-
-    def configs(self) -> dict[str, BaseModel]:
-        """The bound plugin configs with this agent's overrides applied."""
-        return {plugin: self.config_for(plugin) for plugin in self._configs}
 
 
 def resolve_agent_plugin_pins(
