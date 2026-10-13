@@ -9,10 +9,10 @@ import pytest
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from services.agent_runner.agent_host.tests.runtime.host_support import (
-    _Build,
-    _FakeConnCtx,
+    Build,
+    FakeConnCtx,
+    Row,
     _FakePool,
-    _Row,
 )
 from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
@@ -27,13 +27,13 @@ from tests.components.agent.test_maintenance import isolate as isolate
 
 
 async def test_a_failed_continuation_is_alerted_and_the_held_control_stays_runnable(
-    wired: _Build, monkeypatch: pytest.MonkeyPatch, alerts: Alerts
+    wired: Build, monkeypatch: pytest.MonkeyPatch, alerts: Alerts
 ) -> None:
     """The turn raises while its restart command is owed: the host reports it and
     latches nothing in the journal. (This fake pool cannot settle the command, so
     the held control stays runnable; the settled case is tested against Postgres in
     `test_maintenance_receipt_grading`.)"""
-    host, graph, _pool = wired({11: _Row(status="idling")})
+    host, graph, _pool = wired({11: Row(status="idling")})
     hold = MaintenanceHold(MaintenancePhase.DRAINING, {11: 100})
 
     async def broken(*_args: object, **_kwargs: object) -> None:
@@ -65,7 +65,7 @@ class _BlockedRead:
         self._first_read = True
         self._cleanup_pool = _FakePool({})
 
-    def connection(self, timeout: float | None = None) -> "_BlockedRead | _FakeConnCtx":
+    def connection(self, timeout: float | None = None) -> "_BlockedRead | FakeConnCtx":
         if self._first_read:
             self._first_read = False
             return self
@@ -89,7 +89,7 @@ class _BlockedRead:
     ids=["foreign-3", "foreign-8", "foreign-9", "drained-member", "draining-member"],
 )
 async def test_a_wake_cancelled_before_its_row_read_reports_only_owed_continuations(
-    wired: _Build,
+    wired: Build,
     monkeypatch: pytest.MonkeyPatch,
     alerts: Alerts,
     phase: str,
@@ -125,12 +125,12 @@ async def test_a_wake_cancelled_before_its_row_read_reports_only_owed_continuati
 @pytest.mark.parametrize("phase", ["stopping", "stopped"])
 @pytest.mark.parametrize("agent", [2, 5], ids=["drained", "parked"])
 async def test_a_settled_members_held_wake_claims_nothing(
-    wired: _Build, monkeypatch: pytest.MonkeyPatch, phase: str, agent: int
+    wired: Build, monkeypatch: pytest.MonkeyPatch, phase: str, agent: int
 ) -> None:
     """Why its failure is no receipt: after the certified drain a drained or
     parked member's wake reads the row and returns; it never reaches the held
     control that claims, so its inbound messages stay pending."""
-    host, _graph, pool = wired({agent: _Row(status="idling")})
+    host, _graph, pool = wired({agent: Row(status="idling")})
     control = AsyncMock()
     monkeypatch.setattr(host, "_run_held_controls", control)
     fc10_hold(phase, parked=(5,))

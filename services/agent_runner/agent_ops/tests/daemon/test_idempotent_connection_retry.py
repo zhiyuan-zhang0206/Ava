@@ -16,7 +16,7 @@ from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
-from services.agent_runner.agent_ops.tests.test_daemon import _noop_sleep
+from services.agent_runner.agent_ops.tests.test_daemon import noop_sleep
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -55,9 +55,9 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
             raise psycopg.OperationalError("the connection is closed")
         return "completed", {"ok": True}
 
-    monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _flaky_pass)
-    monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
-    status, result = await daemon._dispatch_idempotent(
+    monkeypatch.setattr(daemon, "dispatch_idempotent_pass", _flaky_pass)
+    monkeypatch.setattr(daemon, "_sleep", noop_sleep)
+    status, result = await daemon.dispatch_idempotent(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
         "key-1",
@@ -109,10 +109,10 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
         calls.append(1)
         raise psycopg.OperationalError("the connection is closed")
 
-    monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _always_dead)
-    monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
+    monkeypatch.setattr(daemon, "dispatch_idempotent_pass", _always_dead)
+    monkeypatch.setattr(daemon, "_sleep", noop_sleep)
     with pytest.raises(psycopg.OperationalError):
-        await daemon._dispatch_idempotent(
+        await daemon.dispatch_idempotent(
             "spawn-launch",
             {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
             "key-2",
@@ -126,7 +126,7 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
             image=ops_image,
             local_machine=machine_identity,
         )
-    assert len(calls) == daemon._DISPATCH_RETRY_ATTEMPTS
+    assert len(calls) == daemon.DISPATCH_RETRY_ATTEMPTS
 
 
 @pytest.mark.asyncio
@@ -162,10 +162,10 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
         calls.append(1)
         raise ValueError("not a connection problem")
 
-    monkeypatch.setattr(daemon, "_dispatch_idempotent_pass", _boom)
-    monkeypatch.setattr(daemon, "_sleep", _noop_sleep)
+    monkeypatch.setattr(daemon, "dispatch_idempotent_pass", _boom)
+    monkeypatch.setattr(daemon, "_sleep", noop_sleep)
     with pytest.raises(ValueError):
-        await daemon._dispatch_idempotent(
+        await daemon.dispatch_idempotent(
             "spawn-launch",
             {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
             "key-3",

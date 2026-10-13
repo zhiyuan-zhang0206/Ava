@@ -326,7 +326,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
 # after the last step returned and the termination commits.
 
 
-def _terminate_command(
+def terminate_command(
     conn: psycopg.Connection, agent_id: int, *, source: str = "user", kill: bool = False
 ) -> int:
     row = conn.execute(
@@ -409,7 +409,7 @@ async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    _terminate_command(db_conn, agent_id, kill=requested)
+    terminate_command(db_conn, agent_id, kill=requested)
     kills = _record_kills(monkeypatch)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     await _run_terminating_turn(
@@ -439,8 +439,8 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
     terminate queued behind it still takes the sessions with the death."""
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    own = _terminate_command(db_conn, agent_id, source="self")
-    _terminate_command(db_conn, agent_id, kill=True)
+    own = terminate_command(db_conn, agent_id, source="self")
+    terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch)
     assert [
         row.id
@@ -469,7 +469,7 @@ async def test_hosted_failed_kill_still_applies_the_termination(
     """A session-kill failure is an ERROR, never a crashed turn: the death applies."""
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    _terminate_command(db_conn, agent_id, kill=True)
+    terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch, fail=True)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     await _run_terminating_turn(

@@ -88,7 +88,7 @@ def _patch_reconcile_dependencies(
     monkeypatch: pytest.MonkeyPatch, backends: list[_FakeBackend]
 ) -> list[tuple[str, int, str, bool]]:
     calls: list[tuple[str, int, str, bool]] = []
-    monkeypatch.setattr(reconcile, "_sample_queries", _one_query)
+    monkeypatch.setattr(reconcile, "sample_queries", _one_query)
     monkeypatch.setattr(reconcile, "get_provider", _FakeProvider)
 
     def _get_backend_named(
@@ -250,7 +250,7 @@ def test_empty_query_pool_returns_before_capture_or_database(
     def no_queries(limit: int, *, roles: MachineRoles) -> list[str]:
         return []
 
-    monkeypatch.setattr(reconcile, "_sample_queries", no_queries)
+    monkeypatch.setattr(reconcile, "sample_queries", no_queries)
     monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector"])
     assert reconcile.main() == 1
     capture.assert_not_called()

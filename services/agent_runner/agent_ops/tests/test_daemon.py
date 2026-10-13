@@ -32,7 +32,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 _REPO = Path(__file__).resolve().parents[4]
 
 
-def _stub_pool() -> ConnectionPool:
+def stub_pool() -> ConnectionPool:
     """A closed real pool for mocked arms; no connection is borrowed."""
     return ConnectionPool(open=False)
 
@@ -86,7 +86,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
     machine_identity: MachineIdentity,
 ) -> None:
     """spawn-launch kind -> ops.launch_agent_op."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     captured: dict[str, object] = {}
 
     from ops.rpc_schemas import SpawnedAgent
@@ -138,7 +138,7 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
     """shell_probe kind -> cluster.shell_probe_op(agent_id), serialized."""
     from ops.rpc_schemas import ShellInfo, ShellProbeResult
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     seen: dict[str, object] = {}
 
     def _fake_probe(agent_id: int) -> ShellProbeResult:
@@ -186,7 +186,7 @@ async def test_dispatch_shell_probe_bad_payload_fails(
     machine_identity: MachineIdentity,
 ) -> None:
     """shell_probe without agent_id fails without invoking the op."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("must not dispatch on bad payload")
@@ -227,7 +227,7 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
     """shell_kill resolves and kills one host-local persistent session."""
     from ops.rpc_schemas import ShellKillResult
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     seen: dict[str, int] = {}
 
     def _fake_kill(agent_id: int, session_id: int) -> ShellKillResult:
@@ -267,7 +267,7 @@ async def test_dispatch_shell_kill_reports_absent(
     """A shell already gone is a successful, idempotent absent result."""
     from ops.rpc_schemas import ShellKillResult
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
 
     def absent(_agent_id: int, _session_id: int) -> ShellKillResult:
         return ShellKillResult(mode=ShellKillMode.ABSENT)
@@ -308,7 +308,7 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
     """agent_skill_view kind -> cluster.agent_skill_view_op(agent_id, pool)."""
     from ops.rpc_schemas import AgentSkillViewResult, OpsCommandItem
 
-    pool = _stub_pool()
+    pool = stub_pool()
     dispatch_pool: ConnectionPool = pool
     seen: dict[str, object] = {}
 
@@ -353,7 +353,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
     machine_identity: MachineIdentity,
 ) -> None:
     """agent_skill_view without an id is rejected before it reaches the op."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("must not dispatch on bad payload")
@@ -394,7 +394,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
     """shell_capture kind -> cluster.shell_capture_op(agent_id, session_id, lines)."""
     from ops.rpc_schemas import ShellCaptureResult
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     seen: dict[str, object] = {}
 
     def _fake_capture(agent_id: int, session_id: int, lines: int = 200) -> ShellCaptureResult:
@@ -441,7 +441,7 @@ async def test_dispatch_shell_capture_defaults_lines(
     """shell_capture without lines defaults to 200."""
     from ops.rpc_schemas import ShellCaptureResult
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     seen: dict[str, object] = {}
 
     def _fake_capture(agent_id: int, session_id: int, lines: int = 200) -> ShellCaptureResult:
@@ -478,7 +478,7 @@ async def test_dispatch_unknown_kind(
     machine_identity: MachineIdentity,
 ) -> None:
     """Unknown kind returns failed; routing table is exhaustive."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     status, result = await daemon._dispatch(
         "bogus_kind",
         {},
@@ -511,7 +511,7 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
     plain failed result, not a crash for _ops_route's catch-all to log."""
     from ops.cluster_status import ShellNotFoundError
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
 
     def _raises(agent_id: int, session_id: int, lines: int = 200) -> object:
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
@@ -550,7 +550,7 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
 @pytest.fixture
 def ops_pool(db_url: str) -> object:
     """A real ConnectionPool on the session test DB (the dedup path writes the
-    shared `api_idempotency` table, method='ops' rows; `_stub_pool` is a
+    shared `api_idempotency` table, method='ops' rows; `stub_pool` is a
     non-DB stand-in and cannot serve it)."""
     from psycopg_pool import ConnectionPool
 
@@ -563,7 +563,7 @@ def ops_pool(db_url: str) -> object:
         pool.close()
 
 
-def _fake_spawn_factory(calls: dict[str, int]) -> object:
+def fake_spawn_factory(calls: dict[str, int]) -> object:
     """A launch_agent_op stand-in that counts executions and returns id 777."""
     from ops.rpc_schemas import SpawnedAgent
 
@@ -585,7 +585,7 @@ def _fake_spawn_factory(calls: dict[str, int]) -> object:
 # ─── _dispatch_idempotent retry on closed connection (Task #1059) ──────────────
 
 
-async def _noop_sleep(_seconds: float) -> None:
+async def noop_sleep(_seconds: float) -> None:
     """Stand-in for daemon._sleep in retry tests — no real backoff wait."""
 
 

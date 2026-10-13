@@ -61,7 +61,7 @@ def test_an_unchanged_checkpoint_keeps_the_view_past_the_ttl(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = FakeStore(monkeypatch)
-    monkeypatch.setattr(history, "_TTL_SECONDS", 0.0)
+    monkeypatch.setattr(history, "TTL_SECONDS", 0.0)
     cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     first = cache.get(DB, 9)
     assert cache.get(DB, 9) is first
@@ -70,7 +70,7 @@ def test_an_unchanged_checkpoint_keeps_the_view_past_the_ttl(
 
 def test_a_new_checkpoint_rebuilds_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
     store = FakeStore(monkeypatch)
-    monkeypatch.setattr(history, "_TTL_SECONDS", 0.0)
+    monkeypatch.setattr(history, "TTL_SECONDS", 0.0)
     cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     first = cache.get(DB, 9)
     store.head = "c2"
@@ -80,8 +80,8 @@ def test_a_new_checkpoint_rebuilds_the_view(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_a_view_is_rebuilt_past_the_max_age(monkeypatch: pytest.MonkeyPatch) -> None:
     store = FakeStore(monkeypatch)
-    monkeypatch.setattr(history, "_TTL_SECONDS", 0.0)
-    monkeypatch.setattr(history, "_MAX_AGE_SECONDS", -1.0)
+    monkeypatch.setattr(history, "TTL_SECONDS", 0.0)
+    monkeypatch.setattr(history, "MAX_AGE_SECONDS", -1.0)
     cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
     cache.get(DB, 9)
     cache.get(DB, 9)

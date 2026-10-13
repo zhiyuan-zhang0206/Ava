@@ -63,7 +63,7 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.derived.memory_indexer.daemon")
 
 
-def _memory_root(*, roles: MachineRoles) -> Path:
+def memory_root(*, roles: MachineRoles) -> Path:
     """The consolidated memory checkout this daemon indexes, resolved on use."""
     return gateway_memory_dir(roles=roles)
 
@@ -77,18 +77,18 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return _endpoint(config, runtime=runtime).pidfile
 
 
-_LOOP_INTERVAL_S = 1.0
+LOOP_INTERVAL_S = 1.0
 # Startup reconciles beat before and after file-granular chunks:
 # a full rebuild can outlive the liveness ceiling. Chunks bound preparation and
-# local work; _process_paths also beats before external calls within each chunk.
-_RECONCILE_CHUNK_PATHS = 64
-_BATCH_SIZE = 32
+# local work; process_paths also beats before external calls within each chunk.
+RECONCILE_CHUNK_PATHS = 64
+BATCH_SIZE = 32
 """Gemini embed_content accepts multiple inputs per call; batching amortizes round-trips."""
 
 _MD_SUFFIX = ".md"
 
 
-class _MarkdownEventHandler(FileSystemEventHandler):
+class MarkdownEventHandler(FileSystemEventHandler):
     """Push *.md create / modify / move / delete paths to the dirty queue.
 
     Observer runs its own thread; callbacks must not block — only push,
@@ -149,7 +149,7 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-def _scan_disk(root: Path) -> dict[Path, float]:
+def scan_disk(root: Path) -> dict[Path, float]:
     """Recursive list `*.md` under `root`. {abs_path: mtime}. Symlinks not followed."""
     if not root.exists():
         return {}
@@ -207,8 +207,8 @@ def _embed_batches(
     liveness: Liveness,
 ) -> None:
     """Embed `flat_rows` in batches, recording each embedded row (and each completed file)."""
-    for i in range(0, len(flat_rows), _BATCH_SIZE):
-        batch = flat_rows[i : i + _BATCH_SIZE]
+    for i in range(0, len(flat_rows), BATCH_SIZE):
+        batch = flat_rows[i : i + BATCH_SIZE]
         texts = [text for *_, text in batch]
         # One external call per gap; commit calls beat separately below.
         liveness.beat()
@@ -221,7 +221,7 @@ def _embed_batches(
                 progress.embedded_files.append(path)
 
 
-def _process_paths(
+def process_paths(
     backend: MemorySearchBackend,
     paths: set[Path],
     provider: EmbeddingProvider,
@@ -262,7 +262,7 @@ def _process_paths(
     Backends must be cross-thread safe (the HTTP client and the pgvector pool are).
     """
     liveness.beat()
-    root = _memory_root(roles=machine.role()).resolve()
+    root = memory_root(roles=machine.role()).resolve()
     to_delete, to_embed = _classify_dirty(backend, paths, provider, root)
 
     for p in to_delete:
@@ -364,7 +364,7 @@ def _reconcile(
     when an embed failure truncates the pass; no follow-up pass is scheduled.
 
     Rows whose path is outside the watched root are pruned even though the
-    files still exist on disk (see `_process_paths`): they are leftovers
+    files still exist on disk (see `process_paths`): they are leftovers
     from an era when the indexer embedded a different checkout, and they
     surface as stale duplicates in search results.
 
@@ -373,27 +373,27 @@ def _reconcile(
     another semantic space (a provider switch), so every row must be
     re-embedded.
 
-    The dirty set is worked in file-granular chunks (`_RECONCILE_CHUNK_PATHS`),
-    beating `liveness` before and after each chunk. `_process_paths` also beats
+    The dirty set is worked in file-granular chunks (`RECONCILE_CHUNK_PATHS`),
+    beating `liveness` before and after each chunk. `process_paths` also beats
     before each embed batch so a long rebuild stays alive. Chunk boundaries
     never split a file; its rows commit as one unit (issue #1946). An
     `EmbeddingAPIError` is logged and the remaining chunks are skipped.
     """
-    disk = _scan_disk(_memory_root(roles=machine.role()))
+    disk = scan_disk(memory_root(roles=machine.role()))
     indexed = backend.all_meta()
     indexed_paths = {Path(p) for p in indexed}
     disk_paths = set(disk.keys())
-    root = _memory_root(roles=machine.role()).resolve()
+    root = memory_root(roles=machine.role()).resolve()
 
     dirty: set[Path] = set()
     # Changes / additions — mark dirty when mtime differs;
-    # _process_paths further filters by hash internally.
+    # process_paths further filters by hash internally.
     for path, mtime in disk.items():
         prev = indexed.get(str(path))
         if prev is None or prev[0] != mtime or prev[2] != provider.fingerprint:
             dirty.add(path)
     # Deletions: indexed rows that vanished from disk, or that live outside
-    # the watched root (stale-checkout leftovers) — _process_paths deletes
+    # the watched root (stale-checkout leftovers) — process_paths deletes
     # both classes (missing on disk / not under root).
     for path in indexed_paths - disk_paths:
         dirty.add(path)
@@ -405,13 +405,13 @@ def _reconcile(
         _log.info("[indexer] reconcile: %d dirty paths", len(dirty))
         # Sorted for a deterministic chunk order; boundaries fall between
         # paths, and a path is one whole file, so no file is ever split
-        # across chunks (`_process_paths` commits a file's rows as one unit).
+        # across chunks (`process_paths` commits a file's rows as one unit).
         ordered = sorted(dirty, key=str)
         try:
-            for i in range(0, len(ordered), _RECONCILE_CHUNK_PATHS):
-                chunk = set(ordered[i : i + _RECONCILE_CHUNK_PATHS])
+            for i in range(0, len(ordered), RECONCILE_CHUNK_PATHS):
+                chunk = set(ordered[i : i + RECONCILE_CHUNK_PATHS])
                 liveness.beat()  # per chunk: a rebuild outlives the liveness ceiling
-                _process_paths(backend, chunk, provider, liveness, machine=machine)
+                process_paths(backend, chunk, provider, liveness, machine=machine)
                 liveness.beat()  # chunk committed -> the rebuild is progressing
         except EmbeddingAPIError as exc:
             _log.error(
@@ -422,7 +422,7 @@ def _reconcile(
     return True
 
 
-async def _drain_loop(
+async def drain_loop(
     backend: MemorySearchBackend,
     dirty_queue: queue.Queue[Path],
     liveness: Liveness,
@@ -430,9 +430,9 @@ async def _drain_loop(
     *,
     machine: MachineIdentity,
 ) -> None:
-    """Main loop: every _LOOP_INTERVAL_S drain queue, dedup, batch process.
+    """Main loop: every LOOP_INTERVAL_S drain queue, dedup, batch process.
 
-    `_process_paths` blocks (network embed + backend write calls); use
+    `process_paths` blocks (network embed + backend write calls); use
     ``asyncio.to_thread`` so the event loop can still serve the health
     probe during embedding. Failed paths are not requeued; a later file event or
     explicit rebuild may attempt them again.
@@ -440,7 +440,7 @@ async def _drain_loop(
     _log.info("[indexer] daemon loop started, pid=%s", os.getpid())
     while True:
         liveness.beat()
-        await asyncio.sleep(_LOOP_INTERVAL_S)
+        await asyncio.sleep(LOOP_INTERVAL_S)
         if admission.quiesced():
             continue  # the pgvector backend borrows the pool; dirty paths wait in the queue
         batch: set[Path] = set()
@@ -452,7 +452,7 @@ async def _drain_loop(
             continue
         try:
             await asyncio.to_thread(
-                _process_paths, backend, batch, provider, liveness, machine=machine
+                process_paths, backend, batch, provider, liveness, machine=machine
             )
             liveness.beat()  # embed batch returned -> loop is making progress
         except EmbeddingAPIError as exc:
@@ -466,7 +466,7 @@ async def _drain_loop(
             )
 
 
-async def _connect_backend_with_retry(
+async def connect_backend_with_retry(
     database: Database,
     provider: EmbeddingProvider,
     deadline_s: float = 30.0,
@@ -483,7 +483,7 @@ async def _connect_backend_with_retry(
     backend time to come up. The backend is constructed for `provider`'s
     vector space (dim + fingerprint) — see `backends.factory`.
 
-    Runtime backend calls (`_process_paths` etc.) do **not** use this
+    Runtime backend calls (`process_paths` etc.) do **not** use this
     retry — those are the healthcheck's responsibility (if the backend
     dies, the healthcheck restarts it; if memory_indexer itself crashes
     and exits, the healthcheck spawns a fresh process that goes through
@@ -580,7 +580,7 @@ async def run(
     )
     _log.info("[indexer] healthz listening on :%s", endpoint.health_port)
 
-    root = _memory_root(roles=machine.role())
+    root = memory_root(roles=machine.role())
     root.mkdir(parents=True, exist_ok=True)
     # Preflight the selected backend BEFORE the retry loop: a backend that can
     # never work (fatal) fails fast with the actionable fix instead of a 30s
@@ -602,7 +602,7 @@ async def run(
             inputs.backend_name(),
             preflight.message,
         )
-    backend = await _connect_backend_with_retry(
+    backend = await connect_backend_with_retry(
         db,
         provider,
         name=inputs.backend_name(),
@@ -611,7 +611,7 @@ async def run(
     )
     _log.info("[indexer] connected to %s backend", backend.name)
     dirty_queue: queue.Queue[Path] = queue.Queue()
-    handler = _MarkdownEventHandler(dirty_queue)
+    handler = MarkdownEventHandler(dirty_queue)
     observer = Observer()
     observer.schedule(handler, str(root), recursive=True)
     observer.start()
@@ -620,7 +620,7 @@ async def run(
     try:
         if not await asyncio.to_thread(_reconcile, backend, provider, liveness, machine=machine):
             _log.warning("[indexer] startup index incomplete; explicit rebuild required")
-        await _drain_loop(backend, dirty_queue, liveness, provider, machine=machine)
+        await drain_loop(backend, dirty_queue, liveness, provider, machine=machine)
     finally:
         observer.stop()
         observer.join(timeout=5.0)

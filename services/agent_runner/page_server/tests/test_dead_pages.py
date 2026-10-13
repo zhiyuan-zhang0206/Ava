@@ -319,7 +319,7 @@ def _patch_run(
         return _Pool()
 
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
-    monkeypatch.setattr(daemon, "_reconcile_loop", loops["reconcile"])
+    monkeypatch.setattr(daemon, "reconcile_loop", loops["reconcile"])
     monkeypatch.setattr(daemon.dead_pages, "dead_pages_loop", loops["dead"])
     return seen
 

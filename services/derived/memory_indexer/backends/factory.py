@@ -61,7 +61,7 @@ def _pgvector_backend(
 
 
 # Uniform constructor shape `(database, dim, fingerprint, readonly, uri_reader)`.
-_BACKENDS: dict[
+BACKENDS: dict[
     str, Callable[[Database, int, str, bool, Callable[[], str]], MemorySearchBackend]
 ] = {
     "numpy": lambda database, dim, fingerprint, readonly, uri_reader: _numpy_backend(
@@ -87,9 +87,9 @@ def get_backend_named(
     a typo would otherwise keep the old storage while the operator believes
     the switch happened)."""
     try:
-        ctor = _BACKENDS[name]
+        ctor = BACKENDS[name]
     except KeyError:
-        known = ", ".join(sorted(_BACKENDS))
+        known = ", ".join(sorted(BACKENDS))
         raise ValueError(f"unknown memory search backend {name!r} (known: {known})") from None
     return ctor(database, dim, fingerprint, readonly, uri_reader)
 

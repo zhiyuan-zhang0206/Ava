@@ -42,16 +42,16 @@ class MemoryIndexerInputs:
 # and deletes, so calls cannot compound in one gap (default batch budget 606s).
 # A false kill costs a rebuild; later true-wedge detection costs staleness
 # only, since search keeps reading the existing index.
-_LIVENESS_TIMEOUT_FLOOR_S = 180.0  # Historic ceiling; preserve other loop branches' slack.
+LIVENESS_TIMEOUT_FLOOR_S = 180.0  # Historic ceiling; preserve other loop branches' slack.
 # Covers executor scheduling, local processing, and loop resumption. Commit
 # calls beat separately; NumPy's 300s upsert allowance fits the default 636s.
-_LIVENESS_SAFETY_MARGIN_S = 30.0
+LIVENESS_SAFETY_MARGIN_S = 30.0
 
 
 def liveness_timeout_seconds(name: str, *, timeout_seconds: float) -> float:
     """Cover one selected provider batch plus local scheduling and commit slack."""
     return max(
-        _LIVENESS_TIMEOUT_FLOOR_S,
+        LIVENESS_TIMEOUT_FLOOR_S,
         factory.worst_case_batch_seconds(name, timeout_seconds=timeout_seconds)
-        + _LIVENESS_SAFETY_MARGIN_S,
+        + LIVENESS_SAFETY_MARGIN_S,
     )

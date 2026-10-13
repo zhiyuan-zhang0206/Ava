@@ -212,11 +212,11 @@ def test_the_largest_exclusion_list_is_accepted(pool: _Pool) -> None:
 def test_the_exclusion_limit_fits_the_vector_service_query_limit() -> None:
     """Vector search is asked for the candidates plus every excluded note in one query."""
     from base.api_contracts.memory_search import MEMORY_SEARCH_MAX_EXCLUDE
-    from services.derived.memory_search.app import _MAX_K
+    from services.derived.memory_search.app import MAX_K
 
     most_candidates = type(settings.services).model_fields["memory_rerank_candidates"]
     limit = next(m.le for m in most_candidates.metadata if hasattr(m, "le"))
-    assert MEMORY_SEARCH_MAX_EXCLUDE + limit <= _MAX_K
+    assert MEMORY_SEARCH_MAX_EXCLUDE + limit <= MAX_K
 
 
 def test_valid_paths_are_accepted(pool: _Pool) -> None:

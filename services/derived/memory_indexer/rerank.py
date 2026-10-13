@@ -15,7 +15,7 @@ arguments. Excluded notes are dropped before they are read or ranked, and do not
 One request per candidate, each with its own state (the query plus that one note) and a single
 yes/no question, is the shape the score threshold of passive recall was calibrated on; the
 wording below is part of that calibration, so changing the model, a question or a state template
-means re-running the benchmark. Requests run concurrently up to `_MAX_CONCURRENT_DECISIONS`;
+means re-running the benchmark. Requests run concurrently up to `MAX_CONCURRENT_DECISIONS`;
 cancelling the search cancels the requests still running.
 
 A failed decision call raises `IndexerUnavailable` with the cause: there is no fallback to vector
@@ -49,7 +49,7 @@ USAGE_KINDS: dict[MemorySearchPurpose, str] = {
 """`llm_usage.usage_kind` of the decision calls per purpose, so rerank spend is separable from
 chat spend and the duplicate check of written notes is separable from search."""
 
-_MAX_CONCURRENT_DECISIONS = 30
+MAX_CONCURRENT_DECISIONS = 30
 """Decision requests in flight at once for one search. At the default of 30 candidates every
 request goes out together, which kept the ranking near 2s in the calibration benchmark; the
 cap only bites when `memory_rerank_candidates` is raised."""
@@ -129,7 +129,7 @@ class RankedChunk(NamedTuple):
 
 
 @dataclass(frozen=True)
-class _Candidate:
+class Candidate:
     path: str
     chunk: str
     description: str
@@ -177,9 +177,9 @@ def _pool_relative(path: str, root: Path) -> tuple[Path, str]:
         return file, path
 
 
-def _load_candidates(
+def load_candidates(
     hits: Sequence[ChunkHit], memory_root: Path, exclude: Collection[str], limit: int
-) -> list[_Candidate]:
+) -> list[Candidate]:
     """Restore the chunk text of the first `limit` hits that are not excluded.
 
     An excluded hit is passed over before its file is read. A hit whose file is gone,
@@ -188,7 +188,7 @@ def _load_candidates(
     the `limit` slots, so the next-closest hit fills it.
     """
     root = memory_root.resolve()
-    candidates: list[_Candidate] = []
+    candidates: list[Candidate] = []
     for hit in hits:
         if len(candidates) == limit:
             break
@@ -205,11 +205,11 @@ def _load_candidates(
         note = parse_note(content, file.name)
         description = note.description.strip() if note and note.description else ""
         tags = list(note.tags) if note else []
-        candidates.append(_Candidate(rel, chunk, description, tags))
+        candidates.append(Candidate(rel, chunk, description, tags))
     return candidates
 
 
-def _pair_state(query: str, candidate: _Candidate, purpose: MemorySearchPurpose) -> str:
+def pair_state(query: str, candidate: Candidate, purpose: MemorySearchPurpose) -> str:
     """The state shown to the decision model for one (query, candidate chunk) pair."""
     query_header, note_header = _STATE_TEMPLATES[purpose]
     note = (
@@ -230,9 +230,9 @@ async def _score_all(
     catalog: ModelCatalog,
     usage_kind: str,
 ) -> list[float]:
-    """One request per state, at most `_MAX_CONCURRENT_DECISIONS` at once; the first failure
+    """One request per state, at most `MAX_CONCURRENT_DECISIONS` at once; the first failure
     cancels the rest and is raised as itself."""
-    permits = asyncio.Semaphore(_MAX_CONCURRENT_DECISIONS)
+    permits = asyncio.Semaphore(MAX_CONCURRENT_DECISIONS)
 
     async def score(state: str) -> float:
         async with permits:
@@ -268,10 +268,10 @@ async def rerank(
     decision model cannot answer; an empty `hits`, or hits whose files are all gone or excluded,
     give [].
     """
-    candidates = await asyncio.to_thread(_load_candidates, hits, memory_root, exclude, limit)
+    candidates = await asyncio.to_thread(load_candidates, hits, memory_root, exclude, limit)
     if not candidates:
         return []
-    states = [_pair_state(query, candidate, purpose) for candidate in candidates]
+    states = [pair_state(query, candidate, purpose) for candidate in candidates]
     scores = await _score_all(model, states, _QUESTIONS[purpose], catalog, USAGE_KINDS[purpose])
     ranked = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)[:k]
     return [

@@ -96,12 +96,12 @@ _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 # A same-key dispatch while the owner is still executing is a caller bug
 # (gateway attempts are sequential); wait briefly for the stored outcome,
 # then fail loud instead of re-executing.
-_DEDUP_WAIT_STEP_S = 0.1
-_DEDUP_WAIT_ATTEMPTS = 30  # ~3s cap
+DEDUP_WAIT_STEP_S = 0.1
+DEDUP_WAIT_ATTEMPTS = 30  # ~3s cap
 # Bounded retry for a connection that dies mid-transaction (Task #1059): the
 # idempotency key makes a re-run safe — a committed claim replays/waits, an
 # uncommitted one re-claims and executes.
-_DISPATCH_RETRY_ATTEMPTS = 3
+DISPATCH_RETRY_ATTEMPTS = 3
 _DISPATCH_RETRY_BACKOFF_S = 0.5
 _sleep = asyncio.sleep
 
@@ -109,7 +109,7 @@ _sleep = asyncio.sleep
 ActiveOps = dict[str, tuple[str, float]]
 
 
-async def _run_arm(
+async def run_arm(
     kind: str,
     payload: dict[str, Any],
     *,
@@ -163,7 +163,7 @@ def _dispatch_sync(
 ) -> tuple[OpStatus, dict[str, object]]:
     """Bind blocking arms to this invocation's pool, authority, image and machine.
 
-    `_run_arm` retains these inputs across the executor boundary.
+    `run_arm` retains these inputs across the executor boundary.
     """
     return dispatch_sync(
         kind,
@@ -261,7 +261,7 @@ async def _dispatch(
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
-                return await _run_arm(
+                return await run_arm(
                     kind,
                     payload,
                     active_ops=active_ops,
@@ -290,12 +290,12 @@ async def _dispatch(
         # A capture for a shell session that no longer exists (capture_shell's
         # business miss) is a normal 'failed' result the gateway turns into its
         # 404; a resurrection refusal is a durable row verdict the caller
-        # reports by reason. Neither is a dispatch crash for _ops_route's
+        # reports by reason. Neither is a dispatch crash for ops_route's
         # catch-all to log.
         return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
 
 
-async def _dispatch_idempotent(
+async def dispatch_idempotent(
     kind: str,
     payload: dict[str, Any],
     key: str,
@@ -313,18 +313,18 @@ async def _dispatch_idempotent(
     """Dispatch one op with a dedup key, retrying a pass that dies on a
     closed DB connection.
 
-    The body is `_dispatch_idempotent_pass`; a `psycopg.OperationalError`
+    The body is `dispatch_idempotent_pass`; a `psycopg.OperationalError`
     (a connection that died between checkout and commit) re-runs the whole
-    pass up to `_DISPATCH_RETRY_ATTEMPTS` times. Re-running is safe: the
+    pass up to `DISPATCH_RETRY_ATTEMPTS` times. Re-running is safe: the
     dedup claim is atomic, so a retry either re-claims (original claim never
     committed) or observes the existing row and replays/waits for its outcome.
     Any other exception propagates unchanged.
     """
     if not is_op_kind(kind):
         return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
-    for attempt in range(_DISPATCH_RETRY_ATTEMPTS):
+    for attempt in range(DISPATCH_RETRY_ATTEMPTS):
         try:
-            return await _dispatch_idempotent_pass(
+            return await dispatch_idempotent_pass(
                 kind,
                 payload,
                 key,
@@ -339,18 +339,18 @@ async def _dispatch_idempotent(
                 local_machine=local_machine,
             )
         except psycopg.OperationalError:
-            if attempt + 1 >= _DISPATCH_RETRY_ATTEMPTS:
+            if attempt + 1 >= DISPATCH_RETRY_ATTEMPTS:
                 raise
             _log.warning(
                 "dispatch idempotent pass died with OperationalError (attempt %d/%d); retrying",
                 attempt + 1,
-                _DISPATCH_RETRY_ATTEMPTS,
+                DISPATCH_RETRY_ATTEMPTS,
             )
             await _sleep(_DISPATCH_RETRY_BACKOFF_S)
     raise AssertionError("unreachable")  # pragma: no cover — loop always returns or raises
 
 
-async def _dispatch_idempotent_pass(
+async def dispatch_idempotent_pass(
     kind: str,
     payload: dict[str, Any],
     key: str,
@@ -432,7 +432,7 @@ async def _dispatch_idempotent_pass(
             )
         return status, result
     # A concurrent duplicate waits for the recorded outcome, never executes twice.
-    for _ in range(_DEDUP_WAIT_ATTEMPTS):
+    for _ in range(DEDUP_WAIT_ATTEMPTS):
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT method, path, request_hash, op_status, response_body FROM api_idempotency "
@@ -449,14 +449,14 @@ async def _dispatch_idempotent_pass(
             if row[3] is not None:
                 result: dict[str, object] = row[4] or {}
                 return OpStatus(row[3]), result
-        await _sleep(_DEDUP_WAIT_STEP_S)
+        await _sleep(DEDUP_WAIT_STEP_S)
     return OpStatus.FAILED, {
         "error": f"idempotency key {key!r} is owned by another dispatch that never "
         "completed; outcome uncertain, inspect the stored operation before recovery"
     }
 
 
-async def _ops_route(
+async def ops_route(
     body: bytes,
     *,
     active_ops: ActiveOps,
@@ -505,8 +505,8 @@ async def _ops_route(
                 if envelope.idempotency_key is not None:
                     # Non-idempotent ops retried by the gateway carry a dedup key:
                     # first dispatch executes + stores, later same-key dispatches
-                    # replay (see _dispatch_idempotent).
-                    status, result = await _dispatch_idempotent(
+                    # replay (see dispatch_idempotent).
+                    status, result = await dispatch_idempotent(
                         envelope.kind,
                         envelope.payload,
                         envelope.idempotency_key,
@@ -610,7 +610,7 @@ async def _main(
             host=bind_host,
             extra_routes={
                 ("POST", "/ops"): functools.partial(
-                    _ops_route,
+                    ops_route,
                     database=database,
                     image=image,
                     executor=executor,
