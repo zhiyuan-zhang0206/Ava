@@ -15,7 +15,6 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
@@ -25,6 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import impersonation_handoff as _handoff
 from agent import impersonation_process as _relay_process
 from agent import state as _state
+from agent.messages import inbound_message
 from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.impersonation.notes import HandoffNotes
@@ -146,14 +146,13 @@ async def claim_gate(
                 ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
             ),
         )
-        message = HumanMessage(
-            id=f"impersonation-request:{request_receipt}",
+        message = inbound_message(
+            message_id=f"impersonation-request:{request_receipt}",
             content=head + content,
-            additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_source": session["source"],
-                "ava_inbound_body_start": len(head),
-            },
+            source=session["source"],
+            inbound_id=None,
+            body_start=len(head),
+            created_at=datetime.now(UTC),
         )
         return Command(
             update={

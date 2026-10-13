@@ -56,9 +56,8 @@ def _stamp_picked_up(kwargs: dict[str, object]) -> dict[str, object]:
 
 
 def _stamp_created_at(kwargs: dict[str, object], created_at: datetime | None) -> dict[str, object]:
-    """Add the ISO-8601 `ava_created_at` when a real creation time is known.
-    The timeline read side prefers it over its synthetic anchor+offset ordering;
-    omitting it (created_at None) leaves the message on the legacy fallback path."""
+    """Add the ISO-8601 `ava_created_at` when a creation time is supplied.
+    Omitting it (created_at None) leaves the message without a creation time."""
     if created_at is not None:
         kwargs["ava_created_at"] = created_at.isoformat()
     return kwargs
@@ -68,10 +67,11 @@ def inbound_message(
     *,
     content: str | list[dict[str, Any]],
     source: str,
-    inbound_id: int,
+    inbound_id: int | None,
     body_start: int,
     created_at: datetime | None = None,
     image_urls: list[str] | None = None,
+    message_id: str | None = None,
 ) -> HumanMessage:
     """Envelope-wrapped inbound message (product of `base/agents/messages/envelope.py:wrap_inbound`).
 
@@ -81,12 +81,18 @@ def inbound_message(
     then lists each image's reference url so the timeline can render a thumbnail
     without decoding the base64 that sits in `content`.
 
+    `inbound_id` is None only for an inbound that has no `inbound_messages`
+    row (the impersonation consent request); no id is invented for it.
+    `message_id` pins the LangChain message id when the caller needs a
+    deterministic one (the consent request is deduplicated by it).
+
     additional_kwargs:
         ava_msg_type: "inbound"
         ava_source: original source string ("system" / "agent:N" / "user")
         ava_inbound_id: inbound_messages.id of the source row — history
             readers (timeline, run timeline) correlate a message with its
             queue row through it (see agent/db/__init__.py:claim_inbound_batch).
+            Omitted when the inbound has no queue row.
         ava_inbound_body_start: index in the (first text block of) `content` where the
             sender's content begins, after the envelope header (`inbound_head`).
         ava_created_at: ISO-8601 wall-clock the inbound entered the conversation
@@ -101,14 +107,16 @@ def inbound_message(
     kwargs: dict[str, object] = {
         "ava_msg_type": AvaMsgType.INBOUND.value,
         "ava_source": source,
-        "ava_inbound_id": inbound_id,
         "ava_inbound_body_start": body_start,
     }
+    if inbound_id is not None:
+        kwargs["ava_inbound_id"] = inbound_id
     if image_urls:
         kwargs["ava_image_urls"] = image_urls
     # langchain types content as str | list[str | dict]; our block list is a
     # subset it accepts at runtime (a leading text block + native image blocks).
     return HumanMessage(
+        id=message_id,
         content=cast("str | list[str | dict[str, Any]]", content),
         additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
     )
@@ -196,10 +204,10 @@ def exec_output_message(
     tool_call_id: str,
     status: ExecStatus,
     body_start: int,
+    created_at: datetime,
     exec_ms: int | None = None,
     started_at: datetime | None = None,
     sdk_calls: list[dict[str, Any]] | None = None,
-    created_at: datetime | None = None,
 ) -> ToolMessage:
     """Envelope-wrapped stdout/stderr block after subprocess exec completes
     (product of `agent/graph/exec/node.py:wrap_code_output`).

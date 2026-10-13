@@ -2,11 +2,12 @@
 
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -18,6 +19,7 @@ from ava.sdk_surface.process_context import process_clients
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.messages.kwargs import read_ava_kwargs
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
@@ -135,6 +137,30 @@ async def test_unfixable_syntax_does_not_skip_sibling(
     _, first, second = result["messages"]
     assert "SyntaxError" in first.content
     assert "sibling ran" in second.content
+
+
+async def test_unfixable_single_call_error_result_carries_creation_time(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: Runtime[AvaContext],
+) -> None:
+    from ava_builtins.plugins.ava_syntax_fix import agent_runtime as syntax
+
+    def unchanged(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
+        return code, []
+
+    monkeypatch.setattr(syntax, "_apply_fix_pipeline", unchanged)
+    monkeypatch.setattr(syntax, "_llm_repair_syntax", AsyncMock(return_value=None))
+    before = datetime.now(UTC)
+    update = await syntax.syntax_fix_before_exec(_state("return"), runtime, {})
+    assert update is not None
+    assert update["goto"] == "after_exec"
+    _, error = update["messages"]
+    assert isinstance(error, ToolMessage)
+    kwargs = read_ava_kwargs(error)
+    assert kwargs.get("ava_msg_type") == "exec_output"
+    created = kwargs.get("ava_created_at")
+    assert created is not None
+    assert before <= datetime.fromisoformat(created) <= datetime.now(UTC)
 
 
 def _config() -> RunnableConfig:
