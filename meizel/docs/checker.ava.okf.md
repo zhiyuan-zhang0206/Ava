@@ -17,8 +17,7 @@ facts from source and fails when a fact is not covered by a declaration. The
 decision and its rationale live in
 [the accepted decision](../../docs/decisions/engineering/design/simplification/2026-10-11-meizel-nested-dag-locality.md).
 
-The checker uses only the standard library and reads source without importing
-it. The node universe is `git ls-files -z`; facts come from tracked first-party
+The checker uses only the standard library and never imports the source. The node universe is `git ls-files -z`; facts come from tracked first-party
 `.py` files. Run from the repository root.
 
 ```
@@ -30,8 +29,7 @@ python -m meizel roles list <role>... | check | write
 ```
 
 `--repo <root>` selects another checkout; `--jobs N` sets parser processes
-(default up to 8). Exit codes: 0 clean, 1 violations, 2 the tool could not run
-(git failure, unparsable source, unknown path).
+(default up to 8). Exit codes: 0 clean, 1 violations, 2 the tool could not run.
 
 ## Commands
 
@@ -43,14 +41,13 @@ python -m meizel roles list <role>... | check | write
   boundary in both directions.
 - `sync --prune` removes declared edges and `[loads]` entries that no fact
   needs, repeating until nothing stale remains. Comments outside the edited
-  lists survive. A manifest left empty is deleted. Adding an edge is always a
-  manual manifest edit.
+  lists survive; an emptied manifest is deleted. Adding an edge is a manual edit.
 - `bootstrap --out DIR` writes one `meizel.toml` per directory, mirrored under
   `DIR`, from the current fact edges, plus `DIR/report.json`: per-directory edge
   counts, transitive-reduction sizes, strongly connected components with a
-  shortest cycle and one witness fact per edge, cycles that need test files,
+  shortest cycle and a witness fact per edge, cycles that need test files,
   exports blocked by underscore children, and violation counts by code. The
-  repository is left untouched.
+  repository is untouched.
 
 ## Fact edges
 
@@ -103,8 +100,8 @@ writing a first-party module into `sys.modules` by name (`sys.modules["a.b"] = .
 `del`, `pop`, `setdefault`, `update`, `monkeypatch.setitem/delitem(sys.modules, "a.b", ...)`,
 `patch.dict(sys.modules, {...})`), which belongs to the same class as a string patch
 target. Reading `sys.modules` (`sys.modules.get(...)`, `"a.b" in sys.modules`, a subscript
-read) is not restricted. A file that owns
-a dynamic load declares it:
+read) is not restricted. A file that owns a
+dynamic load declares it:
 
 ```toml
 [loads]
@@ -124,10 +121,14 @@ named by operator configuration) declares it under `[external]` with a reason:
 ```
 
 The file is then exempt from `exec`, `compile` and the dynamic-import forms
-(`import_module`, `__import__`, `runpy.*`, `spec_from_file_location`); none of them makes an
+(`import_module`, `__import__`, `runpy.*`, `spec_from_file_location`); none makes an
 edge. Other restricted forms (`sys.modules` writes, `python -c` imports, string patches)
-still apply. The reason must be non-empty, and an entry whose file has none of the exempt
+still apply. The reason must be non-empty; an entry whose file has none of the exempt
 forms is `stale-external`.
+
+Plugin and schedule-script discovery is `[external]`, never `[loads]`: built-in plugins
+and `$AVA_HOME/plugins/` alike are discovered content core does not depend on, as is
+`schedules/` for the schedule engine.
 
 ## Manifest
 
