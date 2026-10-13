@@ -1,18 +1,16 @@
-exports = ["computer.py", "control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_parsers.py", "impersonation_relay.py", "parsers.py", "pty.py"]
+exports = ["computer.py", "control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_parsers.py", "impersonation_relay.py", "parsers.py", "pty.py", "timeline.py"]
 
 [uses]
 "impersonation.py" = ["control.py"]
 "impersonation_parsers.py" = ["impersonation.py", "impersonation_relay.py"]
 "impersonation_relay.py" = ["impersonation.py", "impersonation_adapters.py"]
 "parsers.py" = ["control.py", "notices.py", "timeline.py"]
-"tests" = ["control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_relay.py", "notices.py", "parsers.py", "timeline.py"]
+"tests" = ["control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_relay.py", "notices.py", "timeline.py"]
 
 [external]
 "impersonation.py" = "runs the Python the operator pipes in or names as a file"
 
 [debt.private-name]
 "tests/test_delivery.py -> impersonation_relay.py#_MIN_EMIT_INTERVAL_SECONDS" = 1
-"tests/test_external_caller_cli.py -> parsers.py#_h_agents_kill" = 1
-"tests/test_external_caller_cli.py -> parsers.py#_h_agents_send" = 2
 "tests/test_impersonation_bridge.py -> impersonation_relay.py#_MIN_EMIT_INTERVAL_SECONDS" = 2
 "tests/test_impersonation_bridge_part2.py -> impersonation_relay.py#_MIN_EMIT_INTERVAL_SECONDS" = 1
