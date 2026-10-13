@@ -14,8 +14,8 @@ import pytest
 from loguru import logger
 
 from agent.graph.exec._child_boundary import result_from_payload
-from agent.graph.exec._result import _ExecCrashed, _ExecDone
-from agent.graph.exec._subprocess import _run_in_subprocess
+from agent.graph.exec._result import ExecCrashed, ExecDone
+from agent.graph.exec._subprocess import run_in_subprocess
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.memory_pressure import PressureLevel
@@ -165,7 +165,7 @@ def test_a_guard_killed_run_reports_the_reason_not_a_missing_envelope() -> None:
         timed_out=False,
         memory_guard_notice="[exec killed by the host memory guard: because]",
     )
-    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result, ExecCrashed)
     assert "partial output" in result.output
     assert "killed by the host memory guard" in result.output
     assert "without writing a result envelope" not in str(result.exc)
@@ -174,7 +174,7 @@ def test_a_guard_killed_run_reports_the_reason_not_a_missing_envelope() -> None:
 
 def test_without_a_notice_a_missing_envelope_keeps_its_generic_error() -> None:
     result = result_from_payload("", None, cancelled=False, timed_out=False)
-    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result, ExecCrashed)
     assert "without writing a result envelope" in str(result.exc)
 
 
@@ -189,7 +189,7 @@ class _CriticalOs:
 
 
 async def _run(tmp_path: Path, code: str, *, database_gate: ProcessDbGate) -> Any:
-    result, _payload = await _run_in_subprocess(
+    result, _payload = await run_in_subprocess(
         Database.from_settings(gate=database_gate),
         code,
         exec_context(424242),
@@ -247,14 +247,14 @@ async def test_a_real_exec_is_killed_with_its_reason_and_the_host_keeps_serving(
         assert victim.agent_id == 424242
 
         result = await run
-        assert isinstance(result, _ExecCrashed)
+        assert isinstance(result, ExecCrashed)
         assert "killed by the host memory guard" in result.output
         assert "working" in result.output
         assert "without writing a result envelope" not in str(result.exc)
         assert await _gone(descendant_pid)
 
         after = await _run(tmp_path, "print('still serving')", database_gate=database_gate)
-        assert isinstance(after, _ExecDone)
+        assert isinstance(after, ExecDone)
     finally:
         run.cancel()
         with contextlib.suppress(asyncio.CancelledError):

@@ -108,7 +108,7 @@ def _field_reducer(model_fields: dict[str, Any], key: str) -> Callable[[Any, Any
     for m in field_info.metadata:
         if callable(m) and not isinstance(m, type):
             return m
-        if _state._is_messages_reducer_form(m):
+        if _state.is_messages_reducer_form(m):
             # The messages channel's delta form (write
             # switch, task #3180): co-writes merge
             # through the guarded single-merge, same
@@ -117,7 +117,7 @@ def _field_reducer(model_fields: dict[str, Any], key: str) -> Callable[[Any, Any
     return None
 
 
-def _merge_result(
+def merge_result(
     update: dict[str, Any],
     key_writer: dict[str, str],
     result: dict[str, Any],
@@ -246,7 +246,7 @@ def make_hook_runner(
                 detail=f"{hook.name} wrote {','.join(sorted(result))}",  # pyright: ignore[reportUnknownArgumentType]
                 model=runtime.context.require_agent().brain.llm_model,
             )
-            _merge_result(update, key_writer, result, hook.name, hook_name, model_fields)
+            merge_result(update, key_writer, result, hook.name, hook_name, model_fields)
         _log_hook_timings(hook_name, timings)
         if "goto" in update:
             next_node = update.pop("goto")

@@ -14,7 +14,7 @@ from agent.execution import owner_child
 
 
 def test_normal_stop_joins_the_actual_watchdog() -> None:
-    watchdog = owner_child._DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=10))
+    watchdog = owner_child.DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=10))
     watchdog.close()
     assert watchdog._finished.is_set()
     assert not watchdog._thread.is_alive()
@@ -40,11 +40,11 @@ def test_primary_execution_error_retains_the_watchdog_secondary(
     ) -> None:
         return None
 
-    monkeypatch.setattr(owner_child._DeadlineWatchdog, "_wait_until_deadline", failed_wait)
+    monkeypatch.setattr(owner_child.DeadlineWatchdog, "_wait_until_deadline", failed_wait)
     monkeypatch.setattr(owner_child.sys, "excepthook", report)
     with (
         pytest.raises(ValueError) as observed,
-        owner_child._DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=10)) as watchdog,
+        owner_child.DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=10)) as watchdog,
     ):
         assert watchdog._finished.wait(1)
         raise primary
@@ -63,9 +63,9 @@ def test_uncooperative_worker_is_not_reported_as_joined(
         entered.set()
         assert release.wait(5)
 
-    monkeypatch.setattr(owner_child._DeadlineWatchdog, "_wait_until_deadline", blocked)
-    monkeypatch.setattr(owner_child, "_WATCHDOG_JOIN_S", 0.02)
-    watchdog = owner_child._DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=10))
+    monkeypatch.setattr(owner_child.DeadlineWatchdog, "_wait_until_deadline", blocked)
+    monkeypatch.setattr(owner_child, "WATCHDOG_JOIN_S", 0.02)
+    watchdog = owner_child.DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=10))
     try:
         assert entered.wait(1)
         started = time.monotonic()
@@ -90,9 +90,9 @@ def test_worker_unknown_is_reported_immediately_and_collected(
     def report(_kind: type[BaseException], error: BaseException, _tb: TracebackType | None) -> None:
         reported.append(error)
 
-    monkeypatch.setattr(owner_child._DeadlineWatchdog, "_wait_until_deadline", failed_wait)
+    monkeypatch.setattr(owner_child.DeadlineWatchdog, "_wait_until_deadline", failed_wait)
     monkeypatch.setattr(owner_child.sys, "excepthook", report)
-    watchdog = owner_child._DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=10))
+    watchdog = owner_child.DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=10))
     assert watchdog._finished.wait(1)
     assert reported == [failure]
     assert watchdog._finished.is_set() and watchdog._error is failure

@@ -85,7 +85,7 @@ class MemoryState(BaseModel):
 
     `injected_paths` are memory-pool note paths already surfaced by passive
     recall this session, union-accumulated across turns (see
-    `_memory_state_merge`) so the same note is not re-injected for the agent's
+    `memory_state_merge`) so the same note is not re-injected for the agent's
     life. Gated by `passive_memory_recall_enabled`; stays
     empty when recall is off.
     """
@@ -93,7 +93,7 @@ class MemoryState(BaseModel):
     injected_paths: set[str] = Field(default_factory=set)
 
 
-def _memory_state_merge(old: MemoryState, new: MemoryState) -> MemoryState:
+def memory_state_merge(old: MemoryState, new: MemoryState) -> MemoryState:
     """Reducer for the `memory` channel: union the injected-path sets. The recall
     hook writes only the fresh paths each turn; this accumulates them across turns
     so a note recalled once stays deduped."""

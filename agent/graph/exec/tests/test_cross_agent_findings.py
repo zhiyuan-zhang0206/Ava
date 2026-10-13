@@ -26,7 +26,7 @@ from psycopg_pool import AsyncConnectionPool
 
 import agent.graph.exec.node as agent_graph_exec_node
 from agent.graph import claim_node, exec_node
-from agent.graph.exec._result import _ExecDone
+from agent.graph.exec._result import ExecDone
 from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import AvaContext
@@ -60,10 +60,10 @@ def _scan_on_with_exec_child_stubbed(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def _child_that_prints_ok(
         *_args: object, **_kwargs: object
-    ) -> tuple[_ExecDone, dict[str, Any], int, None, None]:
-        return _ExecDone(output="ok"), {}, 5, None, None
+    ) -> tuple[ExecDone, dict[str, Any], int, None, None]:
+        return ExecDone(output="ok"), {}, 5, None, None
 
-    monkeypatch.setattr(agent_graph_exec_node, "_run_agent_code", _child_that_prints_ok)
+    monkeypatch.setattr(agent_graph_exec_node, "run_agent_code", _child_that_prints_ok)
 
 
 class _Turn:

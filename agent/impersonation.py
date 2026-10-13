@@ -29,7 +29,7 @@ from agent.nodes import BEFORE_LLM, END, NodeName
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.relay import record_relay_failure
-from base.agents.impersonation.relay import stamp_relay_failure as _stamp_relay_failure
+from base.agents.impersonation.relay import stamp_relay_failure as stamp_relay_failure
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
@@ -317,7 +317,7 @@ async def settle_checkpoint(
 
 # ── Bound relay process: establishment, supervision, teardown ─────────────────
 
-_RELAY_READY_TIMEOUT_S = 30.0
+RELAY_READY_TIMEOUT_S = 30.0
 _RELAY_READY_POLL_S = 1.0
 
 
@@ -363,7 +363,7 @@ def _await_session_relay(
     if session["automatic"]:
         from base.agents.impersonation import native_status as read_status
 
-        deadline = time.monotonic() + _RELAY_READY_TIMEOUT_S
+        deadline = time.monotonic() + RELAY_READY_TIMEOUT_S
         while not _heartbeat_fresh(session["relay_heartbeat_at"]) and time.monotonic() < deadline:
             time.sleep(_RELAY_READY_POLL_S)
             latest = read_status(db, bus, incarnation.agent_id, incarnation)
@@ -425,7 +425,7 @@ def _establish_codex_relay(
         minted["relay_generation"],
     )
     relays.children[incarnation.agent_id] = child
-    deadline = time.monotonic() + _RELAY_READY_TIMEOUT_S
+    deadline = time.monotonic() + RELAY_READY_TIMEOUT_S
     while time.monotonic() < deadline:
         if child.process.poll() is not None:
             relays.children.pop(incarnation.agent_id, None)
@@ -628,14 +628,14 @@ async def _record_stale_relay(
         not confirmed_exit
         and child is not None
         and child.process.poll() is None
-        and time.monotonic() - child.spawned_at < _RELAY_READY_TIMEOUT_S
+        and time.monotonic() - child.spawned_at < RELAY_READY_TIMEOUT_S
     ):
         return
     minted_at = session.get("relay_minted_at")
     if (
         not confirmed_exit
         and minted_at is not None
-        and (datetime.now(UTC) - minted_at).total_seconds() < _RELAY_READY_TIMEOUT_S
+        and (datetime.now(UTC) - minted_at).total_seconds() < RELAY_READY_TIMEOUT_S
     ):
         return
     await asyncio.to_thread(
@@ -646,7 +646,7 @@ async def _record_stale_relay(
         "relay unavailable; automatic recovery unsupported",
     )
     await asyncio.to_thread(
-        _stamp_relay_failure,
+        stamp_relay_failure,
         db,
         session,
         agent_id,

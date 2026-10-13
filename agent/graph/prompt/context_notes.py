@@ -197,7 +197,7 @@ def timezone_note(ctx: AvaContext) -> HumanMessage | None:
     )
 
 
-def _own_label(ctx: AvaContext, agent_id: int) -> str | None:
+def own_label(ctx: AvaContext, agent_id: int) -> str | None:
     """The agent's current label, whitespace-normalized, or None.
 
     A missing row or empty label omits the optional clause. SQL and programming
@@ -213,7 +213,7 @@ def _own_label(ctx: AvaContext, agent_id: int) -> str | None:
     return " ".join(str(row[0]).split())
 
 
-def _machine_clause(ctx: AvaContext) -> str | None:
+def machine_clause(ctx: AvaContext) -> str | None:
     """The host's machine name, whitespace-normalized, or None when unset.
 
     An unset machine name omits this optional clause; other failures propagate."""
@@ -263,10 +263,10 @@ def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
     if aid is None:
         return None
     clauses: list[str] = []
-    label = _own_label(ctx, aid)
+    label = own_label(ctx, aid)
     if label:
         clauses.append(f"label: {label}")
-    machine = _machine_clause(ctx)
+    machine = machine_clause(ctx)
     if machine:
         clauses.append(f"machine: {machine}")
     detail = f" ({', '.join(clauses)})" if clauses else ""

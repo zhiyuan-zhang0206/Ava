@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent.graph.exec import _process
-from agent.graph.exec._owned_run import _OwnedRun
-from agent.graph.exec._subprocess import _finish_failed_run
+from agent.graph.exec._owned_run import OwnedRun
+from agent.graph.exec._subprocess import finish_failed_run
 from base.native_process.turn_identity import HostedServiceResources
 
 
@@ -91,8 +91,8 @@ async def test_native_unknown_keeps_original_identity_and_body_primary() -> None
     proc.wait.assert_not_called()
 
 
-def _managed(**fields: Any) -> _OwnedRun:
-    owner = object.__new__(_OwnedRun)
+def _managed(**fields: Any) -> OwnedRun:
+    owner = object.__new__(OwnedRun)
     defaults: dict[str, Any] = {
         "request": Path("pending-managed-request"),
         "request_id": "original",
@@ -238,7 +238,7 @@ async def test_unknown_stop_failure_cannot_be_erased_by_successful_stage_tasks()
     failures = await _process.settle_resources(root, reap, owner, tail, request_stop=True)
     assert len(failures) == 1 and failures[0].error is sentinel
     body = ValueError("original business failure")
-    settled = await _finish_failed_run(body, root, reap, owner, tail, reader, resources=None)
+    settled = await finish_failed_run(body, root, reap, owner, tail, reader, resources=None)
     assert not settled
     assert "unknown stop observation bug" in body.__notes__[0]
     assert owner.teardown_task is not None

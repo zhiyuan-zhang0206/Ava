@@ -20,9 +20,9 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.db import ClaimedInbound, finalize_claimed_inbounds
-from agent.graph.claim._batch import _defer_chats_to_pending
-from agent.graph.claim._dispatch import _BatchState
-from agent.graph.claim._routing import ClaimGoto, _Routing
+from agent.graph.claim._batch import defer_chats_to_pending
+from agent.graph.claim._dispatch import BatchState
+from agent.graph.claim._routing import ClaimGoto, Routing
 from agent.graph.hooks.compact import (
     build_compact_transition,
     emit_compaction_monitoring,
@@ -73,7 +73,7 @@ def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
     return kept
 
 
-def _cancel_outcome(ctx: AvaContext, agent_id: int, st: _BatchState) -> _Outcome:
+def _cancel_outcome(ctx: AvaContext, agent_id: int, st: BatchState) -> _Outcome:
     """The cancel path: pause (or revive when a chat is committed in the same batch)."""
     # Both branches below drop any pending compact payload instead of
     # applying it — a run that generated a summary this pass can never
@@ -99,7 +99,7 @@ def _cancel_outcome(ctx: AvaContext, agent_id: int, st: _BatchState) -> _Outcome
 
 
 async def _compact_outcome(
-    ctx: AvaContext, state: _state.AgentState, agent_id: int, st: _BatchState
+    ctx: AvaContext, state: _state.AgentState, agent_id: int, st: BatchState
 ) -> _Outcome:
     """The compact path: summary transition, chat deferral, checkpoint trim, version bump."""
     assert st.compact_payload is not None  # noqa: S101
@@ -131,7 +131,7 @@ async def _compact_outcome(
     # itself is a clean wipe: only the summary and framework lifecycle
     # markers (resurrect / fork) ride the tail — never raw conversation.
     if st.committed_chat_ids:
-        await _defer_chats_to_pending(
+        await defer_chats_to_pending(
             ctx.ops_pool, agent_id, st.committed_chat_ids, incarnation=ctx.original_incarnation
         )
         st.new_msgs = _markers_only(st.new_msgs)
@@ -184,7 +184,7 @@ async def _compact_outcome(
     )
 
 
-def _fallthrough_outcome(st: _BatchState) -> _Outcome:
+def _fallthrough_outcome(st: BatchState) -> _Outcome:
     """Normal fallthrough: the batch's own update, with the END snapshot flag."""
 
     # END snapshot needed when claim routes to END with new markers appended.
@@ -207,7 +207,7 @@ def _fallthrough_outcome(st: _BatchState) -> _Outcome:
     )
 
 
-def _veto_reentry(routing: _Routing, st: _BatchState) -> bool:
+def _veto_reentry(routing: Routing, st: BatchState) -> bool:
     return (
         routing.terminate_vetoed_by_pending
         and not st.committed_chat_ids
@@ -216,7 +216,7 @@ def _veto_reentry(routing: _Routing, st: _BatchState) -> bool:
 
 
 def _idle_restart_gate(
-    state: _state.AgentState, batch: list[ClaimedInbound], st: _BatchState
+    state: _state.AgentState, batch: list[ClaimedInbound], st: BatchState
 ) -> bool:
     return (
         state.halted
@@ -230,8 +230,8 @@ async def decide(
     state: _state.AgentState,
     agent_id: int,
     batch: list[ClaimedInbound],
-    st: _BatchState,
-    routing: _Routing,
+    st: BatchState,
+    routing: Routing,
 ) -> _Outcome:
     """Post-dispatch decision: chain of short-circuit rules → single Command.
 

@@ -43,7 +43,7 @@ async def _await_model_message(operation: Awaitable[AIMessage], timeout: float) 
         raise normalized from exc
 
 
-async def _consume_llm(
+async def consume_llm(
     bound_llm: object,
     messages: list[AnyMessage],
     *,
@@ -56,7 +56,7 @@ async def _consume_llm(
     from base.lm.registry import resolve_setting
 
     model = agent.brain.llm_model
-    return await _consume_stream_with_stall_timeout(
+    return await consume_stream_with_stall_timeout(
         bound_llm.astream(messages).__aiter__(),  # type: ignore[attr-defined]
         chunks=chunks,
         handler=handler,
@@ -81,7 +81,7 @@ async def _consume_llm(
     )
 
 
-async def _consume_stream_with_stall_timeout(
+async def consume_stream_with_stall_timeout(
     stream_iter: AsyncIterator[AIMessage],
     *,
     chunks: list[AIMessageChunk],
@@ -108,7 +108,7 @@ async def _consume_stream_with_stall_timeout(
 
     Also records the stream's decode window: monotonic timestamps of the
     first and last chunk arrival (`first_ts` / `last_ts`), returned as a
-    `(first, last)` pair so `_stream_llm` can stamp
+    `(first, last)` pair so `stream_llm` can stamp
     `handler.llm_decode_ms = (last - first) * 1000`. An empty stream
     (StopAsyncIteration before any chunk) returns `(None, None)` — there is
     no honest decode window, so the payload carries NULL and the ops panel
@@ -186,7 +186,7 @@ def _next_timeout(
     return stage_timeout, False
 
 
-async def _stream_llm(
+async def stream_llm(
     llm: BaseChatModel,
     messages: list[AnyMessage],
     *,
@@ -202,7 +202,7 @@ async def _stream_llm(
     """
     call_started = time.monotonic()
     runnable = llm.bind_tools([execute_code])
-    first_ts, last_ts = await _consume_llm(
+    first_ts, last_ts = await consume_llm(
         runnable, messages, chunks=chunks, handler=handler, agent=agent, catalog=catalog
     )
     handler.llm_latency_ms = (time.monotonic() - call_started) * 1000.0

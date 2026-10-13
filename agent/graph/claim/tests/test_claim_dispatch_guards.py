@@ -10,7 +10,7 @@ from agent.graph import claim_node
 from agent.graph.claim import node
 from agent.state import AgentState
 from agent.tests.claim.claim_support import (
-    _await_inbound_visible,
+    await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
     thread_config,
@@ -113,7 +113,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     chat_id = insert_inbound_message(
         db_conn, tid, "message after the claim", source="user", bus=event_bus, database=database
     )
-    await _await_inbound_visible(aops_pool, chat_id)
+    await await_inbound_visible(aops_pool, chat_id)
     runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
 
     async def fake_claim(
@@ -198,7 +198,7 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     chat_id = insert_inbound_message(
         db_conn, tid, "message in the batch", source="user", bus=event_bus, database=database
     )
-    await _await_inbound_visible(aops_pool, chat_id)
+    await await_inbound_visible(aops_pool, chat_id)
     runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
 
     async def fake_claim(

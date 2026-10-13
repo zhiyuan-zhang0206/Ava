@@ -281,7 +281,7 @@ def auto_compact_will_fire(state: AgentState, agent: AgentSlices, *, catalog: Mo
     return bool(conversation_messages(state.messages))
 
 
-async def _auto_compact_summary(
+async def auto_compact_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
     content_count: int,
@@ -394,7 +394,7 @@ async def auto_compact_for_llm(
             resources=runtime.context.hosted_resources,
         ) as interrupted:
             summary = await interruptible_model(
-                _auto_compact_summary(
+                auto_compact_summary(
                     list(state.messages),
                     llm,
                     len(content_msgs),
@@ -548,7 +548,7 @@ COMPACT_REMINDER_NOTE = (
 )
 
 
-def _compact_reminder_update(
+def compact_reminder_update(
     state: AgentState, agent: AgentSlices, *, catalog: ModelCatalog
 ) -> dict | None:
     """The one-time wind-down reminder, injected when occupancy sits in the band
@@ -631,7 +631,7 @@ class _CompactReminderHook(Hook):
             state, agent, catalog=catalog
         ):
             return None
-        return _compact_reminder_update(state, agent, catalog=catalog)
+        return compact_reminder_update(state, agent, catalog=catalog)
 
 
-_compact_reminder = _CompactReminderHook()
+compact_reminder = _CompactReminderHook()

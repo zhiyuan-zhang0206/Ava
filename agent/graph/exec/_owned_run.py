@@ -45,7 +45,7 @@ from base.paths import exec_run_dir
 
 from ._child_boundary import build_child_env, read_result_envelope, result_from_payload
 from ._output_pipe import ExecOutputPipe
-from ._result import _ExecCrashed, _ExecResult
+from ._result import ExecCrashed, ExecResult
 from ._stream import ExecOutputChunkPublisher, StreamingTextIO
 from .protocol import ResultPayload, write_request
 
@@ -73,7 +73,7 @@ def managed_target(
         return target
 
 
-def _register_attached(db: Database, context: OwnerContext, ready: OwnerReady) -> None:
+def register_attached(db: Database, context: OwnerContext, ready: OwnerReady) -> None:
     """Publish only an attached allocation; force can win before this transaction."""
     with db.write_transaction() as conn:
         target = RuntimeIncarnation(context.agent_id, context.generation, context.runtime_owner)
@@ -109,7 +109,7 @@ def _complete(db: Database, context: OwnerContext, attached: ExecAllocation) -> 
         )
 
 
-class _OwnedRun:
+class OwnedRun:
     """One managed exec: one object retains the exact allocation and subprocess ownership."""
 
     def __init__(
@@ -209,7 +209,7 @@ class _OwnedRun:
         if self.registration is not None:
             raise RuntimeError("managed exec registration has already started")
         self.registration = asyncio.create_task(
-            asyncio.to_thread(_register_attached, self.db, self.context, ready),
+            asyncio.to_thread(register_attached, self.db, self.context, ready),
             name=f"exec-owner-register-{self.request_id}",
         )
         self._register(self.registration)
@@ -356,7 +356,7 @@ class _OwnedRun:
 
     async def collect(
         self, proc: subprocess.Popen[bytes]
-    ) -> tuple[_ExecResult, ResultPayload | None]:
+    ) -> tuple[ExecResult, ResultPayload | None]:
         """The exact close receipt and the result envelope of an owner that exited."""
         reader = self.reader
         if self.ready is None or proc.returncode != 0 or reader is None:
@@ -485,8 +485,8 @@ class _OwnedRun:
                 self.scope.unresolved[self.request] = self.ready
         await asyncio.shield(self.attached_completion())
 
-    def crashed(self, label: str, exc: Exception) -> tuple[_ExecCrashed, None]:
-        return _ExecCrashed(output=f"{label}: {exc}\n{self.stream.getvalue()}", exc=exc), None
+    def crashed(self, label: str, exc: Exception) -> tuple[ExecCrashed, None]:
+        return ExecCrashed(output=f"{label}: {exc}\n{self.stream.getvalue()}", exc=exc), None
 
 
 async def run_owned(
@@ -503,9 +503,9 @@ async def run_owned(
     exec_dir: Path | None,
     config_overlay: dict[str, object] | None,
     birth_config: dict[str, object] | None,
-) -> tuple[_ExecResult, ResultPayload | None]:
+) -> tuple[ExecResult, ResultPayload | None]:
     """Run one managed exec with its invocation-owned output pipe and completion tasks."""
-    owned = _OwnedRun(
+    owned = OwnedRun(
         db,
         target,
         code,

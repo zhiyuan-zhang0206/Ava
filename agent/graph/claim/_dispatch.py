@@ -40,11 +40,11 @@ from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.packages.plugins.extensions import ExtensionRegistry
 
-from ._routing import _ROUTING_KINDS, ClaimGoto, _Routing
+from ._routing import ROUTING_KINDS, ClaimGoto, Routing
 
 
 @dataclass
-class _BatchState:
+class BatchState:
     """Mutable accumulator carried through one dispatch pass.
 
     Initialised with the inheritable channel values from AgentState; mutated
@@ -86,7 +86,7 @@ class _BatchState:
             )
 
 
-def _by_who(source: str) -> str:
+def by_who(source: str) -> str:
     """Render "by X" in lifecycle marker text.
 
     'self' (ava.self.terminate / restart called by agent itself) → "yourself"
@@ -123,7 +123,7 @@ def _is_sensitive_overlay_key(key: str) -> bool:
     return any(fragment in normalized for fragment in _SENSITIVE_OVERLAY_KEY_FRAGMENTS)
 
 
-def _render_restart_completed_marker(
+def render_restart_completed_marker(
     source: str, payload: dict[str, object] | None = None, *, timestamp_prefix: Callable[[], str]
 ) -> str:
     """Lifecycle marker text for restart_completed inbound.
@@ -133,7 +133,7 @@ def _render_restart_completed_marker(
     - `system:update` → "You have been updated and restarted" (no actor suffix —
       a system-driven cluster rollout has no single human actor). This is the
       marker each agent wakes to on the new code after a rollout.
-    - Any other source → "You have been restarted by {_by_who(source)}"
+    - Any other source → "You have been restarted by {by_who(source)}"
 
     Payload contains ``config_overlay`` (`ava.self.restart(config_overlay=...)` path) →
     append ``with config {k=v, ...}`` at the end so the agent immediately sees the
@@ -147,7 +147,7 @@ def _render_restart_completed_marker(
     if source == "system:update":
         base = f"{ts}You have been updated and restarted"
     else:
-        base = f"{ts}You have been restarted by {_by_who(source)}"
+        base = f"{ts}You have been restarted by {by_who(source)}"
 
     if payload:
         overlay = payload.get("config_overlay")
@@ -164,7 +164,7 @@ def _render_restart_completed_marker(
 async def _handle_chat(
     ctx: AvaContext,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
     st.append_scanned(
@@ -214,7 +214,7 @@ def _task_id_from_system_note(payload: dict[str, object] | None, tag: NoteTag) -
 async def _handle_system_note(
     ctx: AvaContext,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """SYSTEM_NOTE inbound: render as a system note (system_marker), not chat.
 
@@ -239,7 +239,7 @@ async def _handle_system_note(
     )
 
 
-def _close_superseded_compact(ctx: AvaContext, agent_id: int, st: _BatchState) -> None:
+def _close_superseded_compact(ctx: AvaContext, agent_id: int, st: BatchState) -> None:
     """Close the tracked compact run sitting in the payload slot.
 
     A later compact outcome in this dispatch pass supersedes it: the slot
@@ -259,7 +259,7 @@ async def _handle_compact_summary(
     ctx: AvaContext,
     agent_id: int,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """COMPACT_SUMMARY: agent-authored summary — used directly, no LLM run."""
     _close_superseded_compact(ctx, agent_id, st)
@@ -271,12 +271,12 @@ async def _handle_compact_request(
     agent_id: int,
     state: _state.AgentState,
     _item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """COMPACT_REQUEST: run Compaction LLM to generate summary.
 
     Dropped under an exit winner (the guard is in dispatch_batch via
-    _Routing.is_winner). An empty conversation is a normal state for a
+    Routing.is_winner). An empty conversation is a normal state for a
     user-issued /compact (fresh agent), not a fault — consumed as a logged
     no-op.
     """
@@ -342,7 +342,7 @@ async def _handle_compact_request(
 async def _handle_cancel(
     ctx: AvaContext,
     agent_id: int,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """CANCEL: pause agent — stop in-flight work, idle. No lifecycle marker."""
     assert ctx.event_publisher is not None, "_handle_cancel requires ctx.event_publisher"  # noqa: S101
@@ -354,7 +354,7 @@ async def _handle_heartbeat(
     ctx: AvaContext,
     agent_id: int,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
     state: _state.AgentState,
 ) -> None:
     """HEARTBEAT: check-in delivered as a system note.
@@ -386,7 +386,7 @@ async def _handle_heartbeat(
 async def _handle_terminate(
     ctx: AvaContext,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """TERMINATE: append lifecycle marker, route to END.
 
@@ -395,7 +395,7 @@ async def _handle_terminate(
     """
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix(ctx)}Termination was accepted from {_by_who(item.source)}",
+            content=f"{_ts_prefix(ctx)}Termination was accepted from {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_TERMINATE,
             created_at=datetime.now(UTC),
         )
@@ -403,16 +403,16 @@ async def _handle_terminate(
     st.next_goto = END
 
 
-async def _handle_restart(
+async def handle_restart(
     ctx: AvaContext,
     _agent_id: int,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """Render restart acceptance and end this invocation. The host applies the durable command after the graph returns and the checkpoint flushes."""
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix(ctx)}Restart was accepted from {_by_who(item.source)}",
+            content=f"{_ts_prefix(ctx)}Restart was accepted from {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_RESTART,
             created_at=datetime.now(UTC),
         )
@@ -424,11 +424,11 @@ async def _handle_restart(
 async def _handle_restart_stateful(
     state: _state.AgentState,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """Set restart_preserves_idle and update_initiated from state context.
 
-    Separated from _handle_restart because these decisions depend on
+    Separated from handle_restart because these decisions depend on
     *state* (AgentState), which the dispatch loop already has.
     """
     st.restart_preserves_idle = (state.halted or not state.messages) and item.source not in (
@@ -443,7 +443,7 @@ async def _handle_restart_stateful(
 async def _handle_restart_completed(
     ctx: AvaContext,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """RESTART_COMPLETED: append lifecycle marker (correct tense).
 
@@ -452,7 +452,7 @@ async def _handle_restart_completed(
     """
     st.new_msgs.append(
         system_note_message(
-            content=_render_restart_completed_marker(
+            content=render_restart_completed_marker(
                 item.source, item.payload, timestamp_prefix=lambda: _ts_prefix(ctx)
             ),
             tag=NoteTag.LIFECYCLE_RESTART,
@@ -466,7 +466,7 @@ async def _handle_restart_completed(
 async def _handle_resurrect(
     ctx: AvaContext,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
 ) -> None:
     """RESURRECT: append lifecycle marker, wake to BEFORE_LLM.
 
@@ -476,7 +476,7 @@ async def _handle_resurrect(
     """
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix(ctx)}You have been resurrected by {_by_who(item.source)}",
+            content=f"{_ts_prefix(ctx)}You have been resurrected by {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_RESURRECT,
             created_at=datetime.now(UTC),
         )
@@ -491,7 +491,7 @@ async def _handle_resurrect(
 # is deliberately NOT here: it is cluster-wide, so the inherited copy is the
 # same content a graft would add (grafting it duplicated the index — the
 # timezone note's reasoning applies to it too).
-_STRIP_ON_FORK_TAGS: frozenset[NoteTag] = frozenset(
+STRIP_ON_FORK_TAGS: frozenset[NoteTag] = frozenset(
     {
         NoteTag.AGENT_ID,
         NoteTag.AGENT_MEMORY,
@@ -507,11 +507,11 @@ def _is_source_identity_note(m: BaseMessage) -> bool:
     kw = read_ava_kwargs(m)
     return (
         kw.get("ava_msg_type") == AvaMsgType.SYSTEM_NOTE.value
-        and kw.get("ava_note_tag") in _STRIP_ON_FORK_TAGS
+        and kw.get("ava_note_tag") in STRIP_ON_FORK_TAGS
     )
 
 
-def _fork_rebuild_prefix(state: _state.AgentState) -> list[BaseMessage]:
+def fork_rebuild_prefix(state: _state.AgentState) -> list[BaseMessage]:
     """The full-wipe rebuild the fork prepends to its claim update: the
     inherited history re-listed UNCHANGED except that the source-identity
     notes are dropped.
@@ -533,7 +533,7 @@ def _fork_rebuild_prefix(state: _state.AgentState) -> list[BaseMessage]:
 async def _handle_fork(
     agent_id: int,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
     state: _state.AgentState,
     slices: AgentSlices,
     extensions: ExtensionRegistry,
@@ -550,7 +550,7 @@ async def _handle_fork(
     marker the same batch dispatched stays a tail append AFTER the rebuild —
     a wipe must never swallow a message another handler already appended.
     """
-    st.new_msgs[0:0] = _fork_rebuild_prefix(state)
+    st.new_msgs[0:0] = fork_rebuild_prefix(state)
     st.new_msgs.append(
         system_note_message(
             content=(
@@ -586,7 +586,7 @@ async def _dispatch_item(
     state: _state.AgentState,
     agent_id: int,
     item: ClaimedInbound,
-    st: _BatchState,
+    st: BatchState,
     latest_resurrect_id: int | None,
 ) -> None:
     """Route one claimed inbound to its handler by kind."""
@@ -606,7 +606,7 @@ async def _dispatch_item(
     elif kind == InboundKind.TERMINATE:
         await _handle_terminate(ctx, item, st)
     elif kind == InboundKind.RESTART:
-        await _handle_restart(ctx, agent_id, item, st)
+        await handle_restart(ctx, agent_id, item, st)
         await _handle_restart_stateful(state, item, st)
     elif kind == InboundKind.RESTART_COMPLETED:
         await _handle_restart_completed(ctx, item, st)
@@ -634,8 +634,8 @@ async def dispatch_batch(
     state: _state.AgentState,
     agent_id: int,
     batch: list[ClaimedInbound],
-    routing: _Routing,
-    st: _BatchState,
+    routing: Routing,
+    st: BatchState,
 ) -> None:
     """Dispatch every claimed inbound through its handler.
 
@@ -650,6 +650,6 @@ async def dispatch_batch(
     )
     for item in batch:
         kind = item.kind
-        if kind in _ROUTING_KINDS and not routing.is_winner(item):
+        if kind in ROUTING_KINDS and not routing.is_winner(item):
             continue
         await _dispatch_item(ctx, state, agent_id, item, st, latest_resurrect_id)

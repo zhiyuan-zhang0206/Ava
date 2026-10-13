@@ -12,7 +12,7 @@ import io
 import ava
 
 
-def _capture_ava_overview() -> str:
+def capture_ava_overview() -> str:
     """Emit the `# ava` overview — the public SDK surface as a name + docstring index.
 
     `ava.help(ava)` renders ava's own docstring plus one entry per public
@@ -59,19 +59,19 @@ def _capture_ava_overview() -> str:
 # when the first _claim sees state.messages empty; afterward SystemMessage is
 # persisted into state.messages[0] and reused across restart — cache hit rate
 # is 1/1, no point.
-def _get_ava_overview() -> str:
-    return _capture_ava_overview()
+def get_ava_overview() -> str:
+    return capture_ava_overview()
 
 
-# _BASE_SYSTEM_PROMPT is the immutable core of the system prompt.
-# The {_AVA_OVERVIEW} placeholder is filled by _get_ava_overview() lazy capture
+# BASE_SYSTEM_PROMPT is the immutable core of the system prompt.
+# The {_AVA_OVERVIEW} placeholder is filled by get_ava_overview() lazy capture
 # the first time build_system_prompt() is called — by then load_extensions() has
 # run and all plugin namespaces are visible.
 # Plugins add extension content through `PluginContributions.system_prompt_sections`.
-# _CODE_ACTION_PREAMBLE is shared with the bare identity used when the SDK overview is disabled.
-# Its {_SEQUENTIAL_TOOL_CALLS} placeholder takes _SEQUENTIAL_TOOL_CALLS_NOTE when
+# CODE_ACTION_PREAMBLE is shared with the bare identity used when the SDK overview is disabled.
+# Its {_SEQUENTIAL_TOOL_CALLS} placeholder takes SEQUENTIAL_TOOL_CALLS_NOTE when
 # `prompt_sequential_tool_calls_enabled` is on for the agent, else "".
-_CODE_ACTION_PREAMBLE = """\
+CODE_ACTION_PREAMBLE = """\
 You are Ava, an agent that acts by writing Python code — call the
 `execute_code(code: str)` tool — each call runs in an ephemeral interpreter. To idle, do not output any
 tool calls.{_SEQUENTIAL_TOOL_CALLS}
@@ -79,7 +79,7 @@ tool calls.{_SEQUENTIAL_TOOL_CALLS}
 Before using any `ava.*` function, you must explicitly `import ava` in your code.
 """
 
-_SEQUENTIAL_TOOL_CALLS_NOTE = """ Several tool calls in one response run one at a time, in the order given; an error in one
+SEQUENTIAL_TOOL_CALLS_NOTE = """ Several tool calls in one response run one at a time, in the order given; an error in one
 does not stop the later ones, so keep steps that depend on an earlier step succeeding in one call."""
 
-_BASE_SYSTEM_PROMPT = _CODE_ACTION_PREAMBLE + "\n{_AVA_OVERVIEW}"
+BASE_SYSTEM_PROMPT = CODE_ACTION_PREAMBLE + "\n{_AVA_OVERVIEW}"

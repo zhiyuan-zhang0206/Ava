@@ -15,7 +15,7 @@ from langgraph.runtime import Runtime
 
 from agent.graph._attach_drain import build_attach_drain
 from agent.graph.claim import node
-from agent.graph.claim.node import _claim_node_impl
+from agent.graph.claim.node import claim_node_impl
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import AvaContext
@@ -122,7 +122,7 @@ async def test_claim_drains_before_turn_boundary_wait(
 
     monkeypatch.setattr(node, "claim_inbound_batch", AsyncMock(return_value=[]))
 
-    command = await _claim_node_impl(state, runtime, config)
+    command = await claim_node_impl(state, runtime, config)
 
     assert command.goto == CLAIM
     assert command.update is not None
@@ -143,7 +143,7 @@ async def test_claim_does_not_drain_mid_turn(
 
     monkeypatch.setattr(node, "claim_inbound_batch", AsyncMock(return_value=[]))
 
-    command = await _claim_node_impl(state, runtime, config)
+    command = await claim_node_impl(state, runtime, config)
 
     assert command.goto == "before_llm"
     assert command.update is not None

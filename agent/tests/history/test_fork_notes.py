@@ -26,7 +26,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, RemoveMessage, Sy
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim._dispatch import (
-    _STRIP_ON_FORK_TAGS,
+    STRIP_ON_FORK_TAGS,
 )
 from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
@@ -62,7 +62,7 @@ def test_strip_tag_set_is_exactly_the_source_identity_notes() -> None:
                 NoteTag.PRELOADED_SKILLS,
             }
         )
-        == _STRIP_ON_FORK_TAGS
+        == STRIP_ON_FORK_TAGS
     )
 
 
@@ -79,8 +79,8 @@ def test_fork_rebuild_passes_the_messages_guard() -> None:
     messages guard sanctions (task #1256): survivors keep content + relative
     order; the dropped source-identity notes are gone; the grafted notes land
     as new messages. This pins that the reducer accepts the exact shape
-    `_fork_rebuild_prefix` produces."""
-    from agent.graph.claim._dispatch import _fork_rebuild_prefix
+    `fork_rebuild_prefix` produces."""
+    from agent.graph.claim._dispatch import fork_rebuild_prefix
     from agent.messages.guard import guarded_add_messages
     from agent.state import AgentState
 
@@ -95,7 +95,7 @@ def test_fork_rebuild_passes_the_messages_guard() -> None:
     ]
     state = AgentState(messages=list(before))
     delta: list[object] = [
-        *_fork_rebuild_prefix(state),
+        *fork_rebuild_prefix(state),
         _fake_note(NoteTag.LIFECYCLE_FORK, "marker", "m-marker"),
     ]
     after = guarded_add_messages(before, delta)
@@ -109,13 +109,13 @@ def test_fork_rebuild_dropping_a_conversation_message_is_rejected() -> None:
     the caller does not explicitly drop. This pins the rebuild shape (not the
     tag policy): dropping a conversation message from the rebuild re-listing
     is invisible to the guard, so the tag filter above is load-bearing."""
-    from agent.graph.claim._dispatch import _fork_rebuild_prefix
+    from agent.graph.claim._dispatch import fork_rebuild_prefix
     from agent.state import AgentState
 
     conversation = HumanMessage(content="hello", id="m-chat")
     state = AgentState(messages=[SystemMessage(content="sys", id="m-sys"), conversation])
-    rebuilt = _fork_rebuild_prefix(state)
-    # The prefix only ever drops _STRIP_ON_FORK_TAGS notes — conversation
+    rebuilt = fork_rebuild_prefix(state)
+    # The prefix only ever drops STRIP_ON_FORK_TAGS notes — conversation
     # messages and unmarked messages are always re-listed.
     re_listed = [
         m for m in rebuilt if isinstance(m, BaseMessage) and not isinstance(m, RemoveMessage)

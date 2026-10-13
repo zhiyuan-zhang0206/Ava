@@ -137,7 +137,7 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
 
     monkeypatch.setattr(Clock, "from_settings", classmethod(fixed_clock))
     monkeypatch.setattr(settings.general, "message_timestamps", timestamps)
-    monkeypatch.setattr(impersonation_handoff, "_save_document", saved_document)
+    monkeypatch.setattr(impersonation_handoff, "save_document", saved_document)
     monkeypatch.setattr(impersonation_handoff, "_receipt", no_op)
     monkeypatch.setattr(impersonation_handoff, "publish_inbound_wake", no_op)
     graph, config = await _graph()
@@ -239,9 +239,7 @@ async def test_existing_handoff_receipt_does_not_render_new_notes(
 ) -> None:
     graph, config = await _graph()
     await graph.aupdate_state(config, {"impersonation_handoff_id": "42:0"})
-    monkeypatch.setattr(
-        impersonation_handoff, "_save_document", Mock(return_value=("done", "path"))
-    )
+    monkeypatch.setattr(impersonation_handoff, "save_document", Mock(return_value=("done", "path")))
     receipt = Mock()
     monkeypatch.setattr(impersonation_handoff, "_receipt", receipt)
     monkeypatch.setattr(impersonation_handoff, "publish_inbound_wake", Mock())

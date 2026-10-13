@@ -12,7 +12,7 @@ import pytest
 from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._process import ExecTeardownError, TeardownFailure
 from agent.graph.exec._stream import StreamingTextIO
-from agent.graph.exec._subprocess import _finish_request_evidence, _retain_late_reader_completion
+from agent.graph.exec._subprocess import finish_request_evidence, retain_late_reader_completion
 from base.native_process.turn_identity import HostedTurnResources
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
@@ -41,14 +41,14 @@ def test_failed_cleanup_keeps_primary_resource_and_wire_evidence(tmp_path: Path)
     resources = HostedTurnResources()
     domain = object()
     resources.unresolved[request] = domain
-    _finish_request_evidence(request, result, domain, settled=False, resources=resources)
+    finish_request_evidence(request, result, domain, settled=False, resources=resources)
     assert resources.unresolved[request] is domain
     assert request.exists() and result.exists()
     assert not resources.changed.is_set()
-    _finish_request_evidence(request, result, object(), settled=True, resources=resources)
+    finish_request_evidence(request, result, object(), settled=True, resources=resources)
     assert resources.unresolved[request] is domain
     assert request.exists() and result.exists()
-    _finish_request_evidence(request, result, domain, settled=True, resources=resources)
+    finish_request_evidence(request, result, domain, settled=True, resources=resources)
     assert not resources.unresolved
     assert not request.exists() and not result.exists()
 
@@ -62,7 +62,7 @@ async def test_late_reader_cannot_clean_replacement_domain(
     resources.unresolved[request] = original
     failure = ExecTeardownError((TeardownFailure("reader_join", TimeoutError("join")),))
     reader = _closed_output_pipe()
-    _retain_late_reader_completion(failure, request, result, reader, resources=resources)
+    retain_late_reader_completion(failure, request, result, reader, resources=resources)
     tasks = set(resources.completions)
     resources.unresolved[request] = replacement
     await asyncio.gather(*tasks)
@@ -83,7 +83,7 @@ async def test_secondary_teardown_failure_cannot_certify_cleanup(tmp_path: Path)
             TeardownFailure("domain_close", RuntimeError("close")),
         )
     )
-    _retain_late_reader_completion(
+    retain_late_reader_completion(
         failure, request, result, _closed_output_pipe(), resources=resources
     )
     assert not resources.completions
@@ -93,7 +93,7 @@ async def test_secondary_teardown_failure_cannot_certify_cleanup(tmp_path: Path)
 
 
 async def test_actual_owner_completion_unknown_reaches_original_service() -> None:
-    from agent.graph.exec._owned_run import _OwnedRun
+    from agent.graph.exec._owned_run import OwnedRun
     from base.agents.incarnation.exec_owner_protocol import OwnerClosed
     from base.native_process.turn_identity import HostedServiceResources
 
@@ -107,7 +107,7 @@ async def test_actual_owner_completion_unknown_reaches_original_service() -> Non
         raise error
 
     completion = asyncio.create_task(failed_receipt())
-    owned = object.__new__(_OwnedRun)
+    owned = object.__new__(OwnedRun)
     owned.registration = None
     owned.attached = True
     owned.attached_completion = lambda: completion

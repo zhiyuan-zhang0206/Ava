@@ -29,7 +29,7 @@ from base.packages.skills.names import match_key
 _DESC_MAX_CHARS = 300
 
 
-def _disabled_by_sdk_config(path: str, sdk_disable_config: Sequence[str]) -> bool:
+def disabled_by_sdk_config(path: str, sdk_disable_config: Sequence[str]) -> bool:
     """True when `path` or one of its dotted parents is SDK-disabled.
 
     `path` is relative to the `ava` namespace and therefore has no `ava.`
@@ -64,7 +64,7 @@ def _disabled_by_sdk_config(path: str, sdk_disable_config: Sequence[str]) -> boo
 _CAPABILITY_SURFACES = frozenset({"skills", "mcps"})
 
 
-def _is_capability_surface_member(path: str) -> bool:
+def is_capability_surface_member(path: str) -> bool:
     """True for a path *inside* a capability surface (`skills.gmail`) — not the
     surface itself, which an operator may still expand.
 
@@ -107,7 +107,7 @@ def resolve_prompt_skills(
     Returns `[]` when the `skills` SDK surface is disabled, nothing is
     configured, or nothing resolves.
     """
-    if _disabled_by_sdk_config("skills", sdk_disable_config):
+    if disabled_by_sdk_config("skills", sdk_disable_config):
         return []
     if not wanted:
         return []
@@ -342,15 +342,15 @@ _NEW_SKILLS_FRAMING = (
 # The snapshot still advances over ALL of them (membership is replaced whole), so
 # the unlisted ones are never named later; `ava.help(ava.skills)` and the next
 # compaction's rebuilt index are what cover them.
-_NEW_SKILLS_MAX_ENTRIES = 20
+NEW_SKILLS_MAX_ENTRIES = 20
 
 
 def new_skills_note_text(skills: list[Any]) -> str:
     """The drift note's body — the framing plus one index line per skill, in the
     exact shape `# Capabilities` uses, so the agent reads it as more of the same
     listing rather than a different kind of thing. Capped at
-    `_NEW_SKILLS_MAX_ENTRIES` lines with a counted tail."""
-    listed = skills[:_NEW_SKILLS_MAX_ENTRIES]
+    `NEW_SKILLS_MAX_ENTRIES` lines with a counted tail."""
+    listed = skills[:NEW_SKILLS_MAX_ENTRIES]
     lines = [_index_line(s) for s in listed]
     if len(skills) > len(listed):
         lines.append(
@@ -364,7 +364,7 @@ def _mcp_index_lines(sdk_disable_config: Sequence[str]) -> list[str]:
     """The MCP half of the capabilities index: one `ava.mcps.<server>` entry per
     configured server, carrying its config `description` when set (name only
     otherwise). Empty when no server is configured."""
-    if _disabled_by_sdk_config("mcps", sdk_disable_config):
+    if disabled_by_sdk_config("mcps", sdk_disable_config):
         return []
     import ava
 

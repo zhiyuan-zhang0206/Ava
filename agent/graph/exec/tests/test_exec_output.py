@@ -183,7 +183,7 @@ def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
     def overflow_dir(_agent_id: int) -> Path:
         return tmp_path / "overflow"
 
-    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
+    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
 
     limit = 1000
     head_marker = "HEAD_START"
@@ -228,8 +228,8 @@ def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
     def overflow_dir(_agent_id: int) -> Path:
         return tmp_path / "overflow"
 
-    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
-    monkeypatch.setattr(output, "_OVERFLOW_KEEP", 3)
+    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
+    monkeypatch.setattr(output, "OVERFLOW_KEEP", 3)
 
     for _ in range(5):
         wrap_code_output(
@@ -414,16 +414,16 @@ def test_wrap_code_output_no_timestamp_when_disabled(
 
 
 def _boot_crash(exc: Exception, code_reached: bool | None) -> object:
-    from agent.graph.exec._result import _ExecCrashed
+    from agent.graph.exec._result import ExecCrashed
 
-    return _ExecCrashed(output="", exc=exc, full_traceback=None, code_reached=code_reached)
+    return ExecCrashed(output="", exc=exc, full_traceback=None, code_reached=code_reached)
 
 
 def _dispatch(result: object, monkeypatch: pytest.MonkeyPatch) -> tuple[bool, str]:
-    from agent.graph.exec.node import _dispatch_exec_result
+    from agent.graph.exec.node import dispatch_exec_result
 
     del monkeypatch
-    halted, envelope, _ = _dispatch_exec_result(
+    halted, envelope, _ = dispatch_exec_result(
         result,  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
         7,
@@ -478,9 +478,9 @@ def test_dispatch_crash_after_code_ran_but_printed_nothing(
 
 def test_dispatch_crash_with_output_keeps_the_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """A crash WITH stdout keeps the agent-facing traceback — no marker added."""
-    from agent.graph.exec._result import ExecChildError, _ExecCrashed
+    from agent.graph.exec._result import ExecChildError, ExecCrashed
 
-    result = _ExecCrashed(
+    result = ExecCrashed(
         output="Traceback (most recent call last):\n  boom\n",
         exc=ExecChildError("ValueError", "boom", None),
         code_reached=True,
@@ -497,10 +497,10 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
     """P2 #2102: a boot-phase failure (code_reached=False) emits the WARNING
     exec_child_boot_failed event the alert rule reads; the unknown case does not."""
     from agent.graph.exec._result import ExecChildError
-    from agent.graph.exec.node import _dispatch_exec_result
+    from agent.graph.exec.node import dispatch_exec_result
 
     boot_exc = ExecChildError("BootstrapFetchError", "down", None)
-    _dispatch_exec_result(
+    dispatch_exec_result(
         _boot_crash(boot_exc, False),  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
         42,
@@ -518,7 +518,7 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
 
     loguru_records.clear()
     unknown_exc = ExecChildError("exec_subprocess_aborted", "gone", None)
-    _dispatch_exec_result(
+    dispatch_exec_result(
         _boot_crash(unknown_exc, None),  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
         42,
@@ -654,8 +654,8 @@ def test_header_carries_elapsed_in_every_ending(
     ],
 )
 def test_dispatch_reports_status_and_body_start(kind: str, status: str, halted: bool) -> None:
-    from agent.graph.exec._result import _ExecCancelled, _ExecCrashed, _ExecDone, _ExecTimedOut
-    from agent.graph.exec.node import _dispatch_exec_result
+    from agent.graph.exec._result import ExecCancelled, ExecCrashed, ExecDone, ExecTimedOut
+    from agent.graph.exec.node import dispatch_exec_result
 
     class _Events:
         def emit(self, _event: str) -> None: ...
@@ -664,12 +664,12 @@ def test_dispatch_reports_status_and_body_start(kind: str, status: str, halted: 
         event_publisher = _Events()
 
     results: dict[str, object] = {
-        "done": _ExecDone(output="o\n"),
-        "timed_out": _ExecTimedOut(output="o\n"),
-        "cancelled": _ExecCancelled(output="o\n"),
-        "crashed": _ExecCrashed(output="o\n", exc=ValueError("x"), full_traceback=None),
+        "done": ExecDone(output="o\n"),
+        "timed_out": ExecTimedOut(output="o\n"),
+        "cancelled": ExecCancelled(output="o\n"),
+        "crashed": ExecCrashed(output="o\n", exc=ValueError("x"), full_traceback=None),
     }
-    got_halted, envelope, got_status = _dispatch_exec_result(
+    got_halted, envelope, got_status = dispatch_exec_result(
         results[kind],  # type: ignore[arg-type]
         _Ctx(),  # type: ignore[arg-type]
         7,

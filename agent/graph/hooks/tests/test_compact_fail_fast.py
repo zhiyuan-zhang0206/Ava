@@ -44,7 +44,7 @@ async def test_compaction_programming_error_stops_once_without_history_change(
 
     monkeypatch.setattr(compact, "generate_summary", broken_summary)
     with pytest.raises(TypeError) as raised:
-        await compact._auto_compact_summary(
+        await compact.auto_compact_summary(
             messages,
             llm,
             content_count=1,
@@ -75,7 +75,7 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
     slices = AgentSlices.resolve(
         default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
     )
-    result = await compact._auto_compact_summary(
+    result = await compact.auto_compact_summary(
         messages, llm, 1, slices, catalog=build_model_catalog()
     )
     assert result == expected

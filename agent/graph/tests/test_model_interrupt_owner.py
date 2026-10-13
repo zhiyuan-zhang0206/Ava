@@ -104,7 +104,7 @@ async def test_inflight_unknown_reaches_caller_with_original_identity(
     async def fail(*_args: object, **_kwargs: object) -> None:
         raise original
 
-    monkeypatch.setattr(interrupt, "_watch_for_interrupt", fail)
+    monkeypatch.setattr(interrupt, "watch_for_interrupt", fail)
     with pytest.raises(ValueError) as observed:
         async with interrupt.subscribe_interrupt(
             _pool(), 1, incarnation=None, work=None, resources=scope
@@ -130,7 +130,7 @@ async def test_primary_and_watcher_cleanup_unknown_both_survive(
         except asyncio.CancelledError:
             raise secondary from None
 
-    monkeypatch.setattr(interrupt, "_watch_for_interrupt", fail_cleanup)
+    monkeypatch.setattr(interrupt, "watch_for_interrupt", fail_cleanup)
     with pytest.raises(RuntimeError) as observed:
         async with interrupt.subscribe_interrupt(
             _pool(), 1, incarnation=None, work=None, resources=scope
@@ -166,8 +166,8 @@ async def test_late_unknown_is_visible_before_service_join_without_sibling_cance
         await asyncio.sleep(0)
         sibling_alive.set()
 
-    monkeypatch.setattr(interrupt, "_watch_for_interrupt", late_failure)
-    monkeypatch.setattr(interrupt, "_WATCHER_EXIT_TIMEOUT_S", 0.02)
+    monkeypatch.setattr(interrupt, "watch_for_interrupt", late_failure)
+    monkeypatch.setattr(interrupt, "WATCHER_EXIT_TIMEOUT_S", 0.02)
     async with interrupt.subscribe_interrupt(
         _pool(), 1, incarnation=None, work=None, resources=scope
     ) as old_event:
@@ -208,8 +208,8 @@ async def test_repeated_cancel_during_bounded_exit_still_hands_off_actual_task(
         ):
             await entered.wait()
 
-    monkeypatch.setattr(interrupt, "_watch_for_interrupt", late_failure)
-    monkeypatch.setattr(interrupt, "_WATCHER_EXIT_TIMEOUT_S", 0.03)
+    monkeypatch.setattr(interrupt, "watch_for_interrupt", late_failure)
+    monkeypatch.setattr(interrupt, "WATCHER_EXIT_TIMEOUT_S", 0.03)
     caller = asyncio.create_task(invoke())
     await cancelled.wait()
     caller.cancel()

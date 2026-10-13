@@ -33,7 +33,7 @@ from base.clock import Clock
 from base.log import logger
 from base.paths import workspace_dir
 
-from ._crop import _CropConfig, crop_output
+from ._crop import CropConfig, crop_output
 from ._stream import StreamCap
 
 # The default marker is the user Stop action. Maintenance and other external
@@ -48,10 +48,10 @@ EXEC_CANCEL_NOTE = "[cancelled by user]"
 _OVERFLOW_DIRNAME = ".exec_output"
 # Ring: keep the most recent N overflow files per workspace, prune older ones
 # so the dir doesn't grow unbounded across a long-lived agent.
-_OVERFLOW_KEEP = 20
+OVERFLOW_KEEP = 20
 
 
-def _overflow_dir(agent_id: int) -> Path:
+def overflow_dir(agent_id: int) -> Path:
     return workspace_dir(agent_id) / _OVERFLOW_DIRNAME
 
 
@@ -98,7 +98,7 @@ def _fit_body(
     referenced_messages: Sequence[BaseMessage],
     max_chars: int,
     agent_id: int,
-    crop_config: _CropConfig,
+    crop_config: CropConfig,
     clock: Clock,
 ) -> str:
     """The envelope body for non-empty output: logged, soft-cropped or truncated to fit."""
@@ -120,7 +120,7 @@ def _fit_body(
         if over:
             preview = crop_output(
                 output,
-                _overflow_dir(agent_id),
+                overflow_dir(agent_id),
                 crop_config,
                 referenced_messages=referenced_messages,
                 max_chars=max_chars,
@@ -138,7 +138,7 @@ def wrap_code_output(
     output: str,
     *,
     agent_id: int,
-    crop_config: _CropConfig,
+    crop_config: CropConfig,
     clock: Clock,
     timeout_seconds: float,
     max_chars: int,
@@ -289,7 +289,7 @@ def _write_overflow_file(
     microsecond timestamp makes names sortable by exec time and unique within
     an agent (execs are serial, and two in the same microsecond cannot happen).
     """
-    d = _overflow_dir(agent_id)
+    d = overflow_dir(agent_id)
     d.mkdir(parents=True, exist_ok=True)
     # Stamped in the configured timezone so filenames sort together with the
     # envelope timestamps the agent sees.
@@ -304,6 +304,6 @@ def _write_overflow_file(
         ) + output
     path.write_text(output, encoding="utf-8")
     existing = sorted(d.glob("exec_*.txt"), key=lambda p: p.stat().st_mtime)
-    for old in existing[:-_OVERFLOW_KEEP]:
+    for old in existing[:-OVERFLOW_KEEP]:
         old.unlink(missing_ok=True)
     return path

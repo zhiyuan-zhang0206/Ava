@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._retry import retry_wait
-from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_timeout
+from agent.graph.llm._stream import consume_llm, consume_stream_with_stall_timeout
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.errors import is_retryable_provider_error
@@ -37,7 +37,7 @@ async def test_transport_authority_stays_at_the_model_boundary(
     handler = cast(RedisStreamHandler, sink)
     expected = ModelConnectionError if during_model_iteration else httpx.ConnectError
     with pytest.raises(expected) as raised:
-        await _consume_stream_with_stall_timeout(
+        await consume_stream_with_stall_timeout(
             stream(), chunks=[], handler=handler, ttft_timeout=1, inter_chunk_timeout=1
         )
     if during_model_iteration:
@@ -81,7 +81,7 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
         default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
     )
     with pytest.raises(TimeoutError) as raised:
-        await _consume_llm(
+        await consume_llm(
             model,
             [],
             chunks=[],
@@ -139,7 +139,7 @@ async def test_external_cancellation_stays_external_inside_owned_model_deadline(
     model.astream.return_value = stream()
     model.ainvoke = AsyncMock(side_effect=invoke)
     task = asyncio.create_task(
-        _consume_llm(
+        consume_llm(
             model,
             [],
             chunks=[],

@@ -16,7 +16,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.graph.claim.node import claim_node
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState, BaseAgentState
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
@@ -110,7 +110,7 @@ async def test_original_invocation_stops_once_after_database_fault(
         pool: ConnectionPool
         incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
         agent = initial.agent_id
-        first = _insert(db_conn, agent)
+        first = insert(db_conn, agent)
         entered, release = asyncio.Event(), asyncio.Event()
 
         async def model(state: BaseAgentState) -> Command[Any]:
@@ -167,7 +167,7 @@ async def test_original_invocation_stops_once_after_database_fault(
                     accept_native_cancel, pool, "original-work", agent, target
                 )
                 assert repeated == accepted
-            queued = _insert(db_conn, agent)
+            queued = insert(db_conn, agent)
             release.set()
             with pytest.raises(psycopg.OperationalError):
                 await asyncio.wait_for(running, 15)

@@ -22,10 +22,10 @@ from base.agents.incarnation.exec_owner_protocol import (
     read_owner_context,
 )
 
-_WATCHDOG_JOIN_S = 5.0
+WATCHDOG_JOIN_S = 5.0
 
 
-class _DeadlineWatchdog:
+class DeadlineWatchdog:
     """The gated child's independent deadline, owned through its entire entry.
 
     The daemon can exit native code that releases the GIL even after its parent
@@ -71,7 +71,7 @@ class _DeadlineWatchdog:
             if not self._stop.is_set() and time.monotonic() >= self._deadline:
                 os._exit(124)
             self._stop.set()
-        self._thread.join(timeout=_WATCHDOG_JOIN_S)
+        self._thread.join(timeout=WATCHDOG_JOIN_S)
         unfinished = self._thread.is_alive()
         if self._error is not None:
             if unfinished:
@@ -80,7 +80,7 @@ class _DeadlineWatchdog:
         if unfinished or not self._finished.is_set():
             raise RuntimeError("exec deadline watchdog join remains unfinished")
 
-    def __enter__(self) -> "_DeadlineWatchdog":
+    def __enter__(self) -> "DeadlineWatchdog":
         return self
 
     def __exit__(
@@ -106,7 +106,7 @@ def main() -> None:
     parser.add_argument("--context", type=Path, required=True)
     args = parser.parse_args()
     context = read_owner_context(args.context)
-    with _DeadlineWatchdog(context.allocation.deadline):
+    with DeadlineWatchdog(context.allocation.deadline):
         _run_permitted(context)
 
 

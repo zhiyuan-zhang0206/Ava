@@ -12,8 +12,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
 from agent.graph.llm_errors import FatalProviderError, LlmLedger
-from agent.graph.tests.test_llm_helpers import _CONFIG as _LLM_CONFIG
-from agent.graph.tests.test_llm_helpers import _make_runtime as _llm_make_runtime
+from agent.graph.tests.test_llm_helpers import CONFIG as _LLM_CONFIG
+from agent.graph.tests.test_llm_helpers import make_runtime as _llm_make_runtime
 from base.agents.context import AvaContext
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -212,7 +212,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     """The completed-turn UPDATE is the single reset: it clears the corpse
     marker, the recovery-breaker streak, and the recorded reject reason
     together (agent/graph/llm/node.py)."""
-    from agent.graph.llm.node import _persist_last_active
+    from agent.graph.llm.node import persist_last_active
 
     child_id = spawn_agent(
         spawner="user",
@@ -229,7 +229,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     )
     db_conn.commit()
 
-    await _persist_last_active(
+    await persist_last_active(
         AvaContext(
             ops_pool=aops_pool,
             llm=MagicMock(),

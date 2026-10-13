@@ -12,10 +12,10 @@ def _ava_compact_loaded():
     agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
     """
-    from agent.graph.hooks.compact import _compact_reminder
+    from agent.graph.hooks.compact import compact_reminder
     from agent.state import build_agent_state
 
-    return build_agent_state(EMPTY), _compact_reminder
+    return build_agent_state(EMPTY), compact_reminder
 
 
 def test_compact_triggers_point_at_the_contract(_ava_compact_loaded):

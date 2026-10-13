@@ -91,15 +91,15 @@ class FatalProviderError(Exception):
 # via settings.lm.llm_fatal_provider_error_types. An empty set disables the check.
 
 
-def _parse_provider_error_type(exc: BaseException) -> str | None:
+def parse_provider_error_type(exc: BaseException) -> str | None:
     """Read a provider type only through the shared trusted-error classifier."""
     return classify_error(exc).error_type
 
 
-def _is_fatal_provider_error_type(exc: BaseException, llm_policy: LlmCallPolicy) -> bool:
+def is_fatal_provider_error_type(exc: BaseException, llm_policy: LlmCallPolicy) -> bool:
     """Check whether ``exc`` carries a provider error type configured as fatal.
 
-    Returns ``True`` when ``_parse_provider_error_type`` extracts a type
+    Returns ``True`` when ``parse_provider_error_type`` extracts a type
     that is in the configured ``llm_fatal_provider_error_types``
     (comma-separated string parsed into a set). On an empty config string
     the check is a fast no-op.
@@ -108,11 +108,11 @@ def _is_fatal_provider_error_type(exc: BaseException, llm_policy: LlmCallPolicy)
     if not fatal_csv:
         return False
     fatal_types = {t.strip() for t in fatal_csv.split(",") if t.strip()}
-    error_type = _parse_provider_error_type(exc)
+    error_type = parse_provider_error_type(exc)
     return error_type is not None and error_type in fatal_types
 
 
-def _classify_and_log_provider_error(
+def classify_and_log_provider_error(
     exc: Exception, agent: AgentSlices, *, catalog: ModelCatalog
 ) -> FatalProviderError | None:
     """Classify a provider exception, emit the structured postmortem log, and
@@ -137,7 +137,7 @@ def _classify_and_log_provider_error(
     identify the same account the event does (task #3916).
     """
     classification = classify_error(exc)
-    fatal_type_hit = _is_fatal_provider_error_type(exc, agent.llm_policy)
+    fatal_type_hit = is_fatal_provider_error_type(exc, agent.llm_policy)
     fatal = classification.error_class is ErrorClass.PERMANENT or fatal_type_hit
     context_overflow = classification.context_overflow
     model = agent.brain.llm_model
