@@ -224,7 +224,7 @@ async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
     event_bus: EventBus,
 ) -> None:
     """A force on an unknown historical runtime cannot authorize its adoption."""
-    from base.agents import ResurrectRefused
+    from base.api_contracts.agent_contract import ResurrectRefused
 
     agent_id = _agent(db_conn)
     with ConnectionPool[psycopg.Connection](

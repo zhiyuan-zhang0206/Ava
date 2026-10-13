@@ -11,8 +11,8 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from ava.agents import work
 from ava.gateway_client import transport
-from base.agents import GatewayUnavailable
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
+from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate

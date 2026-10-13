@@ -170,7 +170,7 @@ def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
 
 
 def test_sink_agent_id_int_kwarg_overrides_bind(sink_logger, db_conn: psycopg.Connection) -> None:
-    """log call passing agent_id=N overrides the bind default — used by base/agents/contract.py for cross-process
+    """log call passing agent_id=N overrides the bind default — used by base/api_contracts/agent_contract.py for cross-process
     lifecycle events (the caller process bind may not be the target)."""
     tid = _insert_agent(db_conn)
     db_conn.commit()

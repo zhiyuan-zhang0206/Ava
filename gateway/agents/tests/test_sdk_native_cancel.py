@@ -11,7 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from ava.agents import work
 from ava.gateway_client import transport
-from base.agents import GatewayUnavailable
+from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.test_idempotency import client as client

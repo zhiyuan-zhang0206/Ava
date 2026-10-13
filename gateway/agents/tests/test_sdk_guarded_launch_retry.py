@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from ava import agents
 from ava.gateway_client import transport
-from base.agents import GatewayUnavailable
+from base.api_contracts.agent_contract import GatewayUnavailable
 from gateway.agents.tests.test_keyed_launch_retry import birth
 from gateway.agents.tests.test_keyed_launch_retry import client as client
 from tests.fixtures.retry_waits import retry_waits as retry_waits

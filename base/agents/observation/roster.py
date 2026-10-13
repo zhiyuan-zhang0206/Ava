@@ -15,7 +15,6 @@ import psycopg
 from psycopg import sql
 from pydantic import BaseModel
 
-from base.agents import AgentStatus, LivenessState
 from base.agents.impersonation.status import OpenImpersonationStatus
 from base.agents.observation.evidence import (
     AgentAvailability,
@@ -24,6 +23,7 @@ from base.agents.observation.evidence import (
     observation,
 )
 from base.agents.tasks.priority import Priority
+from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import model_supports_vision
 from base.lm.registry import resolve_available_model

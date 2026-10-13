@@ -17,7 +17,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e.fixture_environment import E2EEnv

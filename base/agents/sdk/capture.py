@@ -2,7 +2,7 @@
 
 from typing import Any, Protocol
 
-from base.agents.contract import SdkCaptureAdmission
+from base.api_contracts.agent_contract import SdkCaptureAdmission
 
 
 class SdkCaptureOwner(Protocol):

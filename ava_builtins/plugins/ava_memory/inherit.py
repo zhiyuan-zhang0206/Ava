@@ -139,7 +139,7 @@ def _ancestor_chain(agent_id: int, ctx: AvaContext) -> list[dict[str, Any]] | No
     import httpx  # deferred: stays off the boot path
 
     from ava import gateway_client
-    from base.agents import GatewayUnavailable
+    from base.api_contracts.agent_contract import GatewayUnavailable
 
     try:
         return gateway_client.get_born_chain(agent_id, context=ctx)

@@ -17,8 +17,8 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
-from base.agents import ResurrectResult, TerminateResult
 from base.agents.messages.inbound import InboundKind
+from base.api_contracts.agent_contract import ResurrectResult, TerminateResult
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -193,7 +193,7 @@ class TestSpawnPrechecksBlocking:
         self, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
     ) -> None:
         """fork_from with no checkpoint raises ForkSourceEmpty (wire-mapped to 409)."""
-        from base.agents import ForkSourceEmpty
+        from base.api_contracts.agent_contract import ForkSourceEmpty
 
         monkeypatch.setattr(launch, "latest_checkpoint_id", lambda _cur, _aid: None)
         with pytest.raises(ForkSourceEmpty):
@@ -294,7 +294,7 @@ async def test_resurrect_agent_op_alive_returns_already_alive(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.agents import AgentStatus
+    from base.api_contracts.agent_contract import AgentStatus
 
     monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.RUNNING)
     resp = await lifecycle.resurrect_agent_op(
@@ -317,7 +317,7 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
 ) -> None:
     """The internal guarded path treats a stale chat as an expected no-launch
     race, while leaving the still-terminated status for its caller to return."""
-    from base.agents import AgentStatus
+    from base.api_contracts.agent_contract import AgentStatus
     from ops.agents.wake import ResurrectTriggerStaleError
 
     def _terminated(_db: object, _agent_id: int) -> AgentStatus:
@@ -345,7 +345,7 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
 async def test_terminate_agent_op_terminated_short_circuits(
     monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
-    from base.agents import AgentStatus
+    from base.api_contracts.agent_contract import AgentStatus
 
     monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
 

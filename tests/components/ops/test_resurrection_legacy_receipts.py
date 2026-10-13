@@ -5,7 +5,7 @@ from typing import Protocol
 import psycopg
 import pytest
 
-from base.agents import ResurrectRefused
+from base.api_contracts.agent_contract import ResurrectRefused
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database

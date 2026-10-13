@@ -7,7 +7,7 @@ import pytest
 def test_inspector_parses_liveness_at_db_boundary(state: str) -> None:
     from unittest.mock import MagicMock
 
-    from base.agents import LivenessState
+    from base.api_contracts.agent_contract import LivenessState
     from gateway.inspect._live import db_rows_blocking
 
     pool = MagicMock()

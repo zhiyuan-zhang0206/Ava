@@ -586,8 +586,8 @@ def test_historical_runtime_cannot_be_resurrected(
     machine_identity: MachineIdentity,
 ) -> None:
     """An absent command pointer cannot adopt a historical or unknown runtime."""
-    from base.agents import ResurrectRefused
     from base.agents.inbox.insert import insert_inbound_message
+    from base.api_contracts.agent_contract import ResurrectRefused
 
     aid = _park(
         db_conn,
@@ -643,7 +643,7 @@ def test_incomplete_hosted_target_requires_cutover(
     """A hosted label alone cannot replace the retained incarnation authority."""
     from psycopg import sql
 
-    from base.agents import ResurrectRefused
+    from base.api_contracts.agent_contract import ResurrectRefused
 
     aid = _park(
         db_conn,

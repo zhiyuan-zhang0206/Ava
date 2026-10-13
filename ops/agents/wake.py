@@ -8,12 +8,6 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from base import telemetry
-from base.agents import (
-    AgentNotFound,
-    AgentStatus,
-    MachinePaused,
-    ResurrectAlreadyAlive,
-)
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.incarnation.lifecycle_acceptance import (
     LIFECYCLE_RELEASE,
@@ -21,6 +15,12 @@ from base.agents.incarnation.lifecycle_acceptance import (
     UNOWNED_TERMINATION_RECORDED,
 )
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
+from base.api_contracts.agent_contract import (
+    AgentNotFound,
+    AgentStatus,
+    MachinePaused,
+    ResurrectAlreadyAlive,
+)
 from base.db import Database, fetch_one
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus

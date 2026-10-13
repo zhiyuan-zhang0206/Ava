@@ -22,11 +22,11 @@ if TYPE_CHECKING:
     # (task #3633; `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.messages import BaseMessage
 
-from base.agents.contract import SdkCaptureAdmission
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
+from base.api_contracts.agent_contract import SdkCaptureAdmission
 
 # Event name written to events for each public SDK entry.
 SDK_CALL_EVENT = "sdk_call"

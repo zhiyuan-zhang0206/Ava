@@ -452,7 +452,7 @@ class TestResurrect:
     def test_resurrect_returns_resurrect_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """resurrect(agent_id, prompt) calls gateway client and wraps status."""
         from ava import agents
-        from base.agents import ResurrectResult
+        from base.api_contracts.agent_contract import ResurrectResult
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
@@ -472,7 +472,7 @@ class TestResurrect:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from ava import agents
-        from base.agents import ResurrectResult
+        from base.api_contracts.agent_contract import ResurrectResult
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
@@ -488,7 +488,7 @@ class TestResurrect:
     def test_resurrect_already_alive(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When the agent is still alive, resurrect returns ALREADY_ALIVE."""
         from ava import agents
-        from base.agents import ResurrectResult
+        from base.api_contracts.agent_contract import ResurrectResult
 
         monkeypatch.setattr(gateway_client, "resurrect", lambda _agent_id, **_kw: "already_alive")  # pyright: ignore[reportUnknownArgumentType]
         assert agents.resurrect(1, "ping") == ResurrectResult.ALREADY_ALIVE
@@ -516,7 +516,7 @@ class TestLifecycleResultEnums:
     def test_terminate_result_matches_gateway_schema(self) -> None:
         from typing import get_type_hints
 
-        from base.agents import TerminateResult
+        from base.api_contracts.agent_contract import TerminateResult
         from ops.rpc_schemas import TerminateAgentResponse
 
         assert get_type_hints(TerminateAgentResponse)["status"] is TerminateResult
@@ -530,7 +530,7 @@ class TestLifecycleResultEnums:
     def test_resurrect_result_matches_gateway_schema(self) -> None:
         from typing import get_type_hints
 
-        from base.agents import ResurrectResult
+        from base.api_contracts.agent_contract import ResurrectResult
         from ops.rpc_schemas import ResurrectAgentResponse
 
         assert get_type_hints(ResurrectAgentResponse)["status"] is ResurrectResult
@@ -544,7 +544,7 @@ class TestLifecycleResultEnums:
     def test_restart_result_matches_gateway_schema(self) -> None:
         from typing import get_type_hints
 
-        from base.agents import RestartResult
+        from base.api_contracts.agent_contract import RestartResult
         from ops.rpc_schemas import RestartAgentResponse
 
         assert get_type_hints(RestartAgentResponse)["status"] is RestartResult

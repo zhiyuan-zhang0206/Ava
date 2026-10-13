@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 
-from base.agents import ErrorReason
+from base.api_contracts.agent_contract import ErrorReason
 
 
 class ErrorEnvelope(BaseModel):

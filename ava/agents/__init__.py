@@ -9,30 +9,34 @@ import ava
 import ava.sdk_surface.agent_identity
 from ava import gateway_client as _client
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-from base.agents import AgentLaunchFailed as AgentLaunchFailed
+from base.api_contracts.agent_contract import AgentLaunchFailed as AgentLaunchFailed
 
 # Redundant-alias re-exports: importable from this module but deliberately not
 # in __all_for_ava__ — error types never render into the SDK docs every agent carries;
 # a traceback names them clearly on the rare occasion one fires. The aliases keep
 # pyright from flagging them unused.
-from base.agents import AgentNotFound as AgentNotFound
-from base.agents import (
+from base.api_contracts.agent_contract import AgentNotFound as AgentNotFound
+from base.api_contracts.agent_contract import (
     AgentStatus,
     RestartResult,
     ResurrectResult,
     ShellSessionKillTiming,
     TerminateResult,
 )
-from base.agents import CrossMachineGatewayUnavailable as CrossMachineGatewayUnavailable
-from base.agents import ForkCheckpointNotFound as ForkCheckpointNotFound
-from base.agents import ForkConfigChangeNotAllowed as ForkConfigChangeNotAllowed
-from base.agents import ForkError as ForkError
-from base.agents import ForkSourceEmpty as ForkSourceEmpty
-from base.agents import GatewayUnavailable as GatewayUnavailable
-from base.agents import InvalidModelConfig as InvalidModelConfig
-from base.agents import MachineNotRegistered as MachineNotRegistered
-from base.agents import ResurrectError as ResurrectError
-from base.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
+from base.api_contracts.agent_contract import (
+    CrossMachineGatewayUnavailable as CrossMachineGatewayUnavailable,
+)
+from base.api_contracts.agent_contract import ForkCheckpointNotFound as ForkCheckpointNotFound
+from base.api_contracts.agent_contract import (
+    ForkConfigChangeNotAllowed as ForkConfigChangeNotAllowed,
+)
+from base.api_contracts.agent_contract import ForkError as ForkError
+from base.api_contracts.agent_contract import ForkSourceEmpty as ForkSourceEmpty
+from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
+from base.api_contracts.agent_contract import InvalidModelConfig as InvalidModelConfig
+from base.api_contracts.agent_contract import MachineNotRegistered as MachineNotRegistered
+from base.api_contracts.agent_contract import ResurrectError as ResurrectError
+from base.api_contracts.agent_contract import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 
 from . import compaction as compaction
 from . import presets as presets

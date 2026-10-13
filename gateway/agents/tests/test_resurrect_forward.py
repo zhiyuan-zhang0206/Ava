@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from base.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
+from base.api_contracts.agent_contract import CrossMachineGatewayUnavailable, MachineNotRegistered
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.agents import forward as forward_module

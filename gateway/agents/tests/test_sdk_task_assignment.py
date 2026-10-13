@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 from ava.gateway_client import transport
 from ava_builtins.plugins.ava_fleet import task_registry
 from ava_builtins.plugins.ava_fleet.task_registry import TaskAssignment
-from base.agents import GatewayUnavailable
 from base.agents.context.identity import ExternalLease
+from base.api_contracts.agent_contract import GatewayUnavailable
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from gateway.agents import router as agent_router

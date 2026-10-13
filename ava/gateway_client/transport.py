@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 import ava
-from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.agents.context import AvaContext
 from base.agents.context.clients import GatewayHandle
 from base.agents.messages.delivery.retry import GatewayResponse, network_errors, retryable_response
 from base.api_contracts import contracts
+from base.api_contracts.agent_contract import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.api_contracts.contracts import Idempotency
 from base.api_contracts.idempotency import keyed_headers
 from base.host.net.resilience import Policy, http_classifier, retry
@@ -215,7 +215,7 @@ def raise_from_response(resp: TransportResponse) -> None:
         return  # unreachable; raise_for_status has raised
     reason, body = wire
     if reason == ErrorReason.AGENT_LAUNCH_FAILED:
-        from base.agents import AgentLaunchFailed
+        from base.api_contracts.agent_contract import AgentLaunchFailed
 
         raise AgentLaunchFailed(
             body["detail"],

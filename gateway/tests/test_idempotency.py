@@ -19,7 +19,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
