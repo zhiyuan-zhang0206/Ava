@@ -21,7 +21,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_runner.agent_host.tests.lifecycle.test_hosted_lifecycle import (
-    _terminate_command,
+    terminate_command,
 )
 
 
@@ -33,7 +33,7 @@ async def _prepare(
     conn.execute("UPDATE agents_meta SET session_index=4 WHERE id=%s", (agent_id,))
     conn.commit()
     if phase == "graceful":
-        command = _terminate_command(conn, agent_id, kill=True)
+        command = terminate_command(conn, agent_id, kill=True)
         await claim_inbound_batch(pool, agent_id, incarnation=owner, work=None)
     else:
         with ConnectionPool[psycopg.Connection](conn.info.dsn) as sync_pool:

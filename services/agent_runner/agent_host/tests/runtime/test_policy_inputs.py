@@ -5,12 +5,12 @@ from dataclasses import replace
 
 from services.agent_runner.agent_host.runtime import HostCachePolicy
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from services.agent_runner.agent_host.tests.runtime.host_support import _Build, _Row
+from services.agent_runner.agent_host.tests.runtime.host_support import Build, Row
 from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
 from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
 
 
-async def test_host_capacity_is_independent_and_fixed_at_construction(wired: _Build) -> None:
+async def test_host_capacity_is_independent_and_fixed_at_construction(wired: Build) -> None:
     policy = replace(
         configured_policy(),
         max_concurrent_turns=1,
@@ -40,7 +40,7 @@ async def test_host_capacity_is_independent_and_fixed_at_construction(wired: _Bu
 
 
 async def test_hosts_read_their_live_model_defaults_and_preserve_explicit_pins(
-    wired: _Build,
+    wired: Build,
 ) -> None:
     defaults = {"first": "alpha", "second": "beta"}
     first_policy = replace(
@@ -51,8 +51,8 @@ async def test_hosts_read_their_live_model_defaults_and_preserve_explicit_pins(
         llm_override=lambda: "",
     )
     second_policy = replace(first_policy, default_model=lambda: defaults["second"])
-    first, first_graph, _ = wired({1: _Row()}, policy=first_policy)
-    second, second_graph, _ = wired({1: _Row()}, policy=second_policy)
+    first, first_graph, _ = wired({1: Row()}, policy=first_policy)
+    second, second_graph, _ = wired({1: Row()}, policy=second_policy)
     await asyncio.gather(first.run_turn(1), second.run_turn(1))
     assert first_graph.observations[-1].model == "alpha"
     assert second_graph.observations[-1].model == "beta"
@@ -67,7 +67,7 @@ async def test_hosts_read_their_live_model_defaults_and_preserve_explicit_pins(
         raise AssertionError("an explicit pin must not read the default")
 
     pinned, graph, _ = wired(
-        {1: _Row(overlay={"llm_model": "alpha"})},
+        {1: Row(overlay={"llm_model": "alpha"})},
         policy=replace(first_policy, default_model=unneeded_default),
     )
     await pinned.run_turn(1)
@@ -75,7 +75,7 @@ async def test_hosts_read_their_live_model_defaults_and_preserve_explicit_pins(
     await asyncio.gather(first.aclose(), second.aclose(), pinned.aclose())
 
 
-async def test_cache_policy_reads_live_values_for_each_host(wired: _Build) -> None:
+async def test_cache_policy_reads_live_values_for_each_host(wired: Build) -> None:
     policies = {"first": HostCachePolicy(60, 4), "second": HostCachePolicy(60, 4)}
     first_policy = replace(
         configured_policy(),
@@ -84,9 +84,9 @@ async def test_cache_policy_reads_live_values_for_each_host(wired: _Build) -> No
         default_model=lambda: "alpha",
         llm_override=lambda: "",
     )
-    first, _, _ = wired({1: _Row(), 2: _Row(), 3: _Row()}, policy=first_policy)
+    first, _, _ = wired({1: Row(), 2: Row(), 3: Row()}, policy=first_policy)
     second, _, _ = wired(
-        {1: _Row(), 2: _Row(), 3: _Row()},
+        {1: Row(), 2: Row(), 3: Row()},
         policy=replace(first_policy, cache=lambda: policies["second"]),
     )
     for agent_id in (1, 2, 3):

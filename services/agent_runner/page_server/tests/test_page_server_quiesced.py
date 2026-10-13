@@ -29,7 +29,7 @@ async def test_a_quiesced_unit_runs_no_reconcile_pass(
     def record_pass(*args: object) -> None:
         passes.append(args)
 
-    monkeypatch.setattr(daemon, "_reconcile_once", record_pass)
+    monkeypatch.setattr(daemon, "reconcile_once", record_pass)
     real_sleep = asyncio.sleep
 
     async def short_sleep(_seconds: float) -> None:
@@ -38,7 +38,7 @@ async def test_a_quiesced_unit_runs_no_reconcile_pass(
     monkeypatch.setattr(daemon.asyncio, "sleep", short_sleep)
     pool = MagicMock()
     task = asyncio.create_task(
-        daemon._reconcile_loop(
+        daemon.reconcile_loop(
             cast("ConnectionPool", pool),
             LoopProgress("t", 60.0),
             page_server_config(),

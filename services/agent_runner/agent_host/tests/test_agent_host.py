@@ -40,9 +40,9 @@ from services.agent_runner.agent_host.tests.host_policy import (
     configured_machine,
 )
 from services.agent_runner.agent_host.tests.runtime.host_support import (
-    _Build,
-    _PendingScanPool,
-    _Row,
+    Build,
+    PendingScanPool,
+    Row,
     build_agent_host,
 )
 from services.agent_runner.agent_host.tests.runtime.host_support import (
@@ -63,7 +63,7 @@ class TestPendingInboundBackstop:
     ) -> None:
         """The hosted dispatcher scans only this machine's runnable rows. A
         pending inbound wakes its agent; the scan never selects a turn to cancel."""
-        pool = _PendingScanPool([(17,), (23,)])
+        pool = PendingScanPool([(17,), (23,)])
         host = build_agent_host(
             catalog=model_catalog,
             pool=pool,
@@ -91,7 +91,7 @@ class TestPendingInboundBackstop:
             def connection(self) -> object:
                 raise AssertionError("pending scan borrowed from the turn pool")
 
-        control_pool = _PendingScanPool([(17,)])
+        control_pool = PendingScanPool([(17,)])
         host = build_agent_host(
             catalog=model_catalog,
             pool=cast(AsyncConnectionPool[Any], _ForbiddenTurnPool()),
@@ -109,7 +109,7 @@ class TestConcurrentAgentIsolation:
     @pytest.mark.parametrize("sdk_bound", [False, True])
     async def test_two_overlapping_turns_each_see_their_own_everything(
         self,
-        wired: _Build,
+        wired: Build,
         sdk_bound: bool,
         machine_identity: MachineIdentity,
     ) -> None:
@@ -123,8 +123,8 @@ class TestConcurrentAgentIsolation:
         else:
             pin_no_identity()
         rows = {
-            11: _Row(overlay={"llm_model": "model-for-11", "marker": "plug-for-11"}),
-            22: _Row(overlay={"llm_model": "model-for-22", "marker": "plug-for-22"}),
+            11: Row(overlay={"llm_model": "model-for-11", "marker": "plug-for-11"}),
+            22: Row(overlay={"llm_model": "model-for-22", "marker": "plug-for-22"}),
         }
         host, graph, _ = wired(
             rows,
@@ -162,11 +162,11 @@ class TestConcurrentAgentIsolation:
 
     async def test_nothing_leaks_after_a_turn_ends(
         self,
-        wired: _Build,
+        wired: Build,
     ) -> None:
         """Host turns carry their identity explicitly and never change the shared SDK slot."""
         host, _, _ = wired(
-            {11: _Row(overlay={"llm_model": "model-for-11"})},
+            {11: Row(overlay={"llm_model": "model-for-11"})},
         )
         child_context = getattr(ava, "context", None)
         await asyncio.wait_for(host.run_turn(11), 2)

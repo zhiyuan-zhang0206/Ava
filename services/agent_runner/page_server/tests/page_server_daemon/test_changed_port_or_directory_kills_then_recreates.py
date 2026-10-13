@@ -21,9 +21,9 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.page_server.tests.page_shell import PageShellBackend
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
-    _HOST,
-    _insert_page_row,
+    HOST,
     _reconcile,
+    insert_page_row,
 )
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
     _identity as _identity,
@@ -60,8 +60,8 @@ def test_changed_port_or_directory_kills_then_recreates_the_page_session(
     old_dir.mkdir()
     new_dir = tmp_path / "new"
     new_dir.mkdir()
-    _insert_page_row(db_conn, agent_id, "changed", 12007, old_dir)
-    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    insert_page_row(db_conn, agent_id, "changed", 12007, old_dir)
+    managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
     _reconcile(sync_pool, managed)
     old_session = managed[(agent_id, "changed")].session_name
@@ -98,7 +98,7 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
     )
     page_session = f"ava-agent-{agent_id}-shell-5-page-adopted"
     backend.sessions.add(page_session)
-    _insert_page_row(
+    insert_page_row(
         db_conn,
         agent_id,
         "adopted",
@@ -107,8 +107,8 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
-    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
     _reconcile(sync_pool, managed)
 
@@ -140,7 +140,7 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
     key = (agent_id, "kept")
     page_session = f"ava-agent-{agent_id}-shell-6-page-kept"
     backend.sessions.add(page_session)
-    _insert_page_row(
+    insert_page_row(
         db_conn,
         agent_id,
         "kept",
@@ -151,16 +151,16 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
     )
     monkeypatch.setattr(
         psd,
-        "_page_server_occupants",
+        "page_server_occupants",
         lambda: {
             12010: (5010, str(psd.ava_home())),
             12011: (5011, str(psd.ava_home())),
         },
     )
-    monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5010 else None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(psd, "page_session_owner", lambda pid, _pids: key if pid == 5010 else None)  # pyright: ignore[reportUnknownArgumentType]
     killed: list[int] = []
-    monkeypatch.setattr(psd, "_kill_pid", killed.append)
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(psd, "kill_pid", killed.append)
+    monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
 
     _reconcile(sync_pool, {})
 
@@ -178,15 +178,15 @@ def test_page_session_owner_walks_process_ancestry(monkeypatch: pytest.MonkeyPat
             return [_Parent(11), _Parent(12)]
 
     monkeypatch.setattr(psd.psutil, "Process", lambda _pid: _Proc())  # pyright: ignore[reportUnknownArgumentType]
-    assert psd._page_session_owner(99, {12: (7, "page")}) == (7, "page")
-    assert psd._page_session_owner(99, {11: (8, "near"), 12: (7, "page")}) == (8, "near")
+    assert psd.page_session_owner(99, {12: (7, "page")}) == (7, "page")
+    assert psd.page_session_owner(99, {11: (8, "near"), 12: (7, "page")}) == (8, "near")
     # Unrelated host ancestry must not acquire a managed page's ownership.
-    assert psd._page_session_owner(99, {77: (7, "page")}) is None
+    assert psd.page_session_owner(99, {77: (7, "page")}) is None
 
 
 def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) -> None:
     with socket.socket() as sock:
-        sock.bind((_HOST, 0))
+        sock.bind((HOST, 0))
         port = sock.getsockname()[1]
     env = {**os.environ, "PAGE_SERVER_TOKEN": "roundtrip"}
     proc = subprocess.Popen(  # noqa: S603 -- server module receives fixed test arguments
@@ -197,7 +197,7 @@ def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) 
             "--port",
             str(port),
             "--host",
-            _HOST,
+            HOST,
             "--dir",
             str(tmp_path),
         ],
@@ -209,10 +209,10 @@ def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) 
     try:
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
-            if psd._server_is_healthy(_HOST, port, "roundtrip"):
+            if psd.server_is_healthy(HOST, port, "roundtrip"):
                 break
             time.sleep(0.05)
-        assert psd._server_is_healthy(_HOST, port, "roundtrip")
+        assert psd.server_is_healthy(HOST, port, "roundtrip")
     finally:
         # SIGKILL: a shell session's SIGTERM=SIG_IGN is inherited, so the
         # graceful call would leave the page server alive.

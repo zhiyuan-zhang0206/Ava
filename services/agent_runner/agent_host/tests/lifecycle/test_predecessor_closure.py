@@ -38,7 +38,7 @@ _DRAIN = {
 }
 
 
-def _retired(generation: UUID, owner: UUID, *, open_request: bool = False) -> dict[str, Any]:
+def retired(generation: UUID, owner: UUID, *, open_request: bool = False) -> dict[str, Any]:
     """`IncarnationResources.model_dump(mode="json")` as the retired runtime wrote
     it: process receipts carry only pid and wall birth, no boot scope."""
     requests: dict[str, Any] = {}
@@ -82,7 +82,7 @@ def _drained(
         catalog=model_catalog,
         authority=config_authority,
     )
-    before = _retired(uuid4(), uuid4(), **resources)
+    before = retired(uuid4(), uuid4(), **resources)
     receipt = db.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,payload,status,claimed_at,"
         "applied_at,target_generation,target_owner) VALUES(%s,'restart','system:maintenance',"
@@ -111,7 +111,7 @@ def _snapshot(db: psycopg.Connection, aid: int, receipt: int) -> tuple[Any, ...]
     return row
 
 
-def _closed_form(db: psycopg.Connection, aid: int, before: dict[str, Any]) -> IncarnationResources:
+def closed_form(db: psycopg.Connection, aid: int, before: dict[str, Any]) -> IncarnationResources:
     """Store the closed-predecessor form of the incarnation `before` names."""
     closed = IncarnationResources(
         generation=UUID(before["generation"]), owner=UUID(before["owner"]), requests={}
@@ -144,7 +144,7 @@ async def _admit(
 
 def test_retired_shape_is_a_typed_refusal() -> None:
     with pytest.raises(ResourceShapeError, match="cutover reconciliation"):
-        decode_resources(_retired(uuid4(), uuid4()))
+        decode_resources(retired(uuid4(), uuid4()))
 
 
 def _warnings(records: list[dict[str, Any]]) -> list[str]:
@@ -202,7 +202,7 @@ async def test_closed_form_is_admitted_exactly_once(
         database_gate=database_gate,
         local_machine=machine_identity,
     )
-    closed = _closed_form(db_conn, aid, before)
+    closed = closed_form(db_conn, aid, before)
     stored = _snapshot(db_conn, aid, receipt)
     assert decode_resources(stored[0]["incarnation_resources"]) == closed
 
@@ -245,7 +245,7 @@ async def test_closed_form_without_its_receipt_is_not_admissible(
         database_gate=database_gate,
         local_machine=machine_identity,
     )
-    _closed_form(db_conn, aid, before)
+    closed_form(db_conn, aid, before)
     # Withdraw the receipt: the same bytes without a settled decision prove nothing.
     db_conn.execute("UPDATE inbound_messages SET applied_at=NULL WHERE id=%s", (receipt,))
     db_conn.commit()
@@ -274,7 +274,7 @@ def _resurrected(
         catalog=model_catalog,
         authority=config_authority,
     )
-    before = _retired(uuid4(), uuid4())
+    before = retired(uuid4(), uuid4())
     receipt = db.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,status,claimed_at,applied_at,"
         "observed_at,target_generation,target_owner) VALUES(%s,'terminate','user','','done',"
@@ -311,7 +311,7 @@ async def test_a_resurrected_row_never_readmitted_is_admitted_through_its_termin
         database_gate=database_gate,
         local_machine=machine_identity,
     )
-    _closed_form(db_conn, aid, before)
+    closed_form(db_conn, aid, before)
     successor = await _admit(
         aops_pool, aid, uuid4(), database_gate=database_gate, local_machine=machine_identity
     )
@@ -342,7 +342,7 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
         database_gate=database_gate,
         local_machine=machine_identity,
     )
-    _closed_form(db_conn, aid, before)
+    closed_form(db_conn, aid, before)
     incarnation = await _admit(
         aops_pool, aid, uuid4(), database_gate=database_gate, local_machine=machine_identity
     )

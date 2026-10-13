@@ -27,8 +27,8 @@ from base.db.tests.fakes import fake_database
 from services.derived.memory_indexer.backends.pgvector import (
     _TABLE,
     PGVectorBackend,
-    _validate_schema,
     prepare_table,
+    validate_schema,
 )
 
 _DIM = 8
@@ -179,7 +179,7 @@ def test_validate_schema_refuses_dim_mismatch_without_dropping_rows(
     backend.upsert("/survives.md", 1.0, "hash", _vec(0))
 
     with pytest.raises(RuntimeError, match="vector dimension 8, expected 9"):
-        _validate_schema(db_conn, _DIM + 1)
+        validate_schema(db_conn, _DIM + 1)
 
     assert _rows(db_conn) == [("/survives.md\x1fbody\x1f0", "/survives.md", "body", 0, 1.0, "hash")]
 
@@ -206,7 +206,7 @@ def test_validate_schema_accepts_matching_table(
     """Validation reads the current schema without provisioning anything."""
     backend.upsert("/present.md", 1.0, "hash", _vec(0))
 
-    _validate_schema(db_conn, _DIM)
+    validate_schema(db_conn, _DIM)
 
     assert _rows(db_conn) == [("/present.md\x1fbody\x1f0", "/present.md", "body", 0, 1.0, "hash")]
 
@@ -214,7 +214,7 @@ def test_validate_schema_accepts_matching_table(
 def test_validate_schema_refuses_missing_table(db_conn: psycopg.Connection) -> None:
     """Validation cannot create an absent derived-cache table."""
     with pytest.raises(RuntimeError, match="is missing"):
-        _validate_schema(db_conn, _DIM)
+        validate_schema(db_conn, _DIM)
 
     assert _table_dim(db_conn) is None
 

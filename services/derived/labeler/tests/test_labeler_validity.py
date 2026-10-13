@@ -6,7 +6,7 @@ Issue #178: fed a long English second-person imperative brief (the shape
 `deepseek-v4-flash` failed every draw on the real preview-cluster prompts —
 15/15 on replay — answering the brief in assistant voice, emitting `<think>` /
 `<thinking>` scaffolding as plain text, and echoing the `<user_request>` fence
-back. `_normalize` took the first 64 characters of each and
+back. `normalize` took the first 64 characters of each and
 `generate_label_async` wrote it.
 
 Three corpora pin the classifier, because a classifier that never fires and one
@@ -42,9 +42,9 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-from services.derived.labeler.labeler import _rejection_reason as _reason_for
-from services.derived.labeler.labeler import _system_prompt as _prompt_for
 from services.derived.labeler.labeler import generate_label_async
+from services.derived.labeler.labeler import rejection_reason as _reason_for
+from services.derived.labeler.labeler import system_prompt as _prompt_for
 from services.derived.labeler.tests.slices import labeler_config, labeler_db
 
 
@@ -59,7 +59,7 @@ def _system_prompt(**config: Any) -> str:
 # The nine outputs #178 recorded from real runs: three observed landing in
 # `agents.label` on the preview cluster, six from replaying the stored prompts
 # through the labeler's system prompt. All are already 64-char-truncated by
-# `_normalize` — that is the exact string that reached the database.
+# `normalize` — that is the exact string that reached the database.
 _ISSUE_178_OUTPUTS = [
     "I'll systematically test the preview cluster's frontend as a ske",
     "I'll start by checking if the validation suite exists, then work",
@@ -76,7 +76,7 @@ _ISSUE_178_OUTPUTS = [
 # are exactly 64 characters long (the default limit) and contain `<yes|no>` placeholders, and the
 # one that is a verbatim prefix of its own prompt: they are the measured
 # counter-examples to the three rules this change considered and dropped (see
-# `_rejection_reason`'s docstring).
+# `rejection_reason`'s docstring).
 _PROD_LABELS = [
     "Extend Syntax Fix Plugin to auto-import missing names on NameErr",
     "Mining transcript for user interrupt signals and durable prefere",
@@ -233,13 +233,13 @@ class TestRejectionReason:
     def test_character_limit_follows_config(self) -> None:
         """The ceiling is cluster config: a shortened limit reaches both the
         truncation and the prompt handed to the model."""
-        assert labeler_module._normalize("x" * 50, 10) == "x" * 10
+        assert labeler_module.normalize("x" * 50, 10) == "x" * 10
         assert "at most 10 characters" in _system_prompt(labeler_max_chars=10)
 
     def test_rejects_a_fenced_code_block_opener(self) -> None:
         """Replaying the three real preview prompts through the old default
         produced this: the model started answering in a code block and
-        `_normalize` kept the fence line."""
+        `normalize` kept the fence line."""
         assert _rejection_reason("```json") == "markup"
         assert _rejection_reason("```") == "markup"
 
@@ -250,7 +250,7 @@ class TestRejectionReason:
 
     def test_rejects_an_echo_of_the_system_prompt(self) -> None:
         """Observed while measuring model candidates: the model repeated its own
-        instruction instead of applying it, and `_normalize` truncated that to
+        instruction instead of applying it, and `normalize` truncated that to
         64 characters like any other output."""
         echoed = _system_prompt()[: labeler_config().labeler_max_chars]
         assert _rejection_reason(echoed) == "instruction_echo"

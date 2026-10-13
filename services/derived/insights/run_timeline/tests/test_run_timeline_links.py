@@ -236,7 +236,7 @@ def test_a_window_longer_than_a_page_is_read_completely(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(links, "_PAGE_SIZE", 2)
+    monkeypatch.setattr(links, "PAGE_SIZE", 2)
     for hours in (5, 4, 3, 2, 1):
         message(db_conn, receiver=receiver, sender=405, hours_ago=hours)
     assert len(read(receiver, kinds=("send_message",), database_gate=database_gate)) == 5
