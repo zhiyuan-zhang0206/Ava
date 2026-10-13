@@ -154,13 +154,22 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
     )
     recording.add_argument("paths", nargs="+")
     modes.add_parser("prune", help="remove recorded debt that no longer occurs")
-    moving = modes.add_parser("carry", help="move recorded debt to where renamed files now are")
+    moving = modes.add_parser(
+        "carry", help="move recorded debt to where renamed files, targets and symbols now are"
+    )
     moving.add_argument(
         "--rename-target",
         action="append",
         default=[],
         metavar="OLD=NEW",
         help="a patch target that was renamed (a symbol, not a file); repeatable",
+    )
+    moving.add_argument(
+        "--move-symbol",
+        action="append",
+        default=[],
+        metavar="OLD_FILE::NAME=NEW_FILE",
+        help="a top-level function or class that moved to another file; repeatable",
     )
     moving.add_argument(
         "--base",
@@ -230,11 +239,13 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
     if mode == "diff":
         return _run_diff(root, args.against, args.on_growth, args.waive_if_changed)
     if mode == "carry":
-        lines = carry_debt(root, args.base, args.rename_target)
+        lines = carry_debt(root, args.base, args.rename_target, args.move_symbol)
         for line in lines:
             print(f"meizel: carried {line}")
         if not lines:
-            print("meizel: no renamed file carries recorded debt")
+            print(
+                "meizel: nothing to carry: no renamed file, target or moved symbol has recorded debt"
+            )
         return 0
     return _run_record(root, [relative_target(root, base, p) for p in args.paths], jobs)
 

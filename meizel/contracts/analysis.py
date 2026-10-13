@@ -20,7 +20,7 @@ from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
 from meizel.language.scan import EXTERNAL_FORMS, FileScan, scan_file
 
-__all__ = ["Analysis", "analyze"]
+__all__ = ["Analysis", "analyze", "diagnose"]
 
 _PARALLEL_FROM = 200
 _WORKER: dict[str, Universe] = {}
@@ -310,6 +310,15 @@ def _judge_facts(
             for source, target in manifest.covering(*relative(proj)):
                 needed[(proj.lca, source, target)].append(proj.fact)
     return projections, found, dict(needed)
+
+
+def diagnose(scan: FileScan, manifests: dict[str, Manifest]) -> list[Diagnostic]:
+    """The violations one scanned file contributes by itself, as `analyze` finds them."""
+    _, found, _ = _judge_facts(scan.facts, manifests)
+    loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
+    found.extend(_source_diagnostics([scan], loaders, externals))
+    found.extend(_patch_diagnostics([scan]))
+    return _distinct(found)
 
 
 def analyze(

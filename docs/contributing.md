@@ -75,7 +75,8 @@ violations pass, anything new fails, and the debt may only shrink
   `env-patch` and `unresolved-patch` (a target the imports do not resolve). Do not add one;
   pass the dependency in as an explicit parameter
   ([patching](../meizel/docs/checker/patching.ava.okf.md)). When a symbol is renamed, `debt carry
-  --rename-target OLD=NEW` moves its entries.
+  --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
+  `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does.
 - `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
   `[loads]` sites, default-argument injections). Do not edit it unless the task names the entry;
   CI prints every change to it ([the policy file](../meizel/docs/checker/policy.ava.okf.md)).

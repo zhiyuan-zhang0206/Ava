@@ -86,7 +86,13 @@ errors cannot be recorded.
   detected), it relocates entries whose source or target was renamed, to the
   owner and key they now have. It only relocates: counts merge, the total never
   changes, and a new violation in the moved file stays an error. Run it, then
-  `debt prune`.
+  `debt prune`. `--rename-target OLD=NEW` rewrites a patch target that was
+  renamed. `--move-symbol OLD_FILE::NAME=NEW_FILE` follows a top-level function
+  or class that moved to another file, which git cannot see as a rename (a
+  fixture moved into a helper module). It scans the symbol's lines in the old
+  file at the base and in the new file, and rekeys one for one at most what the
+  symbol cost before, costs now and has recorded, so what it gained on the way
+  stays an error. The old file must no longer define the name.
 - `debt diff --against <ref> --on-growth fail|warn` compares the recorded
   totals per code with those at a git ref. Totals, not directories, are
   compared, so debt that moves with its file does not count as growth. The
