@@ -66,7 +66,7 @@ from gateway.http.auth.request_principal import AuthPrincipal, PrincipalScopeErr
 from gateway.http.middleware.error_envelope import error_response
 from gateway.mcp_server import clients
 from ops.agents import get_agent_status
-from ops.agents.delivery import deliver_chat_inbound
+from ops.lifecycle.delivery import deliver_chat_inbound
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 
 # Provenance of everything this surface creates. `spawner` groups the agents

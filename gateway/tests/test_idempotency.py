@@ -198,8 +198,8 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
 
 def _inject_delivery_failure(patch: pytest.MonkeyPatch, step: str) -> None:
     from ops import lifecycle
-    from ops.agents import delivery
     from ops.cluster import rpc
+    from ops.lifecycle import delivery
 
     async def fail_async(*_args: object, **_kwargs: object) -> None:
         raise AttributeError("injected postcommit bug")
