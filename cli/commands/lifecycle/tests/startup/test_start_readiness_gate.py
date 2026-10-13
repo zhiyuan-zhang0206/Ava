@@ -73,7 +73,7 @@ def roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None], 
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_start(
+def hermetic_start(
     db_url: str,
     serving_root: RootBirth,
     monkeypatch: pytest.MonkeyPatch,

@@ -27,7 +27,7 @@ HOST = "127.0.0.1"
 
 
 @pytest.fixture(autouse=True)
-def _identity(machine_identity: MachineIdentity) -> None:
+def page_server_identity(machine_identity: MachineIdentity) -> None:
     machine_identity.set(host=HOST)
 
 

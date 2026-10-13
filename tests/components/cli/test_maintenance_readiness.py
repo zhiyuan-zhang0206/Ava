@@ -14,7 +14,7 @@ from base.deploy.maintenance import admission
 from base.deploy.state import host_deploy_state
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
-    _hermetic_start as _hermetic_start,
+    hermetic_start as hermetic_start,
 )
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import roster
 from cli.database.runtime import CommandRuntime

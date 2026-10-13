@@ -16,13 +16,13 @@ __all__ = [
     "_FakeResponse",
     "_FakeResult",
     "_FakeSessionBackend",
-    "_fake_session_backends",
-    "_gateway_role_pinned",
     "_git_aware",
-    "_hermetic_gateway_base",
     "_patch_gateway_http",
     "_sess",
     "_spec",
+    "fake_session_backends",
+    "gateway_role_pinned",
+    "hermetic_gateway_base",
 ]
 
 
@@ -118,7 +118,7 @@ class _FakeSessionBackend:
 
 
 @pytest.fixture(autouse=True)
-def _fake_session_backends(
+def fake_session_backends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[_FakeSessionBackend, _FakeSessionBackend]:
     """The session backends, faked in-memory for every test in an importing module.
@@ -138,7 +138,7 @@ def _fake_session_backends(
 
 
 @pytest.fixture(autouse=True)
-def _gateway_role_pinned(command_runtime: CommandRuntime) -> None:
+def gateway_role_pinned(command_runtime: CommandRuntime) -> None:
     """Pin the machine's capability set to gateway, whatever the dev host's environment says.
 
     The cluster-status commands read it through `_roles_or_none`; the tests assert the
@@ -147,7 +147,7 @@ def _gateway_role_pinned(command_runtime: CommandRuntime) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
+def hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep `ava status` / `ava cluster status` HTTP calls off any real gateway.
 
     `cmd_status`'s gateway supplement and `cmd_cluster_status`'s roster both dial

@@ -211,7 +211,7 @@ def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) ->
 
 
 @pytest.fixture(autouse=True)
-def _dummy_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def dummy_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inject a key so `_api_key()` does not short-circuit the provider.
 
     These tests mock the HTTP call (`httpx.AsyncClient`), not auth — the key
