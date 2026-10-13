@@ -20,8 +20,4 @@ exports = ["collection_guard.py", "configuration.py", "env_bootstrap.py", "gatew
 "tests/test_full_run_guard.py -> provisioning.py#_full_run_guard_message" = 1
 
 [debt.restricted-python]
-"guards.py#string patch target 'base.cluster.new_home_ports'" = 1
-"guards.py#string patch target 'base.host.proc.hosting_exec_domain'" = 1
 "guards.py#string patch target 'cli.commands.lifecycle.root_driver.wait_for_service_tree'" = 1
-"guards.py#string patch target 'gateway.schedules.session_control.capture'" = 1
-"guards.py#string patch target 'gateway.schedules.session_control.wait_consumed'" = 1
