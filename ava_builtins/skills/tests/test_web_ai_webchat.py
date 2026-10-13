@@ -68,7 +68,10 @@ def fake_chrome(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     chrome.new_page.return_value = _PAGE_LIST
     import ava as _ava
 
-    monkeypatch.setattr(_ava.mcps, "chrome", chrome, raising=False)
+    # `setitem` on the module dict, not `setattr`: `setattr(..., raising=False)` first reads the old
+    # value through the module `__getattr__`, gets a live server proxy back, and on undo writes that
+    # proxy into the module as a real attribute, which later sends the metering walk into the daemon.
+    monkeypatch.setitem(vars(_ava.mcps), "chrome", chrome)
     return chrome
 
 
