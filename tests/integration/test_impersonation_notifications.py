@@ -23,13 +23,13 @@ from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.incarnation.hosted_force import original_host_force
-from base.agents.messages.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, pool
 from base.db.code_version_gate import ProcessDbGate
+from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation

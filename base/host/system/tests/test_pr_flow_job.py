@@ -216,7 +216,7 @@ def _foreign_home(*, machine: MachineIdentity, home: Path) -> bool:
 
 
 def _passing_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("base.telemetry.observability.production_identity", _production_home)
+    monkeypatch.setattr("base.host.system.pr_flow_job.production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_gh)
     token = tmp_path / ".trunk" / "api-token"
     token.parent.mkdir(parents=True, exist_ok=True)
@@ -229,13 +229,13 @@ def test_credential_blocker_names_each_missing_piece(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr("base.telemetry.observability.production_identity", _foreign_home)
+    monkeypatch.setattr("base.host.system.pr_flow_job.production_identity", _foreign_home)
     assert (
         job.credential_blocker(machine=machine_identity, home=tmp_path)
         == "not the registered production home"
     )
 
-    monkeypatch.setattr("base.telemetry.observability.production_identity", _production_home)
+    monkeypatch.setattr("base.host.system.pr_flow_job.production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_missing)
     assert job.credential_blocker(machine=machine_identity, home=tmp_path) == "gh CLI not on PATH"
 
@@ -277,7 +277,7 @@ def test_register_skips_without_credentials(
     machine_identity: MachineIdentity,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr("base.telemetry.observability.production_identity", _production_home)
+    monkeypatch.setattr("base.host.system.pr_flow_job.production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_missing)  # no gh
 
     def no_platform(*_a: object, **_k: object) -> None:

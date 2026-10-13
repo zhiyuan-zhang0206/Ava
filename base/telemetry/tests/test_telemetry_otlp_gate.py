@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster import derive
 from base.cluster.machine import MachineNameMissing, MachineRoleInvalid, MachineRoleMissing
 from base.telemetry import observability
 from base.telemetry.otlp import telemetry_otlp
@@ -22,11 +23,11 @@ def _production_label(_home: Path | None = None) -> str:
 def test_production_identity_requires_name_and_production_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str, cluster: str, expected: bool
 ) -> None:
-    def label(_home: Path | None = None) -> str:
+    def label(_home: Path) -> str:
         return cluster
 
-    monkeypatch.setattr(observability, "cluster_label", label)
-    assert observability.production_identity(machine_identity(name=name), home=tmp_path) is expected
+    monkeypatch.setattr(derive, "home_label", label)
+    assert derive.production_identity(machine_identity(name=name), home=tmp_path) is expected
 
 
 @pytest.mark.parametrize(
@@ -48,7 +49,7 @@ def test_export_gate_roles_marker_and_override(
     override: bool,
     expected: bool,
 ) -> None:
-    monkeypatch.setattr(observability, "cluster_label", _production_label)
+    monkeypatch.setattr(derive, "home_label", _production_label)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     if override:
         monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://explicit:4318")
@@ -82,7 +83,7 @@ def test_missing_role_preserves_runner_bootstrap_gate(
         raise MachineRoleMissing("not configured")
 
     monkeypatch.setattr(machine, "role", missing)
-    monkeypatch.setattr(observability, "cluster_label", _production_label)
+    monkeypatch.setattr(derive, "home_label", _production_label)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     assert telemetry_otlp.observability_export_allowed(machine, home=tmp_path)
 
@@ -92,7 +93,7 @@ def test_invalid_roles_propagate_outside_transport_isolation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operation: str
 ) -> None:
     machine = machine_identity(roles=frozenset({"unknown"}))
-    monkeypatch.setattr(observability, "cluster_label", _production_label)
+    monkeypatch.setattr(derive, "home_label", _production_label)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     with pytest.raises(MachineRoleInvalid):
         if operation == "gateway":

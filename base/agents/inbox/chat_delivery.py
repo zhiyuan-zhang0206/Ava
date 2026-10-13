@@ -18,13 +18,13 @@ from psycopg.pq import TransactionStatus
 
 from base import telemetry
 from base.agents.impersonation.manifest import record_central_event
-from base.agents.messages.caller_identity import caller_payload
 from base.agents.messages.inbound_provenance import (
     InboundProvenance,
     content_sha256,
     source_assertion_match,
 )
 from base.db import fetch_one
+from base.events.caller_identity import caller_payload
 from base.telemetry.audit_events import record_audit
 
 

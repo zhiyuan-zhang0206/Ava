@@ -59,6 +59,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from base.cluster.derive import production_identity
 from base.cluster.machine import MachineIdentity
 from base.telemetry import (
     DrainPhase,
@@ -75,7 +76,6 @@ from base.telemetry.observability import (
     cluster_label,
     endpoint_override_is_explicit,
     gateway_observability_home,
-    production_identity,
 )
 from base.telemetry.otlp import telemetry_otlp_metrics
 from base.telemetry.otlp.telemetry_otlp_defer import ChildDeferral

@@ -10,7 +10,7 @@ from typing import Any, Literal, LiteralString, cast
 import psycopg
 
 from base.events.contract import LLM_USAGE_KEYS
-from base.telemetry.event_sql import numeric
+from base.telemetry.metrics.event_sql import numeric
 
 # One grouped row per (agent, model): tokens in/out/cached/reasoning, calls,
 # summed cost snapshots, unpriced calls. The aggregate() contract.

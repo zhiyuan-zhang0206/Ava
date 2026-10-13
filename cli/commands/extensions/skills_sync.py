@@ -45,7 +45,6 @@ from pathlib import Path
 
 from base import paths
 from base.cluster import is_default_home
-from base.host.converge.preserve_report import report_converge_preserve
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import (
     IGNORED_NAMES,
@@ -55,6 +54,7 @@ from base.packages.extensions.install_registry import (
     tree_hash,
 )
 from base.packages.skills.names import SkillIdentity, match_key
+from base.telemetry.converge_report import report_converge_preserve
 from cli.commands.extensions.skill_package import contains_skill_md
 
 # A git worktree checkout's sources are branch work-in-progress. converge and
