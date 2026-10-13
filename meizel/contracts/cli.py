@@ -14,6 +14,7 @@ from meizel.contracts.bootstrap import bootstrap
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
 from meizel.contracts.debt_report import diff, summarize
+from meizel.contracts.declare import declare
 from meizel.contracts.explain import explain
 from meizel.contracts.ledger import debts_in
 from meizel.contracts.sync import prune
@@ -114,9 +115,13 @@ def build_parser() -> argparse.ArgumentParser:
     show = commands.add_parser("explain", help="show a node's view of the graph")
     show.add_argument("path")
     sync = commands.add_parser("sync", help="maintain manifests")
+    sync.add_argument("--prune", action="store_true", help="remove stale declared edges")
     sync.add_argument(
-        "--prune", action="store_true", required=True, help="remove stale declared edges"
+        "--declare",
+        action="store_true",
+        help="declare the legal new dependencies of the paths (default: the changed files); also prunes",
     )
+    sync.add_argument("paths", nargs="*", help="with --declare: only dependencies of these paths")
     seed = commands.add_parser("bootstrap", help="generate manifests from current facts")
     seed.add_argument("--out", type=Path, required=True, help="directory to mirror manifests into")
     add_debt_parser(commands)
@@ -194,6 +199,30 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
     return _run_record(root, [relative_target(root, base, p) for p in args.paths], jobs)
 
 
+def run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
+    if not (args.prune or args.declare):
+        raise MeizelError("sync needs --prune or --declare")
+    if args.paths and not args.declare:
+        raise MeizelError("paths narrow --declare only")
+    left: list[str] = []
+    if args.declare:
+        targets = [relative_target(root, base, p) for p in args.paths] if args.paths else None
+        lines, left = declare(root, targets, args.jobs)
+        for line in lines:
+            print(line)
+        for line in left:
+            print(line)
+    for line in prune(root, args.jobs):
+        print(line)
+    if left:
+        print(
+            f"meizel: {len(left)} dependencies need a code change, not a declaration",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def run_roles(root: Path, args: argparse.Namespace) -> int:
     if args.mode == "list":
         for name in role_api.packages(*args.role_names, root=root):
@@ -228,9 +257,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "roles":
             return run_roles(root, args)
         if args.command == "sync":
-            for line in prune(root, args.jobs):
-                print(line)
-            return 0
+            return run_sync(root, base, args)
         print(bootstrap(root, args.out, args.jobs))
         return 0
     except MeizelError as error:
