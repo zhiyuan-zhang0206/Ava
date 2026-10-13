@@ -1,7 +1,7 @@
 """`contributions.ui` validation — the U1 slice of
 `future/frontend-plugin-contributions.md`.
 
-Every check here goes through the manifest validator (`pm._validate`) rather
+Every check here goes through the manifest validator (`pm.validate`) rather
 than the sub-validator alone: `contributions.ui` is only worth anything if a
 real `ava-plugin.json` carrying it validates, and the closed sets only hold if
 the manifest layer refuses what they exclude.
@@ -19,7 +19,7 @@ from base.packages.plugins.surface import ui_contributions as ui
 
 def _ui(**contributions: object) -> dict[str, object]:
     """A manifest carrying one `contributions.ui` declaration, validated."""
-    manifest = pm._validate(
+    manifest = pm.validate(
         cast(
             dict[str, Any],
             {
@@ -273,7 +273,7 @@ def test_missing_and_unknown_entry_fields_fail() -> None:
 
 def test_ui_must_be_an_object() -> None:
     with pytest.raises(ManifestError, match=r"contributions\.ui must be an object"):
-        pm._validate(
+        pm.validate(
             cast(
                 dict[str, Any],
                 {

@@ -86,25 +86,25 @@ from base.telemetry.otlp.telemetry_otlp import (
 )
 from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm
 from base.telemetry.trace_mirror import (
-    _disk_usage,
-    _disk_watermark_exceeded,
-    _enforce_dir_cap,
-    _gzip_old_mirror,
-    _mirror_size,
-    _prune_old_mirror,
+    disk_usage,
+    disk_watermark_exceeded,
+    enforce_dir_cap,
+    gzip_old_mirror,
+    mirror_size,
+    prune_old_mirror,
 )
 
 __all__ = [
     "OtlpJsonHttpSpanExporter",
-    "_disk_usage",
-    "_disk_watermark_exceeded",
-    "_enforce_dir_cap",
-    "_gzip_old_mirror",
-    "_mirror_size",
-    "_prune_old_mirror",
     "claim_idle_wait_span",
+    "disk_usage",
+    "disk_watermark_exceeded",
+    "enforce_dir_cap",
     "ensure_init_resolved",
+    "gzip_old_mirror",
     "initialize_tracing",
+    "mirror_size",
+    "prune_old_mirror",
     "turn_span",
 ]
 
@@ -129,9 +129,9 @@ _NODE_SPAN_PREFIX = "execute_task "
 
 _IDLE_WAIT_SPAN_NAME = "claim idle-wait"
 
-_TRACE_EXPORT_TIMEOUT_S = 2.0
-_TRACE_EXPORT_FAILURE_THRESHOLD = 3
-_TRACE_EXPORT_COOLDOWN_S = 30.0
+TRACE_EXPORT_TIMEOUT_S = 2.0
+TRACE_EXPORT_FAILURE_THRESHOLD = 3
+TRACE_EXPORT_COOLDOWN_S = 30.0
 
 
 # ── LLM content stripping (trace v2) ─────────────────────────────────────────
@@ -169,7 +169,7 @@ _CONTENT_ATTR_PREFIXES: tuple[str, ...] = (
 # even if an instrumentor invents a new key — bounds a future leak to a few
 # KB per span. 16 KB is above the largest real metadata (a long langgraph
 # path array) and far below the smallest real content (a prompt).
-_MAX_ATTR_STRING_CHARS = 16 * 1024
+MAX_ATTR_STRING_CHARS = 16 * 1024
 
 
 def _is_content_attribute(key: str) -> bool:
@@ -196,12 +196,12 @@ def _attribute_value_size(value: dict[str, Any]) -> int:
     return 0
 
 
-def _strip_content_attributes(otlp: dict[str, Any]) -> None:
+def strip_content_attributes(otlp: dict[str, Any]) -> None:
     """Remove LLM-content attributes from a decoded OTLP export request, in place.
 
     Walks resourceSpans -> scopeSpans -> spans (attributes + events) and drops
     every attribute whose key is a known content key (or content prefix), plus
-    any attribute whose string payload exceeds `_MAX_ATTR_STRING_CHARS` (the
+    any attribute whose string payload exceeds `MAX_ATTR_STRING_CHARS` (the
     size guard — metadata is never large). Span names, timestamps, status,
     ids and `traceloop.*` / `gen_ai.task.*` / `langgraph.*` metadata survive.
     """
@@ -212,7 +212,7 @@ def _strip_content_attributes(otlp: dict[str, Any]) -> None:
                     kv
                     for kv in span.get("attributes", [])
                     if not _is_content_attribute(kv.get("key", ""))
-                    and _attribute_value_size(kv.get("value", {})) <= _MAX_ATTR_STRING_CHARS
+                    and _attribute_value_size(kv.get("value", {})) <= MAX_ATTR_STRING_CHARS
                 ]
                 if kept:
                     span["attributes"] = kept
@@ -223,7 +223,7 @@ def _strip_content_attributes(otlp: dict[str, Any]) -> None:
                         kv
                         for kv in ev.get("attributes", [])
                         if not _is_content_attribute(kv.get("key", ""))
-                        and _attribute_value_size(kv.get("value", {})) <= _MAX_ATTR_STRING_CHARS
+                        and _attribute_value_size(kv.get("value", {})) <= MAX_ATTR_STRING_CHARS
                     ]
                     if ev_kept:
                         ev["attributes"] = ev_kept
@@ -317,7 +317,7 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
 
             otlp = MessageToDict(encode_spans(spans))
             if settings.observability.trace_strip_content:
-                _strip_content_attributes(otlp)
+                strip_content_attributes(otlp)
             req = Parse(
                 json.dumps(otlp, separators=(",", ":"), ensure_ascii=False),
                 ExportTraceServiceRequest(),
@@ -326,7 +326,7 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
                 self._endpoint,
                 content=req.SerializeToString(),
                 headers={"Content-Type": "application/x-protobuf"},
-                timeout=_TRACE_EXPORT_TIMEOUT_S,
+                timeout=TRACE_EXPORT_TIMEOUT_S,
             )
             resp.raise_for_status()
         except Exception as exc:  # exporter failures must never escape into the SDK
@@ -334,12 +334,10 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
             with self._circuit_lock:
                 self._consecutive_failures += 1
                 failures = self._consecutive_failures
-                circuit_opened = (
-                    self._probe_in_flight or failures >= _TRACE_EXPORT_FAILURE_THRESHOLD
-                )
+                circuit_opened = self._probe_in_flight or failures >= TRACE_EXPORT_FAILURE_THRESHOLD
                 self._probe_in_flight = False
                 if circuit_opened:
-                    self._circuit_open_until = now + _TRACE_EXPORT_COOLDOWN_S
+                    self._circuit_open_until = now + TRACE_EXPORT_COOLDOWN_S
             if failures == 1 or circuit_opened:
                 logger.warning(
                     "OTLP trace export failed",
@@ -377,7 +375,7 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
         return None
 
 
-def _start_collector_retry(machine: MachineIdentity, home: Path) -> None:
+def start_collector_retry(machine: MachineIdentity, home: Path) -> None:
     with _lifecycle_lock:
         if _state.get("closed") or _state.get("retry_owner") is not None:
             return
@@ -488,7 +486,7 @@ def _arm_tracing(
         _state["init_resolved"].set()
 
 
-def _start_arm_thread(endpoint: str, machine: MachineIdentity, home: Path) -> None:
+def start_arm_thread(endpoint: str, machine: MachineIdentity, home: Path) -> None:
     """Admit one arm; stop never acquires the slow SDK init lock."""
     with _lifecycle_lock:
         if _state.get("closed") or _state.get("arm_owner") is not None:
@@ -533,7 +531,7 @@ def shutdown(timeout: float = 2.0) -> tuple[str, ...]:
     return tuple(unfinished)
 
 
-_INIT_RESOLVED_TIMEOUT_S = 30.0
+INIT_RESOLVED_TIMEOUT_S = 30.0
 
 
 def ensure_init_resolved() -> None:
@@ -545,7 +543,7 @@ def ensure_init_resolved() -> None:
     traceloop handler. Only waits when this process armed background tracing
     — declined or never-requested init returns immediately.
 
-    The wait is bounded (_INIT_RESOLVED_TIMEOUT_S): a hung arm (cross-thread
+    The wait is bounded (INIT_RESOLVED_TIMEOUT_S): a hung arm (cross-thread
     import deadlock, SDK network stall) must not hang the first turn forever.
     A timeout logs once, proceeds without recording, and later turns skip the
     wait entirely — if the arm eventually completes, recording comes up
@@ -553,14 +551,14 @@ def ensure_init_resolved() -> None:
     """
     if _state["arm_thread"] is None or _state["timeout_reported"]:
         return
-    if _state["init_resolved"].wait(_INIT_RESOLVED_TIMEOUT_S):
+    if _state["init_resolved"].wait(INIT_RESOLVED_TIMEOUT_S):
         return
     _state["timeout_reported"] = True
     logger.warning(
         "trace init not resolved within timeout — proceeding without recording",
         event="trace",
         action="init_resolved_timeout",
-        timeout_s=_INIT_RESOLVED_TIMEOUT_S,
+        timeout_s=INIT_RESOLVED_TIMEOUT_S,
     )
 
 
@@ -606,7 +604,7 @@ def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
     permanently (one arm attempt per process).
 
     Guards (each independently configurable):
-    - compression (`_gzip_old_mirror`): rotated (non-active) mirror segments
+    - compression (`gzip_old_mirror`): rotated (non-active) mirror segments
       gzipped first, so retention and the cap see the compressed footprint.
     - retention (`trace_retention_days`): day-stamped mirror files older than
       N days pruned first (the collector's rotation also bounds them).
@@ -631,15 +629,15 @@ def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
     # then retention (days), then the hard directory cap. When the disk is
     # already over the watermark this is exactly the pass that frees space —
     # skipping it there would let an over-watermark disk stay full.
-    _gzip_old_mirror()
-    _prune_old_mirror(settings.observability.trace_retention_days)
-    _enforce_dir_cap(settings.observability.trace_max_dir_mb)
+    gzip_old_mirror()
+    prune_old_mirror(settings.observability.trace_retention_days)
+    enforce_dir_cap(settings.observability.trace_max_dir_mb)
 
     # Disk-watermark guard: if the data disk is over its watermark, skip
     # recording entirely (auto-degrade) instead of letting the mirror grow
     # the disk toward full. Logged as a warning event so the degradation is
     # visible; a later agent start re-checks.
-    usage = _disk_usage()
+    usage = disk_usage()
     if usage is not None and usage[0] > settings.observability.trace_disk_watermark:
         # Auto-degrade: skip recording so the mirror can never fill the disk.
         # The loguru events sink lands this in the unified event stream
@@ -671,10 +669,10 @@ def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
                 endpoint=endpoint,
             )
             _state["collector_offline_reported"] = True
-        _start_collector_retry(machine, home)
+        start_collector_retry(machine, home)
         return
 
-    _start_arm_thread(endpoint, machine, home)
+    start_arm_thread(endpoint, machine, home)
 
 
 @contextlib.contextmanager

@@ -194,7 +194,7 @@ def test_owner_build_gate_is_bounded_and_does_not_block_another_owner(
         return blocked.ensure_eager()
 
     monkeypatch.setattr(_full, "build", controlled_build)
-    monkeypatch.setattr(_lite, "_BUILD_WAIT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(_lite, "BUILD_WAIT_TIMEOUT_SECONDS", 0.05)
     with ThreadPoolExecutor(max_workers=1) as pool:
         task = pool.submit(blocked_build)
         try:

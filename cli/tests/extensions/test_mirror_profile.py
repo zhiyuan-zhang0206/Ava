@@ -95,7 +95,7 @@ def test_unit_boot_preserves_single_index_precedence_across_aliases(
         unit.write_text(f"{higher_key}=https://pypi.org/simple\n")
     use_env_files(monkeypatch, unit, mirror)
     # This independent boot policy does not participate in package index precedence.
-    monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", skip_authority_pass)
+    monkeypatch.setattr(dotenv_boot, "enforce_cluster_env_authority", skip_authority_pass)
     before = unit.read_bytes(), mirror.read_bytes()
     dotenv_boot.load_ava_env()
     assert python_index(tmp_path, os.environ) == "https://pypi.org/simple"

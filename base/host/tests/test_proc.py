@@ -313,7 +313,7 @@ def test_kill_process_tree_skips_changed_identity(
         ticks[200] = 201
         return members
 
-    monkeypatch.setattr(proc, "_wait_owned", wait_owned)
+    monkeypatch.setattr(proc, "wait_owned", wait_owned)
     kill_process_tree(100, include_root=False)
     assert delivered == ([] if changed_before == "terminate" else [signal.SIGTERM])
 

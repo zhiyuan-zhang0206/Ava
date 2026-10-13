@@ -35,7 +35,7 @@ def _backend() -> PosixProcSessionBackend:
 
 def _pid(name: str) -> int:
     """The recorded pid for a live session (asserts the record exists)."""
-    rec = posixproc._read_record(name)
+    rec = posixproc.read_record(name)
     assert rec is not None
     return rec.pid
 
@@ -141,7 +141,7 @@ def test_spawn_and_kill_idempotent(unit_home):
         ok, mode = backend.kill_session(name, graceful=False)
         assert ok is True and mode == "forced"
         assert backend.has_session(name) is False
-        assert not posixproc._record_path(name).exists()
+        assert not posixproc.record_path(name).exists()
 
         ok, mode = backend.kill_session(name, graceful=False)
         assert ok is True and mode == "noop"
@@ -224,7 +224,7 @@ def test_pid_reuse_protection(unit_home):
             cwd=str(unit_home),  # pyright: ignore[reportUnknownArgumentType]
             started_at=1.0,
         )
-        rec.write(posixproc._record_path(name))
+        rec.write(posixproc.record_path(name))
         assert backend.has_session(name) is False
         assert name not in backend.list_sessions(prefix="ava-test-posixbe-")
     finally:
@@ -243,9 +243,9 @@ def test_session_record_reclaimed(unit_home):
     proc = psutil.Process(pid)
     proc.kill()
     proc.wait(timeout=5)
-    assert posixproc._record_path(name).exists()
+    assert posixproc.record_path(name).exists()
     assert backend.list_sessions(prefix="ava-test-posixbe-") == []
-    assert not posixproc._record_path(name).exists()
+    assert not posixproc.record_path(name).exists()
 
 
 # ---------------------------------------------------------------------------

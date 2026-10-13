@@ -26,7 +26,7 @@ from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.serialization import event_line
 
 # Log-record severity mapping — OTel SeverityNumber values (plain ints; the
-# enum is constructed at the record site, see _emit_log_record).
+# enum is constructed at the record site, see emit_log_record).
 _SEVERITY_NUMBERS: dict[str, int] = {
     "debug": 5,
     "info": 9,
@@ -36,7 +36,7 @@ _SEVERITY_NUMBERS: dict[str, int] = {
 }
 
 
-def _emit_log_record(logs: Any, event: Event) -> None:
+def emit_log_record(logs: Any, event: Event) -> None:
     """Map one Event to an OTLP LogRecord and emit it through `logs`.
 
     `logs` is the backend's LoggerProvider (an OTel type; any-typed here

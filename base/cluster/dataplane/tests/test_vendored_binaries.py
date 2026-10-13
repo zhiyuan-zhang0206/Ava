@@ -91,7 +91,7 @@ def test_download_retries_transient_answers_then_succeeds(
         monkeypatch,
         [_http_error(429), _http_error(503), urllib.error.URLError("reset"), _FakeResponse(b"jar")],
     )
-    assert rb._download("https://repo1.invalid/x.jar") == b"jar"
+    assert rb.download("https://repo1.invalid/x.jar") == b"jar"
     assert len(calls) == 4
     assert retry_waits == [2, 4, 8]
 
@@ -101,7 +101,7 @@ def test_download_retries_transient_http_then_succeeds(
     monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], status: int
 ) -> None:
     calls = _patch_urlopen(monkeypatch, [_http_error(status), _FakeResponse(b"jar")])
-    assert rb._download("https://repo1.invalid/x.jar") == b"jar"
+    assert rb.download("https://repo1.invalid/x.jar") == b"jar"
     assert len(calls) == 2
     assert retry_waits == [2]
 
@@ -112,7 +112,7 @@ def test_download_ignores_retry_after(
     error = _http_error(429)
     error.headers["Retry-After"] = "60"
     _patch_urlopen(monkeypatch, [error, _FakeResponse(b"jar")])
-    assert rb._download("https://repo1.invalid/x.jar") == b"jar"
+    assert rb.download("https://repo1.invalid/x.jar") == b"jar"
     assert retry_waits == [2]
 
 
@@ -126,7 +126,7 @@ def test_download_fails_fast_on_a_permanent_http_answer(
     error = _http_error(status)
     calls = _patch_urlopen(monkeypatch, [error])
     with pytest.raises(RuntimeError) as caught:
-        rb._download("https://repo1.invalid/x.jar")
+        rb.download("https://repo1.invalid/x.jar")
     assert (
         str(caught.value)
         == f"failed to download vendored Postgres from https://repo1.invalid/x.jar: {error}"
@@ -140,10 +140,10 @@ def test_download_fails_fast_on_a_permanent_http_answer(
 def test_download_gives_up_after_bounded_retries(
     monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], status: int
 ) -> None:
-    calls = _patch_urlopen(monkeypatch, [_http_error(status)] * rb._DOWNLOAD_ATTEMPTS)
+    calls = _patch_urlopen(monkeypatch, [_http_error(status)] * rb.DOWNLOAD_ATTEMPTS)
     with pytest.raises(RuntimeError, match=str(status)):
-        rb._download("https://repo1.invalid/x.jar")
-    assert len(calls) == rb._DOWNLOAD_ATTEMPTS
+        rb.download("https://repo1.invalid/x.jar")
+    assert len(calls) == rb.DOWNLOAD_ATTEMPTS
     assert retry_waits == [2, 4, 8]
 
 
@@ -159,7 +159,7 @@ def test_download_preserves_transient_warning_and_final_error(
     monkeypatch.setattr(rb.logger, "warning", warnings.append)
 
     with pytest.raises(RuntimeError) as caught:
-        rb._download(url)
+        rb.download(url)
 
     assert calls == [url] * 4
     assert retry_waits == [2, 4, 8]
@@ -198,9 +198,9 @@ def test_ensure_pg_binaries_hermetic_fixture(
 ) -> None:
     artifact_name = "synthetic-postgres"
     synthetic_jar = _synthetic_pg_jar(artifact_name)
-    key = rb._platform_key()
+    key = rb.platform_key()
     monkeypatch.setitem(
-        rb._PG_ARTIFACTS,
+        rb.PG_ARTIFACTS,
         key,
         (artifact_name, hashlib.sha256(synthetic_jar).hexdigest()),
     )
@@ -210,7 +210,7 @@ def test_ensure_pg_binaries_hermetic_fixture(
         downloads.append(url)
         return synthetic_jar
 
-    monkeypatch.setattr(rb, "_download", fake_download)
+    monkeypatch.setattr(rb, "download", fake_download)
     assert rb.vendored_pg_bin_dir() is None
 
     bin_dir = rb.ensure_pg_binaries()
@@ -283,7 +283,7 @@ def _synthetic_bottle() -> bytes:
 
 
 def test_pgvector_deb_extraction_layout() -> None:
-    assert rb._pgvector_extension_files(_synthetic_deb(), "linux-x86_64") == {
+    assert rb.pgvector_extension_files(_synthetic_deb(), "linux-x86_64") == {
         "lib/postgresql/vector.so": b"SO",
         "share/postgresql/extension/vector.control": b"CTRL",
         f"share/postgresql/extension/{rb._PGVECTOR_SQL}": b"SQL",
@@ -291,7 +291,7 @@ def test_pgvector_deb_extraction_layout() -> None:
 
 
 def test_pgvector_bottle_extraction_layout() -> None:
-    assert rb._pgvector_extension_files(_synthetic_bottle(), "darwin-arm64") == {
+    assert rb.pgvector_extension_files(_synthetic_bottle(), "darwin-arm64") == {
         "lib/postgresql/vector.dylib": b"DYLIB",
         "share/postgresql/extension/vector.control": b"CTRL",
         f"share/postgresql/extension/{rb._PGVECTOR_SQL}": b"SQL",
@@ -312,7 +312,7 @@ def test_pgvector_extraction_fails_fast_on_missing_member() -> None:
         + _ar_member("data.tar.xz", lzma.compress(data_tar.getvalue()))
     )
     with pytest.raises(RuntimeError, match="member missing"):
-        rb._pgvector_extension_files(deb, "linux-x86_64")
+        rb.pgvector_extension_files(deb, "linux-x86_64")
 
 
 def test_ensure_pgvector_injects_and_is_idempotent(
@@ -326,7 +326,7 @@ def test_ensure_pgvector_injects_and_is_idempotent(
     fake_url = "https://example.invalid/pgvector.deb"
     monkeypatch.setattr(
         rb,
-        "_PGVECTOR_ARTIFACTS",
+        "PGVECTOR_ARTIFACTS",
         {"linux-x86_64": (fake_url, hashlib.sha256(synthetic).hexdigest())},
     )
     calls: list[str] = []
@@ -335,7 +335,7 @@ def test_ensure_pgvector_injects_and_is_idempotent(
         calls.append(url)
         return synthetic
 
-    monkeypatch.setattr(rb, "_download", fake_download)
+    monkeypatch.setattr(rb, "download", fake_download)
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("platform.machine", lambda: "x86_64")
 
@@ -364,7 +364,7 @@ def test_ensure_pgvector_fails_on_checksum_mismatch(
     def fake_download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
         return b"junk"
 
-    monkeypatch.setattr(rb, "_download", fake_download)
+    monkeypatch.setattr(rb, "download", fake_download)
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("platform.machine", lambda: "x86_64")
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
@@ -385,9 +385,9 @@ def test_download_ghcr_blob_fetches_token_then_blob(
         calls.append((url, headers))
         return b'{"token": "tok"}' if "token" in url else b"blob"
 
-    monkeypatch.setattr(rb, "_download", fake_download)
+    monkeypatch.setattr(rb, "download", fake_download)
     blob_url = "https://ghcr.io/v2/homebrew/core/pgvector/blobs/sha256:abc"
-    assert rb._download_ghcr_blob(blob_url) == b"blob"
+    assert rb.download_ghcr_blob(blob_url) == b"blob"
     assert calls[0] == (
         "https://ghcr.io/token?service=ghcr.io&scope=repository:homebrew/core/pgvector:pull",
         None,
@@ -399,12 +399,12 @@ def test_pgvector_platform_key_out_of_matrix(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("platform.machine", lambda: "aarch64")
     with pytest.raises(RuntimeError, match="linux/aarch64"):
-        rb._pgvector_platform_key()
+        rb.pgvector_platform_key()
 
 
 def test_intel_macos_has_no_pinned_pgvector_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("platform.system", lambda: "Darwin")
     monkeypatch.setattr("platform.machine", lambda: "x86_64")
     with pytest.raises(RuntimeError, match=r"no vendored pgvector available for darwin/x86_64"):
-        rb._pgvector_platform_key()
-    assert set(rb._PGVECTOR_ARTIFACTS) == {"linux-x86_64", "darwin-arm64"}
+        rb.pgvector_platform_key()
+    assert set(rb.PGVECTOR_ARTIFACTS) == {"linux-x86_64", "darwin-arm64"}

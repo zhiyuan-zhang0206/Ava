@@ -40,7 +40,7 @@ def test_status_last_fetch_renders_cluster_zone(
             return "1\t0"
         raise AssertionError(f"unexpected git call: {argv}")
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
     fetch_head = tmp_path / ".git" / "FETCH_HEAD"
     fetch_head.parent.mkdir(parents=True)
     fetch_head.write_text("dummy\n")
@@ -85,7 +85,7 @@ def test_init_split_runner_without_remote_bootstraps_from_gateway(
         local_inits.append((branch, cwd))
 
     monkeypatch.setattr(memory_repo, "bootstrap_from_gateway", _fake_bootstrap)
-    monkeypatch.setattr(memory_repo, "_init_local_repo", _fake_local_init)
+    monkeypatch.setattr(memory_repo, "init_local_repo", _fake_local_init)
 
     memory_repo.init(machine=machine_identity)
 
@@ -146,7 +146,7 @@ def test_init_combined_unit_without_remote_still_local_inits(
         local_inits.append((branch, cwd))
 
     monkeypatch.setattr(memory_repo, "bootstrap_from_gateway", _fake_bootstrap)
-    monkeypatch.setattr(memory_repo, "_init_local_repo", _fake_local_init)
+    monkeypatch.setattr(memory_repo, "init_local_repo", _fake_local_init)
 
     memory_repo.init(machine=machine_identity)
 
@@ -200,7 +200,7 @@ def test_bootstrap_from_gateway_clones_bundle_as_machine_branch(
         captured["headers"] = headers
         return head, bundle_bytes
 
-    monkeypatch.setattr(memory_repo, "_download_pool_snapshot", _fake_download)
+    monkeypatch.setattr(memory_repo, "download_pool_snapshot", _fake_download)
 
     import base.cluster.machine as _machine
 
@@ -249,7 +249,7 @@ def test_bootstrap_from_gateway_head_mismatch_fails_loud(
     def _fake_download(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
         return "deadbeefdeadbeef", bundle_bytes
 
-    monkeypatch.setattr(memory_repo, "_download_pool_snapshot", _fake_download)
+    monkeypatch.setattr(memory_repo, "download_pool_snapshot", _fake_download)
 
     import base.cluster.machine as _machine
 
@@ -271,7 +271,7 @@ def test_bootstrap_from_gateway_non_200_fails_loud(
     def _failing_download(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
         raise memory_repo.MemoryPoolBootstrapFailed("GET http://gw/api/memory/pool -> HTTP 502")
 
-    monkeypatch.setattr(memory_repo, "_download_pool_snapshot", _failing_download)
+    monkeypatch.setattr(memory_repo, "download_pool_snapshot", _failing_download)
 
     import base.cluster.machine as _machine
 
@@ -313,7 +313,7 @@ def test_bootstrap_from_gateway_corrupt_bundle_fails_loud(
     def _junk_download(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
         return None, b"this is not a git bundle"
 
-    monkeypatch.setattr(memory_repo, "_download_pool_snapshot", _junk_download)
+    monkeypatch.setattr(memory_repo, "download_pool_snapshot", _junk_download)
 
     import base.cluster.machine as _machine
 

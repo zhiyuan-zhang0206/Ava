@@ -33,10 +33,10 @@ import redis.asyncio as aredis
 from redis.asyncio.client import PubSub as _RedisPubSub
 
 from base.cluster import inbound_channel
-from base.events.live.redis_client import _TransportAwareAsyncConnection
+from base.events.live.redis_client import TransportAwareAsyncConnection
 from base.events.live.redis_resilience import (
-    _HEALTH_CHECK_INTERVAL_S,
-    _SOCKET_CONNECT_TIMEOUT_S,
+    HEALTH_CHECK_INTERVAL_S,
+    SOCKET_CONNECT_TIMEOUT_S,
     keepalive_options,
 )
 from base.log import logger
@@ -279,15 +279,15 @@ class RedisInboundListener:
         redis = aredis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
             self._redis_url,
             decode_responses=True,
-            socket_connect_timeout=_SOCKET_CONNECT_TIMEOUT_S,
+            socket_connect_timeout=SOCKET_CONNECT_TIMEOUT_S,
             # Explicit None: redis-py >= 5 defaults socket_timeout to 5s, which
             # would cut the listener's long blocking pubsub read every idle
             # interval (same pin as base/redis_client.RESILIENCE_KWARGS).
             socket_timeout=None,
-            health_check_interval=_HEALTH_CHECK_INTERVAL_S,
+            health_check_interval=HEALTH_CHECK_INTERVAL_S,
             socket_keepalive=True,
             socket_keepalive_options=keepalive_options(),
-            # Dead-transport detection: see `_TransportAwareAsyncConnection`.
+            # Dead-transport detection: see `TransportAwareAsyncConnection`.
             # Without it, a pubsub connection whose asyncio transport already
             # fired connection_lost (network outage) still reports
             # `is_connected=True`; the next `parse_response` health-check PING
@@ -295,7 +295,7 @@ class RedisInboundListener:
             # `TypeError: 'NoneType' object is not callable`, which escaped
             # redis-py's except chain and killed an agent's claim node
             # (agent 2613, 2026-08-04).
-            connection_class=_TransportAwareAsyncConnection,
+            connection_class=TransportAwareAsyncConnection,
         )
         pubsub: _RedisPubSub | None = None
         try:
@@ -536,7 +536,7 @@ class RedisInboundListener:
                 # TypeError: a defensive catch for redis-py's
                 # `TypeError: 'NoneType' object is not callable` when a
                 # connection_lost transport is written through (agent 2613
-                # crash, 2026-08-04). `_TransportAwareAsyncConnection` makes
+                # crash, 2026-08-04). `TransportAwareAsyncConnection` makes
                 # that path reconnect instead, but the race window between
                 # the is_connected check and the write still exists — an
                 # agent process must never die to a redis library quirk, so

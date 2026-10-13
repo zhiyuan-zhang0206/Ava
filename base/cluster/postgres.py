@@ -117,7 +117,7 @@ def _directory_matches(process: psutil.Process, data: Path, receipt: Receipt | N
     return "-D" in argv and Path(argv[argv.index("-D") + 1]).resolve() == data
 
 
-def _require_closed(data: Path, receipt: Receipt | None) -> None:
+def require_closed(data: Path, receipt: Receipt | None) -> None:
     """A dead postmaster alone cannot prove that its old workers have closed."""
     session = (
         receipt.owner.pid
@@ -187,12 +187,12 @@ def observe(data: Path) -> OwnedProcess | None:
     if receipt is None:
         if (data / "postmaster.pid").exists():
             raise RuntimeError("PostgreSQL pidfile has no native launch receipt; reconcile custody")
-        _require_closed(data, None)
+        require_closed(data, None)
         return None
     if receipt.state == "pending":
         raise RuntimeError("PostgreSQL launch custody is unresolved; reconcile pending receipt")
     if receipt.boot_id != _boot() or receipt.owner is None or not receipt.process().live():
-        _require_closed(data, receipt)
+        require_closed(data, receipt)
         return None
     owner = _require_process(data, receipt)
     _pidfile(data, receipt)
@@ -288,7 +288,7 @@ def _complete_start(
                 _write(data, admitted)
             return owner
         time.sleep(0.05)
-    _require_closed(data, receipt)
+    require_closed(data, receipt)
     raise RuntimeError(f"PostgreSQL exited before readiness; inspect {data / 'pg.log'}")
 
 
@@ -455,7 +455,7 @@ def stop(
                 escalation = _escalate(owner, tree, timeout, immediate_wait, kill_wait)
                 break
             time.sleep(0.05)
-        _require_closed(data, receipt)
+        require_closed(data, receipt)
         require_listener(None, receipt.port, required=False)
         if retained_children is not None:
             for child in tuple(retained_children):

@@ -25,7 +25,7 @@ _MINUTE = 40
 _LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.logs-maintenance"
 
 
-def _launchd_plist_path() -> Path:
+def launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
@@ -34,7 +34,7 @@ def _shell_command() -> str:
     return f"{ava} logs rotate && {ava} logs retention --family-days {FAMILY_DAYS}"
 
 
-def _launchd_plist_content() -> str:
+def launchd_plist_content() -> str:
     log_file = Path(base.host.system.cron.job_home()) / "logs" / "logs-maintenance.out.log"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -68,12 +68,12 @@ def _launchd_plist_content() -> str:
 """
 
 
-def _register_macos() -> int:
+def register_macos() -> int:
     """Rewrite and reload the daily LaunchAgent."""
     label = _LABEL
-    plist_path = _launchd_plist_path()
+    plist_path = launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(_launchd_plist_content(), encoding="utf-8")
+    plist_path.write_text(launchd_plist_content(), encoding="utf-8")
 
     if base.host.system.cron.reload_launchd_job(label, plist_path) != 0:
         return 1
@@ -81,12 +81,12 @@ def _register_macos() -> int:
     return 0
 
 
-def _unregister_macos() -> int:
-    base.host.system.cron.remove_launchd_job(_LABEL, _launchd_plist_path())
+def unregister_macos() -> int:
+    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path())
     return 0
 
 
-def _register_linux() -> int:
+def register_linux() -> int:
     """Replace the 04:40 maintenance line in the user crontab.
 
     Lines are matched by the marker as a substring.
@@ -116,7 +116,7 @@ def _register_linux() -> int:
     return 0
 
 
-def _unregister_linux() -> int:
+def unregister_linux() -> int:
     return base.host.system.cron.remove_crontab_entry(
         _CRON_MARKER, write_failure_rc=1, on_removed=None
     )
@@ -130,7 +130,7 @@ def register_logs_job(*, enabled_reader: Callable[[], bool]) -> None:
     if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
         return
     base.host.system.cron.register_platform_job(
-        "logs-maintenance", macos=_register_macos, linux=_register_linux
+        "logs-maintenance", macos=register_macos, linux=register_linux
     )
 
 
@@ -138,4 +138,4 @@ def unregister_logs_job() -> None:
     """Remove the daily logs-maintenance job (a no-op outside the default home)."""
     if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
         return
-    base.host.system.cron.unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)
+    base.host.system.cron.unregister_platform_job(macos=unregister_macos, linux=unregister_linux)

@@ -11,7 +11,7 @@ import sys
 from collections.abc import Callable
 
 from base.log import logger
-from base.log.sinks import _HUMAN_FORMAT, _add_file_sink, _install_stdlib_intercept, add_sink
+from base.log.sinks import HUMAN_FORMAT, _add_file_sink, _install_stdlib_intercept, add_sink
 
 __all__ = ["init_subprocess_logger", "start_process_logging"]
 
@@ -60,7 +60,7 @@ def _add_stderr_sink_before_settings() -> None:
     (`base/host/env/bootstrap.py`). The fresh executable prelude removed loguru's default handler; open the
     human sink before configuration warnings can be emitted.
     """
-    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+    add_sink(sys.stderr, format=HUMAN_FORMAT, level="INFO", colorize=True)
 
 
 def start_process_logging(

@@ -83,17 +83,15 @@ def prepare(
             from base.deploy.maintenance.cold import require_cold_end
 
             for values in rows:
-                row = _RuntimeRow(*values)
+                row = RuntimeRow(*values)
                 if row.retired_intent():
                     require_cold_end(conn, row.agent_id)
         applied = _applied_capture(conn, hold, host_owner, holder, acquired_at)
-        captured = _classify([_RuntimeRow(*row) for row in rows], hold, host_owner, applied)
-        cold = _cold_agents(
-            [_RuntimeRow(*row) for row in rows], host_owner, host_absent=host_absent
-        )
+        captured = _classify([RuntimeRow(*row) for row in rows], hold, host_owner, applied)
+        cold = _cold_agents([RuntimeRow(*row) for row in rows], host_owner, host_absent=host_absent)
         settled = _settle_orphan_claims(conn, captured, cold)
-        _refuse_inflight_lifecycle(conn, captured, cold, holder=holder, acquired_at=acquired_at)
-        _require_resolved(conn, captured, cold=cold)
+        refuse_inflight_lifecycle(conn, captured, cold, holder=holder, acquired_at=acquired_at)
+        require_resolved(conn, captured, cold=cold)
         if captured != hold:
             pause_owner.change_maintenance(holder, acquired_at, hold, captured)
             hold = captured
@@ -106,7 +104,7 @@ def prepare(
     return draining
 
 
-class _RuntimeRow(NamedTuple):
+class RuntimeRow(NamedTuple):
     agent_id: int
     status: str
     kind: str | None
@@ -236,7 +234,7 @@ def _emit_orphan_settlements(consumed: list[OrphanClaim]) -> None:
 
 
 def _classify(
-    rows: list[_RuntimeRow],
+    rows: list[RuntimeRow],
     hold: MaintenanceHold,
     owner: UUID | None,
     applied: set[int],
@@ -258,7 +256,7 @@ def _classify(
 
 
 def _cold_agents(
-    rows: list[_RuntimeRow], host_owner: UUID | None, *, host_absent: bool
+    rows: list[RuntimeRow], host_owner: UUID | None, *, host_absent: bool
 ) -> frozenset[int]:
     """Parked agents with no resource record, when no host is running at all."""
     return frozenset(
@@ -269,7 +267,7 @@ def _cold_agents(
 
 
 def _parked_agents(
-    rows: list[_RuntimeRow], hold: MaintenanceHold, host_owner: UUID | None
+    rows: list[RuntimeRow], hold: MaintenanceHold, host_owner: UUID | None
 ) -> tuple[int, ...]:
     """Agents outside the cohort whose native intent is parked (idle, no live owner)."""
     return tuple(
@@ -281,9 +279,7 @@ def _parked_agents(
     )
 
 
-def _require_live_owners(
-    selected: list[_RuntimeRow], owner: UUID | None, applied: set[int]
-) -> None:
+def _require_live_owners(selected: list[RuntimeRow], owner: UUID | None, applied: set[int]) -> None:
     invalid = [
         row.agent_id
         for row in selected
@@ -318,12 +314,12 @@ def _applied_capture(
     return {row[0] for row in rows}
 
 
-def _require_resolved(
+def require_resolved(
     conn: psycopg.Connection, hold: MaintenanceHold, *, cold: frozenset[int] = frozenset()
 ) -> None:
     """The second guard on the same collision, with the same waitability rule.
 
-    ``_refuse_inflight_lifecycle`` runs first and already covers every parked
+    ``refuse_inflight_lifecycle`` runs first and already covers every parked
     row it finds unresolved; this repeats the parked half independently so a
     change to either query cannot silently skip parked agents (task #3591). It
     raises the same typed collision: parked rows without a maintenance payload
@@ -392,7 +388,7 @@ def _parked_collisions(
     ]
 
 
-def _refuse_inflight_lifecycle(
+def refuse_inflight_lifecycle(
     conn: psycopg.Connection,
     hold: MaintenanceHold,
     cold: frozenset[int],
@@ -407,7 +403,7 @@ def _refuse_inflight_lifecycle(
     the caller's bounded retry starts from the same clean boundary and
     re-verifies every condition under the same locks. This mirrors the two
     downstream refusal checks — the per-member pending-command check in
-    ``_restart`` and the parked-agent predicate of ``_require_resolved`` — one
+    ``_restart`` and the parked-agent predicate of ``require_resolved`` — one
     step earlier, carrying the waitability the retry decision needs: ordinary
     work without a maintenance payload is waitable — both an in-flight agent
     lifecycle operation (restart/terminate) and any parked claim left after
@@ -437,7 +433,7 @@ def _collision_line(agent_id: int, rows: list[_CommandRow]) -> str:
 
 
 def _unresolved_parked(row: _CommandRow, agent_id: int, cold: frozenset[int]) -> bool:
-    """`_require_resolved`'s predicate, per row, for the waitability decision."""
+    """`require_resolved`'s predicate, per row, for the waitability decision."""
     if row.status == "claimed":
         return (
             agent_id not in cold
@@ -479,7 +475,7 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
             "FROM agents_meta WHERE id=ANY(%s)",
             (list(hold.parked),),
         ).fetchall()
-        parked = [_RuntimeRow(*row) for row in rows]
+        parked = [RuntimeRow(*row) for row in rows]
         if {row.agent_id for row in parked if row.parked_idle(None)} != set(hold.parked):
             raise RuntimeError("parked agent intent changed during maintenance")
     for agent_id, command_id in hold.commands.items():

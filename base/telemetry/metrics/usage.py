@@ -63,7 +63,7 @@ GROUP BY agent_id"""
 _EPOCH = datetime(2000, 1, 1, tzinfo=UTC)
 
 
-def _event_rows(conn: Any, tails: dict[int, datetime], until: datetime | None) -> list[_Row]:
+def event_rows(conn: Any, tails: dict[int, datetime], until: datetime | None) -> list[_Row]:
     """The `llm_usage` rows of `telemetry_events` from each agent's tail start to `until`."""
     if not tails:
         return []
@@ -88,7 +88,7 @@ def _event_rows(conn: Any, tails: dict[int, datetime], until: datetime | None) -
     ]
 
 
-def _ledger_rows(conn: Any, agent_ids: list[int]) -> tuple[list[_Row], dict[int, datetime]]:
+def ledger_rows(conn: Any, agent_ids: list[int]) -> tuple[list[_Row], dict[int, datetime]]:
     """Ledger rows (folded totals + the days after the watermark) and each agent's live-tail start:
     the midnight after its newest ledger day, the midnight after the watermark for an agent whose
     ledger is folded entirely, and the beginning for an agent with no ledger row."""
@@ -257,10 +257,10 @@ def usage_report(
         raise ValueError("window must have timezone-aware timestamps with start < end")
     agents = select_agents(conn, roots, lineage)
     if start is None:
-        rows, tails = _ledger_rows(conn, agents)
-        rows.extend(_event_rows(conn, tails, end))
+        rows, tails = ledger_rows(conn, agents)
+        rows.extend(event_rows(conn, tails, end))
     else:
-        rows = _event_rows(conn, dict.fromkeys(agents, start), end)
+        rows = event_rows(conn, dict.fromkeys(agents, start), end)
     folded = aggregate(rows)
     per_agent: list[dict[str, Any]] = []
     for agent_id in agents:

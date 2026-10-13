@@ -29,7 +29,7 @@ class ExecDomainBirthError(RuntimeError):
         self.proc = proc
 
 
-def _process_group_has_live_member(pgid: int) -> bool:
+def process_group_has_live_member(pgid: int) -> bool:
     """Read a still-pinned group; unreadable members are never absence."""
     for process in psutil.process_iter(["pid", "status"]):
         try:
@@ -115,7 +115,7 @@ class ExecProcessDomain:
     def members_live(self) -> bool:
         """Observe the pinned trusted-tool group; this is not a closure proof."""
         self._require_unreaped()
-        return _process_group_has_live_member(self.proc.pid)
+        return process_group_has_live_member(self.proc.pid)
 
     def signal(self, signum: int) -> None:
         """Signal the launch-owned group while its direct child remains pinned."""
@@ -158,7 +158,7 @@ class ExecProcessDomain:
                 or exc.errno != errno.EPERM
                 or self._birth is None
                 or self._birth.live()
-                or _process_group_has_live_member(self.proc.pid)
+                or process_group_has_live_member(self.proc.pid)
             ):
                 raise
 

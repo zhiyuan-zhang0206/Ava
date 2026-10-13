@@ -27,7 +27,7 @@ def test_resolve_uses_explicit_override(monkeypatch: pytest.MonkeyPatch, tmp_pat
 def test_resolve_macos_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pp, "sys", _FakeSys("darwin"))
     monkeypatch.setattr(pp.Path, "exists", lambda _self: True)  # pyright: ignore[reportUnknownArgumentType]
-    assert pp.resolve_chrome_binary(None) == pp._MACOS_CHROME
+    assert pp.resolve_chrome_binary(None) == pp.MACOS_CHROME
 
 
 def test_resolve_returns_none_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -171,7 +171,7 @@ def test_npx_incapability_reason_is_exported_once_for_both_probe_variants() -> N
 def _all_platform_browser_deps_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the settings-free browser dependency prongs pass."""
     monkeypatch.setattr(pp, "display_available", lambda: True)
-    monkeypatch.setattr(pp, "_platform_chrome_binary", lambda: "/chrome")
+    monkeypatch.setattr(pp, "platform_chrome_binary", lambda: "/chrome")
     monkeypatch.setattr(pp.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType]
 
 
@@ -190,7 +190,7 @@ def test_browser_deps_incapability_returns_display_reason_first(
 
 def test_browser_deps_incapability_returns_chrome_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     _all_platform_browser_deps_present(monkeypatch)
-    monkeypatch.setattr(pp, "_platform_chrome_binary", lambda: None)
+    monkeypatch.setattr(pp, "platform_chrome_binary", lambda: None)
     assert pp.browser_deps_incapability() == "no Chrome (install it or set AVA_CHROME_BINARY)"
 
 
@@ -212,7 +212,7 @@ def test_gui_session_domain_reads_launchctl_managername(monkeypatch: pytest.Monk
     calls: list[list[str]] = []
     monkeypatch.setattr(
         pp,
-        "_bounded_stdout",
+        "bounded_stdout",
         lambda argv: calls.append(argv) or "Background",  # pyright: ignore[reportUnknownArgumentType]
     )
     assert pp.gui_session_domain() == "Background"
@@ -221,7 +221,7 @@ def test_gui_session_domain_reads_launchctl_managername(monkeypatch: pytest.Monk
 
 def test_gui_session_domain_none_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pp, "sys", _FakeSys("linux"))
-    monkeypatch.setattr(pp, "_bounded_stdout", _unexpected_probe)
+    monkeypatch.setattr(pp, "bounded_stdout", _unexpected_probe)
     assert pp.gui_session_domain() is None
 
 
@@ -230,7 +230,7 @@ def test_gui_login_user_reads_the_console_owner(monkeypatch: pytest.MonkeyPatch)
     calls: list[list[str]] = []
     monkeypatch.setattr(
         pp,
-        "_bounded_stdout",
+        "bounded_stdout",
         lambda argv: calls.append(argv) or "zyonzhang",  # pyright: ignore[reportUnknownArgumentType]
     )
     assert pp.gui_login_user() == "zyonzhang"
@@ -239,7 +239,7 @@ def test_gui_login_user_reads_the_console_owner(monkeypatch: pytest.MonkeyPatch)
 
 def test_gui_login_user_none_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pp, "sys", _FakeSys("linux"))
-    monkeypatch.setattr(pp, "_bounded_stdout", _unexpected_probe)
+    monkeypatch.setattr(pp, "bounded_stdout", _unexpected_probe)
     assert pp.gui_login_user() is None
 
 
@@ -260,17 +260,17 @@ def _runner_returning(completed: _Completed) -> Callable[..., _Completed]:
 
 def test_bounded_stdout_returns_the_stripped_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(proc, "run_bounded", _runner_returning(_Completed(0, " Aqua\n")))
-    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) == "Aqua"
+    assert pp.bounded_stdout(["/bin/launchctl", "managername"]) == "Aqua"
 
 
 def test_bounded_stdout_none_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(proc, "run_bounded", _runner_returning(_Completed(1, "error")))
-    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
+    assert pp.bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
 def test_bounded_stdout_none_on_empty_output(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(proc, "run_bounded", _runner_returning(_Completed(0, "  \n")))
-    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
+    assert pp.bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
 def test_bounded_stdout_none_on_missing_binary(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,7 +278,7 @@ def test_bounded_stdout_none_on_missing_binary(monkeypatch: pytest.MonkeyPatch) 
         raise FileNotFoundError("no launchctl")
 
     monkeypatch.setattr(proc, "run_bounded", _missing)
-    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
+    assert pp.bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
 def test_bounded_stdout_none_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -288,7 +288,7 @@ def test_bounded_stdout_none_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None
         raise subprocess.TimeoutExpired(["launchctl"], 5.0)
 
     monkeypatch.setattr(proc, "run_bounded", _timeout)
-    assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
+    assert pp.bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────
@@ -311,7 +311,7 @@ def test_runtime_and_settings_free_probes_share_the_npx_reason(
     """A changed npx message cannot split runtime gating from enrollment repair."""
     monkeypatch.setattr(pp, "display_available", lambda: True)
     monkeypatch.setattr(pp, "resolve_chrome_binary", lambda _configured: "/chrome")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(pp, "_platform_chrome_binary", lambda: "/chrome")
+    monkeypatch.setattr(pp, "platform_chrome_binary", lambda: "/chrome")
     monkeypatch.setattr(
         pp.shutil,
         "which",

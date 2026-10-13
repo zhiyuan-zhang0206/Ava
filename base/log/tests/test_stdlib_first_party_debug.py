@@ -10,7 +10,7 @@ before it ever reached `_StdlibInterceptHandler`, let alone loguru. 68 days of
 respawn controller's gateway-health gate defers a restart.
 
 Fix: `_install_stdlib_intercept` raises the effective level back to DEBUG for
-`_FIRST_PARTY_LOGGER_NAMES` (our own top-level logger names) via stdlib's own
+`FIRST_PARTY_LOGGER_NAMES` (our own top-level logger names) via stdlib's own
 ancestor-level lookup, while the root stays at INFO — so third-party libraries
 (httpx, psycopg, ...), which never call
 `setLevel` on themselves, stay gated, and only our own code's DEBUG reaches
@@ -24,7 +24,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from base.log import _FIRST_PARTY_LOGGER_NAMES, _install_stdlib_intercept
+from base.log import FIRST_PARTY_LOGGER_NAMES, _install_stdlib_intercept
 
 
 @pytest.fixture(autouse=True)
@@ -32,13 +32,13 @@ def _reset_touched_logger_levels() -> Iterator[None]:
     """`_install_stdlib_intercept` mutates process-global `logging` state
     (levels persist on the module-level `Logger.manager.loggerDict` singleton,
     independent of test order): it calls `.setLevel(DEBUG)` on each name in
-    `_FIRST_PARTY_LOGGER_NAMES` directly — the probe loggers used below are
+    `FIRST_PARTY_LOGGER_NAMES` directly — the probe loggers used below are
     *children* of those names and are never themselves leveled, they just
     inherit. Reset the actual mutated names after each test so this file
     doesn't leak DEBUG-everywhere into unrelated tests elsewhere in the
     suite."""
     yield
-    for prefix in _FIRST_PARTY_LOGGER_NAMES:
+    for prefix in FIRST_PARTY_LOGGER_NAMES:
         logging.getLogger(prefix).setLevel(logging.NOTSET)
     logging.getLogger("httpx").setLevel(logging.NOTSET)
 
@@ -57,7 +57,7 @@ def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict])
     )
 
 
-@pytest.mark.parametrize("prefix", _FIRST_PARTY_LOGGER_NAMES)
+@pytest.mark.parametrize("prefix", FIRST_PARTY_LOGGER_NAMES)
 def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list[dict]) -> None:
     """Every listed first-party namespace gets the same DEBUG passthrough —
     not just ops.controllers.*, but services / base / gateway / agent /

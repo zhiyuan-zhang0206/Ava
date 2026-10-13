@@ -70,7 +70,7 @@ def _autostart_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
-def _autostart_plist_content() -> str:
+def autostart_plist_content() -> str:
     """The LaunchAgent plist: run `ava start --boot` at load, and keep re-running
     it while it fails, up to the boot attempt budget.
 
@@ -122,12 +122,12 @@ def _autostart_plist_content() -> str:
 """
 
 
-def _register_macos() -> int:
+def register_macos() -> int:
     """Write (or update) the autostart LaunchAgent plist. Idempotent: rewrites
     only when the content changed, and never bootstraps (see module docstring)."""
     plist_path = _autostart_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
-    content = _autostart_plist_content()
+    content = autostart_plist_content()
     if plist_path.exists() and plist_path.read_text() == content:
         return 0  # already current -- nothing to do, no reload
     plist_path.write_text(content)
@@ -154,12 +154,12 @@ def _unregister_macos() -> int:
     return 0
 
 
-def _register_linux() -> int:
+def register_linux() -> int:
     install()
     return 0
 
 
-def _unregister_linux() -> int:
+def unregister_linux() -> int:
     uninstall()
     return 0
 
@@ -181,7 +181,7 @@ def register_autostart(*, enabled_reader: Callable[[], bool]) -> None:
         return
     if not owns_os_jobs("autostart"):
         return
-    register_platform_job("autostart", macos=_register_macos, linux=_register_linux)
+    register_platform_job("autostart", macos=register_macos, linux=register_linux)
 
 
 def unregister_autostart() -> None:
@@ -192,4 +192,4 @@ def unregister_autostart() -> None:
     """
     if not owns_os_jobs("autostart"):
         return
-    unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)
+    unregister_platform_job(macos=_unregister_macos, linux=unregister_linux)

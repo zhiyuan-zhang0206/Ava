@@ -22,7 +22,7 @@ def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     exporter = InMemoryLogRecordExporter()
     logs = LoggerProvider()
-    resource_exporter: Any = telemetry_otlp._EventDimensionResourceExporter(exporter)
+    resource_exporter: Any = telemetry_otlp.EventDimensionResourceExporter(exporter)
     logs.add_log_record_processor(SimpleLogRecordProcessor(resource_exporter))
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,

@@ -85,7 +85,7 @@ def _launch(name: str, script: Path, tmp_path: Path) -> None:
 
 
 def _recorded(name: str) -> psutil.Process:
-    rec = posixproc._read_record(name)
+    rec = posixproc.read_record(name)
     assert rec is not None, f"no session record for {name}"
     return psutil.Process(rec.pid)
 
