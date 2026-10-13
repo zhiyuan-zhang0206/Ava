@@ -21,8 +21,11 @@ removes the file by hand (`rm $AVA_HOME/run/deploy-pause-owner.json`) and runs
 `ava start`.
 
 An explicit [maintenance hold](maintenance.ava.okf.md) uses the same journal
-with a typed cohort/progress payload and the recorded shepherding process it
-was taken under (`base/deploy/maintenance/hold_driver.py`). It has no expiry timer and no
-automatic release; only its exact
+with a typed cohort/progress payload. The journal records no process identity:
+whether another `ava stop` is still running is answered by the lifecycle lock and
+`run/lifecycle-op.json`, not by the hold. A journal written by an earlier release
+may carry a `driver` key; it is ignored on read and absent after the next write
+([why](../../../../docs/decisions/runtime/processes/shutdown/2026-10-13-delete-hold-driver-diagnostics.md)).
+It has no expiry timer and no automatic release; only its exact
 operation's `ava start` ends it. Ordinary
 compensation and a newer maintenance operation cannot release or overwrite it.

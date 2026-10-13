@@ -46,8 +46,6 @@ _CLEAN = (
     "are not caused by this update (a changed .gitignore can reveal them): check them, then "
     'move them away (do not delete) and rerun down."; exit 1; }'
 )
-# `printf '%s\n'`, not `echo`: zsh's (and dash's) echo interprets backslashes, which corrupts the
-# hold JSON when an argv in the record holds one (`\\$HOME` becomes `\$HOME`: an invalid escape).
 _PROBE = f"""{_HOME}
 printf '%s\\n' "head=$(git rev-parse HEAD)"
 printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"

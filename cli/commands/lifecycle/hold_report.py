@@ -3,51 +3,26 @@
 One local read of the hold journal, settings-lite: no database, gateway or service
 probe, so it answers when everything else is down. `ava status` prints it as the
 first section; `ava status --json` prints only it, for the fleet update's
-start-of-work refusal and the out-of-band triage.
+start-of-work refusal.
 """
 
 from __future__ import annotations
 
 import json
 
-from base.deploy.maintenance import hold_driver, pause_owner
+from base.deploy.maintenance import pause_owner
 
 _SCOPE = "local unit; excludes independent OS-managed extras and remote hosts"
 
 
-def _driver_evidence(driver: hold_driver.HoldDriver | None) -> dict[str, object] | None:
-    """The recorded shepherd identity, for humans reading the journal.
-
-    `root` is the process the stranded-hold verdict judges; `leader` (the session
-    leader at mint time) is display evidence only. Liveness is probed from local
-    process state (pid + birth). None when no identity was recorded (a
-    daemon-driven pause).
-    """
-    if driver is None:
-        return None
-    return {
-        "liveness": hold_driver.liveness(driver),
-        "root": _process_ref(driver.root),
-        "leader": _process_ref(driver.leader),
-    }
-
-
-def _process_ref(ref: hold_driver.ProcessRef | None) -> dict[str, object] | None:
-    """One recorded process reference as the journal reader needs it: pid + argv."""
-    if ref is None:
-        return None
-    return {"pid": ref.pid, "argv": ref.argv}
-
-
 def hold_report() -> dict[str, object]:
-    """The journal's hold: status, generation, phase payload and the shepherd's liveness."""
+    """The journal's hold: status, generation and phase payload."""
     current = pause_owner.read()
     return {
         "status": current.status,
         "operation": current.holder,
         "acquired_at": current.acquired_at.isoformat() if current.acquired_at else None,
         "maintenance": current.maintenance.encode() if current.maintenance else None,
-        "driver": _driver_evidence(current.driver),
         "scope": _SCOPE,
     }
 
@@ -66,12 +41,8 @@ def print_hold_section() -> None:
     if current.status != "paused" or hold is None:
         print(f"maintenance hold: none ({current.status})")
         return
-    liveness = hold_driver.liveness(current.driver) if current.driver else "missing"
     acquired_at = current.acquired_at.isoformat() if current.acquired_at else None
-    print(
-        f"maintenance hold: {hold.phase}  operation={current.holder}  acquired_at={acquired_at}  "
-        f"driver={liveness}"
-    )
+    print(f"maintenance hold: {hold.phase}  operation={current.holder}  acquired_at={acquired_at}")
     print("  `ava start` releases the hold.")
 
 

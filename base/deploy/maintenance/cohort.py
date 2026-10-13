@@ -18,7 +18,6 @@ from base import telemetry
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.agents.incarnation.resources import ResourceBirth, decode_resources
 from base.deploy.maintenance import admission, pause_owner
-from base.deploy.maintenance.hold_driver import HoldDriver
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 
 
@@ -49,7 +48,6 @@ def prepare(
     holder: str,
     acquired_at: datetime,
     host_absent: bool = False,
-    driver: HoldDriver | None = None,
 ) -> MaintenanceHold:
     """Freeze the original runnable set and enqueue one restart per member.
 
@@ -97,18 +95,14 @@ def prepare(
         _refuse_inflight_lifecycle(conn, captured, cold, holder=holder, acquired_at=acquired_at)
         _require_resolved(conn, captured, cold=cold)
         if captured != hold:
-            pause_owner.change_maintenance(
-                holder, acquired_at, hold, captured, refresh_driver=driver is not None
-            )
+            pause_owner.change_maintenance(holder, acquired_at, hold, captured)
             hold = captured
         commands: dict[int, int] = {}
         for agent_id in sorted(hold.commands):
             commands[agent_id] = _restart(conn, agent_id, holder, acquired_at)
     _emit_orphan_settlements(settled)
     draining = MaintenanceHold(MaintenancePhase.DRAINING, commands, parked=hold.parked)
-    pause_owner.change_maintenance(
-        holder, acquired_at, hold, draining, refresh_driver=driver is not None
-    )
+    pause_owner.change_maintenance(holder, acquired_at, hold, draining)
     return draining
 
 

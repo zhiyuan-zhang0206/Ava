@@ -21,7 +21,6 @@ from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
-from base.deploy.maintenance.hold_driver import HoldDriver
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from ops.agent_pause.probe import HostIdentity, host_identity, host_running
@@ -96,14 +95,9 @@ def prepare(
     holder: str,
     at: datetime,
     *,
-    driver: HoldDriver | None = None,
     local_machine: MachineIdentity,
 ) -> None:
     """Publish the hold and enqueue restarts.
-
-    `driver` is the shepherding identity of an operator-side entry (task
-    #3270); daemon-driven pauses pass None and keep the handoff/outcome as
-    their ownership evidence.
 
     In-flight work this actor did not author is bounded-waited (task #3591):
     an agent lifecycle command, or a parked claim left after orphan settlement,
@@ -116,7 +110,7 @@ def prepare(
     identity = host_identity() if "agent-runner" in roles and host_running() else None
     # The actual running daemon, not the checked-out source, must support the
     # admission fence. First deployment of this protocol needs separate proof.
-    pause_owner.begin_maintenance(holder, at, driver=driver)
+    pause_owner.begin_maintenance(holder, at)
     if "agent-runner" not in roles:
         with db.connect() as conn:
             row = conn.execute(
@@ -128,14 +122,10 @@ def prepare(
         current = _hold(holder, at)
         if current.phase == MaintenancePhase.PREPARING:
             pause_owner.change_maintenance(
-                holder,
-                at,
-                current,
-                MaintenanceHold(MaintenancePhase.DRAINING),
-                refresh_driver=driver is not None,
+                holder, at, current, MaintenanceHold(MaintenancePhase.DRAINING)
             )
         return
-    hold = _prepare_cohort(db, holder, at, identity, driver=driver, local_machine=local_machine)
+    hold = _prepare_cohort(db, holder, at, identity, local_machine=local_machine)
     if identity is not None and host_identity().owner != identity.owner:
         raise RuntimeError("agent-host changed boot during preparation; hold retained")
     _wake(db, bus, hold)
@@ -147,7 +137,6 @@ def _prepare_cohort(
     at: datetime,
     identity: HostIdentity | None,
     *,
-    driver: HoldDriver | None,
     local_machine: MachineIdentity,
 ) -> MaintenanceHold:
     """Prepare the cohort, bounded-waiting out in-flight work it did not author.
@@ -173,7 +162,6 @@ def _prepare_cohort(
                     holder=holder,
                     acquired_at=at,
                     host_absent=identity is None,
-                    driver=driver,
                 )
         except cohort.LifecycleCollisionError as collision:
             if started is None:
@@ -335,15 +323,12 @@ def pause_agents(
     bus: EventBus,
     timeout: float = PAUSE_TIMEOUT_SECONDS,
     *,
-    driver: HoldDriver | None = None,
     local_machine: MachineIdentity,
 ) -> None:
     """Idempotently drain this unit, leaving persistent terminals untouched.
 
-    `driver` is minted by operator-side callers (`ava stop`);
-    a daemon-driven caller passes None so a long-lived caller process never
-    masks a dead ladder shepherd. A drain never kills a straggler: it waits
-    out `timeout` and aborts with the hold retained.
+    A drain never kills a straggler: it waits out `timeout` and aborts with the
+    hold retained.
     """
     current = pause_owner.read()
     if current.status == "invalid":
@@ -351,8 +336,6 @@ def pause_agents(
     if current.status == "paused":
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
         holder, at = current.holder, current.acquired_at
-        if driver is not None:
-            pause_owner.refresh_driver(holder, at, driver=driver)
     else:
         holder = new_stop_holder(local_machine.name())
         at = datetime.now(UTC)
@@ -361,7 +344,7 @@ def pause_agents(
         or current.maintenance is None
         or current.maintenance.phase == MaintenancePhase.PREPARING
     ):
-        prepare(db, bus, holder, at, driver=driver, local_machine=local_machine)
+        prepare(db, bus, holder, at, local_machine=local_machine)
     hold = _hold(holder, at)
     if hold.phase in (
         MaintenancePhase.PREPARING,

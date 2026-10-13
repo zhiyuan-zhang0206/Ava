@@ -27,44 +27,52 @@ def test_naive_or_malformed_identity_is_invalid() -> None:
     assert pause_owner.read().status == "invalid"
 
 
-def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:
-    """Task #3270: the hold carries the operator-side shepherd; progress writes
-    keep it, a refresh (a new ladder step) re-stamps it."""
-    from dataclasses import replace
-
-    from base.deploy.maintenance.hold_driver import HoldDriver, mint_driver
-
-    shepherd = mint_driver()
-    before = pause_owner.begin_maintenance("op1", _when(), driver=shepherd).snapshot
-    assert before.driver == shepherd
-    hold = before.maintenance
-    assert hold is not None
-    # A progress write (agent-host side) must not claim the ladder.
-    stamp = HoldDriver()
-    assert pause_owner.refresh_driver("op1", _when(1), driver=stamp) is False  # wrong generation
-    assert pause_owner.refresh_driver("op1", _when(), driver=stamp) is True
-    after = pause_owner.change_maintenance(
-        "op1", _when(), hold, replace(hold, phase=MaintenancePhase.DRAINING)
-    )
-    assert after.driver == stamp
+def test_begin_maintenance_writes_exactly_the_hold_record() -> None:
+    """The journal carries the capability and the typed hold, nothing else: no
+    process identity is recorded for anything to judge."""
+    pause_owner.begin_maintenance("op1", _when())
+    raw = json.loads(pause_owner.state_path().read_text())
+    assert set(raw) == {"state", "holder", "acquired_at", "maintenance"}
 
 
-def test_a_journal_without_a_shepherd_reads_none() -> None:
-    """A journal without a shepherd is valid state with missing evidence, not an error."""
+def test_a_journal_with_the_retired_driver_key_reads_and_loses_it_on_rewrite() -> None:
+    """A fleet update stops on the old code and starts on the new one, so the new code reads a
+    journal the old code wrote with a `driver` identity. The hold reads whole -- every other
+    field intact, the retired key ignored -- and the next write drops the key."""
+    import json
+
     from base.deploy.maintenance.state import MaintenanceHold
 
+    hold = MaintenanceHold(MaintenancePhase.DRAINING, {7: 100})
+    legacy_ref = {"pid": 4242, "birth": 1.5, "starttime": 77, "argv": "ava stop"}
     pause_owner.state_path().write_text(
-        '{"state":"paused","holder":"A","acquired_at":"2026-08-25T01:02:00+00:00",'
-        f'"maintenance":{json.dumps(MaintenanceHold().encode())}}}'
+        json.dumps(
+            {
+                "state": "paused",
+                "holder": "A",
+                "acquired_at": "2026-08-25T01:02:00+00:00",
+                "maintenance": hold.encode(),
+                "driver": {"root": legacy_ref, "leader": legacy_ref},
+            }
+        )
     )
     snapshot = pause_owner.read()
     assert snapshot.status == "paused"
-    assert snapshot.driver is None
+    assert snapshot.holder == "A"
+    assert snapshot.acquired_at == _when()
+    assert snapshot.maintenance == hold
+
+    pause_owner.change_maintenance(
+        "A", _when(), hold, MaintenanceHold(MaintenancePhase.DRAINED, {7: 100})
+    )
+
+    raw = json.loads(pause_owner.state_path().read_text())
+    assert "driver" not in raw
+    assert pause_owner.read().maintenance == MaintenanceHold(MaintenancePhase.DRAINED, {7: 100})
 
 
-def test_a_malformed_shepherd_degrades_to_none_never_a_broken_journal() -> None:
-    """The hold must stay readable when only its shepherd evidence is unusable:
-    the verdict reports the missing identity loudly instead."""
+def test_a_malformed_retired_driver_key_never_breaks_the_journal() -> None:
+    """The retired key is never parsed, so garbage in it cannot make a hold unreadable."""
     import json
 
     from base.deploy.maintenance.state import MaintenanceHold
@@ -80,9 +88,7 @@ def test_a_malformed_shepherd_degrades_to_none_never_a_broken_journal() -> None:
             }
         )
     )
-    snapshot = pause_owner.read()
-    assert snapshot.status == "paused"
-    assert snapshot.driver is None
+    assert pause_owner.read().status == "paused"
 
 
 def test_a_journal_written_with_the_retired_reaped_map_still_reads() -> None:

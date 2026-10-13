@@ -175,10 +175,12 @@ for eligibility and retry semantics.
 `ava stop` and `ava restart` take the hold and walk it through drain and stop;
 `ava start` releases it after readiness. No command runs those steps one at a
 time, and no command reads or ends a hold except these: `ava status` prints the
-hold (phase, operation, acquired-at, the shepherd's
-liveness), `ava status --json` prints only it as one JSON object (the fleet
-update's start-of-work refusal and the out-of-band triage read that; it probes
-nothing, so it answers with everything else down), and `ava start` ends it.
+hold (phase, operation, acquired-at), `ava status --json` prints only it as one
+JSON object (`status`, `operation`, `acquired_at`, `maintenance`, `scope`; the
+fleet update's start-of-work refusal reads that; it probes nothing, so it
+answers with everything else down), and `ava start` ends it. The hold records
+no process identity and says nothing about whether the `ava stop` that took it
+is still running; see "Is a stop still running?" below.
 
 A restart that fails before any service stopped (its preflight, preparation or
 drain) releases the hold its own process took, so the idle agents on the
@@ -220,9 +222,8 @@ restart or release of admission.
 
 First identify what owns the home: `ava status` names the operation and phase.
 Do not apply the table below over a `cli.fleet_update` half that is still
-running; rerun that half after its failure is fixed instead. Status includes the
-recorded process identity and its judged liveness; a refused connection alone
-does not establish that the owner is absent.
+running; rerun that half after its failure is fixed instead. A refused
+connection alone does not establish that the owner is absent.
 
 | Phase found | Recovery after confirming there is no competing owner |
 | --- | --- |
@@ -232,8 +233,25 @@ does not establish that the owner is absent.
 
 An unreadable journal, or a record with no maintenance hold, has no exact
 generation to match, and no command clears it. After confirming no `ava stop`
-is in flight for this home (`ava status` reports what it can read), remove
+is in flight for this home (see "Is a stop still running?" below), remove
 `$AVA_HOME/run/deploy-pause-owner.json` by hand and run `ava start`.
+
+### Is a stop still running?
+
+The hold does not say. Ask the lifecycle itself:
+
+- `$AVA_HOME/run/lifecycle-op.json` records the running or last stop/restart: its
+  pid, the phase timeline and whether it finished. A pid that is gone without a
+  completion means the command died where the timeline stops.
+- `ava stop`, `ava restart` and `ava start` all run under one exclusive lock on
+  the home (`resource_lock` over `deploy-state.lifecycle.lock`). When another of
+  them holds it, `ava start` waits up to 30 seconds and then fails naming the
+  holder's pid and purpose. When the lock is free, `ava start` proceeds and
+  releases the hold as usual, so use it as the probe only when releasing is what
+  you want next.
+
+The lock belongs to the OS and goes away with its process, so a killed
+`ava stop` never blocks `ava start`.
 
 A failed stop retains its process inventory and hold. Force remains an explicit
 owned-process escalation, not an inference from a timeout or a way to
