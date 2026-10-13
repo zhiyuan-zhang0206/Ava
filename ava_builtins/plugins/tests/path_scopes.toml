@@ -4,3 +4,6 @@
     "test_ava_sdk_reminder_plugin.py",
     "test_sysprompt_verbosity_regression.py",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_data_registry.py",
+]

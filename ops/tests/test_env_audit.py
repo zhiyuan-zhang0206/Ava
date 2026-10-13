@@ -497,15 +497,7 @@ def test_declaration_projection_works_without_a_runtime_settings_image(tmp_path:
         [
             sys.executable,
             "-I",
-            str(
-                Path(__file__).parents[2]
-                / "base"
-                / "host"
-                / "env"
-                / "tests"
-                / "_env_import_child.py"
-            ),
-            "declaration_projection",
+            str(Path(__file__).with_name("_env_audit_projection_child.py")),
         ],
         cwd=tmp_path,
         env={

@@ -1,0 +1,21 @@
+"""Fresh-interpreter probe: the declaration projection needs no runtime settings image.
+
+Run as ``python -I _env_audit_projection_child.py`` with the environment prepared by the test.
+"""
+
+from __future__ import annotations
+
+import sys
+
+
+def declaration_projection() -> None:
+    from ops.env_audit import _load_alias_metadata
+
+    metadata = _load_alias_metadata()
+    assert metadata["AVA_DB_URL"][1] is True
+    assert "base.config._full" not in sys.modules
+    assert "base.config.admin.metadata" not in sys.modules
+
+
+if __name__ == "__main__":
+    declaration_projection()
