@@ -15,14 +15,14 @@ from services.redis_bridge import relay
 
 
 @pytest.fixture
-def connection() -> Iterator[tuple[socket.socket, socket.socket, relay._Connection]]:
+def connection() -> Iterator[tuple[socket.socket, socket.socket, relay.Connection]]:
     client, relay_client = socket.socketpair()
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen(1)
         listener.settimeout(3.0)
         errors: list[BaseException] = []
-        handler = relay._Connection(
+        handler = relay.Connection(
             relay_client, ("127.0.0.1", 12345), listener.getsockname(), errors.append
         )
         backend, _ = listener.accept()
@@ -51,7 +51,7 @@ def _read_to_eof(endpoint: socket.socket) -> bytes:
 
 
 def test_idle_connection_survives_the_five_second_connect_deadline(
-    connection: tuple[socket.socket, socket.socket, relay._Connection],
+    connection: tuple[socket.socket, socket.socket, relay.Connection],
 ) -> None:
     client, backend, handler = connection
     backend.sendall(b"ready")
@@ -69,7 +69,7 @@ def test_idle_connection_survives_the_five_second_connect_deadline(
 
 @pytest.mark.parametrize("initiator", ["client", "backend"])
 def test_half_close_delivers_the_complete_reverse_stream(
-    connection: tuple[socket.socket, socket.socket, relay._Connection],
+    connection: tuple[socket.socket, socket.socket, relay.Connection],
     initiator: str,
 ) -> None:
     client, backend, handler = connection
@@ -93,7 +93,7 @@ def test_half_close_delivers_the_complete_reverse_stream(
 
 
 def test_reset_backend_reclaims_a_pump_blocked_on_an_open_client(
-    connection: tuple[socket.socket, socket.socket, relay._Connection],
+    connection: tuple[socket.socket, socket.socket, relay.Connection],
 ) -> None:
     client, backend, handler = connection
     client.sendall(b"ready")
@@ -106,7 +106,7 @@ def test_reset_backend_reclaims_a_pump_blocked_on_an_open_client(
 
 
 def test_backpressure_preserves_all_bytes_until_the_receiver_drains(
-    connection: tuple[socket.socket, socket.socket, relay._Connection],
+    connection: tuple[socket.socket, socket.socket, relay.Connection],
 ) -> None:
     client, backend, handler = connection
     client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)

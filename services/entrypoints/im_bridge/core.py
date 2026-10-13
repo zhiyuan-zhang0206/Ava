@@ -21,7 +21,7 @@ from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import TimelineAcceptance
 from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
 from services.entrypoints.im_bridge.spawn_menu import SpawnMenuMixin
-from services.entrypoints.im_bridge.state import _load_switch_state, _save_switch_state
+from services.entrypoints.im_bridge.state import load_switch_state, save_switch_state
 from services.entrypoints.im_bridge.timeline_acceptance import (
     SelectionAdmission,
     accept_timeline,
@@ -62,7 +62,7 @@ def _display_status(status: str) -> str:
     return status
 
 
-def _is_dialog_item(it: dict[str, Any]) -> bool:
+def is_dialog_item(it: dict[str, Any]) -> bool:
     """The default push filter: user-originated messages + agent text output.
 
     ``inbound_chat`` rows carry their envelope ``source`` — only the human's
@@ -78,8 +78,8 @@ def _is_dialog_item(it: dict[str, Any]) -> bool:
 
 
 # Refresh Telegram's ~5-second typing indicator every 4s, for at most 5 minutes.
-_TYPING_INTERVAL_S = 4.0
-_TYPING_MAX_S = 300.0
+TYPING_INTERVAL_S = 4.0
+TYPING_MAX_S = 300.0
 
 
 class IMBridgeCore(SpawnMenuMixin):
@@ -108,7 +108,7 @@ class IMBridgeCore(SpawnMenuMixin):
         self._last_pushed: dict[tuple[str, str, int], PushWatermark] = {}
         # Post-commit memory cache; the cursor row owns acceptance and selection.
 
-        self._switch_state = _load_switch_state()
+        self._switch_state = load_switch_state()
         self._disabled_channels: set[str] = set(config.im_disabled_adapters)
 
     async def stop(self) -> None:
@@ -178,7 +178,7 @@ class IMBridgeCore(SpawnMenuMixin):
             self._switch_state.pop(key, None)
         else:
             self._switch_state[key] = state.current_agent_id
-        _save_switch_state(self._switch_state)
+        save_switch_state(self._switch_state)
 
     async def handle_inbound(self, msg: InboundMessage) -> None:
         """Normalize entry point from adapters. Replies via the originating
@@ -396,7 +396,7 @@ class IMBridgeCore(SpawnMenuMixin):
         window = self.config.im_bridge_timeline_window
         replay = self.config.im_bridge_replay_messages
         items = await self.gateway.get_timeline(target["agent_id"], limit=window)
-        msgs = [it for it in items if _is_dialog_item(it)][-replay:]
+        msgs = [it for it in items if is_dialog_item(it)][-replay:]
         replies: list[Reply] = [
             Reply(
                 copy.SWITCHED_TO.format(
@@ -536,7 +536,7 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _typing_loop(
         self, key: tuple[str, str], state: ChatState, adapter: IMAdapter
     ) -> None:
-        deadline = time.monotonic() + _TYPING_MAX_S
+        deadline = time.monotonic() + TYPING_MAX_S
         try:
             while time.monotonic() < deadline:
                 try:
@@ -545,7 +545,7 @@ class IMBridgeCore(SpawnMenuMixin):
                     # cosmetic feature — a failing indicator gives up quietly
                     _log.warning("typing failed channel=%s chat=%s", state.channel, state.chat_id)
                     return
-                await asyncio.sleep(_TYPING_INTERVAL_S)
+                await asyncio.sleep(TYPING_INTERVAL_S)
         finally:
             self._typing_tasks.pop(key, None)
 
@@ -661,7 +661,7 @@ class IMBridgeCore(SpawnMenuMixin):
         if state.current_agent_id is None:
             return
         agent_id = state.current_agent_id
-        items = [it for it in raw_items if _is_dialog_item(it)]
+        items = [it for it in raw_items if is_dialog_item(it)]
         if not items:
             return
         items.sort(key=lambda it: _item_key(str(it.get("item_id", "0.0"))))

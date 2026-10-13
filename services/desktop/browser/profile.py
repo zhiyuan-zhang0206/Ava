@@ -65,19 +65,19 @@ def profile_is_populated(path: Path) -> bool:
     return path.is_dir() and any(path.iterdir())
 
 
-def _ignore_junk(_src: str, names: list[str]) -> set[str]:
+def ignore_junk(_src: str, names: list[str]) -> set[str]:
     """`shutil.copytree` ignore callback: drop lock/socket files and regenerable
     caches (see `_EXCLUDED_NAMES`)."""
     return {n for n in names if n.startswith("Singleton") or n in _EXCLUDED_NAMES}
 
 
-def _dir_size_bytes(src: Path) -> int:
+def dir_size_bytes(src: Path) -> int:
     """Size (bytes) of what a copy would carry: walk `src` applying the same
-    exclusions `_copy_default_profile` uses, so the reported figure matches the
+    exclusions `copy_default_profile` uses, so the reported figure matches the
     bytes actually copied. Symlinks are not followed (their target isn't copied)."""
     total = 0
     for root, dirs, files in os.walk(src):
-        ignored = _ignore_junk(root, dirs + files)
+        ignored = ignore_junk(root, dirs + files)
         dirs[:] = [d for d in dirs if d not in ignored]  # prune -> os.walk won't descend
         for name in files:
             if name in ignored:
@@ -89,7 +89,7 @@ def _dir_size_bytes(src: Path) -> int:
     return total
 
 
-def _running_chrome_pid(src: Path) -> int | None:
+def running_chrome_pid(src: Path) -> int | None:
     """Pid of a Chrome holding `src` open, or None if none is.
 
     Chrome writes a `SingletonLock` symlink -> `<hostname>-<pid>` while a
@@ -114,7 +114,7 @@ def _running_chrome_pid(src: Path) -> int | None:
     return None  # stale lock
 
 
-def _copy_default_profile(src: Path, dst: Path) -> None:
+def copy_default_profile(src: Path, dst: Path) -> None:
     """Copy the daily Chrome user-data dir `src` into the agent profile `dst`,
     excluding locks + caches. `dst` must be absent: any existing directory is an
     immutable Chrome profile, including a partial first copy, so it is never
@@ -125,7 +125,7 @@ def _copy_default_profile(src: Path, dst: Path) -> None:
     # broken link in the source can't abort the whole copy. If this fails after
     # creating `dst`, leave it intact rather than deleting potentially valuable
     # profile material; a human can inspect or remove it explicitly.
-    shutil.copytree(src, dst, ignore=_ignore_junk, symlinks=True)
+    shutil.copytree(src, dst, ignore=ignore_junk, symlinks=True)
 
 
 def validate_local_state(profile: Path) -> str | None:
@@ -150,7 +150,7 @@ def validate_local_state(profile: Path) -> str | None:
     return None
 
 
-def _human_size(n_bytes: int) -> str:
+def human_size(n_bytes: int) -> str:
     gb = n_bytes / 1024**3
     return f"{gb:.1f} GB" if gb >= 1 else f"{n_bytes / 1024**2:.0f} MB"
 
@@ -174,7 +174,7 @@ def _prompt_profile_choice(src: Path) -> str:
 
 def _confirm_copy(src: Path, dst: Path, size_bytes: int) -> bool:
     """Final size-aware confirmation for the copy. Returns True only on explicit yes."""
-    print(f"\n  This copies {_human_size(size_bytes)} from")  # noqa: T201
+    print(f"\n  This copies {human_size(size_bytes)} from")  # noqa: T201
     print(f"    {src}")  # noqa: T201
     print("  into the agent's profile at")  # noqa: T201
     print(f"    {dst}")  # noqa: T201
@@ -204,7 +204,7 @@ def ensure_browser_profile(*, interactive: bool) -> None:
 
     # Copying a live profile risks importing half-written SQLite. Require Chrome
     # closed; loop so the operator can quit it and continue without restarting.
-    while _running_chrome_pid(src) is not None:
+    while running_chrome_pid(src) is not None:
         print("\n  Chrome is still running — copying now could corrupt the imported data.")  # noqa: T201
         if (
             input("  Quit Chrome fully, then press Enter to retry (or type 'new'): ")
@@ -214,8 +214,8 @@ def ensure_browser_profile(*, interactive: bool) -> None:
         ):
             return
 
-    if not _confirm_copy(src, dst, _dir_size_bytes(src)):
+    if not _confirm_copy(src, dst, dir_size_bytes(src)):
         return
     print(f"  Copying your Chrome profile into {dst} … (this may take a while)")  # noqa: T201
-    _copy_default_profile(src, dst)
+    copy_default_profile(src, dst)
     print("  Done — the agent's browser now shares your logged-in Chrome state.")  # noqa: T201

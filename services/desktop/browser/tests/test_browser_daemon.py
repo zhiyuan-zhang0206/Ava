@@ -31,7 +31,7 @@ def test_assert_capable_ok_when_capable(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_chrome_args_has_debug_port_and_profile(tmp_path: Path) -> None:
-    args = bd._chrome_args("/chrome", 9222, tmp_path / "prof")
+    args = bd.chrome_args("/chrome", 9222, tmp_path / "prof")
     assert args[0] == "/chrome"
     assert "--remote-debugging-port=9222" in args
     assert f"--user-data-dir={tmp_path / 'prof'}" in args
@@ -48,7 +48,7 @@ def test_main_asserts_capable_then_execvps_chrome(
     monkeypatch.setattr(bd, "assert_browser_capable", lambda: order.append("capable"))
     monkeypatch.setattr(
         bd,
-        "_cdp_reachable",
+        "cdp_reachable",
         lambda _p: (order.append("port"), False)[1],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(bd, "resolve_chrome_binary", lambda _chrome: "/chrome")  # pyright: ignore[reportUnknownArgumentType]
@@ -57,7 +57,7 @@ def test_main_asserts_capable_then_execvps_chrome(
         order.append("profile")
         return tmp_path / "prof"
 
-    monkeypatch.setattr(bd, "_profile_dir", _profile)
+    monkeypatch.setattr(bd, "profile_dir", _profile)
     monkeypatch.setattr(
         bd.macos_readiness, "wait_for_browser_startup_readiness", lambda: order.append("ready")
     )
@@ -106,7 +106,7 @@ def test_cdp_reachable_true_on_200(monkeypatch: pytest.MonkeyPatch) -> None:
     cm = MagicMock()
     cm.__enter__.return_value = resp
     monkeypatch.setattr(bd.urllib.request, "urlopen", lambda *_a, **_k: cm)  # pyright: ignore[reportUnknownArgumentType]
-    assert bd._cdp_reachable(9222) is True
+    assert bd.cdp_reachable(9222) is True
 
 
 def test_cdp_reachable_false_on_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,7 +114,7 @@ def test_cdp_reachable_false_on_connection_refused(monkeypatch: pytest.MonkeyPat
         raise bd.urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(bd.urllib.request, "urlopen", _refused)
-    assert bd._cdp_reachable(9222) is False
+    assert bd.cdp_reachable(9222) is False
 
 
 def test_launch_execs_in_place_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,8 +134,8 @@ def test_main_refuses_when_cdp_port_already_served(
     colliding second Chrome — so the healthcheck/watchdog don't churn a
     profile-lock crash."""
     monkeypatch.setattr(bd, "assert_browser_capable", lambda: None)
-    monkeypatch.setattr(bd, "_cdp_reachable", lambda _p: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(bd, "_profile_dir", lambda: Path("/x/chrome-profile"))
+    monkeypatch.setattr(bd, "cdp_reachable", lambda _p: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bd, "profile_dir", lambda: Path("/x/chrome-profile"))
     monkeypatch.setattr(
         bd.os,
         "execvp",

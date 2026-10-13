@@ -50,12 +50,12 @@ def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> No
     async def parked_outbound(_core: Any, _alerts: Any):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(daemon, "_timeline_outbound_loop", parked_outbound)
-    monkeypatch.setattr(daemon, "_LIVENESS_BEAT_INTERVAL_S", 0.02)
+    monkeypatch.setattr(daemon, "timeline_outbound_loop", parked_outbound)
+    monkeypatch.setattr(daemon, "LIVENESS_BEAT_INTERVAL_S", 0.02)
     liveness = Liveness(timeout_s=0.2)
 
     async def scenario() -> None:
-        task = asyncio.create_task(daemon._liveness_loop(liveness))
+        task = asyncio.create_task(daemon.liveness_loop(liveness))
         try:
             await asyncio.sleep(0.5)  # ~25 beats, several times the timeout
             assert liveness.is_alive()
@@ -154,13 +154,13 @@ def test_run_wires_the_liveness_task(
         loaded_with.append(disabled)
         return []
 
-    monkeypatch.setattr(daemon, "_load_adapters", fake_load_adapters)
+    monkeypatch.setattr(daemon, "load_adapters", fake_load_adapters)
 
     async def parked_outbound(_core: Any, _alerts: Any):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(daemon, "_timeline_outbound_loop", parked_outbound)
-    monkeypatch.setattr(daemon, "_LIVENESS_BEAT_INTERVAL_S", 0.02)
+    monkeypatch.setattr(daemon, "timeline_outbound_loop", parked_outbound)
+    monkeypatch.setattr(daemon, "LIVENESS_BEAT_INTERVAL_S", 0.02)
 
     async def scenario() -> None:
         task = asyncio.create_task(
@@ -203,7 +203,7 @@ def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return type("mod", (), {"ADAPTER_CLASS": _FakeAdapter})
 
-    monkeypatch.setattr(daemon, "_import_adapter", fake_import)
+    monkeypatch.setattr(daemon, "import_adapter", fake_import)
 
     class _FakeCore:
         def __init__(self) -> None:
@@ -213,7 +213,7 @@ def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
             self.registered.append(adapter)
 
     core = _FakeCore()
-    loaded = daemon._load_adapters(core, frozenset({"weixin", "feishu"}))
+    loaded = daemon.load_adapters(core, frozenset({"weixin", "feishu"}))
     assert imported == ["telegram"]
     assert len(loaded) == 1
     assert len(core.registered) == 1
@@ -232,13 +232,13 @@ def test_load_adapters_hands_each_adapter_its_slice(monkeypatch: pytest.MonkeyPa
 
         return type("mod", (), {"ADAPTER_CLASS": _FakeAdapter})
 
-    monkeypatch.setattr(daemon, "_import_adapter", fake_import)
+    monkeypatch.setattr(daemon, "import_adapter", fake_import)
 
     class _FakeCore:
         def register(self, adapter: Any) -> None:
             pass
 
-    daemon._load_adapters(_FakeCore(), frozenset())
+    daemon.load_adapters(_FakeCore(), frozenset())
     assert [type(c) for c in received["telegram"]] == [TelegramCredentialsConfig]
     assert received["weixin"] == ()
     assert [type(c) for c in received["feishu"]] == [FeishuCredentialsConfig]
@@ -290,7 +290,7 @@ def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
         )
         assert "FAKE-TOKEN" in caplog.text
 
-        daemon._gate_httpx_info_logs()
+        daemon.gate_httpx_info_logs()
         assert httpx_logger.getEffectiveLevel() == logging.WARNING
         caplog.clear()
         httpx_logger.info(
@@ -389,7 +389,7 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
     def load_adapters(_core: Any, _disabled: frozenset[str]) -> list[Adapter]:
         return [Adapter()]
 
-    monkeypatch.setattr(daemon, "_load_adapters", load_adapters)
+    monkeypatch.setattr(daemon, "load_adapters", load_adapters)
     monkeypatch.setattr(daemon, "start_health_server", AsyncMock(return_value=_FakeServer()))
 
     async def stop_health(server: Any) -> None:
@@ -431,9 +431,9 @@ def test_invalid_adapter_configuration_is_not_skipped(monkeypatch: pytest.Monkey
     def import_adapter(_name: str) -> SimpleNamespace:
         return SimpleNamespace(ADAPTER_CLASS=BrokenAdapter)
 
-    monkeypatch.setattr(daemon, "_import_adapter", import_adapter)
+    monkeypatch.setattr(daemon, "import_adapter", import_adapter)
     with pytest.raises(ValueError, match="invalid adapter configuration"):
-        daemon._load_adapters(object(), frozenset({"weixin", "feishu"}))
+        daemon.load_adapters(object(), frozenset({"weixin", "feishu"}))
 
 
 async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault(
@@ -455,7 +455,7 @@ async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile)
     errors = await asyncio.wait_for(
-        daemon._stop_resources(
+        daemon.stop_resources(
             core, [broken, healthy], health, pool, config=process_config, runtime=tmp_path / "run"
         ),
         timeout=2,
@@ -487,7 +487,7 @@ def test_cleanup_group_with_cancellation_uses_the_bounded_failure_exit(
     monkeypatch.setattr(daemon, "init_gateway_process", MagicMock())
     monkeypatch.setattr(daemon, "build_pipeline", MagicMock(return_value=object()))
     monkeypatch.setattr(daemon, "install_graceful_shutdown", MagicMock())
-    monkeypatch.setattr(daemon, "_gate_httpx_info_logs", lambda: None)
+    monkeypatch.setattr(daemon, "gate_httpx_info_logs", lambda: None)
     monkeypatch.setattr(daemon, "_hard_exit", exit_process)
     daemon.main()
     exit_process.assert_called_once_with(1)

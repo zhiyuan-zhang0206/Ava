@@ -41,14 +41,14 @@ class OcrError(Exception):
     """OCR could not run or produced no parseable output."""
 
 
-def _bin_path() -> Path:
+def bin_path() -> Path:
     """Where the compiled OCR binary lives, under this home's logs dir."""
     return logs_dir() / "computer" / "ocr-bin" / "ocr"
 
 
 def _binary() -> Path:
     """The compiled OCR binary, built on demand (source-newer check)."""
-    binary = _bin_path()
+    binary = bin_path()
     if not binary.exists() or _SOURCE.stat().st_mtime > binary.stat().st_mtime:
         binary.parent.mkdir(parents=True, exist_ok=True)
         swiftc = shutil.which("swiftc")

@@ -5,7 +5,7 @@ The root supervisor runs it under ``/usr/bin/python3`` so macOS's application
 firewall recognizes the serving binary. Redis itself remains loopback-only.
 
 A listener that cannot be bound or kept accepting is rebuilt with a growing delay, but
-only ``_MAX_LISTENER_FAILURES`` times in a row: the process then exits non-zero and the
+only ``MAX_LISTENER_FAILURES`` times in a row: the process then exits non-zero and the
 root supervisor's bounded restart budget decides what happens next.
 """
 
@@ -29,11 +29,11 @@ _MAX_REBIND_DELAY_S = 30.0
 _STOP_TIMEOUT_S = 5.0
 # Consecutive listener failures (bind or accept) without one admitted connection before the
 # relay gives up. With the delays above the five failures span about half a minute.
-_MAX_LISTENER_FAILURES = 5
+MAX_LISTENER_FAILURES = 5
 
 
 class ListenerExhaustedError(RuntimeError):
-    """The listener failed `_MAX_LISTENER_FAILURES` times in a row without admitting a connection."""
+    """The listener failed `MAX_LISTENER_FAILURES` times in a row without admitting a connection."""
 
 
 def _log(message: str) -> None:
@@ -41,7 +41,7 @@ def _log(message: str) -> None:
     sys.stdout.flush()
 
 
-def _open_listener(address: tuple[str, int]) -> socket.socket:
+def open_listener(address: tuple[str, int]) -> socket.socket:
     family = socket.AF_INET6 if ":" in address[0] else socket.AF_INET
     listener = socket.socket(family, socket.SOCK_STREAM)
     try:
@@ -60,7 +60,7 @@ def _shutdown(connection: socket.socket) -> None:
         connection.shutdown(socket.SHUT_RDWR)
 
 
-class _Pump:
+class Pump:
     """One forwarding direction, retained until its actual worker is joined."""
 
     def __init__(
@@ -124,7 +124,7 @@ class _Pump:
         return finished
 
 
-class _Connection:
+class Connection:
     """Own the accepted socket, backend lookup/connect, and both pump workers."""
 
     def __init__(
@@ -139,7 +139,7 @@ class _Connection:
         self._backend_address = backend_address
         self._observe_error = observe_error
         self._backend: socket.socket | None = None
-        self._pumps: list[_Pump] = []
+        self._pumps: list[Pump] = []
         self._lock = threading.RLock()
         self._stopped = threading.Event()
         self._done = threading.Event()
@@ -185,8 +185,8 @@ class _Connection:
             # Establishment is bounded; connected Redis Pub/Sub has no idle limit.
             backend.settimeout(None)
             _log(f"relay {self._peer[0]}:{self._peer[1]} <-> backend")
-            self._pumps.append(_Pump(self._client, backend, self._observe_error))
-            self._pumps.append(_Pump(backend, self._client, self._observe_error))
+            self._pumps.append(Pump(self._client, backend, self._observe_error))
+            self._pumps.append(Pump(backend, self._client, self._observe_error))
         for pump in self._pumps:
             while not pump.wait(0.1):
                 if self._stopped.is_set():
@@ -241,7 +241,7 @@ class RelayService:
         listen_address: tuple[str, int],
         backend_address: tuple[str, int],
         *,
-        open_listener: Callable[[tuple[str, int]], socket.socket] = _open_listener,
+        open_listener: Callable[[tuple[str, int]], socket.socket] = open_listener,
         sleep: Callable[[float], None] | None = None,
     ) -> None:
         self._listen_address = listen_address
@@ -251,7 +251,7 @@ class RelayService:
         self._sleep = sleep if sleep is not None else self._stopped.wait
         self._lock = threading.RLock()
         self._listener: socket.socket | None = None
-        self._connections: list[_Connection] = []
+        self._connections: list[Connection] = []
         self._errors: list[BaseException] = []
         self._listener_failures = 0
 
@@ -269,7 +269,7 @@ class RelayService:
                 client.close()
                 return
             try:
-                connection = _Connection(client, peer, self._backend_address, self._observe_error)
+                connection = Connection(client, peer, self._backend_address, self._observe_error)
             except BaseException:
                 client.close()
                 raise
@@ -334,7 +334,7 @@ class RelayService:
         """Rebind a failed listener while established connections keep forwarding.
 
         Raises:
-            ListenerExhaustedError: the listener failed `_MAX_LISTENER_FAILURES` times in a
+            ListenerExhaustedError: the listener failed `MAX_LISTENER_FAILURES` times in a
                 row; an admitted connection clears the count.
         """
         delay_s = _INITIAL_REBIND_DELAY_S
@@ -362,7 +362,7 @@ class RelayService:
                     self._listener = None
             if self._stopped.is_set():
                 continue
-            if self._listener_failures >= _MAX_LISTENER_FAILURES:
+            if self._listener_failures >= MAX_LISTENER_FAILURES:
                 raise ListenerExhaustedError(
                     f"listener on {self._listen_address[0]}:{self._listen_address[1]} failed "
                     f"{self._listener_failures} times in a row"
@@ -387,7 +387,7 @@ class RelayService:
             self._listener_failures = 0
 
 
-def _run_service(service: RelayService) -> None:
+def run_service(service: RelayService) -> None:
     try:
         service.serve_forever()
     except BaseException:
@@ -406,11 +406,11 @@ def serve_forever(
     listen_address: tuple[str, int],
     backend_address: tuple[str, int],
     *,
-    open_listener: Callable[[tuple[str, int]], socket.socket] = _open_listener,
+    open_listener: Callable[[tuple[str, int]], socket.socket] = open_listener,
     sleep: Callable[[float], None] | None = None,
 ) -> None:
     """Serve with an owner that stops and collects connections on every exit."""
-    _run_service(
+    run_service(
         RelayService(listen_address, backend_address, open_listener=open_listener, sleep=sleep)
     )
 
@@ -436,7 +436,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     previous_int = signal.signal(signal.SIGINT, stop_handler)
     previous_term = signal.signal(signal.SIGTERM, stop_handler)
     try:
-        _run_service(service)
+        run_service(service)
     except ListenerExhaustedError as exc:
         _log(f"giving up: {exc}")
         raise SystemExit(1) from exc

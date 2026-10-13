@@ -73,7 +73,7 @@ def _install_fake_cdp(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeWS]:
         return browser_ws if "browser" in url else page_ws
 
     _install_fake_gateway_login(monkeypatch)
-    monkeypatch.setattr(sess, "_http_json", fake_http_json)
+    monkeypatch.setattr(sess, "http_json", fake_http_json)
     monkeypatch.setattr(sess.websockets, "connect", fake_connect)
     return {"browser": browser_ws, "page": page_ws}
 
@@ -196,7 +196,7 @@ async def test_inject_raises_when_browser_rejects_cookie(monkeypatch: pytest.Mon
 async def test_cdp_call_raises_on_protocol_error() -> None:
     ws = FakeWS([{"id": 1, "error": {"code": -32601, "message": "not found"}}])
     with pytest.raises(RuntimeError, match=r"CDP Network\.setCookie failed"):
-        await sess._cdp_call(ws, itertools.count(1), "Network.setCookie", {})
+        await sess.cdp_call(ws, itertools.count(1), "Network.setCookie", {})
 
 
 async def test_inject_raises_when_chrome_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,7 +204,7 @@ async def test_inject_raises_when_chrome_unreachable(monkeypatch: pytest.MonkeyP
         raise httpx.ConnectError("connection refused")
 
     _install_fake_gateway_login(monkeypatch)
-    monkeypatch.setattr(sess, "_http_json", boom)
+    monkeypatch.setattr(sess, "http_json", boom)
     with pytest.raises(httpx.ConnectError):
         await sess.inject_session_cookie(9222, GATEWAY, SECRET)
 
@@ -260,7 +260,7 @@ def test_session_params_present_the_delivered_runner_token(
     monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
     monkeypatch.setenv("AVA_API_TOKEN", "delivered-runner-token")
-    assert gateway_session._gateway_session_params() == (GATEWAY, "delivered-runner-token")
+    assert gateway_session.gateway_session_params() == (GATEWAY, "delivered-runner-token")
 
 
 def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secret(
@@ -275,7 +275,7 @@ def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secr
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "runner")
     monkeypatch.delenv("AVA_API_TOKEN", raising=False)
 
-    assert gateway_session._gateway_session_params() is None
+    assert gateway_session.gateway_session_params() is None
 
     assert len(errors) == 1
     assert "AVA_API_TOKEN" in errors[0]

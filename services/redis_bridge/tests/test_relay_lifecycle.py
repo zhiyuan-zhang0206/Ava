@@ -264,7 +264,7 @@ def test_cleanup_keeps_primary_caller_error_and_records_secondary(
     )
     try:
         with pytest.raises(_EndServingError, match="caller failure"):
-            relay._run_service(service)
+            relay.run_service(service)
         assert service._errors == [secondary]
         assert "secondary backend defect" in capsys.readouterr().err
         assert accepted.fileno() == -1
@@ -302,7 +302,7 @@ class _RebindAfterOneAccept:
 
 
 def test_rebound_listener_preserves_the_old_live_connection() -> None:
-    listeners = [relay._open_listener(("127.0.0.1", 0)) for _ in range(2)]
+    listeners = [relay.open_listener(("127.0.0.1", 0)) for _ in range(2)]
     first_address, second_address = [listener.getsockname() for listener in listeners]
     rebound = threading.Event()
     opens = 0
@@ -326,7 +326,7 @@ def test_rebound_listener_preserves_the_old_live_connection() -> None:
             sleep=lambda _delay: None,
         )
         with ThreadPoolExecutor(max_workers=1) as executor:
-            serving = executor.submit(relay._run_service, service)
+            serving = executor.submit(relay.run_service, service)
             client = socket.create_connection(first_address, timeout=2.0)
             backend, _ = backend_listener.accept()
             try:
@@ -428,9 +428,9 @@ def test_pump_cleanup_preserves_primary_and_collects_every_secondary(
             assert owner._done.wait(2.0)
             owner._thread.join(timeout=2.0)
             first, second = owner._pumps
-            original_stop = relay._Pump.stop
+            original_stop = relay.Pump.stop
 
-            def stop_with_cleanup_defect(pump: relay._Pump, timeout: float) -> bool:
+            def stop_with_cleanup_defect(pump: relay.Pump, timeout: float) -> bool:
                 finished = original_stop(pump, timeout)
                 if pump is first and not worker_primary:
                     raise primary
@@ -439,7 +439,7 @@ def test_pump_cleanup_preserves_primary_and_collects_every_secondary(
                 return finished
 
             with monkeypatch.context() as patched:
-                patched.setattr(relay._Pump, "stop", stop_with_cleanup_defect)
+                patched.setattr(relay.Pump, "stop", stop_with_cleanup_defect)
                 with pytest.raises(LookupError) as collected:
                     service.stop(2.0)
             assert collected.value is primary
@@ -463,14 +463,14 @@ def test_worker_failure_cleanup_retains_both_original_errors(
     secondary = ValueError("pump worker shutdown secondary defect")
     client, accepted = socket.socketpair()
     source = cast(socket.socket, _RecvDefect(accepted, primary))
-    original_request_stop = relay._Pump.request_stop
+    original_request_stop = relay.Pump.request_stop
 
-    def request_stop_with_defect(pump: relay._Pump) -> None:
+    def request_stop_with_defect(pump: relay.Pump) -> None:
         original_request_stop(pump)
         if pump._source is source and threading.current_thread() is pump._thread:
             raise secondary
 
-    monkeypatch.setattr(relay._Pump, "request_stop", request_stop_with_defect)
+    monkeypatch.setattr(relay.Pump, "request_stop", request_stop_with_defect)
     with socket.socket() as backend_listener:
         backend_listener.bind(("127.0.0.1", 0))
         backend_listener.listen()
@@ -501,18 +501,18 @@ def test_connect_failure_cleanup_preserves_primary_and_retains_secondary(
 ) -> None:
     primary = LookupError("connect primary defect")
     secondary = ValueError("connection close secondary defect")
-    original_close = relay._Connection._close_sockets
+    original_close = relay.Connection._close_sockets
 
     def fail_connect(*_args: object, **_kwargs: object) -> socket.socket:
         raise primary
 
-    def close_with_defect(owner: relay._Connection) -> None:
+    def close_with_defect(owner: relay.Connection) -> None:
         original_close(owner)
         if threading.current_thread() is owner._thread:
             raise secondary
 
     monkeypatch.setattr(relay.socket, "create_connection", fail_connect)
-    monkeypatch.setattr(relay._Connection, "_close_sockets", close_with_defect)
+    monkeypatch.setattr(relay.Connection, "_close_sockets", close_with_defect)
     client, accepted = socket.socketpair()
     service = relay.RelayService(("127.0.0.1", 0), ("redis.example", 6380))
     service._admit(accepted, ("127.0.0.1", 1))
@@ -550,7 +550,7 @@ def test_listener_that_never_binds_gives_up_after_the_failure_limit() -> None:
             sleep=delays.append,
         )
 
-    assert len(attempts) == relay._MAX_LISTENER_FAILURES
+    assert len(attempts) == relay.MAX_LISTENER_FAILURES
     # The delay still grows between attempts and no sleep follows the last failure.
     assert delays == [1.0, 2.0, 4.0, 8.0]
 
@@ -565,7 +565,7 @@ def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
                 raise OSError("descriptor went bad")
             return super().accept()
 
-    clients = [socket.socketpair() for _ in range(relay._MAX_LISTENER_FAILURES + 2)]
+    clients = [socket.socketpair() for _ in range(relay.MAX_LISTENER_FAILURES + 2)]
     plan: list[object] = []
     for client, _peer in clients:
         # Each round: a bind failure, then a listener that admits one client and fails.

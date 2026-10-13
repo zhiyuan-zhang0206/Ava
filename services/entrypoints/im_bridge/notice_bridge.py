@@ -53,7 +53,7 @@ _CB_LIST = "notice:list"
 _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
-def _state_dir() -> Path:
+def state_dir() -> Path:
     return ava_home() / "state" / "im_bridge"
 
 
@@ -120,7 +120,7 @@ class NoticeBridge:
     # -- persistence -------------------------------------------------------
 
     def _load_state(self) -> None:
-        d = _state_dir()
+        d = state_dir()
         d.mkdir(parents=True, exist_ok=True)
         with suppress(FileNotFoundError):
             self._filters = json.loads((d / "notice_filters.json").read_text())
@@ -128,7 +128,7 @@ class NoticeBridge:
             raise TypeError("notice filters must be an object")
 
     def _save(self, name: str, value: Any) -> None:
-        (_state_dir() / name).write_text(json.dumps(value))
+        (state_dir() / name).write_text(json.dumps(value))
 
     # -- gateway -----------------------------------------------------------
 

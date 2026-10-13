@@ -20,9 +20,9 @@ from services.desktop.browser.mcp_daemon import ChromeMcpDaemon
 from services.desktop.browser.tab_groups.grouping import AgentTabGroups
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     FakeUpstream,
-    _err,
-    _new_daemon,
     _text_of,
+    err,
+    new_daemon,
 )
 
 
@@ -49,7 +49,7 @@ class RecordingGroups(AgentTabGroups):
 def _grouped_daemon() -> tuple[ChromeMcpDaemon, FakeUpstream, RecordingGroups]:
     up = FakeUpstream()
     groups = RecordingGroups()
-    return _new_daemon(up, tab_groups=groups), up, groups
+    return new_daemon(up, tab_groups=groups), up, groups
 
 
 async def test_explicit_new_page_is_grouped_around_the_upstream_call() -> None:
@@ -108,11 +108,11 @@ async def test_a_failed_new_page_is_not_grouped() -> None:
     class Failing(FakeUpstream):
         async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
             if name == "new_page":
-                return _err("net::ERR_NAME_NOT_RESOLVED")
+                return err("net::ERR_NAME_NOT_RESOLVED")
             return await super().call_tool(name, args)
 
     groups = RecordingGroups()
-    d = _new_daemon(Failing(), tab_groups=groups)
+    d = new_daemon(Failing(), tab_groups=groups)
     result = await d.call_tool_for_agent("new_page", {"url": "https://nope.invalid/"}, 7)
     assert result.is_error
     assert groups.grouped() == []
@@ -138,7 +138,7 @@ async def test_grouping_failure_leaves_the_page_created_registered_and_selected(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     up = FakeUpstream()
-    d = _new_daemon(up, tab_groups=AgentTabGroups(_closed_local_port(), asyncio.TaskGroup()))
+    d = new_daemon(up, tab_groups=AgentTabGroups(_closed_local_port(), asyncio.TaskGroup()))
 
     explicit = await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
     auto = await d.call_tool_for_agent("navigate_page", {"url": "https://b.example/"}, 8)
@@ -210,7 +210,7 @@ async def test_a_stuck_grouping_neither_delays_new_page_nor_holds_the_daemon_loc
     serial lock is held only for the two target listings."""
     async with WedgedChrome() as chrome, asyncio.TaskGroup() as tasks:
         groups = AgentTabGroups(chrome.port, tasks)
-        d = _new_daemon(FakeUpstream(), tab_groups=groups)
+        d = new_daemon(FakeUpstream(), tab_groups=groups)
         try:
             started = time.monotonic()
             created = await asyncio.wait_for(
@@ -240,7 +240,7 @@ async def _agent_with_one_page(
     groups: RecordingGroups | None = None,
 ) -> tuple[ChromeMcpDaemon, _CloseObserver]:
     up = _CloseObserver()
-    d = _new_daemon(up, tab_groups=groups or RecordingGroups())
+    d = new_daemon(up, tab_groups=groups or RecordingGroups())
     await d.call_tool_for_agent("new_page", {"url": "http://localhost:9/dev"}, 7)
     up.calls.clear()
     return d, up

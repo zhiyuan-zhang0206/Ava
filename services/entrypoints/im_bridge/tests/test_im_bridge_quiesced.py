@@ -25,7 +25,7 @@ async def test_a_quiesced_unit_polls_no_notices(
     monkeypatch.setattr(daemon.asyncio, "sleep", short_sleep)
     core = MagicMock()
     core.notice_bridge.poll_once = AsyncMock()
-    task = asyncio.create_task(daemon._notice_loop(core))
+    task = asyncio.create_task(daemon.notice_loop(core))
     try:
         await real_sleep(0.2)
     finally:
@@ -49,7 +49,7 @@ async def test_timeline_acceptance_and_dispatch_loop_hold_during_maintenance(
     core.poll_timeline_outbound = AsyncMock()
     alerts = MagicMock()
     alerts.poll_once = AsyncMock()
-    task = asyncio.create_task(daemon._timeline_outbound_loop(core, alerts))
+    task = asyncio.create_task(daemon.timeline_outbound_loop(core, alerts))
     try:
         await real_sleep(0.05)
     finally:

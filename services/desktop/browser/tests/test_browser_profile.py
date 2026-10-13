@@ -3,7 +3,7 @@ Chrome profile and one seeded from the operator's daily Chrome.
 
 The interactive orchestration (`ensure_browser_profile`) is exercised by
 monkeypatching its module-bound seams (`profile_dir`, `default_chrome_user_data_dir`,
-`_running_chrome_pid`, `_copy_default_profile`) and `builtins.input`. The pure
+`running_chrome_pid`, `copy_default_profile`) and `builtins.input`. The pure
 machinery — exclusions, size accounting, running-Chrome detection, and the copy
 itself — is tested against a real on-disk mini profile.
 """
@@ -47,7 +47,7 @@ def test_profile_is_populated(tmp_path: Path) -> None:
 
 def test_ignore_junk_drops_singletons_and_caches() -> None:
     names = ["Cookies", "Local State", "SingletonLock", "SingletonSocket", "Cache", "GPUCache"]
-    assert bp._ignore_junk("/anywhere", names) == {
+    assert bp.ignore_junk("/anywhere", names) == {
         "SingletonLock",
         "SingletonSocket",
         "Cache",
@@ -59,47 +59,47 @@ def test_dir_size_bytes_excludes_junk(tmp_path: Path) -> None:
     src = _make_profile(tmp_path / "chrome")
     # Only "Cookies" (10) + "Local State" (2) count; the 4096-byte Cache blob and
     # the SingletonLock symlink are excluded.
-    assert bp._dir_size_bytes(src) == len(b"cookie-jar") + len("{}")
+    assert bp.dir_size_bytes(src) == len(b"cookie-jar") + len("{}")
 
 
 def test_running_chrome_pid_none_when_no_lock(tmp_path: Path) -> None:
     src = tmp_path / "chrome"
     src.mkdir()
-    assert bp._running_chrome_pid(src) is None
+    assert bp.running_chrome_pid(src) is None
 
 
 def test_running_chrome_pid_none_when_lock_is_regular_file(tmp_path: Path) -> None:
     src = tmp_path / "chrome"
     src.mkdir()
     (src / "SingletonLock").write_text("not-a-symlink")  # readlink -> OSError
-    assert bp._running_chrome_pid(src) is None
+    assert bp.running_chrome_pid(src) is None
 
 
 def test_running_chrome_pid_none_on_stale_lock(tmp_path: Path) -> None:
     src = tmp_path / "chrome"
     src.mkdir()
     (src / "SingletonLock").symlink_to("myhost-999999")  # pid not alive
-    assert bp._running_chrome_pid(src) is None
+    assert bp.running_chrome_pid(src) is None
 
 
 def test_running_chrome_pid_none_on_unparseable_pid(tmp_path: Path) -> None:
     src = tmp_path / "chrome"
     src.mkdir()
     (src / "SingletonLock").symlink_to("myhost-notanumber")
-    assert bp._running_chrome_pid(src) is None
+    assert bp.running_chrome_pid(src) is None
 
 
 def test_running_chrome_pid_live(tmp_path: Path) -> None:
     src = tmp_path / "chrome"
     src.mkdir()
     (src / "SingletonLock").symlink_to(f"myhost-{os.getpid()}")  # this process is alive
-    assert bp._running_chrome_pid(src) == os.getpid()
+    assert bp.running_chrome_pid(src) == os.getpid()
 
 
 def test_copy_default_profile_excludes_and_copies(tmp_path: Path) -> None:
     src = _make_profile(tmp_path / "chrome")
     dst = tmp_path / "agent-profile"
-    bp._copy_default_profile(src, dst)
+    bp.copy_default_profile(src, dst)
     assert (dst / "Default" / "Cookies").read_bytes() == b"cookie-jar"
     assert (dst / "Local State").exists()
     assert not (dst / "Default" / "Cache").exists()
@@ -113,7 +113,7 @@ def test_copy_default_profile_refuses_existing_dst_without_touching_it(tmp_path:
     cookies = dst / "Cookies"
     cookies.write_bytes(b"existing-login")
     with pytest.raises(FileExistsError):
-        bp._copy_default_profile(src, dst)
+        bp.copy_default_profile(src, dst)
     assert cookies.read_bytes() == b"existing-login"
 
 
@@ -129,7 +129,7 @@ def test_copy_default_profile_preserves_partial_dst_on_failure(
 
     monkeypatch.setattr(bp.shutil, "copytree", _explode)
     with pytest.raises(OSError, match="disk full"):
-        bp._copy_default_profile(src, dst)
+        bp.copy_default_profile(src, dst)
     assert dst.exists()  # preserve every existing directory; never clear a profile automatically
 
 
@@ -166,8 +166,8 @@ def test_validate_local_state_warns_when_mtime_is_unexpectedly_future_dated(
 
 
 def test_human_size() -> None:
-    assert bp._human_size(2 * 1024**3) == "2.0 GB"
-    assert bp._human_size(512 * 1024**2) == "512 MB"
+    assert bp.human_size(2 * 1024**3) == "2.0 GB"
+    assert bp.human_size(512 * 1024**2) == "512 MB"
 
 
 # --- ensure_browser_profile orchestration ----------------------------------
@@ -203,10 +203,10 @@ def _wire_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[Pa
     src.mkdir()
     monkeypatch.setattr(bp, "profile_dir", lambda: dst)
     monkeypatch.setattr(bp, "default_chrome_user_data_dir", lambda: src)
-    monkeypatch.setattr(bp, "_running_chrome_pid", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(bp, "_dir_size_bytes", lambda _s: 1234)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bp, "running_chrome_pid", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bp, "dir_size_bytes", lambda _s: 1234)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Path, Path]] = []
-    monkeypatch.setattr(bp, "_copy_default_profile", lambda s, d: calls.append((s, d)))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bp, "copy_default_profile", lambda s, d: calls.append((s, d)))  # pyright: ignore[reportUnknownArgumentType]
     return calls
 
 
@@ -237,7 +237,7 @@ def test_copy_aborts_when_chrome_running(tmp_path: Path, monkeypatch: pytest.Mon
     calls = _wire_copy(tmp_path, monkeypatch)
     monkeypatch.setattr(
         bp,
-        "_running_chrome_pid",
+        "running_chrome_pid",
         lambda _s: 4242,  # pyright: ignore[reportUnknownArgumentType]
     )  # never quits
     answers = iter(["copy", "new"])  # choose copy, then bail out of the retry loop
@@ -249,7 +249,7 @@ def test_copy_aborts_when_chrome_running(tmp_path: Path, monkeypatch: pytest.Mon
 def test_copy_proceeds_after_chrome_quits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire_copy(tmp_path, monkeypatch)
     pids = iter([4242, None])  # running on first probe, quit by the second
-    monkeypatch.setattr(bp, "_running_chrome_pid", lambda _s: next(pids))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bp, "running_chrome_pid", lambda _s: next(pids))  # pyright: ignore[reportUnknownArgumentType]
     answers = iter(["copy", "", "yes"])  # copy; Enter to retry; confirm
     monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
     bp.ensure_browser_profile(interactive=True)

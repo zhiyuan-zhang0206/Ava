@@ -120,7 +120,7 @@ async def _create_upstream(
         session = await stack.enter_async_context(
             ClientSession(read, write, read_timeout_seconds=_READ_TIMEOUT.total_seconds())
         )
-        await _initialize_until_stop_or_timeout(
+        await initialize_until_stop_or_timeout(
             session, stop, connect_timeout_reader=connect_timeout_reader
         )
         return session, stack
@@ -131,7 +131,7 @@ async def _create_upstream(
         raise
 
 
-async def _initialize_until_stop_or_timeout(
+async def initialize_until_stop_or_timeout(
     session: ClientSession, stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
 ) -> None:
     """Run ``session.initialize()`` until it returns, the stop event fires, or
