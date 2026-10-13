@@ -7,6 +7,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+import gateway.agents.notices as agents_notices
 from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.tests.events.test_notices_endpoint import _insert_notice, _seed_agent
@@ -151,7 +152,7 @@ def test_create_receipt_survives_expiration(
         def reject_fresh(*args: object) -> None:
             raise RuntimeError("fresh operation validation should not run")
 
-        monkeypatch.setattr("gateway.agents.notices.validate_creation_state", reject_fresh)
+        monkeypatch.setattr(agents_notices, "validate_creation_state", reject_fresh)
         replay = client.post(path, json=body, headers=keyed_headers("expires"))
     assert first.status_code == replay.status_code == 201
     assert first.json() == replay.json()

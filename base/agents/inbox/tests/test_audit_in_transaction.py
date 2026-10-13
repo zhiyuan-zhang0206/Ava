@@ -7,6 +7,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.agents.inbox import compact, insert
 from base.agents.inbox.compact import insert_compact_request_inbound
 from base.agents.inbox.insert import insert_inbound_message, insert_spawn_prompt_in_transaction
 from base.db import Database, create_agent
@@ -49,7 +50,7 @@ def test_an_inbound_whose_audit_fact_cannot_be_recorded_is_not_written(
     event_bus: EventBus,
 ) -> None:
     agent_id = create_agent(db_conn)
-    monkeypatch.setattr("base.agents.inbox.insert.record_audit", _refuse)
+    monkeypatch.setattr(insert, "record_audit", _refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
         insert_inbound_message(
@@ -76,7 +77,7 @@ def test_a_compact_request_is_recorded_before_it_is_emitted(
     def emit(_event: Event | None) -> None:
         seen_at_emit.append(len(_audit(db_conn, agent_id, "compact")))
 
-    monkeypatch.setattr("base.agents.inbox.compact.emit_prepared_event", emit)
+    monkeypatch.setattr(compact, "emit_prepared_event", emit)
 
     insert_compact_request_inbound(db_conn, agent_id, bus=event_bus, database=database)
 

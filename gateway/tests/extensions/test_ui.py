@@ -25,6 +25,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import ava
+from ava import ui
 from ava.gateway_client.transport import use_client
 from ava.sdk_surface import agent_identity
 from ava.ui import InvalidPageName, PageClosed
@@ -60,7 +61,7 @@ def _use_page_host(
             **overrides,
         )
 
-    monkeypatch.setattr("ava.ui.page_host", build)
+    monkeypatch.setattr(ui, "page_host", build)
 
 
 def _open_pages(db: psycopg.Connection, agent_id: int) -> list[tuple[Any, ...]]:

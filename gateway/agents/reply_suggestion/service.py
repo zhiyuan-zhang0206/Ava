@@ -161,7 +161,7 @@ class ReplySuggestionService:
     def _excerpt(self, agent_id: int) -> ConversationExcerpt | None:
         messages = self._load_messages(agent_id)
         items: list[TimelineItem]
-        items, _ = build_timeline_items(messages, [], inputs=self._rendering)
+        items, _ = build_timeline_items(messages, inputs=self._rendering)
         return build_excerpt(items, self._policy.max_input_tokens())
 
     def _remember(self, key: tuple[int, str], result: ReplySuggestionResponse) -> None:

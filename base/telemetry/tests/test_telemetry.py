@@ -29,7 +29,7 @@ import pytest
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
-from base import paths, telemetry
+from base import cluster, paths, telemetry
 from base.db import Database
 from base.telemetry import emitter, observability
 from base.telemetry.tests.identity_inputs import machine_identity
@@ -205,11 +205,11 @@ def test_cluster_label_falls_back_without_raising(
     def fallback_slug(_home: Any) -> str:
         return "ava-preview-fallback"
 
-    monkeypatch.setattr("base.cluster.home_label", fail_label)
-    monkeypatch.setattr("base.cluster.home_slug", fallback_slug)
+    monkeypatch.setattr(cluster, "home_label", fail_label)
+    monkeypatch.setattr(cluster, "home_slug", fallback_slug)
     assert observability.cluster_label(home) == "ava-preview-fallback"
 
-    monkeypatch.setattr("base.cluster.home_slug", fail_label)
+    monkeypatch.setattr(cluster, "home_slug", fail_label)
     assert observability.cluster_label(home) == ".unknown"
 
 

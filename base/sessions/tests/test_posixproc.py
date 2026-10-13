@@ -582,7 +582,7 @@ def test_new_session_dead_child_records_sentinel(
         def is_running(self) -> bool:
             return False
 
-    monkeypatch.setattr("base.sessions.posixproc.psutil.Process", _NoCreateTime)
+    monkeypatch.setattr(posixproc.psutil, "Process", _NoCreateTime)
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     rec = posixproc._read_record(name)
@@ -595,7 +595,7 @@ def test_new_session_dead_child_records_sentinel(
     # monkeypatch.undo() — the latter would also undo `unit_home`'s ava_home
     # patch and the cleanup would touch the real $AVA_HOME.
     pid = rec.pid
-    monkeypatch.setattr("base.sessions.posixproc.psutil.Process", real_process)
+    monkeypatch.setattr(posixproc.psutil, "Process", real_process)
     with contextlib.suppress(psutil.NoSuchProcess):
         psutil.Process(pid).kill()
     posixproc._record_path(name).unlink(missing_ok=True)

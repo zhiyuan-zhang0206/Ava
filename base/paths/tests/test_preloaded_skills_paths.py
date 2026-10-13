@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from base.config import FIELD_INFOS, AgentSettings, per_agent_field_names
+from base.packages.extensions import install_registry
 from base.paths import skills_dir
 
 
@@ -19,9 +20,7 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         d = skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
-    )
+    monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
 
 
 def test_field_default_is_empty() -> None:

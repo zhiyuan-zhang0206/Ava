@@ -21,7 +21,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 
-from base.agents.history.chat_anchors import chat_anchor_demand
 from base.agents.history.checkpoint import (
     CheckpointReadError,
     list_compact_boundary_checkpoint_ids,
@@ -36,7 +35,6 @@ from base.agents.history.timeline import (
     timeline_default_limit,
 )
 from base.agents.history.timeline_item import hydrate
-from base.agents.inbox.rows import ChatAnchor, list_chat_anchors
 from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.read_inputs import TimelineReadPolicy
@@ -300,7 +298,7 @@ def _load_history_segment(
     if not messages:
         return None
     prefix = f"s{rank}.{checkpoint_id}"
-    items, _ = build_timeline_items(messages, [], inputs=policy.rendering, segment_prefix=prefix)
+    items, _ = build_timeline_items(messages, inputs=policy.rendering, segment_prefix=prefix)
     return hydrate(db, items, agent_id, limit=limit, before=before)
 
 
@@ -437,32 +435,6 @@ def _initial_window(
     return window, has_more or historical_segments_available
 
 
-def _chat_anchors(
-    request: Request, agent_id: int, messages: Sequence[BaseMessage]
-) -> list[ChatAnchor]:
-    """The chat inbound anchors rendering *messages* can consume.
-
-    A checkpoint whose every message carries its own id and read time reads
-    no inbound rows at all. Otherwise the read is the anchors the checkpoint
-    references by id, plus — only when a legacy id-less inbound aligns
-    positionally — the agent's oldest chat rows.
-    """
-    demand = chat_anchor_demand(messages)
-    if demand is None:
-        return []
-    with request.app.state.db_pool.connection() as conn:
-        # The 100_000 ceiling bounds only the legacy positional prefix, not a
-        # page size: anchors referenced by id are read regardless, so the
-        # read stays a literal rather than config (task #3696 exception
-        # inventory).
-        return list_chat_anchors(
-            conn,
-            agent_id,
-            referenced_ids=demand.referenced_ids,
-            limit=100_000 if demand.positional else 0,
-        )
-
-
 def load_current_messages(db: Database, agent_id: int) -> list[BaseMessage]:
     """Load live messages once for timeline and composed snapshot reads.
 
@@ -492,9 +464,7 @@ def _current_items(
     """The current segment's rendered, hydrated items in item-id order + msg_count."""
     db: Database = request.app.state.db
     policy: TimelineReadPolicy = request.app.state.timeline_policy
-    items, msg_count = build_timeline_items(
-        messages, _chat_anchors(request, agent_id, messages), inputs=policy.rendering
-    )
+    items, msg_count = build_timeline_items(messages, inputs=policy.rendering)
     items = hydrate(db, items, agent_id, limit=limit, before=before)
     items.sort(key=lambda it: _item_sort_key(it.item_id))
     return items, msg_count

@@ -54,10 +54,9 @@ are not normalized as legacy. LangGraph's pre-serialization writer remains the
 ID generator for new message writes.
 
 Timeline snapshots add `source_message_id`, `source_inbound_id` and
-`source_block_idx`. They preserve the existing positional `item_id` and legacy
-UI anchor behavior. A source message ID must be present and not ephemeral;
-an inbound fallback must be an explicitly embedded positive `ava_inbound_id`,
-never a positionally matched UI anchor. Block ordinals distinguish content in
+`source_block_idx`. They preserve the existing positional `item_id`. A source
+message ID must be present and not ephemeral; an inbound fallback must be an
+explicitly embedded positive `ava_inbound_id`. Block ordinals distinguish content in
 one source message and survive timeline renumbering/compact history prefixes.
 These coordinates qualify identity only: a live snapshot is not evidence of a
 committed checkpoint. Consumers requiring durable acceptance must read committed

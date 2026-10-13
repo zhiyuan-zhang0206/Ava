@@ -15,6 +15,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
+from gateway.routers import guide
 
 
 def test_draft_spawns_ava_guide_agent(
@@ -43,7 +44,7 @@ def test_draft_spawns_ava_guide_agent(
         calls["target"] = target
         return SpawnedAgent(id=777)
 
-    monkeypatch.setattr("gateway.routers.guide.create_and_launch_agent", _fake_create_launch)
+    monkeypatch.setattr(guide, "create_and_launch_agent", _fake_create_launch)
     r = client.post(
         "/api/keyed/v1/guide/draft",
         json={"nl": "install the linear MCP server"},

@@ -131,6 +131,20 @@ def test_ai_parts_carry_their_kinds() -> None:
     assert [p.kind for p in result.messages[0].parts] == ["think", "text", "call"]
 
 
+def test_a_message_without_a_read_time_has_no_timestamp() -> None:
+    messages: list[BaseMessage] = [
+        HumanMessage(
+            content="stamped",
+            additional_kwargs={"ava_msg_type": "inbound", "ava_created_at": STAMP},
+        ),
+        AIMessage(content="written before messages were stamped"),
+    ]
+    result = route.get_run_timeline_messages(
+        request(messages), 1, start=0, end=1, limit=50, full=True
+    )
+    assert [m.ts is None for m in result.messages] == [False, True]
+
+
 def test_a_message_carries_the_tokens_it_occupies_and_whether_they_are_estimated() -> None:
     req = request(history(3))
     views = cast(Views, req.app.state.run_timeline_views)

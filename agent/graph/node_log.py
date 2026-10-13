@@ -59,12 +59,9 @@ from collections.abc import AsyncGenerator, Callable, Generator, Sequence
 from typing import Any, TextIO
 
 from langchain_core.messages import BaseMessage
-from psycopg_pool import AsyncConnectionPool
 
-from agent.db import list_chat_inbound_anchors
 from base.agents.history.timeline import (
     build_timeline_items,
-    needs_chat_anchors,
     tail_window,
     timeline_default_limit,
 )
@@ -235,7 +232,6 @@ async def node_lifecycle(
     node_name: str,
     *,
     messages: Sequence[BaseMessage],
-    ops_pool: AsyncConnectionPool | None,
     event_publisher: AgentEventPublisher,
     agent_id: int,
     turn_progress: TurnProgress,
@@ -247,9 +243,7 @@ async def node_lifecycle(
     """Wrap node body with enter/exit events + publish a TimelineSnapshot on enter.
 
     `messages` is the node's in-memory `state.messages`; the snapshot is
-    rendered from it (race-free, unlike a checkpoint re-read). `ops_pool`
-    fetches chat inbound ts anchors; None (container / eval) renders inbound
-    items with synthetic ts.
+    rendered from it (race-free, unlike a checkpoint re-read).
 
     `BaseException` catch (vs Exception) is so SystemExit / KeyboardInterrupt
     also write the exit event; all paths re-raise to preserve propagation.
@@ -268,31 +262,19 @@ async def node_lifecycle(
     # this clock, and a turn blocked inside one node is exactly what it must
     # be able to see.
     turn_progress.mark(agent_id)
-    # The guard spans the pre-enter ops_pool query AND the node body (the
-    # `yield`), so a hang in either lands a stack dump naming the blocked frame.
+    # The guard spans the snapshot render AND the node body (the `yield`), so a
+    # hang in either lands a stack dump naming the blocked frame.
     with _stall_dump_guard(node_name, read_stall_seconds=read_stall_seconds):
         # Incremental snapshot protocol: on enter, publish only what was newly
         # committed since the last published snapshot. The full-window path
         # (first enter after process start, compaction shrink, or the claim
         # node's turn-end fallback) renders the whole tail window; every other
         # enter renders just messages[cursor:] — O(new commits) instead of
-        # O(history), and no anchors DB query (modern messages carry their own
-        # ava_created_at; anchors only serve legacy rows on the full path).
+        # O(history).
         cursor = _SNAPSHOT_CURSOR.get(agent_id, 0)
         if full_window or cursor == 0 or len(messages) < cursor:
-            # Full-window render. Anchors (the kind='chat' inbound rows) only
-            # feed LEGACY inbounds that predate ava_created_at; an all-modern
-            # history renders identically with [] — so skip the query unless
-            # the window actually needs it. The post-compact enter is exactly
-            # such a case: REMOVE_ALL wiped the history and the rebuilt head
-            # is freshly stamped, so the snapshot the frontend is waiting on
-            # is emitted without a DB round trip.
-            anchors = (
-                await list_chat_inbound_anchors(ops_pool, agent_id)
-                if ops_pool is not None and needs_chat_anchors(messages)
-                else []
-            )
-            items, msg_count = build_timeline_items(messages, anchors, inputs=timeline_inputs)
+            # Full-window render.
+            items, msg_count = build_timeline_items(messages, inputs=timeline_inputs)
             # Publish only the newest window — a streaming turn always lands in
             # the tail, and the frontend keeps older windows it scroll-loaded
             # (its merge preserves items below the snapshot's msg_idx floor).
@@ -309,7 +291,7 @@ async def node_lifecycle(
             # msg_count = len(messages) from its first argument, and that must
             # stay the full history length (hard invariant).
             inc_items, msg_count = build_timeline_items(
-                messages, [], start=cursor, inputs=timeline_inputs
+                messages, start=cursor, inputs=timeline_inputs
             )
             window = inc_items
         # An empty window carries no items and no signal — skip the emit on

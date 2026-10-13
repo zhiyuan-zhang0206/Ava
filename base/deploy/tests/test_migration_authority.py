@@ -28,6 +28,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.deploy.schema import migration_layout
 from base.deploy.schema.migrations import MigrationAuthorityMismatch, apply_pending_migrations
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -122,7 +123,7 @@ def _pending_migration(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Point MIGRATIONS_DIR at one synthetic post-baseline migration (tracked)."""
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_authority_t (id int);")
     _as_git_worktree(tmp_path)
-    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
 
 def _synthetic_table_exists() -> bool:
@@ -244,7 +245,7 @@ def test_untracked_migration_files_names_only_untracked_sql(
     # Written AFTER the commit, so git does not track them:
     (tmp_path / "20260808T020000_untracked.sql").write_text("-- up")
     (tmp_path / ".hidden.sql").write_text("-- hidden")
-    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     from base.deploy.schema import migrations as m
 
@@ -257,7 +258,7 @@ def test_untracked_migration_files_empty_outside_a_worktree(
     """Not a git worktree → empty, not an error: the loader fails closed there
     (nothing would be applied), so the warning surface has nothing to add."""
     (tmp_path / "20260808T010000_x.sql").write_text("-- up")
-    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     from base.deploy.schema import migrations as m
 
@@ -274,7 +275,7 @@ def test_unreadable_migration_files_names_a_denied_tracked_file(
     locked.write_text("-- up")
     _as_git_worktree(tmp_path)
     locked.chmod(0)
-    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     from base.deploy.schema import migrations as m
 
@@ -288,7 +289,7 @@ def test_unreadable_migration_files_empty_when_every_tracked_file_reads(
 ) -> None:
     (tmp_path / "20260808T010000_ok.sql").write_text("-- up")
     _as_git_worktree(tmp_path)
-    monkeypatch.setattr("base.deploy.schema.migration_layout.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     from base.deploy.schema import migrations as m
 

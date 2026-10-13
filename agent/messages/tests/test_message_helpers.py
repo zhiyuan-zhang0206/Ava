@@ -45,9 +45,7 @@ class TestInboundMessageMetadata:
 class TestMessageCreatedAtStamp:
     """All three message constructors stamp `ava_created_at` (ISO-8601) when
     handed the message's real creation time, and omit the key when not — the
-    timeline read side prefers this real ts over its synthetic anchor+offset
-    fallback (so an agent's own messages no longer render at 1970 / a stale
-    chat's time)."""
+    timeline renders a message without one with no time."""
 
     def test_inbound_message_stamps_when_given(self):
         from datetime import UTC, datetime

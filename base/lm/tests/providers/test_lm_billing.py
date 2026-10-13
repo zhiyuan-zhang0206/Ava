@@ -9,6 +9,7 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
+from base import config
 from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderBinding
 from tests.fixtures.model_catalog import AddBindings
@@ -42,7 +43,7 @@ def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
     from base.telemetry import tracing as tracing_mod
 
     tracer = _RecordingTracer()
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     return tracer
@@ -237,7 +238,7 @@ def test_emit_billing_event_is_noop_when_tracing_is_disabled(
     from base.lm.usage import emit_billing_event
 
     tracer = _RecordingTracer()
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", False)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", False)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     emit_billing_event(
