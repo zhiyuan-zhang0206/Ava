@@ -7,8 +7,8 @@ description: "Coordinates Ava Fleet tasks after collaboration is chosen. Use whe
 
 Fleet is one optional implementation of collaboration. Use `ava-workflow` to
 choose how to work; direct execution, peer cooperation, and script orchestration
-remain valid. Loading this skill does not require spawning, task creation, or a
-manager role. The procedures below apply to chosen Fleet work. Read the
+remain valid. Loading this skill does not require task creation or a manager
+role. The procedures below apply to chosen Fleet work. Read the
 [operating contract](reference/operating-contract.md) before using its labels,
 notices, delegation, or task tracking; it owns detailed operating obligations.
 
@@ -16,15 +16,14 @@ A **fleet** is a graph of agents working toward a human's goals, supervised from
 
 Agents are general-purpose. Every worker already indexes every skill on its machine, so division of labor comes from what each agent is asked to do. A spawn brief that does not name the skill(s) the worker must use is incomplete; the worker loads each named skill first. (`config_overlay` can still set `skills_to_inject_into_system_prompt`, but under a universal index that only *narrows* a worker's view; it grants nothing.)
 
-## When choosing a collaborator: observe, ask, then spawn
+## Choosing a collaborator
 
-When collaboration would help, check for existing ownership before duplicating work. Direct execution remains an option; these steps help choose a collaborator:
-
-1. **Observe** — look at the agents around you and their labels. A label names a domain ("health steward", "memory maintenance"); if one already names this work, that agent is the owner. Hand it over instead of taking over.
-2. **Ask** — if no label clearly covers the work, message the closest peers and ask who owns it, or who has the context for it. Labels are one-line summaries; the real division of labor lives in what agents know. A quick question beats a duplicate effort.
-3. **Spawn** — only when observing and asking place it nowhere: consider spawning a peer if collaboration is still useful. The spawn brief must name the skill(s) it must use, and the worker loads them first; a brief without a skill name is incomplete. Spawning is the fallback, not the default — every spawn you avoid is context and memory you did not duplicate.
-
-If you were spawned for a specific sub-task, skip the check and finish that sub-task — do not expand into adjacent domains.
+Proactively parallelize independent work. Fork when your existing context is
+valuable to the task; otherwise spawn fresh or reuse a suitable, available agent.
+Check existing ownership to avoid duplicate work; a matching role does not by
+itself mean the agent can take on more work now. Consult nearby peers when
+ownership is unclear, rather than requiring a round of questions before every
+spawn. Keep delegated work within the accepted task's scope.
 
 ## Task ↔ Fleet Interactions
 

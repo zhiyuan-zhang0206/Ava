@@ -38,7 +38,7 @@ The public signature, declaration order and external-plugin migration contract l
 - `_action_caution_section` — Confirm before irreversible actions
 - `_align_before_action_section` — Resolve material outcome, cost, autonomy, and authority choices; respect existing consent rather than reapprove settled work after planning
 - `_cross_machine_delegation_section` — One sentence (user-finalized wording, verbatim): when work spans machines, let an agent on the target machine do it rather than reaching across. Toggle `AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION` (default on); semantic steer only — no API detail, so it cannot go stale.
-- `_delegation_check_section` — Consult the capability index and load `ava-workflow` when available for non-trivial or consequential work. Select methods and peer collaboration by need, without forcing interviews, plans, supervision, or delegation. The index step is omitted and steps renumbered when the index is empty.
+- `delegation_check_section` — Consult capabilities and existing ownership; proactively parallelize independent work. Fork for valuable existing context, otherwise spawn fresh or reuse a suitable available agent. Omit the index step and renumber when the index is empty.
 - `_file_driven_work_section` — File-driven workflow
 - `_long_running_operation_section` — Lifecycle and cost principles without fleet; the long-running-agent skill supplies procedures.
 - `_temporal_awareness_section` — Time awareness, including the `ava-workflow.capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
