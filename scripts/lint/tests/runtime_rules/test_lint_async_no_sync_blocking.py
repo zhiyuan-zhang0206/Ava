@@ -17,7 +17,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(_lint, "_ROOT", tmp_path)
     monkeypatch.setattr(_lint, "DEFINITION_DIRS", ("base",))
     monkeypatch.setattr(_lint, "_SCAN_DIRS", ("gateway",))
-    monkeypatch.setattr(_lint, "_REPO_BLOCKING_HELPERS", {"sync_op"})
+    monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op"})
     monkeypatch.setattr(_lint, "BLOCKING_NAMES", _lint.LIBRARY_BLOCKING_NAMES | {"sync_op"})
     _write(tmp_path, "base/ops.py", "def sync_op() -> None:\n    pass\n")
     (tmp_path / "gateway").mkdir()
@@ -35,21 +35,21 @@ def test_real_repo_helpers_are_all_defined() -> None:
 
 
 def test_a_retired_helper_name_is_stale(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_lint, "_REPO_BLOCKING_HELPERS", {"sync_op", "cluster_rollout_op"})
+    monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op", "cluster_rollout_op"})
     assert _lint.stale_repo_helpers() == ["cluster_rollout_op"]
 
 
 def test_a_stale_helper_fails_the_lint(
     tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(_lint, "_REPO_BLOCKING_HELPERS", {"sync_op", "cluster_update_op"})
+    monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op", "cluster_update_op"})
     assert _lint.main() == 1
-    assert "stale _REPO_BLOCKING_HELPERS entry 'cluster_update_op'" in capsys.readouterr().out
+    assert "stale REPO_BLOCKING_HELPERS entry 'cluster_update_op'" in capsys.readouterr().out
 
 
 def test_async_helper_definitions_count(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write(tree, "base/aio.py", "async def async_op[T](value: T) -> T:\n    return value\n")
-    monkeypatch.setattr(_lint, "_REPO_BLOCKING_HELPERS", {"sync_op", "async_op"})
+    monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op", "async_op"})
     assert _lint.stale_repo_helpers() == []
 
 

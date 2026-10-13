@@ -24,7 +24,7 @@ def _crash() -> None:
 
     daemon.init_gateway_process = _silent
     daemon.install_graceful_shutdown = _silent
-    daemon._main = _boom
+    daemon.serve_ops_daemon = _boom
     sys.argv[1:] = []  # the daemon parses its own argv
     daemon.main()
 

@@ -1,4 +1,4 @@
-"""`base.log._install_stdlib_intercept` — first-party DEBUG passthrough (#1126).
+"""`base.log.install_stdlib_intercept` — first-party DEBUG passthrough (#1126).
 
 Bug: controllers' `_log.debug(...)` on stdlib `logging.getLogger(...)` loggers
 (e.g. `ops.controllers.respawn`'s "gateway not healthy, deferring respawn"
@@ -9,7 +9,7 @@ before it ever reached `_StdlibInterceptHandler`, let alone loguru. 68 days of
 `restarter.log` had zero occurrences of a line that fires every time the
 respawn controller's gateway-health gate defers a restart.
 
-Fix: `_install_stdlib_intercept` raises the effective level back to DEBUG for
+Fix: `install_stdlib_intercept` raises the effective level back to DEBUG for
 `FIRST_PARTY_LOGGER_NAMES` (our own top-level logger names) via stdlib's own
 ancestor-level lookup, while the root stays at INFO — so third-party libraries
 (httpx, psycopg, ...), which never call
@@ -24,12 +24,12 @@ from collections.abc import Iterator
 
 import pytest
 
-from base.log import FIRST_PARTY_LOGGER_NAMES, _install_stdlib_intercept
+from base.log import FIRST_PARTY_LOGGER_NAMES, install_stdlib_intercept
 
 
 @pytest.fixture(autouse=True)
 def _reset_touched_logger_levels() -> Iterator[None]:
-    """`_install_stdlib_intercept` mutates process-global `logging` state
+    """`install_stdlib_intercept` mutates process-global `logging` state
     (levels persist on the module-level `Logger.manager.loggerDict` singleton,
     independent of test order): it calls `.setLevel(DEBUG)` on each name in
     `FIRST_PARTY_LOGGER_NAMES` directly — the probe loggers used below are
@@ -47,7 +47,7 @@ def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict])
     """A DEBUG record from a stdlib logger under a first-party namespace
     (e.g. `ops.controllers.respawn`) now flows through to loguru — the exact
     shape of the dropped "gateway not healthy, deferring respawn" line."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     logging.getLogger("ops.controllers.respawn").debug(
         "gateway not healthy, deferring respawn of %d agent(s)", 3
     )
@@ -62,7 +62,7 @@ def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list
     """Every listed first-party namespace gets the same DEBUG passthrough —
     not just ops.controllers.*, but services / base / gateway / agent /
     ava_builtins daemons and controllers."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     logging.getLogger(f"{prefix}.some_module").debug("marker-%s", prefix)
     assert any(
         r["level"].name == "DEBUG" and f"marker-{prefix}" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -76,7 +76,7 @@ def test_third_party_logger_debug_still_gated(loguru_records: list[dict]) -> Non
     already grew unbounded once from unfiltered volume (see
     `_add_file_sink`'s docstring); this locks in that the fix does not widen
     the floor for everyone, only for our own code."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     logging.getLogger("httpx").debug("connection pool churn")
     assert not any("connection pool churn" in r["message"] for r in loguru_records)
 

@@ -212,7 +212,7 @@ def _crash_after_pin(home: Path, monkeypatch: pytest.MonkeyPatch) -> rotate.Rota
         raise OSError("injected crash between pin and rotate")
 
     with monkeypatch.context() as scoped:
-        scoped.setattr(rotate, "_write_secret", crash)
+        scoped.setattr(rotate, "write_secret", crash)
         with pytest.raises(OSError, match="injected crash"):
             rotate.advance(home, None, journal)
     assert journal.saved[-1].state == "pinned" and _secret(home) == _OLD
@@ -236,7 +236,7 @@ def test_a_resumed_rotation_never_rederives_from_the_new_secret(
     """After `.env` already holds the new secret, a lost pin is refused: deriving
     it now would pin the NEW secret's passphrase and orphan every old backup."""
     recorded = _crash_after_pin(home, monkeypatch)
-    rotate._write_secret(home, recorded)  # the crash landed after the .env write
+    rotate.write_secret(home, recorded)  # the crash landed after the .env write
     passphrase.pin_path(home).unlink()
     with pytest.raises(rotate.RotationRefusedError, match="cannot be derived safely"):
         rotate.advance(home, recorded, lambda _rotation: None)

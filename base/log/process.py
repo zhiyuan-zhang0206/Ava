@@ -11,7 +11,7 @@ import sys
 from collections.abc import Callable
 
 from base.log import logger
-from base.log.sinks import HUMAN_FORMAT, _install_stdlib_intercept, add_file_sink, add_sink
+from base.log.sinks import HUMAN_FORMAT, add_file_sink, add_sink, install_stdlib_intercept
 
 __all__ = ["init_subprocess_logger", "start_process_logging"]
 
@@ -48,7 +48,7 @@ def init_subprocess_logger(*, agent_id: int) -> None:
 
     logger.configure(extra={"agent_id": str(agent_id), "process_role": "subprocess"})
     add_file_sink(logs_dir() / f"agent-{agent_id}.log")
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     init_done = True
 
 
@@ -85,7 +85,7 @@ def start_process_logging(
 
     add_file_sink(logs_dir() / f"{name}.log")
     attach_events()
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     if announce is not None:
         announce()
     init_done = True

@@ -81,7 +81,7 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
         mock.patch.object(slog.logger, "add"),
         mock.patch.object(slog, "add_file_sink"),
         mock.patch.object(plog, "add_event_sink") as init_pipeline,
-        mock.patch.object(slog, "_install_stdlib_intercept"),
+        mock.patch.object(slog, "install_stdlib_intercept"),
         mock.patch.object(slog.logger, "info") as boot_log,
         mock.patch.object(slog.logger, "configure") as configure,
     ):
@@ -117,7 +117,7 @@ def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
         mock.patch.object(slog.logger, "add"),
         mock.patch.object(slog, "add_file_sink"),
         mock.patch.object(plog, "add_event_sink") as init_pipeline,
-        mock.patch.object(slog, "_install_stdlib_intercept"),
+        mock.patch.object(slog, "install_stdlib_intercept"),
         mock.patch.object(
             loaded_commit, "capture_commit", side_effect=AssertionError("no recapture")
         ) as read_late_version,

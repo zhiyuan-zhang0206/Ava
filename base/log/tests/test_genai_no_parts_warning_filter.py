@@ -7,7 +7,7 @@ benign substitution into a permanent flood. A single long-context agent wrote
 2,072 of these records into the file sink and the event stream in one day
 (2026-09-13).
 
-Fix: `_install_stdlib_intercept` attaches `GenaiEmptyPartsWarningFilter` to the
+Fix: `install_stdlib_intercept` attaches `GenaiEmptyPartsWarningFilter` to the
 root intercept handler. It drops exactly the two warning variants and lets every
 other `langchain_google_genai` record through — including the library's own
 "cannot be represented as a Gemini part" warning — which is why gating the whole
@@ -25,7 +25,7 @@ from langchain_google_genai.chat_models import _parse_chat_history
 from base.log import (
     GenaiEmptyPartsWarningFilter,
     StdlibInterceptHandler,
-    _install_stdlib_intercept,
+    install_stdlib_intercept,
 )
 
 _MODEL = "gemini-2.5-flash"
@@ -51,7 +51,7 @@ def _convert(ai_message: AIMessage) -> None:
 def test_empty_ai_message_warning_does_not_reach_loguru(loguru_records: list[dict]) -> None:
     """`AIMessage(content=[])` converts to no parts -> the library substitutes
     an empty text part and warns; that warning must not reach loguru."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     _convert(AIMessage(content=[]))
     assert not any(_EMPTY_PARTS_MARKER in message for message in _messages(loguru_records))
 
@@ -59,7 +59,7 @@ def test_empty_ai_message_warning_does_not_reach_loguru(loguru_records: list[dic
 def test_dropped_content_blocks_warning_does_not_reach_loguru(loguru_records: list[dict]) -> None:
     """The "after all N content block(s) were dropped" variant is dropped too,
     while the library's distinct per-block warning still flows."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     _convert(AIMessage(content=[{"type": "not_a_gemini_block", "payload": 1}]))
     messages = _messages(loguru_records)
     assert not any(_EMPTY_PARTS_MARKER in message for message in messages)
@@ -70,7 +70,7 @@ def test_other_records_from_the_same_logger_pass(loguru_records: list[dict]) -> 
     """Only the two variants are dropped: other warnings and INFO records on the
     same logger still reach loguru — the reason a blanket setLevel(ERROR) was
     rejected."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     genai_log = logging.getLogger(_GENAI_CHAT_MODELS_LOGGER)
     genai_log.warning("Dropping content block that cannot be represented as a Gemini part")
     genai_log.info("GenAI conversion completed")
@@ -82,7 +82,7 @@ def test_other_records_from_the_same_logger_pass(loguru_records: list[dict]) -> 
 def test_same_marker_from_another_logger_passes(loguru_records: list[dict]) -> None:
     """The drop is scoped to `langchain_google_genai` and its dotted children —
     an identical message from any other logger is untouched."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     logging.getLogger("base.llm_router").warning(
         "AI message at index 1 converted to no Gemini parts; using an empty text part."
     )
@@ -93,8 +93,8 @@ def test_repeated_install_does_not_stack_filters(loguru_records: list[dict]) -> 
     """`init_*` entry points may install the intercept more than once per process
     (#970): the second install must rebuild the handler instead of accumulating
     filters on top of the first."""
-    _install_stdlib_intercept()
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
+    install_stdlib_intercept()
     genai_log = logging.getLogger(_GENAI_CHAT_MODELS_LOGGER)
     genai_log.warning(
         "AI message at index 7 converted to no Gemini parts; using an empty text part."

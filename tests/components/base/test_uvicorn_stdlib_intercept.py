@@ -10,7 +10,7 @@ search 500's gateway-side traceback was unforensicable.
 
 Fix: `uvicorn.run(..., log_config=None)` leaves the logging system alone, so
 `uvicorn.error` propagates to the root intercept handler and reaches the
-loguru sinks (gateway.log + the event stream). `_install_stdlib_intercept` gates
+loguru sinks (gateway.log + the event stream). `install_stdlib_intercept` gates
 `uvicorn.access` to WARNING — per-request INFO would otherwise flood the file
 sink and the event stream.
 """
@@ -25,7 +25,7 @@ import pytest
 import uvicorn
 from uvicorn.config import LOGGING_CONFIG
 
-from base.log import _install_stdlib_intercept
+from base.log import install_stdlib_intercept
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -39,9 +39,9 @@ def _reset_uvicorn_levels() -> Iterator[None]:
 
 def test_uvicorn_error_traceback_reaches_loguru(loguru_records: list[dict]) -> None:
     """An ERROR record on `uvicorn.error` — the shape of an unhandled ASGI
-    exception — flows through to loguru after `_install_stdlib_intercept`,
+    exception — flows through to loguru after `install_stdlib_intercept`,
     which is the precondition for it landing in gateway.log + events."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     try:
         raise RuntimeError("boom")  # noqa: TRY301 — set sys.exc_info() for the .exception() record
     except RuntimeError:
@@ -64,7 +64,7 @@ def test_intercept_restores_uvicorn_propagation_after_default_config(
     intercept restores propagation after replacing the root handler.
     """
     logging.config.dictConfig(LOGGING_CONFIG)
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     logging.getLogger("uvicorn.error").error("Uvicorn error after default config")
     assert any(
         r["level"].name == "ERROR" and "Uvicorn error after default config" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -86,7 +86,7 @@ def test_intercept_resets_uvicorn_error_level_after_default_config(
         pass
 
     uvicorn.Config(asgi_app, log_level="critical")
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     assert logging.getLogger("uvicorn.error").getEffectiveLevel() <= logging.INFO
     logging.getLogger("uvicorn.error").error("Uvicorn error after critical config")
     assert any(
@@ -98,7 +98,7 @@ def test_intercept_resets_uvicorn_error_level_after_default_config(
 def test_uvicorn_error_startup_info_reaches_loguru(loguru_records: list[dict]) -> None:
     """INFO startup lines ("Uvicorn running on ...", "Started server process")
     still pass — they are the pane-scrollback staples operators grep for."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     logging.getLogger("uvicorn.error").info("Uvicorn running on http://127.0.0.1:8000")
     assert any(
         r["level"].name == "INFO" and "Uvicorn running on" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -110,7 +110,7 @@ def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:
     """Per-request INFO on `uvicorn.access` is gated to WARNING — a busy
     gateway would otherwise emit thousands of access lines into the file
     sink and the event stream every day."""
-    _install_stdlib_intercept()
+    install_stdlib_intercept()
     logging.getLogger("uvicorn.access").info('GET /api/health HTTP/1.1" 200')
     assert not any(
         r["level"].name == "INFO" and "/api/health" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

@@ -22,7 +22,7 @@
 [debt.first-party-patch]
 "test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.BLOCKING_NAMES" = 1
 "test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.DEFINITION_DIRS" = 2
-"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking._REPO_BLOCKING_HELPERS" = 2
+"test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking.REPO_BLOCKING_HELPERS" = 2
 "test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.async_no_sync_blocking._ROOT" = 2
 "test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.ava_root_scope._REPO_ROOT" = 1
 "test_tests_dir_scope.py#monkeypatch.setattr scripts.lint.fixture_scope._REPO_ROOT" = 3
