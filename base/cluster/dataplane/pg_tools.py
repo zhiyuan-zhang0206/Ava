@@ -40,8 +40,6 @@ from base.log import logger
 from base.native_process.child_env import daemon_process_env
 from base.native_process.os_platform import is_macos
 
-PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
-
 # mmap-backed shared memory for every Postgres this codebase starts (Task #1263).
 # Both settings make Postgres keep shared memory in files under the data
 # directory instead of POSIX shm segments in /dev/shm, so an external unlink of
@@ -137,19 +135,6 @@ _THROWAWAY_PREFIX = "ava-pg-"
 # else the OS temp dir), the AVA_PG_THROWAWAY_BASE override, and the
 # capacity-aware pick — is base.cluster.dataplane.pg_throwaway_base, extracted to keep this
 # module under its line ceiling.
-
-
-def brew_prefix(formula: str = "") -> Path:
-    """`brew --prefix [formula]`. Bare form → the Homebrew root (`/opt/homebrew`
-    on Apple Silicon, `/usr/local` on Intel); with a formula → that keg's path.
-    Falls back to the Apple-Silicon default if brew is absent so callers degrade
-    to a wrong-but-harmless path (probes then read not-running) instead of crashing."""
-    cmd = ["brew", "--prefix", *([formula] if formula else [])]
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
-    except FileNotFoundError:
-        return Path("/opt/homebrew")
-    return Path(out.stdout.strip() or "/opt/homebrew")
 
 
 def pg_tool(name: str) -> Path:

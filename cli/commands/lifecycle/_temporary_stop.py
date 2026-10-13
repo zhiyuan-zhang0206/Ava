@@ -213,7 +213,8 @@ def _stop_initialization(
 
 def _refuse_hosted_stop() -> None:
     """A stop run from inside the work it drains strands itself mid-drain."""
-    from base.host.proc import hosting_exec_domain, hosting_supervised_session
+    from base.host.proc import hosting_exec_domain
+    from base.sessions.hosting import hosting_supervised_session
 
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
     # call returns, mid-drain (the 2026-09-12 stranding shape). A stop closes this

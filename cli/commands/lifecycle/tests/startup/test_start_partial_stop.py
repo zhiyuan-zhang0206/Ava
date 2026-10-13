@@ -10,6 +10,7 @@ from base import cluster, paths
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
 from base.host import proc
+from base.sessions import hosting as sessions_hosting
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as stop
 from cli.commands.lifecycle import service_stop
@@ -128,7 +129,7 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
         return []
 
     monkeypatch.setattr(proc, "hosting_exec_domain", lambda: None)
-    monkeypatch.setattr(proc, "hosting_supervised_session", lambda: None)
+    monkeypatch.setattr(sessions_hosting, "hosting_supervised_session", lambda: None)
     monkeypatch.setattr(stop, "_stop_plan", _fake_stop_plan)
     monkeypatch.setattr(stop, "pause_agents", _fake_pause_agents)
     monkeypatch.setattr(stop, "_services_phase_action", _fake_services_phase_action)

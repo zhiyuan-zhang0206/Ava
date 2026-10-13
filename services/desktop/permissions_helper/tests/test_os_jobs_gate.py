@@ -16,15 +16,13 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
-def _allow_pr_flow(*, machine: MachineIdentity, home: Path) -> None:
+def _allow_pr_flow(*, production: bool) -> None:
     """Credentials are present; registration still applies its home and switch gates."""
-    _ = machine, home
+    _ = production
 
 
 def _exploding_platform(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,12 +135,11 @@ def test_registration_never_reaches_the_backend_when_gated(
     call: object,
     default_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
 ) -> None:
     _exploding_platform(monkeypatch)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
-        call(machine=machine_identity, home=default_home / ".ava")
+        call(production=True)
     else:
         call()  # no AssertionError == the gate held
 
@@ -152,7 +149,6 @@ def test_registration_dispatches_when_enabled(
     default_home: Path,
     backend: _RecordedPlatform,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
     cron.register_os_cron(enabled_reader=lambda: settings.general.os_jobs_enabled)
@@ -165,8 +161,7 @@ def test_registration_dispatches_when_enabled(
     )
     pr_flow_job.register_pr_flow_job(
         enabled_reader=lambda: settings.general.os_jobs_enabled,
-        machine=machine_identity,
-        home=default_home / ".ava",
+        production=True,
     )
     walg_job.register_walg_job(
         enabled_reader=lambda: settings.general.os_jobs_enabled,
@@ -215,13 +210,12 @@ def test_a_scratch_home_registers_nothing(
     gate_on: None,
     unit_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
 ) -> None:
     _exploding_platform(monkeypatch)
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
-        call(machine=machine_identity, home=unit_home)
+        call(production=True)
     else:
         call()  # no AssertionError == nothing reached the scheduler
 

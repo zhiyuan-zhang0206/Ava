@@ -419,7 +419,7 @@ def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) 
     name = "ava-test-hosting-1"
     new(name, _REPO, {"AVA_HOME": str(unit_home), "AVA_CONFIG_FETCH": "skip"})
     probe = (
-        "from base.host.proc import hosting_supervised_session as hosting; "
+        "from base.sessions.hosting import hosting_supervised_session as hosting; "
         "print('hosted-in=' + str(hosting()))"
     )
     type_line(name, f'{sys.executable} -c "{probe}"')
@@ -429,7 +429,7 @@ def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) 
 
 def hosting_from_outside() -> str | None:
     """The same question asked by this test process, which no session hosts."""
-    from base.host.proc import hosting_supervised_session
+    from base.sessions.hosting import hosting_supervised_session
 
     return hosting_supervised_session()
 

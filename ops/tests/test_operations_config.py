@@ -171,7 +171,7 @@ def test_config_read_op_can_enable_for_browser_enabled(
     monkeypatch.setattr(
         config_validators,
         "read_time_capability",
-        lambda name: (  # pyright: ignore[reportUnknownArgumentType]
+        lambda name, **_kwargs: (  # pyright: ignore[reportUnknownArgumentType]
             config_validators.ValidationResult(ok=True) if name == "browser_enabled" else None
         ),
     )
@@ -194,7 +194,7 @@ def test_config_read_op_can_enable_false_carries_reason(
     monkeypatch.setattr(
         config_validators,
         "read_time_capability",
-        lambda name: (  # pyright: ignore[reportUnknownArgumentType]
+        lambda name, **_kwargs: (  # pyright: ignore[reportUnknownArgumentType]
             config_validators.ValidationResult(ok=False, reason="no display detected")
             if name == "browser_enabled"
             else None
@@ -346,7 +346,7 @@ def test_config_write_op_local_accepts_writable_host_field(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _f, _v, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op(
         {"cross_machine_transfer_backend": "none"},
@@ -451,7 +451,7 @@ def test_config_write_op_all_good_writes_file(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op(
         {"ops_concurrency": 4, "machine_description": "test"},
@@ -475,7 +475,7 @@ def test_config_write_op_none_unsets_field(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op(
         {"ops_concurrency": 4, "machine_description": "hi"},
@@ -508,7 +508,7 @@ def test_config_write_op_absent_key_left_untouched(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op(
         {"ops_concurrency": 4, "machine_description": "hi"},
@@ -536,7 +536,7 @@ def test_config_write_op_empty_patch_is_noop(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op(
         {"ops_concurrency": 4}, authority=config_authority, local_machine=machine_identity.name()
@@ -560,7 +560,7 @@ def test_config_write_op_does_not_disturb_non_managed_env(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     isolated_host_home.joinpath(".env").write_text("AVA_DB_URL=postgresql://x@127.0.0.1:1/x\n")
     config_write_op(
@@ -585,7 +585,7 @@ def test_config_write_op_restart_required_union(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op(
         {"ops_concurrency": 4, "machine_description": "hi"},

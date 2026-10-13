@@ -26,13 +26,21 @@ over something it cannot fix would be its own outage.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentity, MachineNameMissing
 from base.host import macos_firewall as fw
 from base.host.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 from cli.commands.converge.spec import ConvergeCtx
+
+
+def configured_machine_name(machine: MachineIdentity) -> str | None:
+    """The configured Ava machine name (``AVA_MACHINE_NAME``), or None when unset."""
+    with contextlib.suppress(MachineNameMissing):
+        return machine.name()
+    return None
 
 
 def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
@@ -123,7 +131,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     # running interpreter through the launch helpers (catching a venv the globs
     # do not name), the manifest carries the whole declarative whitelist.
     required = {p.resolve() for p in audit.missing}
-    required.update(fw.manifest_paths(machine=ctx.machine))
+    required.update(fw.manifest_paths(machine_name=configured_machine_name(ctx.machine)))
     required = tuple(sorted(required, key=str))
 
     # Prune before adding: a stale rule still holds its bundle identifier, and

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.derive import production_identity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
@@ -112,10 +112,8 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
     monkeypatch.setattr(autostart, "register_autostart", register)
     monkeypatch.setattr(logs_job, "register_logs_job", register)
 
-    def register_pr_flow(
-        *, enabled_reader: Callable[[], bool], machine: MachineIdentity, home: Path
-    ) -> None:
-        assert machine is ctx.machine and home == ctx.ava_home
+    def register_pr_flow(*, enabled_reader: Callable[[], bool], production: bool) -> None:
+        assert production is production_identity(machine=ctx.machine, home=ctx.ava_home)
         register(enabled_reader=enabled_reader)
 
     monkeypatch.setattr(pr_flow_job, "register_pr_flow_job", register_pr_flow)

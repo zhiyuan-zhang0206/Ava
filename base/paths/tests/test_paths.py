@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
+from base.paths.home import default_home, is_default_home
 
 
 @pytest.fixture(autouse=True)
@@ -43,3 +44,12 @@ def test_plugins_dir_auto_mkdirs(tmp_path: Path):
     assert not target.exists()
     paths.plugins_dir()
     assert target.is_dir()
+
+
+def test_default_home_is_bare_ava():
+    assert default_home() == Path("~/.ava").expanduser()
+
+
+def test_is_default_home_expands_and_compares():
+    assert is_default_home(Path("~/.ava"))
+    assert not is_default_home(Path("~/.ava-foo"))

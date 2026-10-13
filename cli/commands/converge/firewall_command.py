@@ -21,7 +21,11 @@ import sys
 
 from base.cluster.machine import MachineIdentity
 from base.host import macos_firewall as fw
-from cli.commands.converge.firewall import _report_missing, audit_this_host
+from cli.commands.converge.firewall import (
+    _report_missing,
+    audit_this_host,
+    configured_machine_name,
+)
 
 
 def cmd_firewall_status(*, machine: MachineIdentity) -> int:
@@ -40,7 +44,7 @@ def cmd_firewall_status(*, machine: MachineIdentity) -> int:
     if rules is None:
         print(f"  unreadable: could not read the allow list from {fw.SOCKETFILTERFW}")
         return 1
-    print(fw.render_manifest_status(rules, machine=machine))
+    print(fw.render_manifest_status(rules, machine_name=configured_machine_name(machine)))
     stale = fw.stale_manifest_rules(rules)
     print(f"  stale rules: {len(stale)}")
     for path in stale:
@@ -76,7 +80,7 @@ def cmd_firewall_sync(*, machine: MachineIdentity) -> int:
         )
         return 1
     required = {p.resolve() for p in audit.missing}
-    required.update(fw.manifest_paths(machine=machine))
+    required.update(fw.manifest_paths(machine_name=configured_machine_name(machine)))
     required = tuple(sorted(required, key=str))
     # Prune before adding so a stale rule's bundle identifier is free for the
     # replacement version's rule (macOS 15 ALF deduplicates by identifier).

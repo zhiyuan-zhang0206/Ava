@@ -48,7 +48,7 @@ def assert_browser_capable() -> None:
     main(). The capability check itself lives in base.host.system.probes
     (browser_incapability); this raises its reason so a launch fails loudly with
     the same wording the operator sees in `ava status`."""
-    reason = browser_incapability()
+    reason = browser_incapability(settings.services.chrome_binary)
     if reason is not None:
         raise RuntimeError(f"ava-browser: {reason}")
 
@@ -118,7 +118,7 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    binary = resolve_chrome_binary()
+    binary = resolve_chrome_binary(settings.services.chrome_binary)
     if binary is None:  # assert_browser_capable already raised if so — this narrows the type
         sys.exit(127)
     # On macOS a detached process can see a display while lacking the active GUI

@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from base.cluster import derive
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
+from base.paths import home as paths_home
 from cli.commands.extensions.skill import cmd_skill_update, cmd_skill_upgrade
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
@@ -350,7 +350,7 @@ def test_update_refuses_worktree_repo_for_default_home(
     """`ava skill update` from a worktree checkout must not write the prod home
     (the R5 worktree that synced ava-serious-research into prod)."""
 
-    monkeypatch.setattr(derive, "default_home", lambda: unit_home)
+    monkeypatch.setattr(paths_home, "default_home", lambda: unit_home)
     wt_repo = tmp_path / "repo" / ".worktrees" / "ava-9999-task"
     _write_skill(wt_repo / "ava_builtins" / "skills", "builtin-a")
     assert cmd_skill_update(None, config=process_config, repo=wt_repo) == 1

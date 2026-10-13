@@ -16,7 +16,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster import is_default_home
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.host.converge.accessibility import (
@@ -28,7 +27,7 @@ from base.host.converge.accessibility import (
 from base.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
 from base.host.converge.screen_capture import clear_status, write_status
 from base.host.system.probes import browser_incapability
-from base.paths.home import resolve_ava_home
+from base.paths.home import is_default_home, resolve_ava_home
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge._brew_pin import ensure_brew_pin
@@ -119,7 +118,7 @@ def _ensure_browser(ctx: ConvergeCtx) -> None:
     """
     if not ctx.read_config().view.services.browser_enabled:
         return
-    reason = browser_incapability()
+    reason = browser_incapability(ctx.read_config().view.services.chrome_binary)
     if reason is not None:
         if reason.startswith("no display"):
             print(f"  i browser: {browser_deps_notice(reason)}", file=sys.stderr)
