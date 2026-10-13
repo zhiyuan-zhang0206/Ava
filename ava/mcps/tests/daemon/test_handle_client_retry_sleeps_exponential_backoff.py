@@ -208,10 +208,11 @@ async def test_shared_browser_server_connects_direct_no_child(
 
     def _boom(*_a: object, **_k: object) -> None:
         spawned.append(1)
+        raise AssertionError("a shared server is dialed directly, never spawned over stdio")
 
-    monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
-
-    session, stack = await daemon_mod.connect_server("chrome", {}, timeout_seconds=lambda: 15.0)
+    session, stack = await daemon_mod.connect_server(
+        "chrome", {}, timeout_seconds=lambda: 15.0, stdio_client=_boom
+    )
     assert session is browser_session and stack is browser_stack
     direct.assert_awaited_once_with()
     assert spawned == []
@@ -589,11 +590,10 @@ async def test_shared_computer_use_server_connects_direct_no_child(
 
     def _boom(*_a: object, **_k: object) -> None:
         spawned.append(1)
-
-    monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
+        raise AssertionError("a shared server is dialed directly, never spawned over stdio")
 
     got_session, got_stack = await daemon_mod.connect_server(
-        "computer_use", {}, timeout_seconds=lambda: 15.0
+        "computer_use", {}, timeout_seconds=lambda: 15.0, stdio_client=_boom
     )
     assert got_session is session and got_stack is stack
     direct.assert_awaited_once_with()

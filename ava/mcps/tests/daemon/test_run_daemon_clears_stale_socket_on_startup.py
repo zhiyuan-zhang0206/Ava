@@ -310,10 +310,12 @@ async def test_connect_server_enforces_requires_before_connecting(
     def _boom(*_a: object, **_k: object) -> None:
         nonlocal called
         called = True
+        raise AssertionError("an unmet requirement is reported before any child is spawned")
 
-    monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
     with pytest.raises(_cfg.MCPError, match="requires a display"):
-        await daemon_mod.connect_server("chrome", {}, timeout_seconds=lambda: 15.0)
+        await daemon_mod.connect_server(
+            "chrome", {}, timeout_seconds=lambda: 15.0, stdio_client=_boom
+        )
     assert called is False
 
 
