@@ -30,13 +30,6 @@ _NAME_RE = _re.compile(r"^[a-zA-Z0-9_-]+$")
 _PAGE_PORT_MIN = 1024
 _PAGE_PORT_MAX = 65535
 
-# How long serve() waits for the page_server daemon to bring the server up
-# before failing. The daemon's fast path adopts a new row within one poll
-# (~2s); this window is the fallback for a cold daemon restart or a slow pass
-# under load — long enough to cover the slowest observed pass (~30s,
-# 2026-08-28) while still failing loudly when the daemon is genuinely down.
-_SERVE_READY_TIMEOUT_S = 60.0
-
 
 class PageError(Exception):
     """Base for `ava.ui` failures — catch this for broad handling."""
@@ -143,7 +136,12 @@ class PageHost:
 
     host: str
     agent_id: int
-    ready_timeout_s: float = _SERVE_READY_TIMEOUT_S
+    # How long serve() waits for the page_server daemon to bring the server up
+    # before failing. The daemon's fast path adopts a new row within one poll
+    # (~2s); this window is the fallback for a cold daemon restart or a slow pass
+    # under load — long enough to cover the slowest observed pass (~30s,
+    # 2026-08-28) while still failing loudly when the daemon is genuinely down.
+    ready_timeout_s: float = 60.0
     health: Callable[[str, int], str | None] = _probe_page_health
     bindable: Callable[[str, int], bool] = _port_is_bindable
 
@@ -187,7 +185,7 @@ class PageHost:
 
         serve() is about to have the page-server daemon bind this port; a foreign
         process can never be displaced (the daemon backs off and retries
-        forever), so letting it through means a silent `_SERVE_READY_TIMEOUT_S`
+        forever), so letting it through means a silent ready-timeout
         wait followed by a misleading "daemon down" error. Page-server occupants
         — this agent's own page being replaced, or another agent's page — pass
         through to the gateway's live-port conflict check, the only party that
