@@ -21,4 +21,3 @@ exports = ["aggregate.py", "aggregate_sql.py", "ci_runs_metrics.py", "core", "ev
 "plugin_metrics.py -> plugin_metrics_sql.py#_SQL_OPS" = 1
 "plugin_metrics.py -> plugin_metrics_sql.py#_TOKEN_RE" = 1
 "plugin_metrics.py -> plugin_metrics_sql.py#_check_from_clauses" = 1
-"tests/test_plugin_metrics.py -> plugin_metrics.py#_sql_literal" = 1

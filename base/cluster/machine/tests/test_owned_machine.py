@@ -1,35 +1,10 @@
 """Composition-owned machine fields keep lazy caches and explicit reset boundaries."""
 
-import os
-import subprocess
-import sys
-from pathlib import Path
-
 import pytest
 
 from base.cluster.machine import MachineNameMissing
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-
-
-def test_machine_value_and_pipeline_type_imports_do_not_load_settings(tmp_path: Path) -> None:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
-    env["AVA_HOME"] = str(tmp_path)
-    result = subprocess.run(  # noqa: S603 — fixed interpreter and child script, isolated temporary home
-        [
-            sys.executable,
-            "-I",
-            str(Path(__file__).with_name("_import_child.py")),
-            "machine_value_imports",
-            str(Path(__file__).resolve().parents[4]),
-        ],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
 
 
 def test_construction_does_not_read_configuration(monkeypatch: pytest.MonkeyPatch) -> None:

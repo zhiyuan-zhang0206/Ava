@@ -5,5 +5,5 @@
 ]
 "tests.fixtures.unit.sdk" = [
     "core/test_catalog.py",
-    "test_metrics_aggregate_equivalence.py"
+    "test_metrics_aggregate_equivalence.py",
 ]

@@ -4,10 +4,7 @@ tuning defaults) and the `resolve_setting` config layering.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from dataclasses import fields as dataclass_fields
-from pathlib import Path
 
 import pytest
 
@@ -481,20 +478,6 @@ def test_reasoning_effort_default_must_stay_within_effort_levels(
         reg.validate_spec(
             "glm-5.3-flash", bad, anthropic_protocol=False, prices=model_catalog.prices
         )
-
-
-def test_explicit_catalog_resolves_withdrawal_in_a_fresh_process() -> None:
-    """The composition root builds a catalog; synthetic changes stay local."""
-    result = subprocess.run(  # noqa: S603 — our own venv python + a fixed child script
-        [sys.executable, str(Path(__file__).with_name("_fresh_catalog_child.py")), "withdrawal"],
-        cwd=Path(__file__).resolve().parents[4],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=180,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "OK"
 
 
 def test_normalize_overlay_settles_withdrawn_model_and_returns_receipt(

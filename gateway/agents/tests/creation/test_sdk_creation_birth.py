@@ -13,7 +13,7 @@ from ava.gateway_client import transport
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from base.tests.fixtures.retry_waits import retry_waits as retry_waits
+from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.agents.tests.creation.test_sdk_strong_creation import _response, sdk

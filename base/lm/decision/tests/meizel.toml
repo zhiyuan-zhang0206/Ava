@@ -1,3 +1,4 @@
+exports = ["support.py"]
+
 [uses]
 "test_decide_call.py" = ["support.py"]
-"test_decision_catalog.py" = ["support.py"]

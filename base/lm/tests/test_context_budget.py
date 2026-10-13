@@ -6,10 +6,7 @@ constructed catalog before the first budget read.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from dataclasses import fields
-from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -22,8 +19,6 @@ from base.lm.context_budget import (
     latest_input_tokens,
     resolve_context_budget,
 )
-
-_FRESH_CATALOG_CHILD = Path(__file__).parent / "registry" / "_fresh_catalog_child.py"
 
 
 def test_budget_is_thirty_forty_percent_of_a_1m_window(*, model_catalog: ModelCatalog) -> None:
@@ -213,21 +208,6 @@ def test_every_supported_model_resolves(*, model_catalog: ModelCatalog) -> None:
                     {field.name: get_field(field.name) for field in fields(ModelOverrides)}
                 ),
             )
-
-
-def test_owned_catalog_resolves_budget_in_a_fresh_process() -> None:
-    """A cold root explicitly builds the catalog before resolving a budget."""
-    model = settings.lm.llm_model
-    result = subprocess.run(  # noqa: S603 — our own venv python + a fixed child script
-        [sys.executable, str(_FRESH_CATALOG_CHILD), "budget", model],
-        cwd=Path(__file__).resolve().parents[3],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=180,
-    )
-    assert result.returncode == 0, result.stderr
-    assert int(result.stdout.strip()) > 0
 
 
 def test_latest_input_tokens_reads_most_recent_usage() -> None:

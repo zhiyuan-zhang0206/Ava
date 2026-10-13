@@ -1,6 +1,1 @@
-exports = ["test_provider_plugins.py"]
-
-[uses]
-"test_provider_loader_fail_fast.py" = ["provider_plugin_support.py"]
-"test_provider_plugin_gate.py" = ["provider_plugin_support.py"]
-"test_provider_plugins.py" = ["provider_plugin_support.py"]
+exports = ["provider_plugin_support.py"]
