@@ -17,7 +17,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from services.entrypoints.im_bridge import daemon
-from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
+from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeCore,
     FakeWsClient,
     PatchingAdapter,

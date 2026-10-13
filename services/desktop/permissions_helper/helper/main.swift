@@ -1975,7 +1975,7 @@ struct RootSeed {
 }
 
 /// Non-blocking liveness probe of `<run_dir>/ava-root.lock`, the run dir's
-/// instance lock (flock; see `services/supervision/ava_root/singleton.py`). The lock is
+/// instance lock (flock; see `base/native_process/root_control/instance_lock.py`). The lock is
 /// the authority: the kernel releases it with its owner, so acquiring it
 /// proves no live root holds the dir — no pid-reuse window. The pid recorded
 /// in the file is read for reporting only. Both held and unknown ownership

@@ -9,7 +9,6 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from services.entrypoints.im_bridge.adapters.tests.test_weixin_adapter import env as env
 from services.entrypoints.im_bridge.adapters.weixin import (
     load_account,
     ordinary_chat_key,
@@ -18,6 +17,7 @@ from services.entrypoints.im_bridge.adapters.weixin import (
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.identity import source_chat_key
 from services.entrypoints.im_bridge.ingress.types import ProviderSource
+from services.entrypoints.im_bridge.tests.adapters.test_weixin_adapter import env as env
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
 
 

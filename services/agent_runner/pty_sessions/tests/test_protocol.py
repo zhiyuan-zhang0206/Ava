@@ -18,10 +18,8 @@ from typing import Any
 
 import pytest
 
-from base.daemon.health import ProbeVerdict
 from base.sessions.pty import client, protocol
 from base.sessions.pty.paths import service_socket_path
-from services.supervision.healthchecks import protocol_probe
 from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
@@ -45,12 +43,6 @@ def test_ping_echoes_the_request_id(pty_service: PtyServiceProcess) -> None:
     assert response["id"] == 4711
     assert response["ok"] is True
     assert response["data"]["pid"] == pty_service.pid
-
-
-def test_protocol_ping_reads_the_service_as_up(pty_service: PtyServiceProcess) -> None:
-    del pty_service
-    result = protocol_probe.ping(service_socket_path())
-    assert result.verdict is ProbeVerdict.ALIVE, result.detail
 
 
 @pytest.mark.parametrize(

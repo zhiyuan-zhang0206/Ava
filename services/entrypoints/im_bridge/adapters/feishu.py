@@ -558,7 +558,9 @@ class FeishuAdapter(IMAdapter):
         return PreparedOutboundSend(
             adapter_kind=OutboundAdapterKind.FEISHU,
             account_id=await self.outbound_account_id(),
-            chunks=tuple(OutboundChunk(text=part) for part in _segment(text, MAX_SEGMENT_CHARS)),
+            chunks=tuple(
+                OutboundChunk(text=part) for part in segment_text(text, MAX_SEGMENT_CHARS)
+            ),
             markdown=False,
         )
 
@@ -619,7 +621,7 @@ class FeishuAdapter(IMAdapter):
         if buttons:
             await asyncio.to_thread(self._send_card, self._rest_client, chat_id, text, buttons)
         else:
-            for index, segment in enumerate(_segment(text, MAX_SEGMENT_CHARS)):
+            for index, segment in enumerate(segment_text(text, MAX_SEGMENT_CHARS)):
                 try:
                     await asyncio.to_thread(self._send_one, self._rest_client, chat_id, segment)
                 except (SendNotStartedError, RetryableTransportError, SendOutcomeUncertainError):
@@ -755,7 +757,7 @@ class FeishuAdapter(IMAdapter):
         return chat_id_resolved
 
 
-def _segment(text: str, limit: int) -> list[str]:
+def segment_text(text: str, limit: int) -> list[str]:
     """Split text into ``<=limit``-char chunks (empty text → no chunks)."""
     return [text[i : i + limit] for i in range(0, len(text), limit)]
 

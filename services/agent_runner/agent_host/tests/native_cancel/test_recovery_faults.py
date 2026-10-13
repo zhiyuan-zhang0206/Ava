@@ -8,7 +8,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.agents.inbox.native_cancel import accept_native_cancel
 from base.db.code_version_gate import ProcessDbGate
 from services.agent_runner.agent_host.invocation.native_work import recover_native_cancel
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 
 
 async def test_interrupted_cancel_never_fabricates_completion(

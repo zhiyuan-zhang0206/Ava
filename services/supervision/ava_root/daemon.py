@@ -17,6 +17,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.native_process.root_control.instance_lock import (
+    AlreadyRunningError,
+    acquire_instance_lock,
+    release_instance_lock,
+)
 from base.native_process.root_control.ipc import (
     ErrorCode,
     RequestPayload,
@@ -27,11 +32,6 @@ from base.native_process.root_control.ipc import (
 )
 from services.supervision.ava_root.manifest import ManifestError, load_manifests
 from services.supervision.ava_root.server import ControlServer
-from services.supervision.ava_root.singleton import (
-    AlreadyRunningError,
-    acquire_instance_lock,
-    release_instance_lock,
-)
 from services.supervision.ava_root.supervisor import Supervisor
 from services.supervision.ava_root.wiring import (
     WiringContext,

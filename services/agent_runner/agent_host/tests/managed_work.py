@@ -6,7 +6,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.incarnation.native_work import activate_work
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.incarnation.resources import ResourceBirth
@@ -32,7 +32,7 @@ async def managed_work(
         (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), agent),
     )
     conn.commit()
-    incarnation = await _admit(pool, agent, database_gate=database_gate)
+    incarnation = await admit_owner(pool, agent, database_gate=database_gate)
     work = NativeWorkContinuation(uuid4())
     await prepare_native_invocation(pool, work, incarnation)
     assert work.target is not None

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, backoff_delay
-from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
+from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeCore,
     FakeRestClient,
     make_event,
@@ -18,7 +18,7 @@ from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
     make_list_response,
     websocket_ready,
 )
-from services.entrypoints.im_bridge.adapters.tests.test_feishu_adapter import (
+from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     adapter as adapter,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config

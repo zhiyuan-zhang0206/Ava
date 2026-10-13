@@ -14,12 +14,15 @@ from typing import cast
 import pytest
 
 from base.daemon.health import DaemonProbe
+from base.native_process.root_control.instance_lock import (
+    acquire_instance_lock,
+    release_instance_lock,
+)
 from services.supervision.ava_root.daemon import finish
 from services.supervision.ava_root.health import HealthMonitor, ProbeRunner
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.probes import ProbeRegistry
 from services.supervision.ava_root.server import ControlServer
-from services.supervision.ava_root.singleton import acquire_instance_lock, release_instance_lock
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.ava_root.unit_records import Generation, UnitRuntime
 

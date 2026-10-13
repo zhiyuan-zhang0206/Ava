@@ -10,7 +10,6 @@ exports = ["claim"]
 "test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 
 [debt.private-name]
-"compact/test_compact_reminder_fires_in_band.py -> claim/test_inbound_ownership.py#_admit" = 2
 "compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_ava_compact_loaded" = 1
 "compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_config" = 1
 "state_slot/test_exec_node_preserves_state_update_on_lifecycle.py -> test_state_slot.py#_reset_state_slot" = 1

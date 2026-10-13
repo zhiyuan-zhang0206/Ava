@@ -23,10 +23,10 @@ import httpx
 import pytest
 
 from services.entrypoints.im_bridge.adapters import weixin
-from services.entrypoints.im_bridge.adapters.tests.weixin_native import NativeWeixin
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
 from services.entrypoints.im_bridge.adapters.weixin_login import qr_login
 from services.entrypoints.im_bridge.ingress.types import IngressReceipt, IngressStatus
+from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 

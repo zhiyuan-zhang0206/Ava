@@ -19,7 +19,7 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import invocation
-from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
+from services.agent_runner.agent_host.tests.managed_work import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
     blocked_host,
@@ -143,7 +143,7 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
     machine_identity.set(name="claim-test")
     async with hosted_scope() as resources:
         from agent.ownership.hosted import apply_hosted_lifecycle
-        from agent.tests.claim.test_inbound_ownership import _admit
+        from agent.tests.claim.test_inbound_ownership import admit_owner
 
         incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
         insert(db_conn, initial.agent_id)
@@ -174,7 +174,7 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
                 if site != "before_apply":
                     await apply_hosted_lifecycle(pool, token, **kwargs)
                 if site == "after_observe_cleanup":
-                    successor = await _admit(
+                    successor = await admit_owner(
                         aops_pool, initial.agent_id, database_gate=database_gate
                     )
                     assert successor != incarnation

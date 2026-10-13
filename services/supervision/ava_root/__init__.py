@@ -5,6 +5,11 @@ health observation, and service manifests share this owner; there is no service
 session mode or in-place interpreter upgrade.
 """
 
+from base.native_process.root_control.instance_lock import (
+    AlreadyRunningError,
+    acquire_instance_lock,
+    release_instance_lock,
+)
 from base.native_process.root_control.ipc import UnitState
 from services.supervision.ava_root.health import HealthConfig, HealthMonitor
 from services.supervision.ava_root.manifest import (
@@ -19,11 +24,6 @@ from services.supervision.ava_root.manifest import (
 from services.supervision.ava_root.probes import ProbeError, ProbeRegistry
 from services.supervision.ava_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.ava_root.server import ControlServer
-from services.supervision.ava_root.singleton import (
-    AlreadyRunningError,
-    acquire_instance_lock,
-    release_instance_lock,
-)
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.ava_root.wiring import (
     WiringContext,

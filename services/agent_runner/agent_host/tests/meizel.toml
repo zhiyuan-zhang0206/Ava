@@ -1,23 +1,20 @@
-exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "native_cancel", "runtime"]
+exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed_work.py", "native_cancel", "runtime"]
 
 [uses]
 "agent_host" = ["runtime", "test_maintenance_receipt_grading.py"]
 "circuit_breaker" = ["host_policy.py"]
 "dispatch" = ["host_policy.py", "runtime"]
 "guarded_compact_support.py" = ["host_policy.py"]
-"history" = ["host_policy.py", "native_cancel", "runtime"]
+"history" = ["host_policy.py", "managed_work.py", "runtime"]
 "lifecycle" = ["host_policy.py", "runtime"]
-"native_cancel" = ["history", "host_policy.py", "runtime"]
-"native_restart" = ["native_cancel", "runtime"]
+"native_cancel" = ["history", "host_policy.py", "managed_work.py", "runtime"]
+"native_restart" = ["managed_work.py", "native_cancel", "runtime"]
 "runtime" = ["host_policy.py"]
 "test_agent_host.py" = ["host_policy.py", "runtime"]
 "test_circuit_breaker.py" = ["circuit_breaker", "host_policy.py"]
 "test_circuit_breaker_audit.py" = ["host_policy.py"]
 "test_maintenance_prior_failure.py" = ["host_policy.py", "test_maintenance_receipt_grading.py"]
 "test_turn_dispatcher.py" = ["turn_dispatcher"]
-
-[debt.manifest-cycle]
-"native_cancel -> history" = 1
 
 [debt.private-name]
 "agent_host/test_maintenance_failures.py -> runtime/host_support.py#_FakePool" = 1
