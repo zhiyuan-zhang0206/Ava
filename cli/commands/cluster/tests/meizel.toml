@@ -90,9 +90,6 @@ exports = ["health_probe_inputs.py", "test_cluster_health.py"]
 "test_provider_guard.py#monkeypatch.setattr cli.commands.cluster._provider_guard.halted_agents_count" = 4
 "test_provider_guard.py#monkeypatch.setattr cli.commands.cluster._provider_guard.provider_guard_failure" = 2
 
-[debt.private-name]
-"test_cluster_health_window.py -> test_cluster_health.py#_home" = 1
-
 [debt.stdlib-patch]
 "test_cluster_health.py#monkeypatch.setattr subprocess.run" = 1
 "test_cluster_health_window.py#monkeypatch.setattr subprocess.run" = 1

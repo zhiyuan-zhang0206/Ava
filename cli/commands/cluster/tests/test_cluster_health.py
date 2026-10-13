@@ -111,7 +111,7 @@ def test_agent_population_db_error_is_environment_class(
 
 
 def test_liveness_retry_recovers_before_reporting_outage(
-    probe: Probe, _home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe, isolated_cluster_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A brief data-plane restart window is healthy once liveness recovers."""
     answers = iter([False, False, True])
@@ -137,7 +137,7 @@ def test_liveness_retry_recovers_before_reporting_outage(
 
 
 def test_environment_liveness_failure_signals_without_counting(
-    probe: Probe, _home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe, isolated_cluster_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A data-plane failure signals but cannot launch an unrelated code rollback."""
     rollback_commands: list[list[str]] = []
@@ -154,7 +154,7 @@ def test_environment_liveness_failure_signals_without_counting(
 
 
 def test_code_liveness_failure_is_unhealthy(
-    probe: Probe, _home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe, isolated_cluster_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A gateway failure with a healthy data plane remains unhealthy."""
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
@@ -164,7 +164,7 @@ def test_code_liveness_failure_is_unhealthy(
 
 
 def test_agent_population_classifies_db_failure_as_environment(
-    probe: Probe, _home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe, isolated_cluster_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Population-query connection failure is environmental; a low count is code-class."""
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
@@ -187,7 +187,7 @@ def test_agent_population_classifies_db_failure_as_environment(
 
 
 @pytest.fixture
-def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def isolated_cluster_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # Unit tests have no production checkout; dedicated cases pin this guard.
     from base.deploy.git import cluster_drift
 
@@ -200,7 +200,7 @@ def test_every_run_emits_the_heartbeat_healthy_or_not(
     redis_url: str,
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
     ran: list[dict[str, object]],
@@ -225,7 +225,7 @@ def test_every_run_emits_the_heartbeat_healthy_or_not(
 
 def test_a_refused_checkout_emits_no_heartbeat(
     probe: Probe,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     ran: list[dict[str, object]],
 ) -> None:
@@ -247,7 +247,7 @@ def test_a_refused_checkout_emits_no_heartbeat(
 def test_service_probe_failure_emits_the_alert_only_signal(
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
@@ -272,7 +272,7 @@ def test_service_probe_failure_emits_the_alert_only_signal(
 def test_disk_over_watermark_fails_and_signals(
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
@@ -295,7 +295,7 @@ def test_disk_over_watermark_fails_and_signals(
 def test_wal_archiving_failure_signals_with_its_message(
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
@@ -315,7 +315,10 @@ def test_wal_archiving_failure_signals_with_its_message(
 
 
 def test_wal_archiving_is_never_dialed_while_off(
-    probe: Probe, all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
+    probe: Probe,
+    all_checks_pass: None,
+    isolated_cluster_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from services.backup.walg import probe as walg_probe
 
@@ -327,7 +330,9 @@ def test_wal_archiving_is_never_dialed_while_off(
     assert probe() == 0
 
 
-def test_disk_under_watermark_passes(probe: Probe, all_checks_pass: None, _home: Path) -> None:
+def test_disk_under_watermark_passes(
+    probe: Probe, all_checks_pass: None, isolated_cluster_home: Path
+) -> None:
     """Healthy disk usage keeps the probe green (no alert, exit 0)."""
     rc = probe()
     assert rc == 0
@@ -374,7 +379,7 @@ def test_disk_usage_failure_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_source_tree_failure_signals(
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
@@ -395,7 +400,7 @@ def test_source_tree_failure_signals(
 def test_source_tree_clean_passes(
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A clean tree must not fail the probe — the whitelist exists so the
@@ -432,7 +437,7 @@ def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
     redis_url: str,
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
@@ -447,7 +452,7 @@ def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
     monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
     assert probe() == 0
     assert len(signals) == 2
-    assert not list(_home.iterdir())
+    assert not list(isolated_cluster_home.iterdir())
 
 
 def test_signal_names_the_failed_check(
@@ -455,7 +460,7 @@ def test_signal_names_the_failed_check(
     redis_url: str,
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     signals: list[dict[str, object]],
 ) -> None:
@@ -479,7 +484,7 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
     probe: Probe,
     monkeypatch: pytest.MonkeyPatch,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     signals: list[dict[str, object]],
 ) -> None:
     """The boundary this check was placed for: a dark entry port signals and exits 1.
@@ -534,7 +539,7 @@ def test_redis_bridge_failure_signals_without_arming_rollback(
     probe: Probe,
     monkeypatch: pytest.MonkeyPatch,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     signals: list[dict[str, object]],
 ) -> None:
     failure = "Redis bridge 10.64.0.7:6380 failed authenticated PING (connection refused)"
@@ -553,7 +558,7 @@ def test_resurrect_audit_rows_do_not_make_the_probe_unhealthy(
     db_conn: psycopg.Connection,
     probe: Probe,
     all_checks_pass: None,
-    _home: Path,
+    isolated_cluster_home: Path,
     signals: list[dict[str, object]],
 ) -> None:
     """The probe no longer counts `resurrect` audit events: after the automatic

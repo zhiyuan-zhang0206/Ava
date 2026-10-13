@@ -66,7 +66,7 @@ def _vec(seed: int) -> np.ndarray:
 
 
 @pytest.fixture(autouse=True)
-def _watched_root(
+def memory_watched_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
 ) -> None:
     """Point the daemon's watched root at this test's sandbox.

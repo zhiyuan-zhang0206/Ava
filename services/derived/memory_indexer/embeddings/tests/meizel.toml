@@ -20,7 +20,6 @@ exports = ["test_embeddings.py"]
 "test_retry_budget.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.gemini.EMBED_POLICY" = 1
 
 [debt.private-name]
-"embeddings/test_worst_case_single_attempt_has_no_sleep.py -> test_embeddings.py#_dummy_gemini_key" = 1
 "embeddings/test_worst_case_single_attempt_has_no_sleep.py -> test_embeddings.py#_provider" = 1
 "test_explicit_inputs.py -> test_embeddings.py#_AsyncClient" = 1
 
