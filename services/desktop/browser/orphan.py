@@ -73,9 +73,19 @@ from base.log import logger
 
 from .profile import profile_dir
 
-# psutil exceptions meaning "gone, or not ours to read". A process we cannot read
-# is one we cannot identify, so every one of these is a skip (module docstring).
-_UNREADABLE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
+# Exceptions meaning "gone, or not ours to read". `psutil.NoSuchProcess` and
+# `AccessDenied` are psutil's own two; `OSError` covers raw OS-error shapes
+# (a `PermissionError` out of the macOS `sysctl(KERN_PROCARGS2)` read included).
+# `SystemError` is what psutil's C extension leaks when a process diverges under
+# the scan: `proc.cmdline()` fails at the C boundary ("returned a result with an
+# exception set", the real `PermissionError` chained as its `__cause__`) instead
+# of raising a clean psutil error — uncaught in the walk it failed the whole
+# browser probe, the wrapper reported down, and the root health monitor
+# restarted the browser over it (2026-10-12/13: two restarts, each swapping the
+# Chrome generation and losing every agent page). A
+# process we cannot read is one we cannot identify, so every one of these is a
+# skip (module docstring).
+_UNREADABLE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError, SystemError)
 
 _USER_DATA_DIR = "--user-data-dir="
 # Chrome stamps every process it spawns for itself with `--type=<renderer|gpu-process
