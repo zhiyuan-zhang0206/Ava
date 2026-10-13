@@ -129,6 +129,8 @@ def test_process_boot_builds_no_connection_stack(pytester: pytest.Pytester) -> N
         "import ava\n"
         "image = ava._LOADED_IMAGE\n"
         "assert 'base.db' not in sys.modules\n"
+        "assert 'ava.sdk_surface.extensions' not in sys.modules\n"
+        "assert 'base.packages.plugins.loading.registry' not in sys.modules\n"
         "assert not getattr(ava, '__plugin_installation__', None)\n"
         "assert not [t for t in threading.enumerate() if t is not threading.main_thread()]\n"
         "importlib.reload(ava)\n"
