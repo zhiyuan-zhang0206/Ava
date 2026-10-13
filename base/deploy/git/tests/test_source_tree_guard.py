@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.deploy.git import source_tree_guard as stg
 
 
@@ -46,7 +47,7 @@ def _commit(source: Path, content: str, msg: str) -> str:
 def test_clean_checkout_reports_no_violations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
 
     assert stg.source_tree_violations(repo) == ()
@@ -55,7 +56,7 @@ def test_clean_checkout_reports_no_violations(
 def test_untracked_file_outside_whitelist_is_a_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "junk.txt").write_text("j")
 
@@ -67,7 +68,7 @@ def test_untracked_file_outside_whitelist_is_a_violation(
 def test_untracked_dir_outside_whitelist_is_a_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "junkdir").mkdir()
     (repo / "junkdir" / "inner.txt").write_text("i")
@@ -81,7 +82,7 @@ def test_whitelisted_runtime_artifacts_are_not_violations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The built frontend bundle (frontend/) is the one legal untracked tree."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "frontend" / ".next").mkdir(parents=True)
     (repo / "frontend" / ".next" / "build.txt").write_text("b")
@@ -96,7 +97,7 @@ def test_gitignored_paths_are_not_violations(
     """Gitignored runtime paths need no whitelist entry: the detector never
     sees them (the documented contract — e.g. the accounting ledger at
     ``scripts/ci/ci_usage/``)."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / ".gitignore").write_text("scripts/ci/ci_usage/\n")
     _git(repo, "add", ".gitignore")
@@ -110,7 +111,7 @@ def test_gitignored_paths_are_not_violations(
 def test_tracked_modification_is_a_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     (repo / "tracked.txt").write_text("changed")
 
@@ -125,7 +126,7 @@ def test_head_move_alone_is_not_a_violation(
     """A clean checkout whose HEAD moved is not tampering. No lifecycle records
     an installed commit for a source checkout, so a legitimate checkout move
     must not become a permanent alert."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     _commit(repo, "y", "c2")
 
@@ -137,7 +138,7 @@ def test_non_git_checkout_signals_guard_skipped(
 ) -> None:
     """A checkout that is not a git repo must not look clean: the guard
     cannot see anything, so it reports itself as skipped (not tampered)."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = tmp_path / "plain"
     repo.mkdir()
 
@@ -154,7 +155,7 @@ def test_git_unavailable_signals_guard_skipped(
 ) -> None:
     """A broken git (binary missing / command error / timeout) makes the
     detector blind — the probe must alert on the blind guard, never pass it."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     monkeypatch.setattr(stg, "_git", _no_git)
 
@@ -165,7 +166,7 @@ def test_git_command_failure_signals_guard_skipped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A git command that runs but exits non-zero is a blind guard too."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "no-home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
     failed = subprocess.CompletedProcess([], returncode=1, stdout="", stderr="boom")
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.cluster.machine import MachineIdentity
 from base.host.system import cron
 from base.host.system import pr_flow_job as job
@@ -28,7 +29,7 @@ def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
     monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".ava"))
     monkeypatch.setattr(cron, "launchd_path_env", lambda: "/work tree/.venv/bin:/usr/bin")
-    monkeypatch.setattr("base.paths.repo_root", lambda: Path("/check/out"))
+    monkeypatch.setattr(paths, "repo_root", lambda: Path("/check/out"))
 
 
 def _ok() -> types.SimpleNamespace:
@@ -216,7 +217,7 @@ def _foreign_home(*, machine: MachineIdentity, home: Path) -> bool:
 
 
 def _passing_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("base.host.system.pr_flow_job.production_identity", _production_home)
+    monkeypatch.setattr(job, "production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_gh)
     token = tmp_path / ".trunk" / "api-token"
     token.parent.mkdir(parents=True, exist_ok=True)
@@ -229,13 +230,13 @@ def test_credential_blocker_names_each_missing_piece(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr("base.host.system.pr_flow_job.production_identity", _foreign_home)
+    monkeypatch.setattr(job, "production_identity", _foreign_home)
     assert (
         job.credential_blocker(machine=machine_identity, home=tmp_path)
         == "not the registered production home"
     )
 
-    monkeypatch.setattr("base.host.system.pr_flow_job.production_identity", _production_home)
+    monkeypatch.setattr(job, "production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_missing)
     assert job.credential_blocker(machine=machine_identity, home=tmp_path) == "gh CLI not on PATH"
 
@@ -277,7 +278,7 @@ def test_register_skips_without_credentials(
     machine_identity: MachineIdentity,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr("base.host.system.pr_flow_job.production_identity", _production_home)
+    monkeypatch.setattr(job, "production_identity", _production_home)
     monkeypatch.setattr(job.shutil, "which", _which_missing)  # no gh
 
     def no_platform(*_a: object, **_k: object) -> None:

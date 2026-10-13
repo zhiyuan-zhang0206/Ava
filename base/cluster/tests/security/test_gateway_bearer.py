@@ -16,6 +16,7 @@ import pytest
 from base.cluster import machine
 from base.cluster.machine import gateway_auth_headers
 from base.config import settings
+from base.host.env import bootstrap
 from base.host.net.auth import API_TOKEN_ENV, bearer_header
 
 SECRET = "human-" + "h" * 40
@@ -48,7 +49,7 @@ def _process(
 
 def _remote_managed_gateway_home(monkeypatch: pytest.MonkeyPatch, *, serves_gateway: bool) -> None:
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
-    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: serves_gateway)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: serves_gateway)
 
 
 @pytest.mark.parametrize("profile", [None, "gateway", "agent", "runner"])

@@ -12,6 +12,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
+from base import db
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -53,7 +54,7 @@ def test_read_uses_the_callers_connection(
     def _fresh_connect(**_kwargs: object) -> object:
         raise AssertionError("read opened a fresh connection")
 
-    monkeypatch.setattr("base.db.connect", _fresh_connect)
+    monkeypatch.setattr(db, "connect", _fresh_connect)
 
     state = hds.read(database, conn=db_conn, machine=machine_identity.name())
 

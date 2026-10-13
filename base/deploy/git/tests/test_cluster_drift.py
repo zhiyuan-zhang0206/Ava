@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.deploy.git import cluster_drift
 from base.deploy.git.cluster_drift import (
     checkout_head_sha,
@@ -89,7 +90,7 @@ def test_prod_source_dir_is_the_homes_own_source(
     elsewhere.parent.mkdir(parents=True)
     elsewhere.write_text("#!/bin/sh\n")
     (home / "ava").symlink_to(elsewhere)
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
     assert prod_source_dir() == home / "source"
 
 
