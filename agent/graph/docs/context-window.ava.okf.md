@@ -38,6 +38,6 @@ Agent context window management — how message history is compressed as it appr
 - [[routers.ava.okf.md]] — token-usage / context-breakdown display endpoints
 
 ## Entry Points
-- `ava/self.py:compact(summary)` — active compaction entry
+- `ava/self/__init__.py:compact(summary)` — active compaction entry
 - `agent/graph/hooks/compact.py` — auto-compact trigger hook (Option Y occupancy determination)
 - `base/lm/context_budget.py:resolve_context_budget()` — per-model soft/hard threshold resolution

@@ -34,7 +34,7 @@ requires them. A finite task still terminates when complete.
 ## Key Dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — the "use watchers" primitive
-- [[ava/docs/self.ava.okf.md|ava.self]] — `pause_heartbeat` / `compact` / identity (AGENT_ID)
+- [[ava/self/docs/self.ava.okf.md|ava.self]] — `pause_heartbeat` / `compact` / identity (AGENT_ID)
 
 ## Usage reminders
 

@@ -104,39 +104,14 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
 
 
 def _publish_self_inbound_wake() -> None:
-    """Best-effort Redis wake for a self-inserted inbound (restart / terminate /
-    compact), over the agent's own SDK redis handle (`ava.context.redis`).
-
-    Same contract as `base.agents.impersonation.wake.publish_inbound_wake`: never raises (the claim
-    loop's SELECT recheck delivers the row regardless), but a `NoPermissionError`
-    is logged rather than swallowed — it means this agent's redis ACL user is not
-    granted its own `<prefix>:inbound:*` channel (an ACL / channel-prefix
-    misconfig). Channel derived via `inbound_channel` so it matches
-    `RedisInboundListener` and stays inside the ACL grant."""
-    from redis.exceptions import ResponseError
-
+    """Best-effort wake for a self-inserted inbound (restart / terminate / compact), over
+    the agent's own SDK redis handle (`ava.context.redis`); see `ava.self.wake`."""
     from ava.sdk_surface import agent_identity
-    from base.cluster import inbound_channel
-    from base.log import logger
+    from ava.self import wake
 
-    channel = inbound_channel(agent_identity.require_agent_id())
-    try:
-        process_context.current_context().redis.publish(channel, "0")
-    except ResponseError as exc:
-        logger.warning(
-            "self inbound wake publish to {ch!r} rejected by redis ({exc!r}) — "
-            "this agent's redis ACL user lacks its inbound channel; the "
-            "self-restart/terminate/compact wake falls back to the claim SELECT "
-            "recheck. Check ensure_cluster_redis_acl.",
-            ch=channel,
-            exc=exc,
-        )
-    except Exception:
-        logger.opt(exception=True).warning(
-            "self inbound wake publish to {ch!r} failed; the wake falls back to the claim "
-            "SELECT recheck",
-            ch=channel,
-        )
+    wake.publish_inbound_wake(
+        process_context.current_context().redis, agent_identity.require_agent_id()
+    )
 
 
 def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
