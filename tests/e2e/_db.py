@@ -1,4 +1,5 @@
-"""Shared e2e DB pollers — wait for an agent row to reach a target lifecycle state.
+"""Shared e2e DB helpers — pollers that wait for an agent row to reach a target lifecycle state,
+and the per-run agent-id offset.
 
 One generous default timeout in one place. A genuine hang still fails, just at
 a higher ceiling. Previously each lifecycle test carried its own copy-pasted
@@ -16,11 +17,13 @@ in the `agent-*.log` artifact either way.
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
 import httpx
 import psycopg
+from psycopg import sql
 
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
@@ -99,4 +102,19 @@ def enqueue_compact_history_fixture(agent_id: int, *, database: Database) -> int
     with psycopg.connect(settings.data_plane.db_url) as conn:
         return insert_compact_request_inbound(
             conn, agent_id, database=database, bus=EventBus.from_settings()
+        )
+
+
+def apply_e2e_seq_offset() -> None:
+    """Offset agents_id_seq by PID so concurrent e2e workers spawn non-colliding
+    session names (`ava-agent-<id>` shares a global namespace). PID <
+    65536, ×1000 leaves ample room. Applied once per e2e package — there is exactly
+    one, so once per run: `truncated_db` truncates without RESTART IDENTITY, so the
+    sequence is never reset and this base persists (ids stay monotonic +
+    per-worker-disjoint for the whole run)."""
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("ALTER SEQUENCE agents_id_seq RESTART {}").format(
+                sql.Literal(os.getpid() * 1000)
+            )
         )
