@@ -1,20 +1,17 @@
-"""Real maintenance admission fixtures shared by caller and hosted-runtime tests."""
+"""Real maintenance admission fixtures shared by caller and hosted-runtime tests.
+
+Depends on `base` only; `maintenance_cluster` holds the part that drives the CLI start path.
+"""
 
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
 
-from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineIdentity
 from base.db import create_agent
-from base.deploy.maintenance import admission, pause_owner
-from base.deploy.state import host_deploy_state
-from cli.database import operator_database_factory
-from ops import agent_pause
+from base.deploy.maintenance import pause_owner
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
@@ -33,25 +30,3 @@ def maintenance_agent(conn: psycopg.Connection[Any], *, machine_name: str) -> in
     )
     conn.commit()
     return agent_id
-
-
-def start_cluster_through_ready_gate(
-    monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity
-) -> None:
-    database_factory = operator_database_factory(local_host=machine.host)
-    from base.deploy.lifecycle import start_serving
-    from cli.commands.lifecycle._pause_resume import resume_after_start
-
-    monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
-    monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-
-    @resume_after_start
-    def ready_start(
-        operation: pause_owner.PauseOwnerSnapshot | None, database_factory: DatabaseFactory
-    ) -> int:
-        admission.require_start_allowed(operation)
-        return 0
-
-    assert ready_start(None, database_factory, machine) == 0
-    assert not admission.held()
