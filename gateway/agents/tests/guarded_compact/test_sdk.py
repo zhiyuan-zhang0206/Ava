@@ -18,9 +18,9 @@ from base.api_contracts.agent_contract import GatewayUnavailable
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact_support import make_host
-from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 
 @pytest.mark.usefixtures("retry_waits")

@@ -16,6 +16,7 @@ from base.agents.context.identity import ExternalLease
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
+from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from gateway.agents import router as agent_router
 from gateway.agents.tests.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.agents.tests.test_task_assignments import body as body
@@ -23,7 +24,6 @@ from gateway.agents.tests.test_task_assignments import client as client
 from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.pin_agent import pin_agent
-from tests.fixtures.retry_waits import retry_waits as retry_waits
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
