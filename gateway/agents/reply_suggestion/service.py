@@ -10,6 +10,7 @@ unknown agent, a missing draft-model key or any unclassified error still fails t
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -25,6 +26,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.lm.call import extract_text
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import Decision, DecisionError, Question, YesNo
+from base.lm.compat.stop import StopCategory, classify_stop
 from base.lm.errors import ErrorClass, classify_error, normalize_provider_transport_error
 from base.lm.usage import log_usage_from_message
 from base.log import logger
@@ -54,9 +56,8 @@ GATE_QUESTION = YesNo(
 
 # First in the request so the provider's prompt cache covers it on every call.
 DRAFT_INSTRUCTION = (
-    "Draft short replies the user could send next based on the conversation. "
-    "Decide the appropriate number of suggestions and their content from context. "
-    "Return only a JSON array of reply strings in the user's language."
+    "Draft short replies the user could send next in the user's language. "
+    "Decide the appropriate number of suggestions and their content from context."
 )
 
 LoadMessages = Callable[[int], Sequence[BaseMessage]]
@@ -196,7 +197,12 @@ class ReplySuggestionService:
 
     async def _draft(self, agent_id: int, excerpt: ConversationExcerpt) -> ReplySuggestionResponse:
         model_id = self._policy.model()
-        llm = self._draft_model(model_id)
+        llm = self._draft_model(model_id).with_structured_output(
+            DraftReplies.model_json_schema(),
+            method="json_schema",
+            strict=True,
+            include_raw=True,
+        )
         started = time.monotonic()
         try:
             response = await llm.ainvoke(
@@ -215,22 +221,32 @@ class ReplySuggestionService:
             )
             return _none("generation_failed")
         log_usage_from_message(
-            response,
+            response["raw"],
             model=model_id,
             usage_kind=DRAFT_USAGE_KIND,
             latency_ms=(time.monotonic() - started) * 1000,
             for_agent_id=agent_id,
             catalog=self._catalog,
         )
-        text = extract_text(response)
-        try:
-            suggestions = DraftReplies.model_validate_json(text).root
-        except ValidationError:
+        stop, _ = classify_stop(response["raw"], stops=self._catalog.stops)
+        if stop is not StopCategory.NORMAL or response["parsing_error"] is not None:
             logger.warning(
-                "reply suggestion draft for agent {agent_id} rejected: invalid candidates ({chars} characters)",
+                "reply suggestion draft for agent {agent_id} rejected: incomplete or unparsable structured output",
                 event="reply_suggestion_draft_rejected",
                 agent_id=agent_id,
-                chars=len(text),
+                stop=stop.value,
+            )
+            return _none("invalid_generation")
+        try:
+            # LangChain's dict parser can repair incomplete JSON. The native response
+            # must itself be a complete document before accepting its parsed object.
+            json.loads(extract_text(response["raw"]))
+            suggestions = DraftReplies.model_validate(response["parsed"]).suggestions
+        except (json.JSONDecodeError, ValidationError):
+            logger.warning(
+                "reply suggestion draft for agent {agent_id} rejected: invalid candidates",
+                event="reply_suggestion_draft_rejected",
+                agent_id=agent_id,
             )
             return _none("invalid_generation")
         return ReplySuggestionResponse(suggestions=suggestions)

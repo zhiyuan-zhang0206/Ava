@@ -54,11 +54,20 @@ a 200. An unknown agent is 404 and an unreadable checkpoint is the history read'
 4. Draft: `reply_suggestion_model` with reasoning off (DeepSeek defaults to maximum
    effort, which makes a one-line draft run for tens of seconds). The fixed instruction
    is the system message, first in the request, so the provider's prompt cache covers it.
-   One call returns a JSON array of reply strings. The model chooses both the number
-   and content from context; there is no preferred count, three-candidate ceiling or
-   question-type policy. Pydantic rejects malformed JSON, duplicate replies, empty
-   arrays or strings, and candidates over 500 characters as `invalid_generation`. Invalid
-   arrays are rejected as a whole, never partially salvaged or truncated.
+   One native structured-output call submits the `DraftReplies` schema through
+   `with_structured_output(method="json_schema", strict=True, include_raw=True)`, returning
+   an object containing `suggestions`. The prompt specifies the task, not a JSON format.
+   The model chooses both the number and content from context; there is no preferred
+   count, three-candidate ceiling or question-type policy.
+   The default DeepSeek provider uses its Responses endpoint for this operation because
+   its Anthropic-compatible endpoint supports only `output_config.effort`. The configured
+   model, key, reasoning effort, timeout and output cap are preserved; ordinary agent chat
+   retains the Anthropic transport. There is no plain-text or alternate-model fallback.
+   The client retains the raw message for usage accounting and rejects unfinished or
+   unparsable output. Pydantic validates the parsed object, rejecting missing or additional
+   fields, duplicate replies, empty arrays or strings, and candidates over 500 characters
+   as `invalid_generation`. Invalid candidates are rejected as a whole, never partially
+   salvaged or truncated.
 5. Usage: `llm_usage` rows with `usage_kind` `reply_suggestion_gate` and `reply_suggestion`,
    both attributed to the agent (`for_agent_id`).
 
@@ -83,7 +92,21 @@ Code: `gateway/agents/reply_suggestion/` (`router.py`, `service.py`, `excerpt.py
 
 ## Verification scope
 
-Unit tests inject fake decision and chat models. They verify gating, parsing, candidate
+Unit tests inject fake decision and chat models. They verify gating, validation, candidate
 transport, caching and keyboard behaviour, including preserving model-returned counts
 above three. They do not evaluate the usefulness judgement or generated reply quality;
 those require a benchmark with representative conversations and actual model outputs.
+
+Factory tests exercise the real LangChain and vendor SDKs with injected mock HTTP
+transports. They verify the Responses URL, `text.format.type="json_schema"`, `strict=true`,
+schema, reasoning settings and raw usage, and preserve the ordinary Anthropic request.
+
+Live compatibility probes on 2026-10-13 UTC used the official OpenAI SDK and LangChain
+against DeepSeek's endpoints. An ordinary draft with the reply schema succeeded. Adversarial
+prompts also produced schema violations (wrong enum values, additional fields and non-string
+array items) on Responses and Beta strict tool calls. Thus the client requests native strict
+structured output as documented, but these probes do not establish a server-side constrained
+decoding guarantee. Boundary validation remains required. These are protocol probes, not a
+generation-quality benchmark. Official contracts:
+[Responses schema output](https://api-docs.deepseek.com/api/create-response/),
+[strict tool calls](https://api-docs.deepseek.com/guides/tool_calls/#strict-mode-beta).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -84,23 +85,38 @@ class FakeDecide:
 
 
 class FakeChat:
-    """A chat model double: records the messages and answers with `reply`."""
+    """A structured chat double recording schema bindings and model messages."""
 
-    def __init__(self, reply: str = '["Yes, go ahead.", "Wait, explain the plan first."]') -> None:
+    def __init__(
+        self,
+        reply: str = '{"suggestions": ["Yes, go ahead.", "Wait, explain the plan first."]}',
+    ) -> None:
         self.reply = reply
         self.error: Exception | None = None
         self.built: list[str] = []
         self.invocations: list[Sequence[BaseMessage]] = []
+        self.bindings: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self.raw = AIMessage(content=reply)
+        self.metadata = {"model_provider": "anthropic", "stop_reason": "end_turn"}
 
     def factory(self, model: str) -> FakeChat:
         self.built.append(model)
         return self
 
-    async def ainvoke(self, messages: Sequence[BaseMessage]) -> AIMessage:
+    def with_structured_output(self, schema: dict[str, Any], **kwargs: Any) -> FakeChat:
+        self.bindings.append((schema, kwargs))
+        return self
+
+    async def ainvoke(self, messages: Sequence[BaseMessage]) -> dict[str, Any]:
         self.invocations.append(messages)
         if self.error is not None:
             raise self.error
-        return AIMessage(content=self.reply)
+        self.raw = AIMessage(content=self.reply, response_metadata=self.metadata)
+        try:
+            parsed = json.loads(self.reply)
+        except json.JSONDecodeError as error:
+            return {"raw": self.raw, "parsed": None, "parsing_error": error}
+        return {"raw": self.raw, "parsed": parsed, "parsing_error": None}
 
 
 class Harness:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, RootModel, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 MAX_SUGGESTION_CHARS = 500
 ReplyText = Annotated[
@@ -23,12 +23,14 @@ SuggestionReason = Literal[
 ]
 
 
-class DraftReplies(RootModel[list[ReplyText]]):
-    """Validate the model's JSON array before any candidate reaches the composer."""
+class DraftReplies(BaseModel):
+    """Structured model output, validated before candidates reach the composer."""
 
-    root: list[ReplyText] = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
 
-    @field_validator("root")
+    suggestions: list[ReplyText] = Field(min_length=1)
+
+    @field_validator("suggestions")
     @classmethod
     def distinct_replies(cls, replies: list[str]) -> list[str]:
         if len({reply.casefold() for reply in replies}) != len(replies):
