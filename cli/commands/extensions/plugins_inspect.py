@@ -234,11 +234,15 @@ def _where(exc: BaseException) -> str:
 
 def cmd_plugins_verify() -> int:
     """`ava plugins verify` — load every enabled plugin; exit 1 when any is skipped."""
-    from agent.extensions import load_extensions
+    from agent.state import plugin_state_schema
+    from ava.sdk_surface.extensions import load_extensions
 
     failures: list[tuple[str, BaseException]] = []
     try:
-        loaded = load_extensions(report=lambda name, exc: failures.append((name, exc)))
+        loaded = load_extensions(
+            report=lambda name, exc: failures.append((name, exc)),
+            validate_state=plugin_state_schema,
+        )
     except Exception as exc:  # the loader itself broke — not a contained plugin failure
         print("RESULT enabled=0 failed=0 rc=2")
         print(f"TOOL-ERROR {type(exc).__name__}: {str(exc)[:200]}")

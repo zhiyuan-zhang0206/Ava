@@ -26,21 +26,22 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from agent.extensions._discovery import (
+from base.packages.plugins import load_report
+from base.packages.plugins.config_face import CONFIG_FACE
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.packages.plugins.gate import check_manifest
+from base.packages.plugins.loading import StateGate
+from base.packages.plugins.loading.discovery import (
     FACE_MODULE,
     SURFACE_MODULE,
     enabled_plugin_dirs,
     pkg_of,
 )
-from base.packages.plugins import load_report
-from base.packages.plugins.config_face import CONFIG_FACE
-from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from base.packages.plugins.gate import check_manifest
 from base.packages.plugins.manifest import load_manifest
 from base.telemetry import report_sink_failure
 
 SURFACE_FACES: tuple[str, ...] = (SURFACE_MODULE, CONFIG_FACE)
-# The dotted packages a plugin's modules load under (`agent.extensions._discovery.pkg_of`).
+# The dotted packages a plugin's modules load under (`base.packages.plugins.loading.discovery.pkg_of`).
 _PLUGIN_PACKAGES = frozenset({"ava_builtins.plugins", "plugins"})
 ALL_FACES: tuple[str, ...] = (*SURFACE_FACES, FACE_MODULE)
 
@@ -126,22 +127,32 @@ def loaded_state_classes() -> frozenset[type[BaseModel]]:
 
 
 def build_registry(
-    faces: Sequence[str] = ALL_FACES, report: load_report.Reporter | None = None
+    faces: Sequence[str] = ALL_FACES,
+    report: load_report.Reporter | None = None,
+    *,
+    validate_state: StateGate | None = None,
 ) -> ExtensionRegistry:
     """What every enabled plugin declares through `faces`, as a new registry.
 
     Pure: nothing is registered anywhere, so building it again is the whole of a registry reload. Each
     declaration passes the gate (see the module docstring) or its plugin is reported as a load failure
     and left out.
+
+    A plugin that declares state classes is checked by `validate_state` (the agent kernel's
+    `plugin_state_schema`, supplied by a caller that runs agent code); a plugin that declares state
+    when no gate was supplied is a caller error, not a plugin failure, and raises.
     """
     keys = tuple(key for face in faces for key in FACE_KEYS.get(face, ()))
     admitted: list[tuple[str, PluginContributions]] = []
     for name, plugin_dir, contributions in declarations(faces, report):
+        if contributions.state and validate_state is None:
+            raise RuntimeError(
+                f"plugin {name!r} declares state classes but this load supplied no state gate "
+                "(`validate_state`); only a caller that runs agent code can load an agent-runtime face"
+            )
         try:
-            if contributions.state:
-                from agent.state import plugin_state_schema
-
-                plugin_state_schema(ExtensionRegistry(((name, contributions),)))
+            if contributions.state and validate_state is not None:
+                validate_state(ExtensionRegistry(((name, contributions),)))
             check_manifest(name, plugin_dir, contributions, keys)
         except Exception as exc:
             load_report.reporter(report)(name, exc)

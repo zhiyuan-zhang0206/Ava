@@ -372,9 +372,6 @@ ignore_imports = [
     "services.agent_runner.agent_host.host -> agent.db",
     "services.agent_runner.agent_host.pools -> agent.db",
     "services.agent_runner.agent_host.* -> agent.graph",
-    # The daemon is the composition root that builds the plugin `ExtensionRegistry` once the graph
-    # (and with it every agent_runtime face) is loaded, and hands it to `AgentHost`.
-    "services.agent_runner.agent_host.daemon -> agent.extensions",
     # The daemon hands the agent's own tool schema (`execute_code`) to the understanding-chunk
     # consumer loop, so its generation requests bind the same tools as the agent's own calls
     # (prefix-cache parity).

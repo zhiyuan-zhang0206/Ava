@@ -24,8 +24,9 @@ Each module holds one cohesive slice of the entry-point machinery:
   hierarchy;
 - `wraps` — the wrap layer primitive `install` applies
   (`ava/__init__.py` builds the curated `ava.extend` surface from it);
-- `plugin_loader` — the plugin-by-path loader (`load_plugin_module`,
-  `safe_load_plugin_module`) `agent.extensions.load_extensions` drives;
+- `extensions` — `load_extensions`: asks `base.packages.plugins.loading` (plugin discovery, the
+  by-path loader, the registry of what plugins declare) to import the enabled plugins' faces and
+  hands the result to `install`;
 - `skill_sources` — plugin-contributed skill-root providers, carried by the
   installation and kept off the `ava.skills` namespace so the installer can write
   them even when `AVA_SDK_DISABLE` stubs that namespace out; `scoped` holds one

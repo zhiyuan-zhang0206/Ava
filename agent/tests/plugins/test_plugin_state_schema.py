@@ -15,7 +15,6 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 import agent.state as agent_state
-from agent.extensions.registry import loaded_state_classes
 from agent.state import (
     BaseAgentState,
     PluginStateHandle,
@@ -25,6 +24,7 @@ from agent.state import (
     plugin_state_schema,
 )
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.packages.plugins.loading.registry import loaded_state_classes
 
 
 def _declared(state_cls: type[BaseAgentState], name: str) -> Any:

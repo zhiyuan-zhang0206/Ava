@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -48,32 +48,6 @@ class WrapLayer:
 SkillProvider = Callable[[], list[Path]]
 
 
-class ExternalState(Protocol):
-    """The checkpoint-compatible plugin-state codec an external attachment needs.
-
-    `ava` sits below `agent`, so the agent layer supplies it when it installs the surface
-    (`agent.extensions.plugin_state_codec` satisfies this as a module)."""
-
-    def encode_plugin_delta(self, delta: dict[str, Any], state_cls: type[Any]) -> dict[str, str]:
-        """Serialize a reducer input validated against `state_cls`, without coercing it."""
-        ...
-
-    def decode_plugin_delta(self, encoded: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
-        """Decode the codec envelope, rejecting channels `state_cls` does not have."""
-        ...
-
-    def apply_plugin_delta(self, state: Any, delta: dict[str, Any]) -> None:
-        """Replay one journal entry through the registered field reducers."""
-        ...
-
-    def load_snapshot(
-        self, agent_id: int, *, database: Any
-    ) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
-        """Read native state and pinned config through `database` (a `base.db.Database`); never
-        create or update a checkpoint."""
-        ...
-
-
 @dataclass(frozen=True)
 class Installation:
     """What the installed registry put into the process, and how to take it back.
@@ -97,13 +71,6 @@ class Installation:
     authority: ConfigAuthority | None = None
     clock_factory: Callable[[], Clock] | None = None
     producer: Callable[[], Any] | None = None
-    external_state: Callable[[], ExternalState] | None = None
-
-    def require_external_state(self) -> ExternalState:
-        """The plugin-state codec the agent layer supplied, imported on first use."""
-        if self.external_state is None:
-            raise RuntimeError("the SDK installation carries no external-attachment state codec")
-        return self.external_state()
 
     def require_catalog(self) -> ModelCatalog:
         """Return this installation's explicit model facts or refuse a non-model installation."""

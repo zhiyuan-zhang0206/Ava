@@ -1,6 +1,6 @@
 """Agent-runtime face of the ava_memory plugin — context notes, prompt section, recall hook, write check.
 
-Loaded only in the agent process: `agent.extensions` imports this module after
+Loaded only in the agent process: the plugin loader (`base.packages.plugins.loading`) imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin's SDK
 **surface** — the `ava.memory` namespace (PATH / PERSONAL_PATH / search) and the
 two `files.*` wraps that record written notes — lives in `plugin.py` and loads

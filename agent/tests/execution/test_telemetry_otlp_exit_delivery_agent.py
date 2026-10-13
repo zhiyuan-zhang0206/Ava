@@ -62,8 +62,8 @@ import os
 import ava
 from ava import external
 from agent.extensions import plugin_state_codec
-from agent.extensions.registry import build_registry
-from agent.state import build_agent_state
+from base.packages.plugins.loading.registry import build_registry
+from agent.state import build_agent_state, plugin_state_schema
 
 SAMPLE = {sample!r}
 LEASE = {{
@@ -87,7 +87,7 @@ external.control.require_active = require_active
 os.environ["AVA_MACHINE_NAME"] = "external-cli-probe"
 external.process_metadata = lambda: {{"pid": 1}}
 def load_snapshot(_agent_id, **_kwargs):
-    state = build_agent_state(build_registry())()
+    state = build_agent_state(build_registry(validate_state=plugin_state_schema))()
     state.ava_code__cwd = str(Path(SAMPLE).parent)
     return state, {{}}, None
 

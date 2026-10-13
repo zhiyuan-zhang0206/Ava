@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
-from agent.extensions import registry as registry_module
 from ava import external
 from ava.boot import process_clients
 from ava.sdk_surface import process_context
@@ -32,6 +31,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.packages.plugins.loading import registry as registry_module
 from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from tests.impersonation_support import attested_caller, recorded_tree
@@ -66,8 +66,12 @@ def native_checkpoint(
     )
     installation = replace(model_installation, registry=extensions, faces=True)
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
+
     # The attachment builds its state class from the loaded plugins' registry; hand it ours.
-    monkeypatch.setattr(registry_module, "build_registry", lambda: extensions)
+    def build_registry(*, validate_state: object = None) -> ExtensionRegistry:
+        return extensions
+
+    monkeypatch.setattr(registry_module, "build_registry", build_registry)
     handle = state_module.PluginStateHandle(IntegrationPlugin, "integration")
     state_module.build_agent_state(extensions)
 

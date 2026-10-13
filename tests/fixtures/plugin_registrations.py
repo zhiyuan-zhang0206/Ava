@@ -1,6 +1,6 @@
 """Per-test isolation for the installed SDK surface, the one process-global a plugin load writes.
 
-A full plugin load (`agent.extensions.load_extensions`, reached through the plugin catalog, a
+A full plugin load (`ava.sdk_surface.extensions.load_extensions`, reached through the plugin catalog, a
 test, or a lazy `ava.*` miss) installs the plugins' SDK surface into the `ava` module
 (`ava.sdk_surface.install`): `ava.<namespace>` surfaces, members, wrap layers, skill sources.
 Nothing used to put it back, so one plugin-loading test left the whole set in its xdist worker, and

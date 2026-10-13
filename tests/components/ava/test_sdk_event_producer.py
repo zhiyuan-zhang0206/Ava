@@ -163,8 +163,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
 ) -> None:
     import atexit
 
-    from agent import extensions
-    from ava.sdk_surface import install
+    from ava.sdk_surface import extensions, install
     from base.config import ConfigBoot
     from base.config.service_read import ConfigAuthority
     from base.lm.catalog import ModelCatalog
@@ -201,6 +200,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         authority: ConfigAuthority,
         producer: object,
         clock_factory: object,
+        validate_state: object,
     ) -> None:
         # Capture the production root inputs without installing unrelated plugins.
         captured.append(producer)
