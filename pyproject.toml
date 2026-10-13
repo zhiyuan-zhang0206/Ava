@@ -1155,6 +1155,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/host/db_authority/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/host/env/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

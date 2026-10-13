@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster import port_preflight
-from base.cluster.authority import POOLER_ADMIN
 from base.cluster.machine import MachineIdentity
+from base.host.db_authority.delivery import POOLER_ADMIN
 from base.paths import ava_home
 
 

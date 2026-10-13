@@ -10,7 +10,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from base.agents.upload_delivery.paths import MAX_UPLOAD_BYTES
-from base.cluster.authority.unit import UnitIdentity
+from base.host.db_authority.unit import UnitIdentity
 from base.paths import ava_home
 
 NAMESPACE = ".delivered-v1"

@@ -110,7 +110,7 @@ def _auth_headers() -> dict[str, str]:
         bearer = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
     home = runtime_config.env_file_path().parent
     if not bearer and (home / "db-authority" / "unit.json").exists():
-        from base.cluster.authority.unit import consume_unit
+        from base.host.db_authority.unit import consume_unit
 
         bearer = consume_unit(home.resolve()).api.token
     return bearer_header(bearer) if bearer else {}

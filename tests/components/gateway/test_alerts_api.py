@@ -26,9 +26,9 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
-from base.cluster.authority.api import AcceptanceCache
 from base.config import settings
 from base.events.live.tests.fakes import record_publishes
+from base.host.db_authority.api import AcceptanceCache
 from base.telemetry.alerts.native import load_native_group, stamp_native_sent
 from gateway.alerts import router as alerts_router
 from gateway.app import app

@@ -13,10 +13,11 @@ from unittest.mock import Mock
 import pytest
 
 from base import cluster
-from base.cluster import ClusterPorts, authority
+from base.cluster import ClusterPorts
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
+from base.host.db_authority import delivery
 from services.supervision.ava_root_glue.diagnostic_probes import pgbouncer
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -46,7 +47,7 @@ def test_pooler_protocol_requires_both_authenticated_listeners(
     admin = SimpleNamespace(password="pooler-admin-credential")  # noqa: S106 — test fixture
 
     monkeypatch.setattr(cluster, "get_record", _fake_get_record)
-    monkeypatch.setattr(authority, "read_pooler_admin", Mock(return_value=admin))
+    monkeypatch.setattr(delivery, "read_pooler_admin", Mock(return_value=admin))
     monkeypatch.setattr(ownership, "pooler", owner)
     monkeypatch.setattr(
         diagnostic_probes,

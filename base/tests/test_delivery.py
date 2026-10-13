@@ -17,11 +17,10 @@ from typing import Any
 
 import pytest
 
-from base.cluster import authority
-from base.cluster.authority import delivery
 from base.db import connections
 from base.db.code_version_gate import ProcessDbGate
 from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
+from base.host.db_authority import delivery, ledger, model
 from base.host.env import dotenv_boot
 from base.paths.home import resolve_ava_home
 
@@ -43,7 +42,7 @@ def home(tmp_path: Path) -> Path:
 @pytest.fixture
 def seeded(home: Path, seed_write_generation: Callable[[Path], Any]) -> Any:
     secret = seed_write_generation(home)
-    authority.ensure_pooler_admin(home, encrypt=_encrypt)
+    delivery.ensure_pooler_admin(home, encrypt=_encrypt)
     return secret
 
 
@@ -59,12 +58,12 @@ def _intent(home: Path, checkout: Path) -> None:
 def test_userlist_holds_exactly_the_generation_and_the_admin_console(
     home: Path, seeded: Any
 ) -> None:
-    body = authority.render_userlist(home, authority.active_generation(home)).decode()
-    admin = authority.read_pooler_admin(home)
+    body = delivery.render_userlist(home, delivery.active_generation(home)).decode()
+    admin = delivery.read_pooler_admin(home)
     assert body.splitlines() == [
         f'"{seeded.roles.gateway.name}" "{seeded.roles.gateway.verifier}"',
         f'"{seeded.roles.runner.name}" "{seeded.roles.runner.verifier}"',
-        f'"{authority.POOLER_ADMIN}" "{admin.verifier}"',
+        f'"{delivery.POOLER_ADMIN}" "{admin.verifier}"',
     ]
     for password in (seeded.roles.gateway.password, seeded.roles.runner.password, admin.password):
         assert password not in body
@@ -72,19 +71,19 @@ def test_userlist_holds_exactly_the_generation_and_the_admin_console(
 
 def test_pooler_admin_is_created_once_and_never_rotated(home: Path, seeded: Any) -> None:
     del seeded
-    first = authority.read_pooler_admin(home)
-    again = authority.ensure_pooler_admin(home, encrypt=_encrypt)
+    first = delivery.read_pooler_admin(home)
+    again = delivery.ensure_pooler_admin(home, encrypt=_encrypt)
     assert again == first
     info = delivery.pooler_admin_path(home).stat()
     assert info.st_mode & 0o077 == 0
 
 
 def test_write_grant_is_the_active_class_login_bound_to_the_ledger(home: Path, seeded: Any) -> None:
-    grant = authority.write_grant(home, "runner")
+    grant = delivery.write_grant(home, "runner")
     assert (grant.role, grant.password) == (seeded.roles.runner.name, seeded.roles.runner.password)
     assert grant.reference == {
         "number": 0,
-        "credential_digest": authority.active_generation(home).credential_digest,
+        "credential_digest": delivery.active_generation(home).credential_digest,
     }
     assert grant.dsn(_ENDPOINT) == (
         f"postgresql://{grant.role}:{grant.password}@127.0.0.1:6433/ava"
@@ -97,18 +96,18 @@ def test_a_tampered_secret_is_never_delivered(home: Path, seeded: Any) -> None:
     body = json.loads(path.read_text())
     body["roles"]["gateway"]["password"] = "x" * 40
     path.write_text(json.dumps(body))
-    with pytest.raises(authority.LedgerRefusedError, match="does not match the ledger"):
-        authority.write_grant(home, "gateway")
+    with pytest.raises(model.LedgerRefusedError, match="does not match the ledger"):
+        delivery.write_grant(home, "gateway")
 
 
 def test_a_pending_generation_is_never_delivered(home: Path) -> None:
-    from base.cluster.authority.ledger import begin_mint
+    from base.host.db_authority.ledger import begin_mint
 
-    groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
-    authority.create_ledger(home, owner="ava", groups=groups)
+    groups = model.Groups(gateway=model.GATEWAY_GROUP, runner=model.RUNNER_GROUP)
+    ledger.create_ledger(home, owner="ava", groups=groups)
     begin_mint(home, encrypt=_encrypt)
-    with pytest.raises(authority.LedgerRefusedError, match="no active generation"):
-        authority.write_grant(home, "gateway")
+    with pytest.raises(model.LedgerRefusedError, match="no active generation"):
+        delivery.write_grant(home, "gateway")
 
 
 # ── admitted runtime ─────────────────────────────────────────────────────────
@@ -119,7 +118,7 @@ def test_source_runtime_must_be_the_home_checkout(home: Path, tmp_path: Path) ->
     delivery.require_admitted_runtime(home, code_root=_REPO)
     other = tmp_path / "other-checkout"
     other.mkdir()
-    with pytest.raises(authority.AuthorityRefusedError, match="not the home's source checkout"):
+    with pytest.raises(model.AuthorityRefusedError, match="not the home's source checkout"):
         delivery.require_admitted_runtime(home, code_root=other)
 
 
@@ -140,7 +139,7 @@ def boot(monkeypatch: pytest.MonkeyPatch, home: Path) -> Iterator[Path]:
     for key in (
         "AVA_PROCESS_PROFILE",
         dotenv_boot.LAUNCHER_PROFILE_ENV_KEY,
-        authority.GENERATION_ENV,
+        delivery.GENERATION_ENV,
     ):
         os.environ.pop(key, None)
     # Not a bare assignment: a test body that monkeypatches this key records the value set here and
@@ -159,7 +158,7 @@ def test_a_delivered_login_for_this_home_survives_the_env_file(
     delivered = "postgresql://ava_g4_gateway:delivered@127.0.0.1:6433/ava"
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "gateway")
     monkeypatch.setitem(os.environ, "AVA_DB_URL", delivered)
-    monkeypatch.setitem(os.environ, authority.GENERATION_ENV, "4")
+    monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "4")
     result = dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == delivered
     assert result.db_authority_refusal is None
@@ -172,7 +171,7 @@ def test_a_sibling_homes_delivery_is_replaced_by_this_homes_endpoint(
     monkeypatch.setitem(
         os.environ, "AVA_DB_URL", "postgresql://ava_g4_gateway:sibling@127.0.0.1:7433/ava"
     )
-    monkeypatch.setitem(os.environ, authority.GENERATION_ENV, "4")
+    monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "4")
     dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
 
@@ -184,7 +183,7 @@ def test_an_admitted_operator_process_receives_the_gateway_login(boot: Path, see
     assert os.environ["AVA_DB_URL"] == (
         f"postgresql://{gateway.name}:{gateway.password}@127.0.0.1:6433/ava"
     )
-    assert os.environ[authority.GENERATION_ENV] == "0"
+    assert os.environ[delivery.GENERATION_ENV] == "0"
     assert result.db_authority_refusal is None
 
 
@@ -195,7 +194,7 @@ def test_a_foreign_runtime_gets_nothing_and_its_dial_fails_by_name(
     _intent(boot, tmp_path / "another-checkout")
     result = dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
-    assert authority.GENERATION_ENV not in os.environ
+    assert delivery.GENERATION_ENV not in os.environ
     refusal = result.db_authority_refusal
     assert refusal is not None and "source checkout" in refusal
     with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):

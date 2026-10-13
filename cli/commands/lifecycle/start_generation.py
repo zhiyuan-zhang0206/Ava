@@ -19,8 +19,8 @@ def _write_generation(home: Path) -> dict[str, object] | None:
     """The delivered write generation's non-secret reference: the ledger's active
     generation on a gateway home, the installed unit capability's on a pure
     agent-runner, None on a remote-managed plane."""
-    from base.cluster.authority import load_ledger
-    from base.cluster.authority.unit import unit_reference
+    from base.host.db_authority.ledger import load_ledger
+    from base.host.db_authority.unit import unit_reference
 
     ledger = load_ledger(home.resolve())
     if ledger is None:

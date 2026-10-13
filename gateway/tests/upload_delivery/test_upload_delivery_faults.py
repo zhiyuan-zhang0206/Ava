@@ -14,10 +14,10 @@ from pydantic import ValidationError
 
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import CopyProof, ReceiveRequest
-from base.cluster.authority.unit import UnitIdentity
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.db_authority.unit import UnitIdentity
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (

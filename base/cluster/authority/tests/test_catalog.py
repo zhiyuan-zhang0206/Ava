@@ -9,13 +9,13 @@ import pytest
 from psycopg import sql
 
 from base.cluster.authority import (
-    CatalogRefusedError,
     VacuumSkippedError,
     check_invariant,
     ensure_groups,
     ensure_monitor,
     vacuum_or_fail,
 )
+from base.host.db_authority.model import CatalogRefusedError
 from tests.path_scoped.db_authority_tests import OWNER, AuthorityCluster
 
 # (mutation run by the admin, expected violation fragment)

@@ -12,11 +12,11 @@ import yaml
 from fastapi.testclient import TestClient
 
 from base import config, paths
-from base.cluster.authority import unit
-from base.cluster.authority.api import telemetry_token
 from base.cluster.machine import MachineIdentity
 from base.config.domains.observability.settings import ObservabilitySettings
 from base.config.service_read import ConfigAuthority
+from base.host.db_authority import unit
+from base.host.db_authority.api import telemetry_token
 from base.host.env import runtime_config
 from cli.commands.observability import otel_collector as collector
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine

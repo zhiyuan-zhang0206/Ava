@@ -34,9 +34,9 @@ from redis.exceptions import RedisError
 
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
-from base.cluster.authority import read_pooler_admin
 from base.cluster.dataplane import pooler as pooler_files
 from base.config import settings
+from base.host.db_authority.delivery import read_pooler_admin
 from base.log import logger
 from base.paths import ava_home
 from base.telemetry import EventPipeline

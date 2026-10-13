@@ -14,7 +14,7 @@ from typing import Any
 
 import psycopg
 
-from base.cluster.authority.model import AuthorityRefusedError, Groups
+from base.host.db_authority.model import AuthorityRefusedError, Groups
 
 BOOTSTRAP_SUPERUSER_OID = 10
 
@@ -54,7 +54,7 @@ class RoleFacts:
     valid_until: datetime | None
     # `pg_authid.rolpassword` — a SCRAM verifier, not the plaintext login, but
     # still credential material; hidden from repr for the same reason as
-    # `RoleSecret.verifier` (base/cluster/authority/model.py).
+    # `RoleSecret.verifier` (base/host/db_authority/model.py).
     password: str | None = field(repr=False)
     configured: bool
     depended: bool

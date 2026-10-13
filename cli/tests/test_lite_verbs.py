@@ -130,9 +130,10 @@ def test_lite_cli_uses_its_local_runner_api_token(
     capability_token: str | None,
     expected: str | None,
 ) -> None:
-    from base.cluster.authority import AuthorityRefusedError, unit
     from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
     from base.config import settings
+    from base.host.db_authority import unit
+    from base.host.db_authority.model import AuthorityRefusedError
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.delenv("AVA_LAUNCHER_PROFILE", raising=False)
@@ -176,7 +177,7 @@ def test_lite_cli_uses_its_local_runner_api_token(
 def test_lite_cli_in_agent_profile_does_not_consume_operator_capability(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from base.cluster.authority import unit
+    from base.host.db_authority import unit
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")

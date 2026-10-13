@@ -19,15 +19,15 @@ from unittest.mock import Mock
 import pytest
 
 import base.db
-from base.cluster.authority.api import (
+from base.config import settings
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.host.db_authority.api import (
     publish_telemetry_token,
     read_telemetry_token,
     telemetry_token,
     telemetry_token_path,
 )
-from base.config import settings
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home

@@ -23,7 +23,7 @@ def join_gateway(values: dict[str, str], home: Path, capability: str | None) -> 
     machine API token of its capability — the carried bundle's at a join, the
     installed one's afterwards.
     """
-    from base.cluster.authority.unit import install_bundle
+    from base.host.db_authority.unit import install_bundle
     from base.host.env.bootstrap import fetch_bootstrap_config
 
     if "AVA_CLUSTER_SECRET" in values:
@@ -64,7 +64,7 @@ def _join_credential(home: Path, capability: str | None) -> tuple[Any, str]:
     A carried bundle is opened (authenticated, unexpired) before anything is
     fetched; without one the installed capability must exist.
     """
-    from base.cluster.authority.unit import (
+    from base.host.db_authority.unit import (
         CAPABILITY_KEY_ENV,
         load_unit_capability,
         no_capability_message,

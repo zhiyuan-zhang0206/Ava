@@ -76,8 +76,8 @@ LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
 _RUNNER_LOGIN = re.compile(r"ava_runner|ava_g(?:0|[1-9][0-9]*)_runner")
 
 # The non-secret launch-environment marker that makes a launcher-injected
-# AVA_DB_URL authoritative (mirrors base.cluster.authority.GENERATION_ENV),
-# and the delivered machine API token (base.cluster.authority.api).
+# AVA_DB_URL authoritative (mirrors base.host.db_authority.delivery.GENERATION_ENV),
+# and the delivered machine API token (base.host.db_authority.api).
 _GENERATION_ENV = "AVA_DB_GENERATION"
 _API_TOKEN_ENV = "AVA_API_TOKEN"  # noqa: S105 — env key name, not a credential
 
@@ -557,7 +557,7 @@ def _is_delivered_generation(file_url: str | None) -> bool:
 
 def operator_db_delivery(endpoint: str | None) -> dict[str, str] | str:
     """This operator process's gateway login on its home as environment, or why
-    it holds none (`base.cluster.authority.operator_environment`). Nothing for
+    it holds none (`base.host.db_authority.delivery.operator_environment`). Nothing for
     a home without a ledger, or over a delivery naming this home's `endpoint`
     that the process already carries."""
     home = resolve_ava_home().expanduser().resolve()
@@ -565,7 +565,8 @@ def operator_db_delivery(endpoint: str | None) -> dict[str, str] | str:
         return {}
     if not (home / "db-authority" / "ledger.json").exists():
         return {}
-    from base.cluster.authority import AuthorityRefusedError, operator_environment
+    from base.host.db_authority.delivery import operator_environment
+    from base.host.db_authority.model import AuthorityRefusedError
 
     try:
         return operator_environment(home, endpoint, launcher=launcher_context())
@@ -591,12 +592,12 @@ def _keeps_undeclared_db_url(value: str | None) -> bool:
 
 def is_delivered_unit_login() -> bool:
     """Whether os.environ carries exactly this runner home's installed unit
-    login (`base.cluster.authority.unit`) with its generation marker."""
+    login (`base.host.db_authority.unit`) with its generation marker."""
     generation = os.environ.get(_GENERATION_ENV)
     home = resolve_ava_home().expanduser().resolve()
     if not generation or not (home / "db-authority" / "unit.json").exists():
         return False
-    from base.cluster.authority.unit import is_delivered_login
+    from base.host.db_authority.unit import is_delivered_login
 
     return is_delivered_login(home, os.environ.get("AVA_DB_URL"), generation)
 
@@ -619,8 +620,8 @@ def deliver_unit_authority() -> EnvBootResult:
                 "database login; only the root launcher delivers it"
             )
         )
-    from base.cluster.authority import AuthorityRefusedError
-    from base.cluster.authority.unit import consume_unit
+    from base.host.db_authority.model import AuthorityRefusedError
+    from base.host.db_authority.unit import consume_unit
 
     try:
         capability = consume_unit(home)

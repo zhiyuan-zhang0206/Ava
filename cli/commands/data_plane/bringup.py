@@ -25,11 +25,11 @@ import psycopg
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
-from base.cluster.authority.model import Generation
 from base.cluster.dataplane import pooler
 from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
 from base.config import settings
+from base.host.db_authority.model import Generation
 from base.host.net.url_secret import url_host
 from base.log import logger
 from base.paths import ava_home
@@ -57,7 +57,7 @@ def ensure_gateway_data_plane(
         redis_identity,
         redis_password_from_env,
     )
-    from base.cluster.authority.api import publish_telemetry_token
+    from base.host.db_authority.api import publish_telemetry_token
 
     rec = get_record(ava_home())
     if rec is None:
@@ -99,7 +99,7 @@ def ensure_gateway_data_plane(
         print(f"  ✓ remote data plane reachable ({pg_line}; {redis_line})")
         return 0
 
-    from base.cluster.authority import load_ledger
+    from base.host.db_authority.ledger import load_ledger
     from cli.start_identity import needs_provision
 
     if not needs_provision(ava_home()) and load_ledger(ava_home().resolve()) is None:
@@ -323,11 +323,11 @@ def db_delivery(cls: DbAccess) -> dict[str, str]:
     remote-managed gateway plane delivers nothing here: its agents keep the
     provider projection.
     """
-    from base.cluster.authority import GENERATION_ENV, write_grant
+    from base.host.db_authority.delivery import GENERATION_ENV, write_grant
     from base.host.env.bootstrap import config_source_is_local
 
     if not config_source_is_local():
-        from base.cluster.authority.unit import unit_delivery
+        from base.host.db_authority.unit import unit_delivery
 
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class database service")
@@ -347,11 +347,11 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
     `cls` token. A remote-managed plane keeps no write generations and delivers
     nothing; its gateway-local services present the human secret.
     """
-    from base.cluster.authority.api import API_TOKEN_ENV, api_token
+    from base.host.db_authority.api import API_TOKEN_ENV, api_token
     from base.host.env.bootstrap import config_source_is_local
 
     if not config_source_is_local():
-        from base.cluster.authority.unit import unit_api_delivery
+        from base.host.db_authority.unit import unit_api_delivery
 
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class service")
@@ -372,7 +372,7 @@ def _ensure_pooler(
     """Serve exactly `generation` through the owned pooler (restart on change)."""
     if not settings.data_plane.pgbouncer_enabled:
         return
-    from base.cluster.authority import read_pooler_admin, render_userlist
+    from base.host.db_authority.delivery import read_pooler_admin, render_userlist
 
     rc = pgbouncer.ensure_pgbouncer(
         pg_port=rec.ports["postgres"],
@@ -389,7 +389,7 @@ def _ensure_pooler(
 def prove_generation_logins(home: Path, generation: Generation, endpoint: str) -> None:
     """Both logins of `generation` answer `SELECT 1` through the consumer endpoint
     (the pooler when enabled: SCRAM client auth plus the pass-through hop)."""
-    from base.cluster.authority import read_secret
+    from base.host.db_authority.ledger import read_secret
     from base.host.net.url_secret import url_with_userinfo
     from cli.commands.converge.health_preflight import probe_postgres
 
@@ -406,7 +406,7 @@ def adopt_gateway_login(home: Path, endpoint: str) -> None:
     its own boot, which ran before the ledger existed."""
     import os
 
-    from base.cluster.authority import GENERATION_ENV, write_grant
+    from base.host.db_authority.delivery import GENERATION_ENV, write_grant
 
     grant = write_grant(home, "gateway")
     os.environ["AVA_DB_URL"] = grant.dsn(endpoint)
@@ -420,15 +420,16 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
 
     from base import cluster
     from base.cluster import authority
+    from base.host.db_authority import delivery, ledger, model
 
     owner = cluster.db_identity()
-    groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
+    groups = model.Groups(gateway=model.GATEWAY_GROUP, runner=model.RUNNER_GROUP)
     authority.ensure_groups(conn, owner=owner, database=database, groups=groups)
     authority.ensure_monitor(conn, database=database)
-    authority.create_ledger(home, owner=owner, groups=groups)
-    authority.ensure_pooler_admin(home, encrypt=partial(authority.scram_verifier, conn))
+    ledger.create_ledger(home, owner=owner, groups=groups)
+    delivery.ensure_pooler_admin(home, encrypt=partial(authority.scram_verifier, conn))
     authority.mint_generation(conn, home)
-    generation = authority.require_ledger(home).generation
+    generation = ledger.require_ledger(home).generation
     if generation is None:
         raise RuntimeError("birth minted no write generation")
     return generation
@@ -441,8 +442,9 @@ def _admitted_generation(
     invariant holds."""
     from base import cluster
     from base.cluster import authority
+    from base.host.db_authority import ledger
 
-    ledger = authority.load_ledger(home)
+    ledger = ledger.load_ledger(home)
     if ledger is None:
         raise RuntimeError(legacy_home_refusal(home))
     if ledger.owner != cluster.db_identity():
@@ -495,6 +497,7 @@ def complete_gateway_data_plane(
                 raise RuntimeError(f"consumer database readiness failed: {error}")
     else:
         from base.cluster import authority
+        from base.host.db_authority import ledger
 
         home = ava_home().resolve()
         rec = cluster.get_record(ava_home())
@@ -510,7 +513,7 @@ def complete_gateway_data_plane(
             )
             prepare_memory_vectors(database_factory=database_factory)
         birth = needs_provision(ava_home())
-        if not birth and authority.load_ledger(home) is None:
+        if not birth and ledger.load_ledger(home) is None:
             raise RuntimeError(legacy_home_refusal(home))
         with admin_session(rec, database) as conn:
             if birth:
@@ -519,9 +522,9 @@ def complete_gateway_data_plane(
                 generation = _admitted_generation(conn, home, database, refresh=refresh_schema)
             _ensure_pooler(rec, database, home, generation, machine=machine)
             prove_generation_logins(home, generation, endpoint)
-            if authority.require_ledger(home).active is None:
+            if ledger.require_ledger(home).active is None:
                 verified = authority.verify_generation(conn, home)
-                authority.activate(home, verified)
+                ledger.activate(home, verified)
         adopt_gateway_login(home, endpoint)
         print(f"  ✓ database write generation {generation.number} admitted")
     if error := probe_redis(settings.data_plane.redis_url):
@@ -589,7 +592,8 @@ def _print_pooler_status() -> None:
     admin console as the operator entry from the home's authority store. No
     registry record means the port is unknowable — say so instead of a false `:0`."""
     from base.cluster import get_record
-    from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
+    from base.host.db_authority.delivery import read_pooler_admin
+    from base.host.db_authority.model import AuthorityRefusedError
 
     rec = get_record(ava_home())
     if rec is None:

@@ -14,11 +14,10 @@ import pytest
 from dotenv import dotenv_values
 
 from base import config
-from base.cluster import authority
-from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import _HUMAN, _MACHINE
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.host.db_authority import delivery, unit
 from base.host.env import bootstrap
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
@@ -152,7 +151,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
         scoped.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
         assert bringup.db_delivery("runner") == {
             "AVA_DB_URL": capability.dsn,
-            authority.GENERATION_ENV: "0",
+            delivery.GENERATION_ENV: "0",
         }
 
 

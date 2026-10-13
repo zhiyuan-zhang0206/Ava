@@ -31,7 +31,7 @@ from base.cluster.authority.catalog import (
     role_facts,
 )
 from base.cluster.authority.event_grants import grant_event_log_runner_access
-from base.cluster.authority.model import AuthorityRefusedError, CatalogRefusedError, Groups
+from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedError, Groups
 
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 

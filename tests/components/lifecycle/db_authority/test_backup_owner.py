@@ -29,11 +29,11 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.conninfo import conninfo_to_dict
 
-from base.cluster import authority
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
+from base.host.db_authority import delivery
 from base.host.net.url_secret import url_with_port
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -70,7 +70,7 @@ def maintenance(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
     assert conninfo_to_dict(endpoint).get("password") is None
     monkeypatch.setattr(settings.data_plane, "db_url", endpoint)
     monkeypatch.setitem(os.environ, "AVA_DB_URL", endpoint)
-    monkeypatch.delitem(os.environ, authority.GENERATION_ENV, raising=False)
+    monkeypatch.delitem(os.environ, delivery.GENERATION_ENV, raising=False)
     monkeypatch.delenv("AVA_DB_ADMIN_PASSWORD", raising=False)
     assert "AVA_DB_ADMIN_PASSWORD" not in (born.home / ".env").read_text()
     monkeypatch.setattr(offsite, "publish", _no_publish)

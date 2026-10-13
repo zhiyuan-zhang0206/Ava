@@ -23,7 +23,7 @@ RoleName = Annotated[str, StringConstraints(pattern=r"^[a-z_][a-z0-9_]{0,62}$")]
 # Credential digest — a one-way sha256 over the secret file's bytes, never
 # reversible into a login — is deliberately excluded from this hiding: it is
 # the safe-to-log fingerprint the whole authority library uses in launch
-# digests and journals (see `base/cluster/authority/ledger.py:credential_digest`).
+# digests and journals (see `base/host/db_authority/ledger.py:credential_digest`).
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 # repr=False: a SCRAM stored verifier is derived from the role's password and
 # is not meant to be displayed — hiding it here covers every field typed

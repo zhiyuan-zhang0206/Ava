@@ -376,10 +376,10 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     Refused on a pure agent-runner, a remote-managed plane and a home without an
     active generation.
     """
-    from base.cluster.authority import AuthorityRefusedError
-    from base.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
     from base.config import Settings, settings
     from base.config.service_read import ConfigAuthority
+    from base.host.db_authority.model import AuthorityRefusedError
+    from base.host.db_authority.unit import UnitIdentity, issue_bundle, write_bundle
 
     target = Path(out).expanduser().absolute()
     gateway_home = _gateway_authority_home("issue-unit")
@@ -427,7 +427,7 @@ def cmd_db_authority_install_unit(*, bundle: str) -> int:
     rotation: stop the unit, install the new bundle, start it. Refused on a gateway
     home (it keeps its own ledger) and on a home `ava init` has not initialized.
     """
-    from base.cluster.authority import AuthorityRefusedError
+    from base.host.db_authority.model import AuthorityRefusedError
     from base.host.env.bootstrap import BootstrapFetchError
     from base.paths.home import resolve_ava_home
     from cli.start_identity import require_initialized, stored_values

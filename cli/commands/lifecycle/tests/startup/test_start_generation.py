@@ -176,8 +176,7 @@ def test_generation_binds_the_delivered_write_generation(
 ) -> None:
     """A changed write generation alone changes the launch digest; only its
     number and credential digest are bound, never a password."""
-    from base.cluster.authority import load_ledger
-    from base.cluster.authority.ledger import ledger_path
+    from base.host.db_authority.ledger import ledger_path, load_ledger
 
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)

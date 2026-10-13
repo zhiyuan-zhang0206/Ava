@@ -183,7 +183,7 @@ generation's tokens, a unit's ops server its generation's two tokens, and the
 launcher delivers each service its class token (`AVA_API_TOKEN`) only while the
 API is authenticated. Remote units never hold the human secret (bootstrap does
 not serve it); their OTLP relay uses a telemetry token derived from it
-([API tokens](../../../base/cluster/authority/docs/api-tokens.ava.okf.md)).
+([API tokens](../../../base/host/db_authority/docs/api-tokens.ava.okf.md)).
 A home born before this model is refused; no conversion exists
 ([credential split](../../../docs/conventions/data/data-plane-secret-split.md#homes-born-before-this-model)).
 
@@ -212,7 +212,7 @@ alerts remain active; removing an old decision path is not evidence that a
 replacement is complete. A networked cluster has no in-band way to rotate its
 write generation, so a compromised unit or a lost capability bundle is
 contained by the manual procedure in the runbook
-([what a bundle exposes](../../../base/cluster/authority/docs/unit-bundle.ava.okf.md)).
+([what a bundle exposes](../../../base/host/db_authority/docs/unit-bundle.ava.okf.md)).
 
 No real-process test runs a gateway with its cluster secret set against a
 runner's real `/ops` and spawns an agent through it. The e2e stack blanks the

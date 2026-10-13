@@ -14,9 +14,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.authority.api import AcceptanceCache
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
+from base.host.db_authority.api import AcceptanceCache
 from base.lm import usage
 from base.lm.catalog import ModelCatalog
 from gateway.app import app

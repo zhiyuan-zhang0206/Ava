@@ -4,7 +4,7 @@ The served `AVA_DB_URL` is the credential-free endpoint whatever the gateway
 home holds: a local plane's active write generation is not projected, a
 remote-managed plane's provider password is stripped, and the retired runner
 password key is never served. A runner's login arrives only through its
-installed unit capability (`base.cluster.authority.unit`).
+installed unit capability (`base.host.db_authority.unit`).
 """
 
 from __future__ import annotations

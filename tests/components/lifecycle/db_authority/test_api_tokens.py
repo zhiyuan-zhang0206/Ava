@@ -24,8 +24,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from base.cluster import authority
-from base.cluster.authority import api, ledger, unit
 from base.cluster.machine import (
     GatewayApiTokenMissing,
     MachineIdentity,
@@ -34,6 +32,7 @@ from base.cluster.machine import (
 )
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
+from base.host.db_authority import api, delivery, ledger, model, unit
 from base.host.env import bootstrap
 from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
 from cli.commands.data_plane import bringup
@@ -49,8 +48,8 @@ _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
 
 
-def _tokens(home: Path) -> authority.GenerationSecret:
-    return authority.read_secret(home, authority.active_generation(home))
+def _tokens(home: Path) -> model.GenerationSecret:
+    return ledger.read_secret(home, delivery.active_generation(home))
 
 
 def _unadmit(home: Path) -> None:

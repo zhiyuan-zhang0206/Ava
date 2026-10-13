@@ -1,7 +1,7 @@
 ---
 type: doc
 title: macOS Firewall Manifest
-description: base/host/macos_firewall.py — the declarative per-binary Application Firewall allow-list manifest, renderer, and rootless-first reconciliation behind converge and `ava firewall`.
+description: base/host/system/macos_firewall.py — the declarative per-binary Application Firewall allow-list manifest, renderer, and rootless-first reconciliation behind converge and `ava firewall`.
 tags:
 - base
 - macos
@@ -12,7 +12,7 @@ tags:
 
 ## Manifest and reconciliation
 
-`base/host/macos_firewall.py` owns the declarative macOS Application Firewall
+`base/host/system/macos_firewall.py` owns the declarative macOS Application Firewall
 allow-list manifest. Each entry carries stable identity, purpose, machine scope,
 and globbed paths so versioned Python, Postgres, Homebrew, browser, and
 observability binaries are resolved after upgrades. Redis is absent by design:

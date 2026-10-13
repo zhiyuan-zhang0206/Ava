@@ -97,7 +97,7 @@ CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-hos
 NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 
 # How long a unit capability bundle (`ava cluster db-authority issue-unit`,
-# `base.cluster.authority.unit.issue_bundle`) stays installable by default
+# `base.host.db_authority.unit.issue_bundle`) stays installable by default
 # (`--ttl-hours`): a day covers the trip to one unit. The most it may ask for is
-# `base.cluster.authority.unit.UNIT_BUNDLE_MAX_TTL_S`.
+# `base.host.db_authority.unit.UNIT_BUNDLE_MAX_TTL_S`.
 UNIT_BUNDLE_TTL_S = 24 * 3600.0

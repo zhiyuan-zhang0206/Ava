@@ -39,23 +39,14 @@ import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import sql
 
-from base.cluster.authority import (
-    GATEWAY_GROUP,
-    RUNNER_GROUP,
-    GenerationSecret,
-    Groups,
-    activate,
-    create_ledger,
-    ensure_groups,
-    mint_generation,
-    read_secret,
-    require_ledger,
-)
+from base.cluster.authority import ensure_groups, mint_generation
 from base.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_postgres
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.deploy.schema.migrations import apply_pending_migrations
+from base.host.db_authority.ledger import activate, create_ledger, read_secret, require_ledger
+from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, GenerationSecret, Groups
 
 OWNER = "ava_test_owner"
 _TEMPLATE = "ava_test_tmpl"
