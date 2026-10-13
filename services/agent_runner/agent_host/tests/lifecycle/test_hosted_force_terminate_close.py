@@ -28,7 +28,7 @@ from psycopg_pool import AsyncConnectionPool
 import services.agent_runner.agent_host.host as agent_host_host
 from agent.graph.exec._subprocess import run_in_subprocess
 from agent.ownership import hosted
-from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.context import AvaContext
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
@@ -114,7 +114,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
 ) -> None:
     async with hosted_scope(expected_error=ImpersonationError) as resources:
         agent_id = agent_row(db_conn)
-        incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+        incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
         publisher = Mock()
         commands: list[int] = []
         failure = ImpersonationError(_FORCE_ERROR)
@@ -189,7 +189,7 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
     the race rather than claiming the ordering is routine.
     """
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
     _resurrect_shape(db_conn, agent_id)
     host = _host(
@@ -223,7 +223,7 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
 ) -> None:
     """Site host.py:683 — the turn starts already under the applied force."""
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
     graph = _raising_graph()
     host = _host(graph, aops_pool, model_catalog=model_catalog, database_gate=database_gate)
@@ -256,7 +256,7 @@ async def test_a_cli_style_user_force_closes_quietly_too(
 ) -> None:
     """No source whitelist: the durable shape, not the caller, classifies."""
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id, source="user")
     host = _host(
         _raising_graph(), aops_pool, model_catalog=model_catalog, database_gate=database_gate
@@ -290,7 +290,7 @@ async def test_the_held_wake_force_guard_stops_quietly(
 ) -> None:
     """Site host.py:371 (held-controls probe) — the wake must not crash."""
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
     monkeypatch.setattr(
         agent_host_host,
@@ -311,7 +311,7 @@ async def test_an_observed_force_still_crashes(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     command = _apply_force(db_conn, agent_id)
     db_conn.execute(
         "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' WHERE id=%s",
@@ -349,7 +349,7 @@ async def test_a_foreign_incarnation_force_still_crashes(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     command = _apply_force(db_conn, agent_id)
     db_conn.execute("UPDATE inbound_messages SET target_owner=%s WHERE id=%s", (uuid4(), command))
     db_conn.commit()
@@ -383,7 +383,7 @@ async def test_a_detached_pointer_still_crashes(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     command = _apply_force(db_conn, agent_id)
     assert command
     db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s", (agent_id,))
@@ -418,7 +418,7 @@ async def test_a_non_impersonation_exception_still_crashes(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
 
     async def graph_return(*args: object, **kwargs: object) -> dict[str, object]:
         _apply_force(db_conn, agent_id)
@@ -461,7 +461,7 @@ async def test_a_superseded_older_force_cannot_classify(
     shape.
     """
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)  # applied + unobserved, pointer -> this force
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
@@ -504,7 +504,7 @@ async def test_a_lapsed_lease_still_crashes(
 ) -> None:
     """Renewal is the host beat's job; a truly expired lease stays fail-closed."""
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at = now() - interval '5 minutes' WHERE id=%s",
         (agent_id,),
@@ -559,7 +559,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     from base.native_process.turn_identity import HostedTurnResources
 
     agent_id = agent_row(db_conn)
-    incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     original_close = ExecProcessDomain.close_confirmed
     failure = PermissionError("injected unverifiable domain closure")
     closed_domains: list[ExecProcessDomain] = []

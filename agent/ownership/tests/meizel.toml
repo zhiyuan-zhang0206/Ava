@@ -5,6 +5,4 @@ exports = ["ownership_support.py", "test_lifecycle_intent.py"]
 "test_lifecycle_intent.py" = ["ownership_support.py"]
 
 [debt.private-name]
-"test_hosted_completion.py -> ownership_support.py#_admit" = 1
 "test_hosted_completion.py -> test_lifecycle_intent.py#_command" = 1
-"test_lifecycle_intent.py -> ownership_support.py#_admit" = 1

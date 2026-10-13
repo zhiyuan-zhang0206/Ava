@@ -22,7 +22,7 @@ import services.entrypoints.im_bridge.adapters.feishu as feishu_module
 from services.entrypoints.im_bridge.adapters.feishu import (
     MAX_SEGMENT_CHARS,
     FeishuAdapter,
-    _segment,
+    segment_text,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
@@ -391,7 +391,7 @@ async def test_send_segments_long_text(adapter: FeishuAdapter) -> None:
         text = "a" * (MAX_SEGMENT_CHARS * 2 + 123)
         await adapter.send("ou_user_1", text)
     assert len(rest.created) == 3
-    for request, expected in zip(rest.created, _segment(text, MAX_SEGMENT_CHARS), strict=True):
+    for request, expected in zip(rest.created, segment_text(text, MAX_SEGMENT_CHARS), strict=True):
         assert request.receive_id_type == "open_id"
         assert request.request_body.receive_id == "ou_user_1"
         assert request.request_body.msg_type == "text"
@@ -492,9 +492,9 @@ async def test_send_to_owner_after_inbound_uses_last_open_id(
 
 
 def test_segment_chunks() -> None:
-    assert _segment("", 10) == []
-    assert _segment("abc", 10) == ["abc"]
-    assert _segment("abcdefghij", 4) == ["abcd", "efgh", "ij"]
+    assert segment_text("", 10) == []
+    assert segment_text("abc", 10) == ["abc"]
+    assert segment_text("abcdefghij", 4) == ["abcd", "efgh", "ij"]
 
 
 # -- REST timeout (task #698 G6) -------------------------------------------

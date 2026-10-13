@@ -17,7 +17,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
-from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.cluster.machine import MachineIdentity
@@ -45,7 +45,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
     machine_identity.set(name="test")
     async with hosted_scope() as resources:
         agent_id = agent_row(db_conn)
-        incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
+        incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
         traces: list[str] = []
         provider = TracerProvider()
         tracer = provider.get_tracer(__name__)

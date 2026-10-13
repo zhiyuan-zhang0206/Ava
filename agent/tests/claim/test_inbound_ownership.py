@@ -14,7 +14,7 @@ from agent.db import (
 from agent.graph.claim._batch import defer_chats_to_pending
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
-from agent.ownership.tests.ownership_support import _admit, agent_row, insert
+from agent.ownership.tests.ownership_support import admit_owner, agent_row, insert
 from base.config import settings
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
@@ -96,7 +96,7 @@ async def test_stale_or_missing_owner_cannot_claim(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert(db_conn, agent_id)
     stale = None if missing else RuntimeIncarnation(agent_id, owner.generation, uuid4())
     with pytest.raises(RuntimeOwnershipLostError):
@@ -122,7 +122,7 @@ async def test_two_owners_compete_only_current_owner_claims(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert(db_conn, agent_id)
 
     async def claim(token: RuntimeIncarnation) -> list[int]:
@@ -147,7 +147,7 @@ async def test_expired_owner_zero_claim_then_takeover(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    old = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    old = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert(db_conn, agent_id)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at=now()-interval '1 second' WHERE id=%s",
@@ -169,7 +169,7 @@ async def test_owner_locked_queue_mutation_rolls_back(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert(db_conn, agent_id)
     with pytest.raises(RuntimeError, match="injected rollback"):
         async with async_write_transaction(aops_pool) as conn:
@@ -187,7 +187,7 @@ async def test_lock_wait_past_unchanged_lease_expiry_refuses_claim(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert(db_conn, agent_id)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at=clock_timestamp()+interval '1 second' WHERE id=%s",
@@ -221,7 +221,7 @@ async def test_claim_lock_timeout_releases_connection_for_retry(
         settings.agent, "db_pool_acquire_timeout_seconds", 0.05
     )  # lock timeout 50ms
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert(db_conn, agent_id)
     async with async_write_transaction(aops_pool) as blocker:
         await blocker.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
@@ -243,7 +243,7 @@ async def test_missing_redis_publish_recovers_from_durable_pg(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     # Direct SQL deliberately omits all Redis notifications.
     inbound = insert(db_conn, agent_id)
     assert [
@@ -259,7 +259,7 @@ async def test_old_owner_cannot_finalize_or_defer_successor_work(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = insert(db_conn, agent_id)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     stale = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -277,7 +277,7 @@ async def test_chat_finalization_does_not_ack_lifecycle_intent(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     chat = insert(db_conn, agent_id)
     lifecycle = insert(db_conn, agent_id)
     db_conn.execute(

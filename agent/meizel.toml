@@ -53,7 +53,6 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "tests/claim/test_claim_dispatch.py -> graph/tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
 "tests/claim/test_claim_restart.py -> graph/tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
 "tests/claim/test_claim_terminate_cancel.py -> graph/tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
-"tests/claim/test_inbound_ownership.py -> ownership/tests/ownership_support.py#_admit" = 1
 "tests/execution/test_exec_child.py -> execution/child.py#_ChildContext" = 1
 "tests/execution/test_exec_child.py -> execution/child.py#_apply_overlay_scope" = 1
 "tests/execution/test_exec_child.py -> execution/child.py#_build_state_slot" = 1

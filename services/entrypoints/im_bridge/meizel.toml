@@ -1,7 +1,7 @@
-exports = ["adapters", "daemon.py", "ingress", "types.py"]
+exports = ["adapters", "daemon.py", "ingress", "tests", "types.py"]
 
 [uses]
-"adapters" = ["config.py", "core.py", "cursor_store.py", "daemon.py", "gateway_client.py", "ingress", "outbound", "state.py", "tests", "types.py"]
+"adapters" = ["config.py", "ingress", "state.py", "types.py"]
 "alert_outbound.py" = ["outbound", "types.py"]
 "core.py" = ["config.py", "copy.py", "cursor_store.py", "gateway_client.py", "notice_bridge.py", "outbound", "push_watchdog.py", "spawn_menu.py", "state.py", "timeline_acceptance.py", "types.py"]
 "daemon.py" = ["adapters", "alert_outbound.py", "config.py", "core.py", "gateway_client.py", "types.py"]
@@ -12,11 +12,8 @@ exports = ["adapters", "daemon.py", "ingress", "types.py"]
 "outbound" = ["cursor_store.py", "types.py"]
 "push_watchdog.py" = ["config.py", "copy.py", "types.py"]
 "spawn_menu.py" = ["copy.py", "gateway_client.py", "types.py"]
-"tests" = ["alert_outbound.py", "config.py", "copy.py", "core.py", "cursor_store.py", "daemon.py", "gateway_client.py", "notice_bridge.py", "outbound", "push_watchdog.py", "state.py", "timeline_acceptance.py", "types.py"]
+"tests" = ["adapters", "alert_outbound.py", "config.py", "copy.py", "core.py", "cursor_store.py", "daemon.py", "gateway_client.py", "ingress", "notice_bridge.py", "outbound", "push_watchdog.py", "state.py", "timeline_acceptance.py", "types.py"]
 "timeline_acceptance.py" = ["outbound", "types.py"]
-
-[debt.manifest-cycle]
-"daemon.py -> adapters" = 1
 
 [debt.private-name]
 "tests/im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> push_watchdog.py#_sleep" = 3
