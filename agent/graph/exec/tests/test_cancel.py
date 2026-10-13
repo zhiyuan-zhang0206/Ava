@@ -34,7 +34,6 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import LlmLedger, exec_node, llm_node
 from agent.graph.exec import node
 from agent.graph.exec.node import (
     ExecCancelled,
@@ -42,7 +41,10 @@ from agent.graph.exec.node import (
     ExecDone,
     ExecLifecycle,
     ExecTimedOut,
+    exec_node,
 )
+from agent.graph.llm.node import llm_node
+from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext

@@ -22,8 +22,8 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import claim_node
 from agent.graph import node_log as _node_log
+from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import AvaContext
