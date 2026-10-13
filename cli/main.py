@@ -23,6 +23,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -37,7 +38,7 @@ from base.native_process.os_platform import (
 # adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli import parsers
 
-__all__ = ["entry", "main"]
+__all__ = ["entry", "main", "run_command"]
 
 # The verbs that bring this unit up (every in-process `cmd_start`) open the
 # loguru sinks a service process has, under these names. Importing `base.log`
@@ -205,6 +206,25 @@ def main(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
+    """Run one command with the operator event pipeline as its telemetry producer."""
+    return run_command(
+        argv, retained_children=retained_children, producer_factory=_operator_producer
+    )
+
+
+def _operator_producer(database_factory: Any, *, machine: Any, home: Path) -> Any:
+    from cli.database import operator_event_pipeline
+
+    return operator_event_pipeline(database_factory, machine=machine, home=home)
+
+
+def run_command(
+    argv: list[str] | None,
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+    producer_factory: Callable[..., Any],
+) -> int:
+    """Run one command; `producer_factory(database_factory, machine=, home=)` builds its producer."""
     # Line-buffer stdout so a long command piped into `tee` (every detached rollout /
     # updater session) streams its own progress in real time instead of block-buffering
     # it to the end of the log, out of order against its children's unbuffered output.
@@ -235,7 +255,7 @@ def main(
             print(f"ava start: {exc}", file=sys.stderr)
             return 1
     from base.paths import ava_home
-    from cli.database import operator_database_factory, operator_event_pipeline
+    from cli.database import operator_database_factory
     from cli.database.runtime import CommandRuntime
 
     command = CommandRuntime.create()
@@ -243,7 +263,7 @@ def main(
     database_factory = operator_database_factory(local_host=command.machine.host)
     args.database_factory = database_factory
     args.database_for_url = database_factory.for_url
-    producer = operator_event_pipeline(database_factory, machine=command.machine, home=ava_home())
+    producer = producer_factory(database_factory, machine=command.machine, home=ava_home())
     args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission

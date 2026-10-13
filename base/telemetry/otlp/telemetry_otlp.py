@@ -761,10 +761,13 @@ class ExportingEventPipeline(EventPipeline):
         *,
         writer: Callable[[list[Event], OtlpBackend], None],
         export_allowed: Callable[[], bool],
+        flush_interval_s: float = 0.5,
     ) -> None:
         self._exporter = OtlpBackend(export_allowed=export_allowed)
         self._exports_finished = False
-        super().__init__(writer=lambda events: writer(events, self._exporter))
+        super().__init__(
+            writer=lambda events: writer(events, self._exporter), flush_interval_s=flush_interval_s
+        )
 
     @property
     def stopped(self) -> bool:
