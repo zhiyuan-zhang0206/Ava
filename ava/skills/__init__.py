@@ -5,17 +5,16 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import Any
 
 from ava.sdk_surface import process_context, skill_sources
-from base.log import logger
-from base.packages.skills.names import SkillIdentity, display_name, match_key
+from ava.skills.skill_model import Skill as Skill
+from ava.skills.skill_model import SkillNameCollision as SkillNameCollision
+from ava.skills.skill_model import flatten
+from ava.skills.skill_model import identifier as identifier
+from ava.skills.skill_model import target as target
+from ava.skills.skill_proxies import Namespace, SkillProxy, node_to_obj
 from base.paths import skills_dir
-
-if TYPE_CHECKING:
-    # Annotation-only on the mount signatures; imported at the call site so the
-    # stack stays off every exec child (task #3816; _TYPE_CHECKING_ALLOWED).
-    from base.packages.skills.index import SkillFile
 
 # Attribution timing: a `skill_invoked` row at depth `"loaded"` — the only
 # depth the producer writes — means the agent CONSUMED a skill's SKILL.md body
@@ -85,50 +84,6 @@ if TYPE_CHECKING:
 # by the agent via ava.files.read.
 
 
-class Skill(TypedDict):
-    """Metadata for one skill. `name` is the bare identifier from frontmatter
-    (canonically dash-separated). `description` / `path` as usual. `namespace`
-    is the tuple of folder segments above the skill (raw folder names; `()` = a
-    bare top-level skill). Both fields keep the RAW spelling found on disk —
-    `identifier(skill)` renders the canonical dash display id and
-    `target(skill)` the `ava.skills` access path."""
-
-    name: str
-    description: str
-    path: str
-    namespace: tuple[str, ...]
-
-
-class SkillNameCollision(ValueError):  # noqa: N818
-    """Two different skill directories under one mount root fold to the same
-    namespace path once dash and underscore are unified (`foo-bar/` beside
-    `foo_bar/`, or two SKILL.md files claiming the same `name:`).
-
-    The tree can hold only one of them, so the loader refuses rather than
-    silently keeping whichever sorted last — a skill vanishing with no signal is
-    the failure mode worth crashing over. Rename one; dash is canonical."""
-
-
-def identifier(skill: Skill) -> str:
-    """Composer / display identifier: the `:`-joined dash path, e.g.
-    `superpowers:brainstorming`, `coding:tdd`, or a bare `goal` when the skill
-    has no namespace.
-
-    Canonical display form, so a skill whose folder or frontmatter still spells
-    itself with underscores (a hand-installed legacy package, a plugin whose
-    directory must stay a Python package) still presents the ecosystem
-    spelling. `:` separates namespace segments in display; `target()` renders
-    the loadable `ava.skills` spelling of the same path (`-`/`:` -> `_`/`.`)."""
-    return ":".join(display_name(seg) for seg in (*skill["namespace"], skill["name"]))
-
-
-def target(skill: Skill) -> str:
-    """`ava.skills` access path (attr form): `.`-joined, hyphens→underscores,
-    e.g. `superpowers.test_driven_development`, or bare `goal`. The Python
-    projection of `identifier` — the two are the same path in two spellings."""
-    return ".".join(match_key(seg) for seg in (*skill["namespace"], skill["name"]))
-
-
 # Plugin-contributed skill-root providers: the installed list lives in
 # `ava.sdk_surface.skill_sources` (framework-internal, written only by `ava.sdk_surface.install`), off
 # this disable-able `ava.skills` module.
@@ -139,307 +94,13 @@ def _provider_roots() -> list[Path]:
     return skill_sources.roots()
 
 
-# ─── scanning: folder tree = namespace tree ────────────────────────────────
-#
-# A tree node is either a `_Leaf` (a pure skill — folder with SKILL.md, no
-# skill-bearing children) or an `_NS` (a namespace dict, optionally carrying its
-# own `.skill` for a root skill and/or an INDEX.md `.doc`). Both are concrete
-# wrapper types so `isinstance` distinguishes them — a TypedDict is a plain dict
-# at runtime, so the leaf needs a wrapper, and the namespace a dedicated subclass
-# to hang `.skill` / `.doc` off.
-
-
-class _Leaf:
-    """A pure skill leaf in the namespace tree — a folder with a SKILL.md and no
-    skill-bearing children. Wraps a `Skill` so it's not confused with a
-    namespace `dict`."""
-
-    __slots__ = ("skill",)
-
-    def __init__(self, skill: Skill) -> None:
-        self.skill = skill
-
-
-class _NS(dict):
-    """A namespace node — a folder that contains skill-bearing children. A `dict`
-    of `child_attr -> (_Leaf | _NS)` carrying two optional folder-level fields:
-
-      - `skill`: set when the folder ALSO has its own SKILL.md (a *root skill* —
-        a folder that is both an invocable skill and a namespace, like a Python
-        package whose `__init__` carries a body alongside its submodules).
-      - `doc`: an authored namespace description from a sibling INDEX.md (a folder
-        that is only a label, like a package `__init__` with just a docstring).
-        A root skill's own description takes precedence over INDEX.md.
-    """
-
-    skill: Skill | None = None
-    doc: str | None = None
-
-
-def _descend(tree: dict, segs: tuple[str, ...]) -> _NS:
-    """Walk `segs` from `tree`, returning the `_NS` at that path (creating nodes
-    as needed). A `_Leaf` met mid-walk is promoted to an `_NS` that keeps the
-    leaf's skill — the folder turns out to be a root skill (a skill AND a
-    namespace)."""
-    node: dict = tree
-    for seg in segs:
-        seg_attr = match_key(seg)
-        child = node.get(seg_attr)
-        if isinstance(child, _Leaf):
-            promoted = _NS()
-            promoted.skill = child.skill
-            node[seg_attr] = promoted
-            child = promoted
-        elif not isinstance(child, _NS):
-            child = _NS()
-            node[seg_attr] = child
-        node = child
-    return node  # type: ignore[return-value]  # callers pass a non-empty segs, so node is an _NS
-
-
-def _claim(claimed: dict[tuple[str, ...], str], attr_path: tuple[str, ...], src: str) -> None:
-    """Record that `src` owns `attr_path` in the tree, refusing a second owner.
-
-    Dash and underscore fold to one attribute path, so `foo-bar/` and `foo_bar/`
-    would both land on `tree['foo_bar']` and the later one would silently win.
-    Every namespace prefix and every leaf key is claimed by the directory that
-    produced it; a different directory claiming the same path raises."""
-    prev = claimed.get(attr_path)
-    if prev is not None and prev != src:
-        raise SkillNameCollision(
-            f"skill path {'.'.join(attr_path)!r} is claimed by both {prev} and {src} — "
-            "dash and underscore are the same name (base/packages/skills/names.py). "
-            "Rename one; dash is canonical."
-        )
-    claimed[attr_path] = src
-
-
-class SkillIndexBuilder:
-    """Builds the skill namespace tree from mount roots.
-
-    Owns the state the mount threads through — the tree, the per-root
-    claimed-paths registry, and the cross-root seen-hashes dedup set — as
-    instance state. The folder scan + frontmatter parse itself lives in
-    `base.packages.skills.index` (doorplate ⑤): one builder behind every skill read
-    path, so the loader and the lint cannot drift (they had: the INDEX.md gate
-    compared raw names where the SKILL.md gate folded dash/underscore, and the
-    lint's separate traversal once skipped a three-deep tree entirely).
-    """
-
-    def __init__(self, base_ns: tuple[str, ...] = ()) -> None:
-        self.tree: dict = {}
-        self._base_ns = base_ns
-        # attr path -> the source dir that owns it; `mount()` resets it, so a
-        # collision is only refused within one root (a later root overriding an
-        # earlier one is the documented provider-root behaviour).
-        self._claimed: dict[tuple[str, ...], str] = {}
-        # SHA256 of every SKILL.md content loaded across all mount points —
-        # same content at different paths (e.g. .claude/skills/, .agents/skills/,
-        # .ava/skills/ — usually links) must not produce duplicate entries.
-        self._seen_hashes: set[str] = set()
-
-    def mount(self, root: Path, gate: set[str] | None) -> None:
-        """Scan every `<root>/**/SKILL.md` (+ folder-level `INDEX.md`) into the
-        tree, namespaced by folder path under `root` (prefixed by `base_ns`).
-
-        A folder with both a SKILL.md and skill-bearing children becomes a
-        *root skill* (its `_NS` carries `.skill`); an `INDEX.md` sets that
-        folder's authored namespace `.doc`.
-
-        `gate` not None (the overlay reservation) surfaces only entries whose
-        top-level folder under `root` is in the set — compared through
-        `match_key` (dash/underscore fold). A malformed SKILL.md is skipped
-        with a loud warning rather than crashing the scan; a *name collision*
-        is not skipped but raised, because the alternative is a skill
-        silently disappearing.
-        """
-        if not root.is_dir():
-            return
-        # Claimed paths are per-root: a later root overriding an earlier one
-        # is the documented provider-root behaviour, so a collision is only
-        # refused between two directories of the SAME mount root.
-        self._claimed = {}
-        gate_keys = None if gate is None else {match_key(g) for g in gate}
-        # The scan is `base.packages.skills.index` (doorplate ⑤), mtime-cached: this
-        # mount runs on every system-prompt rebuild, so the cache turns the
-        # repeated scans into a stat walk. Entries arrive parent-before-child
-        # (sorted folders) — the arrival order the tree converges under — and
-        # include the mount point itself, so a SKILL.md at the root (empty
-        # rel) still loads as a bare root skill.
-        from base.packages.skills.index import (
-            SkillIndex,  # heavy stack, deferred per-call (task #3816)
-        )
-
-        index = SkillIndex.cached([root])
-        for entry in index.entries:
-            self._mount_folder_skill(root, entry, gate_keys)
-            self._mount_folder_index(entry, gate_keys)
-
-    def _mount_folder_skill(self, root: Path, entry: SkillFile, gate_keys: set[str] | None) -> None:
-        """Mount one folder's SKILL.md (if any) as a leaf or root skill.
-
-        `entry` is the folder's materialized scan record (doorplate ⑤) — the
-        read + frontmatter parse happened in the index. `gate_keys` the folded
-        gate set, or None for no gate. None-returning stages do the skipping:
-        the gate, content-hash dedup, and the parse error (malformed /
-        unreadable -> warning) each bail out, keeping the pipeline flat.
-        """
-        skill_md = entry.skill_md
-        if skill_md is None:
-            return
-        rel = entry.rel
-        # Gate check: a root SKILL.md at the mount point (empty rel) passes
-        # unconditionally — root skills are always available.
-        if gate_keys is not None and rel and match_key(rel[0]) not in gate_keys:
-            return
-        # Dedup by content hash — registered even for a malformed file, so the
-        # same content at another path is skipped silently, not warned twice
-        # (the pre-index read-then-parse flow behaved the same way).
-        if entry.content_hash is not None:
-            if entry.content_hash in self._seen_hashes:
-                return
-            self._seen_hashes.add(entry.content_hash)
-        if entry.error is not None:
-            logger.warning("skipping malformed skill {}: {}", skill_md, entry.error)
-            return
-        # Supply-chain gate (audit round-2 up-security-trust P0-1): the same
-        # critical rule table the CLI install path refuses on, applied at load
-        # time — a project skill (`.claude/skills` etc., mounted with no user
-        # action) must not reach the namespace or the system-prompt index.
-        if entry.security_rules:
-            logger.warning(
-                "refusing to mount skill {}: supply-chain scan flagged {}",
-                skill_md,
-                ", ".join(entry.security_rules),
-            )
-            return
-        name = entry.name
-        description = entry.description
-        if name is None or description is None:
-            # Index contract: error is None only when name+description parsed.
-            raise RuntimeError(f"skill index contract violated for {skill_md}")
-        skill: Skill = {
-            "name": name,
-            "description": description,
-            "path": str(entry.folder),
-            "namespace": (),
-        }
-        # Identity check (design: install-point identity): the install-point directory is the
-        # source of identity, the frontmatter `name:` is the display claim.
-        # They must fold to one key — a mismatch means the skill would
-        # silently present under a name that is not its own, so it fails
-        # fast here (same family as SkillNameCollision) instead of loading
-        # under two names. A mount-point root skill (empty rel) has no
-        # directory name to check against.
-        if rel:
-            SkillIdentity.from_dir(rel[-1]).verify(SkillIdentity.from_frontmatter(name))
-        ns = self._base_ns + rel[:-1] if rel else self._base_ns
-        skill["namespace"] = ns
-        parent = _descend(self.tree, ns)
-        key = match_key(skill["name"])
-        self._claim_paths(root, rel, key, str(skill_md.parent))
-        existing = parent.get(key)
-        if isinstance(existing, _NS):
-            existing.skill = skill  # children mounted first — this folder is a root skill
-        else:
-            parent[key] = _Leaf(skill)
-            self._maybe_promote(parent, key, skill, ns)
-
-    def _mount_folder_index(self, entry: SkillFile, gate_keys: set[str] | None) -> None:
-        """Mount one folder's INDEX.md (if any) as its namespace `.doc`.
-
-        A root INDEX.md (empty rel) is unconditionally ignored — the mount
-        point's own description is not a namespace label. The gate folds
-        dash/underscore like the SKILL.md gate (this is the fix for the old
-        INDEX.md loop comparing raw names).
-        """
-        index_md = entry.index_md
-        if index_md is None:
-            return
-        rel = entry.rel
-        if not rel or (gate_keys is not None and match_key(rel[0]) not in gate_keys):
-            return
-        if entry.index_text is None:
-            return  # unreadable INDEX.md: no doc (the pre-index flow crashed here)
-        _descend(self.tree, self._base_ns + rel).doc = entry.index_text
-
-    def _claim_paths(self, root: Path, rel: tuple[str, ...], key: str, src: str) -> None:
-        """Claim every namespace prefix plus the leaf key for `src`.
-
-        Dash and underscore fold to one attribute path, so `foo-bar/` and
-        `foo_bar/` would both land on the same node and the later one would
-        silently win. Every namespace prefix and every leaf key is claimed by
-        the directory that produced it; a different directory claiming the
-        same path raises `SkillNameCollision`.
-        """
-        attr_path = tuple(match_key(seg) for seg in self._base_ns)
-        for depth in range(len(rel) - 1):
-            attr_path += (match_key(rel[depth]),)
-            _claim(self._claimed, attr_path, str(root.joinpath(*rel[: depth + 1])))
-        _claim(self._claimed, (*attr_path, key), src)
-
-    def _maybe_promote(self, parent: _NS, key: str, skill: Skill, ns: tuple[str, ...]) -> None:
-        """Auto-promote a leaf skill to a root skill of its parent namespace.
-
-        When a leaf skill has the same name as its parent namespace segment
-        and the parent has no own root skill, the leaf is promoted: this turns
-        `ava_fleet.ava_fleet` (redundant) into just `ava_fleet` — the folder
-        acts as both namespace and root skill without requiring a separate
-        SKILL.md at the parent level.
-        """
-        if ns and parent.skill is None and key == match_key(ns[-1]):
-            parent.skill = {
-                "name": skill["name"],
-                "description": skill["description"],
-                "path": skill["path"],
-                "namespace": ns[:-1],
-            }
-
-
-def _scan_tree() -> dict:
-    """Build the full namespace tree: `~/.ava/skills/` (install-registry gated)
-    plus provider roots (scanned last, so a project-local skill overrides a
-    same-named converged one).
-
-    A shared `seen_hashes` set tracks SHA256 hashes of every SKILL.md content
-    loaded across all mount points, preventing duplicate entries when the same
-    skill file content appears at multiple paths (e.g. `.claude/skills/`,
-    `.agents/skills/` and `.ava/skills/` in the same repo, where two of the
-    three are usually links back to the third).
-    """
+def _scan_tree() -> dict[str, Any]:
+    """The full namespace tree: `~/.ava/skills/` (install-registry gated) plus the provider
+    roots; the scan itself is `skill_index.scan_tree`, which takes all three as arguments."""
+    from ava.skills.skill_index import scan_tree
     from base.packages.extensions.install_registry import loadable_skill_names
 
-    builder = SkillIndexBuilder()
-    builder.mount(skills_dir(), loadable_skill_names())
-    for root in _provider_roots():
-        builder.mount(root, None)
-    return builder.tree
-
-
-def _flatten(tree: dict) -> list[Skill]:
-    """All `Skill` entries in the tree, namespace-then-name sorted. A root
-    skill's own skill is emitted alongside descending into its children.
-    A leaf child whose name matches its parent root skill's name is skipped —
-    it was auto-promoted (or is otherwise redundant) and would duplicate the
-    root skill already emitted."""
-    out: list[Skill] = []
-
-    def walk(node: dict, parent_skill_name: str | None = None) -> None:
-        for key in sorted(node):
-            value = node[key]
-            if isinstance(value, _Leaf):
-                # Skip same-named child that duplicates the parent root skill
-                if parent_skill_name is not None and key == match_key(parent_skill_name):
-                    continue
-                out.append(value.skill)
-            else:  # _NS — a root skill contributes its own skill before its children
-                ns_skill_name: str | None = value.skill["name"] if value.skill is not None else None
-                if value.skill is not None:
-                    out.append(value.skill)
-                walk(value, parent_skill_name=ns_skill_name)
-
-    walk(tree)
-    return out
+    return scan_tree(skills_dir(), loadable_skill_names(), _provider_roots())
 
 
 def skills_in(roots: list[Path]) -> list[Skill]:
@@ -449,134 +110,13 @@ def skills_in(roots: list[Path]) -> list[Skill]:
     Same parse + fail-fast semantics as the full scan. A shared `seen_hashes`
     set prevents duplicate entries across the given roots.
     """
-    builder = SkillIndexBuilder()
-    for root in roots:
-        builder.mount(root, None)
-    return _flatten(builder.tree)
+    from ava.skills.skill_index import skills_in as scan_roots
+
+    return scan_roots(roots)
 
 
 def names() -> list[Skill]:
-    return _flatten(_scan_tree())
-
-
-# ─── Namespace proxy ──────────────────────────────────────────────────────
-#
-# `ava.skills.<name>` goes through module-level `__getattr__`, returning a
-# `_SkillProxy` (leaf) or a `_Namespace` (folder node). Both subclass
-# types.ModuleType so inspect.ismodule = True and ava.help() walks them.
-
-
-class _LazySkillDoc:
-    """Mixin for skill proxies: `__doc__` loads the SKILL.md body on first
-    consumption (a help() render or a direct read) and records the
-    `skill_invoked` attribution there — see the module note on attribution
-    timing. `__init__` must set `self._doc` to None when the node carries a
-    body (index-only nodes set it eagerly in `__init__` and never hit the
-    lazy path) and `self._info` to the `Skill` metadata.
-
-    The hook is `__getattribute__` rather than a `__doc__` property: every
-    class body auto-assigns its own docstring to `__doc__`, so a base-class
-    property named `__doc__` is always shadowed by the subclass's own
-    (None-typed) class attribute. The override returns `Any` — the standard
-    typing escape hatch for dynamic proxy objects whose attributes are only
-    known at runtime."""
-
-    _info: Skill
-    _doc: str | None = None
-
-    def __getattribute__(self, name: str) -> Any:
-        if name == "__doc__":
-            doc = super().__getattribute__("_doc")
-            if doc is None:
-                doc = super().__getattribute__("_load_skill_doc")()
-            return doc
-        return super().__getattribute__(name)
-
-    def _load_skill_doc(self) -> str:
-        """Read the SKILL.md body, record the `skill_invoked` attribution, and
-        cache the result in `_doc`. Runs at most once per proxy (the cache
-        makes later reads free, so one proxy records once)."""
-        self._doc = _consume_skill_body(self._info)
-        return self._doc
-
-
-class _SkillProxy(_LazySkillDoc, types.ModuleType):
-    """Runtime object returned for a skill leaf. Also a marker for the
-    `ava.help()` renderer (checked via `_ava_skill_kind`).
-
-    `__doc__` carries the skill's full content: path line (tilde-shortened)
-    followed by the raw SKILL.md body — so `ava.help(proxy)` renders the
-    whole skill without synthetic Python-assignment wrapping. The body loads
-    lazily on first `__doc__` access, which is also where the
-    `skill_invoked` attribution is recorded (see `_LazySkillDoc`).
-
-    `path` is a plain attribute the agent can read directly (e.g. in
-    f-strings inside a SKILL.md body); it is hidden from `dir()` and the
-    help view so only the content is rendered. `name` is the frontmatter
-    name (may contain hyphens).
-
-    ``__name__`` is ``ava.skills.<path>`` so the heading and parent-
-    namespace attribution see the fully-qualified name.
-    """
-
-    _ava_skill_kind = "leaf"
-
-    def __init__(self, path: str, info: Skill) -> None:
-        super().__init__(f"ava.skills.{path}")
-        self._info = info
-        self._description = info["description"]
-        self.path = info["path"]
-        self.name = info["name"]
-        self._doc = None  # lazy — SKILL.md body loads on first consumption
-
-    def __dir__(self) -> list[str]:
-        return []  # leaf skill — no children to list in help view
-
-
-class _Namespace(_LazySkillDoc, types.ModuleType):
-    """Runtime object for a namespace node (`ava.skills.<seg>…`). Marker for
-    the `ava.help()` renderer (checked via `_ava_skill_kind`).
-
-    Its attrs descend the tree — returning nested `_Namespace`s or
-    `_SkillProxy` leaves — so `ava.skills.<a>.<b>.<skill>` and `ava.help(…)`
-    walk naturally.
-
-    A *root skill* node (its folder also has a SKILL.md): `__doc__` carries
-    the path line + full SKILL.md body, and children render underneath. The
-    body loads lazily on first `__doc__` access — the same attribution point
-    as `_SkillProxy` — so merely resolving the namespace records nothing. For
-    a pure namespace (INDEX.md or no descriptor), `__doc__` is the namespace
-    description, already in memory from the scan."""
-
-    _ava_skill_kind = "namespace"
-
-    def __init__(self, path: str, node: _NS) -> None:
-        super().__init__(f"ava.skills.{path}")
-        self._path = path
-        self._tree = node
-        if node.skill is not None:
-            self._info = node.skill
-            self._doc = None  # lazy — SKILL.md body loads on first consumption
-            self._description = node.skill["description"]
-            self.name = node.skill["name"]
-            self.path = node.skill["path"]
-        elif node.doc is not None:
-            self._doc = node.doc
-        else:
-            children = sorted(node)
-            self._doc = f"Contains: {', '.join(children)}"
-
-    def __getattr__(self, attr: str) -> _SkillProxy | _Namespace:
-        if attr.startswith("_"):
-            raise AttributeError(attr)
-        if attr not in self._tree:
-            raise AttributeError(
-                f"ava.skills.{self._path} has no {attr!r} (available: {sorted(self._tree)})"
-            )
-        return _node_to_obj(f"{self._path}.{attr}", self._tree[attr])
-
-    def __dir__(self) -> list[str]:
-        return sorted(self._tree)
+    return flatten(_scan_tree())
 
 
 def _consume_skill_body(skill: Skill) -> str:
@@ -684,21 +224,7 @@ def _record_skill_invoked(skill: Skill) -> None:
     )
 
 
-def _node_to_obj(path: str, node: _Leaf | _NS) -> _SkillProxy | _Namespace:
-    """Wrap a tree node: a `_Leaf` → `_SkillProxy`; an `_NS` → `_Namespace`.
-
-    Resolution is exposure, not use: no SKILL.md body is read here and no
-    `skill_invoked` attribution is recorded. Index renders and system-prompt
-    assembly resolve nodes every turn (assembly walks `_flatten` directly) —
-    recording here made exposure look like use: ~70% of "loaded" rows had no
-    usage trace in the transcript. Attribution fires on first body
-    consumption, in the lazy `__doc__` loaders (`_LazySkillDoc`)."""
-    if isinstance(node, _Leaf):
-        return _SkillProxy(path, node.skill)
-    return _Namespace(path, node)
-
-
-def __getattr__(name: str) -> _SkillProxy | _Namespace:
+def __getattr__(name: str) -> SkillProxy | Namespace:
     """Module `__getattr__` hook: `ava.skills.<attr>` lazily returns a skill
     proxy (leaf) or a namespace node whose own attrs descend the tree.
 
@@ -706,12 +232,14 @@ def __getattr__(name: str) -> _SkillProxy | _Namespace:
         AttributeError: no such top-level skill or namespace (so
             `hasattr(ava.skills, 'x')` returns False rather than throwing).
     """
-    if name.startswith("_"):
+    if name.startswith("_") or name == "skill_index":
+        # `skill_index` is the lazily imported scan module: the import system asks for it here
+        # before loading it, and answering would scan the tree for nothing.
         raise AttributeError(name)
     tree = _scan_tree()
     if name not in tree:
         raise AttributeError(f"ava.skills has no {name!r} (available: {sorted(tree)})")
-    return _node_to_obj(name, tree[name])
+    return node_to_obj(name, tree[name], _consume_skill_body)
 
 
 def __dir__() -> list[str]:

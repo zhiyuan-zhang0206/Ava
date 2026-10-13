@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -89,8 +87,9 @@ def _manifest_for(name: str, **extra: object) -> dict[str, object]:
 
 
 def test_scan_drops_host_blocked_packages(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import ava.skills as skills_mod
     import base.paths as paths_mod
+    from ava.skills.skill_index import scan_tree
+    from base.packages.extensions.install_registry import loadable_skill_names
 
     home = _home()
     for name in ("ok", "blocked"):
@@ -102,11 +101,6 @@ def test_scan_drops_host_blocked_packages(core_repo: Path, monkeypatch: pytest.M
         json.dumps(_manifest_for("blocked", engines={"ava": ">=2099"})), encoding="utf-8"
     )
     monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
-    monkeypatch.setattr(skills_mod, "_provider_roots", list)
 
-    scan_tree = cast(
-        "Callable[[], dict[str, object]]",
-        skills_mod._scan_tree,  # pyright: ignore[reportUnknownMemberType] — _scan_tree is annotated `-> dict`
-    )
-    tree = scan_tree()
+    tree = scan_tree(home / "skills", loadable_skill_names(), [])
     assert "ok" in tree and "blocked" not in tree

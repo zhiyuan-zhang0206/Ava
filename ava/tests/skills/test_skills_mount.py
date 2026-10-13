@@ -6,6 +6,7 @@ import pytest
 
 import ava.skills as skills_mod
 from ava.sdk_surface import skill_sources
+from ava.skills.skill_proxies import Namespace, SkillProxy
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 from ava.tests.skills._skills_helpers import write_skill
@@ -210,7 +211,7 @@ def test_auto_promote_same_named_child_to_root(db_url: str, fake_skills_dir: Pat
 
     # The namespace is now a root skill
     node = skills_mod.ava_fleet
-    assert isinstance(node, skills_mod._Namespace)
+    assert isinstance(node, Namespace)
     assert node.name == "ava-fleet"
     assert node._description == "Fleet coordination patterns"
     assert "Fleet" in (node.__doc__ or "")
@@ -218,7 +219,7 @@ def test_auto_promote_same_named_child_to_root(db_url: str, fake_skills_dir: Pat
     # Sub-skill still accessible
     assert "sub_skill" in dir(node)
     proxy = node.sub_skill
-    assert isinstance(proxy, skills_mod._SkillProxy)
+    assert isinstance(proxy, SkillProxy)
     assert proxy.name == "sub-skill"
 
 
@@ -232,7 +233,7 @@ def test_auto_promote_backward_compat_child_still_accessible(
 
     # Old path still accessible
     proxy = skills_mod.ava_fleet.ava_fleet
-    assert isinstance(proxy, skills_mod._SkillProxy)
+    assert isinstance(proxy, SkillProxy)
     assert proxy.name == "ava-fleet"
     assert "Fleet" in (proxy.__doc__ or "")
 
@@ -275,7 +276,7 @@ def test_auto_promote_does_not_override_existing_root_skill(
     )
 
     node = skills_mod.sources
-    assert isinstance(node, skills_mod._Namespace)
+    assert isinstance(node, Namespace)
     # The natural root skill wins
     assert node._description == "Natural root"
     assert "Router" in (node.__doc__ or "")
@@ -296,7 +297,7 @@ def test_auto_promote_deep_nesting(fake_skills_dir: Path) -> None:
 
     # `a.b` is a root skill (auto-promoted from `a/b/b/SKILL.md`)
     b_node = skills_mod.a.b
-    assert isinstance(b_node, skills_mod._Namespace)
+    assert isinstance(b_node, Namespace)
     assert b_node.name == "b"
     assert b_node._description == "Deep redundant skill"
 

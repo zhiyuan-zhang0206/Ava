@@ -12,6 +12,7 @@ import pytest
 
 import ava.skills as skills_mod
 from ava.sdk_surface import skill_sources
+from ava.skills.skill_proxies import Namespace, SkillProxy
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 from ava.tests.skills._skills_helpers import write_skill
@@ -144,7 +145,7 @@ def test_module_getattr_returns_proxy(db_url: str, fake_skills_dir: Path) -> Non
     body = "# Steps\n\n1. Do X\n"
     write_skill(fake_skills_dir, "sk", "name: sk\ndescription: d", body=body)
     proxy = skills_mod.sk
-    assert isinstance(proxy, skills_mod._SkillProxy)
+    assert isinstance(proxy, SkillProxy)
     assert proxy.name == "sk"
     assert proxy.path.endswith("/sk")
     # __doc__ includes path + full body; _description stores frontmatter description for listing
@@ -207,7 +208,7 @@ def test_module_getattr_handles_dash_in_name(fake_skills_dir: Path) -> None:
         "name: xiaohongshu-crawler\ndescription: \u5c0f\u7ea2\u4e66\u722c\u866b",
     )
     proxy = skills_mod.xiaohongshu_crawler
-    assert isinstance(proxy, skills_mod._SkillProxy)
+    assert isinstance(proxy, SkillProxy)
     assert proxy.name == "xiaohongshu-crawler"
     assert proxy.path.endswith("/xiaohongshu-crawler")
 
@@ -383,9 +384,9 @@ def test_plugin_skill_nested_access(db_url: str, fake_skills_dir: Path) -> None:
     d = _fake_plugin_skills(fake_skills_dir, "superpowers")
     write_skill(d, "brainstorming", "name: brainstorming\ndescription: bs", body="# Steps\n")
     ns = skills_mod.superpowers
-    assert isinstance(ns, skills_mod._Namespace)
+    assert isinstance(ns, Namespace)
     proxy = ns.brainstorming
-    assert isinstance(proxy, skills_mod._SkillProxy)
+    assert isinstance(proxy, SkillProxy)
     assert proxy.name == "brainstorming"
     assert isinstance(proxy.__doc__, str)
     assert "# Steps" in proxy.__doc__  # full body is in __doc__
@@ -432,7 +433,7 @@ def test_folder_becomes_namespace(fake_skills_dir: Path) -> None:
     (fake_skills_dir / "coding").mkdir()
     write_skill(fake_skills_dir / "coding", "tdd", "name: tdd\ndescription: t")
     proxy = skills_mod.coding.tdd
-    assert isinstance(proxy, skills_mod._SkillProxy)
+    assert isinstance(proxy, SkillProxy)
     assert proxy.name == "tdd"
     sk = next(s for s in skills_mod.names() if s["name"] == "tdd")
     assert sk["namespace"] == ("coding",)
@@ -446,7 +447,7 @@ def test_deep_folder_nesting(fake_skills_dir: Path) -> None:
     (d / "review").mkdir()
     write_skill(d / "review", "receiving", "name: receiving\ndescription: r")
     proxy = skills_mod.superpowers.review.receiving
-    assert isinstance(proxy, skills_mod._SkillProxy)
+    assert isinstance(proxy, SkillProxy)
     assert proxy.name == "receiving"
     sk = next(s for s in skills_mod.names() if s["name"] == "receiving")
     assert sk["namespace"] == ("superpowers", "review")
@@ -474,13 +475,13 @@ def test_root_skill_is_both_skill_and_namespace(db_url: str, fake_skills_dir: Pa
     _root_skill_repo(fake_skills_dir)
 
     node = skills_mod.sources
-    assert isinstance(node, skills_mod._Namespace)
+    assert isinstance(node, Namespace)
     assert node._description == "get content"  # root skill description stored on _description
     assert isinstance(node.__doc__, str)
     assert "get content" in node.__doc__  # full body in __doc__
     assert node.name == "sources"
     assert "bilibili" in dir(node)
-    assert isinstance(node.bilibili, skills_mod._SkillProxy)
+    assert isinstance(node.bilibili, SkillProxy)
 
     # both the root skill and its child appear in the flat listing
     by_id = {skills_mod.identifier(s): s for s in skills_mod.names()}
