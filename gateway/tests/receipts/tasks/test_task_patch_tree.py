@@ -8,11 +8,11 @@ from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
-from gateway.routers.tests.test_tasks_router import (
-    _status,
+from gateway.tests.routers.test_tasks_router import (
     make_agent,
     make_root_task,
     make_task,
+    task_status,
 )
 
 
@@ -39,7 +39,7 @@ class TestParentClose:
         assert resp.json()["detail"] == (
             f"task {parent} has 1 in_progress child tasks (e.g. #{child}) — close or cancel them first"
         )
-        assert _status(db_conn, parent) == "in_progress"
+        assert task_status(db_conn, parent) == "in_progress"
 
     def test_cancelled_with_in_progress_child_is_rejected(
         self, db_conn: psycopg.Connection
@@ -61,7 +61,7 @@ class TestParentClose:
             )
         assert resp.status_code == 422
         assert f"#{child}" in resp.json()["detail"]
-        assert _status(db_conn, parent) == "in_progress"
+        assert task_status(db_conn, parent) == "in_progress"
 
     def test_all_children_closed_allows_parent_close(self, db_conn: psycopg.Connection) -> None:
         owner = make_agent(db_conn)

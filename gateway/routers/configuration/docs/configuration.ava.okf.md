@@ -26,5 +26,5 @@ continues to own configuration reads only. Local identity/role reads and fresh
 configuration reads retain their existing timing. Router-only HTTP tests cover
 two app instances with distinct resources, alongside the full gateway lifespan
 integration coverage. Runtime config
-tests remain in `gateway/routers/tests/config_api/` and default-model API tests
+tests remain in `gateway/tests/routers/config_api/` and default-model API tests
 in `gateway/tests/bootstrap/test_default_model_api.py`.

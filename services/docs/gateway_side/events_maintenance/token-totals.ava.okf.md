@@ -14,7 +14,7 @@ today it can no longer change, so each hourly pass (`fold_totals`, right after t
 newly settled days into `agent_model_tokens_total` (every ledger column, per agent and model) and moves the watermark in
 `agent_model_tokens_total_through`. A fold is one transaction under an advisory lock and is idempotent.
 
-Two readers use it. The fleet graph's node sizes (`gateway/routers/_fleet_tokens.py`) add three
+Two readers use it. The fleet graph's node sizes (`gateway/routers/fleet_tokens.py`) add three
 parts: the totals, the ledger days after the watermark, and the raw `llm_usage` rows of the newest
 two UTC days; a window that starts mid-day also reads that first partial day from the raw rows. The
 independent agent usage script's lifetime read (`base/telemetry/metrics/usage.py`) adds the
