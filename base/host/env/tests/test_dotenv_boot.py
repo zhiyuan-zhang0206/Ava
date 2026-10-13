@@ -19,7 +19,7 @@ from tests.fixtures.units import use_env_files
 
 
 @pytest.fixture(autouse=True)
-def _restore_authority_env() -> Iterator[None]:
+def restore_authority_env() -> Iterator[None]:
     """`enforce_cluster_env_authority` mutates os.environ directly (pop /
     force-assign) — not through monkeypatch, which only restores keys it set.
     Since Phase C the drop covers every cluster-scope alias key, so a test
@@ -562,7 +562,7 @@ def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(
         assert fresh.lm.deepseek_api_key.get_secret_value() == "sk-labeler-test"
     finally:
         # The authority pass force-assigned the key from the temp .env; the
-        # autouse _restore_authority_env fixture only restores keys that existed
+        # autouse restore_authority_env fixture only restores keys that existed
         # before the test, so restore the prior state by hand (a leaked key here
         # flips test_config's bootstrap completeness assertions in the same run).
         if had_key and old_key is not None:

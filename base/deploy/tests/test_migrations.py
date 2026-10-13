@@ -31,7 +31,7 @@ from base.deploy.schema.tests.migration_support import (
     try_lock_from_other_conn,
 )
 from base.deploy.schema.tests.migration_support import (
-    _reset_schema_migrations_state as _reset_schema_migrations_state,
+    reset_schema_migrations_state as reset_schema_migrations_state,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

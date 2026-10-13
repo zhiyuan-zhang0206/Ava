@@ -225,7 +225,7 @@ def _over_threshold_state() -> AgentState:
 
 
 @pytest.fixture
-def _ava_compact_loaded():
+def ava_compact_loaded():
     """Compact is built-in (Issue #1284). The wrapper function lives in
     agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.

@@ -11,7 +11,3 @@ exports = ["migration_support.py"]
 "test_migration_layout.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 5
 "test_migration_reset.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 10
 "test_migration_reset.py#monkeypatch.setattr base.deploy.schema.migrations.squash_history" = 2
-
-[debt.private-name]
-"test_migration_layout.py -> migration_support.py#_reset_schema_migrations_state" = 1
-"test_migration_reset.py -> migration_support.py#_reset_schema_migrations_state" = 1

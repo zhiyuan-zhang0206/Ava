@@ -30,7 +30,7 @@ _IDENTITY_LINES = [
 
 
 @pytest.fixture(autouse=True)
-def _restore_authority_env() -> Iterator[None]:
+def restore_authority_env() -> Iterator[None]:
     """`_enforce_cluster_env_authority` mutates os.environ directly (pop /
     force-assign) — snapshot the keys it touches and restore them after each
     test (same fixture as test_dotenv_boot.py)."""

@@ -28,13 +28,13 @@ from ava.mcps.tests.test_daemon import (
     writer_arg,
 )
 from ava.mcps.tests.test_daemon import (
-    _no_reap_stale_daemons as _no_reap_stale_daemons,
-)
-from ava.mcps.tests.test_daemon import (
     daemon_wide as daemon_wide,
 )
 from ava.mcps.tests.test_daemon import (
     fake_home as fake_home,
+)
+from ava.mcps.tests.test_daemon import (
+    no_reap_stale_daemons as no_reap_stale_daemons,
 )
 from ava.mcps.tests.test_daemon import (
     scope as scope,

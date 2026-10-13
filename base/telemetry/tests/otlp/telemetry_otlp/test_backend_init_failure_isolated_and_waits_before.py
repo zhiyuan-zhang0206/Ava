@@ -16,13 +16,13 @@ from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.otlp.test_telemetry_otlp import AGENT, _event, _metrics
 from base.telemetry.tests.otlp.test_telemetry_otlp import (
-    _bind_telemetry as _bind_telemetry,
-)
-from base.telemetry.tests.otlp.test_telemetry_otlp import (
-    _production_process_by_default as _production_process_by_default,
+    bind_telemetry as bind_telemetry,
 )
 from base.telemetry.tests.otlp.test_telemetry_otlp import (
     otlp_backend as otlp_backend,
+)
+from base.telemetry.tests.otlp.test_telemetry_otlp import (
+    production_process_by_default as production_process_by_default,
 )
 
 

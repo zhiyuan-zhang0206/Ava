@@ -12,7 +12,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
+from agent.graph.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from base.config import settings
 from base.db.test_db_guard import assert_test_db_url
 from tests._containers import grant_runner_login
