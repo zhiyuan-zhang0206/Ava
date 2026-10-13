@@ -106,20 +106,32 @@ def test_acknowledgement_loss_adopts_session_across_manager_restart(
     ).fetchone() == (1, 1)
 
 
-@pytest.mark.parametrize(
-    "entrypoint", ["services.wake.schedule_manager.runner", "gateway.schedules.runner"]
-)
 def test_crash_after_session_birth_before_applied_write_adopts_provenance(
-    db_conn: psycopg.Connection, backend: Backend, entrypoint: str, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
     backend.commands[session_name(f"schedule-{sid}")] = (
-        f".venv/bin/python -m {entrypoint} {sid} 1; exit $?"
+        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 1; exit $?"
     )
     with base.db.pool(gate=database_gate) as pool:
         assert manager.ScheduleManager(pool).sync_one(sid)
     assert backend.launches == 0
     assert backend.killed == []
+    assert db_conn.execute(
+        "SELECT applied_revision FROM schedules WHERE id = %s", (sid,)
+    ).fetchone() == (1,)
+
+
+def test_a_session_launched_under_the_retired_entrypoint_is_replaced_not_adopted(
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
+) -> None:
+    sid = _insert(db_conn)
+    name = session_name(f"schedule-{sid}")
+    backend.commands[name] = f".venv/bin/python -m gateway.schedules.runner {sid} 1; exit $?"
+    with base.db.pool(gate=database_gate) as pool:
+        assert manager.ScheduleManager(pool).sync_one(sid)
+    assert backend.killed == [name]
+    assert backend.launches == 1
     assert db_conn.execute(
         "SELECT applied_revision FROM schedules WHERE id = %s", (sid,)
     ).fetchone() == (1,)
