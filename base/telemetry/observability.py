@@ -42,7 +42,7 @@ def cluster_label(home: Path | None = None) -> str:
 def _report_label_fallback(stage: str, exc: BaseException) -> None:
     """A degraded cluster label is reported (first + every 50th: the label is
     resolved per event), never folded in silently."""
-    from base.telemetry.emitter import report_sink_failure
+    from base.telemetry.delivery.reporting import report_sink_failure
 
     report_sink_failure(f"cluster label {stage}", exc)
 

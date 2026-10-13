@@ -72,7 +72,7 @@ values are skipped (an absent optional metric is not zero).
 ## Resource
 
 The MeterProvider's Resource carries `service.name=ava-<process>` (the
-bounded process dimension, `base/telemetry/emitter.py:process_name`), a
+bounded process dimension, `base/telemetry/delivery/state.py:process_name`), a
 per-instance `service.instance.id` (uuid4) and
 `service.version`, plus the home-derived `cluster` label. Without the service
 identity every series landed as

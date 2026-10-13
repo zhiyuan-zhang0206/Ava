@@ -9,8 +9,7 @@ from threading import Event
 import pytest
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 
-from base import telemetry
-from base.telemetry import Event as TelemetryEvent
+from base.telemetry.delivery.receipts import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp
 from tests.factories.external_attachment import HANDSHAKE_BOUND_S
 
@@ -39,10 +38,6 @@ def paused_otlp_record(
 
     monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)
 
-    def no_sync(*_args: object, **_kwargs: object) -> telemetry.DrainResult:
-        return telemetry.DrainResult(telemetry.DrainStatus.COMPLETED, telemetry.DrainPhase.DRAIN)
-
-    monkeypatch.setattr(telemetry, "sync", no_sync)
     paused = Event()
     release = Event()
     original_emit = backend._emit_log

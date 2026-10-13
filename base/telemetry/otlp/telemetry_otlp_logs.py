@@ -22,7 +22,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from base.telemetry import Event, event_line
+from base.telemetry.delivery.receipts import Event
+from base.telemetry.delivery.serialization import event_line
 
 # Log-record severity mapping — OTel SeverityNumber values (plain ints; the
 # enum is constructed at the record site, see _emit_log_record).

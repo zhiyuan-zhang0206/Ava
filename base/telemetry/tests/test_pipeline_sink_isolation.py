@@ -8,9 +8,11 @@ import pytest
 
 from base import paths, telemetry
 from base.db import Database
+from base.telemetry import pipeline_build
+from base.telemetry.delivery import reporting
 from base.telemetry.metrics import observed_metrics as metrics
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.tests.identity_inputs import machine_identity
+from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 
 def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
@@ -20,7 +22,8 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(metrics, "write_observations", Mock(side_effect=RuntimeError("DB down")))
     diagnostic = Mock()
-    monkeypatch.setattr(telemetry, "report_no_pipeline", diagnostic)
+    monkeypatch.setattr(pipeline_build, "report_no_pipeline", diagnostic)
+    monkeypatch.setattr(reporting, "report_no_pipeline", diagnostic)
     emitted = Mock(side_effect=AssertionError("diagnostics must bypass emitter"))
     monkeypatch.setattr(telemetry, "emit", emitted)
     exported = Mock()

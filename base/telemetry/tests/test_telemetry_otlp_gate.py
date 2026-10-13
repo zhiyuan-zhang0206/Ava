@@ -10,7 +10,7 @@ from base.cluster import derive
 from base.cluster.machine import MachineNameMissing, MachineRoleInvalid, MachineRoleMissing
 from base.telemetry import observability
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.tests.identity_inputs import machine_identity
+from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 
 def _production_label(_home: Path | None = None) -> str:

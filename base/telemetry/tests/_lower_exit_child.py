@@ -25,7 +25,7 @@ def cold() -> None:
     atexit.register(observe)
     from base import telemetry
 
-    assert telemetry._state["pipeline"] is None
+    assert telemetry.process_state["pipeline"] is None
 
 
 def loaded() -> None:
@@ -42,7 +42,7 @@ def loaded() -> None:
 
     atexit.register(observe)
     from base.telemetry import tracing
-    from base.telemetry.tests.identity_inputs import machine_identity
+    from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
     entered = threading.Event()
 

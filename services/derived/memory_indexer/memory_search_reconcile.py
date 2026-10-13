@@ -34,7 +34,7 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.docs.notes import walk_notes
 from base.paths import gateway_memory_dir
-from base.telemetry.emitter import process_name
+from base.telemetry.delivery.state import process_name
 from services.derived.memory_indexer.backends.base import MemorySearchBackend
 from services.derived.memory_indexer.backends.factory import get_backend_named
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError

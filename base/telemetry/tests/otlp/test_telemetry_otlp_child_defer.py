@@ -15,9 +15,9 @@ from typing import Any
 import pytest
 
 from base import config
-from base.telemetry import Event
+from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.tests.identity_inputs import allow_identity
+from base.telemetry.tests.otlp.identity_inputs import allow_identity
 
 _AGENT = 8902
 

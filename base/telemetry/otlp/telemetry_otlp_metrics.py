@@ -149,7 +149,7 @@ def _metrics_resource() -> Any:
 
     from opentelemetry.sdk.resources import Resource
 
-    from base.telemetry import process_name
+    from base.telemetry.delivery.state import process_name
 
     return Resource.create(
         {
@@ -180,7 +180,7 @@ def _build_providers(
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
-    from base.telemetry.loss import install_exporter_drop_observer
+    from base.telemetry.delivery.loss import install_exporter_drop_observer
 
     install_exporter_drop_observer()
     # `shutdown_on_exit=False` on both providers: the SDK default registers a

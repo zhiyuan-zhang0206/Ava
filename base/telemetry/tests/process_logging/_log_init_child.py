@@ -26,7 +26,7 @@ pipelines: list[object] = []
 
 
 def producer() -> object:
-    from base.telemetry import EventPipeline
+    from base.telemetry.delivery.pipeline import EventPipeline
 
     pipeline = EventPipeline(writer=lambda _batch: None)
     pipelines.append(pipeline)

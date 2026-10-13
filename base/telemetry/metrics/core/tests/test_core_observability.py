@@ -167,20 +167,20 @@ def test_logql_template_validation_rejects_drift() -> None:
     """The template-form validator refuses: a query that lost the stream
     selector, one without the json pipeline, and one that hardcodes an
     event filter instead of the placeholders."""
-    from base.telemetry.metrics.logql import _validate_logql_template
+    from base.telemetry.metrics.logql import validate_logql_template
 
     with pytest.raises(InvalidMetricQuery, match="stream"):
-        _validate_logql_template(
+        validate_logql_template(
             'sum(count_over_time({other="x"} | json | event_name={event_name} [5m]))',
             "t",
         )
     with pytest.raises(InvalidMetricQuery, match="json"):
-        _validate_logql_template(
+        validate_logql_template(
             'sum(count_over_time({service_name="unknown_service"} | event_name={event_name} [5m]))',
             "t",
         )
     with pytest.raises(InvalidMetricQuery, match="placeholders"):
-        _validate_logql_template(
+        validate_logql_template(
             'sum(count_over_time({service_name="unknown_service"} | json | event_name="delivery_stalled" [5m]))',
             "t",
         )

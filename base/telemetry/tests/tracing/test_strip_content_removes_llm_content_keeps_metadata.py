@@ -12,7 +12,7 @@ import pytest
 from base import config
 from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
-from base.telemetry.tests.identity_inputs import ignore_arguments, machine_identity
+from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import _collector_up as _collector_up
 from base.telemetry.tests.test_tracing import (
     _otlp_with_attrs,

@@ -30,7 +30,7 @@ from base.db.config import db_config_from_settings
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry.emitter import process_name
+from base.telemetry.delivery.state import process_name
 from services.backup import dump as backup
 
 
