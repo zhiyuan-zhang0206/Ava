@@ -64,7 +64,6 @@ def test_events_are_not_declared_outside_the_domain_modules() -> None:
     the derived views and the scan tool; an event goes in declarations/<domain>.py."""
     assert {p.name for p in _EVENTS_DIR.glob("*.py")} == {
         "__init__.py",
-        "caller_identity.py",
         "contract.py",
         "loader.py",
         "scan_kinds.py",
