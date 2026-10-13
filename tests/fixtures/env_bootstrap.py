@@ -26,7 +26,7 @@ import socket
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 # Third-party only. These import no project module, so they are safe above the
@@ -460,7 +460,7 @@ os.environ.pop("AVA_AGENT_ID", None)
 os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 
 
-def distinct_free_ports(count: int) -> list[int]:
+def _distinct_free_ports(count: int) -> list[int]:
     """`count` different free localhost ports: every socket stays bound until all
     are chosen, so the kernel cannot hand the same number out twice. The small race
     before a server binds one is the same that tests/_containers.py accepts for
@@ -486,7 +486,7 @@ def _pin_setting(field: str, value: object) -> None:
 _HEALTH_PORT_FIELDS = tuple(
     alias.removeprefix("AVA_").lower() for alias in health_port_env_aliases().values()
 )
-_ports = iter(distinct_free_ports(len(_HEALTH_PORT_FIELDS) + 7 + len(FIXED_PORTS)))
+_ports = iter(_distinct_free_ports(len(_HEALTH_PORT_FIELDS) + 7 + len(FIXED_PORTS)))
 for _health_port_field in _HEALTH_PORT_FIELDS:
     _pin_setting(_health_port_field, next(_ports))
 _pin_setting("gateway_health_url", f"http://127.0.0.1:{next(_ports)}/api/health")
@@ -539,6 +539,12 @@ def pristine_env() -> Mapping[str, str]:
     loaded, and a test that reached in by module path would be coupled to it.
     """
     return _PRISTINE_ENV
+
+
+@pytest.fixture(scope="session")
+def distinct_free_ports() -> Callable[[int], list[int]]:
+    """`count` different free localhost ports for a test that births a home of its own."""
+    return _distinct_free_ports
 
 
 @pytest.fixture(scope="session")
