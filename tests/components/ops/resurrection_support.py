@@ -4,6 +4,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.agents.birth.spawn import create_agent_row
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -11,7 +12,6 @@ from base.db import PG_KEEPALIVE_KWARGS, Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from ops.agents.spawn import create_agent_row
 from ops.lifecycle import termination
 
 

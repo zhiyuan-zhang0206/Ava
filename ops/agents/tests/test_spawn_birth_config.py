@@ -1,4 +1,4 @@
-"""Spawn stamping — `ops.agents.spawn.create_agent_row` freezes the frozen set on the row.
+"""Spawn stamping — `base.agents.birth.spawn.create_agent_row` freezes the frozen set on the row.
 
 The agents_meta INSERT is THE spawn boundary (every spawn in the system funnels
 through it), so these tests go through the create+launch split (`create_agent_row`
@@ -17,6 +17,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.agents.birth.spawn import create_agent_row
 from base.agents.model.birth_config import set_cluster_default_model
 from base.cluster.machine import MachineIdentity
 from base.config import frozen_field_names
@@ -25,7 +26,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from ops.agents.spawn import create_agent_row
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

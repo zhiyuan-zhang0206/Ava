@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.birth.spawn import create_agent_row
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -16,7 +17,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
-from ops.agents.spawn import create_agent_row
 
 
 @pytest.fixture

@@ -78,7 +78,7 @@ EVENTS: dict[str, EventSpec] = {
         "spawn",
         "new agent born",
         payload=Spawn,
-        site='ops/agents/spawn.py:349 event_type = "fork" if ... else "spawn"',
+        site='base/agents/birth/spawn.py:349 event_type = "fork" if ... else "spawn"',
     ),
     "fork": audit_event("fork", "agent forked from another"),
     "send_message": audit_event(

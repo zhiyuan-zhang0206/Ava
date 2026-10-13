@@ -10,6 +10,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.agents.birth.spawn import create_agent_row
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -19,7 +20,6 @@ from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
-from ops.agents.spawn import create_agent_row
 from ops.lifecycle import termination
 
 _WAKE = "Continue from the latest checkpoint."

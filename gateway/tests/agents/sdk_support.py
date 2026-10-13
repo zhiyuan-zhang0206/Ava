@@ -29,7 +29,7 @@ def spawn_agent(
     """Setup helper — a row for the SDK's self identity (Task #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only need
     the row to exist)."""
-    from ops.agents.spawn import create_agent_row
+    from base.agents.birth.spawn import create_agent_row
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),

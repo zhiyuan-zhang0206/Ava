@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
 from agent.ownership.hosted import admit_hosted_runtime
+from base.agents.birth.spawn import create_agent_row
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.resources import ResourceBirth
@@ -21,7 +22,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from ops.agents.spawn import create_agent_row
 
 
 async def admit(

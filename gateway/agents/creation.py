@@ -11,6 +11,13 @@ from uuid import UUID
 from fastapi import Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
+from base.agents.birth.creation_identity import (
+    CreationConflictError,
+    CreationReceipt,
+    creation_request_hash,
+    find_creation,
+)
+from base.agents.birth.spawn import create_agent_row
 from base.agents.labels import spawn_prompt_with_label
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
@@ -36,13 +43,6 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
-from ops.agents.creation_identity import (
-    CreationConflictError,
-    CreationReceipt,
-    creation_request_hash,
-    find_creation,
-)
-from ops.agents.spawn import create_agent_row
 from ops.lifecycle.launch import spawn_prechecks_blocking
 from ops.rpc_schemas import ConfigNormalization, LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 

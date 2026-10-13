@@ -1,7 +1,7 @@
 """Fork's checkpoint copy: one agent's LangGraph state, windowed at a compaction boundary, as another's first checkpoints.
 
 Pure checkpoint SQL over the `checkpoints` / `checkpoint_blobs` / `checkpoint_writes` tables, so it lives with the
-rest of the checkpoint history code; `ops.agents.spawn` calls it inside the fork's row-creation transaction.
+rest of the checkpoint history code; `base.agents.birth.spawn` calls it inside the fork's row-creation transaction.
 """
 
 from __future__ import annotations
