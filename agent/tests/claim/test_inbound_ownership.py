@@ -11,7 +11,7 @@ from agent.db import (
     claim_inbound_batch,
     finalize_claimed_inbounds,
 )
-from agent.graph.claim._batch import _defer_chats_to_pending
+from agent.graph.claim._batch import defer_chats_to_pending
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
 from base.config import settings
@@ -32,7 +32,7 @@ def agent_row(conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def _insert(conn: psycopg.Connection, agent_id: int) -> int:
+def insert(conn: psycopg.Connection, agent_id: int) -> int:
     row = conn.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source) "
         "VALUES (%s, 'durable', 'chat', 'user') RETURNING id",
@@ -63,7 +63,7 @@ async def test_unowned_lifecycle_refuses_before_acknowledging_any_batch(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, kind: str
 ) -> None:
     agent_id = agent_row(db_conn)
-    chat = _insert(db_conn, agent_id)
+    chat = insert(db_conn, agent_id)
     command = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
         "VALUES(%s,'',%s,'user') RETURNING id",
@@ -83,7 +83,7 @@ async def test_unowned_ordinary_batch_remains_compatible(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = agent_row(db_conn)
-    _insert(db_conn, agent_id)
+    insert(db_conn, agent_id)
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
         "VALUES(%s,'summary','compact_summary','user')",
@@ -106,7 +106,7 @@ async def test_successful_claim_clears_wake_suppression(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = agent_row(db_conn)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     db_conn.execute(
         "UPDATE agents_meta SET wake_suppressed_until=now()+interval '1 hour', "
         "wake_suppress_reason='resurrect_failed' WHERE id=%s",
@@ -133,7 +133,7 @@ async def test_stale_or_missing_owner_cannot_claim(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     stale = None if missing else RuntimeIncarnation(agent_id, owner.generation, uuid4())
     with pytest.raises(RuntimeOwnershipLostError):
         await claim_inbound_batch(aops_pool, agent_id, incarnation=stale, work=None)
@@ -146,7 +146,7 @@ async def test_missing_runtime_metadata_cannot_claim(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = create_agent(db_conn)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     with pytest.raises(RuntimeOwnershipLostError):
         await claim_inbound_batch(aops_pool, agent_id, incarnation=None, work=None)
     assert db_conn.execute(
@@ -159,7 +159,7 @@ async def test_two_owners_compete_only_current_owner_claims(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
 
     async def claim(token: RuntimeIncarnation) -> list[int]:
         try:
@@ -184,7 +184,7 @@ async def test_expired_owner_zero_claim_then_takeover(
 ) -> None:
     agent_id = agent_row(db_conn)
     old = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at=now()-interval '1 second' WHERE id=%s",
         (agent_id,),
@@ -206,7 +206,7 @@ async def test_owner_locked_queue_mutation_rolls_back(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     with pytest.raises(RuntimeError, match="injected rollback"):
         async with async_write_transaction(aops_pool) as conn:
             await lock_inbound_owner(conn, agent_id, incarnation=owner)
@@ -224,7 +224,7 @@ async def test_lock_wait_past_unchanged_lease_expiry_refuses_claim(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at=clock_timestamp()+interval '1 second' WHERE id=%s",
         (agent_id,),
@@ -258,7 +258,7 @@ async def test_claim_lock_timeout_releases_connection_for_retry(
     )  # lock timeout 50ms
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     async with async_write_transaction(aops_pool) as blocker:
         await blocker.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
         with pytest.raises(psycopg.errors.LockNotAvailable):
@@ -281,7 +281,7 @@ async def test_missing_redis_publish_recovers_from_durable_pg(
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
     # Direct SQL deliberately omits all Redis notifications.
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     assert [
         r.id for r in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     ] == [inbound]
@@ -296,14 +296,14 @@ async def test_old_owner_cannot_finalize_or_defer_successor_work(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    inbound = _insert(db_conn, agent_id)
+    inbound = insert(db_conn, agent_id)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     stale = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     with pytest.raises(RuntimeOwnershipLostError):
         if action == "finalize":
             await finalize_claimed_inbounds(aops_pool, agent_id, incarnation=stale)
         else:
-            await _defer_chats_to_pending(aops_pool, agent_id, [inbound], incarnation=stale)
+            await defer_chats_to_pending(aops_pool, agent_id, [inbound], incarnation=stale)
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
     ).fetchone() == ("claimed",)
@@ -314,8 +314,8 @@ async def test_chat_finalization_does_not_ack_lifecycle_intent(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
-    chat = _insert(db_conn, agent_id)
-    lifecycle = _insert(db_conn, agent_id)
+    chat = insert(db_conn, agent_id)
+    lifecycle = insert(db_conn, agent_id)
     db_conn.execute(
         "UPDATE inbound_messages SET kind='restart', status='claimed' WHERE id=%s", (lifecycle,)
     )

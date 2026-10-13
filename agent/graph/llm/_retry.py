@@ -24,7 +24,7 @@ RETRY_JITTER_SPAN_S = 10.0
 RETRY_REMAINING_ATTR = "_ava_retry_budget_remaining_seconds"
 # The backoff factor the transient schedule was tuned with (every incident validated base 2).
 _BACKOFF_FACTOR = 2.0
-_NEVER_RETRIED = (FatalLLMStreamError, FatalProviderError, CompactionFailedError)
+NEVER_RETRIED = (FatalLLMStreamError, FatalProviderError, CompactionFailedError)
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ def retry_phase_jitter(agent_id: int) -> float:
 
 
 def _retryable_failure(exc: Exception) -> bool:
-    if isinstance(exc, _NEVER_RETRIED):
+    if isinstance(exc, NEVER_RETRIED):
         return False
     return is_retryable_provider_error(exc)
 

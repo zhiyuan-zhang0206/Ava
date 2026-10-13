@@ -78,9 +78,9 @@ from base.lm.reasoning import content_blocks
 from base.log import logger
 
 from ._cancel import race_stream_vs_cancel
-from ._chunk import _assemble_final_message
+from ._chunk import assemble_final_message
 from ._retry import RETRY_REMAINING_ATTR, Attempt, retry_wait
-from ._stream import _stream_llm
+from ._stream import stream_llm
 from .goto import LlmGoto
 
 
@@ -438,7 +438,7 @@ def _silent_idle_command(
     )
 
 
-async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> None:
+async def persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> None:
     """Persist two things every completed turn:
     - last_active_at = now() ALWAYS: this is the agent's real-activity clock
       the heartbeat daemon reads for idle timing. A completed LLM turn is the
@@ -537,7 +537,7 @@ async def _llm_node_impl(
     cancelled_cmd = await race_stream_vs_cancel(
         ctx,
         agent_id,
-        _stream_llm(
+        stream_llm(
             llm,
             list(state.messages),
             chunks=chunks,
@@ -554,7 +554,7 @@ async def _llm_node_impl(
         # LLM returned empty — extremely rare; return empty code per historical
         # behavior (exec_node will run exec(""))
         return Command[LlmGoto](update={"messages": [AIMessage(content="")]}, goto=BEFORE_EXEC)
-    final_msg = _assemble_final_message(chunks, catalog=ctx.require_catalog())
+    final_msg = assemble_final_message(chunks, catalog=ctx.require_catalog())
 
     # Single-tool wire format: code is in tool_calls[0]["args"]["code"], not content.
     # content is the model's text output (e.g. "OK, let me compute fib(10)"),
@@ -562,7 +562,7 @@ async def _llm_node_impl(
     text = final_msg.text  # langchain-normalized text extraction (handles str + list-of-blocks)
     if text:
         logger.info("[text] {body}", event="text", body=text)
-    await _persist_last_active(ctx, agent_id, text)
+    await persist_last_active(ctx, agent_id, text)
     _finalize_turn_observability(
         ctx.event_publisher,
         agent_id,

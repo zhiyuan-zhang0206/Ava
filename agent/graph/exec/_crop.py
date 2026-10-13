@@ -18,7 +18,7 @@ from base.lm.content import content_blocks, message_addl_kwargs, message_content
 from base.log import logger
 
 
-class _CropConfig(Protocol):
+class CropConfig(Protocol):
     """The crop knobs `crop_output` reads — declared structurally so this module
     never imports the eager config chain.
 
@@ -165,7 +165,7 @@ def _make_room(directory: Path, size: int, budget: int, referenced: set[str]) ->
 def crop_output(
     output: str,
     directory: Path,
-    config: _CropConfig,
+    config: CropConfig,
     *,
     referenced_messages: Sequence[BaseMessage],
     max_chars: int,

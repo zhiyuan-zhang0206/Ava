@@ -8,7 +8,7 @@ registers the section explicitly so the render order stays its reading order.
 from base.host.env.agent_slices import AgentSlices
 
 
-def _codeact_section(slices: AgentSlices) -> str:
+def codeact_section(slices: AgentSlices) -> str:
     """Opt-in batching guidance for operations that need no intermediate review."""
     if not slices.prompt.prompt_codeact_enabled:
         return ""

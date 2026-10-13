@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from agent.graph.exec import _child_boundary
-from agent.graph.exec._result import ExecChildError, _ExecCrashed, _ExecDone
-from agent.graph.exec._subprocess import _run_in_subprocess
+from agent.graph.exec._result import ExecChildError, ExecCrashed, ExecDone
+from agent.graph.exec._subprocess import run_in_subprocess
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.release import editable_install
@@ -27,7 +27,7 @@ async def _run(
     editable_guard: Callable[[], tuple[str, ...]] | None,
     database_gate: ProcessDbGate,
 ) -> object:
-    result, _payload = await _run_in_subprocess(
+    result, _payload = await run_in_subprocess(
         Database.from_settings(gate=database_gate),
         "print('healthy child')",
         exec_context(_AGENT_ID),
@@ -57,7 +57,7 @@ async def test_poisoned_editable_install_refuses_without_request_file(
 
     result = await _run(tmp_path, editable_guard=lambda: (violation,), database_gate=database_gate)
 
-    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result, ExecCrashed)
     assert isinstance(result.exc, ExecChildError)
     assert result.exc.exc_type == "exec_editable_install_poisoned"
     assert violation in result.output
@@ -76,7 +76,7 @@ async def test_editable_guard_inspection_failure_tells_agent_not_to_retry(
 
     result = await _run(tmp_path, editable_guard=raise_failure, database_gate=database_gate)
 
-    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result, ExecCrashed)
     assert result.exc is failure
     assert "site-packages is read-only" in result.output
     assert "do not retry" in result.output.lower()
@@ -88,7 +88,7 @@ async def test_healthy_editable_guard_preserves_real_child_behavior(
 ) -> None:
     result = await _run(tmp_path, editable_guard=lambda: (), database_gate=database_gate)
 
-    assert isinstance(result, _ExecDone)
+    assert isinstance(result, ExecDone)
     assert result.output == "healthy child\n"
 
 
@@ -155,7 +155,7 @@ async def test_default_guard_refuses_real_poison_without_repairing_files(
 
     result = await _run(tmp_path, editable_guard=None, database_gate=database_gate)
 
-    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result, ExecCrashed)
     assert "no child was started" in result.output
     assert {path: path.read_bytes() for path in before} == before
     assert not list((tmp_path / "exec").rglob("*.json"))

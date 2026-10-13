@@ -333,7 +333,7 @@ def test_the_node_does_not_repeat_unknown_or_protocol_failures(
 def test_the_node_gives_up_at_the_models_attempt_cap(
     monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    monkeypatch.setattr(_retry, "_NEVER_RETRIED", ())
+    monkeypatch.setattr(_retry, "NEVER_RETRIED", ())
     monkeypatch.setattr(registry, "resolve_setting", _fixed_cap(3))
     tries, sleeps, result = _drive(
         monkeypatch, [ModelConnectionError(str(i)) for i in range(5)], database_gate=database_gate

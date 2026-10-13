@@ -106,7 +106,7 @@ class _NstepCheckpointState:
     delta_channels: set[str] = field(default_factory=set[str])
 
 
-def _delta_evidence(checkpoint: Checkpoint, metadata: CheckpointMetadata) -> set[str]:
+def delta_evidence(checkpoint: Checkpoint, metadata: CheckpointMetadata) -> set[str]:
     """Delta channel names this checkpoint reveals, from two independent signals.
 
     Both are only ever produced for `DeltaChannel` channels, so a non-empty
@@ -136,7 +136,7 @@ def _delta_retires_throttle(
     state: _NstepCheckpointState, checkpoint: Checkpoint, metadata: CheckpointMetadata
 ) -> bool:
     """Learn the thread's delta channels; report whether the throttle is retired."""
-    state.delta_channels.update(_delta_evidence(checkpoint, metadata))
+    state.delta_channels.update(delta_evidence(checkpoint, metadata))
     return bool(state.delta_channels)
 
 
@@ -210,7 +210,7 @@ def wrap_saver_writes_with_nstep_interval(
     delta-bearing threads.
 
     A delta-bearing thread retires the throttle entirely: from the first
-    checkpoint that reveals a ``DeltaChannel`` (see `_delta_evidence`), every
+    checkpoint that reveals a ``DeltaChannel`` (see `delta_evidence`), every
     super-step reaches the saver exactly as upstream writes it — original
     configs, unmerged versions, no skipped writes. A delta channel is
     reconstructed by replaying its ``checkpoint_writes`` in chain order, so a

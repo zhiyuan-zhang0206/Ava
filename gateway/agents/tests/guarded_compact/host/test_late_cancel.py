@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.agents.tests.guarded_compact.host.admission import AcceptedHost, admit
@@ -105,6 +105,6 @@ async def test_late_cancel_closes_after_compact_and_replay_cannot_overwrite(
         ).json()
         == accepted.acceptance
     )
-    _insert(db_conn, accepted.agent)
+    insert(db_conn, accepted.agent)
     await accepted.host.run_turn(accepted.agent)
     assert model.calls == 1 and len(accepted.ordinary) == 2

@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.compaction.models import CompactHeldError
 from base.agents.inbox.native_restart import accept_native_restart, native_restart_progress
 from base.agents.incarnation.native_restart_models import NativeRestartRequest
@@ -87,7 +87,7 @@ async def test_released_sigkill_original_restart_is_no_effect_not_successor_rest
             ).fetchone() == (original.work_id,)
             child.kill()
             await asyncio.wait_for(asyncio.to_thread(child.wait), 10)
-            chat = _insert(db_conn, agent)
+            chat = insert(db_conn, agent)
             model = SummaryModel(responses=["MUST NOT GENERATE" * 100])
             binding = model_catalog.bindings["gpt-"]
             model_catalog = add_bindings(

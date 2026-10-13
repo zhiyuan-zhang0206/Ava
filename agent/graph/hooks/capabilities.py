@@ -124,4 +124,4 @@ class _NewlyInstalledSkillsHook(Hook):
 
 
 # Module-level singleton — the instance `framework_hooks()` hands the graph build.
-_newly_installed_skills = _NewlyInstalledSkillsHook()
+newly_installed_skills = _NewlyInstalledSkillsHook()

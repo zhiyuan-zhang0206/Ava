@@ -69,10 +69,10 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """When _run_in_subprocess hangs longer than exec_node_timeout_seconds,
+    """When run_in_subprocess hangs longer than exec_node_timeout_seconds,
     the outer asyncio.wait_for inside _exec_node_impl fires.
 
-    We monkeypatch _run_in_subprocess to wait forever on a cancellable Future,
+    We monkeypatch run_in_subprocess to wait forever on a cancellable Future,
     simulating a framework wait that the inner code-exec timeout missed.
     """
     # Graph-level timeout very short, inner timeout irrelevant (patched out)
@@ -83,7 +83,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
 
     monkeypatch.setattr(
         node,
-        "_run_in_subprocess",
+        "run_in_subprocess",
         _hang_forever,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -121,22 +121,20 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """When _run_in_subprocess completes quickly, exec_node_timeout_seconds
-    does NOT fire — the normal path returns _ExecDone."""
+    """When run_in_subprocess completes quickly, exec_node_timeout_seconds
+    does NOT fire — the normal path returns ExecDone."""
     monkeypatch.setattr(config.settings.sandbox, "exec_node_timeout_seconds", 10.0)
     monkeypatch.setattr(config.settings.sandbox, "exec_timeout_seconds", 30.0)
 
-    from agent.graph.exec.node import _ExecDone, _ExecResult
+    from agent.graph.exec.node import ExecDone, ExecResult
     from agent.graph.exec.protocol import ResultPayload
 
-    async def _fast_return(
-        _db: object, *args, **kwargs
-    ) -> tuple[_ExecResult, ResultPayload | None]:
-        return (_ExecDone(output="hello"), None)
+    async def _fast_return(_db: object, *args, **kwargs) -> tuple[ExecResult, ResultPayload | None]:
+        return (ExecDone(output="hello"), None)
 
     monkeypatch.setattr(
         node,
-        "_run_in_subprocess",
+        "run_in_subprocess",
         _fast_return,  # pyright: ignore[reportUnknownArgumentType]
     )
 

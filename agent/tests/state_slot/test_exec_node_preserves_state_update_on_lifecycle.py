@@ -12,13 +12,13 @@ from langgraph.types import Overwrite
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from agent.tests.test_state_slot import (
-    _ai_message_with_code,
-    _make_runtime_and_config,
-    _messages_plugin_state_cls,
-    _scan_flagged_code,
+    _reset_state_slot as _reset_state_slot,
 )
 from agent.tests.test_state_slot import (
-    _reset_state_slot as _reset_state_slot,
+    ai_message_with_code,
+    make_runtime_and_config,
+    messages_plugin_state_cls,
+    scan_flagged_code,
 )
 from ava.sdk_surface import process_context
 from base.agents.messages.security_finding import SecurityFindingEntry
@@ -46,8 +46,8 @@ async def test_exec_node_preserves_state_update_on_lifecycle(
         "from ava.self import AgentTermination\n"
         "raise AgentTermination\n"
     )
-    state = _State(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    state = _State(messages=[ai_message_with_code(code)], halted=False)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
@@ -64,10 +64,10 @@ async def test_exec_node_commits_security_finding_to_graph_state(
     `state.security_findings`; the exec node itself adds no note to its messages
     delta (the after_exec hook delivers it) and the host keeps no findings of its own."""
     state = BaseAgentState(
-        messages=[_ai_message_with_code(_scan_flagged_code("shell.run"))],
+        messages=[ai_message_with_code(scan_flagged_code("shell.run"))],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
 
@@ -85,16 +85,16 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
     """Order in the exec's messages delta: ToolMessage, then the plugin's context
     notes — the tool_use adjacency is preserved — while the finding for the same
     context file goes to the graph-state channel."""
-    state_cls = _messages_plugin_state_cls()
+    state_cls = messages_plugin_state_cls()
 
     code = (
-        _scan_flagged_code("context-file:/repo/AGENTS.md")
+        scan_flagged_code("context-file:/repo/AGENTS.md")
         + "import ava\n"
         + "from langchain_core.messages import HumanMessage\n"
         + "ava.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
     )
-    state = state_cls(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    state = state_cls(messages=[ai_message_with_code(code)], halted=False)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
 
@@ -127,8 +127,8 @@ async def test_exec_node_checkpoints_child_attachment(
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = f"import ava\nava.self.attach({str(image)!r}, label='render result')"
-    state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(
+    state = BaseAgentState(messages=[ai_message_with_code(code)], halted=False)
+    runtime, config = make_runtime_and_config(
         AsyncMock(), {"llm_model": "claude-sonnet-5"}, database_gate=database_gate
     )
 
@@ -160,7 +160,7 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
     the whole history — so neither plugin notes nor the child's findings may
     leak into the update (the findings channel is reset instead)."""
 
-    state_cls = _messages_plugin_state_cls()
+    state_cls = messages_plugin_state_cls()
     # The real exec child rejects attach for a text-only model (user ruling
     # 2026-08-28) — boot it with a media-capable model via the per-agent
     # config map the exec path re-emits into the child env (a bare home's
@@ -168,7 +168,7 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = (
-        _scan_flagged_code("shell.run")
+        scan_flagged_code("shell.run")
         + "import ava\n"
         + "from langchain_core.messages import HumanMessage\n"
         + "ava.state_update['messages'] = [HumanMessage(content='x')]\n"
@@ -177,11 +177,11 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
         + "raise SystemHalt()\n"
     )
     state = state_cls(
-        messages=[_ai_message_with_code(code)],
+        messages=[ai_message_with_code(code)],
         halted=False,
         attach=AttachState(pending=[AttachEntry(path="/previous.png", label=None)]),
     )
-    runtime, config = _make_runtime_and_config(
+    runtime, config = make_runtime_and_config(
         AsyncMock(), {"llm_model": "claude-sonnet-5"}, database_gate=database_gate
     )
 

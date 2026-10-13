@@ -21,18 +21,18 @@ from agent.graph.hooks.compact import (
 from agent.messages import inbound_message
 from agent.state import AgentState
 from agent.tests.test_compact import (
-    _COMPACT_SECTIONS,
-    _LONG_SUMMARY,
-    _compact_tail,
-    _compaction_ainvoke,
+    COMPACT_SECTIONS,
+    LONG_SUMMARY,
     _config,
-    _fake_config,
     _fake_llm,
-    _insert_compact_summary,
-    _make_runtime,
-    _patch_compact_config,
-    _reminder_state,
-    _runtime_with_llm,
+    compact_tail,
+    compaction_ainvoke,
+    fake_config,
+    insert_compact_summary,
+    make_runtime,
+    patch_compact_config,
+    reminder_state,
+    runtime_with_llm,
 )
 from agent.tests.test_compact import _ava_compact_loaded as _ava_compact_loaded
 from base.agents.context import AvaContext
@@ -60,11 +60,11 @@ async def test_compact_reminder_fires_in_band(
     from agent.graph.hooks import compact as _p
 
     state_cls, wrap_fn = _ava_compact_loaded
-    _patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     result = await wrap_fn(
-        _reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
-        _runtime_with_llm(_fake_llm(), database_gate=database_gate),
-        _fake_config(),
+        reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
+        runtime_with_llm(_fake_llm(), database_gate=database_gate),
+        fake_config(),
     )
 
     assert result is not None
@@ -83,13 +83,13 @@ async def test_compact_reminder_silent_below_threshold(
 ):
     """est <= reminder_tokens → no note (and no force, est under ceiling)."""
     state_cls, wrap_fn = _ava_compact_loaded
-    _patch_compact_config(
+    patch_compact_config(
         monkeypatch, compact_reminder_tokens=1_000_000, auto_compact_tokens=2_000_000
     )
     result = await wrap_fn(
-        _reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
-        _runtime_with_llm(_fake_llm(), database_gate=database_gate),
-        _fake_config(),
+        reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
+        runtime_with_llm(_fake_llm(), database_gate=database_gate),
+        fake_config(),
     )
     assert result is None
 
@@ -99,11 +99,11 @@ async def test_compact_reminder_yields_to_force_above_ceiling(
 ):
     """Above the ceiling, defer all model work and history changes to the LLM node."""
     state_cls, wrap_fn = _ava_compact_loaded
-    _patch_compact_config(monkeypatch, compact_reminder_tokens=0, auto_compact_tokens=1)
+    patch_compact_config(monkeypatch, compact_reminder_tokens=0, auto_compact_tokens=1)
     result = await wrap_fn(
-        _reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
-        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
-        _fake_config(),
+        reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
+        runtime_with_llm(_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        fake_config(),
     )
 
     assert result is None  # The hook never calls the model; the LLM node owns compaction.
@@ -114,10 +114,10 @@ async def test_compact_reminder_once_per_window(
 ):
     """already reminded this window (shown=True, no compaction since) → silent."""
     state_cls, wrap_fn = _ava_compact_loaded
-    _patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
-    state = _reminder_state(state_cls, version=0, shown=True, seen=0)  # pyright: ignore[reportUnknownArgumentType]
+    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    state = reminder_state(state_cls, version=0, shown=True, seen=0)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
-        state, _runtime_with_llm(_fake_llm(), database_gate=database_gate), _fake_config()
+        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None
 
@@ -129,10 +129,10 @@ async def test_compact_reminder_rearms_after_compaction(
     the old note was summarized away, so the reminder re-arms and fires again,
     catching the bookmark up to the new version."""
     state_cls, wrap_fn = _ava_compact_loaded
-    _patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
-    state = _reminder_state(state_cls, version=1, shown=True, seen=0)  # pyright: ignore[reportUnknownArgumentType]
+    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    state = reminder_state(state_cls, version=1, shown=True, seen=0)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
-        state, _runtime_with_llm(_fake_llm(), database_gate=database_gate), _fake_config()
+        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
     )
 
     assert result is not None
@@ -148,15 +148,15 @@ async def test_compact_reminder_defers_to_agent_reply(
     """in band, but the turn was woken by an agent inbound → defer (return None)
     so the agent-reply note owns the single messages-write this pass allows."""
     state_cls, wrap_fn = _ava_compact_loaded
-    _patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     msgs = [
         SystemMessage(content="<sys>"),
         *(HumanMessage(content="x" * 1000) for _ in range(5)),
         inbound_message(content="ping", source="agent:5", inbound_id=1, body_start=0),
     ]
-    state = _reminder_state(state_cls, messages=msgs)  # pyright: ignore[reportUnknownArgumentType]
+    state = reminder_state(state_cls, messages=msgs)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
-        state, _runtime_with_llm(_fake_llm(), database_gate=database_gate), _fake_config()
+        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None
 
@@ -167,10 +167,10 @@ async def test_compact_reminder_silent_when_no_conversation(
     """est over the reminder threshold but only a SystemMessage (nothing to
     compact) → no point reminding, return None."""
     state_cls, wrap_fn = _ava_compact_loaded
-    _patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
-    state = _reminder_state(state_cls, messages=[SystemMessage(content="x" * 100_000)])  # pyright: ignore[reportUnknownArgumentType]
+    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    state = reminder_state(state_cls, messages=[SystemMessage(content="x" * 100_000)])  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
-        state, _runtime_with_llm(_fake_llm(), database_gate=database_gate), _fake_config()
+        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None
 
@@ -192,7 +192,7 @@ async def test_compact_contract_reaches_request_without_resident_self(
 
     contract = compact.__doc__
     assert contract is not None
-    for section in _COMPACT_SECTIONS:
+    for section in COMPACT_SECTIONS:
         assert section in contract, f"section {section!r} missing from the compact contract"
 
     system_prompt = build_system_prompt(
@@ -214,14 +214,14 @@ async def test_compact_contract_reaches_request_without_resident_self(
         ),
         catalog=build_model_catalog(),
     )
-    [call] = _compaction_ainvoke(llm).call_args_list
+    [call] = compaction_ainvoke(llm).call_args_list
     [request] = call.args
     assert request[0] is head
     from inspect import cleandoc
 
     assert request[-1].content.startswith(COMPACTION_INSTRUCTION)
     assert cleandoc(contract) in request[-1].content
-    for section in _COMPACT_SECTIONS:
+    for section in COMPACT_SECTIONS:
         assert section in request[-1].content, (
             f"section {section!r} missing from compaction request"
         )
@@ -247,7 +247,7 @@ async def test_compact_summary_preserves_agent_continuity(
         database_gate=database_gate,
         machine=machine_identity,
     )
-    _insert_compact_summary(db_conn, tid, "summary after compact")
+    insert_compact_summary(db_conn, tid, "summary after compact")
 
     sys_msg = SystemMessage(content="<test sys prompt>")
     initial_msgs: list[AnyMessage] = [
@@ -257,7 +257,7 @@ async def test_compact_summary_preserves_agent_continuity(
     state = AgentState(messages=initial_msgs)
 
     cmd = await claim_node(
-        state, _make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
     )
     assert cmd.goto == "init_context"
     resume = cmd.update["context_reset"].resume  # type: ignore[index]
@@ -292,12 +292,12 @@ async def test_compact_summary_replaces_whole_history_no_tail(
     ]
     state = AgentState(messages=initial_msgs)
 
-    _insert_compact_summary(db_conn, tid, "the whole memory")
+    insert_compact_summary(db_conn, tid, "the whole memory")
     cmd = await claim_node(
-        state, _make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
     )
 
-    tail = _compact_tail(cmd.update)
+    tail = compact_tail(cmd.update)
     assert [m.content for m in tail] == [compose_summary_message("the whole memory")]  # pyright: ignore[reportUnknownMemberType]
     assert cmd.goto == "init_context"
 
@@ -322,7 +322,7 @@ async def test_compact_summary_emits_compact_done(
         database_gate=database_gate,
         machine=machine_identity,
     )
-    _insert_compact_summary(db_conn, tid, "summary after compact")
+    insert_compact_summary(db_conn, tid, "summary after compact")
     state = AgentState(
         messages=[
             SystemMessage(content="<sys>"),
@@ -390,7 +390,7 @@ async def test_consecutive_compacts_both_processed(
     sys_msg = SystemMessage(content="<test sys prompt>")
 
     # ---- first compact ----
-    _insert_compact_summary(db_conn, tid, "first compact summary")
+    insert_compact_summary(db_conn, tid, "first compact summary")
     initial_msgs: list[AnyMessage] = [
         sys_msg,
         *(HumanMessage(content=f"gen1-msg-{i}") for i in range(8)),
@@ -398,19 +398,19 @@ async def test_consecutive_compacts_both_processed(
     state = AgentState(messages=initial_msgs)
 
     cmd1 = await claim_node(
-        state, _make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
     )
-    tail1 = _compact_tail(cmd1.update)
+    tail1 = compact_tail(cmd1.update)
     assert tail1[0].content == compose_summary_message("first compact summary")  # pyright: ignore[reportUnknownMemberType]
 
     # ---- second compact (on state after compact) ----
     # state after first compact (RemoveMessage already processed by reducer) = [sys, summary1]
     compacted_state = AgentState(messages=[sys_msg, HumanMessage(content="first compact summary")])
-    _insert_compact_summary(db_conn, tid, "second compact summary")
+    insert_compact_summary(db_conn, tid, "second compact summary")
     cmd2 = await claim_node(
-        compacted_state, _make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        compacted_state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
     )
-    tail2 = _compact_tail(cmd2.update)
+    tail2 = compact_tail(cmd2.update)
     assert [m.content for m in tail2] == [compose_summary_message("second compact summary")]  # pyright: ignore[reportUnknownMemberType]
     assert cmd2.update["context_reset"].resume != END  # type: ignore[index]  # can continue
 
@@ -436,15 +436,15 @@ async def test_compact_with_empty_state_injects_system_message_and_summary(
         database_gate=database_gate,
         machine=machine_identity,
     )
-    _insert_compact_summary(db_conn, tid, "compact before any chat")
+    insert_compact_summary(db_conn, tid, "compact before any chat")
 
     state = AgentState()  # empty messages
 
     cmd = await claim_node(
-        state, _make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
     )
 
-    tail = _compact_tail(cmd.update)
+    tail = compact_tail(cmd.update)
     assert [m.content for m in tail] == [compose_summary_message("compact before any chat")]  # pyright: ignore[reportUnknownMemberType]
     assert cmd.goto == "init_context"
 
@@ -476,12 +476,12 @@ async def test_compact_with_super_long_summary_in_claim(
     ]
     state = AgentState(messages=initial_msgs)
 
-    _insert_compact_summary(db_conn, tid, long_summary)
+    insert_compact_summary(db_conn, tid, long_summary)
     cmd = await claim_node(
-        state, _make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
     )
 
-    tail = _compact_tail(cmd.update)
+    tail = compact_tail(cmd.update)
     assert tail[0].content == compose_summary_message(long_summary)  # pyright: ignore[reportUnknownMemberType]
     # the 50K summary rides through untruncated (only the fixed header is added)
     assert len(tail[0].content) == len(compose_summary_message(long_summary))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -501,7 +501,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
     tid = agent_row(db_conn)
     old = await _admit(aops_pool, tid, database_gate=database_gate)
     summary_text = "summary before terminate"
-    _insert_compact_summary(db_conn, tid, summary_text)
+    insert_compact_summary(db_conn, tid, summary_text)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, '', 'terminate')",
@@ -519,7 +519,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
         state,
         Runtime(
             context=replace(
-                _make_runtime(aops_pool, database_gate=database_gate).context,
+                make_runtime(aops_pool, database_gate=database_gate).context,
                 original_incarnation=old,
                 hosted_resources=None,
                 native_work=None,
@@ -556,7 +556,7 @@ async def test_compact_in_same_batch_as_restart(
     old = await _admit(aops_pool, tid, database_gate=database_gate)
 
     summary_text = "summary pre-restart"
-    _insert_compact_summary(db_conn, tid, summary_text)
+    insert_compact_summary(db_conn, tid, summary_text)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, '', 'restart')",
@@ -574,7 +574,7 @@ async def test_compact_in_same_batch_as_restart(
         state,
         Runtime(
             context=replace(
-                _make_runtime(aops_pool, database_gate=database_gate).context,
+                make_runtime(aops_pool, database_gate=database_gate).context,
                 original_incarnation=old,
                 hosted_resources=None,
                 native_work=None,
@@ -606,7 +606,7 @@ async def test_compact_in_same_batch_as_restart(
         state,
         Runtime(
             context=replace(
-                _make_runtime(aops_pool, database_gate=database_gate).context,
+                make_runtime(aops_pool, database_gate=database_gate).context,
                 original_incarnation=successor,
                 hosted_resources=None,
                 native_work=None,
@@ -614,7 +614,7 @@ async def test_compact_in_same_batch_as_restart(
         ),
         _config(tid),
     )
-    tail = _compact_tail(resumed.update)
+    tail = compact_tail(resumed.update)
     assert tail[0].content == compose_summary_message(summary_text)  # pyright: ignore[reportUnknownMemberType]
     assert resumed.goto == "init_context"
     assert db_conn.execute(

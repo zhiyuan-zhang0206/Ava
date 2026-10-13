@@ -502,7 +502,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
     def overflow_dir(_agent_id: int) -> Path:
         return directory
 
-    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
+    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
     # Bodies exceed the 300-line soft-crop trigger; the new body stays under
     # exec_output_max_chars so a reference-protected skip leaves it fully
     # inline (6 x "old payload " = 72 chars + newline -> 340 lines, 24,820 chars).

@@ -27,11 +27,11 @@ import pytest
 
 import ava
 from agent.graph.prompt.capabilities import (
-    _disabled_by_sdk_config,
     capabilities_section,
+    disabled_by_sdk_config,
     indexed_skill_identifiers,
 )
-from agent.graph.prompt.system_prompt import _delegation_check_section, build_system_prompt
+from agent.graph.prompt.system_prompt import build_system_prompt, delegation_check_section
 from ava import mcps
 from ava.sdk_surface import agent_identity, sdk_disable
 from base.config import FIELD_INFOS, settings
@@ -313,7 +313,7 @@ def test_delegation_check_makes_consulting_the_index_mandatory(
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
 
-    text = _delegation_check_section(
+    text = delegation_check_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -335,7 +335,7 @@ def test_delegation_check_routes_nontrivial_work_without_forcing_methods(
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
 
-    text = _delegation_check_section(
+    text = delegation_check_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -365,7 +365,7 @@ def test_delegation_check_drops_the_index_step_when_there_is_no_index(
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
     monkeypatch.setattr(mcps, "servers", list)
 
-    text = _delegation_check_section(
+    text = delegation_check_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),
@@ -497,7 +497,7 @@ def test_applied_disable_registry_marks_runtime_removed_path(
 
     monkeypatch.setattr(sdk_disable, "applied_entries", applied_entries)
     assert (
-        _disabled_by_sdk_config(
+        disabled_by_sdk_config(
             "agents.get_last_message",
             AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
@@ -510,7 +510,7 @@ def test_applied_disable_registry_marks_runtime_removed_path(
 def test_unregistered_missing_path_is_not_sdk_disabled() -> None:
     """A path that never existed must remain eligible for expansion diagnostics."""
     assert (
-        _disabled_by_sdk_config(
+        disabled_by_sdk_config(
             "missing_sdk_namespace",
             AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)

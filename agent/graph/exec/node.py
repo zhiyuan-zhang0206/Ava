@@ -30,9 +30,9 @@ Core mechanisms:
     it streams and a `StreamCap` rides the result to the envelope, so a
     runaway print loop is truncated rather than left to OOM the parent —
     the run itself is not killed.
-  - `_run_in_subprocess` returns the `_ExecResult` sum type
-    (`_ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle |
-    _ExecCrashed`) plus the raw child envelope; exec_node dispatches via
+  - `run_in_subprocess` returns the `ExecResult` sum type
+    (`ExecDone | ExecCancelled | ExecTimedOut | ExecLifecycle |
+    ExecCrashed`) plus the raw child envelope; exec_node dispatches via
     `match`, illegal state combinations are unrepresentable. Ordinary
     exception tracebacks are already in the stream output.
 
@@ -78,29 +78,29 @@ from base.log import logger
 
 from ._crop import CropInputs
 from ._result import (
-    _ExecCancelled,
-    _ExecCrashed,
-    _ExecDone,
-    _ExecLifecycle,
-    _ExecResult,
-    _ExecTimedOut,
+    ExecCancelled,
+    ExecCrashed,
+    ExecDone,
+    ExecLifecycle,
+    ExecResult,
+    ExecTimedOut,
 )
 from ._stream import ExecOutputChunkPublisher
-from ._subprocess import _run_in_subprocess
+from ._subprocess import run_in_subprocess
 from .output import ExecEnvelope, crashed_no_output_body, wrap_code_output
 from .protocol import ResultPayload
 
 # Each exec step commits one call; remaining calls return to EXEC before AFTER_EXEC.
 ExecGoto = Literal["exec", "after_exec"]
 
-# The `_ExecResult` sum type — 5 mutually exclusive variants + a shared output
+# The `ExecResult` sum type — 5 mutually exclusive variants + a shared output
 # field — lives in `_result.py` (moved there so the exec-subprocess
 # machinery can construct the same type without importing this module, which
 # would close an import cycle). Re-exported here: exec_node's match dispatch
 # and existing tests keep importing from agent.graph.exec.node.
 #
 # Lifecycle priority is implemented at the construction site
-# (`_construct_exec_result`): if a lifecycle exc exists, `_ExecLifecycle` is
+# (`_construct_exec_result`): if a lifecycle exc exists, `ExecLifecycle` is
 # constructed directly, skipping the cancelled/timed_out branches — the
 # "lifecycle always wins" race decision moved from dispatch site to
 # construction site; exec_node match no longer has to consider the race.
@@ -135,11 +135,11 @@ async def exec_node(
 
 
 async def _exec_with_node_shield(
-    coro: Awaitable[tuple[_ExecResult, ResultPayload | None]],
+    coro: Awaitable[tuple[ExecResult, ResultPayload | None]],
     agent_id: int,
     *,
     read_timeout: Callable[[], float],
-) -> tuple[_ExecResult, ResultPayload | None]:
+) -> tuple[ExecResult, ResultPayload | None]:
     """Graph-level exec node timeout — defense-in-depth above the per-code-block
     exec_timeout_seconds. If the inner deadline misses a cancellable framework
     hang, this outer shield requests cancellation and surfaces a timeout after
@@ -159,7 +159,7 @@ async def _exec_with_node_shield(
             agent_id=agent_id,
         )
         return (
-            _ExecTimedOut(
+            ExecTimedOut(
                 output=(
                     f"[exec node timeout after {read_timeout():.0f}s] "
                     "Execution was stopped by an internal safeguard and did not "
@@ -172,14 +172,14 @@ async def _exec_with_node_shield(
         )
 
 
-async def _run_agent_code(
+async def run_agent_code(
     state: _state.AgentState,
     ctx: AvaContext,
     agent_id: int,
     code: str,
     chunk_publisher: ExecOutputChunkPublisher,
 ) -> tuple[
-    _ExecResult,
+    ExecResult,
     dict[str, Any],
     int,
     list[dict[str, Any]] | None,
@@ -204,7 +204,7 @@ async def _run_agent_code(
         resources=ctx.hosted_resources,
     ) as cancel_event:
         outcome = await _exec_with_node_shield(
-            _run_in_subprocess(
+            run_in_subprocess(
                 ctx.require_db(),
                 code,
                 ctx,
@@ -224,7 +224,7 @@ async def _run_agent_code(
     # timeout still report the honest time-before-stop.
     exec_ms = round((time.monotonic() - exec_started) * 1000)
     result, payload = outcome
-    if isinstance(result, _ExecCancelled) and cancel_event.is_set():
+    if isinstance(result, ExecCancelled) and cancel_event.is_set():
         result = replace(result, reason=cancel_event.reason)
     if payload is not None and payload.state_update_error is not None:
         # The child reported a tampered slot (agent set ava.state_update to a
@@ -248,8 +248,8 @@ def _emit_exec_boot_failed(agent_id: int, exc: BaseException) -> None:
     )
 
 
-def _dispatch_exec_result(
-    result: _ExecResult,
+def dispatch_exec_result(
+    result: ExecResult,
     ctx: AvaContext,
     agent_id: int,
     *,
@@ -259,7 +259,7 @@ def _dispatch_exec_result(
     read_sandbox: Callable[[str], Any],
     clock: Clock,
 ) -> tuple[bool, ExecEnvelope, ExecStatus]:
-    """Map the `_ExecResult` sum type to (halted, envelope, status).
+    """Map the `ExecResult` sum type to (halted, envelope, status).
 
     Lifecycle priority (lifecycle always wins the cancel/timeout race) is
     implemented at the construction site in `_construct_exec_result` (`_result.py`); the match directly
@@ -281,7 +281,7 @@ def _dispatch_exec_result(
     )
     stream_cap = result.stream_cap
     match result:
-        case _ExecLifecycle(output=output, exc=SystemHalt()):
+        case ExecLifecycle(output=output, exc=SystemHalt()):
             # ava.self.compact already INSERTed compact_summary inbound; append
             # "[system halt]" at the end (agent's real output comes first).
             halted, status = True, ExecStatus.HALTED
@@ -295,7 +295,7 @@ def _dispatch_exec_result(
             )
             logger.info("[exec] {body}", event="exec", body=envelope.text)
             logger.info("[halt] {body}", event="halt", body="system_halt (compact)")
-        case _ExecLifecycle(
+        case ExecLifecycle(
             output=output, exc=AgentTermination() | AgentRestart() | AgentImpersonation() as exc
         ):
             # Restart/terminate enqueue lifecycle inbounds; impersonation
@@ -314,7 +314,7 @@ def _dispatch_exec_result(
                 event="halt",
                 body=f"lifecycle {type(exc).__name__}",
             )
-        case _ExecLifecycle(exc=other_exc):
+        case ExecLifecycle(exc=other_exc):
             # Exhaustive fallthrough: future LifecycleExit subclass not handled
             # in the two cases above falls here and raises — safer than silently
             # taking the "ordinary exception" halted=False path. Implements
@@ -323,7 +323,7 @@ def _dispatch_exec_result(
                 f"Unrecognized LifecycleExit subclass: {type(other_exc).__name__!r} — "
                 f"dispatch ladder missed update"
             )
-        case _ExecCancelled(output=output, reason=reason):
+        case ExecCancelled(output=output, reason=reason):
             halted, status = True, ExecStatus.CANCELLED
             envelope = wrap(
                 output,
@@ -343,7 +343,7 @@ def _dispatch_exec_result(
             # the timeout path does not send Cancelled — not a user cancel).
             assert ctx.event_publisher is not None  # noqa: S101 — asserted by caller; narrowed for the emit
             ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
-        case _ExecTimedOut(output=output):
+        case ExecTimedOut(output=output):
             # Timeout is ordinary feedback, not a stop-turn signal: the envelope
             # hints at long-running primitives; the next LLM round adapts.
             halted, status = False, ExecStatus.TIMED_OUT
@@ -357,7 +357,7 @@ def _dispatch_exec_result(
             logger.info(
                 "[{label}] {body}", label="exec-timeout", body=envelope.text, event="exec_timeout"
             )
-        case _ExecCrashed(
+        case ExecCrashed(
             output=output, exc=exc, full_traceback=child_traceback, code_reached=code_reached
         ):
             # Ordinary exception: `output` carries the agent-facing (filtered)
@@ -397,7 +397,7 @@ def _dispatch_exec_result(
                 # output)". A distinct WARNING event is the operator signal
                 # (P2 #2102); the alert rule reads it from the event stream.
                 _emit_exec_boot_failed(agent_id, exc)
-        case _ExecDone(output=output):
+        case ExecDone(output=output):
             halted, status = False, ExecStatus.COMPLETED
             envelope = wrap(
                 output,
@@ -469,7 +469,7 @@ async def _exec_single_call(
         exec_ms,
         envelope_attachments,
         envelope_sdk_calls,
-    ) = await _run_agent_code(
+    ) = await run_agent_code(
         state,
         ctx,
         agent_id,
@@ -480,7 +480,7 @@ async def _exec_single_call(
     timestamp = (
         clock.now_timestamp() if ctx.require_agent().read("general", "message_timestamps") else None
     )
-    halted, envelope, status = _dispatch_exec_result(
+    halted, envelope, status = dispatch_exec_result(
         result,
         ctx,
         agent_id,
@@ -499,7 +499,7 @@ async def _exec_single_call(
 
     # Compact path (SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
-    compact_halt = isinstance(result, _ExecLifecycle) and isinstance(result.exc, SystemHalt)
+    compact_halt = isinstance(result, ExecLifecycle) and isinstance(result.exc, SystemHalt)
     if compact_halt:
         # Findings annotate the history claim is about to wipe; the rest of the delta (plugin
         # fields) is written back as before, and the findings otherwise ride the spread below

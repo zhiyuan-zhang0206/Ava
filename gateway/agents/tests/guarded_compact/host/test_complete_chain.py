@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _insert, agent_row
+from agent.tests.claim.test_inbound_ownership import agent_row, insert
 from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
@@ -117,7 +117,7 @@ async def test_real_host_http_once_summary_cold_ack_and_next_chat(
         client.post(path + "/compact-history", json=observed.json(), headers=headers).json()
         == accepted.json()
     )
-    _insert(db_conn, agent)
+    insert(db_conn, agent)
     await host.run_turn(agent)
     assert len(ordinary) == 2
     assert str(ordinary[-1]) != status.json()["execution"]["work_id"]
@@ -168,7 +168,7 @@ async def assert_interrupted(
     ).json()
     assert not interrupted["continuation_released"]
     assert injected == [fault] and generated_models[0].calls == 1
-    _insert(db_conn, agent)
+    insert(db_conn, agent)
     await host.run_turn(agent)
     assert len(ordinary) == 1 and generated_models[0].calls == 1
     assert (

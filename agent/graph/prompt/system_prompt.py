@@ -21,13 +21,13 @@ from base.packages.plugins import activation
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import workspace_dir
 
-from ._codeact import _codeact_section
+from ._codeact import codeact_section
 from .capabilities import (
     _CAPABILITY_SURFACES,
-    _disabled_by_sdk_config,
-    _is_capability_surface_member,
     capabilities_section,
     capability_index_is_empty,
+    disabled_by_sdk_config,
+    is_capability_surface_member,
 )
 from .conversation import COMMUNICATION_STYLE_SECTIONS, user_reply_section
 
@@ -74,7 +74,7 @@ def _discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
         # agent_visible_names already drops underscore-prefixed names.
         for name in ava.agent_visible_names(parent):
             full = f"{prefix}.{name}" if prefix else name
-            if full in _CAPABILITY_SURFACES or _disabled_by_sdk_config(full, sdk_disable):
+            if full in _CAPABILITY_SURFACES or disabled_by_sdk_config(full, sdk_disable):
                 continue
             attr = getattr(parent, name, None)
             if inspect.ismodule(attr) or isinstance(attr, SimpleNamespace):
@@ -126,7 +126,7 @@ def effective_sdk_expand(
         if path in seen:
             continue
         seen.add(path)
-        if _is_capability_surface_member(path):
+        if is_capability_surface_member(path):
             logging.getLogger(__name__).warning(
                 "sdk_expand_in_system_prompt: refusing %r — expanding one member of a "
                 "capability surface would render that skill's whole body (or that "
@@ -180,7 +180,7 @@ def _sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         slices.brain.llm_model, catalog=catalog
     )
     for path in wanted:
-        if _disabled_by_sdk_config(path, slices.prompt.sdk_disable):
+        if disabled_by_sdk_config(path, slices.prompt.sdk_disable):
             continue
         target: object = ava
         try:
@@ -234,7 +234,7 @@ def _prefer_sdk_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
 # lays out — right after prefer-SDK, before keep-it-simple.
 
 
-def _keep_it_simple_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def keep_it_simple_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_keep_it_simple_enabled (env
     AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE, default on). Prefer mechanically correct,
     conceptually simple solutions over clever shortcuts, relentlessly even when
@@ -256,7 +256,7 @@ def _keep_it_simple_section(slices: AgentSlices, *, catalog: ModelCatalog) -> st
 # --- Conversation: how you talk to the user ---
 
 
-def _communication_style_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def communication_style_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Selected by agent_communication_style (env
     AVA_AGENT_COMMUNICATION_STYLE, default 'off'). Three styles carry the
     narration guidance and differ in how much the agent says while it
@@ -276,7 +276,7 @@ _VERY_LIGHT_USER_TONE = "Be honest and direct, and keep honesty from turning int
 _USER_TONE_SECTIONS = {"gemini": _STRONG_USER_TONE, "claude": _VERY_LIGHT_USER_TONE}
 
 
-def _user_tone_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def user_tone_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Independent from ``agent_communication_style`` (narration volume vs tone), with a per-family strength gradient; every Claude model defaults off unless explicitly enabled."""
     if not _resolved("prompt_user_tone_enabled", slices, catalog):
         return ""
@@ -303,7 +303,7 @@ def _output_conciseness_section(slices: AgentSlices, *, catalog: ModelCatalog) -
     )
 
 
-def _ui_delivery_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def ui_delivery_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_ui_delivery_enabled (env
     AVA_SYSTEM_PROMPT_UI_DELIVERY, default on). Content for the user goes through
     the UI — never as a bare path to a Markdown file the user would have to open
@@ -359,7 +359,7 @@ def _action_caution_section(slices: AgentSlices, *, catalog: ModelCatalog) -> st
     )
 
 
-def _align_before_action_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def align_before_action_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_align_before_action_enabled (env AVA_SYSTEM_PROMPT_ALIGN,
     default on). Resolve material intent or authority choices without reopening
     settled instructions merely because exploration or planning finished."""
@@ -423,7 +423,7 @@ _STEP_PARALLEL = (
 )
 
 
-def _delegation_check_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def delegation_check_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_delegation_check_enabled (env
     AVA_SYSTEM_PROMPT_DELEGATION_CHECK, default on). Before taking on any work, run a
     30-second capability and delegation check rather than rebuilding from
@@ -465,7 +465,7 @@ _CROSS_MACHINE_DELEGATION_HINT = (
 )
 
 
-def _cross_machine_delegation_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def cross_machine_delegation_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_cross_machine_delegation_enabled (env
     AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION, default on). One sentence,
     user-finalized wording verbatim: when work spans machines, let an agent on
@@ -505,7 +505,7 @@ def _file_driven_work_section(slices: AgentSlices, *, catalog: ModelCatalog) -> 
     )
 
 
-def _temporal_awareness_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def temporal_awareness_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_temporal_awareness_enabled (env
     AVA_SYSTEM_PROMPT_TEMPORAL, default on). For events and releases after the training
     cutoff, assume you don't know — search before answering; don't guess from
@@ -536,7 +536,7 @@ def _temporal_awareness_section(slices: AgentSlices, *, catalog: ModelCatalog) -
 # describes them together (ava_builtins/plugins/ava_memory/plugin.py).
 
 
-_INVEST_IN_THE_FUTURE_SECTION = (
+INVEST_IN_THE_FUTURE_SECTION = (
     "# Invest in the future\n\n"
     "When you notice something that could improve later work — a repeated failure, a "
     "rough edge in a tool or process, an unstable environment, a fix that would help "
@@ -556,7 +556,7 @@ _INVEST_IN_THE_FUTURE_SECTION = (
 )
 
 
-def _invest_in_the_future_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def invest_in_the_future_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_invest_future_enabled (env
     AVA_SYSTEM_PROMPT_INVEST_FUTURE, default on through the per-model floor).
     The framework's ONE cross-domain future-signal rule, merged from the former
@@ -564,7 +564,7 @@ def _invest_in_the_future_section(slices: AgentSlices, *, catalog: ModelCatalog)
     final paragraph."""
     if not _resolved("prompt_invest_future_enabled", slices, catalog):
         return ""
-    return _INVEST_IN_THE_FUTURE_SECTION
+    return INVEST_IN_THE_FUTURE_SECTION
 
 
 def _workspace_section(slices: AgentSlices, *, agent_id: int | None) -> str:
@@ -640,22 +640,22 @@ def _long_running_operation_section(_slices: AgentSlices) -> str:
 FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
     _sdk_expand_section,
     _prefer_sdk_section,
-    _codeact_section,
-    _keep_it_simple_section,
+    codeact_section,
+    keep_it_simple_section,
     user_reply_section,
-    _communication_style_section,
-    _user_tone_section,
+    communication_style_section,
+    user_tone_section,
     _output_conciseness_section,
-    _ui_delivery_section,
+    ui_delivery_section,
     _outcome_reporting_section,
     _action_caution_section,
-    _align_before_action_section,
-    _delegation_check_section,
-    _cross_machine_delegation_section,
+    align_before_action_section,
+    delegation_check_section,
+    cross_machine_delegation_section,
     _file_driven_work_section,
     _long_running_operation_section,
-    _temporal_awareness_section,
-    _invest_in_the_future_section,
+    temporal_awareness_section,
+    invest_in_the_future_section,
 )
 
 
@@ -671,7 +671,7 @@ def build_system_prompt(
     `_claim` node calls once when `state.messages` is empty; afterward
     SystemMessage is persisted into state[0] and reused across turn / restart
     — this function runs only once in an agent's lifetime. So the SDK
-    overview is captured on-site via `_get_ava_overview()`, not cached.
+    overview is captured on-site via `get_ava_overview()`, not cached.
 
     Call timing guarantees `load_extensions()` has run (per `build_graph()`
     flow order), so plugin namespaces (`ava.cwd` etc.) make it into the
@@ -679,24 +679,24 @@ def build_system_prompt(
     """
 
     from ._base_prompt import (
-        _BASE_SYSTEM_PROMPT,
-        _CODE_ACTION_PREAMBLE,
-        _SEQUENTIAL_TOOL_CALLS_NOTE,
-        _get_ava_overview,
+        BASE_SYSTEM_PROMPT,
+        CODE_ACTION_PREAMBLE,
+        SEQUENTIAL_TOOL_CALLS_NOTE,
+        get_ava_overview,
     )
 
     sequential = (
-        _SEQUENTIAL_TOOL_CALLS_NOTE if slices.prompt.prompt_sequential_tool_calls_enabled else ""
+        SEQUENTIAL_TOOL_CALLS_NOTE if slices.prompt.prompt_sequential_tool_calls_enabled else ""
     )
     if slices.read("agent", "prompt_sdk_overview_enabled"):
         parts = [
-            _BASE_SYSTEM_PROMPT.format(
-                _SEQUENTIAL_TOOL_CALLS=sequential, _AVA_OVERVIEW=_get_ava_overview()
+            BASE_SYSTEM_PROMPT.format(
+                _SEQUENTIAL_TOOL_CALLS=sequential, _AVA_OVERVIEW=get_ava_overview()
             )
         ]
     else:
         # Bare identity — no SDK overview, just the preamble
-        parts = [_CODE_ACTION_PREAMBLE.format(_SEQUENTIAL_TOOL_CALLS=sequential)]
+        parts = [CODE_ACTION_PREAMBLE.format(_SEQUENTIAL_TOOL_CALLS=sequential)]
 
     def workspace_section(agent: AgentSlices) -> str:
         return _workspace_section(agent, agent_id=agent_id)
@@ -709,19 +709,19 @@ def build_system_prompt(
     catalog_sections = (
         _sdk_expand_section,
         _prefer_sdk_section,
-        _keep_it_simple_section,
-        _communication_style_section,
-        _user_tone_section,
+        keep_it_simple_section,
+        communication_style_section,
+        user_tone_section,
         _output_conciseness_section,
-        _ui_delivery_section,
+        ui_delivery_section,
         _outcome_reporting_section,
         _action_caution_section,
-        _align_before_action_section,
-        _delegation_check_section,
-        _cross_machine_delegation_section,
+        align_before_action_section,
+        delegation_check_section,
+        cross_machine_delegation_section,
         _file_driven_work_section,
-        _temporal_awareness_section,
-        _invest_in_the_future_section,
+        temporal_awareness_section,
+        invest_in_the_future_section,
         capabilities_section,
     )
     for section_fn in framework_sections:
