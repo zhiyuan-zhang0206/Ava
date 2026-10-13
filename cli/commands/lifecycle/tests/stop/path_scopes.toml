@@ -7,7 +7,7 @@
     "test_stop_extras.py",
     "test_stop_terminals.py",
 ]
-"tests.fixtures.unit.generation" = ["."]
+"base.tests.fixtures.generation" = ["."]
 "base.tests.fixtures.homes" = ["."]
 "tests.fixtures.unit.sdk" = [
     "test_data_plane_stop.py",
