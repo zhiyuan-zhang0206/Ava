@@ -25,7 +25,7 @@ after_exec **always** routes to claim now (no longer only when halted=True),
 ensuring user chat in the middle of a multi-step loop can also be promptly
 claimed and merged into the next LLM round.
 
-Automatic compaction runs in the LLM node via `agent/hooks/compact.py:auto_compact_for_llm`
+Automatic compaction runs in the LLM node via `agent/graph/hooks/compact.py:auto_compact_for_llm`
 after the before_llm hooks commit. Claim still dispatches explicit compaction
 requests.
 

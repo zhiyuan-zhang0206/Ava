@@ -150,7 +150,7 @@ def indexed_skills(prompt: Prompt) -> list[Any]:
     answer; the rendered index is one frozen sample of it, taken when
     `init_context` builds the SystemMessage. Everything that has to reason about
     the distance between the two — the snapshot `init_context` records, the drift
-    check that keeps it honest (`agent/hooks/capabilities.py`) — comes through
+    check that keeps it honest (`agent/graph/hooks/capabilities.py`) — comes through
     here, so no caller re-derives which config list decides membership.
 
     Resolution (wildcard, identifier-then-name, warn-and-skip) is shared with the

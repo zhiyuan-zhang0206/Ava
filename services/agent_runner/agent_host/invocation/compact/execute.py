@@ -7,8 +7,12 @@ from uuid import uuid4
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.hooks.compact import (
+    COMPACT_MIN_SUMMARY_CHARS,
+    conversation_messages,
+    generate_summary,
+)
 from agent.graph.interrupt import interruptible_model, subscribe_interrupt
-from agent.hooks.compact import COMPACT_MIN_SUMMARY_CHARS, conversation_messages, generate_summary
 from agent.hooks.compact_anchor import closing_of
 from agent.state import AgentState
 from base.agents.compaction.execution import (

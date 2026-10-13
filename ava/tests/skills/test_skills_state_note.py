@@ -4,7 +4,7 @@ Skill recall must not offer a skill whose body the agent already has in its cont
 body is read inside the exec child, so the identifier of every skill whose body is handed over
 is appended to `ava.state_update["skill_reads"]` at the one point all read paths share (the
 `skill_invoked` audit). The exec node commits it to the graph state; the skill-recall hook reads
-it from there. See `agent/hooks/tests/test_skill_recall_hook.py` for the consumer.
+it from there. See `agent/graph/hooks/tests/test_skill_recall_hook.py` for the consumer.
 """
 
 import json

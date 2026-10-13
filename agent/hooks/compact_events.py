@@ -1,6 +1,6 @@
 """Compaction live-run events — the SSE started/terminal pair.
 
-Extracted from `agent/hooks/compact.py` (file line budget; task #3323). Emits
+Extracted from `agent/graph/hooks/compact.py` (file line budget; task #3323). Emits
 the pair consumed by the frontend's ticking "Compacting" block: `compact_started`
 when a forced/auto compaction begins, and exactly one `compact_finished`
 (success / failure / replaced) when it ends. The wire contract lives in

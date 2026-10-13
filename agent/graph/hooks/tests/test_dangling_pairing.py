@@ -17,13 +17,13 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMes
 from langchain_core.messages.modifier import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 
+from agent.graph.hooks.framework import framework_hooks
 from agent.hooks import repair as repair_module
-from agent.hooks.framework import framework_hooks
 from agent.hooks.repair import (
     _redundant_tool_results,
-    _repair_dangling_tool_pairing,
     _unpaired_tool_calls,
     dangling_tool_pairing_repairs,
+    repair_dangling_tool_pairing,
 )
 from base.agents.messages.kwargs import ExecStatus
 
@@ -373,17 +373,17 @@ _CONFIG = {"configurable": {"thread_id": "236"}}
 
 
 async def _run_hook(state: _FakeState) -> dict[str, Any] | None:
-    return await _repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
+    return await repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
 
 
 async def test_hook_returns_none_when_history_valid() -> None:
     state = _FakeState([_ai_tool_use("c1"), ToolMessage(content="o", tool_call_id="c1")])
-    assert await _repair_dangling_tool_pairing(state, None, _CONFIG) is None  # type: ignore[arg-type]
+    assert await repair_dangling_tool_pairing(state, None, _CONFIG) is None  # type: ignore[arg-type]
 
 
 async def test_hook_returns_messages_update_for_buried_dangling() -> None:
     state = _FakeState([_ai_tool_use("c1"), HumanMessage(content="buried")])
-    update = await _repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
+    update = await repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
     assert update is not None and set(update) == {"messages", "pending_exec_notes"}  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(update["messages"][0], RemoveMessage)
 
@@ -409,7 +409,7 @@ async def test_hook_drops_orphan_tool_result_in_the_5333_shape() -> None:
 
 
 def test_repair_is_the_first_framework_before_llm_hook() -> None:
-    assert framework_hooks()["before_llm"][0] is _repair_dangling_tool_pairing
+    assert framework_hooks()["before_llm"][0] is repair_dangling_tool_pairing
 
 
 @pytest.mark.parametrize("first_finished", [False, True])
@@ -439,5 +439,5 @@ async def test_repair_hook_drains_notes_when_tool_pairing_already_complete() -> 
     state = _FakeState([_ai_tool_use("c1"), ToolMessage(content="done", tool_call_id="c1")])
     note = HumanMessage(content="deferred context")
     state.pending_exec_notes = [note]
-    update = await _repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
+    update = await repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
     assert update == {"messages": [note], "pending_exec_notes": []}

@@ -41,8 +41,9 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
-from agent.hooks import compact, history_dump
-from agent.hooks.compact import auto_compact_for_llm, compose_summary_message
+from agent.graph.hooks import compact
+from agent.graph.hooks.compact import auto_compact_for_llm, compose_summary_message
+from agent.hooks import history_dump
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext

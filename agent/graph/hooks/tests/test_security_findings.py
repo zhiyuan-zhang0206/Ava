@@ -18,9 +18,9 @@ from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
 from agent.graph.exec.node import _exec_node_impl
+from agent.graph.hooks.framework import framework_hooks
 from agent.graph.interrupt import InterruptEvent
-from agent.hooks.framework import framework_hooks
-from agent.hooks.security import _deliver_security_findings
+from agent.hooks.security import deliver_security_findings
 from agent.state import AgentState, build_agent_state
 from agent.tests._fakes import make_fake_ops_pool
 from ava.sdk_surface.process_context import process_clients
@@ -56,11 +56,11 @@ async def _run_hook(state: AgentState) -> dict[str, Any] | None:
             clock_factory=Clock.from_settings,
         )
     )
-    return await _deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
+    return await deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
 
 
 def test_the_hook_runs_after_exec() -> None:
-    assert _deliver_security_findings in framework_hooks()["after_exec"]
+    assert deliver_security_findings in framework_hooks()["after_exec"]
 
 
 async def test_no_pending_finding_is_a_no_op() -> None:
@@ -162,7 +162,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
     )
 
     async def after_exec(state: Any) -> dict[str, Any] | None:
-        return await _deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
+        return await deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
 
     builder: Any = StateGraph(AgentState, context_schema=AvaContext)
     builder.add_node("exec", _exec_node_impl, input_schema=AgentState)

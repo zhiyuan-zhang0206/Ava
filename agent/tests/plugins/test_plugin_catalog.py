@@ -183,7 +183,7 @@ def test_framework_hooks_are_not_reported_as_plugin_contributions():
     """The catalog is plugin contributions only. The framework's own hooks (repair, compact,
     capability drift) are `framework_hooks()`, outside every plugin's declaration; reporting
     them would make the catalog describe code no plugin contributed."""
-    from agent.hooks.framework import framework_hooks
+    from agent.graph.hooks.framework import framework_hooks
 
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)

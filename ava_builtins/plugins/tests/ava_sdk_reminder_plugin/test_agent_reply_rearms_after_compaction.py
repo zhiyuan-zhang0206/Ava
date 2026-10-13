@@ -211,8 +211,8 @@ async def test_defer_predicate_matches_real_gate(
     (generate_summary stubbed so a fire produces a non-None result without a
     live LLM).
     """
-    from agent.hooks import compact as compact_mod
-    from agent.hooks.compact import auto_compact_will_fire
+    from agent.graph.hooks import compact as compact_mod
+    from agent.graph.hooks.compact import auto_compact_will_fire
 
     if history_len_kind == "no_conversation":
         # only the system prompt -> conversation_messages empty -> no fire
@@ -268,14 +268,14 @@ async def test_real_runner_compaction_wins_no_note(
     """
     from langgraph.graph.message import add_messages
 
-    from agent.hooks import compact as compact_mod
+    from agent.graph.hooks import compact as compact_mod
     from agent.hooks import make_hook_runner
 
     # Force auto-compact to fire on any history.
     _pin_compact_budget(monkeypatch, hard_tokens=1)
 
-    # The compact hook wrapper lives directly in agent.hooks.compact.
-    from agent.hooks.compact import _compact_reminder
+    # The compact hook wrapper lives directly in agent.graph.hooks.compact.
+    from agent.graph.hooks.compact import _compact_reminder
 
     # Long enough to clear the auto-compact retry floor on the first attempt.
     long_summary = "compacted summary " * 100

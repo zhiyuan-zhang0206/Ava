@@ -28,8 +28,8 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.hooks.compact import compose_summary_message
 from agent.graph.prompt import context_notes
-from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail
@@ -405,7 +405,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     assert isinstance(grafted_content, str) and "source's memory" not in grafted_content
 
 
-# auto-compact behavior is now implemented by the before_llm hook in agent/hooks/compact.py,
+# auto-compact behavior is now implemented by the before_llm hook in agent/graph/hooks/compact.py,
 # tests in agent/tests/test_compact.py's hook tests. This file only tests claim node
 # itself (inbound dispatch + state replacement), no longer tests auto-compact.
 

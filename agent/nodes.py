@@ -8,8 +8,8 @@ goto strings.
 Lives at `agent/nodes.py`, not under `agent/graph/`: `agent.hooks._registry`
 needs NodeName at module top level (LangGraph resolves the hook runner's type
 hints against module globals), and importing anything under `agent.graph`
-runs the package __init__ → `_build` → `agent.hooks` — a cycle whenever
-`agent.hooks` loads first. `agent/__init__` is deliberately import-light, so
+runs the package __init__ → `_build` → `agent.graph.hooks.node` → `agent.hooks` — a load
+cycle whenever `agent.hooks` loads first. `agent/__init__` is deliberately import-light, so
 this home is reachable from both sides.
 
 Usage:

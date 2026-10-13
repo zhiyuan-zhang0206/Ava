@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.hooks import compact
-from agent.hooks.compact import generate_summary
+from agent.graph.hooks import compact
+from agent.graph.hooks.compact import generate_summary
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm import usage

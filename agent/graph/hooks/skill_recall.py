@@ -30,10 +30,10 @@ from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
 from agent import state as _state
+from agent.graph.hooks.compact import auto_compact_will_fire
 from agent.graph.prompt.capabilities import recall_candidates
 from agent.graph.recall.skill_recall import SkillRecall, recall_skills
-from agent.hooks._registry import Hook
-from agent.hooks.compact import auto_compact_will_fire
+from agent.hooks import Hook
 from agent.messages import tail_has_skill_recall_inbound
 from agent.state import SkillRecallState
 from base.agents.context import AvaContext, agent_id_from_config

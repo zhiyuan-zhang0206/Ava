@@ -126,7 +126,7 @@ async def init_context_node(
         # Record what `# Capabilities` covers BEFORE rendering it. The section is
         # frozen into the SystemMessage below while `ava.skills` stays an uncached
         # live scan, so this snapshot is the only thing that can later tell the
-        # two apart — see `agent/hooks/capabilities.py`. Taken first on purpose:
+        # two apart — see `agent/graph/hooks/capabilities.py`. Taken first on purpose:
         # a skill landing between the two calls is then rendered but not
         # recorded, so the drift check names it one extra time, where the reverse
         # order would mark it known and drop it silently until the next

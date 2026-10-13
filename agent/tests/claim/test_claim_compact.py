@@ -12,8 +12,8 @@ from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.hooks.compact import compose_summary_message
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
-from agent.hooks.compact import compose_summary_message
 from agent.state import AgentState, CompactState
 from agent.tests.claim.claim_status_support import (
     _await_status,
@@ -477,7 +477,7 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
     llm.bind_tools.return_value.ainvoke = failing
     publisher = MagicMock()
 
-    from agent.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
+    from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
         await claim_node(

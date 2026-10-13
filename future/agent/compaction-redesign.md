@@ -6,7 +6,7 @@
 > items (model-owned compaction timing) remain below.
 
 Compaction has three modes, ordered by how much say the agent has, each mapping
-onto an entry point in `agent/hooks/compact.py` / `ava/self.py`.
+onto an entry point in `agent/graph/hooks/compact.py` / `ava/self.py`.
 
 | Mode | Trigger / entry point | Who writes the summary | Declinable |
 |---|---|---|---|
@@ -48,7 +48,7 @@ compaction.
 - **forced**: a real-overflow ceiling. It is the hard backstop and stays armed at all
   times — including while the agent is mid-housekeeping for a command compact. If the agent's
   own housekeeping turns push the context past the ceiling, forced compact fires anyway.
-- **command**: a **qualitative** reminder, injected by the compact hook (`agent/hooks/compact.py`, moved into core from the ava_compact plugin)
+- **command**: a **qualitative** reminder, injected by the compact hook (`agent/graph/hooks/compact.py`, moved into core from the ava_compact plugin)
   when the estimated context crosses `soft_compact_tokens` (set *earlier* than the ceiling,
   leaving room for the housekeeping turns). The reminder hook defers above the ceiling, where the LLM node runs forced
   compaction through the durable cancellation boundary. Agent-side

@@ -1,7 +1,7 @@
 """Pre-compact history dump — JSONL snapshot of the full conversation.
 
 Every compaction path — the claim node's agent-/user-triggered compact
-(``claim/_decide.py``) and the before_llm auto-compact hook (``agent/hooks/compact.py``)
+(``claim/_decide.py``) and the before_llm auto-compact hook (``agent/graph/hooks/compact.py``)
 — writes the complete pre-compact ``state.messages`` to a JSONL file under the agent
 workspace (``<workspace>/message-history/<start>__<end>.jsonl``) and injects a system
 note in the fresh post-compact context pointing at the dump.

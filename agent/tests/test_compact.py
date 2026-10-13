@@ -1,6 +1,6 @@
 """Compact tool tests.
 
-`agent/hooks/compact.py` exports:
+`agent/graph/hooks/compact.py` exports:
 - `generate_summary(messages, llm) -> summary`: pure function (called by claim node processing
   inbound kind compact_request; also called internally by auto-compact hook). Request =
   whole conversation reused byte-for-byte (original SystemMessage + all content + same
@@ -34,7 +34,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 
-from agent.hooks.compact import (
+from agent.graph.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
     COMPACTION_INSTRUCTION,
     CompactionFailedError,
@@ -104,7 +104,7 @@ def _patch_compact_config(
     ) -> ContextBudget:
         return budget
 
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixed_budget)
+    monkeypatch.setattr("agent.graph.hooks.compact.resolve_context_budget", fixed_budget)
 
 
 def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
@@ -168,7 +168,7 @@ def _fake_config() -> RunnableConfig:
 async def test_stamp_compact_boundary_writes_the_closing_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.hooks import compact
+    from agent.graph.hooks import compact
     from base.agents.history.closing_request import ClosingRequest
 
     seen: list[ClosingRequest | None] = []
@@ -648,10 +648,10 @@ async def test_auto_compact_hook_emits_compact_done_on_success(
 @pytest.fixture
 def _ava_compact_loaded():
     """Compact is built-in (Issue #1284). The wrapper function lives in
-    agent.hooks.compact; state fields are on BaseAgentState. Returns
+    agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
     """
-    from agent.hooks.compact import _compact_reminder
+    from agent.graph.hooks.compact import _compact_reminder
     from agent.state import build_agent_state
 
     return build_agent_state(EMPTY), _compact_reminder

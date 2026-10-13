@@ -29,9 +29,9 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
+from agent.graph.hooks.framework import framework_hooks
+from agent.graph.hooks.node import hook_node
 from agent.graph.llm_errors import LlmLedger
-from agent.hooks import make_hook_runner
-from agent.hooks.framework import framework_hooks
 from agent.impersonation import protect_native_hooks
 from agent.nodes import (
     AFTER_EXEC,
@@ -143,7 +143,7 @@ def build_graph(
     g.add_node(  # type: ignore[arg-type]
         AFTER_INIT,
         protect_native_hooks(
-            make_hook_runner(
+            hook_node(
                 "after_init", default_next=INIT_CONTEXT, hooks=_hooks_at("after_init", extensions)
             )
         ),
@@ -156,9 +156,7 @@ def build_graph(
     g.add_node(  # type: ignore[arg-type]
         BEFORE_LLM,
         protect_native_hooks(
-            make_hook_runner(
-                "before_llm", default_next=LLM, hooks=_hooks_at("before_llm", extensions)
-            )
+            hook_node("before_llm", default_next=LLM, hooks=_hooks_at("before_llm", extensions))
         ),
         input_schema=state_cls,
     )
@@ -166,9 +164,7 @@ def build_graph(
     g.add_node(  # type: ignore[arg-type]
         BEFORE_EXEC,
         protect_native_hooks(
-            make_hook_runner(
-                "before_exec", default_next=EXEC, hooks=_hooks_at("before_exec", extensions)
-            )
+            hook_node("before_exec", default_next=EXEC, hooks=_hooks_at("before_exec", extensions))
         ),
         input_schema=state_cls,
     )
@@ -176,7 +172,7 @@ def build_graph(
     g.add_node(  # type: ignore[arg-type]
         AFTER_EXEC,
         protect_native_hooks(
-            make_hook_runner(
+            hook_node(
                 "after_exec",
                 default_next=_after_exec_default_next,
                 hooks=_hooks_at("after_exec", extensions),

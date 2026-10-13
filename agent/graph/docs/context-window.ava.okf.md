@@ -39,5 +39,5 @@ Agent context window management — how message history is compressed as it appr
 
 ## Entry Points
 - `ava/self.py:compact(summary)` — active compaction entry
-- `agent/hooks/compact.py` — auto-compact trigger hook (Option Y occupancy determination)
+- `agent/graph/hooks/compact.py` — auto-compact trigger hook (Option Y occupancy determination)
 - `base/lm/context_budget.py:resolve_context_budget()` — per-model soft/hard threshold resolution
