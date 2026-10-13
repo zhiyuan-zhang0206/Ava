@@ -15,7 +15,7 @@ from base.native_process.turn_identity import HostedServiceResources
 from services.agent_runner.agent_host import dispatcher, settlement
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
-from services.agent_runner.agent_host.runtime import _config_fingerprint
+from services.agent_runner.agent_host.runtime import config_fingerprint
 from services.agent_runner.agent_host.tests.runtime.host_support import Build, Model, Row
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     host_plugin as host_plugin,
@@ -469,7 +469,7 @@ class TestSchedulerIntegration:
 
         report = next(r for r in records if r.get("event") == "host_turn_crashed")
         assert report["exception_type"] == "ValueError"
-        assert report["config_fingerprint"] == _config_fingerprint(overlay, None)
+        assert report["config_fingerprint"] == config_fingerprint(overlay, None)
 
     async def test_a_wake_race_during_a_hosted_turn_still_runs_the_agent(
         self, wired: Build

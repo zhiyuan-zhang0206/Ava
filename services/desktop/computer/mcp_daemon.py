@@ -92,7 +92,7 @@ from base.telemetry.process_logging import init_gateway_process
 
 from .ax_ids import AxSession
 from .config import ComputerUseConfig
-from .execute import _TOOLS, _execute_tool, _mcp_result, _priority
+from .execute import TOOLS, execute_tool, mcp_result, priority
 from .protocol import Request, Response
 from .session import ScreenSession
 from .task_sessions import TaskSessionTracker
@@ -220,17 +220,17 @@ def computer_use_config() -> ComputerUseConfig:
 # thread's stack to stderr (captured into the unit's output.log by the
 # supervisor) and exits(1) — a dead process the supervisor restarts on its
 # normal path. The incident's other half, a shutdown that never finished, is
-# bounded by `_bounded_cleanup` below. Either serving, or gone.
+# bounded by `bounded_cleanup` below. Either serving, or gone.
 _WATCHDOG_BEAT_S = 15.0  # loop-side re-beat interval (watchdog sampling detail)
 _WATCHDOG_CHECK_S = 5.0  # watchdog-thread check interval (watchdog sampling detail)
 _WATCHDOG_MIN_STALL_S = 1.0  # below this a misconfigured window would restart a healthy daemon
 
 
-class _LoopWatchdog(threading.Thread):
+class LoopWatchdog(threading.Thread):
     """Run `on_stall` once the event loop has not beaten for `stall_s`.
 
     `on_stall` executes on this thread and must end the process (production:
-    `_dump_and_exit`); when it returns, the watchdog ends. The only beat source
+    `dump_and_exit`); when it returns, the watchdog ends. The only beat source
     is the loop's own tick callback, so a blocked loop stops beating — while
     a live loop keeps the watchdog silent no matter how long a *caller* waits.
     """
@@ -273,7 +273,7 @@ class _LoopWatchdog(threading.Thread):
                 return
 
 
-def _dump_and_exit(reason: str) -> None:
+def dump_and_exit(reason: str) -> None:
     """The last resort of every bound in this module: dump every thread's
     stack, then exit for a supervisor restart.
 
@@ -295,28 +295,28 @@ def _dump_and_exit(reason: str) -> None:
         os._exit(1)
 
 
-def _guard_loop_liveness(
+def guard_loop_liveness(
     loop: asyncio.AbstractEventLoop,
     stall_s: float,
     *,
     beat_s: float = _WATCHDOG_BEAT_S,
     check_s: float = _WATCHDOG_CHECK_S,
     on_stall: Callable[[], None] | None = None,
-) -> _LoopWatchdog:
+) -> LoopWatchdog:
     """Start the loop-liveness watchdog and keep it beating from `loop`.
 
     Returns the watchdog so the shutdown path can stop it. `on_stall`
-    defaults to `_dump_and_exit`; tests inject a recorder instead of the exit.
+    defaults to `dump_and_exit`; tests inject a recorder instead of the exit.
     The re-beat cadence stays well inside the window (`beat_s` shrunk to a
     third of it when the configured window is small), so an operator tuning
     the window down cannot trip a healthy loop; a tiny window is floored so
     a misconfiguration cannot restart-loop the daemon.
     """
     stall_s = max(stall_s, _WATCHDOG_MIN_STALL_S)
-    watchdog = _LoopWatchdog(
+    watchdog = LoopWatchdog(
         stall_s,
         check_s=check_s,
-        on_stall=on_stall or partial(_dump_and_exit, f"run loop silent for over {stall_s}s"),
+        on_stall=on_stall or partial(dump_and_exit, f"run loop silent for over {stall_s}s"),
     )
     watchdog.start()
     beat_interval = min(beat_s, stall_s / 3)
@@ -331,7 +331,7 @@ def _guard_loop_liveness(
     return watchdog
 
 
-async def _bounded_cleanup(
+async def bounded_cleanup(
     server: asyncio.AbstractServer, clients: set[asyncio.Task[None]], *, drain_s: float
 ) -> None:
     """Close out the clients and the listener, bounded by `drain_s`.
@@ -362,12 +362,12 @@ async def _bounded_cleanup(
     if pending:
         _, still_pending = await asyncio.wait(pending, timeout=drain_s)
         if still_pending:
-            _dump_and_exit(f"shutdown cleanup did not finish within {drain_s:g}s")
+            dump_and_exit(f"shutdown cleanup did not finish within {drain_s:g}s")
     try:
         async with asyncio.timeout(max(deadline - loop.time(), 0.0)):
             await server.wait_closed()
     except TimeoutError:
-        _dump_and_exit(f"shutdown cleanup did not finish within {drain_s:g}s")
+        dump_and_exit(f"shutdown cleanup did not finish within {drain_s:g}s")
 
 
 class ComputerMcpDaemon:
@@ -450,7 +450,7 @@ class ComputerMcpDaemon:
         if method == "ping":
             return {"id": req_id, "ok": True, "result": "pong"}
         if method == "list_tools":
-            return {"id": req_id, "ok": True, "result": _TOOLS}
+            return {"id": req_id, "ok": True, "result": TOOLS}
         if method != "call_tool":
             return {"id": req_id, "ok": False, "error": f"unknown method {method!r}"}
         tool = req.get("tool") or ""
@@ -508,7 +508,7 @@ class ComputerMcpDaemon:
         if tool == "release_control":
             return await self._release_control(agent_id, args, req_id)
         if agent_id is not None and not await self._screen.acquire(
-            agent_id, priority=_priority(args)
+            agent_id, priority=priority(args)
         ):
             # Someone else holds the screen and did not let go in time. Fail
             # with a readable busy error instead of interleaving actions.
@@ -526,7 +526,7 @@ class ComputerMcpDaemon:
                 # down: it must not carry over into this agent's actions.
                 self._release_held_mouse(f"screen passed to agent {agent_id}")
             try:
-                result = _execute_tool(
+                result = execute_tool(
                     self._helper,
                     tool,
                     args,
@@ -550,7 +550,7 @@ class ComputerMcpDaemon:
             if error is not None:
                 return {"id": req_id, "ok": False, "error": error}
             assert result is not None  # noqa: S101 — no error ⇒ execution succeeded
-            return {"id": req_id, "ok": True, "result": _mcp_result(result)}
+            return {"id": req_id, "ok": True, "result": mcp_result(result)}
 
     async def _release_control(
         self, agent_id: int | None, args: dict[str, Any], req_id: int
@@ -587,7 +587,7 @@ class ComputerMcpDaemon:
             return {
                 "id": req_id,
                 "ok": True,
-                "result": _mcp_result(
+                "result": mcp_result(
                     {"released": released, "holder": self._screen.holder, **mouse}
                 ),
             }
@@ -747,9 +747,7 @@ async def run(
             limit=_LINE_LIMIT,
         )
         logger.info(f"[computer-mcp] listening on {path}")
-        watchdog = _guard_loop_liveness(
-            asyncio.get_running_loop(), config.computer_use_loop_stall_s
-        )
+        watchdog = guard_loop_liveness(asyncio.get_running_loop(), config.computer_use_loop_stall_s)
         stop = asyncio.Event()
 
         def _stop() -> None:
@@ -763,7 +761,7 @@ async def run(
         finally:
             watchdog.stop()
             server.close()
-            await _bounded_cleanup(
+            await bounded_cleanup(
                 server, daemon._clients, drain_s=config.computer_use_shutdown_drain_s
             )
             with suppress(OSError):

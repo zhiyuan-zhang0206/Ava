@@ -49,7 +49,7 @@ def cold_reader(pool: AsyncConnectionPool[Any]) -> AsyncPostgresSaver:
     return reader
 
 
-async def _prepare_graph(
+async def prepare_graph(
     pool: AsyncConnectionPool[Any], agent: int, interval: int, replies: list[str]
 ) -> tuple[Any, AsyncPostgresSaver, RunnableConfig, list[HumanMessage | AIMessage]]:
     async def model(state: states.BaseAgentState) -> Command[Any]:
@@ -234,7 +234,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     monkeypatch.setattr("agent.graph.hooks.compact.generate_summary", summary)
     replies: list[str] = []
 
-    graph, saver, config, history = await _prepare_graph(aops_pool, agent, interval, replies)
+    graph, saver, config, history = await prepare_graph(aops_pool, agent, interval, replies)
     compact_id = _queue_compact_request(db_conn, agent)
 
     redis = open_async_redis(settings.data_plane.redis_url)

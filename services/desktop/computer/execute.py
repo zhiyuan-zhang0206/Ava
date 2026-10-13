@@ -24,14 +24,14 @@ from .input import (
     tool_schema,
     validate_input,
 )
-from .ocr_text import _click_text_tool, _find_text_tool
+from .ocr_text import click_text_tool, find_text_tool
 from .screen import (
-    _capture_screen,
-    _current_scale,
-    _png_size,
     _snapshot_path,
-    _to_logical,
     capture_region,
+    capture_screen,
+    current_scale,
+    png_size,
+    to_logical,
 )
 from .targets import (
     AppTarget,
@@ -56,7 +56,7 @@ _REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _priority(args: dict[str, Any]) -> str:
+def priority(args: dict[str, Any]) -> str:
     """The caller's queue priority — only "high" is special, anything else
     (absent, garbage) is normal. Resource coordination, not governance: this
     shifts order in the queue, it never grants or denies."""
@@ -163,7 +163,7 @@ def _keycode_for(key: str) -> int | None:
     return _KEYCODES.get(key.lower())
 
 
-def _mcp_result(result: dict[str, Any]) -> dict[str, Any]:
+def mcp_result(result: dict[str, Any]) -> dict[str, Any]:
     """Wrap a tool's plain-dict result in the MCP CallToolResult shape.
 
     The per-agent wrapper and the direct dial both validate the daemon's
@@ -195,7 +195,7 @@ def _snapshot_tool(
             target = WindowTarget.parse(args["target"])
             path = _snapshot_path(agent_id)
             captured = helper.screencapture_window(target.pid, target.window_id, str(path))
-            pw, ph = _png_size(path)
+            pw, ph = png_size(path)
             if (pw, ph) != (captured["width"], captured["height"]):
                 raise ComputerUseError("window image dimensions do not match the helper response")
             frame = CaptureFrame.parse(
@@ -215,7 +215,7 @@ def _snapshot_tool(
             "pixels": {"width": pw, "height": ph},
         }
     else:
-        path, size, scale, (pw, ph) = _capture_screen(helper, agent_id)
+        path, size, scale, (pw, ph) = capture_screen(helper, agent_id)
         result = {
             "path": str(path),
             "source": "screen",
@@ -256,8 +256,8 @@ def _logical_point(
 ) -> tuple[float, float]:
     if frame is not None:
         return CaptureFrame.parse(frame).global_point(x, y)
-    scale = _current_scale(helper, scale)
-    return _to_logical(x, scale), _to_logical(y, scale)
+    scale = current_scale(helper, scale)
+    return to_logical(x, scale), to_logical(y, scale)
 
 
 def _click_tool(
@@ -420,18 +420,18 @@ def _execute(
     if tool == "snapshot":
         return _snapshot_tool(helper, args, agent_id, ocr_cache)
     if tool == "find_text":
-        return _find_text_tool(helper, args, agent_id, ocr_cache)
+        return find_text_tool(helper, args, agent_id, ocr_cache)
     if tool in _SCALED_TOOLS:
         return _SCALED_TOOLS[tool](helper, args, scale)
     if tool in _ARGS_ONLY_TOOLS:
         return _ARGS_ONLY_TOOLS[tool](helper, args)
     if tool == "click_text":
-        return _click_text_tool(helper, args, agent_id, ocr_cache)
+        return click_text_tool(helper, args, agent_id, ocr_cache)
     if tool == "type_text":
         return {"typed": helper.type_text(str(args["text"]))["typed"]}
     if tool == "cursor_position":
         position = helper.cursor_position()
-        current = _current_scale(helper, scale)
+        current = current_scale(helper, scale)
         return {"x": position["x"] * current, "y": position["y"] * current, "scale": current}
     if tool in {
         "list_apps",
@@ -448,7 +448,7 @@ def _execute(
 _AX_TOOLS = {"ax_tree": ax_tools.ax_tree_tool, "ax_act": ax_act.ax_act_tool}
 
 
-def _execute_tool(
+def execute_tool(
     helper: PermissionsHelperClient,
     tool: str,
     args: dict[str, Any],
@@ -465,7 +465,7 @@ def _execute_tool(
 
 
 # MCP tool declarations (list_tools shape: name / description / input_schema).
-_TOOLS: list[dict[str, Any]] = [
+TOOLS: list[dict[str, Any]] = [
     {
         "name": "release_control",
         "description": (

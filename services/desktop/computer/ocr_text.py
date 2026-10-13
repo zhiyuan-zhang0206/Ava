@@ -8,7 +8,7 @@ from typing import Any
 import services.desktop.computer.ocr as ocr_mod
 from base.host.permissions_helper.client import PermissionsHelperClient
 from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.screen import _capture_screen, _to_logical
+from services.desktop.computer.screen import capture_screen, to_logical
 
 
 def _ocr_screen(path: Path, ocr_cache: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -76,7 +76,7 @@ def _match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list
     return matches
 
 
-def _find_text_tool(
+def find_text_tool(
     helper: PermissionsHelperClient,
     args: dict[str, Any],
     agent_id: int,
@@ -98,7 +98,7 @@ def _find_text_tool(
         items: list[dict[str, Any]] = cached_items  # the screen the caller last saw
         fresh = False
     else:
-        path, _size, _scale, _pixels = _capture_screen(helper, agent_id)
+        path, _size, _scale, _pixels = capture_screen(helper, agent_id)
         items = _ocr_screen(path, ocr_cache)
         fresh = True
     matches = _match_ocr_boxes(items, query, mode)
@@ -111,7 +111,7 @@ def _find_text_tool(
     }
 
 
-def _click_text_tool(
+def click_text_tool(
     helper: PermissionsHelperClient,
     args: dict[str, Any],
     agent_id: int,
@@ -131,7 +131,7 @@ def _click_text_tool(
     _validate_text_query(query, mode)
     if index < 0:
         raise ComputerUseError("index must be >= 0")
-    path, _size, scale, _pixels = _capture_screen(helper, agent_id)
+    path, _size, scale, _pixels = capture_screen(helper, agent_id)
     matches = _match_ocr_boxes(_ocr_screen(path, ocr_cache), query, mode)
     if not matches:
         raise ComputerUseError(f"no on-screen text matching {query!r} (match={mode})")
@@ -141,8 +141,8 @@ def _click_text_tool(
         )
     box = matches[index]
     clicked = helper.click(
-        _to_logical(box["cx"], scale),
-        _to_logical(box["cy"], scale),
+        to_logical(box["cx"], scale),
+        to_logical(box["cy"], scale),
         double=False,
     )
     return {

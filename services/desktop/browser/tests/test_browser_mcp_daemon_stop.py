@@ -402,7 +402,7 @@ async def _run_with_fakes(
         assert connect_timeout_reader() == 60.0
         return FakeSession(), stack  # type: ignore[return-value]
 
-    monkeypatch.setattr(daemon_mod, "_create_upstream", fake_create_upstream)
+    monkeypatch.setattr(daemon_mod, "create_upstream", fake_create_upstream)
 
     async def never(*_a: object, **_k: object) -> None:
         await asyncio.Event().wait()

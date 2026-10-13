@@ -10,7 +10,7 @@ from mcp import ClientSession
 
 from services.desktop.browser import mcp_upstream
 from services.desktop.browser.mcp_upstream import (
-    _StoppingError,
+    StoppingError,
     initialize_until_stop_or_timeout,
 )
 
@@ -62,7 +62,7 @@ async def test_stop_still_cancels_pending_initialization() -> None:
     stop = asyncio.Event()
     stop.set()
     session = Initializer(blocked=True)
-    with pytest.raises(_StoppingError):
+    with pytest.raises(StoppingError):
         await initialize_until_stop_or_timeout(
             cast(ClientSession, session), stop, connect_timeout_reader=lambda: 10.0
         )
@@ -107,7 +107,7 @@ async def test_create_upstream_passes_reader_and_closes_failed_connect(
     monkeypatch.setattr(mcp_upstream, "stdio_client", stdio)
     monkeypatch.setattr(mcp_upstream, "ClientSession", client)
     with pytest.raises(TimeoutError):
-        await mcp_upstream._create_upstream(
+        await mcp_upstream.create_upstream(
             "http://example.test", asyncio.Event(), connect_timeout_reader=timeout_reader
         )
     assert reads == [0.01]

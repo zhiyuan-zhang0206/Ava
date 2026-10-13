@@ -29,7 +29,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.native_work import settle_native_invocation
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
-    _prepare_graph,
+    prepare_graph,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
@@ -48,7 +48,7 @@ async def test_real_managed_exec_abort_closes_resources_before_original_ack(
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 100, [])
+    graph, saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 100, [])
     scope = hosted_resources
     async with subscribe_interrupt(
         aops_pool, target.agent_id, incarnation=incarnation, work=target, resources=scope

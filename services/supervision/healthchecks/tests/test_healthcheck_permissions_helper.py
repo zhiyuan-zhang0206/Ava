@@ -144,10 +144,10 @@ def test_ping_uses_short_timeout_and_helper_wire_protocol(
     socket_path = tmp_path / "helper.sock"
     monkeypatch.setattr(client, "connect", connect)
     monkeypatch.setattr(hc, "helper_client", lambda: client.PermissionsHelperClient(socket_path))
-    monkeypatch.setattr(hc, "_helper_parent", _fake_helper_parent)
-    monkeypatch.setattr(hc, "_parent_still_live", _fake_parent_still_live)
+    monkeypatch.setattr(hc, "helper_parent", _fake_helper_parent)
+    monkeypatch.setattr(hc, "parent_still_live", _fake_parent_still_live)
 
-    assert hc._ping()
+    assert hc.ping()
     assert paths == [str(socket_path)]
     assert sock.timeout == 3.0
     assert json.loads(sock.sent) == {"id": 0, "method": "ping"}
@@ -214,10 +214,10 @@ def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
 
 
 def test_probe_alive_and_classified_down(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "_ping", lambda: True)
+    monkeypatch.setattr(hc, "ping", lambda: True)
     assert hc.probe().alive
 
-    monkeypatch.setattr(hc, "_ping", _unhealthy_ping)
+    monkeypatch.setattr(hc, "ping", _unhealthy_ping)
     monkeypatch.setattr(hc, "read_helper_job", lambda: _STUCK_JOB)
     verdict = hc.probe()
     assert not verdict.alive
@@ -233,7 +233,7 @@ def test_probe_is_total_and_non_macos_is_up(monkeypatch: pytest.MonkeyPatch) -> 
     assert hc.probe().alive
 
     monkeypatch.setattr(hc, "is_macos", lambda: True)
-    monkeypatch.setattr(hc, "_ping", _unhealthy_ping)
+    monkeypatch.setattr(hc, "ping", _unhealthy_ping)
 
     def broken_read() -> str | None:
         raise RuntimeError("boom")
@@ -248,9 +248,9 @@ def test_unverifiable_helper_parent_never_reports_protocol_health(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def missing_parent():
-        raise hc._ParentEvidenceError("root parent is not observable")
+        raise hc.ParentEvidenceError("root parent is not observable")
 
-    monkeypatch.setattr(hc, "_ping", missing_parent)
+    monkeypatch.setattr(hc, "ping", missing_parent)
     monkeypatch.setattr(hc, "read_helper_job", lambda: _RUNNING_JOB)
     assert hc.probe().verdict.value == "unavailable"
 
@@ -280,8 +280,8 @@ def test_connected_helper_peer_must_be_root_native_parent(
     monkeypatch.setattr(hc.psutil, "Process", _fake_process)
     monkeypatch.setattr(hc.OwnedProcess, "capture", _fake_capture)
     monkeypatch.setattr(root_control_client, "peer_pid", _fake_peer_pid)
-    with pytest.raises(hc._ParentEvidenceError, match="not the captured root parent"):
-        hc._helper_parent(cast(socket.socket, object()))
+    with pytest.raises(hc.ParentEvidenceError, match="not the captured root parent"):
+        hc.helper_parent(cast(socket.socket, object()))
 
 
 def test_episode_reporting_memory_is_local_to_each_diagnostic(recorder: _Recorder) -> None:
