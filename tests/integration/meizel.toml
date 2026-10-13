@@ -1,0 +1,17 @@
+[debt.first-party-patch]
+"test_cluster_instance.py#monkeypatch.setattr base.cluster.get_record" = 2
+"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane" = 1
+"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.events_channel" = 2
+"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 1
+"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.redis_admin_password" = 2
+"test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
+"test_impersonation_notifications.py#monkeypatch.setattr base.agents.impersonation.relay_inbox" = 1
+"test_impersonation_notifications.py#monkeypatch.setattr base.agents.impersonation.renew" = 1
+"test_impersonation_notifications.py#monkeypatch.setattr base.db.Database.write_transaction" = 1
+"test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation.relay_token_from_env" = 1
+"test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation_adapters.emit_claude" = 2
+"test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.reserve_delivery" = 1
+"test_termination_shell_cleanup.py#monkeypatch.setattr agent.ownership.hosted_cleanup.publish_agent_updated" = 1
+"test_termination_shell_cleanup.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.exec_run_dir" = 2

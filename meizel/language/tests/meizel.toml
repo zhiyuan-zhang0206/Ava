@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_lint_no_script_sibling_imports.py#monkeypatch.setattr meizel.language.no_script_sibling_imports._REPO_ROOT" = 1

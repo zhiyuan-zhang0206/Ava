@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from meizel.graph.model import Fact, FactKind, MeizelError, Problem, Restricted
+from meizel.graph.model import Fact, FactKind, MeizelError, Patch, Problem, Restricted
 from meizel.graph.scopes import Scope, collect_scope, dotted_chain, parameter_names
 from meizel.graph.universe import Universe
 from meizel.language import fixtures
@@ -70,6 +70,7 @@ class FileScan:
     path: str
     facts: list[Fact] = field(default_factory=list[Fact])
     restricted: list[Restricted] = field(default_factory=list[Restricted])
+    patches: list[Patch] = field(default_factory=list[Patch])
     problems: list[Problem] = field(default_factory=list[Problem])
     fixtures: fixtures.FixtureState = field(default_factory=fixtures.FixtureState)
     imported: set[str] = field(default_factory=set[str])
@@ -81,6 +82,7 @@ class Scanner(RestrictedForms):
         self.test_file = fixtures.is_test_file(path)
         self.fixture_state = fixtures.FixtureState()
         self.fn_depth = 0
+        self.patches: list[Patch] = []
         self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
             ast.Import: self.visit_import,
             ast.ImportFrom: self.visit_import_from,
@@ -103,6 +105,7 @@ class Scanner(RestrictedForms):
             self.path,
             facts=list(dict.fromkeys(self.facts)),
             restricted=self.restricted,
+            patches=self.patches,
             problems=self.problems,
             fixtures=self.fixture_state,
             imported=self.imported,
@@ -240,9 +243,12 @@ class Scanner(RestrictedForms):
                 self.patched_sys_modules(node)
         elif kind == "dict":
             self.patched_sys_modules(node)
+            if first is not None:
+                self.record_patch(first, (), node.lineno, "patch.dict")
         elif first is not None and kind in {"object", "multiple"}:
             names = self.patched_names(node, kind)
             self.patch_fact(first, names, node.lineno, f"patch.{kind}")
+            self.record_patch(first, names, node.lineno, f"patch.{kind}")
 
     @staticmethod
     def patched_names(node: ast.Call, kind: str) -> tuple[str, ...]:
@@ -269,6 +275,17 @@ class Scanner(RestrictedForms):
             return
         name = const_str(node.args[1]) if len(node.args) > 1 else None
         self.patch_fact(node.args[0], (name,) if name else (), node.lineno, "monkeypatch")
+        self.record_patch(
+            node.args[0], (name,) if name else (), node.lineno, f"monkeypatch.{method}"
+        )
+
+    def record_patch(self, target: ast.expr, names: tuple[str, ...], line: int, form: str) -> None:
+        """Patching a first-party module or object, found through an import binding."""
+        dotted = self.dotted(target)
+        if dotted is None or not self.u.is_first_party_name(dotted):
+            return
+        for name in names or ("",):
+            self.patches.append(Patch(line, form, f"{dotted}.{name}" if name else dotted))
 
     def string_target(self, target: ast.expr | None, line: int) -> None:
         """A string patch target hides a dependency only when it names first-party code."""

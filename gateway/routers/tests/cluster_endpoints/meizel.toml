@@ -1,0 +1,5 @@
+[debt.first-party-patch]
+"test_admin_events.py#monkeypatch.setattr base.config.settings.display.cluster_events_default_limit" = 1
+"test_admin_machine_delete.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 1
+"test_admin_machine_delete.py#monkeypatch.setattr gateway.cluster.router.gather_cluster_status" = 2
+"test_admin_machine_delete.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_url" = 1

@@ -8,6 +8,42 @@
 "test_tracing_lifecycle.py" = ["otlp"]
 "tracing" = ["otlp", "test_tracing.py"]
 
+[debt.first-party-patch]
+"test_audit_events_record.py#monkeypatch.setattr base.telemetry.emit" = 2
+"test_audit_events_record.py#monkeypatch.setattr base.telemetry.emit_prepared" = 7
+"test_audit_events_record.py#monkeypatch.setattr base.telemetry.event_id" = 1
+"test_emitter_lifecycle.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_no_pipeline" = 1
+"test_emitter_lifecycle.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_sink_failure" = 1
+"test_pipeline_sink_isolation.py#monkeypatch.setattr base.paths.logs_dir" = 1
+"test_pipeline_sink_isolation.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_no_pipeline" = 1
+"test_pipeline_sink_isolation.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_pipeline_sink_isolation.py#monkeypatch.setattr base.telemetry.metrics.observed_metrics.write_observations" = 1
+"test_pipeline_sink_isolation.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.OtlpBackend.export_batch" = 1
+"test_pipeline_sink_isolation.py#monkeypatch.setattr base.telemetry.pipeline_build.report_no_pipeline" = 1
+"test_telemetry.py#monkeypatch.setattr base.cluster.home_label" = 1
+"test_telemetry.py#monkeypatch.setattr base.cluster.home_slug" = 2
+"test_telemetry.py#monkeypatch.setattr base.paths.logs_dir" = 2
+"test_telemetry.py#monkeypatch.setattr base.telemetry.delivery.mirror.JSONL_RETENTION_DAYS" = 1
+"test_telemetry_event_store.py#monkeypatch.setattr base.telemetry.event_store._write" = 3
+"test_telemetry_event_store.py#monkeypatch.setattr base.telemetry.event_store.emit" = 1
+"test_telemetry_otlp_gate.py#monkeypatch.setattr base.cluster.derive.home_label" = 4
+"test_telemetry_otlp_gate.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 3
+"test_tracing.py#monkeypatch.setattr base.cluster.derive.production_identity" = 2
+"test_tracing.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_endpoint" = 1
+"test_tracing.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 13
+"test_tracing.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 3
+"test_tracing.py#monkeypatch.setattr base.telemetry.trace_mirror.traces_dir" = 10
+"test_tracing.py#monkeypatch.setattr base.telemetry.tracing.COLLECTOR_RETRY_INTERVAL_S" = 1
+"test_tracing.py#monkeypatch.setattr base.telemetry.tracing.INIT_RESOLVED_TIMEOUT_S" = 1
+"test_tracing.py#monkeypatch.setattr base.telemetry.tracing.cluster_label" = 1
+"test_tracing.py#monkeypatch.setattr base.telemetry.tracing.disk_usage" = 1
+"test_tracing.py#monkeypatch.setattr base.telemetry.tracing.endpoint_reachable" = 2
+"test_tracing.py#monkeypatch.setattr base.telemetry.tracing.logger.warning" = 3
+"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.trace_workers.report_no_pipeline" = 2
+"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.INIT_RESOLVED_TIMEOUT_S" = 1
+"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing._arm_tracing" = 2
+"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing._state" = 1
+
 [debt.private-name]
 "tracing/test_arm_thread_base_exception_marks_attempt_spent.py -> test_tracing.py#_collector_up" = 1
 "tracing/test_arm_thread_base_exception_marks_attempt_spent.py -> test_tracing.py#_production_process_by_default" = 1

@@ -4,6 +4,21 @@ exports = ["test_maintenance.py"]
 "test_maintenance_legacy_cold.py" = ["test_maintenance.py"]
 "test_maintenance_lifecycle_wait.py" = ["test_maintenance.py"]
 
+[debt.first-party-patch]
+"test_corpse_reap.py#monkeypatch.setattr agent.ownership.hosted.stamp_turn_fatal" = 1
+"test_hosted_resurrection_fences.py#monkeypatch.setattr base.agents.incarnation.exec_owner_recovery.process_ended" = 1
+"test_maintenance_legacy_cold.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.exec_run_dir" = 1
+"test_maintenance_legacy_cold.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.psutil.process_iter" = 1
+"test_maintenance_legacy_cold.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir" = 1
+"test_maintenance_legacy_cold.py#monkeypatch.setattr base.deploy.maintenance.cold.require_persisted_end" = 1
+"test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.config.settings.gateway.pause_lifecycle_wait_seconds" = 4
+"test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.deploy.maintenance.cohort.orphaned_claims" = 1
+"test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.deploy.maintenance.cohort.prepare" = 1
+"test_maintenance_lifecycle_wait.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_maintenance_lifecycle_wait.py#monkeypatch.setattr ops.agent_pause.host_identity" = 1
+"test_maintenance_lifecycle_wait.py#monkeypatch.setattr ops.agent_pause.host_running" = 1
+"test_maintenance_lifecycle_wait.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 1
+
 [debt.private-name]
 "test_maintenance_legacy_cold.py -> test_maintenance.py#_agent" = 1
 "test_maintenance_lifecycle_wait.py -> test_maintenance.py#_agent" = 1

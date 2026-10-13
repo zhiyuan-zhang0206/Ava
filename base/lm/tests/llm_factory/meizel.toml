@@ -1,2 +1,17 @@
 [uses]
 "test_override_resolution.py" = ["factory_support.py"]
+
+[debt.first-party-patch]
+"test_override_resolution.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 2
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.dashscope_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.dashscope_base_url" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 29
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.moonshot_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.openai_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.xiaomi_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.zhipu_api_key" = 1
+"test_provider_construction.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 3
+"test_reasoning_effort_dispatch.py#monkeypatch.setattr base.config.settings.lm.claude_thinking_budget_tokens" = 7
+"test_reasoning_effort_dispatch.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 20
+"test_reasoning_effort_dispatch.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 26

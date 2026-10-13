@@ -1,0 +1,14 @@
+[debt.first-party-patch]
+"test_retained_timeline.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_retained_timeline.py#monkeypatch.setattr gateway.agents.history.timeline.list_compact_boundary_checkpoint_ids" = 1
+"test_retained_timeline.py#monkeypatch.setattr gateway.agents.history.timeline.load_checkpoint_message_count" = 1
+"test_retained_timeline.py#monkeypatch.setattr gateway.agents.history.timeline.load_checkpoint_messages" = 1
+"test_retained_timeline.py#monkeypatch.setattr gateway.agents.history.timeline.load_checkpoint_messages_segment" = 1
+"test_retained_timeline.py#monkeypatch.setattr gateway.app.app.state.config_authority.runtime.gateway.timeline_compact_history" = 2
+"test_timeline_compact_history_boundaries.py#monkeypatch.setattr gateway.agents.history.timeline.list_compact_boundary_checkpoint_ids" = 1
+"test_timeline_compact_history_boundaries.py#monkeypatch.setattr gateway.agents.history.timeline.load_checkpoint_messages" = 1
+"test_timeline_compact_history_boundaries.py#monkeypatch.setattr gateway.app.app.state.config_authority.runtime.gateway.timeline_compact_history" = 10
+"test_timeline_compact_history_head_notes.py#monkeypatch.setattr gateway.agents.history.timeline.list_compact_boundary_checkpoint_ids" = 2
+"test_timeline_compact_history_head_notes.py#monkeypatch.setattr gateway.agents.history.timeline.load_checkpoint_messages_segment" = 4
+"test_timeline_compact_history_head_notes.py#monkeypatch.setattr gateway.app.app.state.config_authority.runtime.gateway.timeline_compact_history" = 6
+"test_timeline_skips_inbound_without_langgraph_state.py#monkeypatch.setattr gateway.app.app.state.config_authority.runtime.display.timeline_default_limit" = 1

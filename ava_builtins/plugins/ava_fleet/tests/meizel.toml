@@ -3,3 +3,28 @@ exports = ["registry_support.py", "task_registry"]
 [uses]
 "test_ava_fleet_plugin.py" = ["registry_support.py"]
 "test_task_registry.py" = ["task_registry"]
+
+[debt.first-party-patch]
+"test_ava_fleet_plugin.py#monkeypatch.setattr ava.gateway_client.patch_label" = 1
+"test_ava_fleet_plugin.py#monkeypatch.setattr ava.gateway_client.spawn" = 2
+"test_ava_fleet_plugin.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_ava_fleet_plugin.py#monkeypatch.setattr base.config.settings.agent.prompt_delegation_check_enabled" = 1
+"test_fleet_audit.py#monkeypatch.setattr base.telemetry.audit_events.record_audit" = 1
+"test_owned_configuration.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 3
+"test_owned_configuration.py#monkeypatch.setattr base.host.env.bootstrap.should_fetch_from_gateway" = 1
+"test_plugin_config_admin.py#monkeypatch.setattr base.packages.plugin_config_admin.config_owners" = 1
+"test_system_prompt_p95_contracts.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_system_prompt_p95_contracts.py#monkeypatch.setattr base.config.settings.agent.sdk_expand_in_system_prompt" = 1
+"test_task_maintenance_daemon.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.advance_reminder_counters" = 1
+"test_task_maintenance_daemon.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.announce_reminder" = 2
+"test_task_maintenance_daemon.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.insert_inbound_message_in_transaction" = 1
+"test_task_maintenance_daemon.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.publish_agent_updated_sync" = 1
+"test_task_maintenance_daemon.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_task_maintenance_daemon_part2.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.announce_reminder" = 1
+"test_task_maintenance_daemon_part2.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_task_registry.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
+"test_task_registry.py#patch.object ava_builtins.plugins.ava_fleet.task_registry._is_terminated" = 1
+"test_validation_ava_fleet.py#monkeypatch.setattr ava.gateway_client.post" = 1
+"test_validation_ava_fleet.py#monkeypatch.setattr ava.gateway_client.raise_from_response" = 1
+"test_validation_ava_fleet.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_registry.update" = 1
+"test_validation_ava_fleet.py#monkeypatch.setattr base.events.live.announce.publish_task_created_sync" = 1

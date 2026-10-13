@@ -1,2 +1,7 @@
+[debt.first-party-patch]
+"test_patch_label.py#monkeypatch.setattr ava.gateway_client.patch" = 1
+"test_watcher.py#monkeypatch.setattr ava.gateway_client.send_message" = 1
+"test_watcher.py#monkeypatch.setattr ava.sdk_surface.agent_identity.agent_id" = 1
+
 [debt.restricted-python]
 "test_watcher.py#exec of source text" = 1

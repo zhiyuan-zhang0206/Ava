@@ -1,2 +1,8 @@
 [uses]
 "test_reconcile_ownership.py" = ["test_reconcile_after_abort.py"]
+
+[debt.first-party-patch]
+"test_reconcile_after_abort.py#monkeypatch.setattr services.agent_runner.agent_host.host.build_runtime" = 1
+"test_recovery_outcome_tracebacks.py#monkeypatch.setattr agent.db.enqueue_fatal_provider_report_to_nearest_alive_ancestor" = 2
+"test_recovery_outcome_tracebacks.py#monkeypatch.setattr base.agents.recovery.breaker.halt_automatic_recovery" = 2
+"test_recovery_outcome_tracebacks.py#monkeypatch.setattr base.agents.recovery.breaker.record_permanent_reject_turn" = 3

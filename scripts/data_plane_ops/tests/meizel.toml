@@ -1,0 +1,15 @@
+[debt.first-party-patch]
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 2
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr base.config.settings.profile" = 4
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.apply_admin" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.ava_home" = 2
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.build_state" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.ensure_cluster_redis_acl" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.get_record" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.preflight" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.redis.Redis" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.redis_probe" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.upsert_env" = 1
+"test_rotate_data_plane_secrets.py#monkeypatch.setattr scripts.data_plane_ops.rotate_data_plane_secrets.working_redis_admin_password" = 2

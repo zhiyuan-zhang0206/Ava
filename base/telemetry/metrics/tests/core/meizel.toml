@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_catalog.py#monkeypatch.setattr base.telemetry.metrics.core.catalog.CORE_DEFINITION_MODULES" = 1

@@ -1,1 +1,30 @@
 exports = ["telemetry_stream.py", "test_alerts_api.py", "test_cluster_endpoints.py"]
+
+[debt.first-party-patch]
+"test_alerts_api.py#monkeypatch.setattr base.config.settings.alerts.im_notify_enabled" = 1
+"test_alerts_api.py#monkeypatch.setattr base.config.settings.alerts.webhook_token" = 3
+"test_alerts_api.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_alerts_api.py#monkeypatch.setattr gateway.alerts.router.notify_alert_group" = 11
+"test_cluster_endpoints.py#monkeypatch.setattr base.cluster.session_name" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr base.deploy.git.cluster_drift.prod_source_head_sha" = 2
+"test_cluster_endpoints.py#monkeypatch.setattr base.deploy.git.running_sha.get" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.run_dir" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 2
+"test_cluster_endpoints.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 2
+"test_cluster_endpoints.py#monkeypatch.setattr base.native_process.loaded_commit.capture_commit" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr base.native_process.root_control.client.root_process" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr base.sessions.backend.get_backend" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr gateway.app.cluster_is_paused" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr gateway.cluster.router.cluster_is_paused" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr gateway.cluster.status.cluster_is_paused" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr gateway.events.telemetry_rows.query_events" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr ops.agent_pause.host_running" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr ops.agent_pause.pause_agents" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr ops.cluster.operations.mark_stopping" = 1
+"test_cluster_endpoints.py#monkeypatch.setattr ops.cluster_status.pause.is_paused" = 1
+"test_delivery_publish.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 1
+"test_delivery_publish.py#monkeypatch.setattr ops.lifecycle.delivery.ops.resurrect_if_terminated" = 2
+"test_delivery_publish.py#monkeypatch.setattr ops.lifecycle.delivery.publish_agent_updated_sync" = 2
+"test_labels.py#monkeypatch.setattr base.lm.usage.log_usage_from_message" = 1
+"test_labels.py#monkeypatch.setattr gateway.agents.router.record_audit" = 1
+"test_labels.py#monkeypatch.setattr services.derived.labeler.labeler.build_chat_model" = 11

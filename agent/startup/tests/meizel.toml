@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_desktop_permissions_startup.py#monkeypatch.setattr ava.ui" = 2
+"test_desktop_permissions_startup.py#monkeypatch.setattr base.host.converge.accessibility.ava_home" = 1
+"test_desktop_permissions_startup.py#monkeypatch.setattr base.host.converge.screen_capture.ava_home" = 1

@@ -1,0 +1,16 @@
+[debt.first-party-patch]
+"test_cluster_tz.py#monkeypatch.setattr base.config.settings.general" = 2
+"test_config_env_values.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 12
+"test_config_env_values.py#monkeypatch.setattr base.log.logger" = 1
+"test_config_profiles.py#monkeypatch.setattr base.config.config_registry.DOMAIN_MODELS" = 2
+"test_config_profiles.py#monkeypatch.setattr base.config.settings" = 3
+"test_config_registry.py#monkeypatch.setattr base.config.config_registry.DOMAIN_MODELS" = 1
+"test_config_registry.py#monkeypatch.setattr base.config.settings.sandbox.exec_timeout_seconds" = 1
+"test_dotenv_file.py#monkeypatch.setattr base.config.settings.general" = 1
+"test_dotenv_file.py#monkeypatch.setattr base.host.env.dotenv_file.write_private_bytes" = 1
+"test_dotenv_file.py#monkeypatch.setattr base.host.private_storage.os.replace" = 1
+"test_paths.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_runner_db_url_projection.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 5
+"test_runner_db_url_projection.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 5
+"test_runner_db_url_projection.py#monkeypatch.setattr base.log.logger.debug" = 1
+"test_runner_db_url_projection.py#monkeypatch.setattr base.log.logger.warning" = 1

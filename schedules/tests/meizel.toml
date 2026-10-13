@@ -5,3 +5,29 @@
 "test_catchup.py" = ["schedules"]
 "test_debt_sweep_daily.py" = ["schedules"]
 "test_dev_ci_metrics.py" = ["schedules"]
+
+[debt.first-party-patch]
+"test_c9_daily_report.py#monkeypatch.setattr base.config.settings.general.timezone" = 2
+"test_c9_daily_report.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_catchup.py#monkeypatch.setattr ava.sdk_surface.process_context.loaded_code_image" = 1
+"test_catchup.py#monkeypatch.setattr base.config.settings.general.timezone" = 2
+"test_catchup.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
+"test_catchup.py#monkeypatch.setattr schedules.entry.Database" = 1
+"test_catchup.py#monkeypatch.setattr schedules.entry.process_name" = 1
+"test_daily_writer.py#monkeypatch.setattr ava.sdk_surface.process_context.loaded_code_image" = 1
+"test_daily_writer.py#monkeypatch.setattr schedules.entry.ClientSet" = 1
+"test_debt_sweep_daily.py#monkeypatch.setattr ava.sdk_surface.process_context.loaded_code_image" = 1
+"test_debt_sweep_daily.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
+"test_debt_sweep_daily.py#monkeypatch.setattr base.db.connect" = 1
+"test_debt_sweep_daily.py#monkeypatch.setattr base.db.pool" = 1
+"test_debt_sweep_daily.py#monkeypatch.setattr base.telemetry.emit" = 2
+"test_debt_sweep_daily.py#monkeypatch.setattr schedules.entry.Database" = 1
+"test_dev_ci_metrics.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
+"test_runner_composition.py#monkeypatch.setattr ava.sdk_surface.process_context.bind_context" = 2
+"test_runner_composition.py#monkeypatch.setattr ava.sdk_surface.process_context.loaded_code_image" = 2
+"test_runner_composition.py#monkeypatch.setattr base.agents.context.clients.ClientSet.close" = 1
+"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.CodeVersion" = 1
+"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.Database" = 1
+"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.ava.ensure_plugins_loaded" = 2
+"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.engine.run" = 2
+"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.prod_service_checkout_error" = 1
