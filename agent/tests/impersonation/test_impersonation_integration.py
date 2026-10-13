@@ -81,7 +81,7 @@ async def test_consent_exec_inbox_release_and_resume(
         return True
 
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     first = await graph.ainvoke(
         reset,
         config,

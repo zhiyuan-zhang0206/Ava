@@ -203,13 +203,13 @@ def test_shell_hint_embeds_live_shell_run_contract(_load_ava_code_plugin: None):
     wrapper's signature or docstring drifts, this goes red and the hint follows
     (user ruling 2026-09-12)."""
     import ava as ava_sdk
-    from ava.sdk_surface.help import _format_signature
+    from ava.sdk_surface.help import format_signature
 
     hint = hint_for("shell")
 
     # Signature line: rendered by the same helper as ava.help()'s stub, so a
     # changed parameter set or annotation fails here.
-    assert f"def run{_format_signature(ava_sdk.shell.run)}:" in hint
+    assert f"def run{format_signature(ava_sdk.shell.run)}:" in hint
 
     # Docstring block: verbatim modulo line wrapping.
     doc = inspect.getdoc(ava_sdk.shell.run)

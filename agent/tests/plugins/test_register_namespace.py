@@ -184,7 +184,7 @@ def test_install_namespace_refuses_disabled_sentinel(installer: _Installer):
     with patch.dict(sys.modules):
         sdk_disable.apply_entries(["code"])
         sentinel = sys.modules["ava.code"]
-        assert isinstance(sentinel, sdk_disable._DisabledSDKModule)
+        assert isinstance(sentinel, sdk_disable.DisabledSDKModule)
         with pytest.raises(ava.FrameworkNamespaceConflictError, match="AVA_SDK_DISABLE"):
             installer.namespace("code", _make_module("code"))
         # The sentinel survives: the namespace stays disabled for downstream

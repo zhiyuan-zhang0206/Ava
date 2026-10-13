@@ -14,7 +14,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from . import ava_module
-from .sdk_disable import _DisabledSDKModule
+from .sdk_disable import DisabledSDKModule
 
 # ── Exception hierarchy (AGENTS.md SDK docstring rule: parent + subclass) ─
 # Plugin authors use RegisterNamespaceError for coarse catch, specific
@@ -155,7 +155,7 @@ def install_namespace(
     # plugin applies (install() applies the env entries before any plugin). The install must NOT clobber the sentinel — it is the
     # legible "disabled" error surface the disable machinery put there, and a disabled name is
     # framework-owned (not overridable), so fail loud with the same conflict class.
-    if isinstance(_sys.modules.get(f"ava.{name}"), _DisabledSDKModule):
+    if isinstance(_sys.modules.get(f"ava.{name}"), DisabledSDKModule):
         raise FrameworkNamespaceConflictError(
             f"ava.{name} is disabled by AVA_SDK_DISABLE — a disabled namespace is framework-owned and not overridable; plugin {plugin!r} must rename."
         )

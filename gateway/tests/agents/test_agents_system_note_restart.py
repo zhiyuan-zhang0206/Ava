@@ -194,7 +194,7 @@ class TestSystemNote:
 
         def enqueue(note_pool: ConnectionPool) -> None:
             try:
-                system_note._system_note_blocking(
+                system_note.system_note_blocking(
                     database,
                     event_bus,
                     note_pool,

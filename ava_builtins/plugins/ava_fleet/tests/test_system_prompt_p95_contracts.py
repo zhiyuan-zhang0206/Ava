@@ -10,7 +10,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from agent.graph.prompt.system_prompt import _sdk_expand_section
+from agent.graph.prompt.system_prompt import sdk_expand_section
 from ava.sdk_surface import install
 from ava.sdk_surface.installation import installed
 from base.config import FIELD_INFOS, settings
@@ -63,7 +63,7 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         authority=config_authority,
     )
 
-    text = _sdk_expand_section(
+    text = sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),

@@ -12,7 +12,7 @@
     "test_start_data_plane.py",
 ]
 "tests.fixtures.unit.generation" = ["."]
-"tests.fixtures.unit.homes" = ["."]
+"base.paths.tests.homes" = ["."]
 "base.deploy.lifecycle.tests.serving_root" = [
     "identity/test_commands_restart_stop.py",
 ]

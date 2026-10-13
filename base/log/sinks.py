@@ -141,7 +141,7 @@ def _install_stdlib_intercept() -> None:
     `add_event_sink`'s own threshold. `FIRST_PARTY_LOGGER_NAMES` then
     raises that floor back to DEBUG for our own code only, so a controller's
     or daemon's `_log.debug(...)` still reaches the file sink (which is
-    itself level=DEBUG — see `_add_file_sink`) the way a native
+    itself level=DEBUG — see `add_file_sink`) the way a native
     `from base.log import logger; logger.debug(...)` call always has.
     Before this, EVERY stdlib DEBUG record was dropped at the root before
     reaching loguru at all — #1126: 68 days of `restarter.log` had zero
@@ -268,7 +268,7 @@ def rotate_by_size_or_day(message: Any, file: Any) -> bool:
     return message.record["time"].astimezone(datetime.UTC).date() > created
 
 
-def _add_file_sink(path: Path) -> int:
+def add_file_sink(path: Path) -> int:
     """Add a JSONL file sink (`serialize=True` makes loguru serialize
     the entire record into a single JSON line — for jq / programmatic
     consumption), rotating at 100 MB or once per day and keeping 7 days.

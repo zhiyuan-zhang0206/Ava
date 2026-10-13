@@ -422,7 +422,7 @@ async def stop_takeover_with_lost_relay(
     relays: RelaySupervision,
 ) -> str:
     """Observe unknown legacy relay custody without revoking the executor lease."""
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     session = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert session is not None
     await impersonation.supervise_relay(

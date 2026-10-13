@@ -106,7 +106,7 @@ An MCP declaration carries `{source, scope}` — not just a config dict:
   and plugin-bundled `.mcp.json` (declared like CC's, at the plugin root) are
   merged by `ava/mcps/config.py:load_mcp_config` — machine overrides a plugin's
   same-named default — which both `ava/mcps/__init__.py:_load_config` (in-process) and
-  `ava/mcps/_daemon.py:_load_config` (the daemon) now delegate to. **Also
+  `ava/mcps/_daemon.py:load_config` (the daemon) now delegate to. **Also
   landed:** `ava plugins install` can now *deliver* a plugin-bundled `.mcp.json`
   into `~/.ava/plugins/<name>/` (`cli/commands/extensions/_claude_code_plugin.py`, alongside any
   bundled agents) — feeding the existing plugin source, no new loader path.

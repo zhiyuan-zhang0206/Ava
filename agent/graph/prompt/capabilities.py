@@ -61,7 +61,7 @@ def disabled_by_sdk_config(path: str, sdk_disable_config: Sequence[str]) -> bool
 # expands it (an operator override — the render is index-style, so it costs a
 # duplicate index and nothing worse), and the SDK overview still lists both as
 # namespaces, so `ava.help(ava.skills)` remains one call away.
-_CAPABILITY_SURFACES = frozenset({"skills", "mcps"})
+CAPABILITY_SURFACES = frozenset({"skills", "mcps"})
 
 
 def is_capability_surface_member(path: str) -> bool:
@@ -75,7 +75,7 @@ def is_capability_surface_member(path: str) -> bool:
     belongs in `skills_to_expand_at_start`, which is accounted for as cost.
     """
     head, _, rest = path.partition(".")
-    return bool(rest) and head in _CAPABILITY_SURFACES
+    return bool(rest) and head in CAPABILITY_SURFACES
 
 
 def _warn_unresolved(config_field: str, name: str) -> None:
@@ -432,7 +432,7 @@ def capabilities_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     exists instead of being rebuilt from general knowledge. Names + one-line
     descriptions only; full bodies / tool lists load on demand. This is the
     prompt's ONE skill index (the expanded SDK reference deliberately skips the
-    capability surfaces — see `_CAPABILITY_SURFACES`), and the delegation check
+    capability surfaces — see `CAPABILITY_SURFACES`), and the delegation check
     is what makes an agent actually read it. No skills configured and no MCP
     servers -> no section.
 

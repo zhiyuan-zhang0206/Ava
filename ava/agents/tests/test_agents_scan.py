@@ -21,7 +21,7 @@ def test_get_last_message_scans_peer_output(monkeypatch: pytest.MonkeyPatch) -> 
     recorded: list[Any] = []
     monkeypatch.setattr(
         security,
-        "_record_finding",
+        "record_finding",
         lambda source, triggers: recorded.append((source, triggers)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(agent_identity, "require_actor", lambda: 9999)
@@ -40,7 +40,7 @@ def test_get_last_message_none_not_scanned(monkeypatch: pytest.MonkeyPatch) -> N
     recorded: list[Any] = []
     monkeypatch.setattr(
         security,
-        "_record_finding",
+        "record_finding",
         lambda source, triggers: recorded.append((source, triggers)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(agent_identity, "require_actor", lambda: 9999)
