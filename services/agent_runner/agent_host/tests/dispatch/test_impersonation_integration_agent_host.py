@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import impersonation_process
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents import impersonation as leases
+from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -20,7 +21,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller, recorded_tree
 
 
 async def test_replacement_host_admission_ends_the_takeover_without_respawning_its_relay(

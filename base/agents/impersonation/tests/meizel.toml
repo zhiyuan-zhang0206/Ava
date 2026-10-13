@@ -1,12 +1,17 @@
-exports = ["test_history.py", "test_host_transport.py"]
+exports = ["impersonation_support.py", "test_history.py", "test_host_transport.py"]
 
 [uses]
-"test_event_log.py" = ["test_history.py"]
+"test_event_log.py" = ["impersonation_support.py", "test_history.py"]
+"test_history.py" = ["impersonation_support.py"]
+"test_impersonation_attestation.py" = ["impersonation_support.py"]
+"test_impersonation_database_attestation.py" = ["impersonation_support.py"]
+"test_transport_lifecycle.py" = ["impersonation_support.py"]
 
 [debt.env-patch]
 "test_host_transport.py#monkeypatch.setenv os.environ.CODEX_HOME" = 1
 
 [debt.first-party-patch]
+"impersonation_support.py#monkeypatch.setattr base.agents.impersonation.event_protocol_for_new_lease" = 1
 "test_event_log.py#monkeypatch.setattr base.agents.impersonation.event_log.MAX_LOG_ENTRIES" = 1
 "test_event_log.py#monkeypatch.setattr base.agents.impersonation.history.workspace_dir" = 1
 "test_history.py#monkeypatch.setattr base.agents.impersonation.history.workspace_dir" = 2

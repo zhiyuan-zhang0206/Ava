@@ -26,6 +26,7 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
+from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -35,7 +36,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller
 
 
 @pytest.fixture

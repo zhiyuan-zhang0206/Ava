@@ -10,14 +10,14 @@ import psutil
 import pytest
 
 from base.agents.impersonation import _store as store
-from base.db import Database
-from base.native_process import ownership
-from tests.impersonation_support import (
+from base.agents.impersonation.tests.impersonation_support import (
     attested_caller,
     native_identity,
     recorded_tree,
     unrelated_caller,
 )
+from base.db import Database
+from base.native_process import ownership
 
 
 def _running_process(pid: int) -> SimpleNamespace:

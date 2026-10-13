@@ -6,6 +6,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -13,7 +14,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.tests.impersonation.support import accept_controller, create_native_owner
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller
 
 
 def test_reminder_is_inserted_once_per_lease_and_wakes(

@@ -1,4 +1,4 @@
-exports = ["components", "e2e", "factories", "fixtures", "impersonation_support.py", "path_scoped", "scripts", "skills"]
+exports = ["components", "e2e", "factories", "fixtures", "path_scoped", "scripts", "skills"]
 
 [uses]
 "ci" = ["e2e", "fixtures", "path_scoped"]
@@ -8,7 +8,7 @@ exports = ["components", "e2e", "factories", "fixtures", "impersonation_support.
 "factories" = ["path_scoped"]
 "fixtures" = ["_containers.py", "_os_jobs.py", "_test_env_file.py", "path_scoped"]
 "harness" = ["_asyncio_stall_probe.py", "_os_jobs.py", "components", "e2e", "fixtures"]
-"integration" = ["fixtures", "impersonation_support.py", "path_scoped"]
+"integration" = ["fixtures", "path_scoped"]
 "path_scoped" = ["_containers.py", "fixtures"]
 "scripts" = ["fixtures", "path_scoped"]
 "skills" = ["fixtures"]
@@ -17,9 +17,6 @@ exports = ["components", "e2e", "factories", "fixtures", "impersonation_support.
 [debt.cycle-edge]
 "path_scoped/ava_tests.py -> fixtures/pin_agent.py" = 1
 "path_scoped/integration_tests.py -> fixtures/gateway_config.py" = 1
-
-[debt.first-party-patch]
-"impersonation_support.py#monkeypatch.setattr base.agents.impersonation.event_protocol_for_new_lease" = 1
 
 [debt.private-module]
 "ci/test_owned_gateway_port.py -> e2e/_ports.py" = 1
