@@ -3,7 +3,7 @@ reads the child's outcome back.
 
 Shared by the plain spawn path (`_subprocess.py`) and the admitted-resource path (`_owned_run.py`),
 which are siblings: both build the same child environment and map the same result envelope onto
-the `_ExecResult` sum type, so neither imports the other for it.
+the `ExecResult` sum type, so neither imports the other for it.
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_
 
 from ._result import (
     ExecChildError,
-    _construct_exec_result,
-    _ExecCrashed,
-    _ExecResult,
+    ExecCrashed,
+    ExecResult,
+    construct_exec_result,
     lifecycle_exception_from_name,
 )
 from ._stream import StreamCap
@@ -144,8 +144,8 @@ def result_from_payload(
     envelope_error: str | None = None,
     stream_cap: StreamCap | None = None,
     memory_guard_notice: str | None = None,
-) -> _ExecResult:
-    """Map the child's outcome onto the `_ExecResult` sum type.
+) -> ExecResult:
+    """Map the child's outcome onto the `ExecResult` sum type.
 
     The parent's cancel/timeout flags stay authoritative (same construction
     priority as the old thread loop); the child's kind is advisory except for
@@ -162,7 +162,7 @@ def result_from_payload(
         )
     else:
         exc = _child_exception(payload, envelope_error)
-    result = _construct_exec_result(
+    result = construct_exec_result(
         output,
         exc,
         cancelled=cancelled,
@@ -171,13 +171,13 @@ def result_from_payload(
         code_reached=(payload.code_reached if payload is not None else None),
     )
     if (
-        isinstance(result, _ExecCrashed)
+        isinstance(result, ExecCrashed)
         and payload is not None
         and payload.full_traceback is not None
     ):
         # The child formatted the full (unfiltered) traceback — the dispatcher
         # logs it instead of formatting the placeholder exception locally.
-        result = _ExecCrashed(
+        result = ExecCrashed(
             output=result.output,
             exc=result.exc,
             full_traceback=payload.full_traceback,

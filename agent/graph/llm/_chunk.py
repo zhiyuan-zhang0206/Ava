@@ -1,9 +1,9 @@
 """Chunk assembly + final-message validation for the llm node.
 
-``_assemble_final_message`` folds the streamed ``AIMessageChunk`` list into one
+``assemble_final_message`` folds the streamed ``AIMessageChunk`` list into one
 ``AIMessage`` via chunk addition, then runs the fail-fast validators:
-``_sanitize_thinking_blocks`` (DeepSeek thinking-delta drift repair) and
-``_validate_stop_reason`` (missing / truncated / unexpected terminal reason).
+``sanitize_thinking_blocks`` (DeepSeek thinking-delta drift repair) and
+``validate_stop_reason`` (missing / truncated / unexpected terminal reason).
 
 Split out of ``node.py`` (Task #1004 >800-line outlier) — a leaf dependency of
 the node entry; nothing here imports back into ``node.py``.
@@ -25,7 +25,7 @@ from base.lm.reasoning import content_blocks
 from base.log import logger
 
 
-def _sanitize_thinking_blocks(final_msg: AIMessage) -> None:
+def sanitize_thinking_blocks(final_msg: AIMessage) -> None:
     """Repair thinking content blocks missing the `thinking` key (DeepSeek drift #167/168).
 
     DeepSeek's anthropic-compat endpoint intermittently drops the thinking_delta
@@ -74,7 +74,7 @@ def _sanitize_thinking_blocks(final_msg: AIMessage) -> None:
 _TOOL_CLAIMED_REASONS: frozenset[str] = frozenset({"tool_use", "tool_calls"})
 
 
-def _validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> None:
+def validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> None:
     """Fail-fast on a missing or abnormal terminal reason, normalized across providers.
 
     Uses `classify_stop` (dispatched on response_metadata['model_provider']) so
@@ -120,7 +120,7 @@ def _validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> Non
         )
 
 
-def _assemble_final_message(chunks: list[AIMessageChunk], *, catalog: ModelCatalog) -> AIMessage:
+def assemble_final_message(chunks: list[AIMessageChunk], *, catalog: ModelCatalog) -> AIMessage:
     """Fold streamed chunks into a single AIMessage + fail-fast validation.
 
     Accumulation via chunk addition merges content + usage_metadata;
@@ -158,6 +158,6 @@ def _assemble_final_message(chunks: list[AIMessageChunk], *, catalog: ModelCatal
     # request, while the filled `thinking=""` shape round-trips (probed
     # 2026-07-25). In-place repair keeps the turn's text/tool blocks instead
     # of aborting into a doubled re-request.
-    _sanitize_thinking_blocks(final_msg)
-    _validate_stop_reason(final_msg, catalog=catalog)
+    sanitize_thinking_blocks(final_msg)
+    validate_stop_reason(final_msg, catalog=catalog)
     return final_msg

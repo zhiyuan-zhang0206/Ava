@@ -451,7 +451,7 @@ def test_establish_relay_codex_readiness_timeout_rolls_back(
     monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
     fail = Mock()
     monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
-    monkeypatch.setattr(impersonation, "_RELAY_READY_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(impersonation, "RELAY_READY_TIMEOUT_S", 0.0)
     assert (
         impersonation.establish_relay(
             database,
@@ -551,7 +551,7 @@ async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_i
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
     stamp = Mock()
-    monkeypatch.setattr(impersonation, "_stamp_relay_failure", stamp)
+    monkeypatch.setattr(impersonation, "stamp_relay_failure", stamp)
     abort = Mock()
     monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
@@ -609,7 +609,7 @@ async def test_confirmed_child_exit_is_degraded_at_once_without_replacement(
     monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
-    monkeypatch.setattr(impersonation, "_stamp_relay_failure", Mock())
+    monkeypatch.setattr(impersonation, "stamp_relay_failure", Mock())
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
     assert decision is not None and decision.goto == END
     degradation.assert_called_once()
@@ -628,7 +628,7 @@ async def test_stale_session_relay_retains_authority_with_visible_unsupported_re
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
-    monkeypatch.setattr(impersonation, "_stamp_relay_failure", Mock())
+    monkeypatch.setattr(impersonation, "stamp_relay_failure", Mock())
     abort = Mock()
     monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
     await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
@@ -721,7 +721,7 @@ async def test_unknown_relay_exit_evidence_degrades_only_when_the_heartbeat_is_s
     monkeypatch.setattr(OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable")))
     degradation = Mock()
     monkeypatch.setattr(relay, "record_degradation", degradation)
-    monkeypatch.setattr(impersonation, "_stamp_relay_failure", Mock())
+    monkeypatch.setattr(impersonation, "stamp_relay_failure", Mock())
     provision = Mock()
     monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
     decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)

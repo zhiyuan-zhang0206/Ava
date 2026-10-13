@@ -12,8 +12,8 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.graph.claim.node import claim_node
-from agent.graph.exec._result import _ExecCancelled
-from agent.graph.exec._subprocess import _run_in_subprocess
+from agent.graph.exec._result import ExecCancelled
+from agent.graph.exec._subprocess import run_in_subprocess
 from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
@@ -54,7 +54,7 @@ async def test_real_managed_exec_abort_closes_resources_before_original_ack(
         aops_pool, target.agent_id, incarnation=incarnation, work=target, resources=scope
     ) as interrupted:
         execution = asyncio.create_task(
-            _run_in_subprocess(
+            run_in_subprocess(
                 database,
                 "import time; print('strong-exec-started', flush=True); time.sleep(60)",
                 exec_context(target.agent_id, incarnation=incarnation, resources=scope),
@@ -71,7 +71,7 @@ async def test_real_managed_exec_abort_closes_resources_before_original_ack(
                     accept_native_cancel, pool, "real-exec-stop", target.agent_id, target
                 )
             result, _payload = await asyncio.wait_for(execution, 10)
-            assert isinstance(result, _ExecCancelled)
+            assert isinstance(result, ExecCancelled)
             assert interrupted.native_cancel == NativeCancelMarker(
                 command_id=accepted.command_id, target=target
             )

@@ -26,7 +26,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.llm._retry import Attempt
-from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_timeout
+from agent.graph.llm._stream import consume_llm, consume_stream_with_stall_timeout
 from agent.graph.llm.node import llm_attempt
 from agent.graph.llm_errors import (
     LlmLedger,
@@ -257,7 +257,7 @@ async def test_total_timeout_ends_the_original_request_while_chunks_keep_arrivin
     chunks: list[AIMessageChunk] = []
 
     with pytest.raises(LLMStreamStallTimeoutError, match="total duration"):
-        await _consume_llm(
+        await consume_llm(
             fake_llm,
             [],
             chunks=chunks,
@@ -286,7 +286,7 @@ async def test_stream_below_total_timeout_is_unchanged(monkeypatch: pytest.Monke
     monkeypatch.setattr(stream_module.time, "monotonic", lambda: clock[0])
     chunks: list[AIMessageChunk] = []
 
-    await _consume_stream_with_stall_timeout(
+    await consume_stream_with_stall_timeout(
         _stream(),
         chunks=chunks,
         handler=MagicMock(),
@@ -315,7 +315,7 @@ async def test_none_disables_stream_total_timeout(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(stream_module.time, "monotonic", lambda: clock[0])
     chunks: list[AIMessageChunk] = []
 
-    await _consume_stream_with_stall_timeout(
+    await consume_stream_with_stall_timeout(
         _long_stream(),
         chunks=chunks,
         handler=MagicMock(),
@@ -346,7 +346,7 @@ _STREAM_BOUNDS = {
 async def _stream_bounds(
     monkeypatch: pytest.MonkeyPatch, agent: AgentSlices
 ) -> dict[str, float | None]:
-    """The bounds `_consume_llm` hands the stream consumer for `agent`."""
+    """The bounds `consume_llm` hands the stream consumer for `agent`."""
     import agent.graph.llm._stream as stream_module
 
     seen: dict[str, float | None] = {}
@@ -355,8 +355,8 @@ async def _stream_bounds(
         seen.update({k: kwargs[k] for k in _STREAM_BOUNDS.values()})
         return AIMessage(content="ok")
 
-    monkeypatch.setattr(stream_module, "_consume_stream_with_stall_timeout", _capture)
-    await _consume_llm(
+    monkeypatch.setattr(stream_module, "consume_stream_with_stall_timeout", _capture)
+    await consume_llm(
         MagicMock(), [], chunks=[], handler=MagicMock(), agent=agent, catalog=build_model_catalog()
     )
     return seen

@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -45,6 +45,6 @@ async def test_pre_attempt_construction_rejected_without_provider_or_starvation(
     assert status["continuation_released"] and status["attempt_id"] is None
     assert status["execution"] is None and not status["result_available"]
     assert len(accepted.ordinary) == 1
-    _insert(db_conn, accepted.agent)
+    insert(db_conn, accepted.agent)
     await accepted.host.run_turn(accepted.agent)
     assert len(accepted.ordinary) == 2

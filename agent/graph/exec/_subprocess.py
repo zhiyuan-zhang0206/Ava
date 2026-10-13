@@ -37,8 +37,8 @@ from ._output_pipe import ExecOutputPipe
 from ._owned_run import managed_target, run_owned
 from ._result import (
     ExecChildError,
-    _ExecCrashed,
-    _ExecResult,
+    ExecCrashed,
+    ExecResult,
 )
 from ._stream import ExecOutputChunkPublisher, StreamingTextIO
 from .protocol import (
@@ -65,12 +65,12 @@ def _default_editable_guard() -> tuple[str, ...]:
 
 def _editable_guard_failure(
     editable_guard: Callable[[], tuple[str, ...]] | None,
-) -> _ExecCrashed | None:
+) -> ExecCrashed | None:
     """Return the agent-visible guard failure before any exec artifacts exist."""
     try:
         violations = (editable_guard or _default_editable_guard)()
     except Exception as exc:
-        return _ExecCrashed(
+        return ExecCrashed(
             output=(
                 f"exec editable-install guard could not inspect the interpreter: {exc}\n\n"
                 "Do not retry this execute_code call. Report the error to the operator."
@@ -85,7 +85,7 @@ def _editable_guard_failure(
         "on this host and inspect the source records before starting new work.\n\n"
         "Invalid records:\n" + "\n".join(f"- {violation}" for violation in violations)
     )
-    return _ExecCrashed(
+    return ExecCrashed(
         output=output,
         exc=ExecChildError("exec_editable_install_poisoned", output, None),
     )
@@ -161,7 +161,7 @@ async def _poll_child(
     return False, False
 
 
-async def _collect_child(
+async def collect_child(
     proc: subprocess.Popen[bytes],
     stream: StreamingTextIO,
     chunk_publisher: ExecOutputChunkPublisher | None,
@@ -192,7 +192,7 @@ async def _collect_child(
             chunk_publisher.publish(pending)
 
 
-async def _finish_failed_run(
+async def finish_failed_run(
     original: BaseException,
     root_exit_task: asyncio.Task[None] | None,
     reap_task: asyncio.Task[int] | None,
@@ -215,7 +215,7 @@ async def _finish_failed_run(
     _process.annotate_original_failure(original, failures)
     if failures and request_paths is not None:
         _retain_domain_completion(domain_close, *request_paths, resources=resources)
-        _retain_late_reader_completion(
+        retain_late_reader_completion(
             _process.ExecTeardownError(failures), *request_paths, reader, resources=resources
         )
     return not failures
@@ -223,7 +223,7 @@ async def _finish_failed_run(
 
 def _write_request_failure(
     path: Path, code: str, context: AvaContext, timeout: float, state: dict[str, Any] | None
-) -> _ExecCrashed | None:
+) -> ExecCrashed | None:
     try:
         write_request(
             path,
@@ -234,11 +234,11 @@ def _write_request_failure(
             incarnation=context.original_incarnation,
         )
     except BaseException as exc:
-        return _ExecCrashed(output=f"exec subprocess request could not be written: {exc}", exc=exc)
+        return ExecCrashed(output=f"exec subprocess request could not be written: {exc}", exc=exc)
     return None
 
 
-def _finish_request_evidence(
+def finish_request_evidence(
     request_path: Path,
     result_path: Path,
     expected: object | None,
@@ -277,14 +277,14 @@ def _retain_domain_completion(
 
     async def finish_original() -> None:
         await owner.finish_later()
-        _finish_request_evidence(request, result, owner, settled=True, resources=resources)
+        finish_request_evidence(request, result, owner, settled=True, resources=resources)
 
     resources.require_service().complete_later(
         resources, finish_original(), name=f"exec-domain-finish-{request.stem}"
     )
 
 
-def _retain_late_reader_completion(
+def retain_late_reader_completion(
     failure: _process.ExecTeardownError,
     request: Path,
     result: Path,
@@ -323,7 +323,7 @@ def _retain_late_reader_completion(
     )
 
 
-async def _run_in_subprocess(
+async def run_in_subprocess(
     db: Database,
     code: str,
     context: AvaContext,
@@ -337,7 +337,7 @@ async def _run_in_subprocess(
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
     editable_guard: Callable[[], tuple[str, ...]] | None = None,
-) -> tuple[_ExecResult, ResultPayload | None]:
+) -> tuple[ExecResult, ResultPayload | None]:
     """Select admitted managed ownership without changing legacy NULL semantics."""
     guard_failure = _editable_guard_failure(editable_guard)
     if guard_failure is not None:
@@ -363,7 +363,7 @@ async def _run_in_subprocess(
             config_overlay=config_overlay,
             birth_config=birth_config,
         )
-    return await _run_legacy_subprocess(
+    return await run_legacy_subprocess(
         code,
         context,
         cancel_event,
@@ -377,7 +377,7 @@ async def _run_in_subprocess(
     )
 
 
-async def _run_legacy_subprocess(
+async def run_legacy_subprocess(
     code: str,
     context: AvaContext,
     cancel_event: asyncio.Event,
@@ -389,12 +389,12 @@ async def _run_legacy_subprocess(
     exec_dir: Path | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
-) -> tuple[_ExecResult, ResultPayload | None]:
+) -> tuple[ExecResult, ResultPayload | None]:
     """Run `code` in one disposable child process; poll every 50ms monitoring
     exit / cancel_event / deadline (same priority as the old thread loop:
     cancel > deadline > natural completion).
 
-    Returns the `_ExecResult` sum type the exec node dispatches plus the raw
+    Returns the `ExecResult` sum type the exec node dispatches plus the raw
     child envelope (None when the child never wrote one — SIGKILL / watchdog /
     os._exit): the envelope carries the state-update delta (plugin fields,
     security findings), which only this function can see.
@@ -436,7 +436,7 @@ async def _run_legacy_subprocess(
                 resource_scope.unresolved[request_path] = domain
         except OSError as exc:
             resources_settled = isinstance(exc, _ExecNeverStartedError)
-            return _ExecCrashed(
+            return ExecCrashed(
                 output=f"exec subprocess could not be spawned: {exc}",
                 exc=exc,
             ), None
@@ -461,7 +461,7 @@ async def _run_legacy_subprocess(
             domain_close,
             reader,
         )
-        await _collect_child(
+        await collect_child(
             proc,
             stream,
             chunk_publisher,
@@ -491,7 +491,7 @@ async def _run_legacy_subprocess(
         # The exec node's outer shield (asyncio.wait_for) cancels this task on
         # node timeout. Cancellation is not complete until every owned resource
         # is settled; otherwise the next exec inherits unresolved process/pipe resources.
-        resources_settled = await _finish_failed_run(
+        resources_settled = await finish_failed_run(
             original,
             root_exit_task,
             reap_task,
@@ -504,12 +504,12 @@ async def _run_legacy_subprocess(
         raise
     except _process.ExecTeardownError as exc:
         _retain_domain_completion(domain_close, request_path, result_path, resources=resource_scope)
-        _retain_late_reader_completion(
+        retain_late_reader_completion(
             exc, request_path, result_path, reader, resources=resource_scope
         )
         # Cleanup failure is an exec outcome, not an agent-process failure.
         return (
-            _ExecCrashed(
+            ExecCrashed(
                 output=(
                     f"[exec teardown failure] {exc}\n\n"
                     "Partial output captured before teardown:\n\n"
@@ -521,7 +521,7 @@ async def _run_legacy_subprocess(
             None,
         )
     except Exception as original:
-        resources_settled = await _finish_failed_run(
+        resources_settled = await finish_failed_run(
             original,
             root_exit_task,
             reap_task,
@@ -533,7 +533,7 @@ async def _run_legacy_subprocess(
         )
         raise
     finally:
-        _finish_request_evidence(
+        finish_request_evidence(
             request_path,
             result_path,
             domain_close or domain,
@@ -542,4 +542,4 @@ async def _run_legacy_subprocess(
         )
 
 
-__all__ = ["_run_in_subprocess"]
+__all__ = ["run_in_subprocess"]

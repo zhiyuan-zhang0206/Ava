@@ -1,7 +1,7 @@
 # pyright: reportOptionalSubscript=false
 """Mutmut gap tests for `agent/graph/llm/node.py` (baseline PR #302).
 
-`_capture_ava_overview` in `_base_prompt.py` captures `ava.help(ava)` stdout.
+`capture_ava_overview` in `_base_prompt.py` captures `ava.help(ava)` stdout.
 The cancel-task/stream-first boundary discards partial generations and publishes
 Cancelled only for cancellation; normal completion calls handler.finish().
 Stop-reason and thinking-block validation cover the remaining mutation gaps.
@@ -24,7 +24,7 @@ from langgraph.types import Command
 
 from agent.graph import llm_node
 from agent.graph.llm_errors import LlmLedger
-from agent.graph.prompt._base_prompt import _capture_ava_overview, _get_ava_overview
+from agent.graph.prompt._base_prompt import capture_ava_overview, get_ava_overview
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
@@ -39,7 +39,7 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
-_CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
+CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
 
 @pytest.fixture
@@ -48,15 +48,15 @@ def ledger() -> LlmLedger:
     return LlmLedger()
 
 
-# ───────────── _capture_ava_overview ─────────────
+# ───────────── capture_ava_overview ─────────────
 
 
 def test_capture_ava_overview_returns_non_empty_string() -> None:
-    """Direct import + call of `_capture_ava_overview` — lock that `buf = io.StringIO()`
+    """Direct import + call of `capture_ava_overview` — lock that `buf = io.StringIO()`
     was not changed to None or list(); `redirect_stdout(buf)` actually captures the
     output of `ava.help(ava)` (mutation `redirect_stdout(None)` would let stdout leak → return ''),
     `buf.getvalue()` is not empty."""
-    overview = _capture_ava_overview()
+    overview = capture_ava_overview()
 
     assert isinstance(overview, str)
     assert len(overview) > 0, "buf did not capture ava.help stdout — redirect_stdout was severed"
@@ -69,7 +69,7 @@ def test_capture_ava_overview_surfaces_public_sdk_index() -> None:
     # spelunking; full per-namespace detail stays on demand via ava.help(ava.X).
     # The root docstring was deliberately removed (sysprompt verbosity audit,
     # PR #840) — the `# ava` heading stands alone.
-    overview = _capture_ava_overview()
+    overview = capture_ava_overview()
 
     assert overview.startswith("# ava\n\n"), (
         f"overview does not start with `# ava` heading: {overview[:200]!r}"
@@ -99,7 +99,7 @@ def test_capture_ava_overview_is_pure_no_stdout_leak(capsys) -> None:
     was not changed to `with contextlib.redirect_stdout(sys.stdout):` — such a mutation
     would make ava.help actually print to stdout, then capsys.readouterr().out would not be empty."""
     capsys.readouterr()  # clear any prior output  # pyright: ignore[reportUnknownMemberType]
-    overview = _capture_ava_overview()
+    overview = capture_ava_overview()
     captured = capsys.readouterr()  # pyright: ignore[reportUnknownMemberType]
 
     assert overview, "overview is empty"
@@ -130,7 +130,7 @@ def test_get_ava_overview_advertises_installed_plugin_namespace() -> None:
 
     undo = plugins.install_namespace("fake-plugin", "fake_late", fake_ns, {})
     try:
-        overview = _get_ava_overview()
+        overview = get_ava_overview()
         assert "fake_late" in overview, (
             f"overview should advertise the installed plugin namespace (otherwise a namespace "
             f"without a section would disappear). overview:\n{overview[:600]}"
@@ -147,7 +147,7 @@ def test_get_ava_overview_advertises_installed_plugin_namespace() -> None:
 # differentiate the two path invariants: "cancel first in done" vs "stream first in done".
 
 
-def _make_runtime(
+def make_runtime(
     *,
     resources: HostedTurnResources,
     llm=None,
@@ -227,13 +227,13 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     trigger = asyncio.create_task(_trigger())
     result = await llm_node(
         state,
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=pub,
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
     await trigger
@@ -287,13 +287,13 @@ async def test_stream_normal_completion_no_cancelled_event(
     # Note: do not set cancel_event —— stream should complete naturally
     result = await llm_node(
         state,
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=pub,
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
 
@@ -334,13 +334,13 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises(
 
     result = await llm_node(
         state,
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
 
@@ -377,13 +377,13 @@ async def test_truly_empty_no_reasoning_halts_with_warning(
 
     result = await llm_node(
         state,
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
 
@@ -410,7 +410,7 @@ def test_validate_stop_reason_unexpected_carries_stop_reason_and_output_tokens()
     attributes; `test_validate_raises_on_max_tokens` reads attributes but only covers the
     Truncated subclass path — the unexpected parent class path is uncovered.
     """
-    from agent.graph.llm._chunk import _validate_stop_reason
+    from agent.graph.llm._chunk import validate_stop_reason
     from agent.graph.llm_errors import LLMStreamUnexpectedStopReasonError
 
     msg = AIMessage(
@@ -419,7 +419,7 @@ def test_validate_stop_reason_unexpected_carries_stop_reason_and_output_tokens()
         usage_metadata={"input_tokens": 10, "output_tokens": 99, "total_tokens": 109},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError) as exc_info:
-        _validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog())
     assert exc_info.value.stop_reason == "pause_turn", (
         f"stop_reason attribute must be actually set (got {exc_info.value.stop_reason!r}) —— "
         "mutation `stop_reason=None` makes this assertion red"
@@ -466,13 +466,13 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 
     result = await llm_node(
         state,
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=pub,
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
 
@@ -517,13 +517,13 @@ async def test_silent_idle_with_thinking_blocks_continue_loops(
 
     result = await llm_node(
         state,
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
 
@@ -560,13 +560,13 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
 
     result = await llm_node(
         state,
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
 
@@ -602,13 +602,13 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
         fake_llm.astream.return_value = _reasoning_content_only()
         result = await llm_node(
             AgentState(messages=[HumanMessage(content="hi")], halted=False),
-            _make_runtime(
+            make_runtime(
                 resources=hosted_resources,
                 llm=fake_llm,
                 event_publisher=MagicMock(),
                 database_gate=database_gate,
             ),
-            _CONFIG,
+            CONFIG,
             ledger=ledger,
         )
         assert isinstance(result, Command)
@@ -624,7 +624,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
 # TRANSIENT class re-raises for the retry loop.
 
 
-class _FakeProviderStatusError(openai.APIStatusError):
+class FakeProviderStatusError(openai.APIStatusError):
     """An actual SDK status error with a synthetic response."""
 
     def __init__(self, status_code: int, body: object = None) -> None:
@@ -634,7 +634,7 @@ class _FakeProviderStatusError(openai.APIStatusError):
         super().__init__(f"HTTP {status_code}", response=response, body=body)
 
 
-def _astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
+def astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
     async def _gen() -> AsyncIterator[AIMessageChunk]:
         raise exc
         yield  # pragma: no cover — unreachable; only marks this an async generator
@@ -658,19 +658,19 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     from base.config import settings
 
     fake_llm = MagicMock()
-    fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(400))
+    fake_llm.astream.return_value = astream_raising(FakeProviderStatusError(400))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(FatalProviderError) as exc_info:
         await llm_node(
             state,
-            _make_runtime(
+            make_runtime(
                 resources=hosted_resources,
                 llm=fake_llm,
                 event_publisher=MagicMock(),
                 database_gate=database_gate,
             ),
-            _CONFIG,
+            CONFIG,
             ledger=ledger,
         )
 
@@ -687,11 +687,11 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
 
 
 # ────────────────────────────────────────────────────────────
-# _parse_provider_error_type / _is_fatal_provider_error_type
+# _parse_provider_error_type / is_fatal_provider_error_type
 # ────────────────────────────────────────────────────────────
 
 
-class _FakeOpenAIError(openai.APIStatusError):
+class FakeOpenAIError(openai.APIStatusError):
     """Actual OpenAI SDK authority for configured fatal-type tests."""
 
     def __init__(self, body: object = None) -> None:
@@ -699,7 +699,7 @@ class _FakeOpenAIError(openai.APIStatusError):
         super().__init__("fake error", response=response, body=body)
 
 
-class _FakeAnthropicError(anthropic.APIStatusError):
+class FakeAnthropicError(anthropic.APIStatusError):
     """Actual Anthropic SDK authority for configured fatal-type tests."""
 
     def __init__(self, body: object = None) -> None:
@@ -707,13 +707,13 @@ class _FakeAnthropicError(anthropic.APIStatusError):
         super().__init__("fake error", response=response, body=body)
 
 
-def _fatal(error_type: str | None, configured: str) -> bool:
-    """`_is_fatal_provider_error_type` for an error of `error_type` under a configured fatal set."""
-    from agent.graph.llm_errors import _is_fatal_provider_error_type
+def fatal(error_type: str | None, configured: str) -> bool:
+    """`is_fatal_provider_error_type` for an error of `error_type` under a configured fatal set."""
+    from agent.graph.llm_errors import is_fatal_provider_error_type
 
     body = {"error": {"type": error_type, "message": "m"}}
     policy = LlmCallPolicy(configured)
-    return _is_fatal_provider_error_type(_FakeOpenAIError(body), policy)
+    return is_fatal_provider_error_type(FakeOpenAIError(body), policy)
 
 
-__all__ = ["_FakeAnthropicError"]
+__all__ = ["FakeAnthropicError"]

@@ -17,7 +17,7 @@ import pytest
 from psycopg import OperationalError
 
 from agent.graph.prompt import context_notes
-from agent.graph.prompt.context_notes import _machine_clause, _own_label, agent_id_note
+from agent.graph.prompt.context_notes import agent_id_note, machine_clause, own_label
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
@@ -59,8 +59,8 @@ def _no_optional_clauses(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default the label / machine clauses to absent; tests opt them back in.
     The workspace clause stays real but its section gate is off by default here,
     so a test that does not exercise it never touches the filesystem."""
-    monkeypatch.setattr(context_notes, "_own_label", _no_label)
-    monkeypatch.setattr(context_notes, "_machine_clause", _no_machine)
+    monkeypatch.setattr(context_notes, "own_label", _no_label)
+    monkeypatch.setattr(context_notes, "machine_clause", _no_machine)
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", False)
 
 
@@ -85,8 +85,8 @@ def _content() -> str:
 
 def test_states_the_id_label_and_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     """The identity line carries id + label + machine."""
-    monkeypatch.setattr(context_notes, "_own_label", _steward_label)
-    monkeypatch.setattr(context_notes, "_machine_clause", _runner_machine)
+    monkeypatch.setattr(context_notes, "own_label", _steward_label)
+    monkeypatch.setattr(context_notes, "machine_clause", _runner_machine)
 
     assert _content().startswith("Your Agent ID is 29 (label: memory steward, machine: runner-a).")
 
@@ -97,11 +97,11 @@ def test_id_only_when_no_optional_clauses() -> None:
 
 
 def test_partial_clauses_render_alone(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(context_notes, "_own_label", _steward_label)
+    monkeypatch.setattr(context_notes, "own_label", _steward_label)
     assert _content() == "Your Agent ID is 29 (label: memory steward)."
 
-    monkeypatch.setattr(context_notes, "_own_label", _no_label)
-    monkeypatch.setattr(context_notes, "_machine_clause", _runner_machine)
+    monkeypatch.setattr(context_notes, "own_label", _no_label)
+    monkeypatch.setattr(context_notes, "machine_clause", _runner_machine)
     assert _content() == "Your Agent ID is 29 (machine: runner-a)."
 
 
@@ -191,7 +191,7 @@ def _fake_sql(monkeypatch: pytest.MonkeyPatch, fake: object) -> AvaContext:
 def test_own_label_normalizes_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
     """A label is free text; the one-line note gets it whitespace-collapsed."""
     ctx = _fake_sql(monkeypatch, _FakeDB(("  memory\n  steward ",)))
-    assert _own_label(ctx, 29) == "memory steward"
+    assert own_label(ctx, 29) == "memory steward"
 
 
 @pytest.mark.parametrize("row", [None, (None,), ("",)])
@@ -199,7 +199,7 @@ def test_own_label_omits_missing_data(
     monkeypatch: pytest.MonkeyPatch, row: tuple[object, ...] | None
 ) -> None:
     ctx = _fake_sql(monkeypatch, _FakeDB(row))
-    assert _own_label(ctx, 29) is None
+    assert own_label(ctx, 29) is None
 
 
 @pytest.mark.parametrize("error_type", [OperationalError, RuntimeError])
@@ -214,7 +214,7 @@ def test_own_label_propagates_cursor_failure(
 
     ctx = _fake_sql(monkeypatch, _Boom())
     with pytest.raises(error_type) as raised:
-        _own_label(ctx, 29)
+        own_label(ctx, 29)
     assert raised.value is failure
 
 
@@ -230,7 +230,7 @@ def test_agent_id_note_propagates_query_failure(monkeypatch: pytest.MonkeyPatch)
             return _BrokenCursor(None)
 
     ctx = _fake_sql(monkeypatch, _BrokenDB())
-    monkeypatch.setattr(context_notes, "_own_label", _own_label)
+    monkeypatch.setattr(context_notes, "own_label", own_label)
     with pytest.raises(OperationalError) as raised:
         agent_id_note(ctx)
     assert raised.value is failure
@@ -256,6 +256,6 @@ def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.Mo
             )
         )
 
-    assert _machine_clause(context(_unset)) is None
+    assert machine_clause(context(_unset)) is None
     with pytest.raises(RuntimeError, match="settings unreadable"):
-        _machine_clause(context(_broken))
+        machine_clause(context(_broken))

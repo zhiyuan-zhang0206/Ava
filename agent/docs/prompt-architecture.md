@@ -59,7 +59,7 @@ multi-tool agent (e.g. Claude Code's per-tool `##` catalog): Ava has one tool
 guidance is the *spine* (base + SDK overview + plugin sections), folded into
 Capabilities rather than standing as its own section.
 
-- **Core base prompt** — `agent/graph/prompt/_base_prompt.py:_BASE_SYSTEM_PROMPT`: the
+- **Core base prompt** — `agent/graph/prompt/_base_prompt.py:BASE_SYSTEM_PROMPT`: the
   code-as-action contract (`execute_code`, speak via text content, empty
   tool-call = idle) plus the `help(ava)` SDK overview. Its `_CODE_ACTION_PREAMBLE`
   is also the bare identity when the SDK overview is disabled. The preamble's
@@ -95,7 +95,7 @@ Capabilities rather than standing as its own section.
   `AVA_SYSTEM_PROMPT_PREFER_SDK`): one line steering the agent to `ava.*` tools over
   plain-Python / raw-shell equivalents. Deliberately example-free — specific
   misuse patterns get addressed if logs show them.
-- **Core CodeAct batching** — `agent/graph/prompt/_codeact.py:_codeact_section` (registered by `system_prompt.py`),
+- **Core CodeAct batching** — `agent/graph/prompt/_codeact.py:codeact_section` (registered by `system_prompt.py`),
   **on by default** via `settings.agent.prompt_codeact_enabled` (env
   `AVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
   call when no intermediate review is needed. The prompt states no separate
@@ -126,7 +126,7 @@ Capabilities rather than standing as its own section.
   always present: answer directly, or give a substantive reply in the same dialog
   before investigating or calling tools. `off` and `silent` do not suppress it.
   Automated wakes and peer messages do not require courtesy replies.
-- **Core communication style** — `agent/graph/prompt/system_prompt.py:_communication_style_section`,
+- **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `AVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
   while it works — `oriented` interleaves brief progress updates in its text content,
@@ -147,7 +147,7 @@ Capabilities rather than standing as its own section.
   on by default via `settings.prompt_output_conciseness_enabled` (env
   `AVA_SYSTEM_PROMPT_CONCISENESS`): reply matched to the task, answer-first, reference
   paths/lines instead of pasting output back. General-agent behavior.
-- **Core UI delivery** — `agent/graph/prompt/system_prompt.py:_ui_delivery_section`,
+- **Core UI delivery** — `agent/graph/prompt/system_prompt.py:ui_delivery_section`,
   on by default via `settings.prompt_ui_delivery_enabled` (env
   `AVA_SYSTEM_PROMPT_UI_DELIVERY`): content for the user goes through the UI,
   never as a bare path to a Markdown file; files keep their role as persistence
@@ -155,7 +155,7 @@ Capabilities rather than standing as its own section.
   API list (signatures drift; the SDK overview / expanded reference carry the
   concrete entry points). Complements output shape (how the *text* is written)
   with *where the deliverable lands*.
-- **Core future signals** — `agent/graph/prompt/system_prompt.py:_invest_in_the_future_section`,
+- **Core future signals** — `agent/graph/prompt/system_prompt.py:invest_in_the_future_section`,
   on by default via `settings.agent.prompt_invest_future_enabled` (env
   `AVA_SYSTEM_PROMPT_INVEST_FUTURE`): the framework's one cross-domain
   future-signal rule. It requires the smallest closing action for a signal that
@@ -169,7 +169,7 @@ Capabilities rather than standing as its own section.
   `AVA_SYSTEM_PROMPT_CAUTION`): confirm before hard-to-reverse / outward-facing actions
   (one approval ≠ standing license), and treat sending to an external service as
   publishing. Combines the irreversible-action and external-send-privacy gaps.
-- **Core align-before-action** — `agent/graph/prompt/system_prompt.py:_align_before_action_section`,
+- **Core align-before-action** — `agent/graph/prompt/system_prompt.py:align_before_action_section`,
   on by default via `settings.prompt_align_before_action_enabled` (env
   `AVA_SYSTEM_PROMPT_ALIGN`): resolve unsettled material outcome, cost, autonomy,
   and authority choices; recommend concrete trade-offs and respect existing

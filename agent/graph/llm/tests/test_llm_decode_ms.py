@@ -2,8 +2,8 @@
 
 The ops panel "\u751f\u6210 stage \u8f93\u51fa TPS" (Σout_total/Σdecode_ms) needs an honest
 decode window: first chunk arrival → last chunk arrival (monotonic ms),
-measured in `_consume_stream_with_stall_timeout` and stamped by
-`_stream_llm` onto the handler as `llm_decode_ms`. Non-streaming
+measured in `consume_stream_with_stall_timeout` and stamped by
+`stream_llm` onto the handler as `llm_decode_ms`. Non-streaming
 fallback calls and empty streams must carry None → NULL in the payload — a
 fake window (e.g. wall-clock) would contaminate the generation-TPS panel.
 
@@ -24,7 +24,7 @@ from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage
 
 import agent.graph.llm._stream as llm_stream
 from agent.graph._callbacks import RedisStreamHandler
-from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_llm
+from agent.graph.llm._stream import consume_stream_with_stall_timeout, stream_llm
 from base.agents.observation.turn_progress import TurnProgress
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
@@ -78,7 +78,7 @@ async def test_consume_stream_records_first_last_timestamps(
 
     chunks: list[AIMessageChunk] = []
     handler = _FakeHandler()
-    first_ts, last_ts = await _consume_stream_with_stall_timeout(
+    first_ts, last_ts = await consume_stream_with_stall_timeout(
         _stream(),
         chunks=chunks,
         handler=handler,
@@ -98,7 +98,7 @@ async def test_consume_stream_empty_stream_returns_none(monkeypatch: pytest.Monk
         if False:  # pragma: no cover — never yields
             yield AIMessageChunk(content="x")
 
-    first_ts, last_ts = await _consume_stream_with_stall_timeout(
+    first_ts, last_ts = await consume_stream_with_stall_timeout(
         _empty(),
         chunks=[],
         handler=_FakeHandler(),
@@ -126,7 +126,7 @@ async def test_stream_llm_stamps_decode_ms(monkeypatch: pytest.MonkeyPatch) -> N
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
-    await _stream_llm(
+    await stream_llm(
         fake_llm,
         [],
         chunks=chunks,
@@ -158,7 +158,7 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
     fake_llm.bind_tools.return_value = fake_llm
 
     handler = _FakeHandler()
-    await _stream_llm(
+    await stream_llm(
         fake_llm,
         [],
         chunks=[],
@@ -196,7 +196,7 @@ async def test_stream_preserves_prefix_and_does_not_recover_cache_403() -> None:
     chunks: list[AIMessageChunk] = []
     handler = _FakeHandler()
     with pytest.raises(ClientError) as caught:
-        await _stream_llm(
+        await stream_llm(
             llm,
             messages,
             chunks=chunks,

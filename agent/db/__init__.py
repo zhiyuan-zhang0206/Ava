@@ -33,7 +33,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 # waiting for a client-pool slot and waiting on ownership row locks; a timeout
 # unwinds the transaction and lets the host scheduler retry
 # from the durable inbound row on a later round.
-def _claim_db_acquire_timeout_s() -> float:
+def claim_db_acquire_timeout_s() -> float:
     return min(5.0, settings.agent.db_pool_acquire_timeout_seconds)
 
 
@@ -324,7 +324,7 @@ async def claim_inbound_batch(
     The lifecycle-only path leaves cancellation for the external decision
     owner, or the ordinary native claim if that owner returns without ACK.
     """
-    acquire_timeout_s = _claim_db_acquire_timeout_s()
+    acquire_timeout_s = claim_db_acquire_timeout_s()
     async with (
         async_write_transaction(pool, timeout=acquire_timeout_s) as conn,
         conn.cursor() as cur,

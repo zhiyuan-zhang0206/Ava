@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from gateway.agents.tests.guarded_compact.host.admission import admit
@@ -64,7 +64,7 @@ async def test_generation_unknown_or_short_never_repeats_and_next_chat_runs(
         assert status["outcome"] == "uncertain"
         assert not status["continuation_released"] and status["recovery_checkpoint_id"] is None
         assert calls == [failure]
-        _insert(db_conn, accepted.agent)
+        insert(db_conn, accepted.agent)
         await accepted.host.run_turn(accepted.agent)
         assert calls == [failure] and len(accepted.ordinary) == 1
         return
@@ -72,7 +72,7 @@ async def test_generation_unknown_or_short_never_repeats_and_next_chat_runs(
     status = accepted.status(client)
     assert status["outcome"] == "rejected" and status["continuation_released"]
     assert calls == [failure]
-    _insert(db_conn, accepted.agent)
+    insert(db_conn, accepted.agent)
     await accepted.host.run_turn(accepted.agent)
     assert calls == [failure] and len(accepted.ordinary) == 2
 
@@ -119,7 +119,7 @@ async def test_later_wake_holds_a_retained_result_without_resuming_or_crashing(
 
     monkeypatch.setattr(host_module, "recover_native_cancel", spy)
 
-    _insert(db_conn, accepted.agent)
+    insert(db_conn, accepted.agent)
     await accepted.host.run_turn(accepted.agent)
 
     assert model.calls == 1 and len(accepted.ordinary) == 1

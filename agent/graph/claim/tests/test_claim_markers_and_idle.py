@@ -19,67 +19,67 @@ from tests.fixtures.units import spawn_agent
 def test_by_who_self_returns_yourself():
     """source 'self' (ava.self.terminate/restart self-invocation) → 'yourself'.
     Lock down that the literal 'self' cannot be mutated to 'SELF' / 'XXselfXX' / '' etc. by mutmut."""
-    from agent.graph.claim.node import _by_who
+    from agent.graph.claim.node import by_who
 
-    assert _by_who("self") == "yourself"
+    assert by_who("self") == "yourself"
 
 
 def test_by_who_uppercase_self_passthrough():
     """source is case-sensitive — 'SELF' does not match the 'self' branch, falls back to
-    return original value. `_by_who` does not do case-folding (to avoid mistakenly treating
+    return original value. `by_who` does not do case-folding (to avoid mistakenly treating
     'Self' / 'SELF' as self-trigger)."""
-    from agent.graph.claim.node import _by_who
+    from agent.graph.claim.node import by_who
 
-    assert _by_who("SELF") == "SELF"
-    assert _by_who("Self") == "Self"
-    assert _by_who("SELF:UPDATE") == "SELF:UPDATE"
+    assert by_who("SELF") == "SELF"
+    assert by_who("Self") == "Self"
+    assert by_who("SELF:UPDATE") == "SELF:UPDATE"
 
 
 def test_by_who_external_source_passthrough():
     """Non self source ('user' / 'agent:42' / 'system')
     returns as-is — the marker text shows who triggered it at a glance."""
-    from agent.graph.claim.node import _by_who
+    from agent.graph.claim.node import by_who
 
-    assert _by_who("user") == "user"
-    assert _by_who("user") == "user"
-    assert _by_who("agent:42") == "agent:42"
-    assert _by_who("system") == "system"
+    assert by_who("user") == "user"
+    assert by_who("user") == "user"
+    assert by_who("agent:42") == "agent:42"
+    assert by_who("system") == "system"
 
 
 def test_by_who_self_prefix_does_not_match_self():
     """'self_xxx' / 'selfish' should not be recognized as 'self' (literal == comparison,
     not startswith)."""
-    from agent.graph.claim.node import _by_who
+    from agent.graph.claim.node import by_who
 
     # anti-regression: changing to startswith("self") would make this test fail
-    assert _by_who("selfish") == "selfish"
-    assert _by_who("self_other") == "self_other"
-    assert _by_who("self:other") == "self:other"  # only self is specifically handled
+    assert by_who("selfish") == "selfish"
+    assert by_who("self_other") == "self_other"
+    assert by_who("self:other") == "self:other"  # only self is specifically handled
 
 
 def test_render_restart_completed_marker_system_update_no_by_clause():
     """source='system:update' → 'updated and restarted' with no trailing 'by ...' noise."""
-    from agent.graph.claim.node import _render_restart_completed_marker
+    from agent.graph.claim.node import render_restart_completed_marker
 
-    text = _render_restart_completed_marker("system:update", timestamp_prefix=lambda: "")
+    text = render_restart_completed_marker("system:update", timestamp_prefix=lambda: "")
     assert "updated and restarted" in text
     assert "by " not in text  # no actor suffix for system-driven rollout
 
 
 def test_render_restart_completed_marker_plain_self_unchanged():
     """source='self' (ordinary restart, not update) → 'restarted by yourself', no 'updated'."""
-    from agent.graph.claim.node import _render_restart_completed_marker
+    from agent.graph.claim.node import render_restart_completed_marker
 
-    text = _render_restart_completed_marker("self", timestamp_prefix=lambda: "")
+    text = render_restart_completed_marker("self", timestamp_prefix=lambda: "")
     assert "restarted by yourself" in text
     assert "updated" not in text
 
 
 def test_render_restart_completed_marker_external_source_unchanged():
     """Non-update sources → plain 'restarted by <source>' wording."""
-    from agent.graph.claim.node import _render_restart_completed_marker
+    from agent.graph.claim.node import render_restart_completed_marker
 
-    text = _render_restart_completed_marker("user", timestamp_prefix=lambda: "")
+    text = render_restart_completed_marker("user", timestamp_prefix=lambda: "")
     assert "restarted by user" in text
     assert "updated" not in text
 

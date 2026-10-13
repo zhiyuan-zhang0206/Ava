@@ -87,7 +87,7 @@ def insert_inbound_kind(
     return new_id
 
 
-async def _await_inbound_visible(pool: AsyncConnectionPool, inbound_id: int) -> None:
+async def await_inbound_visible(pool: AsyncConnectionPool, inbound_id: int) -> None:
     """Block until a `db_conn`-committed inbound row is visible on `pool`.
 
     Setup writes go through the sync `db_conn`; `claim_node` claims the batch

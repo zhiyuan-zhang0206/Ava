@@ -22,10 +22,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.hooks import compact
-from agent.graph.hooks.capabilities import _newly_installed_skills
+from agent.graph.hooks.capabilities import newly_installed_skills
 from agent.graph.hooks.framework import framework_hooks
 from agent.graph.prompt.capabilities import (
-    _NEW_SKILLS_MAX_ENTRIES,
+    NEW_SKILLS_MAX_ENTRIES,
     index_drift,
     indexed_skill_identifiers,
 )
@@ -92,7 +92,7 @@ def _state(indexed: set[str] | None) -> AgentState:
 
 
 async def _run_hook(indexed: set[str] | None, database_gate: ProcessDbGate) -> dict | None:
-    return await _newly_installed_skills(
+    return await newly_installed_skills(
         _state(indexed), _runtime(database_gate=database_gate), _CONFIG
     )  # type: ignore[arg-type]
 
@@ -256,7 +256,7 @@ async def test_a_bulk_install_is_capped_with_a_counted_tail(
     plugin sync landing a whole pack. The note must not turn into a second full
     index, so it lists a bounded prefix and points at the catalog for the rest."""
     extra = 5
-    for i in range(_NEW_SKILLS_MAX_ENTRIES + extra):
+    for i in range(NEW_SKILLS_MAX_ENTRIES + extra):
         _install(skills_dir, f"skill-{i:02d}", f"Desc {i}")
 
     update = await _run_hook(set(), database_gate=database_gate)
@@ -265,13 +265,13 @@ async def test_a_bulk_install_is_capped_with_a_counted_tail(
     (note,) = update["messages"]
     lines = [ln for ln in note.content.splitlines() if ln.startswith("- ")]  # pyright: ignore[reportUnknownMemberType]
     assert (
-        len(lines) == _NEW_SKILLS_MAX_ENTRIES + 1  # pyright: ignore[reportUnknownArgumentType]
+        len(lines) == NEW_SKILLS_MAX_ENTRIES + 1  # pyright: ignore[reportUnknownArgumentType]
     )  # the cap, plus the tail  # pyright: ignore[reportUnknownArgumentType]
     assert lines[-1].startswith(f"- … and {extra} more")  # pyright: ignore[reportUnknownMemberType]
     assert "ava.help(ava.skills)" in lines[-1]
     # The snapshot still covers every one of them, so the ones the note left out
     # are never named later — the tail's pointer is what covers them.
-    assert len(update["capabilities"].indexed) == _NEW_SKILLS_MAX_ENTRIES + extra  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert len(update["capabilities"].indexed) == NEW_SKILLS_MAX_ENTRIES + extra  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
 
 # ── the two turns that write nothing ──
@@ -320,13 +320,13 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
 
     _pin_compact_ceiling(monkeypatch, hard_tokens=1)
     assert (
-        await _newly_installed_skills(state, _runtime(database_gate=database_gate), _CONFIG) is None
+        await newly_installed_skills(state, _runtime(database_gate=database_gate), _CONFIG) is None
     )  # type: ignore[arg-type]
 
     # Deferring is not silencing: the same state with no compaction predicted
     # still names beta, so the guard is the only thing suppressing it.
     _pin_compact_ceiling(monkeypatch, hard_tokens=10_000_000)
-    update = await _newly_installed_skills(state, _runtime(database_gate=database_gate), _CONFIG)  # type: ignore[arg-type]
+    update = await newly_installed_skills(state, _runtime(database_gate=database_gate), _CONFIG)  # type: ignore[arg-type]
     assert update is not None
     assert "ava.skills.beta" in update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
 
@@ -347,7 +347,7 @@ async def test_container_mode_writes_nothing(
 
     state = _state(snapshot)
     assert (
-        await _newly_installed_skills(
+        await newly_installed_skills(
             state, _runtime(container=True, database_gate=database_gate), _CONFIG
         )
         is None
@@ -419,4 +419,4 @@ def test_the_drift_hook_is_a_framework_before_llm_hook_run_last() -> None:
     """Framework-owned and unconditional — the index under-reporting is a
     correctness problem, not a plugin's optional layer. It runs last at the edge, after repair's
     guard and compact's possible full replacement."""
-    assert framework_hooks()["before_llm"][-1] is _newly_installed_skills
+    assert framework_hooks()["before_llm"][-1] is newly_installed_skills

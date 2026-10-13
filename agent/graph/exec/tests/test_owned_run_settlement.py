@@ -9,11 +9,11 @@ from uuid import uuid4
 
 import pytest
 
-from agent.graph.exec._owned_run import _OwnedRun
+from agent.graph.exec._owned_run import OwnedRun
 
 
-def _run(**fields: Any) -> _OwnedRun:
-    run = object.__new__(_OwnedRun)
+def _run(**fields: Any) -> OwnedRun:
+    run = object.__new__(OwnedRun)
     defaults: dict[str, Any] = {
         "request_id": uuid4(),
         "request": "req",

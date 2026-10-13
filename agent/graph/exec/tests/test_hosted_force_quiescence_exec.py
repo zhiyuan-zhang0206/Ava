@@ -13,13 +13,13 @@ from tests.fixtures.pin_agent import exec_context
 async def test_real_missing_executable_is_not_an_unresolved_child(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database
 ) -> None:
-    from agent.graph.exec._result import _ExecCrashed
-    from agent.graph.exec._subprocess import _run_in_subprocess
+    from agent.graph.exec._result import ExecCrashed
+    from agent.graph.exec._subprocess import run_in_subprocess
     from base.native_process.turn_identity import HostedTurnResources
 
     monkeypatch.setattr(_subprocess.sys, "executable", str(tmp_path / "absent"))
     scope = HostedTurnResources()
-    outcome, _ = await _run_in_subprocess(
+    outcome, _ = await run_in_subprocess(
         database,
         "raise AssertionError('must never execute')",
         exec_context(None, resources=scope),
@@ -28,6 +28,6 @@ async def test_real_missing_executable_is_not_an_unresolved_child(
         exec_dir=tmp_path,
         accumulation_max_chars=1_000_000,
     )
-    assert isinstance(outcome, _ExecCrashed)
+    assert isinstance(outcome, ExecCrashed)
     assert "could not be spawned" in outcome.output
     assert not scope.unresolved

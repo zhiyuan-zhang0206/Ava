@@ -214,7 +214,7 @@ def _over_threshold_state() -> AgentState:
     )
 
 
-# --- _compact_reminder (plugins/ava_compact/plugin.py) tests ---
+# --- compact_reminder (plugins/ava_compact/plugin.py) tests ---
 #
 # This wrapper is the implementation side of the Layer 3 monotonic counter producer. Tests cover three things:
 # 1. inner returns None → wrap returns None (no bump version, pass-through)
@@ -230,10 +230,10 @@ def _ava_compact_loaded():
     agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
     """
-    from agent.graph.hooks.compact import _compact_reminder
+    from agent.graph.hooks.compact import compact_reminder
     from agent.state import build_agent_state
 
-    return build_agent_state(EMPTY), _compact_reminder
+    return build_agent_state(EMPTY), compact_reminder
 
 
 def _over_threshold_messages() -> list[AnyMessage]:

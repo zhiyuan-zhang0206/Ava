@@ -11,11 +11,11 @@ import asyncio
 # visually looks like Py2 old-style `except A, B` and misleads readers.
 # Extracting to module-level named tuples satisfies both ruff and reader
 # intuition.
-_STDIN_PIPE_CLOSED = (BrokenPipeError, ConnectionResetError)
-_DRAIN_SHUTDOWN_ERRORS = (TimeoutError, asyncio.CancelledError)
+STDIN_PIPE_CLOSED = (BrokenPipeError, ConnectionResetError)
+DRAIN_SHUTDOWN_ERRORS = (TimeoutError, asyncio.CancelledError)
 
 
-def _uncancel_current_task() -> None:
+def uncancel_current_task() -> None:
     """Swallow `task.cancel()` cancellation request — after catching
     CancelledError, the next await (langgraph writing checkpoint etc.) does
     not raise again.

@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 
-from agent.graph.hooks.compact import _compact_reminder_update, auto_compact_will_fire
+from agent.graph.hooks.compact import auto_compact_will_fire, compact_reminder_update
 from agent.state import AgentState, CompactState
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
@@ -43,7 +43,7 @@ def _agent(**pins: float) -> AgentSlices:
 
 def test_an_unpinned_agent_is_below_its_models_thresholds() -> None:
     assert not auto_compact_will_fire(_state(), _agent(), catalog=build_model_catalog())
-    assert _compact_reminder_update(_state(), _agent(), catalog=build_model_catalog()) is None
+    assert compact_reminder_update(_state(), _agent(), catalog=build_model_catalog()) is None
 
 
 @pytest.mark.parametrize(
@@ -66,7 +66,7 @@ def test_a_raised_force_threshold_is_what_keeps_a_long_conversation_going() -> N
 
 
 def test_an_agent_reminder_threshold_below_the_conversation_injects_the_reminder() -> None:
-    update: dict[str, Any] | None = _compact_reminder_update(
+    update: dict[str, Any] | None = compact_reminder_update(
         _state(), _agent(compact_reminder_fraction=_TINY_FRACTION), catalog=build_model_catalog()
     )
     assert update is not None

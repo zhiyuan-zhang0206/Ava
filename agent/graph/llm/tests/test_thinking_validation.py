@@ -1,4 +1,4 @@
-"""Unit tests for `_sanitize_thinking_blocks` — repair for the 167/168 DeepSeek drift.
+"""Unit tests for `sanitize_thinking_blocks` — repair for the 167/168 DeepSeek drift.
 
 DeepSeek's anthropic-compatible endpoint intermittently misses the thinking_delta SSE event
 (only sends signature_delta + content_block_stop), so chunk accumulation yields
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from agent.graph.llm._chunk import _sanitize_thinking_blocks
+from agent.graph.llm._chunk import sanitize_thinking_blocks
 
 _ANTHROPIC_META = {"model_provider": "anthropic", "stop_reason": "end_turn"}
 
@@ -37,7 +37,7 @@ def test_sanitize_leaves_complete_thinking_block_untouched() -> None:
         ],
         response_metadata=_ANTHROPIC_META,
     )
-    _sanitize_thinking_blocks(msg)
+    sanitize_thinking_blocks(msg)
     block = msg.content[0]  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(block, dict)
     assert block["thinking"] == "Let me reason about this..."
@@ -60,7 +60,7 @@ def test_sanitize_fills_missing_thinking_and_preserves_signature() -> None:
         ],
         response_metadata=_ANTHROPIC_META,
     )
-    _sanitize_thinking_blocks(msg)  # does not raise
+    sanitize_thinking_blocks(msg)  # does not raise
     block = msg.content[0]  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(block, dict)
     assert block["thinking"] == ""
@@ -86,7 +86,7 @@ def test_sanitize_logs_signature_for_diagnosis(loguru_records) -> None:
         ],
         response_metadata=_ANTHROPIC_META,
     )
-    _sanitize_thinking_blocks(msg)
+    sanitize_thinking_blocks(msg)
     infos = [r for r in loguru_records if r["level"].name == "INFO"]  # pyright: ignore[reportUnknownMemberType]
     assert len(infos) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "sig-orphan-167" in infos[0]["message"]
@@ -100,7 +100,7 @@ def test_sanitize_logs_missing_placeholder_without_signature(loguru_records) -> 
         content=[{"type": "thinking"}],
         response_metadata=_ANTHROPIC_META,
     )
-    _sanitize_thinking_blocks(msg)
+    sanitize_thinking_blocks(msg)
     infos = [r for r in loguru_records if r["level"].name == "INFO"]  # pyright: ignore[reportUnknownMemberType]
     assert len(infos) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "'<missing>'" in infos[0]["message"]
@@ -112,7 +112,7 @@ def test_sanitize_logs_missing_placeholder_without_signature(loguru_records) -> 
 def test_sanitize_skips_string_content() -> None:
     """Non-thinking model (pure text output) content is str, no blocks to repair."""
     msg = AIMessage(content="just a plain text response, no thinking blocks")
-    _sanitize_thinking_blocks(msg)  # does not raise
+    sanitize_thinking_blocks(msg)  # does not raise
     assert msg.content == "just a plain text response, no thinking blocks"  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -124,7 +124,7 @@ def test_sanitize_skips_non_thinking_blocks() -> None:
             {"type": "tool_use", "id": "x", "name": "execute_code", "input": {}, "index": 1},
         ]
     )
-    _sanitize_thinking_blocks(msg)
+    sanitize_thinking_blocks(msg)
     assert msg.content[0] == {"type": "text", "text": "hello"}  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -139,7 +139,7 @@ def test_sanitize_repairs_every_incomplete_block() -> None:
         ],
         response_metadata=_ANTHROPIC_META,
     )
-    _sanitize_thinking_blocks(msg)
+    sanitize_thinking_blocks(msg)
     ok_block, repaired = msg.content[1], msg.content[2]  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(ok_block, dict) and isinstance(repaired, dict)
     assert ok_block["thinking"] == "ok block"
@@ -154,7 +154,7 @@ def test_sanitize_fills_non_string_thinking() -> None:
         content=[{"type": "thinking", "thinking": None, "signature": "sig-null"}],
         response_metadata=_ANTHROPIC_META,
     )
-    _sanitize_thinking_blocks(msg)
+    sanitize_thinking_blocks(msg)
     block = msg.content[0]  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(block, dict)
     assert block["thinking"] == ""
@@ -167,7 +167,7 @@ def test_sanitize_skips_non_anthropic_provider() -> None:
         content=[{"type": "thinking", "signature": "abc"}],  # missing 'thinking' key
         response_metadata={"model_provider": "google_genai", "finish_reason": "STOP"},
     )
-    _sanitize_thinking_blocks(msg)
+    sanitize_thinking_blocks(msg)
     # untouched — still no 'thinking' key
     block = msg.content[0]  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(block, dict)

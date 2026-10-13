@@ -9,7 +9,7 @@ from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
-async def _defer_chats_to_pending(
+async def defer_chats_to_pending(
     pool: AsyncConnectionPool | None,
     agent_id: int,
     chat_ids: list[int],

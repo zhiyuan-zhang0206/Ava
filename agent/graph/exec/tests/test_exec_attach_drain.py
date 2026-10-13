@@ -18,7 +18,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.exec import node
-from agent.graph.exec._result import _ExecDone
+from agent.graph.exec._result import ExecDone
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState, AttachState
 from agent.tests._fakes import make_fake_ops_pool
@@ -96,16 +96,16 @@ async def test_exec_drains_attachment_right_after_output(
 
     async def _fake_run_agent_code(
         *args: object, **kwargs: object
-    ) -> tuple[_ExecDone, dict[str, Any], int, list[dict[str, str]] | None, list[Any] | None]:
+    ) -> tuple[ExecDone, dict[str, Any], int, list[dict[str, str]] | None, list[Any] | None]:
         return (
-            _ExecDone(output="exec output text", stream_cap=None),
+            ExecDone(output="exec output text", stream_cap=None),
             {},
             12,
             [{"path": str(image), "label": "brand"}],
             [{"method": "files.read", "count": 3}],
         )
 
-    monkeypatch.setattr(node, "_run_agent_code", _fake_run_agent_code)
+    monkeypatch.setattr(node, "run_agent_code", _fake_run_agent_code)
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
     result = await _exec_node_impl(
@@ -149,10 +149,10 @@ async def test_exec_without_attachments_appends_no_attach_message(
 ) -> None:
     async def _fake_run_agent_code(
         *args: object, **kwargs: object
-    ) -> tuple[_ExecDone, dict[str, Any], int, list[dict[str, str]] | None, list[Any] | None]:
-        return (_ExecDone(output="exec output text", stream_cap=None), {}, 12, None, None)
+    ) -> tuple[ExecDone, dict[str, Any], int, list[dict[str, str]] | None, list[Any] | None]:
+        return (ExecDone(output="exec output text", stream_cap=None), {}, 12, None, None)
 
-    monkeypatch.setattr(node, "_run_agent_code", _fake_run_agent_code)
+    monkeypatch.setattr(node, "run_agent_code", _fake_run_agent_code)
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
     result = await _exec_node_impl(
