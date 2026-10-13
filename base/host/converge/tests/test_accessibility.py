@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.converge import accessibility
 from base.host.converge.accessibility import (
     AccessibilityState,
     AccessibilityStatus,
@@ -75,7 +76,7 @@ class TestAccessibilityStatus:
 
 class TestStatusFile:
     def test_write_read_clear_cycle(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        monkeypatch.setattr("base.host.converge.accessibility.ava_home", lambda: tmp_path)
+        monkeypatch.setattr(accessibility, "ava_home", lambda: tmp_path)
         write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="test"))
 
         assert status_file_path().exists()

@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from base import telemetry
+from base import config, paths, telemetry
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.otlp.tests.test_telemetry_otlp import _AGENT, _event, _metrics
@@ -30,7 +30,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(
 ) -> None:
     """A backend that cannot come up (bad endpoint / missing dep) never raises
     into the emitter and does not retry again inside the five-minute window."""
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
 
     def reachable(_endpoint: str) -> bool:
         return True
@@ -56,7 +56,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
 ) -> None:
     """A failed init reports into the surviving mirror, then a later retry
     initializes the backend and reports recovery."""
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
 
     def reachable(_endpoint: str) -> bool:
         return True
@@ -123,7 +123,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
 def test_backend_unreachable_probe_emits_specific_disabled_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
 
     def unreachable(_endpoint: str) -> bool:
         return False
@@ -156,7 +156,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
 def test_queue_full_sheds_counted_not_blocking(monkeypatch) -> None:
     """The bounded queue sheds instead of blocking the caller when the worker
     cannot keep up — the isolation contract for a hung OTLP endpoint."""
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True, providers=(None, None), queue_maxsize=1
     )
@@ -205,7 +205,7 @@ def test_pipeline_mirror_survives_otlp_failure(
     def boom(endpoint: str, **_receipts: Any) -> tuple[Any, Any]:
         raise RuntimeError("collector unreachable")
 
-    monkeypatch.setattr("base.paths.logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)  # pyright: ignore[reportUnknownMemberType]
     backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
 
@@ -231,7 +231,7 @@ def test_handshake_env_no_longer_gates_export(monkeypatch: pytest.MonkeyPatch) -
     """The AVA_EXEC_REQUEST_FILE handshake was the old child-export gate; it
     must no longer disable OTLP — the export flag is the only authority."""
     monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", "request.json")
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     assert telemetry_otlp.OtlpBackend(export_allowed=lambda: True)._enabled() is True
 
 
@@ -251,7 +251,7 @@ def test_flush_force_flushes_sdk_batch_records(monkeypatch: pytest.MonkeyPatch) 
     logger_provider = LoggerProvider()
     logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
     metric_provider = MeterProvider(metric_readers=[InMemoryMetricReader()])
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True, providers=(logger_provider, metric_provider)
     )
@@ -288,7 +288,7 @@ def test_warmup_builds_backend_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
         ),
     )
 
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     try:
         backend.warmup()
         assert backend._logs is not None

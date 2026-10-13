@@ -17,8 +17,10 @@ import openai
 import pytest
 from langchain_core.messages import AIMessage
 
+from base import config
 from base.config import get_field, settings
 from base.host.env.agent_slices import ModelOverrides
+from base.lm import call, factory
 from base.lm.call import answer_text, extract_text, invoke_text
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
@@ -108,7 +110,7 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
             return span
 
     tracer = _Tracer()
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     llm = _FakeLLM(
@@ -274,7 +276,7 @@ def test_answer_text_happy_path(
         captured["effort"] = reasoning_effort
         return _FakeLLM(_FakeResponse("answer"))
 
-    monkeypatch.setattr("base.lm.factory.build_chat_model", _fake_build)
+    monkeypatch.setattr(factory, "build_chat_model", _fake_build)
     out = answer_text(
         "the prompt",
         "the material",
@@ -309,7 +311,7 @@ def test_answer_text_build_failure_raises_error_type(
     ) -> Any:
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
-    monkeypatch.setattr("base.lm.factory.build_chat_model", _fail)
+    monkeypatch.setattr(factory, "build_chat_model", _fail)
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
         answer_text(
             "p",
@@ -343,7 +345,7 @@ def test_answer_text_build_failure_uses_build_error_when_given(
     ) -> Any:
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
-    monkeypatch.setattr("base.lm.factory.build_chat_model", _fail)
+    monkeypatch.setattr(factory, "build_chat_model", _fail)
 
     def _wrap(model: str, e: Exception) -> Exception:
         seen["model"] = model
@@ -382,7 +384,7 @@ def test_invoke_text_retries_transient_then_succeeds(
     `retry_attempts` allows, and a later success returns normally."""
 
     monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
+    monkeypatch.setattr(call, "jittered", _no_jitter)
     calls = {"n": 0}
 
     class _Flaky:
@@ -412,7 +414,7 @@ def test_invoke_text_retry_exhausted_raises_error_type(
     error type with the attempt count in the message."""
 
     monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
+    monkeypatch.setattr(call, "jittered", _no_jitter)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -438,7 +440,7 @@ def test_invoke_text_retry_uses_exponential_backoff(
 
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
+    monkeypatch.setattr(call, "jittered", _no_jitter)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -465,7 +467,7 @@ def test_invoke_text_retry_backoff_capped(
 
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
+    monkeypatch.setattr(call, "jittered", _no_jitter)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -508,7 +510,7 @@ def test_invoke_text_retry_respects_retry_after(
     120s), plus jitter — mirroring the SDKs' own header reading at our layer."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
+    monkeypatch.setattr(call, "jittered", _no_jitter)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -531,7 +533,7 @@ def test_invoke_text_retry_after_capped_at_120(
     sequence applies instead."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
+    monkeypatch.setattr(call, "jittered", _no_jitter)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -552,7 +554,7 @@ def test_invoke_text_retry_after_ms_header(
     """`retry-after-ms` (the SDKs' non-standard precision header) is honored."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("base.lm.call.jittered", _no_jitter)
+    monkeypatch.setattr(call, "jittered", _no_jitter)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(

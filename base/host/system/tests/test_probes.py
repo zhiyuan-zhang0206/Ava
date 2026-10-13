@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import base.host.system.probes as pp
+from base.host import proc
 
 # ─── resolve_chrome_binary ───────────────────────────────────────────────
 
@@ -263,17 +264,17 @@ def _runner_returning(completed: _Completed) -> Callable[..., _Completed]:
 
 
 def test_bounded_stdout_returns_the_stripped_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.host.proc.run_bounded", _runner_returning(_Completed(0, " Aqua\n")))
+    monkeypatch.setattr(proc, "run_bounded", _runner_returning(_Completed(0, " Aqua\n")))
     assert pp._bounded_stdout(["/bin/launchctl", "managername"]) == "Aqua"
 
 
 def test_bounded_stdout_none_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.host.proc.run_bounded", _runner_returning(_Completed(1, "error")))
+    monkeypatch.setattr(proc, "run_bounded", _runner_returning(_Completed(1, "error")))
     assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
 def test_bounded_stdout_none_on_empty_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.host.proc.run_bounded", _runner_returning(_Completed(0, "  \n")))
+    monkeypatch.setattr(proc, "run_bounded", _runner_returning(_Completed(0, "  \n")))
     assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
@@ -281,7 +282,7 @@ def test_bounded_stdout_none_on_missing_binary(monkeypatch: pytest.MonkeyPatch) 
     def _missing(*_a: object, **_k: object) -> None:
         raise FileNotFoundError("no launchctl")
 
-    monkeypatch.setattr("base.host.proc.run_bounded", _missing)
+    monkeypatch.setattr(proc, "run_bounded", _missing)
     assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
@@ -291,7 +292,7 @@ def test_bounded_stdout_none_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None
     def _timeout(*_a: object, **_k: object) -> None:
         raise subprocess.TimeoutExpired(["launchctl"], 5.0)
 
-    monkeypatch.setattr("base.host.proc.run_bounded", _timeout)
+    monkeypatch.setattr(proc, "run_bounded", _timeout)
     assert pp._bounded_stdout(["/bin/launchctl", "managername"]) is None
 
 
