@@ -8,13 +8,13 @@ import pytest
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import CERTIFIED_PHASES, MaintenanceHold, MaintenancePhase
 from services.entrypoints.im_bridge.core import IMBridgeCore
-from services.entrypoints.im_bridge.state import _save_switch_state
+from services.entrypoints.im_bridge.state import save_switch_state
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakeGateway,
     FakePlainAdapter,
-    _row,
     create_test_core,
+    row,
 )
 from services.entrypoints.im_bridge.types import ChatState
 
@@ -46,10 +46,10 @@ async def test_cold_restoration_precedes_hold_release_without_admission_or_dispa
     legacy: bool,
 ) -> None:
     async with owned_tasks() as tasks:
-        upstream = FakeGateway(agents=[_row(7), _row(8)])
+        upstream = FakeGateway(agents=[row(7), row(8)])
         seeded = create_test_core(upstream, tasks=tasks)
         if legacy:
-            _save_switch_state({"telegram:chat": 7})
+            save_switch_state({"telegram:chat": 7})
         else:
             await seeded._cmd_switch(seeded._get_or_create_state("telegram", "chat"), "7")
         upstream.timeline = [
@@ -100,7 +100,7 @@ async def test_restoration_propagates_unknown_selection_fault(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with owned_tasks() as tasks:
-        _save_switch_state({"telegram:chat": 7})
+        save_switch_state({"telegram:chat": 7})
         core = create_test_core(FakeGateway(), tasks=tasks)
 
         async def broken_account() -> str:

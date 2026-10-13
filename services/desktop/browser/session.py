@@ -70,7 +70,7 @@ async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str
     return name, morsel.value, int(time.time()) + max_age
 
 
-async def _http_json(url: str) -> Any:
+async def http_json(url: str) -> Any:
     """GET ``url`` and return the parsed JSON body."""
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
         resp = await client.get(url)
@@ -78,7 +78,7 @@ async def _http_json(url: str) -> Any:
         return resp.json()
 
 
-async def _cdp_call(
+async def cdp_call(
     ws: Any,
     ids: Iterator[int],
     method: str,
@@ -118,19 +118,19 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
     Raises RuntimeError when Chrome is unreachable or rejects the cookie.
     """
     name, value, expires = await gateway_session_login(gateway_url, secret)
-    version = await _http_json(f"http://127.0.0.1:{cdp_port}/json/version")
+    version = await http_json(f"http://127.0.0.1:{cdp_port}/json/version")
     browser_ws_url = version["webSocketDebuggerUrl"]
 
     ids = itertools.count(1)  # request ids are per connection
     async with websockets.connect(browser_ws_url) as browser_ws:
         # A page target is required for the Network domain; use a throwaway
         # about:blank tab so we never depend on (or disturb) anyone's tabs.
-        created = await _cdp_call(browser_ws, ids, "Target.createTarget", {"url": "about:blank"})
+        created = await cdp_call(browser_ws, ids, "Target.createTarget", {"url": "about:blank"})
         target_id = created["targetId"]
         try:
             page_ws_url = f"ws://127.0.0.1:{cdp_port}/devtools/page/{target_id}"
             async with websockets.connect(page_ws_url) as page_ws:
-                result = await _cdp_call(
+                result = await cdp_call(
                     page_ws,
                     ids,
                     "Network.setCookie",
@@ -146,7 +146,7 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
                 )
         finally:
             try:
-                await _cdp_call(browser_ws, ids, "Target.closeTarget", {"targetId": target_id})
+                await cdp_call(browser_ws, ids, "Target.closeTarget", {"targetId": target_id})
             except Exception:
                 logger.opt(exception=True).warning(
                     "[browser-mcp] could not close the cookie-injection tab {}; "

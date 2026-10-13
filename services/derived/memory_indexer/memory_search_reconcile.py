@@ -41,7 +41,7 @@ from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.factory import get_provider
 
 
-def _sample_queries(limit: int, *, roles: MachineRoles) -> list[str]:
+def sample_queries(limit: int, *, roles: MachineRoles) -> list[str]:
     """Frontmatter descriptions from the memory pool, newest-first, capped at
     `limit` — the short entity-bearing lines the index exists to find."""
     queries: list[str] = []
@@ -128,7 +128,7 @@ def main() -> int:
     boot = ConfigBoot()
     boot.read_process_environment()
     machine = machine_from_boot(boot)
-    queries = _sample_queries(args.limit, roles=machine.role())
+    queries = sample_queries(args.limit, roles=machine.role())
     if not queries:
         print("no query texts found in the memory pool", file=sys.stderr)
         return 1

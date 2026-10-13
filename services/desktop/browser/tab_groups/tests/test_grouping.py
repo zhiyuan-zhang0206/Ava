@@ -137,7 +137,7 @@ class FakeChrome:
         self.listings: list[Any] = []
         self.ws = FakeCdpWS(handlers)
         self.http_urls: list[str] = []
-        monkeypatch.setattr(grouping, "_http_json", self._http_json)
+        monkeypatch.setattr(grouping, "http_json", self._http_json)
         monkeypatch.setattr(grouping.websockets, "connect", self._connect)
 
     def _connect(self, url: str, **kwargs: Any) -> FakeCdpWS:
@@ -302,7 +302,7 @@ async def test_waits_for_the_worker_script_to_run_after_a_fresh_load(
 async def test_a_worker_that_never_defines_the_function_warns(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
-    monkeypatch.setattr(grouping, "_WORKER_WAIT_S", 0.0)
+    monkeypatch.setattr(grouping, "WORKER_WAIT_S", 0.0)
     chrome = FakeChrome(monkeypatch, ChromeModel(script_delay=10**6).handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
     await _group(_groups(), 7, frozenset({"T1"}))
@@ -458,7 +458,7 @@ async def test_cdp_failure_warns_with_cause_and_never_raises(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     handlers = {**_chrome_handlers(), **override}
-    monkeypatch.setattr(grouping, "_WORKER_WAIT_S", 0.0)
+    monkeypatch.setattr(grouping, "WORKER_WAIT_S", 0.0)
     chrome = FakeChrome(monkeypatch, handlers)
     chrome.listings.append([_page("T1"), _page("T2")])
 
@@ -487,8 +487,8 @@ async def test_a_wedged_chrome_is_bounded(
     async def hang(url: str) -> Any:
         await asyncio.sleep(3600)
 
-    monkeypatch.setattr(grouping, "_http_json", hang)
-    monkeypatch.setattr(grouping, "_LISTING_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(grouping, "http_json", hang)
+    monkeypatch.setattr(grouping, "LISTING_TIMEOUT_S", 0.05)
     assert await _groups().snapshot() is None
     await _group(_groups(), 7, frozenset())
     assert len(_warnings(loguru_records)) == 2
@@ -570,7 +570,7 @@ async def test_a_grouping_that_outlives_its_budget_warns(
 ) -> None:
     chrome = FakeChrome(monkeypatch, _chrome_handlers())
     monkeypatch.setattr(grouping.websockets, "connect", WedgedConnect())
-    monkeypatch.setattr(grouping, "_GROUP_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(grouping, "GROUP_TIMEOUT_S", 0.05)
     chrome.listings.append([_page("T1"), _page("T2")])
     await _group(_groups(), 7, frozenset({"T1"}))
     assert len(_warnings(loguru_records)) == 1
@@ -654,7 +654,7 @@ async def test_back_to_back_pages_of_one_agent_make_one_group(
     def connect(url: str, **kwargs: Any) -> RacyWorkerWS:
         return RacyWorkerWS(model.handlers(), created)
 
-    monkeypatch.setattr(grouping, "_http_json", http_json)
+    monkeypatch.setattr(grouping, "http_json", http_json)
     monkeypatch.setattr(grouping.websockets, "connect", connect)
     groups = _groups()
 

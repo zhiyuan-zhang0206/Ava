@@ -117,7 +117,7 @@ def _state_dir() -> Path:
     return path
 
 
-def _atomic_write_json(path: Path, payload: Any) -> None:
+def atomic_write_json(path: Path, payload: Any) -> None:
     """Write all credential-bearing JSON through the private atomic writer."""
     write_private_bytes(path, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
 
@@ -139,8 +139,8 @@ def load_account() -> dict[str, Any] | None:
 
 def save_account(*, account_id: str, bot_token: str, user_id: str, base_url: str) -> None:
     """Persist QR-login credentials atomically, owner-only (0600 — via
-    `_atomic_write_json`, which every credential-bearing write shares)."""
-    _atomic_write_json(
+    `atomic_write_json`, which every credential-bearing write shares)."""
+    atomic_write_json(
         _state_dir() / "weixin_account.json",
         {
             "account_id": account_id,
@@ -191,7 +191,7 @@ class ContextTokenStore:
 
     def _persist(self) -> None:
         try:
-            _atomic_write_json(self._path, self._cache)
+            atomic_write_json(self._path, self._cache)
         except OSError as exc:
             logger.warning("weixin: failed to persist context tokens: {}", exc)
 
@@ -245,7 +245,7 @@ def _is_stale_session_ret(ret: int | None, errcode: int | None, errmsg: Any) -> 
     return msg in ("unknown error", "prepare failed")
 
 
-def _extract_text(item_list: list[dict[str, Any]]) -> str:
+def extract_text(item_list: list[dict[str, Any]]) -> str:
     """First text item; falls back to Weixin's own voice transcription."""
     for item in item_list:
         if item.get("type") == ITEM_TEXT:
@@ -276,7 +276,7 @@ def _split_text(text: str, limit: int = _MAX_MESSAGE_LENGTH) -> list[str]:
     return chunks
 
 
-def _outbound_message(
+def outbound_message(
     to: str, text: str, context_token: str | None, client_id: str
 ) -> dict[str, Any]:
     """One sendmessage ``msg`` payload; context_token is echoed when known.
@@ -297,7 +297,7 @@ def _outbound_message(
     return {"msg": message}
 
 
-def _ordinary_chat_key(
+def ordinary_chat_key(
     *, base_url: str, account_id: object, sender_id: object, provider_id: object, text: str
 ) -> str | None:
     """Qualify one iLink event for ordinary chat; never infer identity from text."""
@@ -341,7 +341,7 @@ def _dm_text(message: dict[str, Any], account_id: str) -> tuple[str, str] | None
         return None  # iLink bots are DM-only; group events are not surfaced
     if message.get("message_type") == MSG_TYPE_BOT:
         return None
-    text = _extract_text(message.get("item_list") or [])
+    text = extract_text(message.get("item_list") or [])
     return (text, sender_id) if text else None
 
 
@@ -480,7 +480,7 @@ class WeixinAdapter(IMAdapter):
     def _persist_activity(self) -> None:
         """Persist per-peer activity (daemon restarts keep the window)."""
         try:
-            _atomic_write_json(
+            atomic_write_json(
                 _account_cache_path("activity", self._cache_namespace, self._account_id),
                 {"last_inbound": self._last_inbound},
             )
@@ -558,7 +558,7 @@ class WeixinAdapter(IMAdapter):
         if not isinstance(item_list, list) or any(not isinstance(item, dict) for item in item_list):
             raise TypeError("Weixin message items must be objects")
         validate_message_items(item_list)
-        text = _extract_text(item_list)
+        text = extract_text(item_list)
         receipt = await ingress.accept(binding, message, text)
         await ingress.recover_after_accept(binding, receipt)
         sender_id = receipt.source.sender_id
@@ -658,7 +658,7 @@ class WeixinAdapter(IMAdapter):
         while True:
             resp = await self._post(
                 EP_SEND_MESSAGE,
-                _outbound_message(chat_id, chunk, token, client_id),
+                outbound_message(chat_id, chunk, token, client_id),
                 timeout=API_TIMEOUT_SECONDS,
             )
             ret = resp.get("ret", 0)

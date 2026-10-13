@@ -59,7 +59,7 @@ _LIVENESS_TIMEOUT_S = 120.0
 # The daemon's main loop never iterates (it waits on an event once the
 # adapters are launched), so a background task carries the heartbeat; the
 # interval sits well under the staleness ceiling.
-_LIVENESS_BEAT_INTERVAL_S = 30.0
+LIVENESS_BEAT_INTERVAL_S = 30.0
 
 
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
@@ -157,7 +157,7 @@ _ADAPTERS: tuple[tuple[str, Callable[[], Any] | None], ...] = (
 )
 
 
-def _import_adapter(name: str) -> Any:
+def import_adapter(name: str) -> Any:
     """Import one adapter module by channel name (seam for tests)."""
 
     # One static import per channel: a disabled adapter's module is never imported.
@@ -176,7 +176,7 @@ def _import_adapter(name: str) -> Any:
     raise ValueError(f"unknown im_bridge adapter {name!r}")
 
 
-def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
+def load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
     """Compose configured adapters; invalid configuration or imports fail startup."""
 
     loaded: list[Any] = []
@@ -184,7 +184,7 @@ def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
         if name in disabled:
             _log.info("im_bridge: adapter %s disabled by config (AVA_IM_DISABLED_ADAPTERS)", name)
             continue
-        mod = _import_adapter(name)
+        mod = import_adapter(name)
         adapter_cls = mod.ADAPTER_CLASS
         adapter = adapter_cls(core, *(() if build_config is None else (build_config(),)))
         core.register(adapter)
@@ -193,7 +193,7 @@ def _load_adapters(core: Any, disabled: frozenset[str]) -> list[Any]:
     return loaded
 
 
-async def _liveness_loop(liveness: Liveness) -> None:
+async def liveness_loop(liveness: Liveness) -> None:
     """Beat the healthz liveness while the daemon serves.
 
     The main loop's work happens in adapter background tasks and the final
@@ -204,10 +204,10 @@ async def _liveness_loop(liveness: Liveness) -> None:
     # quiesce-exempt: beats the health liveness; no database
     while True:
         liveness.beat()
-        await asyncio.sleep(_LIVENESS_BEAT_INTERVAL_S)
+        await asyncio.sleep(LIVENESS_BEAT_INTERVAL_S)
 
 
-async def _notice_loop(core: Any) -> None:
+async def notice_loop(core: Any) -> None:
     """Poll the gateway for new fleet notices and push them to the owner
     chat (Task #884). Cursor + filter persist across restarts."""
 
@@ -217,7 +217,7 @@ async def _notice_loop(core: Any) -> None:
         await asyncio.sleep(3.0)
 
 
-async def _timeline_outbound_loop(core: Any, alerts: AlertOutboundBridge) -> None:
+async def timeline_outbound_loop(core: Any, alerts: AlertOutboundBridge) -> None:
     """One service-owned dispatcher and periodic committed-tail wakeup."""
     while True:
         if not admission.quiesced():
@@ -234,7 +234,7 @@ async def _timeline_outbound_loop(core: Any, alerts: AlertOutboundBridge) -> Non
         await asyncio.sleep(3.0)
 
 
-async def _handle_send(core: Any) -> Any:
+async def handle_send(core: Any) -> Any:
     """Route handler for the daemon's ``POST /send`` RPC (ops-alerts fan-out).
 
     Body: ``{"text": str}`` — fanned out to every loaded adapter's owner chat
@@ -276,7 +276,7 @@ def _begin_shutdown(adapters: list[Any]) -> list[BaseException]:
     return errors
 
 
-async def _stop_resources(
+async def stop_resources(
     core: Any, adapters: list[Any], health: Any, pool: Any, *, config: ConfigBoot, runtime: Path
 ) -> list[BaseException]:
     """Attempt every owned resource once, returning faults for the daemon to expose."""
@@ -349,22 +349,22 @@ async def run(
                     endpoint.health_port,
                     liveness=liveness,
                     extra_routes={
-                        ("POST", "/send"): await _handle_send(core),
+                        ("POST", "/send"): await handle_send(core),
                         ("POST", "/send/alert-outbound"): alerts.handle,
                     },
                     auth_digests=daemon_acceptance(),
                     image=image,
                 )
                 _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)
-                adapters = _load_adapters(core, frozenset(config.im_disabled_adapters))
+                adapters = load_adapters(core, frozenset(config.im_disabled_adapters))
                 if not adapters:
                     _log.warning("im_bridge: no adapters loaded — nothing to serve")
                 await core.restore_subscriptions()
-                loops.create_task(_liveness_loop(liveness))
-                loops.create_task(_notice_loop(core))
+                loops.create_task(liveness_loop(liveness))
+                loops.create_task(notice_loop(core))
                 await asyncio.gather(*(a.start(loops) for a in adapters))
                 if adapters:
-                    loops.create_task(_timeline_outbound_loop(core, alerts))
+                    loops.create_task(timeline_outbound_loop(core, alerts))
                 await asyncio.Event().wait()
             finally:
                 cleanup_errors.extend(_begin_shutdown(adapters))
@@ -373,7 +373,7 @@ async def run(
     finally:
         # Children have drained; every shared resource is attempted even after a stop fault.
         cleanup_errors.extend(
-            await _stop_resources(
+            await stop_resources(
                 core, adapters, health, db_pool, config=process_config, runtime=runtime
             )
         )
@@ -385,7 +385,7 @@ async def run(
         raise primary
 
 
-def _gate_httpx_info_logs() -> None:
+def gate_httpx_info_logs() -> None:
     """Gate httpx's per-request INFO lines in this process.
 
     httpx logs ``HTTP Request: GET <url>`` at INFO, and the Telegram Bot API
@@ -422,7 +422,7 @@ def main() -> None:
         machine_reader=machine.name,
         image=image,
     )
-    _gate_httpx_info_logs()
+    gate_httpx_info_logs()
     install_graceful_shutdown("im_bridge")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that

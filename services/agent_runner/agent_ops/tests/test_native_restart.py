@@ -101,7 +101,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
 
     monkeypatch.setattr(daemon, "_dispatch", lose_response)
     with pytest.raises(psycopg.OperationalError):
-        await daemon._dispatch_idempotent_pass(
+        await daemon.dispatch_idempotent_pass(
             "lifecycle",
             packet,
             "domain-ops",
@@ -120,7 +120,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     assert db_conn.execute(
         "SELECT count(*) FROM api_idempotency WHERE key='domain-ops'"
     ).fetchone() == (0,)
-    status, recovered = await daemon._dispatch_idempotent_pass(
+    status, recovered = await daemon.dispatch_idempotent_pass(
         "lifecycle",
         packet,
         "domain-ops",
@@ -140,7 +140,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
         (target.agent_id,),
     ).fetchone() == (1,)
     bad = packet | {"body": operation.model_dump(mode="json") | {"operation_key": "another"}}
-    status, result = await daemon._dispatch_idempotent_pass(
+    status, result = await daemon.dispatch_idempotent_pass(
         "lifecycle",
         bad,
         "domain-ops",

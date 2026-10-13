@@ -10,10 +10,20 @@
     "test_service_probe_ports.py",
     "test_session_naming.py",
 ]
+"tests.path_scoped.agent_tests" = [
+    "test_maintenance_recovery.py",
+]
 "tests.path_scoped.db_authority_tests" = [
     "test_single_box.py",
 ]
+"tests.fixtures.unit.homes" = [
+    "test_maintenance_recovery.py",
+]
+"tests.fixtures.model_catalog" = [
+    "test_maintenance_recovery.py",
+]
 "tests.fixtures.unit.sdk" = [
     "test_commands_register.py",
-    "test_external_skills.py"
+    "test_external_skills.py",
+    "test_maintenance_recovery.py",
 ]

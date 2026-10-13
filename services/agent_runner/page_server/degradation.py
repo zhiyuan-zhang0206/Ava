@@ -13,7 +13,7 @@ from base.events.live.projection import PageClosed
 
 
 @dataclass
-class _PageRow:
+class PageRow:
     id: int
     agent_id: int
     name: str
@@ -24,7 +24,7 @@ class _PageRow:
     session_name: str | None = None
 
 
-def _close_failed_page(pool: ConnectionPool, row: _PageRow, bus: EventBus) -> None:
+def close_failed_page(pool: ConnectionPool, row: PageRow, bus: EventBus) -> None:
     """Close only this snapshot; a fresh explicit registration stays untouched."""
     with write_transaction(pool) as conn:
         changed = conn.execute(

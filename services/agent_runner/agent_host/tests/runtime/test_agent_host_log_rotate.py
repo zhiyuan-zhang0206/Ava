@@ -28,7 +28,7 @@ def test_stdout_log_path_points_into_logs_dir(
 ) -> None:
     """The transcript path derives from logs_dir() and the session name."""
     monkeypatch.setattr(stdout_log.paths, "logs_dir", lambda: tmp_path)
-    assert stdout_log._stdout_log_path() == tmp_path / "ava-agent-host.out.log"
+    assert stdout_log.stdout_log_path() == tmp_path / "ava-agent-host.out.log"
 
 
 def test_rotate_files_keeps_one_generation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -41,7 +41,7 @@ def test_rotate_files_keeps_one_generation(monkeypatch: pytest.MonkeyPatch, tmp_
     two = tmp_path / "ava-agent-host.out.log.2"
     two.write_bytes(b"ancient-chunk")
 
-    stdout_log._rotate_stdout_log_files(log)
+    stdout_log.rotate_stdout_log_files(log)
 
     assert not two.exists()
     assert one.read_bytes() == b"current-chunk"
@@ -56,7 +56,7 @@ def test_rotate_files_without_prior_generation(
     log = tmp_path / "ava-agent-host.out.log"
     log.write_bytes(b"first-chunk")
 
-    stdout_log._rotate_stdout_log_files(log)
+    stdout_log.rotate_stdout_log_files(log)
 
     assert (tmp_path / "ava-agent-host.out.log.1").read_bytes() == b"first-chunk"
     assert not (tmp_path / "ava-agent-host.out.log.2").exists()

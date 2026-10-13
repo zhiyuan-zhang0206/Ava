@@ -19,7 +19,7 @@ class OpEnvelope(BaseModel):
     `idempotency_key` is the caller-supplied dedup key for non-idempotent ops
     (spawn / lifecycle): every retry of one logical op carries
     the SAME key, and the ops server replays the first run's stored outcome
-    instead of re-executing (services/agent_runner/agent_ops/daemon.py:_dispatch_idempotent),
+    instead of re-executing (services/agent_runner/agent_ops/daemon.py:dispatch_idempotent),
     while changed requests fail closed. An unresolved claim is retained after
     errors and returns uncertainty instead of dispatching again. This replay
     record is not an atomic business receipt. Legacy records lacking request

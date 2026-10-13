@@ -23,7 +23,7 @@ from services.entrypoints.im_bridge.adapters.feishu_inbound import (
 )
 from services.entrypoints.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
-from services.entrypoints.im_bridge.state import _load_switch_state
+from services.entrypoints.im_bridge.state import load_switch_state
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     IMAdapter,
@@ -41,7 +41,7 @@ from services.entrypoints.im_bridge.types import (
 MAX_SEGMENT_CHARS = 8000
 
 
-def _backoff_delay(interval: float, failures: int) -> float:
+def backoff_delay(interval: float, failures: int) -> float:
     """Poll delay after `failures` consecutive all-chats-failed rounds.
 
     Doubles the interval per failure (capped at 32x); the absolute cap never
@@ -164,7 +164,7 @@ class FeishuAdapter(IMAdapter):
         if self._last_open_id:
             return
         prefix = f"{self.channel}:"
-        keys = [k for k in _load_switch_state() if k.startswith(prefix) and k != prefix]
+        keys = [k for k in load_switch_state() if k.startswith(prefix) and k != prefix]
         if len(keys) == 1:
             self._last_open_id = keys[0][len(prefix) :]
             logger.info("FeishuAdapter: seeded owner open id: {}", self._last_open_id)
@@ -372,7 +372,7 @@ class FeishuAdapter(IMAdapter):
             self._poll_failures = 0
             return interval
         self._poll_failures += 1
-        return _backoff_delay(interval, self._poll_failures)
+        return backoff_delay(interval, self._poll_failures)
 
     async def _poll_once(self, chat_id: str) -> bool:
         """List the chat's newest messages; feed unseen user texts to core.

@@ -29,7 +29,7 @@ from contextlib import suppress
 from http import HTTPStatus
 
 
-class _PageHandler(http.server.SimpleHTTPRequestHandler):
+class PageHandler(http.server.SimpleHTTPRequestHandler):
     """Serves the directory with a /health liveness endpoint carrying the
     per-launch token, plus the content-type map the UI pages rely on."""
 
@@ -89,14 +89,14 @@ _EXTENSIONS = {
 }
 
 
-class _ReuseTCPServer(socketserver.ThreadingTCPServer):
+class ReuseTCPServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
 
-def _configure_handler(token: str) -> None:
-    _PageHandler.token = token
-    _PageHandler.extensions_map.update(_EXTENSIONS)
+def configure_handler(token: str) -> None:
+    PageHandler.token = token
+    PageHandler.extensions_map.update(_EXTENSIONS)
 
 
 def main() -> None:
@@ -110,13 +110,13 @@ def main() -> None:
     token = os.environ.get("PAGE_SERVER_TOKEN", "")
     if not token:
         parser.error("PAGE_SERVER_TOKEN not set in environment")
-    _configure_handler(token)
+    configure_handler(token)
     # SimpleHTTPRequestHandler serves the process cwd unless `directory` is
     # given; the daemon passes --dir, so chdir to it before serving (otherwise
     # every page serves the daemon's cwd as a directory listing).
     os.chdir(args.dir)
     with (
-        _ReuseTCPServer((args.host, args.port), _PageHandler) as server,
+        ReuseTCPServer((args.host, args.port), PageHandler) as server,
         suppress(KeyboardInterrupt),
     ):
         server.serve_forever()

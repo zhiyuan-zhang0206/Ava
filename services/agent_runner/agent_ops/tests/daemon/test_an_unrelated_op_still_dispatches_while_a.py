@@ -19,10 +19,10 @@ from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config, inventory
 from ops.cluster import operations as cluster_ops
 from services.agent_runner.agent_ops import boot, daemon
-from services.agent_runner.agent_ops.tests.test_daemon import _stub_pool
 from services.agent_runner.agent_ops.tests.test_daemon import (
     ops_pool as ops_pool,
 )
+from services.agent_runner.agent_ops.tests.test_daemon import stub_pool
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -38,7 +38,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     machine_identity: MachineIdentity,
 ) -> None:
     """A readiness probe stays reachable while an unrelated worker is blocked."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     started = threading.Event()
     release = threading.Event()
 
@@ -121,7 +121,7 @@ async def test_two_config_writes_cannot_interleave(
 
     Asserted as non-overlap rather than on a file, so it pins the guarantee (these
     two never run at once) instead of one writer's implementation."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     inside = 0
     overlapped = False
 
@@ -210,7 +210,7 @@ async def test_config_write_op_receives_actor_and_trace(
         captured.update(_kw)
         return _Result()
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     monkeypatch.setattr(host_config, "config_write_op", _capture)
     status, _ = await daemon._dispatch(
         "config_write",
@@ -256,7 +256,7 @@ async def test_config_audit_read_op_receives_last(
         captured["last"] = last
         return _Result()
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     monkeypatch.setattr(host_config, "config_audit_read_op", _capture)
     status, _ = await daemon._dispatch(
         "config_audit_read",
@@ -286,7 +286,7 @@ async def test_config_audit_read_rejects_out_of_range_last(
     machine_identity: MachineIdentity,
 ) -> None:
     """`last` outside 1..200 fails payload validation before any read."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     status, result = await daemon._dispatch(
         "config_audit_read",
         {"last": 201},
@@ -324,7 +324,7 @@ async def test_op_arms_do_not_run_on_the_default_executor(
     name is the property that both keeps the arm off the default executor AND makes
     the stuck thread findable in a dump — which is what the refusal runbook says to
     go looking for."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     seen: list[str] = []
 
     def _note_thread(*, authority: ConfigAuthority, local_machine: str) -> object:

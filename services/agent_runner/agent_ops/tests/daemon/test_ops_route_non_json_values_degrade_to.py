@@ -26,8 +26,8 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon
 from services.agent_runner.agent_ops.tests.test_daemon import (
-    _fake_spawn_factory,
-    _stub_pool,
+    fake_spawn_factory,
+    stub_pool,
 )
 from services.agent_runner.agent_ops.tests.test_daemon import (
     ops_pool as ops_pool,
@@ -50,7 +50,7 @@ async def test_ops_route_non_json_values_degrade_to_str(
     machine_identity: MachineIdentity,
 ) -> None:
     """A non-JSON-native value in a dispatch result degrades to its str() instead
-    of raising in _ops_route's json.dumps and 500-ing the /ops control plane.
+    of raising in ops_route's json.dumps and 500-ing the /ops control plane.
 
     The Pydantic arms dump with mode="json"; default=str on the final dumps is
     the last-resort fallback for plain-dict results and any future op.
@@ -78,7 +78,7 @@ async def test_ops_route_non_json_values_degrade_to_str(
         return "completed", {"at": datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)}
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)
-    status, body, ctype = await daemon._ops_route(
+    status, body, ctype = await daemon.ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -133,7 +133,7 @@ async def test_ops_route_failed_status_is_still_http_200(
         return "failed", {"error": "boom"}
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)
-    status, body, _ = await daemon._ops_route(
+    status, body, _ = await daemon.ops_route(
         json.dumps(
             {
                 "kind": "spawn-launch",
@@ -172,7 +172,7 @@ async def test_ops_route_malformed_body_400(
     """Non-JSON body and a body missing `kind` both return 400 without dispatching."""
     dispatch_pool: ConnectionPool = ConnectionPool(open=False)
     dispatch_sem = asyncio.Semaphore(1)
-    status, body, _ = await daemon._ops_route(
+    status, body, _ = await daemon.ops_route(
         b"not json",
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -188,7 +188,7 @@ async def test_ops_route_malformed_body_400(
     )
     assert status == 400
     assert "invalid JSON" in json.loads(body)["error"]
-    status, body, _ = await daemon._ops_route(
+    status, body, _ = await daemon.ops_route(
         json.dumps({"payload": {}}).encode(),
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -240,7 +240,7 @@ async def test_ops_route_crash_becomes_failed_result(
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(daemon, "_dispatch", _boom)
-    status, body, _ = await daemon._ops_route(
+    status, body, _ = await daemon.ops_route(
         json.dumps(
             {
                 "kind": "spawn-launch",
@@ -273,7 +273,7 @@ async def test_ops_route_crash_becomes_failed_result(
 def test_ops_route_requires_its_daemon_semaphore() -> None:
     """A route cannot be bound without the daemon's shared concurrency owner."""
     with pytest.raises(TypeError, match="dispatch_sem"):
-        inspect.signature(daemon._ops_route).bind(
+        inspect.signature(daemon.ops_route).bind(
             b"{}", active_ops={}, workers=set(), requests=set()
         )
 
@@ -338,7 +338,7 @@ async def test_ops_route_semaphore_caps_concurrency(
     ]
     results = await asyncio.gather(
         *[
-            daemon._ops_route(
+            daemon.ops_route(
                 b,
                 active_ops={},
                 dispatch_sem=dispatch_sem,
@@ -542,12 +542,12 @@ async def test_ops_route_dedupes_by_envelope_key(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """End-to-end through _ops_route: an envelope carrying idempotency_key goes
+    """End-to-end through ops_route: an envelope carrying idempotency_key goes
     through the dedup path — two identical POSTs execute the op once."""
     dispatch_pool: ConnectionPool = ops_pool
     dispatch_sem = asyncio.Semaphore(4)
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
     body = json.dumps(
         {
@@ -557,7 +557,7 @@ async def test_ops_route_dedupes_by_envelope_key(
         }
     ).encode()
 
-    code1, payload1, _ = await daemon._ops_route(
+    code1, payload1, _ = await daemon.ops_route(
         body,
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -571,7 +571,7 @@ async def test_ops_route_dedupes_by_envelope_key(
         image=ops_image,
         local_machine=machine_identity,
     )
-    code2, payload2, _ = await daemon._ops_route(
+    code2, payload2, _ = await daemon.ops_route(
         body,
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -609,7 +609,7 @@ async def test_ops_route_without_key_does_not_dedupe(
     dispatch_pool: ConnectionPool = ops_pool
     dispatch_sem = asyncio.Semaphore(4)
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
     body = json.dumps(
         {
@@ -617,7 +617,7 @@ async def test_ops_route_without_key_does_not_dedupe(
             "payload": {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
         }
     ).encode()
-    await daemon._ops_route(
+    await daemon.ops_route(
         body,
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -631,7 +631,7 @@ async def test_ops_route_without_key_does_not_dedupe(
         image=ops_image,
         local_machine=machine_identity,
     )
-    await daemon._ops_route(
+    await daemon.ops_route(
         body,
         active_ops={},
         dispatch_sem=dispatch_sem,
@@ -674,7 +674,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
     The op here blocks until the test releases it. What must stay true is that the
     loop keeps turning meanwhile: other coroutines run, other ops dispatch, and the
     health endpoint's `await` still gets its turn."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     started = threading.Event()
     release = threading.Event()
 

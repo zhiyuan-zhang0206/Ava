@@ -52,7 +52,7 @@ async def test_replay_returns_canonical_status_without_reexecution(
     machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, status.value)
-    actual, result = await daemon._dispatch_idempotent_pass(
+    actual, result = await daemon.dispatch_idempotent_pass(
         "status_probe",
         {},
         "status-test",
@@ -85,7 +85,7 @@ async def test_replay_rejects_unknown_stored_status_without_reexecution(
 ) -> None:
     _record(db_conn, status)
     with pytest.raises(ValueError, match="OpStatus"):
-        await daemon._dispatch_idempotent_pass(
+        await daemon.dispatch_idempotent_pass(
             "status_probe",
             {},
             "status-test",
@@ -117,13 +117,13 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
     machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, None)
-    monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 1)
+    monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 1)
 
     async def sleep(_duration: float) -> None:
         return None
 
     monkeypatch.setattr(daemon, "_sleep", sleep)
-    status, result = await daemon._dispatch_idempotent_pass(
+    status, result = await daemon.dispatch_idempotent_pass(
         "status_probe",
         {},
         "status-test",

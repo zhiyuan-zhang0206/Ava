@@ -44,7 +44,7 @@ def test_close_rejects_a_stall_sample_already_in_progress(
     calls = 0
     actions: list[str] = []
 
-    def sample(_guard: sr._StallGuard) -> tuple[str, int, str]:
+    def sample(_guard: sr.StallGuard) -> tuple[str, int, str]:
         nonlocal calls
         calls += 1
         if calls == 2:
@@ -55,9 +55,9 @@ def test_close_rejects_a_stall_sample_already_in_progress(
     def action(_db: Database, _sid: int, msg: str, _rid: int | None) -> None:
         actions.append(msg)
 
-    monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    monkeypatch.setattr(sr, "_stall_action", action)
-    guard = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
+    monkeypatch.setattr(sr.StallGuard, "_sample", sample)
+    monkeypatch.setattr(sr, "stall_action", action)
+    guard = sr.StallGuard(Database.from_settings(gate=database_gate), 1, None)
 
     def release_on_stop() -> None:
         assert guard.stop.wait(2)
@@ -92,12 +92,12 @@ def test_close_collects_an_admitted_stall_action(
         assert release.wait(2)
         finished.set()
 
-    def sample(_guard: sr._StallGuard) -> tuple[str, int, str]:
+    def sample(_guard: sr.StallGuard) -> tuple[str, int, str]:
         return "script.py", 1, "blocked"
 
-    monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    monkeypatch.setattr(sr, "_stall_action", action)
-    guard = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
+    monkeypatch.setattr(sr.StallGuard, "_sample", sample)
+    monkeypatch.setattr(sr, "stall_action", action)
+    guard = sr.StallGuard(Database.from_settings(gate=database_gate), 1, None)
 
     def release_on_stop() -> None:
         assert guard.stop.wait(2)
@@ -127,12 +127,12 @@ def test_guard_unknown_error_is_visible_and_rethrown(
     failed = threading.Event()
     error = WorkerFailure("frame reader implementation failed")
 
-    def sample(_guard: sr._StallGuard) -> None:
+    def sample(_guard: sr.StallGuard) -> None:
         failed.set()
         raise error
 
-    monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    guard = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
+    monkeypatch.setattr(sr.StallGuard, "_sample", sample)
+    guard = sr.StallGuard(Database.from_settings(gate=database_gate), 1, None)
     assert failed.wait(2)
     with pytest.raises(WorkerFailure) as caught:
         guard.close()
@@ -157,16 +157,16 @@ def test_script_failure_stays_primary_when_guard_close_fails(
     _fast_guard(monkeypatch)
     failed = threading.Event()
     secondary = WorkerFailure("guard failed")
-    guards: list[sr._StallGuard] = []
-    original_start = sr._StallGuard  # captured before the factory replaces it
+    guards: list[sr.StallGuard] = []
+    original_start = sr.StallGuard  # captured before the factory replaces it
     argv = sys.argv
     sleep = sr.time.sleep
 
-    def sample(_guard: sr._StallGuard) -> None:
+    def sample(_guard: sr.StallGuard) -> None:
         failed.set()
         raise secondary
 
-    def start(db: Database, sid: int, rid: int | None) -> sr._StallGuard:
+    def start(db: Database, sid: int, rid: int | None) -> sr.StallGuard:
         guard = original_start(db, sid, rid)
         guards.append(guard)
         return guard
@@ -175,14 +175,14 @@ def test_script_failure_stays_primary_when_guard_close_fails(
         assert failed.wait(2)
         raise primary
 
-    monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    monkeypatch.setattr(sr, "_StallGuard", start)
+    monkeypatch.setattr(sr.StallGuard, "_sample", sample)
+    monkeypatch.setattr(sr, "StallGuard", start)
     monkeypatch.setattr(runpy, "run_path", script)
     import ava
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: None)
     with pytest.raises(type(primary)) as caught:
-        sr._run_python_script(
+        sr.run_python_script(
             Database.from_settings(gate=database_gate),
             1,
             None,
@@ -216,13 +216,13 @@ def test_blocked_guard_close_is_finite_and_collects_its_late_error(
     release = threading.Event()
     error = WorkerFailure("late observer failure")
 
-    def sample(_guard: sr._StallGuard) -> None:
+    def sample(_guard: sr.StallGuard) -> None:
         started.set()
         assert release.wait(2)
         raise error
 
-    monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    guard = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
+    monkeypatch.setattr(sr.StallGuard, "_sample", sample)
+    guard = sr.StallGuard(Database.from_settings(gate=database_gate), 1, None)
     try:
         assert started.wait(2)
         with pytest.raises(RuntimeError, match="stall guard did not stop"):
@@ -250,7 +250,7 @@ def test_stall_action_keeps_hard_exit_when_cleanup_fails(
     monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", cleanup)
     monkeypatch.setattr(sr.os, "_exit", exits.append)
     with pytest.raises(WorkerFailure) as caught:
-        sr._stall_action(Database.from_settings(gate=database_gate), 1, "stall", None)
+        sr.stall_action(Database.from_settings(gate=database_gate), 1, "stall", None)
     assert caught.value is error
     assert exits == [1]
 
@@ -275,11 +275,11 @@ def test_stall_action_arms_one_deadline_before_the_failure_writes(
     monkeypatch.setattr(sr.faulthandler, "dump_traceback_later", arm)
     monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", Mock())
     monkeypatch.setattr(sr.os, "_exit", Mock())
-    monkeypatch.setattr(sr, "_record_error", record_error)
-    monkeypatch.setattr(sr, "_record_run_end", record_end)
-    sr._stall_action(Database.from_settings(gate=database_gate), 1, "stall", None)
+    monkeypatch.setattr(sr, "record_error", record_error)
+    monkeypatch.setattr(sr, "record_run_end", record_end)
+    sr.stall_action(Database.from_settings(gate=database_gate), 1, "stall", None)
     assert order == ["arm", "error", "run"]
-    assert armed == [(sr._FAILURE_RECORD_DEADLINE_S, True)]
+    assert armed == [(sr.FAILURE_RECORD_DEADLINE_S, True)]
 
 
 def test_frame_read_failure_is_a_guard_failure_not_a_skipped_sample(
@@ -292,12 +292,12 @@ def test_frame_read_failure_is_a_guard_failure_not_a_skipped_sample(
     failed = threading.Event()
     error = RuntimeError("frame reader failed")
 
-    def sample(_guard: sr._StallGuard) -> None:
+    def sample(_guard: sr.StallGuard) -> None:
         failed.set()
         raise error
 
-    monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    guard = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
+    monkeypatch.setattr(sr.StallGuard, "_sample", sample)
+    guard = sr.StallGuard(Database.from_settings(gate=database_gate), 1, None)
     assert failed.wait(2)
     with pytest.raises(RuntimeError) as caught:
         guard.close()
@@ -322,16 +322,16 @@ def test_successful_script_exit_cannot_complete_after_guard_close_failure(
     failed = threading.Event()
     release = threading.Event()
     error = WorkerFailure("original unknown guard failure")
-    guards: list[sr._StallGuard] = []
-    original_start = sr._StallGuard  # captured before the factory replaces it
+    guards: list[sr.StallGuard] = []
+    original_start = sr.StallGuard  # captured before the factory replaces it
 
-    def sample(_guard: sr._StallGuard) -> None:
+    def sample(_guard: sr.StallGuard) -> None:
         failed.set()
         if blocked:
             assert release.wait(3)
         raise error
 
-    def start(db: Database, sid: int, rid: int | None) -> sr._StallGuard:
+    def start(db: Database, sid: int, rid: int | None) -> sr.StallGuard:
         guard = original_start(db, sid, rid)
         guards.append(guard)
         return guard
@@ -346,8 +346,8 @@ def test_successful_script_exit_cannot_complete_after_guard_close_failure(
     ).fetchone()
     db_conn.commit()
     assert row is not None
-    monkeypatch.setattr(sr._StallGuard, "_sample", sample)
-    monkeypatch.setattr(sr, "_StallGuard", start)
+    monkeypatch.setattr(sr.StallGuard, "_sample", sample)
+    monkeypatch.setattr(sr, "StallGuard", start)
     monkeypatch.setattr(runpy, "run_path", script)
     import ava
 

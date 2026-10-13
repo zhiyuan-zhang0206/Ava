@@ -72,7 +72,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
     pause_owner.change_maintenance("ops", WHEN, before.maintenance, draining)
     tasks = [
         asyncio.create_task(
-            daemon._ops_route(
+            daemon.ops_route(
                 b'{"kind":"config_read","payload":{}}',
                 active_ops={},
                 dispatch_sem=dispatch_sem,
@@ -98,7 +98,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
         pause_owner.change_maintenance(
             "ops", WHEN, draining, MaintenanceHold(MaintenancePhase.STOPPING)
         )
-        status, body, _ = await daemon._ops_route(
+        status, body, _ = await daemon.ops_route(
             b'{"kind":"config_read","payload":{}}',
             active_ops={},
             dispatch_sem=dispatch_sem,
@@ -160,7 +160,7 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
         monkeypatch.setattr(daemon, "_dispatch_sync", arm)
         tasks = [
             asyncio.create_task(
-                daemon._run_arm(
+                daemon.run_arm(
                     "same",
                     {"index": index},
                     active_ops=active_ops,
@@ -272,7 +272,7 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
         dispatch_sem = asyncio.Semaphore(2)
 
         async def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-            status, raw, _ = await daemon._ops_route(
+            status, raw, _ = await daemon.ops_route(
                 json.dumps({"kind": kind, "payload": payload}).encode(),
                 active_ops={},
                 dispatch_sem=dispatch_sem,
@@ -334,7 +334,7 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
         monkeypatch.setattr(daemon, "_dispatch_sync", arm)
         tasks = [
             asyncio.create_task(
-                daemon._run_arm(
+                daemon.run_arm(
                     kind,
                     {"index": index},
                     active_ops=active_ops,
@@ -419,7 +419,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="first-owner") as first,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="second-owner") as second,
     ):
-        first_result = await daemon._run_arm(
+        first_result = await daemon.run_arm(
             "status_probe",
             {},
             active_ops={},
@@ -432,7 +432,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
             local_machine=machine_identity,
         )
         boot.shutdown_op_pool(first)
-        second_result = await daemon._run_arm(
+        second_result = await daemon.run_arm(
             "status_probe",
             {},
             active_ops={},

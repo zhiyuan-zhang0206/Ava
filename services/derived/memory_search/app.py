@@ -33,7 +33,7 @@ _log = logging.getLogger("services.derived.memory_search.app")
 # Loopback-only is the trust model, not a security boundary. Each app's
 # composition root supplies its embedding width so the wire models reject
 # oversized vectors before numpy allocates; the store also checks exact width.
-_MAX_K = 1000
+MAX_K = 1000
 
 # One stats sample per minute — bounded row rate, same cadence as the
 # gateway's gauge flushers (agent_registry / auth401 / latency). A 60s
@@ -192,7 +192,7 @@ def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) ->
 
     class SearchBody(BaseModel):
         vector: list[float] = Field(max_length=embedding_dim)
-        k: int = Field(ge=1, le=_MAX_K)
+        k: int = Field(ge=1, le=MAX_K)
 
     lock = asyncio.Lock()
 

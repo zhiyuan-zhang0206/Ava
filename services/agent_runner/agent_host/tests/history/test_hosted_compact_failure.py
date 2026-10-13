@@ -42,7 +42,7 @@ from ...host import AgentHost
 from ...runtime import TurnOutcome
 
 
-def _cold_reader(pool: AsyncConnectionPool[Any]) -> AsyncPostgresSaver:
+def cold_reader(pool: AsyncConnectionPool[Any]) -> AsyncPostgresSaver:
     """Cold inspector saver that folds delta-written messages (#3180 write switch)."""
     reader = AsyncPostgresSaver(pool)
     wrap_saver_reads_with_delta_reconstruction(reader)
@@ -169,7 +169,7 @@ async def _assert_failure_is_visible_and_durable(
     event = await _receive_error(subscription)
     assert event.agent_id == agent
     assert "CompactionFailedError" in event.content and "history was preserved" in event.content
-    cold = await _cold_reader(pool).aget_tuple(config)
+    cold = await cold_reader(pool).aget_tuple(config)
     assert cold is not None
     persisted = cold.checkpoint["channel_values"]
     assert persisted["halted"] is True
@@ -186,7 +186,7 @@ async def _assert_new_inbound_resumes_with_history(
     compact_id: int,
     history: list[HumanMessage | AIMessage],
 ) -> None:
-    resumed = await _cold_reader(pool).aget_tuple(config)
+    resumed = await cold_reader(pool).aget_tuple(config)
     assert resumed is not None
     messages = resumed.checkpoint["channel_values"]["messages"]
     assert messages[:2] == history

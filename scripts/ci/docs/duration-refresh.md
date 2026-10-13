@@ -1,60 +1,54 @@
-# Duration refresh cadence
+# Test durations: where they come from and how CI gets them
 
-Every CI collection already recalculates least-duration shard assignments.
-Refreshing updates the shared input weights, rather than saving fixed shard
-membership. Unknown nodes use pytest-split's average estimate.
+Every CI collection recalculates least-duration shard assignments from the per-test
+timings in `.test_durations`, so the timings only balance the shards; they never
+change which tests run or whether they pass. Unknown nodes cost pytest-split's
+average. The file is **not in the repository** (it is gitignored): it is built
+daily and distributed through the GitHub Actions cache.
 
-`duration_refresh_policy.py` owns the cadence. Main runs no CI (CI runs on pull
-requests only; the Trunk queue branch tests the tree that lands), so there is no
-completed main run whose timings could be reused. Instead, the refresh workflow
-measures every CI-shaped shard on its own runner (16 backend, four e2e) daily at
-19:30 UTC, with a 21:30 backstop. GitHub may delay cron execution. A complete
-measurement published in the preceding five hours suppresses another scheduled
-measurement; successful no-op runs never reset freshness. Manual dispatch always
-measures. A legacy cache without provenance bootstraps at the next schedule.
-Retry attempts reseed from committed weights before collection; partial
-measurements never affect selection. Only the publisher has write permissions;
-planning and measurement use read permissions. Cancellation prevents publication.
+## Producing it
 
-All shards, artifact merging, and the candidate branch use one source SHA, the
-main head the plan checked out; sources outside main history are refused before
-publication. Artifacts download into runner temporary storage, never over
-executable repository files. Missing, empty or overlapping shards fail before
-the committed cache changes. The native backend population excludes the
-separately owned static tests, just as normal CI does; coverage and worker
-counts match CI.
+`.github/workflows/refresh-test-durations.yml` runs daily (19:30 UTC; GitHub may
+delay cron by hours) and on `workflow_dispatch`, on main only:
 
-After merging complete timings, the workflow creates `.test_durations.source.json`
-with schema version, measured source SHA, Actions run ID and measurement time.
-Both files publish in one Git commit on `ava-bot/test-durations`. The branch is
-rebuilt from the measured source, so its required CI checks see that generation's
-code. One existing bot PR is updated. Creating or pushing a new head to this
-`GITHUB_TOKEN`-created PR starts the existing `pull_request` CI workflow in an
-approval-required state. A maintainer with repository write access reviews the
-two generated files and selects **Approve workflows to run** for that head.
-The publisher does not approve its own workflow. `workflow_dispatch` job checks
-do not satisfy PR required checks, so publication does not dispatch a duplicate
-CI suite. These are [GitHub's bot approval rules](https://docs.github.com/en/actions/concepts/security/github_token)
-and [required-check event rules](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks).
-Admission runs from the workflow's trusted main revision, independently of the
-older measurement source. After publication, `pull_requests/duration_refresh.py` verifies that the open,
-non-draft GitHub Actions bot PR targets main from this repository's fixed bot
-branch, still has the candidate's exact head SHA, and changes only the two generated
-files. It submits that PR to Trunk with the existing `TRUNK_API_TOKEN`; Trunk
-waits for normal readiness and required checks before testing and merging.
-Already-submitted responses are idempotent; submission or validation failures
-fail the workflow visibly. A candidate with no generated diff against its
-measured source publishes nothing. An identical already-published snapshot
-reuses its existing head without a force-push, then still updates and submits the
-PR; its existing approval and CI state remain in effect. An unqueued existing PR
-is not left behind.
+1. `plan` resolves the newest existing cache so the measured shards split with the
+   current model (the first run has none and splits by test count).
+2. `measure-backend` (16 shards) and `measure-e2e` (4) each run
+   `refresh_test_durations.py measure` on their own runner: the CI pytest arguments,
+   the CI coverage module list, `--store-durations --clean-durations`, three attempts
+   that each reseed the temporary duration input, so a failed attempt cannot leak a
+   partial measurement. The native backend population excludes the separately owned
+   static tests, as normal CI does.
+3. `publish` downloads the artifacts and runs `merge`, which requires all 20, rejects
+   empty or overlapping shards before touching anything, keeps every measured entry
+   (fast and zero timings included), rounds to three decimals and writes
+   `.test_durations` atomically. The file is saved as the cache
+   `test-durations-<UTC date>-<run id>-<attempt>`. The key is unique per run, so a
+   same-day dispatch never collides with an earlier save (cache entries are immutable).
+4. `verify` waits (bounded) until the cache listing names that key, then uses the
+   same two actions as CI to resolve and restore it and checks the entry count.
 
-The plan reports applied provenance from main separately from the open bot PR's
-published provenance. Pending publication resets the freshness window to avoid
-rewriting the PR on every scheduled run; it does **not** mean main uses those weights.
-The weights apply only when Trunk merges the bot PR after its gates pass.
-Later node-ID maintenance can edit
-the timing map without claiming a new measurement by changing provenance.
-Closed unmerged bot PRs do not reset the freshness window. A measurement of an
-older source cannot overwrite a newer published snapshot. API errors or malformed provenance
-fail visibly rather than guessing freshness. Required CI gates stay unchanged.
+A failed measurement saves nothing, so CI keeps using the previous entry. Daily
+writes also keep the entry from going unused for the seven days after which Actions
+evicts caches.
+
+## Consuming it
+
+- `classify change` runs `actions/resolve-test-durations` once per run: it lists
+  `test-durations-*` caches on `refs/heads/main` (the default branch's caches are the
+  ones every pull request can read), takes the newest, retries the API three times,
+  then restores it into `.test_durations` for the selector. The key is a job output.
+- `backend shard` and `e2e shard` run `actions/restore-test-durations` with that exact
+  key. Resolving once per run matters: shards that split with different timings than
+  their siblings would drop or duplicate tests, so a key that no longer restores
+  (evicted mid-run) fails the shard instead of degrading silently.
+- With no cache (a fresh repository, an unreadable listing) the run goes on and
+  prints a `test durations` warning annotation: shards split by test count, and the
+  test selector, whose 80% guard compares two sums of timings and has nothing to
+  compare, returns FULL (`no-durations`).
+- Development machines have no file unless `refresh_test_durations.py` (the
+  single-runner `refresh` command) built one; pytest-split then warns and splits
+  evenly.
+
+The workflow needs only `actions: read` and the default token, no secret, no
+repository setting and no approval step.

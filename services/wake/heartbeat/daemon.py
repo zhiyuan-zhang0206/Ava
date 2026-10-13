@@ -57,7 +57,7 @@ from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S, completion_digest
-from services.wake.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
+from services.wake.heartbeat.liveness import PASS_INTERVAL_S, run_liveness_pass
 
 _log = logging.getLogger("services.wake.heartbeat.daemon")
 
@@ -123,7 +123,7 @@ _MAX_CHECKINS_PER_STEP = 25
 # without an LLM call) keeps the doomed calls off meanwhile.
 # streak=1 -> next check-in after 2 idle windows; the cap bounds the longest
 # silence (~5.3h at a 5min idle threshold).
-_BACKOFF_MAX_WINDOWS = 64
+BACKOFF_MAX_WINDOWS = 64
 # Platform-side nudge backoff (B7): a no-op nudge — no real inbound arrived and
 # the agent did not pause — raises the agent's persisted backoff level, which
 # stretches the reminder floor to heartbeat_interval * 2^level, capped at 24h.
@@ -134,7 +134,7 @@ _BACKOFF_MAX_INTERVAL_S = 86400
 _BACKOFF_MAX_LEVEL = 16  # schema CHECK bound; the raise-time cap is tighter
 
 
-def _backoff_max_level(interval_s: float) -> int:
+def backoff_max_level(interval_s: float) -> int:
     """Highest backoff level whose stretched interval stays under the 24h cap."""
     if interval_s <= 0:
         return 0
@@ -374,7 +374,7 @@ def _count_noop_nudge(
     noop_streak[agent_id] = noop_streak.get(agent_id, 0) + 1
     if noop_streak[agent_id] >= threshold:
         noop_streak[agent_id] = 0
-        new_level = min(level + 1, _backoff_max_level(heartbeat_interval_s))
+        new_level = min(level + 1, backoff_max_level(heartbeat_interval_s))
         if new_level > level:
             _raise_backoff_level(pool, agent_id, new_level, heartbeat_interval_s)
 
@@ -502,14 +502,14 @@ def _sweep_backoff_resets(pool: ConnectionPool) -> None:
             )
 
 
-def _backoff_deadlines(
+def backoff_deadlines(
     failure_streak: dict[int, int],
     idle_threshold_s: float,
     deadline_state: dict[int, tuple[int, float]] | None = None,
 ) -> dict[int, float]:
     """Keep each absolute deadline until its agent's failure streak changes.
 
-    A new streak gets `now + min(2^streak, _BACKOFF_MAX_WINDOWS) *
+    A new streak gets `now + min(2^streak, BACKOFF_MAX_WINDOWS) *
     idle_threshold`. A streak of 1 doubles the normal interval; the cap bounds
     the longest silence (~5.3h at a 5min threshold) so the daemon still probes
     a wedged agent occasionally. The state is in-process only.
@@ -523,7 +523,7 @@ def _backoff_deadlines(
         if previous is None or previous[0] != streak:
             deadline_state[agent_id] = (
                 streak,
-                now + min(2**streak, _BACKOFF_MAX_WINDOWS) * idle_threshold_s,
+                now + min(2**streak, BACKOFF_MAX_WINDOWS) * idle_threshold_s,
             )
     return {agent_id: deadline for agent_id, (_, deadline) in deadline_state.items()}
 
@@ -620,7 +620,7 @@ async def _dispatch_loop(
                 heartbeat_interval_s=heartbeat_interval,
                 jitter_span_s=JITTER_SPAN_S,
                 limit=_MAX_CHECKINS_PER_STEP,
-                backoff_until=_backoff_deadlines(failure_streak, idle_threshold, deadline_state),
+                backoff_until=backoff_deadlines(failure_streak, idle_threshold, deadline_state),
             )
             for agent_id, idle_minutes in rows:
                 try:
@@ -647,7 +647,7 @@ async def _dispatch_loop(
             failures.failed(exc)
 
 
-async def _liveness_loop(
+async def liveness_loop(
     db: Database, pool: ConnectionPool, bus: EventBus, liveness: LoopProgress
 ) -> None:
     """Run agent-liveness checks, the first at start so the roster read model is
@@ -663,7 +663,7 @@ async def _liveness_loop(
         except Exception as exc:
             _log.exception("[heartbeat] liveness loop iteration failed")
             failures.failed(exc)
-        await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
+        await _sleep_with_liveness(liveness, PASS_INTERVAL_S)
 
 
 async def run(
@@ -708,7 +708,7 @@ async def run(
         # its siblings and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
             loops.create_task(_dispatch_loop(pool, db, bus, dispatch_progress))
-            loops.create_task(_liveness_loop(db, pool, bus, liveness_progress))
+            loops.create_task(liveness_loop(db, pool, bus, liveness_progress))
             loops.create_task(
                 completion_digest.completion_digest_loop(
                     pool, db, bus, digest_progress, machine=machine

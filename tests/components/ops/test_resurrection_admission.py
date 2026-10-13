@@ -32,8 +32,8 @@ from ops.agents import wake
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from services.agent_runner.agent_host.tests.lifecycle.test_predecessor_closure import (
-    _closed_form,
-    _retired,
+    closed_form,
+    retired,
 )
 from tests.components.ops.resurrection_support import (
     force,
@@ -189,7 +189,7 @@ def test_retired_resources_require_cutover_before_resurrection(
     machine_identity: MachineIdentity,
 ) -> None:
     generation, owner = uuid4(), uuid4()
-    before = _retired(generation, owner)
+    before = retired(generation, owner)
     aid = terminated(
         db_conn,
         before,
@@ -227,7 +227,7 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
     machine_identity: MachineIdentity,
 ) -> None:
     generation, owner = uuid4(), uuid4()
-    before = _retired(generation, owner) | {"frozen_by": 1}
+    before = retired(generation, owner) | {"frozen_by": 1}
     aid = terminated(
         db_conn,
         before,
@@ -249,7 +249,7 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
         (generation, owner, aid),
     )
     db_conn.commit()
-    _closed_form(db_conn, aid, before)
+    closed_form(db_conn, aid, before)
 
     wake.resurrect_agent(
         database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
