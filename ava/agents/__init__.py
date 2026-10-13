@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import ava.sdk_surface.agent_identity
 from ava import gateway_client as _client
+from ava.agents import peers
 from ava.sdk_surface import process_context
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.api_contracts.agent_contract import AgentLaunchFailed as AgentLaunchFailed
@@ -346,10 +347,12 @@ def list_agents(
 
 
 def list_machines() -> list[Machine]:
-    return [
-        Machine(name=r["name"], description=r.get("description"), live=r["live"])
-        for r in _client.list_machines()
-    ]
+    return machines_from_rows(_client.list_machines())
+
+
+def machines_from_rows(rows: list[dict[str, Any]]) -> list[Machine]:
+    """Gateway machine rows -> Machine dataclasses."""
+    return [Machine(name=r["name"], description=r.get("description"), live=r["live"]) for r in rows]
 
 
 def _row_from_dict(data: dict) -> AgentRow:
@@ -625,34 +628,23 @@ def send_system_note(
 
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
-    from base.agents.messages.kwargs import NoteTag
-
-    agent_id = coerce_typed(agent_id, "agent_id", int)
-    content = coerce_str(content, "content")
-    tag = coerce_str(tag, "tag")
-    task_id = coerce_typed(task_id, "task_id", int, allow_none=True)
-    if task_id is not None and task_id <= 0:
-        raise ValueError(f"task_id must be a positive integer, got {task_id!r}")
-    try:
-        NoteTag(tag)
-    except ValueError as exc:
-        valid_tags = ", ".join(member.value for member in NoteTag)
-        raise ValueError(f"tag must be one of: {valid_tags}; got {tag!r}") from exc
-    if task_id is not None and tag != NoteTag.TASK.value:
-        raise ValueError("task_id requires tag='task'")
-    resurrect = coerce_typed(resurrect, "resurrect", bool)
-    from base.api_contracts.idempotency import validate_idempotency_key
-
-    idempotency_key = validate_idempotency_key(idempotency_key)
-    source = ava.sdk_surface.agent_identity.require_actor()
-    return _client.send_system_note(
+    note = peers.validate_system_note(
         agent_id,
-        content=content,
-        note_tag=tag,
-        source=source,
+        content,
+        tag=tag,
         task_id=task_id,
         resurrect=resurrect,
         idempotency_key=idempotency_key,
+    )
+    source = ava.sdk_surface.agent_identity.require_actor()
+    return _client.send_system_note(
+        note.agent_id,
+        content=note.content,
+        note_tag=note.tag,
+        source=source,
+        task_id=note.task_id,
+        resurrect=note.resurrect,
+        idempotency_key=note.idempotency_key,
     )
 
 
@@ -670,10 +662,9 @@ def get_last_message(agent_id: int) -> str | None:
 
     agent_id = coerce_typed(agent_id, "agent_id", int)
     caller = ava.sdk_surface.agent_identity.require_actor()
-    message = _client.get_last_message(agent_id, caller)
-    if message is not None:
-        scan_content(message, source=f"peer.last_message:{agent_id}")
-    return message
+    return peers.scanned_last_message(
+        _client.get_last_message(agent_id, caller), agent_id, scan=scan_content
+    )
 
 
 def get_status(agent_id: int) -> AgentStatus:
