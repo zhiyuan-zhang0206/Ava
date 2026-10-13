@@ -6,7 +6,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hooks.compact import build_compact_transition
+from agent.graph.hooks.compact import build_compact_transition
 from agent.impersonation_handoff import flush_checkpoint
 from agent.nodes import END, INIT_CONTEXT
 from agent.state import BaseAgentState, CompactState

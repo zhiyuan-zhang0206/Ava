@@ -37,7 +37,7 @@ instead of asking; an agent that declares intent beats a prompt that asks it to.
    (`subprocess` → `ava.shell.run`, `time.sleep` loops → `ava.watcher`,
    `open()` → `ava.files`, `requests` → `ava.web`), and reminds an agent that
    a plain text reply reaches nobody — the verb is `ava.agents.send_message`.
-4. **Capabilities drift check** — `agent/hooks/capabilities.py`. Before every LLM
+4. **Capabilities drift check** — `agent/graph/hooks/capabilities.py`. Before every LLM
    call the live skill index is diffed against the snapshot the context window
    was built from; skills installed since are named in one system note, so an
    agent cannot silently rebuild a capability it already has.

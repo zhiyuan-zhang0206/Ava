@@ -14,8 +14,8 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.graph.hooks.compact import auto_compact_will_fire
 from agent.hooks import Hook
-from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext

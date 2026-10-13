@@ -1,6 +1,6 @@
 """Compact tool tests.
 
-`agent/hooks/compact.py` exports:
+`agent/graph/hooks/compact.py` exports:
 - `generate_summary(messages, llm) -> summary`: pure function (called by claim node processing
   inbound kind compact_request; also called internally by auto-compact hook). Request =
   whole conversation reused byte-for-byte (original SystemMessage + all content + same
@@ -31,8 +31,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 
-from agent.hooks import compact
-from agent.hooks.compact import (
+from agent.graph.hooks import compact
+from agent.graph.hooks.compact import (
     auto_compact_for_llm,
     generate_summary,
 )
@@ -227,10 +227,10 @@ def _over_threshold_state() -> AgentState:
 @pytest.fixture
 def _ava_compact_loaded():
     """Compact is built-in (Issue #1284). The wrapper function lives in
-    agent.hooks.compact; state fields are on BaseAgentState. Returns
+    agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
     """
-    from agent.hooks.compact import _compact_reminder
+    from agent.graph.hooks.compact import _compact_reminder
     from agent.state import build_agent_state
 
     return build_agent_state(EMPTY), _compact_reminder
@@ -349,7 +349,7 @@ async def test_claim_compact_request_summary_message_carries_msg_type(
     summary message with ava_msg_type=compact_request — the two compact paths
     must produce the same message contract so the frontend never sees an
     unrecognized system_marker."""
-    from agent.hooks.compact import build_compact_transition
+    from agent.graph.hooks.compact import build_compact_transition
 
     transition = build_compact_transition(
         "the summary",

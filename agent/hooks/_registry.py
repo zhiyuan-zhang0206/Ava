@@ -4,7 +4,7 @@ A hook is a subclass of `Hook` (PyTorch `nn.Module` style): override the typed
 `__call__`, and — because the base pins the signature every hook point shares —
 pyright (strict) flags an incompatible override. A plugin declares *instances* in its
 `contribute()` (`PluginContributions.before_llm` / `before_exec` / `after_exec` /
-`after_init`); the framework's own are `agent.hooks.framework.framework_hooks()`.
+`after_init`); the framework's own are `agent.graph.hooks.framework.framework_hooks()`.
 `make_hook_runner(name, default_next, hooks)` closes over the list the graph build hands it.
 An instance is callable, so the runner invokes each with `hook(state, runtime, config)`.
 
@@ -57,8 +57,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.nodes import NodeName
-from base.agents.context import AvaContext, agent_id_from_config
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.context import AvaContext
 from base.log import logger
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import GraphHook, HookPoint
@@ -210,14 +209,6 @@ def make_hook_runner(
       framework hooks and for `None` returns.
     - Final return Command(update=update_minus_goto, goto=next_node)
     """
-    # node_lifecycle wraps with enter/exit events + publish a timeline snapshot —
-    # hook container node is part of the graph; death observability same as
-    # claim/llm/exec; `hook_name` matches NodeName (before_llm / before_exec /
-    # after_exec), used directly as the node name to emit.
-    from agent.graph.node_log import (
-        node_lifecycle,  # local import to avoid top-level cycle (graph→hooks→graph)
-    )
-
     hooks = tuple(hooks)
 
     async def run(
@@ -225,65 +216,44 @@ def make_hook_runner(
         runtime: Runtime[AvaContext],
         config: RunnableConfig,
     ) -> Command[NodeName]:
-        event_publisher = runtime.context.event_publisher
-        assert event_publisher is not None, (  # noqa: S101
-            f"hook runner ({hook_name}) requires ctx.event_publisher"
-        )
-        async with node_lifecycle(
-            hook_name,
-            messages=state.messages,
-            event_publisher=event_publisher,
-            agent_id=agent_id_from_config(config),
-            turn_progress=runtime.context.turn_progress,
-            read_stall_seconds=lambda: runtime.context.require_agent().read(
-                "agent", "node_stall_dump_seconds"
-            ),
-            timeline_inputs=TimelineReadInputs(
-                runtime.context.require_clock,
-                lambda: runtime.context.require_agent().read("general", "message_timestamps"),
-            ),
-            limit_reader=lambda: runtime.context.require_agent().read(
-                "display", "timeline_default_limit"
-            ),
-        ):
-            update: dict[str, Any] = {}
-            key_writer: dict[str, str] = {}  # key -> name of the hook that set it
-            # Snapshot state schema's model_fields once for reducer lookup during
-            # co-write detection.  Keys with a non-trivial reducer (e.g. messages →
-            # add_messages) allow multiple hooks to co-write without clobbering —
-            # the reducer merges the values rather than overwriting.
-            model_fields = type(state).model_fields  # pyright: ignore[reportUnknownMemberType]
-            # Per-hook timings — one event per hook-runner pass, so a slow
-            # before_llm / before_exec node can be attributed to the hook that
-            # ate the time without a live debugger (the node span alone is a
-            # black box: no sub-spans, no events).
-            timings: list[tuple[str, float]] = []
-            for plugin, hook in hooks:
-                started = time.monotonic()
-                result = await hook(state, runtime, config)
-                timings.append((hook.name, time.monotonic() - started))
-                if not result:
-                    continue
-                # Activation telemetry (philosophy §6): a plugin hook that
-                # returned a state update did something to this turn — record
-                # which keys it touched. A None / {} return is pure observation
-                # and stays free. Plugin state-field writes travel through this
-                # dict, so the `state` surface needs no separate probe.
-                activation.record(
-                    plugin,
-                    "hooks",
-                    hook_name,
-                    detail=f"{hook.name} wrote {','.join(sorted(result))}",  # pyright: ignore[reportUnknownArgumentType]
-                    model=runtime.context.require_agent().brain.llm_model,
-                )
-                _merge_result(update, key_writer, result, hook.name, hook_name, model_fields)
-            _log_hook_timings(hook_name, timings)
-            if "goto" in update:
-                next_node = update.pop("goto")
-            elif callable(default_next):
-                next_node = default_next(state)
-            else:
-                next_node = default_next
-            return Command[NodeName](update=update, goto=next_node)
+        update: dict[str, Any] = {}
+        key_writer: dict[str, str] = {}  # key -> name of the hook that set it
+        # Snapshot state schema's model_fields once for reducer lookup during
+        # co-write detection.  Keys with a non-trivial reducer (e.g. messages →
+        # add_messages) allow multiple hooks to co-write without clobbering —
+        # the reducer merges the values rather than overwriting.
+        model_fields = type(state).model_fields  # pyright: ignore[reportUnknownMemberType]
+        # Per-hook timings — one event per hook-runner pass, so a slow
+        # before_llm / before_exec node can be attributed to the hook that
+        # ate the time without a live debugger (the node span alone is a
+        # black box: no sub-spans, no events).
+        timings: list[tuple[str, float]] = []
+        for plugin, hook in hooks:
+            started = time.monotonic()
+            result = await hook(state, runtime, config)
+            timings.append((hook.name, time.monotonic() - started))
+            if not result:
+                continue
+            # Activation telemetry (philosophy §6): a plugin hook that
+            # returned a state update did something to this turn — record
+            # which keys it touched. A None / {} return is pure observation
+            # and stays free. Plugin state-field writes travel through this
+            # dict, so the `state` surface needs no separate probe.
+            activation.record(
+                plugin,
+                "hooks",
+                hook_name,
+                detail=f"{hook.name} wrote {','.join(sorted(result))}",  # pyright: ignore[reportUnknownArgumentType]
+                model=runtime.context.require_agent().brain.llm_model,
+            )
+            _merge_result(update, key_writer, result, hook.name, hook_name, model_fields)
+        _log_hook_timings(hook_name, timings)
+        if "goto" in update:
+            next_node = update.pop("goto")
+        elif callable(default_next):
+            next_node = default_next(state)
+        else:
+            next_node = default_next
+        return Command[NodeName](update=update, goto=next_node)
 
     return run

@@ -20,13 +20,13 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._chat_inbound import build_chat_inbound
-from agent.graph.prompt import context_notes
-from agent.hooks import compact
-from agent.hooks.compact import (
+from agent.graph.hooks import compact
+from agent.graph.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
     CompactionFailedError,
     conversation_messages,
 )
+from agent.graph.prompt import context_notes
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, security_note_message, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END

@@ -13,7 +13,11 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.node import BEFORE_LLM, END, claim_node
-from agent.hooks.compact import COMPACTION_INSTRUCTION, compose_summary_message, generate_summary
+from agent.graph.hooks.compact import (
+    COMPACTION_INSTRUCTION,
+    compose_summary_message,
+    generate_summary,
+)
 from agent.messages import inbound_message
 from agent.state import AgentState
 from agent.tests.test_compact import (
@@ -53,7 +57,7 @@ async def test_compact_reminder_fires_in_band(
     """reminder_tokens < est <= ceiling, fresh window, no agent inbound →
     inject the qualitative system_note + mark reminder_shown; not a force
     (compact.version unchanged, no history replacement)."""
-    from agent.hooks import compact as _p
+    from agent.graph.hooks import compact as _p
 
     state_cls, wrap_fn = _ava_compact_loaded
     _patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
@@ -310,7 +314,7 @@ async def test_compact_summary_emits_compact_done(
     machine_identity: MachineIdentity,
 ):
     """When claim processes compact_summary (agent-written summary), emit CompactDone
-    at the same place where history is replaced — so UI refreshes, aligning with auto path (agent/hooks/compact.py).
+    at the same place where history is replaced — so UI refreshes, aligning with auto path (agent/graph/hooks/compact.py).
     User-triggered compact_request goes through the same compact_payload block, emit is path-agnostic."""
     tid = spawn_agent(
         catalog=model_catalog,

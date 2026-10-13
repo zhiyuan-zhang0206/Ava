@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
+from agent.graph.hooks.compact import CompactionFailedError
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
-from agent.hooks.compact import CompactionFailedError
 from agent.startup import CHECKPOINT_INTERVAL_KEY
 from agent.state import BaseAgentState
 from agent.state_channels import (

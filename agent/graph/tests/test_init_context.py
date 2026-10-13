@@ -20,8 +20,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import _init_context
 from agent.graph._init_context import init_context_node
+from agent.graph.hooks import compact
 from agent.graph.llm_errors import LlmLedger
-from agent.hooks import compact
 from agent.state import AgentState, ContextReset
 from base.agents.context import AvaContext
 from base.clock import Clock
@@ -347,7 +347,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     driven in sequence, with the snapshot handed from the node that records it to
     the hook that reads it.
     """
-    from agent.hooks.framework import framework_hooks
+    from agent.graph.hooks.framework import framework_hooks
 
     d = skills_dir()
     (d / "alpha").mkdir(parents=True)
@@ -402,9 +402,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     """
     from langgraph.graph.message import add_messages
 
-    from agent.hooks import compact as compact_mod
+    from agent.graph.hooks import compact as compact_mod
+    from agent.graph.hooks.framework import framework_hooks
     from agent.hooks import make_hook_runner
-    from agent.hooks.framework import framework_hooks
     from base.lm.context_budget import ContextBudget
 
     d = skills_dir()
@@ -568,7 +568,7 @@ def test_capabilities_snapshot_survives_the_checkpoint_round_trip() -> None:
 async def test_compacted_takeover_context_restores_explanation_before_summary(
     monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
 ) -> None:
-    from agent.hooks.compact import build_compact_transition
+    from agent.graph.hooks.compact import build_compact_transition
 
     _fake_notes(monkeypatch, "memory")
     prior = AgentState(

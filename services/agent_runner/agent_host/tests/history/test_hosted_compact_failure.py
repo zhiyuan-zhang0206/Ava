@@ -18,7 +18,7 @@ from redis.asyncio.client import PubSub
 
 from agent import state as states
 from agent.graph.claim.node import claim_node
-from agent.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
+from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.tests.claim.test_inbound_ownership import agent_row
@@ -231,7 +231,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     agent = agent_row(db_conn)
     provider_error = RuntimeError("compaction provider unavailable")
     summary = AsyncMock(side_effect=provider_error)
-    monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
+    monkeypatch.setattr("agent.graph.hooks.compact.generate_summary", summary)
     replies: list[str] = []
 
     graph, saver, config, history = await _prepare_graph(aops_pool, agent, interval, replies)

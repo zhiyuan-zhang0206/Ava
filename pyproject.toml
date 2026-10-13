@@ -383,7 +383,7 @@ ignore_imports = [
     # and flush its checkpoint before settling the turn. Import only the taxonomy leaf.
     "services.agent_runner.agent_host.host -> agent.graph.llm_errors",
     # Compaction exhaustion is another expected native turn abort, handled by the host.
-    "services.agent_runner.agent_host.host -> agent.hooks.compact",
+    "services.agent_runner.agent_host.host -> agent.graph.hooks.compact",
     # The host owns the final durable checkpoint/trace link and the node-log tail.
     # The extracted failure boundary retains the same final trace correlation.
     "services.agent_runner.agent_host.invocation -> agent.turn.trace_checkpoint",
@@ -423,14 +423,14 @@ ignore_imports = [
     "services.agent_runner.agent_host.invocation -> agent.state",
     # Guarded compact invocation reuses native summary/transition/init owners;
     # these exact dependencies do not expose the kernel to other services.
-    "services.agent_runner.agent_host.invocation.compact.apply -> agent.hooks.compact",
+    "services.agent_runner.agent_host.invocation.compact.apply -> agent.graph.hooks.compact",
     "services.agent_runner.agent_host.invocation.compact.apply -> agent.impersonation_handoff",
     "services.agent_runner.agent_host.invocation.compact.apply -> agent.nodes",
     "services.agent_runner.agent_host.invocation.compact.apply -> agent.state",
-    "services.agent_runner.agent_host.invocation.compact.checkpoint -> agent.hooks.compact",
+    "services.agent_runner.agent_host.invocation.compact.checkpoint -> agent.graph.hooks.compact",
     "services.agent_runner.agent_host.invocation.compact.checkpoint -> agent.state",
     "services.agent_runner.agent_host.invocation.compact.execute -> agent.graph.interrupt",
-    "services.agent_runner.agent_host.invocation.compact.execute -> agent.hooks.compact",
+    "services.agent_runner.agent_host.invocation.compact.execute -> agent.graph.hooks.compact",
     "services.agent_runner.agent_host.invocation.compact.execute -> agent.hooks.compact_anchor",
     "services.agent_runner.agent_host.invocation.compact.execute -> agent.state",
     "services.agent_runner.agent_host.invocation.compact.source -> agent.state",

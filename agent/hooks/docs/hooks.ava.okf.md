@@ -16,8 +16,8 @@ Together with SDK wraps (a plugin's declared `SdkWrap`, applied by `ava/sdk_surf
 ## Core Responsibilities
 
 - **`Hook` base class** (`agent/hooks/_registry.py:Hook`, `ABC`): subclasses override the typed `async def __call__(self, state, runtime, config, /) -> dict | None`. The base locks the signature—under pyright strict, incompatible overrides raise `reportIncompatibleMethodOverride`; not overriding leaves an uninstantiable abstract class. Optional `.name` property (defaults to class name) labels co-write conflict messages.
-- **Hook declaration**: a plugin's `contribute()` returns `PluginContributions(before_llm=(...), before_exec=(...), after_exec=(...), after_init=(...))` of `Hook` **instances** (not class, not bare function); nothing is registered at import. The framework's own are `agent/hooks/framework.py:framework_hooks()`
-- **Hook execution**: `make_hook_runner(name, default_next, hooks)` creates a node function at graph build time—`hooks` is the `(plugin | None, hook)` sequence the build hands it (plugins' first, then the framework's), fixed for the life of that graph; the runner loops `await hook(state, runtime, config)`—the instance can be called directly (`Hook.__call__`), which is identical in form to the old bare-function calling style.
+- **Hook declaration**: a plugin's `contribute()` returns `PluginContributions(before_llm=(...), before_exec=(...), after_exec=(...), after_init=(...))` of `Hook` **instances** (not class, not bare function); nothing is registered at import. The framework's own are `agent/graph/hooks/framework.py:framework_hooks()`
+- **Hook execution**: `make_hook_runner(name, default_next, hooks)` creates the hook loop at graph build time; the graph wraps it in the node lifecycle events (`agent/graph/hooks/node.py:hook_node`)—`hooks` is the `(plugin | None, hook)` sequence the build hands it (plugins' first, then the framework's), fixed for the life of that graph; the runner loops `await hook(state, runtime, config)`—the instance can be called directly (`Hook.__call__`), which is identical in form to the old bare-function calling style.
 - **Hook points**: `HookName = HookPoint = Literal["before_llm", "before_exec", "after_exec", "after_init"]` (`base/packages/plugins/extensions.py`)
 - **Co-write arbitration**: If two hooks within the same run write to the same state key—if that key has a non-trivial reducer in the state schema (e.g. the `messages` channel's guarded reducer), the runner merges both values using the reducer; if no reducer, raises `RuntimeError` fail-loud (refusing silent last-wins, preventing one hook's wholesale replacement from swallowing another hook's appended content)
 - **Instance state**: subclasses carry per-hook state/configuration in `__init__` on `self`—declarations hold instances, not bare functions. Built-in `_CompactReminderHook` / `_RepairDanglingToolPairingHook` are module-level singletons that `framework_hooks()` returns.
@@ -32,18 +32,18 @@ Together with SDK wraps (a plugin's declared `SdkWrap`, applied by `ava/sdk_surf
 ## Entry Points
 
 - `agent/hooks/_registry.py:Hook` — Base class; subclasses override `__call__`
-- `agent/hooks/framework.py:framework_hooks()` — The framework's own hooks per edge
-- `agent/hooks/_registry.py:make_hook_runner()` — Called at graph build time
+- `agent/graph/hooks/framework.py:framework_hooks()` — The framework's own hooks per edge
+- `agent/hooks/_registry.py:make_hook_runner()` — The hook loop; `agent/graph/hooks/node.py:hook_node()` wraps it at graph build time
 - `agent/hooks/__init__.py` — Public API re-exports (`Hook`, `HookName`, `make_hook_runner`)
 - `agent/hooks/understanding_chunks.py` — when understanding chunks are enqueued: after an llm turn (`due_chunk_update`) and at compaction (`enqueue_closing_chunk`, called by `stamp_compact_boundary`); see [[base/agents/history/hierarchy/docs/chunks.ava.okf.md]]
-- `agent/hooks/history_dump.py:dump_history()` — pre-compact JSONL dump of the full conversation, written by both compaction paths (`agent/graph/claim/_decide.py` and `agent/hooks/compact.py`) before the history is wiped
+- `agent/hooks/history_dump.py:dump_history()` — pre-compact JSONL dump of the full conversation, written by both compaction paths (`agent/graph/claim/_decide.py` and `agent/graph/hooks/compact.py`) before the history is wiped
 
 ## Notes
 
 - **after_init** is the earliest hook point: its container node sits right after `START` and before `init_context`, so its state edits land before the standing message head is laid down (see [[agent/graph/docs/graph.ava.okf.md]] for placement). Example: the ava_code plugin registers `validate_cwd_after_init` here to repair a persisted logical cwd that cannot be statted or is not a directory, without mutating the Python process cwd.
 - A hook returning `None` means "no modification"—it produces no state update
 - Hook signatures are uniform, not distinguishing between nodes—the same `Hook` subclass instance can theoretically be registered at multiple hook points
-- Built-in before_llm hooks (compact / repair / capability-index drift) — the three unconditional built-ins and their registration order: [[agent/hooks/docs/builtin-before-llm.ava.okf.md]].
+- Built-in before_llm hooks (compact / repair / capability-index drift) — the three unconditional built-ins and their registration order: [[agent/graph/hooks/docs/builtin-before-llm.ava.okf.md]].
 - Plugin hooks are also `Hook` subclasses (e.g., `ava_builtins/plugins/ava_sdk_reminder/agent_runtime.py:_SdkReminderAfterExecHook`, `ava_builtins/plugins/ava_code/agent_runtime.py:_InjectCwdNotesAfterExecHook`, `plugins/ava_memory`'s recall hook, etc.), written in the same style as built-in hooks—plugin authors don't need to care about built-in vs plugin distinction
 - The permission hook example (`demos/permission-hooks/sensitive_op_gate.py:_SensitiveOpGateHook`) demonstrates the hook system's access control application: two-stage interception (block/warn), intercepting sensitive operations (force push, delete files, external sends, etc.) in before_exec; when blocking, returns `goto: "after_exec"` to skip the exec node
 

@@ -21,14 +21,14 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.graph.hooks import compact
+from agent.graph.hooks.capabilities import _newly_installed_skills
+from agent.graph.hooks.framework import framework_hooks
 from agent.graph.prompt.capabilities import (
     _NEW_SKILLS_MAX_ENTRIES,
     index_drift,
     indexed_skill_identifiers,
 )
-from agent.hooks import compact
-from agent.hooks.capabilities import _newly_installed_skills
-from agent.hooks.framework import framework_hooks
 from agent.state import AgentState, CapabilitiesState
 from base import paths
 from base.agents.context import AvaContext

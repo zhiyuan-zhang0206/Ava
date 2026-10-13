@@ -114,7 +114,7 @@ def test_real_sdk_and_agent_consumers_supply_display_and_web() -> None:
         ("agent/graph/claim/node.py", "display"),
         ("agent/graph/exec/node.py", "display"),
         ("agent/graph/llm/node.py", "display"),
-        ("agent/hooks/_registry.py", "display"),
+        ("agent/graph/hooks/node.py", "display"),
     ):
         assert domain in {
             owner for owner, _field in explicit_config_reads((root / path).read_text(), path)

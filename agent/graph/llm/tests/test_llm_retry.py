@@ -17,6 +17,7 @@ from langchain_core.exceptions import ModelConnectionError
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.graph.hooks.compact import CompactionFailedError
 from agent.graph.llm import _retry, node
 from agent.graph.llm._retry import (
     RETRY_JITTER_SPAN_S,
@@ -34,7 +35,6 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
-from agent.hooks.compact import CompactionFailedError
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings

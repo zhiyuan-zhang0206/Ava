@@ -23,7 +23,7 @@ from agent.db import ClaimedInbound, finalize_claimed_inbounds
 from agent.graph.claim._batch import _defer_chats_to_pending
 from agent.graph.claim._dispatch import _BatchState
 from agent.graph.claim._routing import ClaimGoto, _Routing
-from agent.hooks.compact import (
+from agent.graph.hooks.compact import (
     build_compact_transition,
     emit_compaction_monitoring,
     stamp_compact_boundary,

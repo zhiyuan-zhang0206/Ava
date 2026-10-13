@@ -5,7 +5,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from agent.hooks.compact import compose_summary_message
+from agent.graph.hooks.compact import compose_summary_message
 from agent.state import CompactState, ContextReset
 from base.agents.compaction.execution import CompactCommand
 from base.agents.compaction.models import CompactHeldError, CompactMarker

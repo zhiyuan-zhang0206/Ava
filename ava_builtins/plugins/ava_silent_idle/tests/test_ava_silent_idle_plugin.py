@@ -25,7 +25,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.hooks import compact
+from agent.graph.hooks import compact
 from agent.messages import NoteTag
 from agent.state import build_agent_state
 from base.agents.context import AvaContext

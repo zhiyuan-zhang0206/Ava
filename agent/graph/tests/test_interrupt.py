@@ -19,9 +19,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph import _init_context, interrupt
+from agent.graph.hooks import compact
 from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm_errors import LlmLedger
-from agent.hooks import compact
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.clock import Clock
@@ -595,8 +595,8 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
 
     from agent.graph._init_context import init_context_node
     from agent.graph.claim.node import claim_node
+    from agent.graph.hooks.compact import _compact_reminder, auto_compact_will_fire
     from agent.graph.llm.node import llm_node
-    from agent.hooks.compact import _compact_reminder, auto_compact_will_fire
     from agent.state import AgentState, checkpoint_msgpack_allowlist
     from base.agents.context import AvaContext
     from base.lm.context_budget import ContextBudget

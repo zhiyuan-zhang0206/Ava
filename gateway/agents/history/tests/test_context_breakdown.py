@@ -20,13 +20,13 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-# Load agent.graph before agent.hooks.compact to resolve the latent graph<->compact
+# Load agent.graph before agent.graph.hooks.compact to resolve the latent graph<->compact
 # import cycle (compact.py imports agent.hooks; claim._decide imports back from
 # compact). Needed only because this test uses the write-side helper below —
 # base.agents.history.context_breakdown itself must NOT need it (see
 # test_bucket_messages_works_without_agent_graph).
 import agent.graph  # noqa: F401  # pyright: ignore[reportUnusedImport]
-from agent.hooks.compact import compose_summary_message
+from agent.graph.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, inbound_message, system_note_message
 from base.agents.history.context_breakdown import (
     SECTION_SPLIT_THRESHOLD_TOKENS,
@@ -324,7 +324,7 @@ def test_no_request_yet_is_an_empty_breakdown() -> None:
 
 def test_bucket_messages_works_without_agent_graph() -> None:
     """Regression: a gateway process never imports agent.graph, and the breakdown
-    must not pull it in. The old lazy `from agent.hooks.compact import
+    must not pull it in. The old lazy `from agent.graph.hooks.compact import
     COMPACT_SUMMARY_HEADER` inside bucket_messages hit the latent
     compact<->graph import cycle on first call in exactly that process shape,
     500-ing every GET /context-breakdown in prod (the in-process tests above

@@ -9,7 +9,7 @@ Public API (re-exported from `_registry`):
   `(plugin, hook)` pairs in run order
 - `Hook` (base class) / `HookName`. Plugin authors subclass `Hook` and override the typed
   `__call__`, then declare instances in `contribute()`.
-- `agent.hooks.framework.framework_hooks()` — the framework's own hooks (repair, compact,
+- `agent.graph.hooks.framework.framework_hooks()` — the framework's own hooks (repair, compact,
   capability-index drift).
 
 Hook declaration example (in a plugin's `agent_runtime.py`):
@@ -26,16 +26,14 @@ Hook declaration example (in a plugin's `agent_runtime.py`):
     def contribute() -> PluginContributions:
         return PluginContributions(before_llm=(WatchTokenCount(),))
 
-Submodules:
-- `agent.hooks.compact` — compact's `generate_summary()` utility function,
-  used by the claim node. Actual hook registration lives in
-  `ava_builtins/plugins/ava_compact/plugin.py`.
+Submodules (the built-in hooks that need the graph kernel — compact, the capability-index
+drift check, skill recall and `framework_hooks()` — live in `agent.graph.hooks`):
 - `agent.hooks.repair` — dangling tool_use/tool_result pairing crash recovery: shared
   detection/rebuild helper + the built-in before_llm repair hook
-  (its hook is one of `framework_hooks()`).
+  (its hook is one of `agent.graph.hooks.framework.framework_hooks()`).
 - `agent.hooks.history_dump` — the pre-compact JSONL dump of the full
   conversation, written by every compaction path (the claim node's and
-  `agent.hooks.compact`'s) before the history is wiped.
+  `agent.graph.hooks.compact`'s) before the history is wiped.
 """
 
 from ._registry import Hook, HookName, make_hook_runner

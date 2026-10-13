@@ -61,4 +61,4 @@ class _DeliverSecurityFindingsHook(Hook):
 
 
 # Module-level singleton — the instance `framework_hooks()` hands the graph build.
-_deliver_security_findings = _DeliverSecurityFindingsHook()
+deliver_security_findings = _DeliverSecurityFindingsHook()
