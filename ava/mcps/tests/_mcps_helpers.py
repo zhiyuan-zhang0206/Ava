@@ -52,13 +52,15 @@ def tool_source(
     *,
     timeout_seconds: Callable[[], float] = lambda: 5.0,
     cache: object | None = None,
+    validate_identity: Callable[[], object] = lambda: None,
 ) -> ToolSource:
-    """A source over the given daemon client: no cache unless one is passed, no identity check."""
+    """A source over the given daemon client: no cache unless one is passed, no identity check
+    unless `validate_identity` is."""
     return ToolSource(
         remote=remote,
         timeout_seconds=timeout_seconds,
         cache=cache if cache is not None else NoCache(),  # pyright: ignore[reportArgumentType]
-        validate_identity=lambda: None,
+        validate_identity=validate_identity,
     )
 
 
