@@ -66,7 +66,7 @@ routing applies to an accepted assignment, not merely a spawn ancestry edge.
 
 ## Communication ownership
 
-`ava_builtins/plugins/ava_fleet/agent_runtime.py:_fleet_self_section` keeps the
+`ava_builtins/plugins/ava_fleet/agent_runtime.py:fleet_self_section` keeps the
 optional capability entry point and essential delivery semantics resident:
 conversation output is not peer delivery, useful messages go to action owners,
 protocol receipts are distinct from completion, duplicate reporting is avoided,

@@ -19,7 +19,7 @@ import pytest
 import ava
 from ava import web
 from ava.sdk_surface import process_context
-from ava.tests.web._web_helpers import _FakeResp
+from ava.tests.web._web_helpers import FakeResp
 from base.config import settings
 from base.lm.catalog.decide.types import Decision, DecisionRequestError, Question
 from base.lm.decision import call as decide_call
@@ -77,7 +77,7 @@ def _fake_decide(
 
 def _fetch() -> list[str]:
     payload = json.dumps({"code": 200, "data": {"title": "", "url": _URL, "content": _PAGE}})
-    with patch.object(web.urllib.request, "urlopen", return_value=_FakeResp(payload.encode())):
+    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload.encode())):
         return ava.web.fetch([(_URL, "summarize")])
 
 

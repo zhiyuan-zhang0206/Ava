@@ -30,7 +30,7 @@ from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
 from base.paths import workspace_dir
 
-from ._prompt_sections import _coding_tools_section, _engineering_workflow_section
+from ._prompt_sections import coding_tools_section, engineering_workflow_section
 from ._state import AvaCodeState
 
 
@@ -120,7 +120,7 @@ def _logical_cwd_error(cwd: Path) -> OSError | None:
     return None
 
 
-class _ValidateCwdAfterInitHook(Hook):
+class ValidateCwdAfterInitHook(Hook):
     """Initialize an absent cwd channel or repair an unusable persisted directory.
 
     The Python process cwd is deliberately outside plugin state: SDK wrappers
@@ -164,8 +164,8 @@ class _ValidateCwdAfterInitHook(Hook):
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
-        system_prompt_sections=(_coding_tools_section, _engineering_workflow_section),
-        after_init=(_ValidateCwdAfterInitHook(),),
+        system_prompt_sections=(coding_tools_section, engineering_workflow_section),
+        after_init=(ValidateCwdAfterInitHook(),),
         after_exec=(_InjectCwdNotesAfterExecHook(),),
         state=(AvaCodeState,),
     )

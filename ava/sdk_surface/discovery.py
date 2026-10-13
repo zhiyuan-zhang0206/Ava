@@ -19,11 +19,11 @@ from .const import is_documented_const
 # ── Kind predicates ────────────────────────────────────────────────────────
 
 
-def _is_container(obj: Any) -> bool:
+def is_container(obj: Any) -> bool:
     return inspect.ismodule(obj) or inspect.isclass(obj) or isinstance(obj, SimpleNamespace)
 
 
-def _is_element(obj: Any) -> bool:
+def is_element(obj: Any) -> bool:
     return inspect.isroutine(obj)
 
 
@@ -40,12 +40,12 @@ class _Constant:
     doc: str
 
 
-def _is_skill_object(obj: Any) -> bool:
+def is_skill_object(obj: Any) -> bool:
     """True if `obj` is a skill proxy or namespace (has `_ava_skill_kind`)."""
     return hasattr(obj, "_ava_skill_kind")
 
 
-def _is_namespace(obj: Any) -> bool:
+def is_namespace(obj: Any) -> bool:
     """True when `obj` is a module or a SimpleNamespace plugin namespace."""
     return obj is not None and (inspect.ismodule(obj) or isinstance(obj, SimpleNamespace))
 
@@ -53,7 +53,7 @@ def _is_namespace(obj: Any) -> bool:
 # ── Children discovery ─────────────────────────────────────────────────────
 
 
-def _children(
+def children(
     container: Any, *, hidden_members: frozenset[str] = frozenset()
 ) -> list[tuple[str, Any]]:
     """Children of a container. `hidden_members` (dotted `ava` paths, e.g.
@@ -265,7 +265,7 @@ def _resolve_child(
         if name in docs or name in annotations:
             return _Constant(type_str=annotations.get(name, ""), doc=docs.get(name, ""))
         return None
-    if _is_container(attr) or _is_element(attr) or is_documented_const(attr):
+    if is_container(attr) or is_element(attr) or is_documented_const(attr):
         return attr
     return _Constant(
         type_str=annotations.get(name, type(attr).__name__),

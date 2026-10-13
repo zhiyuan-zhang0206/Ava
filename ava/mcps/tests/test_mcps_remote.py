@@ -12,8 +12,8 @@ import pytest
 
 import ava.mcps as mcps_mod
 import ava.mcps._remote as remote_mod
-from ava.mcps.tests._mcps_helpers import _make_tool
 from ava.mcps.tests._mcps_helpers import fake_config as fake_config
+from ava.mcps.tests._mcps_helpers import make_tool
 from ava.mcps.tests._mcps_helpers import mock_session as mock_session
 
 # ─── _RemoteMCPClient (mock Unix socket) ───────────────────────────────────
@@ -379,7 +379,7 @@ def test_proxy_tool_docstring_includes_schema(mock_session: MagicMock) -> None:
     """tool has input_schema → docstring includes JSON schema (for agent to see)."""
     mock_session.list_tools.return_value = MagicMock(
         tools=[
-            _make_tool(
+            make_tool(
                 "read_file",
                 "Read a file",
                 schema={"type": "object", "properties": {"path": {"type": "string"}}},
@@ -484,7 +484,7 @@ def test_make_tool_callable_attaches_signature(mock_session: MagicMock) -> None:
     """proxy.<tool> callable carries signature synthesized from schema → inspect.signature sees real names."""
     mock_session.list_tools.return_value = MagicMock(
         tools=[
-            _make_tool(
+            make_tool(
                 "navigate",
                 "Go to a URL",
                 schema={
@@ -514,7 +514,7 @@ def test_tool_signature_shows_real_params_for_mcp_tool(mock_session: MagicMock) 
     """An MCP tool callable carries its real parameter names, not (**kwargs: Any)."""
     mock_session.list_tools.return_value = MagicMock(
         tools=[
-            _make_tool(
+            make_tool(
                 "navigate",
                 schema={
                     "properties": {"url": {"type": "string"}, "timeout": {"type": "integer"}},

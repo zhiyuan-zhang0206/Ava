@@ -6,7 +6,7 @@ input), discovering plugin-bundled `.mcp.json`, and merging plugin defaults
 under the machine config (machine wins on a name collision).
 
 `unit_home` points `ava_home()` (and therefore `plugins_dir()`) at a tmp dir.
-Merge/precedence tests monkeypatch `_plugin_config_paths` so they are isolated
+Merge/precedence tests monkeypatch `plugin_config_paths` so they are isolated
 from whatever the real repo `plugins/` ship.
 """
 
@@ -83,20 +83,20 @@ def test_read_servers_empty_when_section_null(tmp_path: Path) -> None:
     assert cfg_mod.read_servers(p) == {}
 
 
-# ─── _plugin_config_paths (discovery) ────────────────────────────────────
+# ─── plugin_config_paths (discovery) ────────────────────────────────────
 
 
 def test_plugin_config_paths_finds_installed_plugin(unit_home: Path) -> None:
     """An installed plugin's `.mcp.json` under `$AVA_HOME/plugins/<name>/` is discovered."""
     mcp_json = unit_home / "plugins" / "myplugin" / ".mcp.json"
     _write(mcp_json, {"fs": {"command": "x"}})
-    assert mcp_json in cfg_mod._plugin_config_paths()
+    assert mcp_json in cfg_mod.plugin_config_paths()
 
 
 def test_plugin_config_paths_ignores_plugin_without_mcp_json(unit_home: Path) -> None:
     """A plugin dir with no `.mcp.json` contributes no path."""
     (unit_home / "plugins" / "noplugin").mkdir(parents=True)
-    assert all(p.parent.name != "noplugin" for p in cfg_mod._plugin_config_paths())
+    assert all(p.parent.name != "noplugin" for p in cfg_mod.plugin_config_paths())
 
 
 # ─── load_mcp_config (merge + precedence) ────────────────────────────────
@@ -106,13 +106,13 @@ def test_load_empty_when_nothing_configured(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     assert cfg_mod.load_mcp_config() == {}
 
 
 def test_load_returns_machine_servers(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _write(unit_home / "mcp.json", {"fs": {"command": "machine"}})
     assert cfg_mod.load_mcp_config() == {"fs": {"command": "machine"}}
 
@@ -123,7 +123,7 @@ def test_load_returns_plugin_servers_when_no_machine_config(
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"fs": {"command": "plugin"}})
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [plugin_json])
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", lambda: [plugin_json])
     assert cfg_mod.load_mcp_config() == {"fs": {"command": "plugin"}}
 
 
@@ -135,7 +135,7 @@ def test_machine_overrides_plugin_on_name_collision(
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"fs": {"command": "plugin"}, "extra": {"command": "p"}})
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [plugin_json])
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", lambda: [plugin_json])
     _write(unit_home / "mcp.json", {"fs": {"command": "machine"}})
 
     merged = cfg_mod.load_mcp_config()
@@ -151,7 +151,7 @@ def test_later_plugin_overrides_earlier(
     _write(first, {"fs": {"command": "first"}})
     _write(second, {"fs": {"command": "second"}})
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [first, second])
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", lambda: [first, second])
     assert cfg_mod.load_mcp_config() == {"fs": {"command": "second"}}
 
 
@@ -159,7 +159,7 @@ def test_builtin_mcps_folder_surfaces_chrome(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The repo's mcps/chrome/.mcp.json is scanned as a built-in source."""
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     merged = cfg_mod.load_mcp_config()
     assert "chrome" in merged
     # chrome is served through our per-agent bridge (services.desktop.browser.mcp_wrapper),
@@ -175,14 +175,14 @@ def test_builtin_mcps_folder_surfaces_chrome(
 def test_builtin_command_is_not_uv(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No built-in server may launch through `uv run` — one resident uv wrapper
     process per agent per server is pure overhead at high agent density."""
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     for name, spec in cfg_mod.load_mcp_config().items():
         assert spec["command"] != "uv", f"built-in {name} still launches via uv"
 
 
 def test_machine_config_overrides_builtin(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A machine mcp.json entry wins over a same-named built-in."""
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _write(unit_home / "mcp.json", {"chrome": {"command": "OVERRIDE"}})
     assert cfg_mod.load_mcp_config()["chrome"] == {"command": "OVERRIDE"}
 
@@ -205,7 +205,7 @@ def test_installed_mcp_surfaces_when_registered(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _install_mcp(unit_home, "acme", {"command": ".venv/bin/python", "args": ["-m", "acme"]})
     assert "acme" in cfg_mod.load_mcp_config()
 
@@ -215,7 +215,7 @@ def test_installed_mcp_ignored_without_registry_row(
 ) -> None:
     """A stray dir under the load dir with no `type="mcp"` registry row is not loaded."""
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _write(unit_home / "mcps" / "stray" / ".mcp.json", {"stray": {"command": "x"}})
     assert "stray" not in cfg_mod.load_mcp_config()
 
@@ -223,7 +223,7 @@ def test_installed_mcp_ignored_without_registry_row(
 def test_machine_overrides_installed(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Machine config is the top layer: it wins over a same-named installed server."""
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _install_mcp(unit_home, "acme", {"command": "installed"})
     _write(unit_home / "mcp.json", {"acme": {"command": "machine"}})
     assert cfg_mod.load_mcp_config()["acme"] == {"command": "machine"}
@@ -236,7 +236,7 @@ def test_installed_overrides_plugin(
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"acme": {"command": "plugin"}})
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [plugin_json])
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", lambda: [plugin_json])
     _install_mcp(unit_home, "acme", {"command": "installed"})
     assert cfg_mod.load_mcp_config()["acme"] == {"command": "installed"}
 
@@ -294,7 +294,7 @@ def test_server_cwd_plugin_is_none(
 ) -> None:
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"pserver": {"command": "npx"}})
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [plugin_json])
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", lambda: [plugin_json])
     assert cfg_mod.server_cwd("pserver") is None
 
 
@@ -463,7 +463,7 @@ def test_builtin_mcps_folder_surfaces_computer_use(
     The computer_use server is fronted the same way as chrome: shared="computer_use"
     tells the MCP daemon to dial the per-machine computer-mcp service directly,
     and the wrapper command supports older daemons."""
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     merged = cfg_mod.load_mcp_config()
     assert "computer_use" in merged
     assert merged["computer_use"]["shared"] == "computer_use"
