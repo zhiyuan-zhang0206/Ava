@@ -1,6 +1,6 @@
 """Consumer-local opt-in fixtures for this test directory."""
 
-from tests.fixtures.log_capture import loguru_records as loguru_records
+from base.log.tests.log_records import loguru_records as loguru_records
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
 from tests.fixtures.unit.sdk import sdk_identity as sdk_identity

@@ -14,6 +14,7 @@ import pytest
 
 import ava
 from agent.extensions import plugin_state_codec
+from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
 from ava import boot, impersonation
 from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import process_context
@@ -23,7 +24,6 @@ from base.agents.impersonation.status import LOG_PROTOCOL_VERSION
 from base.config import ConfigBoot
 from base.db import Database, code_version_gate, connections
 from base.host.proc import run_bounded
-from tests.factories.external_attachment import attached_runtime as attached_runtime
 
 
 class _RestoreCursor:

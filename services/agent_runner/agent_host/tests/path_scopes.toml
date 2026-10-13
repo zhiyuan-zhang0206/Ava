@@ -20,7 +20,7 @@
     "test_circuit_breaker.py",
     "test_circuit_breaker_audit.py",
 ]
-"tests.fixtures.log_capture" = [
+"base.log.tests.log_records" = [
     "test_circuit_breaker.py",
 ]
 "tests.fixtures.unit.sdk" = [

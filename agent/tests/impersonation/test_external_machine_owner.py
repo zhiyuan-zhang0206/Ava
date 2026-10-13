@@ -5,10 +5,10 @@ from typing import Any
 from unittest.mock import patch
 
 import ava
+from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
 from ava import impersonation
 from ava.sdk_surface import process_context
 from base.cluster.machine import MachineIdentity
-from tests.factories.external_attachment import attached_runtime as attached_runtime
 
 
 def test_attachment_borrows_same_machine_without_resetting_prior_cache(
