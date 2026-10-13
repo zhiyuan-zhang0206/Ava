@@ -21,12 +21,12 @@ from pathlib import Path
 import pytest
 
 from base.host.env import dotenv_boot
+from base.host.env.tests.env_files import use_env_files
 from base.host.env.tests.test_dotenv_boot import (
     point_env_at_without_db_url,
     restore_authority_env,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 from base.paths.home import resolve_ava_home
-from tests.fixtures.units import use_env_files
 
 _NO_DATA_PLANE_IDENTITY_LINES = (
     f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
