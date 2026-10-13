@@ -1,5 +1,2 @@
-[loads]
-"engine.py" = ["schedules"]
-
 [external]
-"engine.py" = "runs the schedule script materialized from the database under $AVA_HOME/schedules"
+"engine.py" = "runs schedule scripts (the one materialized from the database under $AVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"
