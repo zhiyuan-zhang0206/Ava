@@ -191,6 +191,41 @@ def test_an_instance_of_a_value_class_is_not_ambient(
     assert _sites(tmp_path, definition + "\n") == {}
 
 
+def test_a_method_that_fills_a_local_dict_is_still_a_stateless_class(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A subscript write on a local variable changes nothing the instance keeps: the class is
+    stateless, so its module-level instance is a value and not a holder."""
+    source = """
+        class _Hook:
+            def __call__(self, version):
+                update = {}
+                update["memory"] = version
+                update["writes"] += 1
+                return update
+
+        _HOOK = _Hook()
+    """
+    assert _sites(tmp_path, source) == {}
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "def put(self, key):\n        self._table[key] = 1",
+        "def put(self, key):\n        self[key] = 1",
+        "def put(self, key):\n        self.group.table[key] += 1",
+        "@classmethod\n    def put(cls, key):\n        cls._table[key] = 1",
+    ],
+    ids=["self-attribute", "self", "nested-attribute", "cls-attribute"],
+)
+def test_a_subscript_write_through_self_or_cls_is_instance_state(
+    tmp_path: pathlib.Path, method: str
+) -> None:
+    source = f"class _Registry:\n    {method}\n\n_REGISTRY = _Registry()\n"
+    assert _sites(tmp_path, source) == {"ambient-instance:_REGISTRY": 1}
+
+
 def test_a_value_class_defined_in_another_module_is_resolved_through_the_import(
     tmp_path: pathlib.Path,
 ) -> None:
