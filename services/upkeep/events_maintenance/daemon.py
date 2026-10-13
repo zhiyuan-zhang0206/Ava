@@ -122,13 +122,13 @@ def events_maintenance_config(config: ConfigBoot) -> EventsMaintenanceConfig:
     )
 
 
-def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+def events_maintenance_endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
     runtime.mkdir(parents=True, exist_ok=True)
     return ServiceEndpoints.from_boot(config, runtime=runtime).of("events_maintenance")
 
 
 def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
-    return _endpoint(config, runtime=runtime).pidfile
+    return events_maintenance_endpoint(config, runtime=runtime).pidfile
 
 
 _LIVENESS_BEAT_STEP_S = 30.0
@@ -473,7 +473,7 @@ async def run(
         "resolution", config.events_maintenance_resolution_deadline_s
     )
     gauge_progress = liveness.register("registry_gauge", _REGISTRY_GAUGE_LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint(process_config, runtime=runtime)
+    endpoint = events_maintenance_endpoint(process_config, runtime=runtime)
     # Only a unit holding the Grafana credential reconciles alerts; one without it
     # carries no such loop (and no tracker to read as idle).
     reconcile_alerts = alert_reconciler.grafana_reconciliation_configured(config)

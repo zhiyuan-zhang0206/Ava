@@ -8,9 +8,5 @@ exports = ["artifact", "dump.py", "restore_drill.py", "scheduler", "walg"]
 "walg" = ["artifact", "restore_drill.py"]
 
 [debt.private-name]
-"scheduler/tests/child_import_probe.py -> dump.py#_run_backup" = 1
-"scheduler/tests/test_scheduler_shutdown.py -> dump.py#_key_file" = 1
-"tests/backup/test_run_with_progress_without_a_sink_defers.py -> dump.py#_run_backup" = 1
 "tests/child_offsite_entry.py -> dump.py#_main" = 1
-"tests/test_backup.py -> dump.py#_key_file" = 1
 "tests/test_backup.py -> dump.py#_main" = 3

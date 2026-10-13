@@ -244,13 +244,13 @@ def test_run_backup_serializes_dump_creation(
         finally:
             events.append("lock-exit")
 
-    def _run_backup(_now: datetime | None = None, **_kwargs: object) -> Path:
+    def run_locked_backup(_now: datetime | None = None, **_kwargs: object) -> Path:
         events.append("backup-body")
         artifact.write_bytes(b"encrypted")
         return artifact
 
     monkeypatch.setattr(backup, "backup_lock", _backup_lock)
-    monkeypatch.setattr(backup, "_run_backup", _run_backup)
+    monkeypatch.setattr(backup, "run_locked_backup", run_locked_backup)
 
     def _record(name: str, result: object = None) -> Callable[[Path], object]:
         def record(_path: Path, **_kwargs: object) -> object:

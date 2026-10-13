@@ -492,7 +492,6 @@ frontend = ["ui"]
 "cli/commands/lifecycle/tests/test_root_driver.py -> base/host/env/registry.py#_TEMP_DIR_KEYS" = 2
 "cli/commands/tests/test_unit_capability_commands.py -> base/cluster/authority/tests/unit_capability_support.py#_open" = 1
 "cli/tests/bootstrap/child_telemetry_exit.py -> base/telemetry/emitter.py#_FLUSH_INTERVAL_S" = 1
-"gateway/tests/extensions/test_schedule_runner.py -> services/wake/schedule_manager/engine.py#_stall_timeout_s" = 1
 "gateway/tests/lifecycle/creation/test_guarded_creation_birth.py -> ops/lifecycle/launch.py#_validate_launch_row" = 2
 "gateway/tests/lifecycle/creation/test_guarded_drafts.py -> ops/lifecycle/launch.py#_validate_launch_row" = 1
 "gateway/tests/lifecycle/creation/test_sdk_creation_birth.py -> ops/lifecycle/launch.py#_validate_launch_row" = 1

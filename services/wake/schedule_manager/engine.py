@@ -63,7 +63,7 @@ from base.paths import ava_home
 # and silently missed its Monday 9am fire. The stall guard watches the main
 # thread's stack and hard-exits after a frame has not advanced for this long,
 # so the schedule is recorded as failed (last_error) instead of a zombie.
-def _stall_timeout_s() -> float:
+def schedule_stall_timeout_seconds() -> float:
     return settings.gateway.schedule_stall_timeout_seconds
 
 
@@ -81,7 +81,7 @@ _HARD_EXIT_WAIT_S = 9.0 + FAILURE_RECORD_DEADLINE_S
 
 
 def _stall_check_interval_s() -> float:
-    return min(_SAMPLE_INTERVAL_MAX_S, _stall_timeout_s() / 4)
+    return min(_SAMPLE_INTERVAL_MAX_S, schedule_stall_timeout_seconds() / 4)
 
 
 # Frames that legitimately park the main thread for unbounded time — a
@@ -286,7 +286,9 @@ def stall_action(database: Database, schedule_id: int, message: str, run_id: int
                 "Schedule {} stall message could not be recorded in last_error; exiting without it",
                 schedule_id,
             )
-        record_run_end(database, run_id, ok=False, note=f"stalled ({_stall_timeout_s():.0f}s)")
+        record_run_end(
+            database, run_id, ok=False, note=f"stalled ({schedule_stall_timeout_seconds():.0f}s)"
+        )
     finally:
         os._exit(1)  # hard exit; the manager records the process loss
 
@@ -360,7 +362,7 @@ class StallGuard:
                 last_sig = sig
                 stalled_since = now
                 continue
-            if now - stalled_since >= _stall_timeout_s():
+            if now - stalled_since >= schedule_stall_timeout_seconds():
                 message = (
                     f"schedule runner stalled {now - stalled_since:.0f}s in "
                     f"{sig[2]} ({sig[0]}:{sig[1]}) — hard-exiting; check the "
@@ -540,7 +542,7 @@ def _run(
         # after the 2026-08-03 self-evolution miss; the command branch was
         # still open). subprocess.run kills the child on expiry and raises
         # TimeoutExpired; the manager reports terminal process loss without replay.
-        stall_timeout_s = _stall_timeout_s()
+        stall_timeout_s = schedule_stall_timeout_seconds()
         try:
             result = subprocess.run(  # noqa: S603 — command is the operator-authored schedule command
                 shlex.split(command),
