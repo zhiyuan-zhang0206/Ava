@@ -43,29 +43,7 @@ consumer contracts.
 `placement.collect_reference_evidence()` is the common collector for executed
 inputs and ordinary first-party references. Its refs-only API,
 `collect_references()`, raises `IncompleteReferenceEvidenceError` with the
-retained facts when execution inputs are unresolved. `place()` also requires
-complete subject references; it cannot silently certify a lower home from gaps.
-
-The existing patch gate temporarily calls `legacy_patch_placement()`. This
-adapter uses the same collector and subject calculation, pairs its inferred
-home with the evidence, and is only for that legacy consumer. Its result is
-explicitly marked `legacy-inference`; stderr and the census retain launch-site
-gaps. New LCA consumers must use `ReferenceEvidence` directly, never this adapter.
-
-`scripts/lint/patch_targets.py --strict-evidence` is a separate completeness
-diagnostic. It retains the existing private policy and exits 1 for unresolved
-execution inputs or existing-policy violations. `--report` does not suppress
-this diagnostic failure. Normal hooks retain the same private policy and show
-their evidence gaps. A root LCA already established from known subjects may
-still retain unknown inputs in the independent locality analysis; completeness
-failure is not a different placement conclusion.
-
-The approved component contract makes private names file-local, including
-tests. The public-contract migration audit is not yet enabled as a repository
-gate. Remove the legacy authority adapter only after its real consumers and
-private seams are reconciled and complete checks pass without exemptions.
-Test placement remains independent; a locality pass does not approve private
-authorization.
+retained facts when execution inputs are unresolved.
 
 `style.py` supplies a pure rule for qualified imports in the coordinated
 import-style migration.

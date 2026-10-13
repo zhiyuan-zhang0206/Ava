@@ -1,5 +1,32 @@
 exports = ["providers"]
 
+[debt.env-patch]
+"test_fast_services.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 1
+"test_fast_services.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
+"test_llm.py#monkeypatch.setenv os.environ.DEEPSEEK_API_KEY" = 2
+"test_llm_factory.py#monkeypatch.delenv os.environ.ANTHROPIC_API_KEY" = 1
+"test_llm_factory.py#monkeypatch.delenv os.environ.DEEPSEEK_API_KEY" = 1
+"test_llm_factory.py#monkeypatch.delenv os.environ.GEMINI_API_KEY" = 1
+"test_llm_factory.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 5
+"test_llm_factory.py#monkeypatch.setenv os.environ.DEEPSEEK_API_KEY" = 14
+"test_llm_factory.py#monkeypatch.setenv os.environ.GEMINI_API_KEY" = 7
+"test_llm_factory_new_models.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 7
+"test_llm_factory_new_models.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 5
+"test_lm_factory.py#monkeypatch.delenv os.environ.ANTHROPIC_API_KEY" = 1
+"test_lm_factory.py#monkeypatch.delenv os.environ.DASHSCOPE_API_KEY" = 1
+"test_lm_factory.py#monkeypatch.delenv os.environ.DEEPSEEK_API_KEY" = 3
+"test_lm_factory.py#monkeypatch.delenv os.environ.GEMINI_API_KEY" = 1
+"test_lm_factory.py#monkeypatch.delenv os.environ.GLM_API_KEY" = 1
+"test_lm_factory.py#monkeypatch.delenv os.environ.MIMO_API_KEY" = 1
+"test_lm_factory.py#monkeypatch.delenv os.environ.MOONSHOT_API_KEY" = 1
+"test_lm_factory.py#monkeypatch.delenv os.environ.OPENAI_API_KEY" = 1
+"test_lm_factory.py#monkeypatch.setenv os.environ.DEEPSEEK_API_KEY" = 1
+"test_per_agent_overrides.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 1
+"test_per_agent_overrides.py#monkeypatch.setenv os.environ.DEEPSEEK_API_KEY" = 1
+"test_single_attempt.py#monkeypatch.delenv os.environ.GEMINI_API_KEY" = 1
+"test_single_attempt.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 1
+"test_single_attempt.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
+
 [debt.first-party-patch]
 "test_context_budget.py#monkeypatch.setattr base.config.settings.agent.auto_compact_ceiling_tokens" = 3
 "test_context_budget.py#monkeypatch.setattr base.config.settings.agent.auto_compact_fraction" = 3
@@ -30,3 +57,9 @@ exports = ["providers"]
 "test_per_agent_overrides.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 3
 "test_single_attempt.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 1
 "test_single_attempt.py#monkeypatch.setattr base.lm.factory.resolve_available_model" = 1
+
+[debt.stdlib-patch]
+"test_lm_call.py#monkeypatch.setattr time.sleep" = 7
+
+[debt.third-party-patch]
+"test_lm_call.py#monkeypatch.setattr opentelemetry.trace.get_tracer" = 1

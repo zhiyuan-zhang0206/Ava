@@ -36,8 +36,8 @@ changing them. A request to inspect or discuss does not authorize edits.
 - [Python conventions](docs/conventions/python-conventions.md) own coding and
   structure rules: import direction, file/directory and function budgets,
   no `TYPE_CHECKING` imports, no framework `print()`, and no decorative emoji.
-- [Import layering](docs/conventions/import-layering.md) explains the contracts
-  enforced by `pyproject.toml`; [technology selection](docs/conventions/technology-selection.md)
+- [Import layering](docs/conventions/import-layering.md) explains the layering the
+  `meizel.toml` manifests state; [technology selection](docs/conventions/technology-selection.md)
   explains dependency choices.
 - [OKF index](docs/index.ava.okf.md) and component-local `docs/` describe the
   current system. Update the relevant owner in the same PR as the code.

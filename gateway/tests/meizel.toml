@@ -10,6 +10,12 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 "test_native_restart.py" = ["test_idempotency.py", "test_native_cancel.py"]
 "upload_delivery" = ["events"]
 
+[debt.env-patch]
+"test_idempotency.py#patch.dict os.environ" = 1
+"test_understanding_build_endpoints.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_understanding_build_endpoints.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_understanding_build_endpoints.py#patch.dict os.environ" = 2
+
 [debt.first-party-patch]
 "test_agent_inspect.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 7
 "test_agents_endpoints.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 1
@@ -54,3 +60,10 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 
 [debt.private-name]
 "test_native_restart.py -> test_native_cancel.py#_headers" = 1
+
+[debt.stdlib-patch]
+"test_memory_refresh.py#monkeypatch.setattr asyncio.to_thread" = 1
+
+[debt.third-party-patch]
+"test_sse.py#monkeypatch.setattr redis.asyncio.client.PubSub.get_message" = 1
+"test_sse.py#monkeypatch.setattr redis.asyncio.client.PubSub.subscribe" = 1

@@ -3,6 +3,11 @@
 "test_after_exec_hook.py" = ["surface_support.py"]
 "test_ava_code_plugin.py" = ["surface_support.py"]
 
+[debt.env-patch]
+"test_ava_code_plugin.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_ava_code_plugin.py#patch.dict os.environ" = 16
+"test_ava_code_walk.py#patch.dict os.environ" = 10
+
 [debt.first-party-patch]
 "test_ava_code_plugin.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_ava_code_plugin.py#monkeypatch.setattr base.config.settings.sandbox.exec_output_max_chars" = 1

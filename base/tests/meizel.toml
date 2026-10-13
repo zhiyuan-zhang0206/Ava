@@ -1,5 +1,14 @@
 exports = ["impersonation"]
 
+[debt.env-patch]
+"test_delivery.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_delivery.py#monkeypatch.setitem os.environ" = 2
+"test_delivery.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 3
+"test_delivery.py#monkeypatch.setitem os.environ.AVA_PROCESS_PROFILE" = 3
+"test_packages_refresh_base.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_url_secret.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_url_secret.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 6
+
 [debt.first-party-patch]
 "test_activation.py#monkeypatch.setattr base.packages.plugins.activation.emit" = 1
 "test_activation.py#monkeypatch.setattr base.packages.plugins.activation.logger" = 2
@@ -15,3 +24,6 @@ exports = ["impersonation"]
 "test_qwen_live_smoke.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 1
 "test_url_secret.py#monkeypatch.setattr base.config.domains.storage.data_plane.unit_home" = 4
 "test_url_secret.py#monkeypatch.setattr base.config.settings.general.machine_host" = 2
+
+[debt.unresolved-patch]
+"test_checkpoint_message_history.py#monkeypatch.setattr saver.serde.loads_typed" = 1

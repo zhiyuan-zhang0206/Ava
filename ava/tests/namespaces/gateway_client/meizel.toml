@@ -1,6 +1,12 @@
 [uses]
 "test_strong_creation.py" = ["test_gateway_client.py"]
 
+[debt.env-patch]
+"test_gateway_client.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 3
+"test_gateway_client_base_url.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 2
+"test_gateway_client_base_url.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
+"test_gateway_client_base_url.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 2
+
 [debt.first-party-patch]
 "test_gateway_client.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_strong_creation.py#monkeypatch.setattr ava.gateway_client.transport.retry_delay_seconds" = 1

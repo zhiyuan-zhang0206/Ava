@@ -9,7 +9,7 @@ from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
 
-__all__ = ["Projection", "is_private", "judge", "project"]
+__all__ = ["Projection", "cycle_edge", "is_private", "judge", "project", "relative"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +68,12 @@ def _site(fact: Fact) -> tuple[str, int]:
     return fact.src, fact.line
 
 
+def relative(proj: Projection) -> tuple[str, str]:
+    """The fact's source and target, relative to the directory that judges it."""
+    cut = len(proj.lca) + 1 if proj.lca else 0
+    return proj.fact.src[cut:], proj.fact.dst[cut:]
+
+
 def _where(directory: str) -> str:
     return directory or "."
 
@@ -85,6 +91,13 @@ def _undeclared(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic:
         f"L = {_where(lca)}; local edge {proj.cf} -> {proj.ct}",
         f'to declare it, add to {manifest_path(lca)}:  [uses]  "{proj.cf}" = [..., "{proj.ct}"]',
     ]
+    narrowed = manifests[lca].narrowed(proj.cf, proj.ct) if lca in manifests else []
+    if narrowed:
+        listing = ", ".join(f"{s} -> {d}" for s, d in narrowed)
+        hints.append(
+            f"{proj.cf} -> {proj.ct} is declared only for narrowed endpoints ({listing}); "
+            "this fact is outside them: fix the code, or ask for the narrowing to be widened"
+        )
     if proj.cf in reachable(graph, proj.ct):
         hints.append(
             f"declaring it closes a cycle ({proj.ct} already reaches {proj.cf}); "
@@ -127,17 +140,36 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
     return None
 
 
+def cycle_edge(proj: Projection) -> Diagnostic:
+    """A fact whose local edge is a recorded back-edge: it closes a cycle in `lca`."""
+    fact = proj.fact
+    return Diagnostic(
+        *_site(fact),
+        Code.CYCLE_EDGE,
+        f"{fact.edge()} ({fact.detail}) closes a cycle: {proj.cf} -> {proj.ct} is a back-edge "
+        f"of {_where(proj.lca)}",
+        (
+            "break the cycle: use a public door, inject the collaborator, or move the code so "
+            "the dependency points the other way",
+        ),
+        _debt(proj),
+    )
+
+
 def judge(proj: Projection, manifests: dict[str, Manifest]) -> list[Diagnostic]:
     """Every way one fact edge violates the three conditions of the rule."""
     fact = proj.fact
     found: list[Diagnostic] = []
     if not proj.exempt:
-        declared = manifests[proj.lca].uses.get(proj.cf, ()) if proj.lca in manifests else ()
-        if proj.ct not in declared:
+        manifest = manifests.get(proj.lca)
+        if manifest is None or not manifest.covering(*relative(proj)):
             found.append(_undeclared(proj, manifests))
         blocked = _blocked(proj, manifests)
         if blocked is not None:
             found.append(blocked)
+    manifest = manifests.get(proj.lca)
+    if not proj.exempt and manifest is not None and (proj.cf, proj.ct) in manifest.back:
+        found.append(cycle_edge(proj))
     found.extend(
         Diagnostic(
             *_site(fact),

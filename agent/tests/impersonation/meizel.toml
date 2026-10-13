@@ -6,6 +6,9 @@
 "test_impersonation_transport_integration.py" = ["handoff_inputs.py"]
 "test_successor_lease_binding.py" = ["test_impersonation.py"]
 
+[debt.env-patch]
+"test_impersonation_introduction.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "handoff_inputs.py#monkeypatch.setattr agent.impersonation.provider_anchor_states" = 1
 "test_impersonation.py#monkeypatch.setattr agent.extensions.plugin_state_codec.decode_plugin_delta" = 1

@@ -9,3 +9,8 @@
 "test_computer_input.py#monkeypatch.setattr base.agents.impersonation.manifest.emit_recorded_central_event" = 1
 "test_computer_input.py#monkeypatch.setattr base.host.permissions_helper.client.permissions_helper_socket" = 1
 "test_computer_observations.py#monkeypatch.setattr services.desktop.computer.execute.ocr_mod.ocr_image" = 1
+
+[debt.unresolved-patch]
+"test_mcp_wrappers.py#monkeypatch.setattr bridge.asyncio.open_unix_connection" = 3
+"test_mcp_wrappers.py#monkeypatch.setattr wrapper.ConfigBoot" = 1
+"test_mcp_wrappers.py#monkeypatch.setattr wrapper._serve" = 1

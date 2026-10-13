@@ -1,6 +1,9 @@
 [uses]
 "test_commands_restart_stop.py" = ["restart_inputs.py"]
 
+[debt.env-patch]
+"test_commands_restart_stop.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "restart_inputs.py#monkeypatch.setattr cli.commands._repo._ensure_frontend_deps" = 1
 "restart_inputs.py#monkeypatch.setattr cli.commands._repo._roles_or_none" = 1
@@ -49,3 +52,15 @@
 "test_root_driver_signals.py#monkeypatch.setattr cli.commands.lifecycle.root_driver._require_root_owner" = 2
 "test_root_driver_signals.py#monkeypatch.setattr cli.commands.lifecycle.root_driver._root_argv" = 1
 "test_root_driver_signals.py#monkeypatch.setattr cli.commands.lifecycle.root_driver._root_status" = 1
+
+[debt.stdlib-patch]
+"test_commands_restart_stop.py#monkeypatch.setattr builtins.input" = 3
+"test_commands_restart_stop.py#monkeypatch.setattr subprocess.run" = 2
+"test_commands_restart_stop.py#monkeypatch.setattr sys.stdin.isatty" = 1
+
+[debt.third-party-patch]
+"test_commands_restart_stop.py#monkeypatch.setattr httpx.post" = 3
+"test_root_driver_signals.py#monkeypatch.setattr psutil.Process" = 2
+
+[debt.unresolved-patch]
+"restart_inputs.py#monkeypatch.setattr command_runtime.machine.role" = 1

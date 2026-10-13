@@ -10,7 +10,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from meizel.contracts.debt import CYCLE, DebtTable, file_key, total
+from meizel.contracts.debt import DebtTable, file_key, total
 from meizel.contracts.debt_edit import write_baseline
 from meizel.contracts.debt_report import read_baselines
 from meizel.contracts.rule import project
@@ -21,7 +21,13 @@ __all__ = ["carry", "renames_since"]
 
 _SEPARATOR = " -> "
 _EDGE_CODES = frozenset(
-    {Code.UNDECLARED_EDGE, Code.NOT_EXPORTED, Code.PRIVATE_MODULE, Code.PRIVATE_NAME}
+    {
+        Code.UNDECLARED_EDGE,
+        Code.NOT_EXPORTED,
+        Code.PRIVATE_MODULE,
+        Code.PRIVATE_NAME,
+        Code.CYCLE_EDGE,
+    }
 )
 
 
@@ -77,8 +83,6 @@ def _relocated(
     owner: str, code: Code, key: str, moved: dict[str, str], gone: set[str]
 ) -> tuple[str, str] | None:
     """The `(owner, key)` an entry has after the renames, or None when it is not affected."""
-    if code is CYCLE:
-        return None
     if code in _EDGE_CODES:
         head, _, name = key.partition("#")
         src, _, dst = head.partition(_SEPARATOR)
@@ -98,8 +102,45 @@ def _relocated(
     return parent_of(new), file_key(parent_of(new), new, what)
 
 
+_PATCH_CODES = frozenset(
+    {
+        Code.FIRST_PARTY_PATCH,
+        Code.STDLIB_PATCH,
+        Code.THIRD_PARTY_PATCH,
+        Code.ENV_PATCH,
+        Code.UNRESOLVED_PATCH,
+    }
+)
+
+
+def parse_renames(specs: list[str]) -> list[tuple[str, str]]:
+    """`OLD=NEW` target renames, each side a non-empty dotted name."""
+    renames: list[tuple[str, str]] = []
+    for spec in specs:
+        old, _, new = spec.partition("=")
+        if not old or not new or old == new:
+            raise MeizelError(
+                f"{spec!r}: a target rename is written OLD=NEW with two different names"
+            )
+        renames.append((old, new))
+    return renames
+
+
+def _retargeted(key: str, renames: list[tuple[str, str]]) -> str | None:
+    """The patch key with its target renamed (`file#form target`), or None when no rename applies."""
+    file, _, what = key.partition("#")
+    form, _, target = what.partition(" ")
+    for old, new in renames:
+        if target == old or target.startswith(f"{old}."):
+            return f"{file}#{form} {new}{target[len(old) :]}"
+    return None
+
+
 def _plan(
-    baselines: dict[str, DebtTable], moved: dict[str, str], universe: Universe
+    baselines: dict[str, DebtTable],
+    moved: dict[str, str],
+    universe: Universe,
+    renames: list[tuple[str, str]],
 ) -> tuple[dict[str, DebtTable], list[str]]:
     gone = {old for old in moved if old not in universe.files}
     tables = {
@@ -110,6 +151,9 @@ def _plan(
         for code, rows in table.items():
             for key, count in sorted(rows.items()):
                 target = _relocated(owner, code, key, moved, gone)
+                if target is None and code in _PATCH_CODES:
+                    renamed = _retargeted(key, renames)
+                    target = None if renamed is None else (owner, renamed)
                 if target is None or target == (owner, key):
                     continue
                 del tables[owner][code][key]
@@ -119,12 +163,18 @@ def _plan(
     return tables, lines
 
 
-def carry(root: Path, base: str | None = None) -> list[str]:
-    """Move entries to where their renamed files now are; returns a line per entry moved."""
+def carry(
+    root: Path, base: str | None = None, rename_targets: list[str] | None = None
+) -> list[str]:
+    """Move entries to where their renamed files, or renamed patch targets, now are.
+
+    Returns a line per entry moved. `rename_targets` (`OLD=NEW`) rewrites the target of a patch
+    entry in the same source file, one for one: a symbol that was renamed, not a file.
+    """
     moved = renames_since(root, base or default_base(root))
     universe = load_universe(root)
     baselines = read_baselines(universe)
-    tables, lines = _plan(baselines, moved, universe)
+    tables, lines = _plan(baselines, moved, universe, parse_renames(rename_targets or []))
     before = sum(total(t) for t in baselines.values())
     after = sum(total(t) for t in tables.values())
     if after != before:

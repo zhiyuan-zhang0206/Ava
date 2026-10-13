@@ -46,3 +46,6 @@ exports = ["gateway_auth.py"]
 "test_external_agent_source.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
 "test_external_agent_source.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_external_agent_source.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
+
+[debt.third-party-patch]
+"gateway_auth.py#monkeypatch.setattr starlette.testclient.TestClient.__init__" = 2

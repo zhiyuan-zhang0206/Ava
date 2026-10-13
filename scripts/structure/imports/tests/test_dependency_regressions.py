@@ -3,7 +3,7 @@
 import ast
 from pathlib import Path
 
-from scripts.structure import locality, placement
+from scripts.structure import placement
 from scripts.structure.tests.patch_repo import make_repo
 
 
@@ -38,24 +38,3 @@ def test_missing_absolute_module_does_not_become_its_parent(tmp_path: Path) -> N
     )
     assert evidence.refs == []
     assert len(evidence.unresolved) == 1
-
-
-def test_unrelated_parameter_does_not_hide_global_private_reach(tmp_path: Path) -> None:
-    root = make_repo(tmp_path)
-    tree = ast.parse(
-        "import base.net.retry as subject\nsubject._sleep(1)\n"
-        "def unrelated(subject):\n return subject\n"
-    )
-    assert locality.private_imports(tree, "cli/probe.py", ("base", "cli"), root) == {
-        "cli/probe.py::base.net.retry._sleep": [2]
-    }
-
-
-def test_comprehension_target_does_not_hide_global_private_reach(tmp_path: Path) -> None:
-    root = make_repo(tmp_path)
-    tree = ast.parse(
-        "import base.net.retry as subject\n[subject for subject in []]\nsubject._sleep(1)\n"
-    )
-    assert locality.private_imports(tree, "cli/probe.py", ("base", "cli"), root) == {
-        "cli/probe.py::base.net.retry._sleep": [3]
-    }

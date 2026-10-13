@@ -1,3 +1,7 @@
+[debt.env-patch]
+"test_read_wrap_corrupted_state_field_raises.py#patch.dict os.environ" = 4
+"test_read_wrap_hash_dedup_primary_path_blocks.py#patch.dict os.environ" = 2
+
 [debt.first-party-patch]
 "test_read_wrap_corrupted_state_field_raises.py#monkeypatch.setattr base.config.settings.agent.sdk_expand_in_system_prompt" = 2
 "test_read_wrap_corrupted_state_field_raises.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 1

@@ -1,6 +1,16 @@
 [external]
 "test_self_evolution_evaluate.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 
+[debt.env-patch]
+"test_agent_identity.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 6
+"test_agent_identity.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 6
+"test_attachment_transport.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_files.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_files.py#patch.dict os.environ" = 2
+"test_self_machine_spec.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_turn_identity_ava.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_turn_identity_ava.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
+
 [debt.first-party-patch]
 "test_agent_identity.py#monkeypatch.setattr ava.DB.cursor" = 1
 "test_agent_identity.py#monkeypatch.setattr ava.gateway_client.post" = 1
@@ -20,3 +30,16 @@
 "test_validation_ava.py#monkeypatch.setattr ava.web._search_one" = 1
 "test_validation_ava.py#monkeypatch.setattr ava.web.run_batch" = 2
 "test_validation_ava.py#monkeypatch.setattr base.telemetry.audit_events.record_audit" = 1
+
+[debt.stdlib-patch]
+"test_files.py#monkeypatch.setattr os.fdopen" = 1
+"test_files.py#monkeypatch.setattr pathlib.Path.replace" = 1
+
+[debt.unresolved-patch]
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate._eval_dir" = 1
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate._leak_paths" = 2
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.collect_one" = 2
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.poll" = 2
+"test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.scores" = 2
+"test_validation_ava.py#monkeypatch.setattr understand_module._understand_one" = 1
+"test_validation_ava.py#monkeypatch.setattr understand_module.run_batch" = 1

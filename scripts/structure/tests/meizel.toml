@@ -1,11 +1,11 @@
 exports = ["patch_repo.py"]
 
 [uses]
-"test_executed_evidence.py" = ["patch_repo.py"]
-"test_patch_evidence.py" = ["patch_repo.py"]
 "test_placement.py" = ["patch_repo.py"]
 "test_placement_dependencies.py" = ["patch_repo.py"]
-"test_service_units.py" = ["patch_repo.py"]
+
+[debt.env-patch]
+"test_baseline_shards.py#monkeypatch.setenv os.environ.PATH" = 1
 
 [debt.first-party-patch]
 "test_placement_dependencies.py#monkeypatch.setattr scripts.structure.imports.cache.CACHE_PATH" = 2

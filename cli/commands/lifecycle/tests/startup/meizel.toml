@@ -102,3 +102,14 @@ exports = ["test_start_readiness_gate.py"]
 [debt.private-name]
 "test_commands_start.py -> test_start_readiness_gate.py#_hermetic_start" = 1
 "test_start_health_port_gate.py -> test_start_readiness_gate.py#_hermetic_start" = 1
+
+[debt.stdlib-patch]
+"test_commands_start.py#monkeypatch.setattr subprocess.run" = 1
+"test_commands_start.py#monkeypatch.setattr sys.stdin.isatty" = 1
+
+[debt.third-party-patch]
+"test_checkpoint_migration_phase.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 2
+
+[debt.unresolved-patch]
+"test_agent_profile_launch_env.py#monkeypatch.setattr type(settings.data_plane).is_remote" = 1
+"test_start_readiness_gate.py#monkeypatch.setattr command_runtime.machine.role" = 1

@@ -7,8 +7,7 @@ manifest: a package added to the role would silently miss it. Use
 Partial lists (a deliberate subset of a role) are not copies and are not reported.
 
 Tests, documentation and `meizel/` itself are outside the rule: a fixture lists packages on
-purpose, and meizel is where the declaration is read. `[tool.importlinter]` is skipped until
-the import-linter gate is retired.
+purpose, and meizel is where the declaration is read.
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ __all__ = ["violations"]
 
 _MIN_ROLE_SIZE = 3
 _FIRST = re.compile(r"[/.*\\]")
-_SKIPPED_TABLES = ("tool.importlinter",)
 _TESTS_DIR = re.compile(r"(^|/)tests?/")
 
 
@@ -88,9 +86,7 @@ def _python(
 def _arrays(value: object, trail: str) -> Iterable[tuple[str, list[str]]]:
     if isinstance(value, dict):
         for key, child in cast("dict[str, object]", value).items():
-            here = f"{trail}.{key}" if trail else key
-            if here not in _SKIPPED_TABLES:
-                yield from _arrays(child, here)
+            yield from _arrays(child, f"{trail}.{key}" if trail else key)
     elif isinstance(value, list):
         items = cast("list[object]", value)
         strings = [x for x in items if isinstance(x, str)]

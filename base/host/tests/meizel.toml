@@ -16,3 +16,10 @@
 "test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.battery_sample" = 1
 "test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.subprocess.run" = 1
 "test_resource_sample.py#monkeypatch.setattr base.host.resource_sample.sys.platform" = 1
+
+[debt.third-party-patch]
+"test_proc.py#monkeypatch.setattr psutil.Process" = 2
+"test_proc.py#monkeypatch.setattr psutil.Process.children" = 1
+"test_proc.py#monkeypatch.setattr psutil.Process.create_time" = 2
+"test_resource_sample.py#monkeypatch.setattr psutil.cpu_percent" = 1
+"test_resource_sample.py#monkeypatch.setattr psutil.virtual_memory" = 1

@@ -13,3 +13,10 @@ exports = ["conftest.py", "fakes", "process_support.py", "visual"]
 
 [loads]
 "process_support.py" = ["services/agent_runner"]
+
+[debt.env-patch]
+"conftest.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_fixture_dependencies.py#monkeypatch.setenv os.environ.PYTHONPATH" = 2
+
+[debt.third-party-patch]
+"_credentials.py#monkeypatch.setattr httpx.Client.send" = 1

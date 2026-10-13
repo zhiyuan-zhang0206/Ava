@@ -1,0 +1,4 @@
+[debt.env-patch]
+"test_gitenv.py#monkeypatch.setenv os.environ.AVA_GITENV_CANARY" = 1
+"test_gitenv.py#monkeypatch.setenv os.environ.GIT_SSH_COMMAND" = 1
+"test_gitenv.py#monkeypatch.setenv os.environ.GIT_TERMINAL_PROMPT" = 1

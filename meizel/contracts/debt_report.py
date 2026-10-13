@@ -11,14 +11,14 @@ import subprocess
 import tomllib
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from meizel.contracts.debt import TABLE_KEY, DebtTable, parse_debt, total
 from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
 from meizel.graph.universe import MANIFEST, Universe, load_universe, parent_of
 
-__all__ = ["diff", "summarize"]
+__all__ = ["changed_under", "diff", "summarize"]
 
 Baselines = dict[str, DebtTable]
 
@@ -131,16 +131,37 @@ def _git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
     return result.stdout
 
 
-def _baselines_at(root: Path, ref: str) -> Baselines:
+def _totals_in(text: str) -> Counter[str]:
+    """Recorded counts per code in one manifest text, read leniently.
+
+    A ref is history: it may record debt under a code the tool has since retired, and that must
+    still count toward its total instead of stopping the comparison.
+    """
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return Counter()
+    table = document.get(TABLE_KEY)
+    counts: Counter[str] = Counter()
+    if isinstance(table, dict):
+        for code, rows in cast("dict[str, object]", table).items():
+            if isinstance(rows, dict):
+                counts[code] += sum(
+                    n for n in cast("dict[str, object]", rows).values() if isinstance(n, int)
+                )
+    return counts
+
+
+def _totals_at(root: Path, ref: str) -> Counter[str]:
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
     listing = _git(root, "ls-tree", "-r", "-z", "--name-only", ref).decode().split("\0")
     paths = [p for p in listing if p.rsplit("/", 1)[-1] == MANIFEST]
+    totals: Counter[str] = Counter()
     if not paths:
-        return {}
+        return totals
     request = "".join(f"{ref}:{p}\n" for p in paths).encode()
     stream = _git(root, "cat-file", "--batch", stdin=request)
-    found: Baselines = {}
     position = 0
     for path in paths:
         end = stream.index(b"\n", position)
@@ -148,12 +169,17 @@ def _baselines_at(root: Path, ref: str) -> Baselines:
         if len(header) != 3 or header[1] != b"blob":
             raise MeizelError(f"{ref}:{path}: cannot be read")
         size = int(header[2])
-        body = stream[end + 1 : end + 1 + size].decode()
+        totals.update(_totals_in(stream[end + 1 : end + 1 + size].decode()))
         position = end + 1 + size + 1
-        table = _parse(body, f"{ref}:{path}")
-        if table:
-            found[parent_of(path)] = table
-    return found
+    return totals
+
+
+def changed_under(root: Path, ref: str, pathspecs: list[str]) -> list[str]:
+    """The files that differ between `ref` and the working tree under the given git pathspecs."""
+    if ref.startswith("-"):
+        raise MeizelError(f"{ref}: not a git ref")
+    listing = _git(root, "diff", "--name-only", "--no-renames", "-z", ref, "--", *pathspecs)
+    return [p for p in listing.decode().split("\0") if p]
 
 
 def diff(root: Path, ref: str) -> tuple[list[str], bool]:
@@ -162,9 +188,11 @@ def diff(root: Path, ref: str) -> tuple[list[str], bool]:
     Totals, not directories, are compared: debt that moves with a file between directories
     leaves them unchanged.
     """
-    before = _by_code(_baselines_at(root, ref))
-    after = _by_code(read_baselines(load_universe(root)))
-    codes = sorted(set(before) | set(after), key=str)
+    before = _totals_at(root, ref)
+    after = Counter(
+        {code.value: n for code, n in _by_code(read_baselines(load_universe(root))).items()}
+    )
+    codes = sorted(set(before) | set(after))
     lines = [f"{'code':<20}{ref[:12]:>14}{'tree':>8}{'change':>8}"]
     grew = False
     for code in codes:

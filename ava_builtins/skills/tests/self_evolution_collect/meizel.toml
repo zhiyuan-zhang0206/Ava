@@ -1,0 +1,6 @@
+[debt.unresolved-patch]
+"test_build_record_adds_leak_audit_only_for.py#monkeypatch.setattr collect_mod._fetch_events_window" = 1
+"test_build_record_adds_leak_audit_only_for.py#monkeypatch.setattr collect_mod._inbounds_by_agent" = 1
+"test_build_record_adds_leak_audit_only_for.py#monkeypatch.setattr collect_mod._meta_by_agent" = 1
+"test_build_record_adds_leak_audit_only_for.py#monkeypatch.setattr collect_mod._test_label_ids" = 1
+"test_build_record_adds_leak_audit_only_for.py#monkeypatch.setattr collect_mod.build_record" = 1

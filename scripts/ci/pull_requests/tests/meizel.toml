@@ -1,6 +1,11 @@
 [uses]
 "ci_monitor" = ["test_ci_monitor.py"]
 
+[debt.env-patch]
+"test_ci_owner_operations.py#monkeypatch.delenv os.environ.CI_QUEUE" = 1
+"test_ci_owner_operations.py#monkeypatch.delenv os.environ.TRUNK_API_TOKEN" = 1
+"test_ci_owner_operations.py#monkeypatch.setenv os.environ.CI_QUEUE" = 1
+
 [debt.first-party-patch]
 "test_ci_accounting.py#monkeypatch.setattr scripts.ci.pull_requests.accounting.subprocess.run" = 9
 "test_ci_job_rerun.py#monkeypatch.setattr scripts.ci.pull_requests.job_rerun.subprocess.run" = 15
@@ -29,3 +34,15 @@
 "ci_monitor/test_queue_ops_exclusive_with_merge_wait.py -> test_ci_monitor.py#_check" = 1
 "ci_monitor/test_runs_probe_reads_only_incomplete_runs.py -> test_ci_monitor.py#_check" = 1
 "ci_monitor/test_runs_probe_reads_only_incomplete_runs.py -> test_ci_monitor.py#_completed" = 1
+
+[debt.stdlib-patch]
+"test_ci_owner_operations.py#monkeypatch.setattr urllib.request.urlopen" = 16
+
+[debt.unresolved-patch]
+"test_ci_runs_export.py#monkeypatch.setattr module._MAX_RUN_PAGES_PER_CURSOR" = 1
+"test_ci_runs_export.py#monkeypatch.setattr module.collect_repo" = 1
+"test_ci_runs_export.py#monkeypatch.setattr module.emit_snapshot" = 2
+"test_ci_runs_export.py#monkeypatch.setattr module.fetch_closed_prs" = 1
+"test_ci_runs_export.py#monkeypatch.setattr module.fetch_runs" = 1
+"test_ci_runs_export.py#monkeypatch.setattr module.save_json" = 1
+"test_ci_runs_export.py#monkeypatch.setattr module.subprocess.run" = 1

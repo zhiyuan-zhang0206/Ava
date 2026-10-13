@@ -2,6 +2,10 @@
 "child_gateway_scenarios.py" = ["test_server_shutdown.py"]
 "test_auth_enforcement.py" = ["test_auth.py"]
 
+[debt.env-patch]
+"test_bootstrap_fetch_gateway.py#monkeypatch.delitem os.environ.AVA_CLUSTER_SECRET" = 1
+"test_bootstrap_fetch_gateway.py#monkeypatch.setitem os.environ.AVA_API_TOKEN" = 1
+
 [debt.first-party-patch]
 "test_auth.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_auth.py#monkeypatch.setattr base.config.settings.gateway.browser_origin" = 1
@@ -62,3 +66,9 @@
 
 [debt.private-name]
 "test_auth_enforcement.py -> test_auth.py#_patch_secret" = 1
+
+[debt.unresolved-patch]
+"test_bootstrap_endpoint.py#monkeypatch.setattr type(config.settings.data_plane).is_remote" = 1
+"test_gateway_lifespan.py#monkeypatch.setattr app.state.insights_client.aclose" = 1
+"test_gateway_lifespan.py#monkeypatch.setattr pool.close" = 1
+"test_inspect_lifespan.py#monkeypatch.setattr pool.close" = 1

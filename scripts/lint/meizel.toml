@@ -1,7 +1,7 @@
-exports = ["async_no_sync_blocking.py", "ava_root_scope.py", "diagnostics", "fixture_scope.py", "no_os_environ.py", "patch_targets.py", "plugins", "pool_keepalives.py"]
+exports = ["async_no_sync_blocking.py", "ava_root_scope.py", "diagnostics", "fixture_scope.py", "no_os_environ.py", "plugins", "pool_keepalives.py"]
 
 [uses]
-"tests" = ["agent_docstrings.py", "async_no_sync_blocking.py", "ava_root_scope.py", "code_structure.py", "diagnostics", "fixture_scope.py", "no_os_environ.py", "patch_targets.py", "plugins", "pool_keepalives.py", "public_contracts.py", "termination_source.py", "turn_scoped_config.py"]
+"tests" = ["agent_docstrings.py", "async_no_sync_blocking.py", "ava_root_scope.py", "code_structure.py", "diagnostics", "fixture_scope.py", "no_os_environ.py", "plugins", "pool_keepalives.py", "termination_source.py", "turn_scoped_config.py"]
 
 [debt.private-name]
 "tests/runtime_rules/test_lint_async_no_sync_blocking.py -> async_no_sync_blocking.py#_BLOCKING_NAMES" = 1

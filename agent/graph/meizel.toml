@@ -12,10 +12,13 @@ exports = ["agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm"
 "recall" = ["prompt"]
 "tests" = ["__init__.py", "_attach_drain.py", "_attach_merge.py", "_callbacks.py", "_init_context.py", "_shared.py", "agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm", "llm_errors.py", "node_log.py", "prompt", "recall"]
 
-[debt.manifest-cycle]
-"claim -> tests" = 1
-"llm -> exec" = 1
-"llm -> hooks" = 1
+[debt.cycle-edge]
+"claim/tests/test_claim_markers_and_idle.py -> tests/cursor_fixture.py" = 1
+"llm/_retry.py -> hooks/compact.py" = 1
+"llm/node.py -> hooks/compact.py" = 1
+"llm/tests/cancel_fixture.py -> exec/node.py" = 2
+"llm/tests/cancel_fixture.py -> hooks/compact.py" = 2
+"llm/tests/test_llm_retry.py -> hooks/compact.py" = 1
 
 [debt.private-module]
 "tests/llm_helpers/test_llm_node_billing_error_logs_billing_vendor.py -> llm/_retry.py" = 1

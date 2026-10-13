@@ -9,3 +9,7 @@
 "test_manager_state.py#monkeypatch.setattr services.wake.schedule_manager.manager.get_shell_backend" = 1
 "test_manager_state.py#monkeypatch.setattr services.wake.schedule_manager.manager.telemetry.emit" = 3
 "test_secret_argv.py#monkeypatch.setattr services.wake.schedule_manager.manager.REPO_ROOT" = 1
+
+[debt.unresolved-patch]
+"test_manager.py#monkeypatch.setattr _FakeBackend.new_session" = 1
+"test_manager_state.py#monkeypatch.setattr _FakeBackend.new_session" = 1

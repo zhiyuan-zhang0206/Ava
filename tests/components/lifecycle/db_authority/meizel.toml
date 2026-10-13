@@ -1,3 +1,12 @@
+[debt.env-patch]
+"test_api_tokens.py#monkeypatch.delitem os.environ" = 2
+"test_api_tokens.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_api_tokens.py#monkeypatch.setitem os.environ" = 1
+"test_backup_owner.py#monkeypatch.delenv os.environ.AVA_DB_ADMIN_PASSWORD" = 1
+"test_backup_owner.py#monkeypatch.delitem os.environ" = 1
+"test_backup_owner.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+"test_backup_owner.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_api_tokens.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 8
 "test_api_tokens.py#monkeypatch.setattr base.config.settings.general.machine_name" = 2
@@ -5,3 +14,9 @@
 "test_api_tokens.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 2
 "test_backup_owner.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "test_backup_owner.py#monkeypatch.setattr services.backup.artifact.offsite.publish" = 1
+
+[debt.stdlib-patch]
+"test_backup_owner.py#monkeypatch.setattr subprocess.run" = 1
+
+[debt.unresolved-patch]
+"test_api_tokens.py#monkeypatch.setattr type(settings.data_plane).is_remote" = 1

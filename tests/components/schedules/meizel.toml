@@ -3,3 +3,6 @@
 
 [debt.first-party-patch]
 "test_goal_watch_filter.py#monkeypatch.setattr ava.agents.get_status" = 3
+
+[debt.unresolved-patch]
+"test_goal_watch_filter.py#monkeypatch.setattr module._notify" = 1

@@ -11,3 +11,6 @@
 "test_pages_proxy.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_pages_proxy.py#monkeypatch.setattr gateway.routers.pages.display_language" = 1
 "test_pages_proxy.py#monkeypatch.setattr gateway.routers.pages.httpx.AsyncClient" = 1
+
+[debt.third-party-patch]
+"test_pages_proxy.py#monkeypatch.setattr httpx.AsyncClient.send" = 1

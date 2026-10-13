@@ -178,3 +178,66 @@ def test_prune_afterwards_leaves_nothing_to_do(make_repo: RepoFactory) -> None:
     assert run(root, "debt", "prune") == 0
     assert (root / "meizel.toml").read_text() == before
     assert analysis_of(root).verdict == []
+
+
+PATCHED = (
+    "from lib import mod\n\n\n"
+    "def test_a(monkeypatch):\n"
+    "    monkeypatch.setattr(mod.helper, 'x', 1)\n"
+    "    monkeypatch.setattr(mod.helper, 'y', 1)\n"
+)
+
+
+def patch_repo(make_repo: RepoFactory) -> Path:
+    baseline = (
+        "[debt.first-party-patch]\n"
+        '"test_p.py#monkeypatch.setattr lib.mod.helper.x" = 1\n'
+        '"test_p.py#monkeypatch.setattr lib.mod.helper.y" = 1\n'
+        '"test_p.py#monkeypatch.setattr lib.mod.other" = 4\n'
+    )
+    files = {**LIB, "old/test_p.py": PATCHED, "old/meizel.toml": baseline}
+    root = make_repo(files)
+    commit(root)
+    return root
+
+
+def test_a_renamed_patch_target_is_carried_one_for_one(make_repo: RepoFactory) -> None:
+    root = patch_repo(make_repo)
+    assert carry(root, "--rename-target", "lib.mod.helper=lib.mod.Helper") == 0
+    assert debt_of(root, "old")["first-party-patch"] == {
+        "test_p.py#monkeypatch.setattr lib.mod.Helper.x": 1,
+        "test_p.py#monkeypatch.setattr lib.mod.Helper.y": 1,
+        "test_p.py#monkeypatch.setattr lib.mod.other": 4,
+    }
+
+
+def test_a_renamed_target_never_changes_the_total_or_the_source_file(
+    make_repo: RepoFactory,
+) -> None:
+    root = patch_repo(make_repo)
+    write(
+        root,
+        {
+            "old/meizel.toml": (root / "old/meizel.toml").read_text()
+            + '"test_p.py#monkeypatch.setattr lib.mod.Helper.x" = 2\n'
+        },
+    )
+    assert carry(root, "--rename-target", "lib.mod.helper.x=lib.mod.Helper.x") == 0
+    rows = debt_of(root, "old")["first-party-patch"]
+    assert rows["test_p.py#monkeypatch.setattr lib.mod.Helper.x"] == 3
+    assert sum(rows.values()) == 8
+
+
+def test_a_target_rename_does_not_touch_private_names_or_other_names(
+    make_repo: RepoFactory,
+) -> None:
+    root = moved_repo(make_repo)
+    before = (root / "meizel.toml").read_text()
+    assert carry(root, "--rename-target", "lib.mod=lib.mod2") == 0
+    assert (root / "meizel.toml").read_text() == before
+
+
+def test_a_target_rename_must_be_written_old_equals_new(make_repo: RepoFactory) -> None:
+    root = patch_repo(make_repo)
+    assert run(root, "debt", "carry", "--rename-target", "lib.mod.helper") == 2
+    assert run(root, "debt", "carry", "--rename-target", "a=a") == 2

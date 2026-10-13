@@ -1,6 +1,17 @@
+[debt.env-patch]
+"test_mirror_profile.py#monkeypatch.delenv os.environ" = 1
+"test_mirror_profile.py#monkeypatch.delenv os.environ.npm_config_registry" = 1
+"test_mirror_profile.py#monkeypatch.setenv os.environ" = 2
+"test_mirror_profile.py#monkeypatch.setenv os.environ.UV_DEFAULT_INDEX" = 1
+"test_mirror_profile.py#monkeypatch.setenv os.environ.UV_INDEX" = 1
+"test_mirror_profile.py#monkeypatch.setenv os.environ.npm_config_registry" = 1
+
 [debt.first-party-patch]
 "test_memory_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
 "test_memory_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
 "test_memory_cmd.py#monkeypatch.setattr cli.commands.extensions.memory.cmd_memory_search" = 1
 "test_mirror_profile.py#monkeypatch.setattr base.host.env.dotenv_boot.enforce_cluster_env_authority" = 1
 "test_presets_cmd.py#monkeypatch.setattr cli.commands.management.presets.h_presets_update" = 1
+
+[debt.third-party-patch]
+"test_memory_cmd.py#monkeypatch.setattr httpx.post" = 1

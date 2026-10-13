@@ -2,3 +2,7 @@ exports = ["support.py"]
 
 [uses]
 "test_decide_call.py" = ["support.py"]
+
+[debt.env-patch]
+"test_decide_call.py#monkeypatch.delenv os.environ.FAKE_API_KEY" = 1
+"test_decide_call.py#monkeypatch.setenv os.environ.FAKE_API_KEY" = 1

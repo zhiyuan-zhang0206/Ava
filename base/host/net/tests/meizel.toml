@@ -3,6 +3,9 @@ exports = ["retry_waits.py"]
 [uses]
 "conftest.py" = ["retry_waits.py"]
 
+[debt.env-patch]
+"test_resilience.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 1
+
 [debt.first-party-patch]
 "retry_waits.py#monkeypatch.setattr base.host.net.resilience.retry_asleep" = 1
 "retry_waits.py#monkeypatch.setattr base.host.net.resilience.retry_sleep" = 1
@@ -10,3 +13,10 @@ exports = ["retry_waits.py"]
 "test_resilience.py#monkeypatch.setattr base.host.net.resilience.random.uniform" = 5
 "test_resilience.py#monkeypatch.setattr base.host.net.resilience.retry_asleep" = 1
 "test_resilience.py#monkeypatch.setattr base.host.net.resilience.retry_sleep" = 1
+
+[debt.stdlib-patch]
+"test_http_dial.py#monkeypatch.setattr socket.getaddrinfo" = 1
+
+[debt.third-party-patch]
+"test_http_dial.py#monkeypatch.setattr httpx.get" = 1
+"test_http_dial.py#monkeypatch.setattr httpx.post" = 1
