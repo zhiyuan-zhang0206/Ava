@@ -43,7 +43,6 @@ from base.daemon.schedules.completion_notices import (
     delivery_required_for_agent,
 )
 from base.db import agent_exists
-from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.schemas import (
@@ -58,6 +57,7 @@ from gateway.agents.schemas import (
 from gateway.agents.system_note import _system_note_blocking as _system_note_blocking
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
+from ops.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
 
 router = APIRouter()
