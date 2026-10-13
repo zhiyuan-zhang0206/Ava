@@ -247,10 +247,6 @@ def _drain_and_stop(
     machine: MachineIdentity,
 ) -> None:
     """Drain the agents, then stop the selected resources; each phase is timed into `phases`."""
-    # Task #3270: an operator's own stop binds the hold to this
-    # command's shepherding process; daemon-driven holds stay unbound.
-    from base.deploy.maintenance.hold_driver import mint_driver
-
     _timed_phase(
         phases,
         "drain",
@@ -258,7 +254,6 @@ def _drain_and_stop(
             database_factory(),
             EventBus.from_settings(),
             remaining(deadline),
-            driver=mint_driver(),
             local_machine=machine,
         ),
     )

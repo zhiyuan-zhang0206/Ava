@@ -14,7 +14,7 @@ import pytest
 from base.native_process import ownership as proc_tree
 from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import is_linux
-from base.native_process.ownership import OwnedProcess, create_time_matches, stable_create_time
+from base.native_process.ownership import OwnedProcess, stable_create_time
 
 
 def _identity_with_drift(offset: float) -> OwnedProcess:
@@ -100,18 +100,6 @@ def test_live_keeps_the_error_when_a_present_process_cannot_be_read(
     monkeypatch.setattr(proc_tree, "pid_starttime_ticks", unreadable_read)
     with pytest.raises(RuntimeError, match="cannot verify process identity"):
         identity.live()
-
-
-def test_create_time_matches_requires_exact_stable_readings() -> None:
-    assert create_time_matches(99.5, 99.5)
-    assert not create_time_matches(99.5, 98.5)
-    assert not create_time_matches(98.5, 99.5)
-    assert not create_time_matches(99.50001, 99.5)
-
-
-def test_create_time_matches_rejects_different_births() -> None:
-    assert not create_time_matches(101.5, 98.5)
-    assert not create_time_matches(158.5, 98.5)
 
 
 @pytest.mark.skipif(
