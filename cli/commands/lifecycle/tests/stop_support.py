@@ -184,10 +184,9 @@ def dependencies(monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity) -
         _bus: object,
         _timeout: float,
         *,
-        driver: object,
         local_machine: MachineIdentity,
     ) -> None:
-        del _db, _bus, _timeout, driver
+        del _db, _bus, _timeout
         assert local_machine is machine
         drained()
 

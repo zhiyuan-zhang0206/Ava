@@ -28,11 +28,6 @@ from base.native_process import native_boot_id, pid_starttime_ticks, pidfd, proc
 # compare exactly. Legacy records are not silently adopted across this boundary.
 
 
-def create_time_matches(live: float, birth: float) -> bool:
-    """Whether two stable native birth readings identify exactly the same process."""
-    return live == birth
-
-
 # How much of a process's command name a message or a log line shows. The name
 # can come from the process itself: psutil extends Linux's 15-byte comm with
 # argv[0]'s basename, which has no length limit.

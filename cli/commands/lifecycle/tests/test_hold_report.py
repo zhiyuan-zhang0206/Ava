@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from base.deploy.maintenance import hold_driver, pause_owner
+from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from cli.commands.lifecycle import hold_report
 from tests.components.agent.test_maintenance import WHEN
@@ -25,7 +25,19 @@ def test_status_json_of_a_free_unit(capsys: pytest.CaptureFixture[str], isolate:
     hold = _json_hold(capsys)
     assert hold["status"] == "inactive"
     assert hold["maintenance"] is None
-    assert hold["driver"] is None
+
+
+_HOLD_KEYS = {"status", "operation", "acquired_at", "maintenance", "scope"}
+
+
+def test_status_json_hold_has_exactly_the_documented_keys(
+    capsys: pytest.CaptureFixture[str], isolate: None
+) -> None:
+    """The fleet update reads `status` and `maintenance.phase` from this object, so its shape is a
+    contract: a key added or dropped here must be a deliberate change to this set."""
+    assert set(_json_hold(capsys)) == _HOLD_KEYS
+    pause_owner.begin_maintenance("local", WHEN)
+    assert set(_json_hold(capsys)) == _HOLD_KEYS
 
 
 def test_status_json_carries_the_generation_and_phase(
@@ -44,37 +56,6 @@ def test_status_json_carries_the_generation_and_phase(
     assert hold["maintenance"] == held.encode()
 
 
-def test_status_json_surfaces_recorded_shepherd_with_liveness(
-    capsys: pytest.CaptureFixture[str], isolate: None
-) -> None:
-    """The driver block carries the binding process (pid + argv), its session leader and the
-    judged liveness, all read from local process state: a stuck hold stays inspectable exactly
-    when the gateway is down."""
-    pause_owner.begin_maintenance("local", WHEN, driver=hold_driver.mint_driver())
-
-    block = _json_hold(capsys)["driver"]
-
-    assert isinstance(block, dict)
-    assert block["liveness"] == "alive"
-    assert block["root"]["pid"] > 0
-    assert block["root"]["argv"]
-    assert "leader" in block
-
-
-def test_status_json_keeps_a_dead_shepherd_visible(
-    capsys: pytest.CaptureFixture[str], isolate: None
-) -> None:
-    ghost = hold_driver.ProcessRef(pid=99999, birth=0.0, starttime=1, argv="ghost")
-    pause_owner.begin_maintenance("local", WHEN, driver=hold_driver.HoldDriver(root=ghost))
-
-    block = _json_hold(capsys)["driver"]
-
-    assert isinstance(block, dict)
-    assert block["liveness"] == "dead"
-    assert block["root"] == {"pid": 99999, "argv": "ghost"}
-    assert block["leader"] is None
-
-
 def test_human_section_names_the_phase_and_the_exit(
     capsys: pytest.CaptureFixture[str], isolate: None
 ) -> None:
@@ -90,6 +71,7 @@ def test_human_section_names_the_phase_and_the_exit(
     out = capsys.readouterr().out
     assert "maintenance hold: draining" in out
     assert "operation=local" in out
+    assert "driver" not in out
     assert "failures" not in out
     assert "`ava start`" in out
 

@@ -9,7 +9,6 @@ import pytest
 from base import cluster, paths
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.lifecycle import start_serving
-from base.deploy.maintenance.hold_driver import HoldDriver
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as stop
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
@@ -98,7 +97,6 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
         _bus: object,
         timeout: float = 0,
         *,
-        driver: HoldDriver | None = None,
         local_machine: MachineIdentity,
     ) -> None:
         pytest.fail("unstarted home has no work to drain")
