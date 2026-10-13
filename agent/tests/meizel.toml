@@ -1,2 +1,2 @@
-[loads]
-"test_external_integration_agent.py" = ["ava_builtins/skills"]
+[external]
+"test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
