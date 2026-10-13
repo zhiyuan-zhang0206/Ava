@@ -34,35 +34,19 @@ import logging
 from pathlib import Path
 from typing import Any, cast, get_origin
 
-from dotenv import dotenv_values, set_key, unset_key
+from dotenv import set_key, unset_key
 
+from base.host.env import dotenv_file
 from base.host.env.dotenv_file import (
     ENV_LOCK_TIMEOUT_S,
+    EnvAudit,
     env_lock_path,
+    env_values_from_text,
     snapshot_env,
 )
 from base.native_process.os_platform import file_lock
 
 _log = logging.getLogger(__name__)
-
-
-def _ava_home() -> Path:
-    """$AVA_HOME directory, created if missing.
-
-    Routed through `base.paths.home.resolve_ava_home()`: this module's callers run
-    before `load_ava_env` pins `AVA_HOME` into the environment (the
-    Settings-lite maintenance commands defer it — see
-    `base.host.env.bootstrap._serve_flag`)."""
-    from base.paths.home import resolve_ava_home
-
-    root = resolve_ava_home()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def env_file_path() -> Path:
-    """This unit's `.env` — the single config source of truth."""
-    return _ava_home() / ".env"
 
 
 def _field_alias_map() -> dict[str, str]:
@@ -83,22 +67,9 @@ def _field_is_list(name: str) -> bool:
     return get_origin(FIELD_INFOS[name].annotation) is list
 
 
-def read_env_aliases() -> dict[str, str]:
-    """Raw `{ALIAS: value}` currently set in this unit's `.env` file.
-
-    Reads the FILE (not `os.environ`), so a value written since process start is
-    reflected — the gateway can serve a freshly-edited value without restarting
-    itself. Absent file -> `{}`. A bare key with no value is dropped.
-    """
-    path = env_file_path()
-    if not path.exists():
-        return {}
-    return {k: v for k, v in dotenv_values(path).items() if v is not None}
-
-
 def env_set_field_names() -> set[str]:
     """`Settings` field names whose alias is explicitly set in this unit's `.env`."""
-    present = set(read_env_aliases())
+    present = set(dotenv_file.read_env_aliases())
     return {name for name, alias in _field_alias_map().items() if alias in present}
 
 
@@ -125,8 +96,6 @@ def _pending_changes(
     Captured before the file is rewritten in place. `_audit_changes` (the record
     helper) drops values for everything but `sensitive: false` fields.
     """
-    from base.host.env.audit import env_values_from_text
-
     before = env_values_from_text(
         path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
     )
@@ -186,9 +155,7 @@ def write_fields(
     *,
     capture_bytes: bool = False,
     expected_digest: str | None = None,
-    audit_site: str | None = None,
-    actor: str | None = None,
-    trace_id: str | None = None,
+    audit: EnvAudit | None = None,
 ) -> bytes | None:
     """Set each field's alias in this unit's `.env`, and unset each removed field's.
 
@@ -198,10 +165,9 @@ def write_fields(
     absence, so a partial write can't silently unset a key it didn't mention. The
     `.env` is snapshotted before the write (recoverable) and every unset is logged
     (never silent — a silent full-replace once dropped a cluster's secrets).
-    `actor` / `trace_id` describe the initiator for the write audit (the `.env`
-    record and the `env_write` event) whenever `audit_site` is set.
+    `audit`, when given, records the write (`.env` history and `env_write` event).
     """
-    path = env_file_path()
+    path = dotenv_file.env_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Cross-process exclusive, for the whole snapshot-and-rewrite section. Each
     # `set_key` / `unset_key` READS the file and rewrites it, so two writers
@@ -222,22 +188,15 @@ def write_fields(
         amap = _field_alias_map()
         _check_digest(path, expected_digest)
         prepared = None
-        if audit_site is not None:
-            from base.host.env.audit import prepare_env_changes
-
-            prepared = prepare_env_changes(_pending_changes(path, amap, updates, removals))
+        if audit is not None:
+            prepared = audit.prepare(_pending_changes(path, amap, updates, removals))
         _rewrite_env(path, amap, updates, removals)
-        if audit_site is not None:
-            from base.host.env.audit import record_env_write
-
-            record_env_write(
+        if audit is not None:
+            audit.record(
                 path,
                 {amap[name] for name in updates},
                 {amap[name] for name in removals},
-                site=audit_site,
-                actor=actor,
-                trace_id=trace_id,
-                changes=prepared,
+                prepared,
             )
         if capture_bytes:
             captured = path.read_bytes()

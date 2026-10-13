@@ -19,7 +19,7 @@ from starlette.responses import Response
 
 from base import config
 from base.api_contracts.agent_contract import AgentNotFound, AvaAgentError, ErrorReason
-from base.cluster.authority.api import AcceptanceCache
+from base.host.db_authority.api import AcceptanceCache
 from gateway.app import (
     _cluster_auth_middleware,
     _cluster_pause_middleware,

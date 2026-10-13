@@ -1,2 +1,2 @@
-[loads]
-"test_adversarial_eval_schedule.py" = ["schedules"]
+[external]
+"test_adversarial_eval_schedule.py" = "imports a built-in schedule template from schedules/ to test it; schedule scripts are run content, core does not depend on them"

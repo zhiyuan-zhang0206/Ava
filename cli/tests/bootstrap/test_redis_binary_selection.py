@@ -130,22 +130,22 @@ def test_config_is_local_writable_and_not_a_runner_bootstrap_fact(
 def test_local_config_write_only_changes_target_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
     from cli.commands.management import config as config_cli
 
     selected = _tools(tmp_path / "bin", "selected-8")
     target = _home(tmp_path / "gateway", None)
     sibling = _home(tmp_path / "preview", None)
     sibling_bytes = (sibling / ".env").read_bytes()
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: target)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: target)
     target_bytes = (target / ".env").read_bytes()
     assert config_cli.cmd_config_set(["redis_bin_dir=relative/bin"], None, local=True) == 1
     assert (target / ".env").read_bytes() == target_bytes
     assert config_cli.cmd_config_set([f"redis_bin_dir={selected}"], None, local=True) == 0
-    assert runtime_config.read_env_aliases()["AVA_REDIS_BIN_DIR"] == str(selected)
+    assert dotenv_file.read_env_aliases()["AVA_REDIS_BIN_DIR"] == str(selected)
     capsys.readouterr()
     assert config_cli.cmd_config_get("redis_bin_dir", None, local=True) == 0
     assert str(selected) in capsys.readouterr().out
     assert config_cli.cmd_config_unset(["redis_bin_dir"], None, local=True) == 0
-    assert "AVA_REDIS_BIN_DIR" not in runtime_config.read_env_aliases()
+    assert "AVA_REDIS_BIN_DIR" not in dotenv_file.read_env_aliases()
     assert (sibling / ".env").read_bytes() == sibling_bytes

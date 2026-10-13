@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
     {
@@ -107,3 +108,16 @@ def unpinned_formulae() -> tuple[str, ...]:
     if installed is None:
         return ()
     return tuple(sorted((PINNED_BREW_FORMULAE & installed) - pinned))
+
+
+def brew_prefix(formula: str = "") -> Path:
+    """`brew --prefix [formula]`. Bare form → the Homebrew root (`/opt/homebrew`
+    on Apple Silicon, `/usr/local` on Intel); with a formula → that keg's path.
+    Falls back to the Apple-Silicon default if brew is absent so callers degrade
+    to a wrong-but-harmless path (probes then read not-running) instead of crashing."""
+    cmd = ["brew", "--prefix", *([formula] if formula else [])]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
+    except FileNotFoundError:
+        return Path("/opt/homebrew")
+    return Path(out.stdout.strip() or "/opt/homebrew")

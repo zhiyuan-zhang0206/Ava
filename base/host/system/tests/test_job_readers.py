@@ -6,9 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _refuse(message: str) -> Callable[..., None]:
@@ -167,8 +165,6 @@ def test_real_platform_job_keeps_reader_live_at_each_definition(
 def test_every_registrar_reads_gate_once_before_home(
     monkeypatch: pytest.MonkeyPatch,
     register: Callable[..., None],
-    machine_identity: MachineIdentity,
-    tmp_path: Path,
 ) -> None:
     reads: list[str] = []
 
@@ -181,7 +177,7 @@ def test_every_registrar_reads_gate_once_before_home(
 
     monkeypatch.setattr(cron, "owns_os_jobs", owns)
     if register is pr_flow_job.register_pr_flow_job:
-        register(enabled_reader=disabled, machine=machine_identity, home=tmp_path)
+        register(enabled_reader=disabled, production=True)
     else:
         register(enabled_reader=disabled)
     assert reads == ["enabled"]

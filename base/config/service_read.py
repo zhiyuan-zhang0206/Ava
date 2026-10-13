@@ -21,8 +21,8 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
+from base.config.config_registry import DOMAIN_MODELS, field_alias, fields, schema_extra
 from base.host.env.config_lite_table import FIELD_DOMAINS
-from base.host.env.config_registry import DOMAIN_MODELS, field_alias, fields, schema_extra
 from base.host.net.url_secret import credential_free, url_with_host
 
 __all__ = [
@@ -175,7 +175,7 @@ class ConfigAuthority:
         """
         from pydantic import SecretStr
 
-        from base.host.env import runtime_config
+        from base.config.runtime_config import env_value_text
         from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
 
         aliases = self.read_env_aliases()
@@ -195,7 +195,7 @@ class ConfigAuthority:
                 continue
             if isinstance(value, SecretStr):
                 value = value.get_secret_value()
-            out[alias] = runtime_config.env_value_text(value)
+            out[alias] = env_value_text(value)
         _serve_reachable_data_plane_hosts(out, self._reachable_host())
         out["AVA_DB_URL"] = self.served_db_endpoint(aliases)
         out["AVA_GATEWAY_OTLP_ENDPOINT"] = self._gateway_otlp_projection(aliases)
@@ -250,7 +250,7 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> No
 @lru_cache(maxsize=1)
 def domain_model_classes() -> dict[str, type[Any]]:
     """Resolve registry class metadata without constructing any Settings."""
-    from base.host.env.config_registry import model_classes
+    from base.config.config_registry import model_classes
 
     classes = model_classes()
     return {

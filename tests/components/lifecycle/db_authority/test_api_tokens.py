@@ -24,8 +24,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from base.cluster import authority
-from base.cluster.authority import api, ledger, unit
 from base.cluster.machine import (
     GatewayApiTokenMissing,
     MachineIdentity,
@@ -34,6 +32,7 @@ from base.cluster.machine import (
 )
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
+from base.host.db_authority import api, delivery, ledger, model, unit
 from base.host.env import bootstrap
 from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
 from cli.commands.data_plane import bringup
@@ -49,8 +48,8 @@ _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
 
 
-def _tokens(home: Path) -> authority.GenerationSecret:
-    return authority.read_secret(home, authority.active_generation(home))
+def _tokens(home: Path) -> model.GenerationSecret:
+    return ledger.read_secret(home, delivery.active_generation(home))
 
 
 def _unadmit(home: Path) -> None:
@@ -314,11 +313,11 @@ def test_a_machine_token_cannot_choose_the_human_secret(
 ) -> None:
     """A runner token authenticates the administrator, but it must not turn a
     generation-bound admission into a human bearer of its choosing."""
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
     store = tmp_path / "config-store"
     store.mkdir()
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
     with gateway_test_client(config_app(), machine=machine_identity) as client:
@@ -339,11 +338,11 @@ def test_a_machine_token_cannot_open_the_mcp_endpoint(
 ) -> None:
     """Switching `/mcp` on decides whether MCP client tokens, which outlive
     every generation, authenticate at all: no config write may choose it."""
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
     store = tmp_path / "config-store"
     store.mkdir()
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
     with gateway_test_client(config_app(), machine=machine_identity) as client:

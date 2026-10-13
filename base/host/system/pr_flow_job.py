@@ -33,8 +33,6 @@ from xml.sax.saxutils import escape
 from loguru import logger
 
 import base.host.system.cron
-from base.cluster.derive import production_identity
-from base.cluster.machine import MachineIdentity
 
 # Daily at 00:25 host-local (macmini lives on the fleet wall clock,
 # Asia/Shanghai): just past midnight so the previous day is complete, clear of
@@ -172,14 +170,14 @@ def _unregister_linux() -> int:
     )
 
 
-def credential_blocker(*, machine: MachineIdentity, home: Path) -> str | None:
+def credential_blocker(*, production: bool) -> str | None:
     """Why this unit cannot run the sampler, or None when it can.
 
     Cheap and local by design (converge runs on every start): production-home
-    identity, `gh` on PATH, the Trunk token file. No network probes — the
+    identity (`production`, decided by the caller from the machine and home), `gh` on PATH, the Trunk token file. No network probes — the
     sampler itself reports its own fetch failures loudly when it runs.
     """
-    if not production_identity(machine=machine, home=home):
+    if not production:
         return "not the registered production home"
     if shutil.which("gh") is None:
         return "gh CLI not on PATH"
@@ -189,9 +187,7 @@ def credential_blocker(*, machine: MachineIdentity, home: Path) -> str | None:
     return None
 
 
-def register_pr_flow_job(
-    *, enabled_reader: Callable[[], bool], machine: MachineIdentity, home: Path
-) -> None:
+def register_pr_flow_job(*, enabled_reader: Callable[[], bool], production: bool) -> None:
     """Register the daily PR-flow sampler (idempotent).
 
     Skipped when OS jobs are off (`AVA_OS_JOBS_ENABLED` — the test suite), when
@@ -204,7 +200,7 @@ def register_pr_flow_job(
         return
     if not base.host.system.cron.owns_os_jobs("pr flow"):
         return
-    blocker = credential_blocker(machine=machine, home=home)
+    blocker = credential_blocker(production=production)
     if blocker is not None:
         logger.info("PR-flow sampler job not registered: {}", blocker)
         return

@@ -21,12 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.agents.history import checkpoint as checkpoint_reader
-from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
 from base.cluster.dataplane.pg_throwaway_base import format_bytes, select_throwaway_base
 from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
 from base.db import Database, connect_url
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
+from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit

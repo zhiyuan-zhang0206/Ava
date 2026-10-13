@@ -30,7 +30,7 @@ def _read_policy() -> SamplingPolicy:
         fetch_bootstrap_config,
         should_fetch_from_gateway,
     )
-    from base.host.env.runtime_config import read_env_aliases
+    from base.host.env.dotenv_file import read_env_aliases
 
     if config_source_is_local() or not should_fetch_from_gateway():
         aliases = read_env_aliases()

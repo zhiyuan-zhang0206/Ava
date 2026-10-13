@@ -8,14 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster import authority
-from base.cluster.authority import unit
-from base.cluster.authority.api import API_TOKEN_ENV
 from base.cluster.authority.tests.unit_capability_support import _ENDPOINT
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_boot as runner_boot
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
 from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
+from base.host.db_authority import delivery, unit
+from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env import bootstrap, dotenv_boot
 from base.paths.home import resolve_ava_home
 
@@ -42,7 +41,7 @@ def test_a_launched_service_keeps_its_unit_login_over_the_bootstrap_endpoint(
     os.environ.update(unit.unit_api_delivery(Path(runner_boot.unit.home)))
     result = _boot_with_bootstrap()
     assert os.environ["AVA_DB_URL"] == runner_boot.dsn
-    assert os.environ[authority.GENERATION_ENV] == "0"
+    assert os.environ[delivery.GENERATION_ENV] == "0"
     assert runner_boot.api is not None and os.environ[API_TOKEN_ENV] == runner_boot.api.token
     assert result.db_authority_refusal is None
 
@@ -64,7 +63,7 @@ def test_a_forged_login_is_replaced_by_the_endpoint_and_refused(
     del runner_boot
     os.environ["AVA_PROCESS_PROFILE"] = "runner"
     os.environ["AVA_DB_URL"] = "postgresql://ava_g0_runner:forged@10.0.0.7:6433/ava"
-    os.environ[authority.GENERATION_ENV] = "0"
+    os.environ[delivery.GENERATION_ENV] = "0"
     result = _boot_with_bootstrap()
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
     refusal = result.db_authority_refusal
@@ -81,7 +80,7 @@ def test_an_admitted_operator_process_consumes_the_installed_login(
     intent.chmod(0o600)
     result = _boot_with_bootstrap()
     assert os.environ["AVA_DB_URL"] == runner_boot.dsn
-    assert os.environ[authority.GENERATION_ENV] == "0"
+    assert os.environ[delivery.GENERATION_ENV] == "0"
     # ... and its API token, which the bootstrap fetch then presents.
     assert runner_boot.api is not None and os.environ[API_TOKEN_ENV] == runner_boot.api.token
     assert result.db_authority_refusal is None

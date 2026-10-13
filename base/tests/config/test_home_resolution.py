@@ -21,7 +21,7 @@ import pytest
 
 from base import config, paths
 from base.config.base import _unit_home
-from base.host.env import bootstrap, runtime_config
+from base.host.env import bootstrap, dotenv_file
 from base.paths.home import resolve_ava_home
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -100,7 +100,7 @@ _CONSUMERS: list[tuple[str, Callable[[], Path], str]] = [
     ("paths.ava_home", paths.ava_home, ""),
     ("paths.logs_dir", paths.logs_dir, "logs"),
     ("paths.run_dir", paths.run_dir, "run"),
-    ("runtime_config.env_file_path", runtime_config.env_file_path, ".env"),
+    ("dotenv_file.env_file_path", dotenv_file.env_file_path, ".env"),
     ("bootstrap snapshot", bootstrap._snapshot_path, "run/bootstrap-snapshot.json"),
     ("config path-field default", _unit_home, ""),
 ]

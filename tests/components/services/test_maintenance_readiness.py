@@ -22,7 +22,7 @@ from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
-from base.host.env import runtime_config as rt
+from base.host.env import dotenv_file
 from base.host.net.auth import bearer_header
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
@@ -141,7 +141,7 @@ def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
     """The served home's ledger authenticates machine tokens; returns the human secret."""
     secret = uuid4().hex
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr("base.paths.ava_home", rt._ava_home)
+    monkeypatch.setattr("base.paths.ava_home", dotenv_file.unit_home)
     return secret
 
 
@@ -179,7 +179,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     """A runner's init joins (`join_gateway`) with the bundle the gateway issued
     while the gateway's own hold still stands, over the gateway's real
     middleware stack."""
-    from base.cluster.authority import unit
+    from base.host.db_authority import unit
     from base.host.env import bootstrap
     from cli import unit_join
 
@@ -189,7 +189,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
     issued = unit.issue_bundle(
-        rt._ava_home(),
+        dotenv_file.unit_home(),
         unit=unit.UnitIdentity(machine="mini", home=str(runner)),
         endpoint=config.bootstrap_config_values(
             bootstrap_authority,

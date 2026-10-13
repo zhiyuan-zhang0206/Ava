@@ -15,15 +15,6 @@ from base import cluster
 from base.config import settings
 
 
-def test_default_home_is_bare_ava():
-    assert cluster.default_home() == Path("~/.ava").expanduser()
-
-
-def test_is_default_home_expands_and_compares():
-    assert cluster.is_default_home(Path("~/.ava"))
-    assert not cluster.is_default_home(Path("~/.ava-foo"))
-
-
 def test_home_label_is_basename():
     assert cluster.home_label(Path("/x/y/.ava-mytask")) == ".ava-mytask"
     assert cluster.home_label(Path("~/.ava")) == ".ava"

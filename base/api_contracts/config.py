@@ -14,11 +14,12 @@ from pydantic import (
     BaseModel,
 )
 
-# The config-panel capability sections — same Literal the config metadata resolves
-# (`base.host.env.config_registry.Capability`), reused so the schema field and the metadata
-# it is built from are one type, not two structurally-equal aliases. The registry is
-# settings-free, so thin clients can validate gateway responses during repair.
-from base.host.env.config_registry import Capability
+# The config-panel capability sections. The config registry resolves its metadata to this same
+# Literal (`base.config.config_registry` imports it), so the schema field and the metadata
+# it is built from are one type, not two structurally-equal aliases. It is declared here,
+# not in `base.config`, so thin clients can validate gateway responses during repair
+# without importing the config package.
+Capability = Literal["gateway", "agent-runner", "common"]
 
 
 class ConfigFieldView(BaseModel):
@@ -143,7 +144,7 @@ class ResolvedConfigView(BaseModel):
 class ConfigAuditView(BaseModel):
     """GET /api/config/audit response — merged `.env`-write audit records, newest first.
 
-    Each record is the raw audit-JSONL entry (`base/host/env/audit.py`, record v2:
+    Each record is the raw audit-JSONL entry (`ops/env_audit.py`, record v2:
     ts / site / pid / process / cmdline / actor / trace_id / keys_written /
     keys_removed / digest_after / changed), tagged with its `machine`. Values were
     redacted when the record was written (non-sensitive fields only); records from

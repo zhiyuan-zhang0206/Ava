@@ -22,7 +22,7 @@ from starlette.requests import Request
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE as PRINCIPAL_SCOPE
 from base.api_contracts.idempotency import SCOPE_HEADER as SCOPE_HEADER
 from base.api_contracts.idempotency import stored_key
-from base.cluster.authority.api import AcceptanceCache
+from base.host.db_authority.api import AcceptanceCache
 
 
 @dataclass(frozen=True)
@@ -44,11 +44,11 @@ def cluster_credential(
 
     `cluster_bearer` for the human cluster secret; `machine_token:<class>` for
     the ACTIVE write generation's machine API token of that class (a pending
-    generation's token never matches: `base.cluster.authority.api`). Both
+    generation's token never matches: `base.host.db_authority.api`). Both
     authenticate the one cluster administrator; the fact only records which
     credential did. A blank `secret` never verifies as the human bearer.
     """
-    from base.cluster.authority.api import acceptance, bearer_class
+    from base.host.db_authority.api import acceptance, bearer_class
     from base.host.net.auth import verify_bearer
     from base.paths import ava_home
 
@@ -138,7 +138,7 @@ def login_mint(
     managed browser holds no human secret). The gateway-class token never logs
     a browser in. Mints this gateway's session key on first use.
     """
-    from base.cluster.authority.api import acceptance, bearer_class, token_digest
+    from base.host.db_authority.api import acceptance, bearer_class, token_digest
     from base.paths import ava_home
 
     home = ava_home().resolve()
@@ -164,7 +164,7 @@ def session_mints(
     for the active generation's runner token. Empty while no session key
     exists; the runner mint is absent while no generation is active (a fence).
     """
-    from base.cluster.authority.api import acceptance, token_digest
+    from base.host.db_authority.api import acceptance, token_digest
     from base.paths import ava_home
 
     home = ava_home().resolve()

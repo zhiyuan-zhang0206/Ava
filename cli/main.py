@@ -190,8 +190,8 @@ def _deliver_lite_api_token() -> None:
     if config_source_is_local():
         return
 
-    from base.cluster.authority import AuthorityRefusedError
-    from base.cluster.authority.unit import consume_unit
+    from base.host.db_authority.model import AuthorityRefusedError
+    from base.host.db_authority.unit import consume_unit
 
     try:
         capability = consume_unit(resolve_ava_home().resolve())

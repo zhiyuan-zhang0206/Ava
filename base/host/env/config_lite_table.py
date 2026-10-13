@@ -17,7 +17,7 @@ materializes the named surfaces every consumer imports:
 - ``REQUIRED_FIELDS`` — the no-default fields ``_lite.prepare`` requires.
 
 The module lives OUTSIDE the ``base.config`` package on purpose, like
-``base/host/env/config_registry.py``: ``base/host/env/registry.py`` (the env-authority
+``base/config/config_registry.py``: ``base/host/env/registry.py`` (the env-authority
 projections that ``load_ava_env`` runs before Settings exists) imports it, and a
 package submodule import would execute the ``base.config`` facade first —
 re-entering the boot it is part of.

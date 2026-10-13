@@ -13,8 +13,8 @@ from typing import Any
 
 import base.config._lite as lite
 from base.config import _full
+from base.config.config_registry import DOMAIN_MODELS
 from base.host.env.config_lite_table import FIELD_DOMAINS
-from base.host.env.config_registry import DOMAIN_MODELS
 
 MODELS = {
     attr: getattr(_full, model_name)

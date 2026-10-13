@@ -10,7 +10,7 @@ Current topology and authority have component owners:
 | Owned or remote-managed PostgreSQL, Redis and PgBouncer startup | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.ava.okf.md) |
 | Native PostgreSQL custody and admin authority | [PostgreSQL owner](../../base/cluster/docs/postgres.ava.okf.md) |
 | Runtime DB/API delivery and remote runner bootstrap | [Authority wiring](../../base/cluster/authority/docs/wiring.ava.okf.md) |
-| Sealed unit bundle exposure and compromise boundary | [Unit bundle](../../base/cluster/authority/docs/unit-bundle.ava.okf.md) |
+| Sealed unit bundle exposure and compromise boundary | [Unit bundle](../../base/host/db_authority/docs/unit-bundle.ava.okf.md) |
 | Agent checkpoint persistence and crash replay | [Agent startup](../../agent/startup/docs/startup.ava.okf.md) |
 
 Initialize the home before starting it. For a split cluster, start the gateway
@@ -77,7 +77,7 @@ Runtime facts needed to choose the checkout and operation have component owners:
 | Which home and initialized identity a CLI may operate | [Start identity](../../cli/docs/start_identity.ava.okf.md) |
 | Which checkout supplies the CLI and Python installation | [Python installation](../../cli/docs/python-install.ava.okf.md) |
 | PostgreSQL, PgBouncer and Redis startup/custody | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup.ava.okf.md) |
-| Database roles and credential delivery | [Authority](../../base/cluster/authority/docs/authority.ava.okf.md), [wiring](../../base/cluster/authority/docs/wiring.ava.okf.md), [unit bundle exposure](../../base/cluster/authority/docs/unit-bundle.ava.okf.md) |
+| Database roles and credential delivery | [Authority](../../base/cluster/authority/docs/authority.ava.okf.md), [wiring](../../base/cluster/authority/docs/wiring.ava.okf.md), [unit bundle exposure](../../base/host/db_authority/docs/unit-bundle.ava.okf.md) |
 | Source-start host integration | [Host converge](../../cli/commands/converge/docs/converge-host-wiring.ava.okf.md) |
 | External agent skill ownership and update | [Package commands](../../cli/commands/extensions/packages/docs/packages.ava.okf.md) |
 | Schedule source, provisioning and stored-script verification | [Schedules](../../schedules/README.md) |

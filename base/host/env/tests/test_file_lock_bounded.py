@@ -99,12 +99,13 @@ def test_env_locking_never_touches_the_env_file_itself(
     """Every door must lock a SIBLING. `file_lock`'s POSIX branch opens its path with
     "w", which truncates — pointed at the real `.env` it would empty a cluster's
     secrets outright, which is the accident this guard exists for."""
-    import base.host.env.runtime_config as rc
+    import base.config.runtime_config as rc
+    from base.host.env import dotenv_file
     from base.host.env.dotenv_file import upsert_env
 
     env = tmp_path / ".env"
     env.write_text("AVA_KEEP=1\n")
-    monkeypatch.setattr(rc, "env_file_path", lambda: env)
+    monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env)
 
     assert env_lock_path(env) != env
     rc.write_fields({}, set())
@@ -154,12 +155,13 @@ def test_every_env_write_door_takes_the_lock(
     is another rewrite. First start uses the same upsert_env writer. A lock on
     one door orders nothing.
     """
+    import base.config.runtime_config as rc
     import base.host.env.dotenv_file as dotenv_file_mod
-    import base.host.env.runtime_config as rc
+    from base.host.env import dotenv_file
 
     env = tmp_path / ".env"
     env.write_text("AVA_OLD=1\n")
-    monkeypatch.setattr(rc, "env_file_path", lambda: env)
+    monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env)
     expected = env_lock_path(env)
 
     taken: list[Path] = []
@@ -181,8 +183,8 @@ def test_the_write_doors_are_leaves(tmp_path: Path) -> None:
     Asserted on the sources so the invariant survives a future edit."""
     import inspect
 
+    import base.config.runtime_config as rc
     import base.host.env.dotenv_file as dotenv_file_mod
-    import base.host.env.runtime_config as rc
 
     doors = {
         "upsert_env": dotenv_file_mod.upsert_env,

@@ -147,7 +147,9 @@ def _flag_gate_reason(session: str) -> str | None:
 def _browser_family_gate_reason() -> str | None:
     if not settings.services.browser_enabled:
         return "disabled (AVA_BROWSER_ENABLED off)"
-    return browser_incapability()  # display / Chrome / npx, or None when capable
+    return browser_incapability(
+        settings.services.chrome_binary
+    )  # display / Chrome / npx, or None when capable
 
 
 def _core_gate_reason(session: str, *, machine: MachineIdentity) -> str | None:

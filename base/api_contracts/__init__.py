@@ -15,5 +15,5 @@ models (ClusterPanel, SystemStatus, ServiceItem, ...) stay in `gateway.schemas`.
 Import `config`, `contracts`, `op_envelope`, and `status` directly.
 Nothing is re-exported here: every submodule import executes this initializer.
 Settings-free consumers must not inherit unrelated chains such as
-`config.py -> base.host.env.config_registry` or `status.py -> DB`.
+`config.py -> base.config.config_registry` or `status.py -> DB`.
 """

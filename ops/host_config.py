@@ -14,12 +14,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from base.config import field_domain
+from base.config import field_domain, runtime_config, settings
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
-from base.host.env import runtime_config
 from base.packages.plugin_config_admin import (
     panel_metadata,
     panel_overrides,
@@ -28,6 +27,7 @@ from base.packages.plugin_config_admin import (
 )
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+from ops.env_audit import EnvWriteAudit, read_env_write_records
 from ops.rpc_schemas import (
     ConfigAuditReadResult,
     ConfigReadResult,
@@ -63,7 +63,9 @@ def config_read_op(*, authority: ConfigAuthority, local_machine: str) -> ConfigR
         value = meta.current_value
         if meta.sensitive and value:
             value = SENSITIVE_MASK
-        cap = config_validators.read_time_capability(meta.name)
+        cap = config_validators.read_time_capability(
+            meta.name, chrome_binary=settings.services.chrome_binary
+        )
         host_fields[meta.name] = HostConfigField(
             value=value,
             overridden=meta.name in set_fields,
@@ -87,8 +89,6 @@ def config_read_op(*, authority: ConfigAuthority, local_machine: str) -> ConfigR
 
 def config_audit_read_op(last: int, *, local_machine: str) -> ConfigAuditReadResult:
     """Read this machine's most recent `.env`-write audit records (newest first)."""
-    from base.host.env.audit import read_env_write_records
-
     return ConfigAuditReadResult(machine=local_machine, records=read_env_write_records(last))
 
 
@@ -121,7 +121,7 @@ def _field_verdicts(
             except (ValueError, TypeError):
                 results[field] = FieldWriteResult(ok=False, reason="invalid declared scalar")
             continue
-        vr = config_validators.validate(field, value)
+        vr = config_validators.validate(field, value, chrome_binary=settings.services.chrome_binary)
         results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
     return results
 
@@ -166,9 +166,7 @@ def _apply_patch(
                 writes,
                 removals,
                 expected_digest=candidate.expected_digest,
-                audit_site="ops_config_write",
-                actor=actor,
-                trace_id=trace_id,
+                audit=EnvWriteAudit(site="ops_config_write", actor=actor, trace_id=trace_id),
             )
         except RuntimeError as exc:
             if str(exc) != ".env changed before owned runtime-config write":

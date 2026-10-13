@@ -1,5 +1,6 @@
 import os
 import time
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -255,7 +256,16 @@ def test_upsert_noop_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(dotenv_file, "write_private_bytes", _record_write)
 
-    dotenv_file.upsert_env(f, {"A": "1"}, audit_site="test_site")
+    class _NoRecord:
+        def prepare(self, changes: Sequence[Mapping[str, object]]) -> object:
+            raise AssertionError("an unchanged upsert must not prepare an audit record")
+
+        def record(
+            self, path: Path, written: set[str], removed: set[str], prepared: object
+        ) -> None:
+            raise AssertionError("an unchanged upsert must not record an audit entry")
+
+    dotenv_file.upsert_env(f, {"A": "1"}, audit=_NoRecord())
 
     assert writes == []
     assert f.read_text() == "A=1\nKEEP=2\n"

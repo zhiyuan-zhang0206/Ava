@@ -133,7 +133,7 @@ DECISIONS: dict[str, Decision] = {
                 "cutover scripts dial through it, so its transport stays as rehearsed until "
                 "the cutover lands"
             ),
-            "base/cluster/authority/unit.py": (
+            "base/host/db_authority/unit.py": (
                 "probes an installed unit capability's own runner login at the served "
                 "endpoint, the credential under test"
             ),

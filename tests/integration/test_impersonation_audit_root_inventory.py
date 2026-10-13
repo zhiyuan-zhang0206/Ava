@@ -38,7 +38,7 @@ _INVENTORY: dict[str, str] = {
     "base/agents/inbox/control_delivery.py::insert_compact_in_transaction": "ineligible",
     # Verified HTTP control acceptance records source=user, not a borrowed agent caller.
     "base/agents/compaction/commands.py::accept": "ineligible",
-    "base/host/env/audit.py::_emit_audit_event": "ineligible",
+    "ops/env_audit.py::_emit_audit_event": "ineligible",
 }
 
 

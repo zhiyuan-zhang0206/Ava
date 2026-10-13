@@ -1,7 +1,7 @@
 """PgBouncer config generation + the direct-connection exemption contract.
 
 Unit-level: the rendered pgbouncer.ini content (the userlist is rendered by
-`base.cluster.authority.render_userlist`), and the code paths
+`base.host.db_authority.delivery.render_userlist`), and the code paths
 that MUST bypass the pooler. The end-to-end wire behaviour (a real pgbouncer in
 transaction pooling in front of Postgres) lives in test_pgbouncer_wire.py.
 """

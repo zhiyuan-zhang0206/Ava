@@ -30,7 +30,7 @@ from base.cluster.authority.catalog import (
     require_admin,
     role_facts,
 )
-from base.cluster.authority.model import AuthorityRefusedError, CatalogRefusedError
+from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedError
 
 MONITOR_ROLE = "ava_monitor"
 # The pg_ident map pg_hba names for the monitor's peer line.

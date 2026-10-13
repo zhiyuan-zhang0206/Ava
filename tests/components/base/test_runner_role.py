@@ -30,10 +30,11 @@ from base.cluster import (
     ensure_checkpoint_schema,
     provision_database,
 )
-from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+from base.cluster.authority import ensure_groups
 from base.cluster.dataplane.pg_admin import owner_conninfo
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.db.code_version_gate import ProcessDbGate
+from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.host.net.url_secret import url_with_userinfo
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 

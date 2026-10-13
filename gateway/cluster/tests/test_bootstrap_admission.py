@@ -15,8 +15,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base import config, paths
-from base.cluster.authority.api import AcceptanceCache
 from base.config.service_read import ConfigAuthority
+from base.host.db_authority.api import AcceptanceCache
 from base.host.env import bootstrap
 from base.host.net.auth import bearer_header
 from base.lm.catalog import ModelCatalog

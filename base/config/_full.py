@@ -20,7 +20,8 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
-import base.host.env.config_registry as _config_registry
+import base.config.config_registry as _config_registry
+from base.config.config_registry import DOMAIN_ATTRS, DOMAIN_MODELS, schema_extra
 from base.config.domains.agent.settings import AgentSettings
 from base.config.domains.channels.feishu import FeishuSettings
 from base.config.domains.channels.telegram import TelegramSettings
@@ -44,7 +45,6 @@ from base.config.profiles import (
     profile_domain_error,
     profile_unknown_error,
 )
-from base.host.env.config_registry import DOMAIN_ATTRS, DOMAIN_MODELS, schema_extra
 from base.host.env.dotenv_boot import EnvBootResult
 
 

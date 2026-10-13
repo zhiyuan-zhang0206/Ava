@@ -10,7 +10,7 @@ tags: [base, uploads]
 `models` owns ordered immutable manifests, source acceptance, mutable delivery
 status and independently versioned native request/proof. Protocol 1 is required
 as an actual integer; omission, bool, float and unknown values fail before effects.
-Unit identity reuses `base.cluster.authority.unit.UnitIdentity`; native machine and
+Unit identity reuses `base.host.db_authority.unit.UnitIdentity`; native machine and
 resolved `AVA_HOME` identify the receiver, not the physical uploads quota owner.
 
 `paths` owns the shared upload URL, path, image MIME, limits and safe-serving

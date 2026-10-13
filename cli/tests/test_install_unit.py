@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from base import cluster
-from base.cluster.authority import unit
+from base.host.db_authority import unit
 from base.host.env import bootstrap
 from cli import start_identity
 from cli.commands.cluster.control import cmd_db_authority_install_unit

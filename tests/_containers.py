@@ -188,7 +188,8 @@ def grant_runner_login(url: str, *, owner: str, login: str, password: str) -> st
 
     from psycopg import sql
 
-    from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+    from base.cluster.authority import ensure_groups
+    from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
     from base.host.net.url_secret import url_with_userinfo
 
     database = urlsplit(url).path.strip("/")

@@ -19,6 +19,7 @@ from base.cluster import session_name
 from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance.state import MaintenancePhase
 from base.events.live.bus import EventBus
+from base.sessions.hosting import hosting_supervised_session
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
 from cli.commands._repo import _repo_root
@@ -400,7 +401,7 @@ def _cmd_restart_body(
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
-    from base.host.proc import hosting_exec_domain, hosting_supervised_session
+    from base.host.proc import hosting_exec_domain
     from cli.commands import _repo
     from cli.commands.lifecycle import _start_readiness_preflight, start
 

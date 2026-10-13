@@ -60,7 +60,7 @@ _SCAN_DIRS = lint_common.FRAMEWORK_DIRS
 # reason. The `.env` write audit's record is the per-home JSONL because its writers run where
 # no database identity exists (docs/decisions/runtime/config/2026-10-02-env-write-audit-stays-local.md).
 _LOCAL_RECORD_SITES: dict[str, str] = {
-    "base/host/env/audit.py::_emit_audit_event": "the per-home .env audit JSONL is the record",
+    "ops/env_audit.py::_emit_audit_event": "the per-home .env audit JSONL is the record",
 }
 
 _EXEMPT_FILES = frozenset({"base/telemetry/audit_events.py", "base/telemetry/emitter.py"})

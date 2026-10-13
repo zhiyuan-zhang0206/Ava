@@ -15,7 +15,7 @@ helpers. HTTPX uses its installed import behavior and public entry points.
 
 ## Documented components
 
-- [[base/host/env/docs/audit.ava.okf.md]] — Base — .env write audit & integrity guard.
+- [[ops/docs/env-audit.ava.okf.md]] — Base — .env write audit & integrity guard.
 - [[base/host/env/docs/registry.ava.okf.md]] — Environment declarations and boot/child projections.
 - [[base/host/docs/runtime_interpreter.ava.okf.md]] — Loaded-runtime interpreter binding.
 

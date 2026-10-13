@@ -357,9 +357,9 @@ def daemon_acceptance() -> frozenset[str]:
     cluster secret" (docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md); the live
     deployment's data plane is local, and this branch only runs when `is_remote`.
     """
-    from base.cluster.authority.api import acceptance, token_digest
-    from base.cluster.authority.unit import load_unit_capability
     from base.config import settings
+    from base.host.db_authority.api import acceptance, token_digest
+    from base.host.db_authority.unit import load_unit_capability
     from base.paths import ava_home
 
     home = ava_home().resolve()
