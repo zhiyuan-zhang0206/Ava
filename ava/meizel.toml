@@ -22,6 +22,7 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "tests/namespaces/shell/coding_tools/test_sdk_entry_counting.py -> shell/coding_tools/_common.py" = 1
 
 [debt.private-name]
+"tests/namespaces/agents/test_agents_scan.py -> agents/__init__.py#_client" = 2
 "tests/namespaces/gateway_client/test_gateway_client.py -> gateway_client/transport.py#_max_retries" = 1
 "tests/namespaces/gateway_client/test_gateway_client_base_url.py -> gateway_client/transport.py#_http" = 7
 "tests/namespaces/shell/test_shell.py -> shell/sessions.py#_handle" = 1
