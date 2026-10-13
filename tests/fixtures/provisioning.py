@@ -590,7 +590,7 @@ def database(db_url: str, database_gate):
 @pytest.fixture
 def publish_wake(database, event_bus) -> Callable[[int, str], bool]:
     """`publish_inbound_wake` bound to the session's handles, the wake callable a delivery takes."""
-    from base.agents.inbox.wake import publish_inbound_wake
+    from base.agents.impersonation.wake import publish_inbound_wake
 
     return functools.partial(publish_inbound_wake, database, event_bus)
 

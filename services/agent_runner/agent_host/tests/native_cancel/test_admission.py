@@ -11,12 +11,12 @@ from pydantic import ValidationError
 
 from agent.db import claim_inbound_batch
 from agent.tests.claim.test_inbound_ownership import _insert
-from base.agents.incarnation.native_work_models import NativeCancelPendingError, NativeWorkTarget
-from base.agents.messages.native_cancel import (
+from base.agents.inbox.native_cancel import (
     NativeCancelConflictError,
     accept_native_cancel,
     observe_native_work,
 )
+from base.agents.incarnation.native_work_models import NativeCancelPendingError, NativeWorkTarget
 from base.db.code_version_gate import ProcessDbGate
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 

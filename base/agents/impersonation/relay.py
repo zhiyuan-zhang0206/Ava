@@ -19,16 +19,17 @@ from base.agents.impersonation._store import (
     require_relay_active_locked,
     token_hash,
 )
-from base.agents.impersonation.status import ImpersonationStatus, parse_lease
+from base.agents.impersonation.status import (
+    RELAY_FAILURE_STAMP_SECONDS,
+    ImpersonationStatus,
+    parse_lease,
+)
+from base.agents.impersonation.wake import wake_agent
 from base.agents.messages.caller_identity import caller_payload
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-
-RELAY_HEARTBEAT_SECONDS = 10.0
-RELAY_HEARTBEAT_STALE_SECONDS = 45.0
-_RELAY_FAILURE_STAMP_SECONDS = 600
 
 
 def relay_get(
@@ -40,7 +41,6 @@ def relay_get(
     local_machine: str,
 ) -> dict[str, Any]:
     """Lease reads for the bound relay process, under its scoped credential."""
-    from base.agents.impersonation import wake_agent
 
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
@@ -185,7 +185,6 @@ def fail_acceptance(
     agent its acceptance was rolled back and it keeps running. Only the
     accepting native runtime may fail its own acceptance.
     """
-    from base.agents.impersonation import wake_agent
 
     if not reason.strip():
         raise ValueError("A nonempty failure reason is required")
@@ -247,7 +246,7 @@ def record_relay_failure(db: Database, lease_id: str, incarnation: RuntimeIncarn
             "UPDATE agent_impersonations SET relay_last_failure_at=clock_timestamp() "
             "WHERE id=%s AND (relay_last_failure_at IS NULL OR relay_last_failure_at < "
             "clock_timestamp() - %s*interval '1 second') RETURNING id",
-            (lease_id, _RELAY_FAILURE_STAMP_SECONDS),
+            (lease_id, RELAY_FAILURE_STAMP_SECONDS),
         ).fetchone()
     return row is not None
 
@@ -279,9 +278,8 @@ def abort_lease(
     lock serializes with claim-time expiry, the TTL reaper and the terminate
     trigger, so an abort that loses the race is a no-op here.
     """
-    from base.agents.impersonation import wake_agent
-    from base.agents.impersonation.event_log import is_log_native
-    from base.agents.impersonation.manifest import close_event_admission
+    from base.agents.impersonation._store import close_event_admission
+    from base.agents.impersonation.status import is_log_native
 
     detail = detail.strip()
     if not detail:

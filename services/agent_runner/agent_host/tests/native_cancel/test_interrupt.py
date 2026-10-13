@@ -18,9 +18,9 @@ from agent.graph.interrupt import subscribe_interrupt
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
+from base.agents.inbox.native_cancel import accept_native_cancel
 from base.agents.incarnation.exec_owner_protocol import OwnerClosed
 from base.agents.incarnation.native_work_models import NativeCancelMarker
-from base.agents.messages.native_cancel import accept_native_cancel
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus

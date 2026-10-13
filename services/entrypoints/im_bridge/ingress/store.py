@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents.messages.chat_delivery import insert_chat_inbound_in_transaction
+from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from services.entrypoints.im_bridge.ingress.types import (

@@ -7,7 +7,7 @@ import psycopg
 import pytest
 
 from base import telemetry
-from base.agents.messages.chat_delivery import (
+from base.agents.inbox.chat_delivery import (
     ChatInboundReceipt,
     ClientMessageConflictError,
     insert_chat_inbound_in_transaction,
@@ -177,7 +177,7 @@ def test_compatibility_wrapper_dispatches_after_commit_and_wakes_only_first_inse
 def test_postcommit_failure_carries_receipt_without_repeating_audit(
     db_conn: psycopg.Connection, database: Database, monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
-    from base.agents.messages.chat_delivery import ChatInboundCommittedError
+    from base.agents.inbox.chat_delivery import ChatInboundCommittedError
 
     agent_id, sender = create_agent(db_conn), create_agent(db_conn)
     bug = AttributeError("postcommit bug")

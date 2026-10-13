@@ -7,7 +7,7 @@ import psycopg
 
 from base import telemetry
 from base.agents.impersonation.manifest import record_central_event
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.caller_identity import caller_payload
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound_provenance import (

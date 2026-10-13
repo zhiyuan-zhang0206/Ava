@@ -14,7 +14,7 @@ from base.agents import (
     MachinePaused,
     ResurrectAlreadyAlive,
 )
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.incarnation.lifecycle_acceptance import (
     LIFECYCLE_RELEASE,
     UNOWNED_TERMINATION_ID,

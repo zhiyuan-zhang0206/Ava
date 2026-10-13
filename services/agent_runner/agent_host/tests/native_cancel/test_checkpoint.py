@@ -11,11 +11,11 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.impersonation_handoff import flush_checkpoint
 from agent.state import checkpoint_msgpack_allowlist
+from base.agents.inbox.native_cancel import accept_native_cancel, finish_native_cancel
 from base.agents.incarnation.native_work_models import (
     NativeCancelMarker,
     NativeWorkUncertainError,
 )
-from base.agents.messages.native_cancel import accept_native_cancel, finish_native_cancel
 from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from services.agent_runner.agent_host.invocation.native_work import (

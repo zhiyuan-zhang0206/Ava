@@ -16,6 +16,7 @@ from agent.ownership.native_cancel import halt_for_native_cancel
 from agent.state import BaseAgentState
 from base.agents.context import AvaContext
 from base.agents.impersonation.notes import HandoffNotes
+from base.agents.inbox.native_cancel import finish_native_cancel, require_cancel_receiver
 from base.agents.incarnation.native_work import load_work, prepare_work
 from base.agents.incarnation.native_work_models import (
     NativeCancelAcceptance,
@@ -24,7 +25,6 @@ from base.agents.incarnation.native_work_models import (
     NativeWorkTarget,
     NativeWorkUncertainError,
 )
-from base.agents.messages.native_cancel import finish_native_cancel, require_cancel_receiver
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
 from base.db.transaction import async_write_transaction

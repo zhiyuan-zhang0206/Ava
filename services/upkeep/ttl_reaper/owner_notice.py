@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import psycopg
 
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message
-from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db import Database
 from base.events.live.bus import EventBus

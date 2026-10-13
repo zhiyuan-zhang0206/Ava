@@ -11,7 +11,6 @@ patch them on that module — a patch on a package attribute here is not seen by
 the implementation's own reads.
 """
 
-from base.agents import history as history
 from base.agents.contract import (
     EXCEPTION_BY_REASON,
     AgentLaunchFailed,
@@ -72,5 +71,4 @@ __all__ = [
     "SpawnTargetNotAgentRunner",
     "TerminateResult",
     "TerminationSource",
-    "history",
 ]

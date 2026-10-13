@@ -4,7 +4,7 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus

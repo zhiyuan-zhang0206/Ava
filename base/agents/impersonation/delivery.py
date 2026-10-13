@@ -14,7 +14,7 @@ from base.agents.impersonation._store import (
     require_relay_active_locked,
 )
 from base.agents.impersonation.status import ImpersonationStatus
-from base.agents.inbox.wake import publish_inbound_wake
+from base.agents.impersonation.wake import publish_inbound_wake
 from base.db import Database
 from base.events.live.announce import (
     publish_agent_updated_sync,

@@ -6,7 +6,7 @@ on it. The transactional claim / reconcile / status-transition SQL stays in
 `agent/db/__init__.py` (kernel-only, async).
 
 Wake is Redis pub/sub: `insert_inbound_message` (`base/agents/inbox/insert.py`) and the
-transactionally keyed chat path (`base/agents/messages/chat_delivery.py`) publish to
+transactionally keyed chat path (`base/agents/inbox/chat_delivery.py`) publish to
 the cluster-scoped channel `<prefix>:inbound:<agent_id>`
 (`base.cluster.inbound_channel`) on every inbound INSERT, and the claim node
 blocks on `RedisInboundListener.wait_one(timeout=...)` (`base/events/live/redis_listener.py`)

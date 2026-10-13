@@ -20,8 +20,8 @@ from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
 from base.agents.impersonation.notes import HandoffNotes
+from base.agents.inbox.native_restart import original_guarded_restart_id
 from base.agents.incarnation.native_work_models import NativeWorkTarget
-from base.agents.messages.native_restart import original_guarded_restart_id
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
 from base.events.live.bus import EventBus

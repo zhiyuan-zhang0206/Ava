@@ -17,7 +17,7 @@ from agent.extensions import plugin_state_codec
 from ava import external
 from ava.sdk_surface import settings as _settings
 from base.agents.impersonation import manifest
-from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
+from base.agents.impersonation.status import LOG_PROTOCOL_VERSION
 from base.config import ConfigBoot
 from base.db import Database, code_version_gate, connections
 from base.host.proc import run_bounded
