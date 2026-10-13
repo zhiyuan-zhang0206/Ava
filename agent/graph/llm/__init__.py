@@ -6,7 +6,7 @@ Package door — no imports, no re-exports; callers use `agent.graph.llm.node`
 
   - `node.py`    — llm node (stream + cancel = discard partial turn)
   - `_stream.py` — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
-  - `_cancel.py` — llm streaming-vs-cancel race (partial turn discard)
+  - `cancel.py` — llm streaming-vs-cancel race (partial turn discard)
   - `_chunk.py`  — llm chunk assembly + final-message validation
 
 The llm stream error taxonomy (`agent/graph/llm_errors.py`) lives in the parent

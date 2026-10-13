@@ -21,7 +21,6 @@ from agent.graph.exec import node
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState, AttachState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType
 from base.clock import Clock
@@ -32,6 +31,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from tests.fixtures.graph.fakes import make_fake_ops_pool
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}

@@ -18,7 +18,6 @@ from langgraph.types import Command
 
 from agent.hooks import Hook, make_hook_runner
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
@@ -29,6 +28,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from tests.fixtures.graph.fakes import make_fake_ops_pool
 
 
 def _runner(*hooks: Hook, plugin: str | None = None, name: str = "before_llm"):

@@ -190,7 +190,7 @@ entry_modules = ["agent.tests.impersonation.handoff_inputs"]
 
 [[tool.ava.public_contracts.components]]
 module = "agent.tests.claim"
-entry_modules = ["agent.tests.claim.claim_support", "agent.tests.claim.claim_status_support"]
+entry_modules = ["tests.fixtures.graph.claim_support", "agent.tests.claim.claim_status_support"]
 
 [[tool.ava.public_contracts.components]]
 module = "tests.fixtures.units"

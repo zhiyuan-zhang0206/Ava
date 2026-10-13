@@ -39,7 +39,7 @@ from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
     _TEST_AVA_HOME,
 )
-from tests.fixtures.static_environment import static_mode
+from tests.fixtures.unit.static_environment import static_mode
 
 # Host job inventory as it stood BEFORE this session — `pytest_sessionfinish`
 # diffs against it and fails the run on anything new (see tests/_os_jobs.py).

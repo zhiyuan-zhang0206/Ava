@@ -6,15 +6,9 @@ from langchain_core.messages import SystemMessage
 from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import claim_node
 from agent.graph.claim import node
+from agent.graph.claim.node import claim_node
 from agent.state import AgentState
-from agent.tests.claim.claim_support import (
-    await_inbound_visible,
-    insert_inbound_kind,
-    make_runtime,
-    thread_config,
-)
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.cluster.machine import MachineIdentity
@@ -24,6 +18,12 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.fixtures.graph.claim_support import (
+    await_inbound_visible,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
+)
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 

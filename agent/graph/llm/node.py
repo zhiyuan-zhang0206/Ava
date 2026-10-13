@@ -29,9 +29,9 @@ graph build, not the annotation, decides which state class a node receives.
 Module layout (Task #1004 >800-line split): streaming consumption, the cancel
 race, chunk assembly + final-message validation, and the error taxonomy
 live in the sibling modules ``_stream.py`` /
-``_cancel.py`` / ``_chunk.py`` (all in this ``llm/`` package) plus the parent
+``cancel.py`` / ``_chunk.py`` (all in this ``llm/`` package) plus the parent
 package's ``llm_errors.py``; this module keeps the node entry + turn dispatch
-(``llm_node``, ``_llm_node_impl``). The goto type both this module and ``_cancel``
+(``llm_node``, ``_llm_node_impl``). The goto type both this module and ``cancel``
 use lives in ``goto.py``. The immutable base
 system prompt + lazy SDK overview capture live in the parent package's
 ``_base_prompt.py``, imported lazily by ``system_prompt.build_system_prompt``.
@@ -77,10 +77,10 @@ from base.lm.catalog import ModelCatalog
 from base.lm.reasoning import content_blocks
 from base.log import logger
 
-from ._cancel import race_stream_vs_cancel
 from ._chunk import assemble_final_message
 from ._retry import RETRY_REMAINING_ATTR, Attempt, retry_wait
 from ._stream import stream_llm
+from .cancel import race_stream_vs_cancel
 from .goto import LlmGoto
 
 

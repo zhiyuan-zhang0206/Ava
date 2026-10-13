@@ -34,7 +34,6 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import LlmLedger, exec_node, llm_node
 from agent.graph.exec import node
 from agent.graph.exec.node import (
     ExecCancelled,
@@ -42,9 +41,11 @@ from agent.graph.exec.node import (
     ExecDone,
     ExecLifecycle,
     ExecTimedOut,
+    exec_node,
 )
+from agent.graph.llm.node import llm_node
+from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 
@@ -58,6 +59,7 @@ from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from tests.fixtures.graph.fakes import make_fake_ops_pool
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 

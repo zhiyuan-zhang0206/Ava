@@ -22,7 +22,6 @@ from agent.graph.hooks.framework import framework_hooks
 from agent.graph.interrupt import InterruptEvent
 from agent.hooks.security import deliver_security_findings
 from agent.state import AgentState, build_agent_state
-from agent.tests._fakes import make_fake_ops_pool
 from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
@@ -36,6 +35,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from tests.fixtures.graph.fakes import make_fake_ops_pool
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 _FIRST = SecurityFindingEntry(source="web.fetch", triggers=["ignore previous instructions"])

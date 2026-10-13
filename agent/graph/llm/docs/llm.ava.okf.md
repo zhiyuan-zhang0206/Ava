@@ -26,7 +26,7 @@ Ava agent's LLM invocation layer — containing tool schema definition (`agent/l
 - **silent-idle handling**: when only reasoning is present, no text, no tool_call, reasoning is kept and a continue-loop entered (`halted=False`, delegated to `ava_silent_idle` plugin injected nudge). Consecutive silent idles consume output-token budget units; a provider-reported zero-output turn still consumes one unit, so the 2,048-token default (`llm_silent_idle_max_output_tokens`) halts before another model call while the event retains its actual estimated output cost.
 - **streaming output**: AIMessage text goes through two paths — real-time (RedisStreamHandler → ChatStart/ChatDelta → UI) and persistence (LangGraph state.messages → timeline endpoint)
 - **cancel-race tests**: `tests/cancel_fixture.py` is opt-in and bound beside its real LLM, exec and compact consumers, rather than in the root plugin roster. Tests retain real node logic and restore subscription patches at teardown.
-- **interrupt handling**: `agent/graph/llm/_cancel.py:race_stream_vs_cancel` — `subscribe_interrupt` RAII, node entry listens for cancel/terminate inbound, `asyncio.wait` races streaming task; cancel discards partial generation of current turn, not entering history
+- **interrupt handling**: `agent/graph/llm/cancel.py:race_stream_vs_cancel` — `subscribe_interrupt` RAII, node entry listens for cancel/terminate inbound, `asyncio.wait` races streaming task; cancel discards partial generation of current turn, not entering history
 
 ## Key dependencies
 

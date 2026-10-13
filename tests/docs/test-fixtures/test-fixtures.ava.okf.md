@@ -54,7 +54,7 @@ Existing fixture visibility and migration constraints: [[tests/docs/test-fixture
   `os.exec*`. Tests of those boundaries explicitly supply their own doubles or
   opt into an isolated native proof with owned cleanup. The `os.exec*` guard
   protects the test runner itself from process replacement.
-- Plugin registrations (sections, namespaces, state fields) reset together after any test that loaded them, and the `_qualname` stamp `install_namespace` leaves on each namespace module taken off: autouse guard in `tests/fixtures/plugin_registrations.py`, wired via `pytest_plugins`
+- Plugin registrations (sections, namespaces, state fields) reset together after any test that loaded them, and the `_qualname` stamp `install_namespace` leaves on each namespace module taken off: autouse guard in `tests/fixtures/unit/plugin_registrations.py`, wired via `pytest_plugins`
 
 Static execution ownership and CI artifacts: [[tests/fixtures/docs/static-environment.ava.okf.md]].
 

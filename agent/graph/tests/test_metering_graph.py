@@ -51,7 +51,7 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     """The test above still left every plugin's SDK surface in its xdist worker. A later
     partial cleanup then saw a half-installed surface (CI shard 14/16 on PR #3513).
 
-    The autouse `_restore_plugin_registrations` (`tests/fixtures/plugin_registrations.py`)
+    The autouse `_restore_plugin_registrations` (`tests/fixtures/unit/plugin_registrations.py`)
     closes that. Same split as above: the guard is wired onto every test, it sees
     a real `load_extensions()`, and its reset leaves namespaces and members
     removed together.
@@ -59,7 +59,7 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     from agent.state import plugin_state_schema
     from ava.sdk_surface.extensions import load_extensions
     from ava.sdk_surface.installation import installed
-    from tests.fixtures.plugin_registrations import (
+    from tests.fixtures.unit.plugin_registrations import (
         drop_plugin_registrations,
         plugin_registrations_present,
     )

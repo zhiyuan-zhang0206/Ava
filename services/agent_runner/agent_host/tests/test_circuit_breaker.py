@@ -13,12 +13,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import claim_node
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.state import AgentState, CircuitState
-from agent.tests.claim.claim_support import (
-    _fake_llm,
-    insert_inbound_kind,
-    make_runtime,
-    thread_config,
-)
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
 from base.cluster.machine import MachineIdentity
@@ -40,6 +34,12 @@ from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures im
     LONG_SUMMARY,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from tests.fixtures.graph.claim_support import (
+    _fake_llm,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
+)
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 

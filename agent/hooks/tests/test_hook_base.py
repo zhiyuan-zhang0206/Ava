@@ -14,7 +14,6 @@ from langgraph.runtime import Runtime
 
 from agent.hooks import Hook
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
@@ -23,6 +22,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
+from tests.fixtures.graph.fakes import make_fake_ops_pool
 
 
 class _OkHook(Hook):

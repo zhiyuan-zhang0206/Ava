@@ -9,7 +9,7 @@ from base.packages.plugins.extensions import (
     PluginContributions,
     SdkNamespace,
 )
-from tests.fixtures.plugin_registrations import plugin_registrations_present
+from tests.fixtures.unit.plugin_registrations import plugin_registrations_present
 
 assert "agent.state" not in sys.modules, "the fresh interpreter must start without the agent layer"
 assert not plugin_registrations_present()

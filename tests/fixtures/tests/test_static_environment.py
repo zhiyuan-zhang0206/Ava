@@ -12,7 +12,7 @@ from psycopg.conninfo import conninfo_to_dict
 from base.config import settings
 from base.host.system.cron import os_jobs_enabled
 from tests.fixtures.env_bootstrap import UNPROVISIONED_DB_URL, UNPROVISIONED_REDIS_URL
-from tests.fixtures.static_environment import static_mode
+from tests.fixtures.unit.static_environment import static_mode
 
 
 def test_process_environment_keeps_its_home_and_data_plane_boundary(

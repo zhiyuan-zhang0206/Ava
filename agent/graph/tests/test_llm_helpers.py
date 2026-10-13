@@ -26,7 +26,6 @@ from agent.graph import llm_node
 from agent.graph.llm_errors import LlmLedger
 from agent.graph.prompt._base_prompt import capture_ava_overview, get_ava_overview
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
@@ -37,6 +36,7 @@ from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from tests.fixtures.graph.fakes import make_fake_ops_pool
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}

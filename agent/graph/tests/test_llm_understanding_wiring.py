@@ -18,7 +18,6 @@ from agent.graph import LlmLedger, llm_node
 from agent.hooks import understanding_chunks as uc
 from agent.state import AgentState
 from agent.state_channels import CompactState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
@@ -29,6 +28,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from tests.fixtures.graph.fakes import make_fake_ops_pool
 
 
 async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:

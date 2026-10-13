@@ -35,7 +35,7 @@ def test_optin_fixtures_are_not_visible_to_unrelated_collectors(
     assert not request._fixturemanager.getfixturedefs(name, request._pyfuncitem)
     assert request.config.pluginmanager.get_plugin("tests.fixtures.units") is None
     assert request.config.pluginmanager.get_plugin("tests.fixtures.unit.gateway") is None
-    assert request.config.pluginmanager.get_plugin("agent.graph.llm.tests.cancel_fixture") is None
+    assert request.config.pluginmanager.get_plugin("tests.fixtures.graph.cancel") is None
     assert request.config.pluginmanager.get_plugin("tests.fixtures.model_catalog") is None
     assert request.config.pluginmanager.get_plugin("tests.fixtures.log_capture") is None
     assert request.config.pluginmanager.get_plugin("base.tests.fixtures.retry_waits") is None
@@ -52,7 +52,7 @@ pytest_plugins = [
     "tests.fixtures.env_bootstrap",
     "tests.fixtures.leak_guard",
     "tests.fixtures.identity_restore",
-    "tests.fixtures.plugin_registrations",
+    "tests.fixtures.unit.plugin_registrations",
     "tests.fixtures.guards",
 ]
 

@@ -34,18 +34,18 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from agent.tests.claim.claim_support import (
-    _fake_llm,
-    insert_inbound_kind,
-    make_runtime,
-    thread_config,
-)
 from base.agents.context import AvaContext
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from tests.fixtures.graph.claim_support import (
+    _fake_llm,
+    insert_inbound_kind,
+    make_runtime,
+    thread_config,
+)
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
 

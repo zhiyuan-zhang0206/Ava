@@ -5,7 +5,7 @@
 ]
 "tests.fixtures.unit.homes" = ["."]
 "tests.fixtures.unit.identity" = ["."]
-"agent.graph.llm.tests.cancel_fixture" = [
+"tests.fixtures.graph.cancel" = [
     "test_graph_stream.py",
     "test_llm_helpers.py",
     "test_llm_understanding_wiring.py",

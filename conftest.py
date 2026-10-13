@@ -48,7 +48,7 @@ import pytest
 # marked them; registering them here keeps pytest's assertion rewriting for them.
 pytest.register_assert_rewrite(
     "tests.fixtures.env_bootstrap",
-    "tests.fixtures.static_environment",
+    "tests.fixtures.unit.static_environment",
     "tests.fixtures.provisioning",
     "tests.fixtures.guards",
 )
@@ -100,8 +100,8 @@ pytest_plugins = [
     "tests.fixtures.env_bootstrap",
     "tests.fixtures.leak_guard",
     "tests.fixtures.identity_restore",
-    "tests.fixtures.plugin_registrations",
-    "tests.fixtures.static_environment",
+    "tests.fixtures.unit.plugin_registrations",
+    "tests.fixtures.unit.static_environment",
     "tests.fixtures.provisioning",
     "tests.fixtures.guards",
     # Directory-level fixtures that follow their tests (`PATH_SCOPES`), not a conftest.

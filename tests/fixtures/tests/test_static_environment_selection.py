@@ -14,10 +14,10 @@ import yaml
 def owned_tree(tmp_path: Path) -> Path:
     (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     (tmp_path / "conftest.py").write_text(
-        "from tests.fixtures import static_environment as environment\n"
+        "from tests.fixtures.unit import static_environment as environment\n"
         "environment.STATIC_TEST_PATHS = ('tools/tests', 'canaries/test_boundary.py')\n"
         "pytest_plugins = ['tests.fixtures.env_bootstrap', "
-        "'tests.fixtures.static_environment']\n",
+        "'tests.fixtures.unit.static_environment']\n",
         encoding="utf-8",
     )
     for rel in (
