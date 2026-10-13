@@ -494,7 +494,7 @@ def test_poll_reads_directly_from_db(
 ) -> None:
     import asyncio
 
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -537,7 +537,7 @@ def test_list_queue_reads_directly_from_db(
 ) -> None:
     import asyncio
 
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -568,7 +568,7 @@ def test_list_queue_limit_follows_config(
 ) -> None:
     """The queue listing cap is cluster config, resolved per call: a shortened
     limit pushes only that many notices (task #3696)."""
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -603,7 +603,7 @@ def test_unaccepted_notices_caps_at_display_default(
     """One source for the live-read cap: the DB-direct twin resolves the same
     display.notices_open_default_limit the gateway endpoint applies (task
     #3696)."""
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,

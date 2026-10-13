@@ -28,7 +28,7 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     machine_identity: MachineIdentity,
 ) -> None:
     from agent.db import claim_inbound_batch
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -78,7 +78,7 @@ async def test_control_claim_records_superseded_accepted_intent(
 
     from agent.db import claim_inbound_batch
     from agent.ownership.hosted import admit_hosted_runtime
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -145,7 +145,7 @@ async def test_control_claim_preserves_unaccepted_intent(
     machine_identity: MachineIdentity,
 ) -> None:
     from agent.db import claim_inbound_batch
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     agent_id = spawn_agent(
         catalog=model_catalog,

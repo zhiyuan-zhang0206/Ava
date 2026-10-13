@@ -47,6 +47,7 @@ from agent.hooks import history_dump
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
+from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -60,7 +61,6 @@ from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import ContextBudget
 from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 # ── helpers ──
 

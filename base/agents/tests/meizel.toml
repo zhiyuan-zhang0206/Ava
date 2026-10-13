@@ -1,4 +1,7 @@
-exports = ["capture_inputs.py"]
+exports = ["capture_inputs.py", "units.py"]
+
+[uses]
+"test_observation_evidence.py" = ["units.py"]
 
 [debt.first-party-patch]
 "test_birth_config.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1

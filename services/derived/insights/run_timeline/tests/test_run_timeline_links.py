@@ -12,6 +12,7 @@ import psycopg
 import pytest
 from fastapi import HTTPException, Request
 
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -19,7 +20,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.run_timeline import links
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 _INSERT: LiteralString = (
     "INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, source, "

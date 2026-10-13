@@ -17,6 +17,7 @@ from agent.tests.claim.claim_support import (
 )
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.incarnation.native_work_models import NativeWorkTarget
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -25,7 +26,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 async def test_claim_unknown_kind_raises(
