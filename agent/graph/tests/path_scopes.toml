@@ -3,7 +3,7 @@
 "tests.path_scoped.agent_tests" = [
     ".",
 ]
-"tests.fixtures.unit.homes" = ["."]
+"base.paths.tests.homes" = ["."]
 "tests.fixtures.unit.identity" = ["."]
 "agent.graph.llm.tests.cancel_fixture" = [
     "test_graph_stream.py",

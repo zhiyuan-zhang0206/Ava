@@ -1,6 +1,6 @@
 """Children discovery behind the `ava` SDK surface.
 
-The kind predicates, the `_Constant` wrapper, and the module/class child
+The kind predicates, the `Constant` wrapper, and the module/class child
 walkers that power `help()` rendering, SDK-expand discovery, doc linting, and
 metering. `agent_visible_names` is the single source of truth the rest of the
 framework imports (`agent/graph/prompt/system_prompt.py`, `ava/sdk_surface/metering.py`,
@@ -28,12 +28,12 @@ def is_element(obj: Any) -> bool:
 
 
 @dataclass(frozen=True)
-class _Constant:
+class Constant:
     """Module-level constant exposed via PEP 224 attribute docstring.
 
-    `_module_attribute_docs` AST-parses the module source for
+    `module_attribute_docs` AST-parses the module source for
     `AnnAssign(target=Name) [Expr(Constant(str))]` patterns and wraps each hit
-    in this. Renderer treats `_Constant` instances as a separate child kind:
+    in this. Renderer treats `Constant` instances as a separate child kind:
     header carries the annotation, body the docstring."""
 
     type_str: str
@@ -61,7 +61,7 @@ def children(
     render parameter, passed down by `help()`; classes and plain namespaces are
     not filtered."""
     if inspect.ismodule(container):
-        return _sorted_children(_module_children(container, hidden_members=hidden_members))
+        return _sorted_children(module_children(container, hidden_members=hidden_members))
     if inspect.isclass(container):
         # Class members keep definition order — field order is part of the
         # contract (dataclass rows render in their declared order).
@@ -78,7 +78,7 @@ def _child_group_rank(child: Any) -> int:
     (submodules) first, then constants, then classes, then functions."""
     if inspect.ismodule(child) or isinstance(child, SimpleNamespace):
         return 0
-    if isinstance(child, _Constant) or is_documented_const(child):
+    if isinstance(child, Constant) or is_documented_const(child):
         return 1
     if inspect.isclass(child):
         return 2
@@ -142,16 +142,16 @@ def agent_visible_names(container: Any) -> list[str]:
     return surface
 
 
-def _module_children(
+def module_children(
     mod: Any, *, hidden_members: frozenset[str] = frozenset()
 ) -> list[tuple[str, Any]]:
     """The children named by `mod`'s `__all_for_ava__` (via `agent_visible_names`, which raises
     when there is none). PEP 224 attribute docstrings are discovered alongside via AST; any
-    non-callable/non-class/non-module attr is wrapped as `_Constant` so the renderer can show
+    non-callable/non-class/non-module attr is wrapped as `Constant` so the renderer can show
     `## NAME: type` instead of falling back to the underlying class's docstring.
     `hidden_members` is the render caller's filter (dotted paths, e.g. ``ava.self.attach``)."""
-    annotations = _module_attribute_annotations(mod)
-    docs = _module_attribute_docs(mod)
+    annotations = module_attribute_annotations(mod)
+    docs = module_attribute_docs(mod)
     surface = agent_visible_names(mod)
     if hidden_members:
         # Dotted member paths (``ava.self.attach``) passed by the render
@@ -180,7 +180,7 @@ def resolve_child(
     """Build a child entry for `name` from `mod`'s `__all_for_ava__`.
 
     Functions / classes / modules and `ava.const()`-wrapped values pass
-    through; remaining non-callable attrs wrap in `_Constant` so the
+    through; remaining non-callable attrs wrap in `Constant` so the
     renderer emits `## NAME: type` with the PEP 224 docstring (if any) as
     body. Type comes from the source-level annotation when available,
     falling back to the runtime value's class name."""
@@ -190,11 +190,11 @@ def resolve_child(
         # has no entry. Annotation + PEP 224 doc still describe the contract
         # (e.g. `MACHINE` in `ava/self.py` served via `__getattr__`).
         if name in docs or name in annotations:
-            return _Constant(type_str=annotations.get(name, ""), doc=docs.get(name, ""))
+            return Constant(type_str=annotations.get(name, ""), doc=docs.get(name, ""))
         return None
     if is_container(attr) or is_element(attr) or is_documented_const(attr):
         return attr
-    return _Constant(
+    return Constant(
         type_str=annotations.get(name, type(attr).__name__),
         doc=docs.get(name, ""),
     )
@@ -212,7 +212,7 @@ def _module_ast(mod: ModuleType) -> _ast.Module | None:
         return None
 
 
-def _module_attribute_annotations(mod: ModuleType) -> dict[str, str]:
+def module_attribute_annotations(mod: ModuleType) -> dict[str, str]:
     """Extract type annotation strings for `AnnAssign` targets in `mod`."""
     tree = _module_ast(mod)
     if tree is None:
@@ -224,7 +224,7 @@ def _module_attribute_annotations(mod: ModuleType) -> dict[str, str]:
     return annots
 
 
-def _module_attribute_docs(mod: ModuleType) -> dict[str, str]:
+def module_attribute_docs(mod: ModuleType) -> dict[str, str]:
     """Extract PEP 224 attribute docstrings: `{name: docstring}`.
 
     Matches both `AnnAssign` (typed declaration) and plain `Assign`, when
@@ -273,7 +273,7 @@ def _string_literal_value(node: _ast.stmt) -> str | None:
 def _class_children(cls: type) -> list[tuple[str, Any]]:
     """Public surface of a class, in source-reading order: declared fields
     first (e.g. dataclass attributes — annotation order is `__init__` order),
-    then methods / nested classes. Fields wrap as `_Constant` so the renderer
+    then methods / nested classes. Fields wrap as `Constant` so the renderer
     emits `name: type`; inherited-from-object members don't count."""
     result: list[tuple[str, Any]] = [
         _annotation_field(name, ann)
@@ -284,8 +284,8 @@ def _class_children(cls: type) -> list[tuple[str, Any]]:
     return result
 
 
-def _annotation_field(name: str, ann: Any) -> tuple[str, _Constant]:
-    """A declared field as a `_Constant` child. `inspect.get_annotations`
+def _annotation_field(name: str, ann: Any) -> tuple[str, Constant]:
+    """A declared field as a `Constant` child. `inspect.get_annotations`
     returns only the class's own annotations, in definition order. Under
     `from __future__ import annotations` they are strings; otherwise real
     types — take the display name either way. A `NamedTuple` turns its string
@@ -296,7 +296,7 @@ def _annotation_field(name: str, ann: Any) -> tuple[str, _Constant]:
         type_str = ann
     else:
         type_str = getattr(ann, "__name__", str(ann))
-    return (name, _Constant(type_str=type_str, doc=""))
+    return (name, Constant(type_str=type_str, doc=""))
 
 
 def _method_children(cls: type) -> list[tuple[str, Any]]:

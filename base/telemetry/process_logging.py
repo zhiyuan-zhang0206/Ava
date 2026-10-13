@@ -49,7 +49,7 @@ class LoadedImage(Protocol):
     def sha(self) -> str | None: ...
 
 
-def _message_to_params(
+def message_to_params(
     message: loguru.Message,
 ) -> tuple[Any, int | None, str, str, dict[str, Any], str]:
     """Extract `(ts, agent_id, level, event, payload, source)` from one loguru record.
@@ -146,7 +146,7 @@ def _event_sink(
     """Route one loguru record into the unified event pipeline.
 
     This is the loguru-side adapter: field derivation lives in
-    `_message_to_params`, and the event itself is enqueued to
+    `message_to_params`, and the event itself is enqueued to
     `base.telemetry` — the emitter batches it into the unified event stream
     (see `base/telemetry/emitter.py`). The enqueue is non-blocking (bounded queue; shed
     records are counted and reported as `event_log_drop`), so even the
@@ -156,7 +156,7 @@ def _event_sink(
     must not silently fall through; production registrations add the handler
     with `catch=True`, which keeps the raise off the calling thread while the
     JSONL file sink still holds the line."""
-    ts, agent_id, level, event, payload, source = _message_to_params(message)
+    ts, agent_id, level, event, payload, source = message_to_params(message)
     emit(
         category_for_kind(event),
         event,

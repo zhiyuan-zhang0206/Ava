@@ -54,14 +54,14 @@ def _hung_archive_args(**_inputs: object) -> list[str]:
 
 def _private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, int]:
     from base.config import settings
-    from tests._containers import _free_port
+    from tests._containers import free_port
 
     home = tmp_path / "home"
     home.mkdir()
-    port = _free_port()
+    port = free_port()
     monkeypatch.setenv("AVA_HOME", str(home))
     monkeypatch.setattr(settings.data_plane, "db_url", f"postgresql://test@127.0.0.1:{port}/test")
-    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
+    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{free_port()}")
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
     return home / "pg", port

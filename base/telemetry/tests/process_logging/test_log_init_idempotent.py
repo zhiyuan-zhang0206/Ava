@@ -42,7 +42,7 @@ def reset_init_flag() -> Iterator[None]:
 
     In production process init happens only once; test fixture-level reset is for test isolation.
     """
-    slog._init_done = False
+    slog.init_done = False
     # init_gateway_process now logs one `service_started` line per boot (the
     # ops monitor panel's restart-count collection point). Silence it in the
     # idempotency tests — they assert sink wiring, not the log line; the
@@ -50,14 +50,14 @@ def reset_init_flag() -> Iterator[None]:
     # the emission contract.
     with patch.object(slog.logger, "info"):
         yield
-    slog._init_done = False
+    slog.init_done = False
 
 
 def test_init_gateway_process_idempotent() -> None:
     """Repeated calls to init_gateway_process trigger only one logger.add chain."""
     with (
         patch.object(slog.logger, "add") as mock_add,
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
+        patch.object(slog, "add_file_sink") as mock_file_sink,
         patch.object(plog, "add_event_sink") as mock_pg,
     ):
         plog.init_gateway_process(**gateway_inputs())
@@ -74,7 +74,7 @@ def test_init_subprocess_logger_idempotent() -> None:
     """Repeated calls to init_subprocess_logger trigger only one sink chain."""
     with (
         patch.object(slog.logger, "configure") as mock_configure,
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
+        patch.object(slog, "add_file_sink") as mock_file_sink,
     ):
         slog.init_subprocess_logger(agent_id=1)
         slog.init_subprocess_logger(agent_id=1)
@@ -87,13 +87,13 @@ def test_first_init_wins_subsequent_silent_skip() -> None:
     """Call init_gateway first, then init_subprocess_logger → second silent skip doesn't mix sink types.
 
     Single-init contract: at process startup, one role (gateway / subprocess / cli) is determined,
-    then _init_done locked, init of other roles also goes silent skip. Otherwise, beyond watchdog daemon
+    then init_done locked, init of other roles also goes silent skip. Otherwise, beyond watchdog daemon
     (gateway init) calling healthcheck.main() (also gateway init), if healthcheck mistakenly calls different role like init_subprocess_logger, sinks would accumulate again.
     """
     with (
         patch.object(slog.logger, "add") as mock_add,
         patch.object(slog.logger, "configure"),
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
+        patch.object(slog, "add_file_sink") as mock_file_sink,
         patch.object(plog, "add_event_sink"),
     ):
         plog.init_gateway_process(**gateway_inputs())
@@ -108,7 +108,7 @@ def test_init_gateway_process_per_daemon_log_file() -> None:
     """init_gateway_process(name=X) writes X.log, not shared gateway.log — each daemon's log (including uncaught exception traceback) lands in per-daemon file, postmortem can be found (shared gateway.log mixing all daemons by pid makes traceability hard)."""
     with (
         patch.object(slog.logger, "add"),
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
+        patch.object(slog, "add_file_sink") as mock_file_sink,
         patch.object(plog, "add_event_sink"),
     ):
         plog.init_gateway_process(name="restarter", **gateway_inputs())
@@ -120,7 +120,7 @@ def test_init_gateway_process_default_name_is_gateway() -> None:
     """Default name remains gateway.log (gateway process backward compat)."""
     with (
         patch.object(slog.logger, "add"),
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
+        patch.object(slog, "add_file_sink") as mock_file_sink,
         patch.object(plog, "add_event_sink"),
     ):
         plog.init_gateway_process(**gateway_inputs())
@@ -132,7 +132,7 @@ def test_init_cli_process_idempotent() -> None:
     """Repeated calls to init_cli_process trigger only one sink chain."""
     with (
         patch.object(slog.logger, "add") as mock_add,
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
+        patch.object(slog, "add_file_sink") as mock_file_sink,
         patch.object(plog, "add_event_sink") as mock_pg,
     ):
         plog.init_cli_process(
@@ -156,7 +156,7 @@ def test_init_cli_process_per_invocation_log_file() -> None:
     naming convention)."""
     with (
         patch.object(slog.logger, "add"),
-        patch.object(slog, "_add_file_sink") as mock_file_sink,
+        patch.object(slog, "add_file_sink") as mock_file_sink,
         patch.object(plog, "add_event_sink"),
     ):
         plog.init_cli_process(
@@ -174,7 +174,7 @@ def test_file_sink_rotates_and_expires(tmp_path: Path) -> None:
     Without them files only monotonically grow, and nothing reclaims: actual measurement gateway.log ~900 MB, agent-N.log ~190 MB. This is not optional tuning for the sink, it's a prerequisite for its usability.
     """
     with patch.object(slog.logger, "add") as mock_add:
-        slog._add_file_sink(tmp_path / "x.log")
+        slog.add_file_sink(tmp_path / "x.log")
 
     kwargs = mock_add.call_args.kwargs
     assert kwargs["rotation"], "file sink must rotate"
@@ -188,7 +188,7 @@ def test_file_sink_never_enqueues(tmp_path: Path) -> None:
     Prefer accepting rare interleaving on rotation than switching to enqueue.
     """
     with patch.object(slog.logger, "add") as mock_add:
-        slog._add_file_sink(tmp_path / "x.log")
+        slog.add_file_sink(tmp_path / "x.log")
 
     assert mock_add.call_args.kwargs.get("enqueue", False) is False
 
@@ -202,7 +202,7 @@ def test_init_gateway_process_emits_service_started() -> None:
     infos: list[dict] = []
     with (
         patch.object(slog.logger, "add"),
-        patch.object(slog, "_add_file_sink"),
+        patch.object(slog, "add_file_sink"),
         patch.object(plog, "add_event_sink"),
         patch.object(slog.logger, "info", side_effect=lambda _msg, **kw: infos.append(kw)),  # pyright: ignore[reportUnknownMemberType]
     ):
@@ -285,11 +285,11 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
 
 
 def test_add_file_sink_tightens_permissions(tmp_path: Path) -> None:
-    """Log files carry full agent exec output, so _add_file_sink makes the
+    """Log files carry full agent exec output, so add_file_sink makes the
     logs dir 0700 and the file 0600 — content must not be world-readable even
     under a permissive umask."""
     log_path = tmp_path / "logs" / "agent-1.log"
-    sink_id = slog._add_file_sink(log_path)
+    sink_id = slog.add_file_sink(log_path)
     try:
         assert (log_path.parent.stat().st_mode & 0o777) == 0o700
         assert (log_path.stat().st_mode & 0o777) == 0o600

@@ -1,4 +1,4 @@
-exports = ["home.py", "private_dir.py"]
+exports = ["home.py", "private_dir.py", "tests"]
 
 [uses]
 "__init__.py" = ["home.py", "private_dir.py"]

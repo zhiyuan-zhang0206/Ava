@@ -69,7 +69,7 @@ Capabilities rather than standing as its own section.
   `AVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS`, per-agent overlay): production
   histories from 2026-09-28 to 2026-10-10 showed no cross-call dependency failures
   for `deepseek-flash`, and other models are enabled per agent while they are evaluated.
-- **Core expanded SDK reference** — `agent/graph/prompt/system_prompt.py:_sdk_expand_section`,
+- **Core expanded SDK reference** — `agent/graph/prompt/system_prompt.py:sdk_expand_section`,
   rendering `effective_sdk_expand()`: plugin registrations
   (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. ava_code's `cwd`) first, then
   `settings.sdk_expand_in_system_prompt` (env `AVA_SDK_EXPAND`, default `shell,files,agents,tasks`),

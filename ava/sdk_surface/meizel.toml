@@ -17,7 +17,3 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 "skill_sources.py" = ["install.py", "installation.py"]
 "tests" = ["batch.py", "validation.py"]
 "wraps.py" = ["installation.py", "metering.py", "settings.py"]
-
-[debt.private-name]
-"help.py -> discovery.py#_Constant" = 1
-"plugins.py -> sdk_disable.py#_DisabledSDKModule" = 1

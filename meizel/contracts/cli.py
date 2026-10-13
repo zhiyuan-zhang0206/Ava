@@ -11,6 +11,7 @@ from meizel import roles as role_api
 from meizel.contracts import enumerations, generated
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
+from meizel.contracts.debt_carry import carry as carry_debt
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
 from meizel.contracts.debt_report import diff, summarize
@@ -147,6 +148,12 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
     )
     recording.add_argument("paths", nargs="+")
     modes.add_parser("prune", help="remove recorded debt that no longer occurs")
+    moving = modes.add_parser("carry", help="move recorded debt to where renamed files now are")
+    moving.add_argument(
+        "--base",
+        metavar="ref",
+        help="compare with this ref (default: the branch point with origin/main)",
+    )
     growth = modes.add_parser("diff", help="compare recorded totals with a git ref")
     growth.add_argument("--against", required=True, metavar="ref")
     growth.add_argument("--on-growth", required=True, choices=["fail", "warn"])
@@ -196,6 +203,13 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
         return 0
     if mode == "diff":
         return _run_diff(root, args.against, args.on_growth)
+    if mode == "carry":
+        lines = carry_debt(root, args.base)
+        for line in lines:
+            print(f"meizel: carried {line}")
+        if not lines:
+            print("meizel: no renamed file carries recorded debt")
+        return 0
     return _run_record(root, [relative_target(root, base, p) for p in args.paths], jobs)
 
 
@@ -204,16 +218,18 @@ def run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
         raise MeizelError("sync needs --prune or --declare")
     if args.paths and not args.declare:
         raise MeizelError("paths narrow --declare only")
+    for line in prune(root, args.jobs):
+        print(line)
     left: list[str] = []
     if args.declare:
+        for line in prune_debt(root, args.jobs):
+            print(line)
         targets = [relative_target(root, base, p) for p in args.paths] if args.paths else None
         lines, left = declare(root, targets, args.jobs)
         for line in lines:
             print(line)
         for line in left:
             print(line)
-    for line in prune(root, args.jobs):
-        print(line)
     if left:
         print(
             f"meizel: {len(left)} dependencies need a code change, not a declaration",

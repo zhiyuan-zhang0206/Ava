@@ -3,8 +3,3 @@ exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py"]
 [uses]
 "telemetry.py" = ["call_policy.py", "capture.py", "tally.py"]
 "tests" = ["call_policy.py", "tally.py", "telemetry.py"]
-
-[debt.private-name]
-"tests/test_call_policy.py -> call_policy.py#_read_policy" = 13
-"tests/test_policy_owner.py -> call_policy.py#_read_policy" = 2
-"tests/test_sdk_telemetry.py -> call_policy.py#_read_policy" = 2

@@ -11,13 +11,3 @@ exports = ["aggregate.py", "aggregate_sql.py", "ci_runs_metrics.py", "core", "ev
 "plugin_metrics.py" = ["logql.py", "plugin_metrics_sql.py"]
 "tests" = ["__init__.py", "aggregate.py", "core", "observed_metrics.py", "plugin_metrics.py"]
 "usage.py" = ["event_sql.py"]
-
-[debt.private-name]
-"plugin_metrics.py -> plugin_metrics_sql.py#_DOUBLE_QUOTED_OK" = 1
-"plugin_metrics.py -> plugin_metrics_sql.py#_QUOTED_RE" = 1
-"plugin_metrics.py -> plugin_metrics_sql.py#_SQL_DENIED_KEYWORDS" = 1
-"plugin_metrics.py -> plugin_metrics_sql.py#_SQL_FUNCTIONS" = 1
-"plugin_metrics.py -> plugin_metrics_sql.py#_SQL_KEYWORDS" = 1
-"plugin_metrics.py -> plugin_metrics_sql.py#_SQL_OPS" = 1
-"plugin_metrics.py -> plugin_metrics_sql.py#_TOKEN_RE" = 1
-"plugin_metrics.py -> plugin_metrics_sql.py#_check_from_clauses" = 1

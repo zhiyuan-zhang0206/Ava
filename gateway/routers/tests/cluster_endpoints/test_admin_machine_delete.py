@@ -16,12 +16,6 @@ from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from tests.components.gateway.test_cluster_endpoints import _pin_session_names as _pin_session_names
 from tests.components.gateway.test_cluster_endpoints import (
-    _seed_agent_on_machine,
-    _seed_away_machine,
-    _seed_drain_owner,
-    _seed_in_progress_task,
-)
-from tests.components.gateway.test_cluster_endpoints import (
     fake_admin_events as fake_admin_events,
 )
 from tests.components.gateway.test_cluster_endpoints import (
@@ -29,6 +23,12 @@ from tests.components.gateway.test_cluster_endpoints import (
 )
 from tests.components.gateway.test_cluster_endpoints import (
     pause_backend as pause_backend,
+)
+from tests.components.gateway.test_cluster_endpoints import (
+    seed_agent_on_machine,
+    seed_away_machine,
+    seed_drain_owner,
+    seed_in_progress_task,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -331,9 +331,9 @@ class TestMachinePauseResume:
         # identity carries agent-runner so spawn_agent works; the DB row for
         # the local host stays gateway-only (roster's local lightweight path)
         set_machine_identity(role="agent-runner", name="test-host")
-        _seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _seed_drain_owner(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        aid = _seed_agent_on_machine(
+        seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        seed_drain_owner(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        aid = seed_agent_on_machine(
             db_conn,
             "away",
             config_authority=config_authority,
@@ -341,7 +341,7 @@ class TestMachinePauseResume:
             database_gate=database_gate,
             machine_identity=machine_identity,
         )  # pyright: ignore[reportUnknownArgumentType]
-        _seed_agent_on_machine(
+        seed_agent_on_machine(
             db_conn,
             "away",
             config_authority=config_authority,
@@ -349,7 +349,7 @@ class TestMachinePauseResume:
             database_gate=database_gate,
             machine_identity=machine_identity,
         )  # pyright: ignore[reportUnknownArgumentType]
-        _seed_in_progress_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
+        seed_in_progress_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
 
         with TestClient(app) as client:
             r = client.post(
@@ -397,7 +397,7 @@ class TestMachinePauseResume:
         """Re-pausing an already-paused machine is a safe no-op: nothing left
         to drain/terminate, the original latch values are returned."""
         set_machine_identity(role="gateway", name="test-host")
-        _seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             first = client.post("/api/cluster/machines/away/pause", json={"reason": "once"})
             second = client.post("/api/cluster/machines/away/pause", json={"reason": "twice"})
@@ -425,8 +425,8 @@ class TestMachinePauseResume:
         from gateway.agents import forward as _fwd
 
         set_machine_identity(role="agent-runner", name="test-host")
-        _seed_away_machine(db_conn)
-        aid = _seed_agent_on_machine(
+        seed_away_machine(db_conn)
+        aid = seed_agent_on_machine(
             db_conn,
             "away",
             config_authority=config_authority,
@@ -480,7 +480,7 @@ class TestMachinePauseResume:
         """Pausing the gateway host itself is refused — the cluster needs its
         gateway member online to answer anything."""
         set_machine_identity(role="gateway", name="test-host")
-        _seed_away_machine(db_conn, name="test-host", local_row=False)  # pyright: ignore[reportUnknownArgumentType]
+        seed_away_machine(db_conn, name="test-host", local_row=False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             r = client.post("/api/cluster/machines/test-host/pause", json={})
         assert r.status_code == 400
@@ -491,7 +491,7 @@ class TestMachinePauseResume:
         agent machine list again; resuming a not-paused machine is a no-op
         (resumed=False)."""
         set_machine_identity(role="gateway", name="test-host")
-        _seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             client.post("/api/cluster/machines/away/pause", json={})
             r = client.post("/api/cluster/machines/away/resume", json={})

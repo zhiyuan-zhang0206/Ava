@@ -53,7 +53,7 @@ from base.paths import ava_home
 from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 
 
-def _load_config() -> dict[str, dict[str, Any]]:
+def load_config() -> dict[str, dict[str, Any]]:
     """Merged MCP server map (machine `$AVA_HOME/mcp.json` + plugin-bundled `.mcp.json`).
 
     Same loader the in-process tool surface reads, so both agree on the server set.
@@ -78,7 +78,7 @@ def _load_config() -> dict[str, dict[str, Any]]:
 
 def shared_kind(server: str) -> Any:
     """The server's `shared` declaration: `"browser"`, True, or falsy (none)."""
-    cfg = _load_config()
+    cfg = load_config()
     spec = cfg.get(server)
     return spec.get("shared") if spec else None
 
@@ -225,7 +225,7 @@ async def connect_server(
 
     from ._browser import connect_browser_direct
 
-    cfg = _load_config()
+    cfg = load_config()
     spec = cfg[server]
     assert_requirements(spec)
     url = server_url(spec)
@@ -491,7 +491,7 @@ async def get_session(
     buckets and are wrapped in a serializing session, so every connection
     shares one stdio child instead of spawning its own; non-shared servers
     keep the per-connection isolation contract."""
-    cfg = _load_config()
+    cfg = load_config()
     if server not in cfg:
         raise ValueError(f"Server {server!r} not configured")
     shared = cfg[server].get("shared")
@@ -505,7 +505,7 @@ async def get_session(
         buckets.locks[server] = lock
 
     async with lock:
-        cfg = _load_config()
+        cfg = load_config()
         if server not in cfg:
             raise ValueError(f"Server {server!r} not configured")
         if server in buckets.sessions:

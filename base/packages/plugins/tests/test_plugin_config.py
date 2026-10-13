@@ -37,7 +37,7 @@ from base.packages.plugins.plugin_errors import (
 )
 
 
-class _FixtureConfig(BaseModel):
+class FixtureConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     flag: bool = Field(default=True)
     marker: str = Field(default=".git", json_schema_extra={"per_agent": True})
@@ -50,13 +50,13 @@ def test_authority_path_and_reader_do_not_create_a_missing_home(
     monkeypatch.setenv("AVA_HOME", str(home))
     image = disk_image_path("fixture")
     assert image == home / "configs" / "fixture" / "config.json"
-    assert read_config_image(_FixtureConfig, image).flag is True
+    assert read_config_image(FixtureConfig, image).flag is True
     assert not home.exists()
 
 
 def test_read_config_image_defaults_without_creating_home(tmp_path: Path) -> None:
     image = tmp_path / "absent-home" / "configs" / "fixture" / "config.json"
-    config = read_config_image(_FixtureConfig, image)
+    config = read_config_image(FixtureConfig, image)
     assert config.flag is True
     assert config.marker == ".git"
     assert not image.parent.parent.parent.exists()
@@ -66,7 +66,7 @@ def test_read_config_image_returns_disk_values_without_registration(tmp_path: Pa
     image = tmp_path / "config.json"
     content = '{"flag": false, "marker": "custom"}\n'
     image.write_text(content)
-    config = read_config_image(_FixtureConfig, image)
+    config = read_config_image(FixtureConfig, image)
     assert (config.flag, config.marker) == (False, "custom")
     assert image.read_text() == content
 
@@ -80,7 +80,7 @@ def test_read_config_image_rejects_schema_drift_without_repair(
     image = tmp_path / "config.json"
     image.write_text(content)
     with pytest.raises(SchemaDriftError, match="schema drift"):
-        read_config_image(_FixtureConfig, image)
+        read_config_image(FixtureConfig, image)
     assert image.read_text() == content
 
 
@@ -99,14 +99,14 @@ def test_bind_non_basemodel_raises(isolated_registry: dict[str, BaseModel]):
 
 
 def test_bind_duplicate_raises(isolated_registry: dict[str, BaseModel], unit_home):
-    bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
+    bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
     with pytest.raises(DuplicateRegistration, match="test_plugin"):
-        bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
+        bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
 
 
 def test_bind_auto_writes_default_when_missing(isolated_registry: dict[str, BaseModel], unit_home):
     """disk image missing → bind_plugin_config auto-writes default + instantiation OK."""
-    bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
+    bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
 
     cfg = get_plugin_config(
         "test_plugin",
@@ -114,7 +114,7 @@ def test_bind_auto_writes_default_when_missing(isolated_registry: dict[str, Base
             plugin_configs=isolated_registry,
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
-        _FixtureConfig,
+        FixtureConfig,
     )
     assert cfg.flag is True
     assert cfg.marker == ".git"
@@ -131,7 +131,7 @@ def test_bind_reads_existing_image(isolated_registry: dict[str, BaseModel], unit
     img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
     img.write_text(json.dumps({"flag": False, "marker": ".hg"}))  # pyright: ignore[reportUnknownMemberType]
 
-    bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
+    bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
 
     cfg = get_plugin_config(
         "test_plugin",
@@ -139,7 +139,7 @@ def test_bind_reads_existing_image(isolated_registry: dict[str, BaseModel], unit
             plugin_configs=isolated_registry,
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
-        _FixtureConfig,
+        FixtureConfig,
     )
     assert cfg.flag is False
     assert cfg.marker == ".hg"
@@ -153,7 +153,7 @@ def test_bind_schema_drift_raises(isolated_registry: dict[str, BaseModel], unit_
     img.write_text(json.dumps({"flag": True, "marker": ".git", "extra_field": 42}))  # pyright: ignore[reportUnknownMemberType]
 
     with pytest.raises(SchemaDriftError, match="schema drift"):
-        bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
+        bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
     assert "test_plugin" not in isolated_registry
 
 
@@ -166,7 +166,7 @@ def test_merge_disk_image_adds_new_field(isolated_registry: dict[str, BaseModel]
         json.dumps({"flag": True})
     )  # missing marker  # pyright: ignore[reportUnknownMemberType]
 
-    added, removed = merge_disk_image_schema("test_plugin", _FixtureConfig)
+    added, removed = merge_disk_image_schema("test_plugin", FixtureConfig)
     assert added == {"marker"}
     assert removed == set()
     assert json.loads(img.read_text()) == {"flag": True, "marker": ".git"}  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -183,7 +183,7 @@ def test_merge_disk_image_drops_removed_field(isolated_registry: dict[str, BaseM
     img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
     img.write_text(json.dumps({"flag": True, "marker": ".git", "obsolete": "old"}))  # pyright: ignore[reportUnknownMemberType]
 
-    added, removed = merge_disk_image_schema("test_plugin", _FixtureConfig)
+    added, removed = merge_disk_image_schema("test_plugin", FixtureConfig)
     assert added == set()
     assert removed == {"obsolete"}
     # obsolete has been dropped from disk image → field set now matches cls_keys
@@ -205,10 +205,10 @@ def test_merge_then_bind_resolves_removed_field_drift(
     img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
     img.write_text(json.dumps({"flag": True, "marker": ".git", "obsolete": "old"}))  # pyright: ignore[reportUnknownMemberType]
 
-    merge_disk_image_schema("test_plugin", _FixtureConfig)
+    merge_disk_image_schema("test_plugin", FixtureConfig)
 
     bind_plugin_config(
-        "test_plugin", _FixtureConfig, configs=isolated_registry
+        "test_plugin", FixtureConfig, configs=isolated_registry
     )  # before fix, would raise SchemaDriftError here
 
     cfg = get_plugin_config(
@@ -217,7 +217,7 @@ def test_merge_then_bind_resolves_removed_field_drift(
             plugin_configs=isolated_registry,
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
-        _FixtureConfig,
+        FixtureConfig,
     )
     assert cfg.flag is True
     assert cfg.marker == ".git"
@@ -231,7 +231,7 @@ def test_merge_disk_image_noop_when_aligned(isolated_registry: dict[str, BaseMod
     img.write_text(json.dumps({"flag": False, "marker": ".hg"}))  # pyright: ignore[reportUnknownMemberType]
     mtime_before = img.stat().st_mtime  # pyright: ignore[reportUnknownMemberType]
 
-    added, removed = merge_disk_image_schema("test_plugin", _FixtureConfig)
+    added, removed = merge_disk_image_schema("test_plugin", FixtureConfig)
     assert added == set()
     assert removed == set()
     assert img.stat().st_mtime == mtime_before  # pyright: ignore[reportUnknownMemberType]
@@ -241,7 +241,7 @@ def test_merge_disk_image_writes_default_when_missing(
     isolated_registry: dict[str, BaseModel], unit_home
 ):
     """disk missing → merge treats as first write of defaults, returns all-fields added."""
-    added, removed = merge_disk_image_schema("test_plugin", _FixtureConfig)
+    added, removed = merge_disk_image_schema("test_plugin", FixtureConfig)
     assert added == {"flag", "marker"}
     assert removed == set()
     assert disk_image_path("test_plugin").exists()
@@ -256,7 +256,7 @@ def test_write_default_disk_image_preserves_existing(
     content = json.dumps({"flag": False, "marker": ".old"})
     image.write_text(content)
     with pytest.raises(RuntimeError, match="changed before owned image write"):
-        write_default_disk_image("test_plugin", _FixtureConfig)
+        write_default_disk_image("test_plugin", FixtureConfig)
     assert image.read_text() == content
 
 
@@ -266,15 +266,15 @@ def test_default_initialization_rejects_file_created_after_missing_check(
     image = unit_home / "configs" / "test_plugin" / "config.json"
     assert not image.exists()
     image.parent.mkdir(parents=True)
-    image.write_text(_FixtureConfig(flag=False, marker="concurrent").model_dump_json())
+    image.write_text(FixtureConfig(flag=False, marker="concurrent").model_dump_json())
     with pytest.raises(RuntimeError, match="changed before owned image write"):
-        write_default_disk_image("test_plugin", _FixtureConfig)
-    assert read_config_image(_FixtureConfig, image).marker == "concurrent"
+        write_default_disk_image("test_plugin", FixtureConfig)
+    assert read_config_image(FixtureConfig, image).marker == "concurrent"
 
 
 def test_is_per_agent_field_metadata(isolated_registry: dict[str, BaseModel], unit_home):
     """json_schema_extra={"per_agent": True} → is_per_agent_field True; otherwise False."""
-    bind_plugin_config("test_plugin", _FixtureConfig, configs=isolated_registry)
+    bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
 
     assert (
         is_per_agent_field("test_plugin", "marker", configs=isolated_registry) is True
@@ -296,7 +296,7 @@ def _setup_overlayable_plugin(isolated_registry: dict[str, BaseModel]):
     pointing at a per-test tmp dir) so bind_plugin_config writes the disk image there,
     not into the shared session home — callers must declare `unit_home`.
     """
-    bind_plugin_config("overlay_test", _FixtureConfig, configs=isolated_registry)
+    bind_plugin_config("overlay_test", FixtureConfig, configs=isolated_registry)
 
 
 def test_resolve_overlay_targets_unknown_key_raises(
@@ -559,7 +559,7 @@ def test_apply_config_overlay_mutates_plugin_config(
                 plugin_configs=isolated_registry,
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
-            _FixtureConfig,
+            FixtureConfig,
         ).marker
         == ".git"
     )
@@ -571,7 +571,7 @@ def test_apply_config_overlay_mutates_plugin_config(
                 plugin_configs=isolated_registry,
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
-            _FixtureConfig,
+            FixtureConfig,
         ).marker
         == ".hg"
     )
@@ -592,7 +592,7 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
                 plugin_configs=isolated_registry,
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
-            _FixtureConfig,
+            FixtureConfig,
         ).marker
         == ".git"
     )
@@ -614,7 +614,7 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
                 plugin_configs=isolated_registry,
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
-            _FixtureConfig,
+            FixtureConfig,
         ).marker
         == ".git"
     )  # plugin untouched
@@ -645,7 +645,7 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
                 plugin_configs=isolated_registry,
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
-            _FixtureConfig,
+            FixtureConfig,
         ).marker
         == ".hg"
     )

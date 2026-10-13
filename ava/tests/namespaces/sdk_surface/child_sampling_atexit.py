@@ -14,7 +14,7 @@ def read() -> object:
     raise original
 
 
-call_policy._read_policy = read  # pyright: ignore[reportAttributeAccessIssue]
+call_policy.read_policy = read  # pyright: ignore[reportAttributeAccessIssue]
 installation = installed()
 assert installation is not None
 owner = installation.sampling

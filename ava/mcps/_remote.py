@@ -172,7 +172,7 @@ def connect_remote(socket_path: str) -> RemoteMCPClient:
     return RemoteMCPClient(socket_path)
 
 
-def _socket_path_for() -> str:
+def socket_path_for() -> str:
     """Filesystem path of the shared MCP daemon socket — the client side of the
     convention. The daemon is a per-machine service (one for all agents;
     sessions isolated per connection). Thin alias of
@@ -190,5 +190,5 @@ def daemon_socket_path() -> str | None:
     Presence does not prove liveness. An absent or stale socket fails the
     request; callers never fall back to a local server.
     """
-    path = _socket_path_for()
+    path = socket_path_for()
     return path if Path(path).exists() else None

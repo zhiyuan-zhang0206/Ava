@@ -1,2 +1,7 @@
+exports = ["homes.py"]
+
+[uses]
+"conftest.py" = ["homes.py"]
+
 [debt.first-party-patch]
 "test_private_dir.py#monkeypatch.setattr base.paths.private_dir.os.geteuid" = 1

@@ -6,7 +6,3 @@ exports = ["router.py", "session_control.py", "tests"]
 
 [external]
 "router.py" = "compiles a user-written schedule script to reject syntax errors"
-
-[debt.private-name]
-"tests/schedule_manager/test_revision_recovery.py -> router.py#_update_blocking" = 1
-"tests/test_update_delivery.py -> router.py#_update_blocking" = 2

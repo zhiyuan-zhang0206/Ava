@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.authority.tests.unit_capability_support import _ENDPOINT
+from base.cluster.authority.tests.unit_capability_support import ENDPOINT
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_boot as runner_boot
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
@@ -28,7 +28,7 @@ def _boot_with_bootstrap() -> dotenv_boot.EnvBootResult:
     dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     result = dotenv_boot.deliver_unit_authority()
     bootstrap.apply_bootstrap_values(
-        "http://gateway.invalid", {"AVA_DB_URL": _ENDPOINT, "AVA_EVENTS_CHANNEL": "ava:events"}
+        "http://gateway.invalid", {"AVA_DB_URL": ENDPOINT, "AVA_EVENTS_CHANNEL": "ava:events"}
     )
     return result
 
@@ -65,11 +65,11 @@ def test_a_forged_login_is_replaced_by_the_endpoint_and_refused(
     os.environ["AVA_DB_URL"] = "postgresql://ava_g0_runner:forged@10.0.0.7:6433/ava"
     os.environ[delivery.GENERATION_ENV] = "0"
     result = _boot_with_bootstrap()
-    assert os.environ["AVA_DB_URL"] == _ENDPOINT
+    assert os.environ["AVA_DB_URL"] == ENDPOINT
     refusal = result.db_authority_refusal
     assert refusal is not None and "only the root launcher delivers" in refusal
     with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):
-        guard_db_url(_ENDPOINT, refusal=refusal)
+        guard_db_url(ENDPOINT, refusal=refusal)
 
 
 def test_an_admitted_operator_process_consumes_the_installed_login(
@@ -95,10 +95,10 @@ def test_a_runner_without_a_capability_is_refused_by_name(
     intent.chmod(0o600)
     unit.unit_capability_path(runner_home).unlink()
     result = _boot_with_bootstrap()
-    assert os.environ["AVA_DB_URL"] == _ENDPOINT
+    assert os.environ["AVA_DB_URL"] == ENDPOINT
     assert API_TOKEN_ENV not in os.environ
     refusal = result.db_authority_refusal
     assert refusal is not None and "holds no database capability" in refusal
     assert "ava cluster db-authority issue-unit" in refusal
     with pytest.raises(NoDatabaseAuthorityError, match="issue-unit"):
-        guard_db_url(_ENDPOINT, refusal=refusal)
+        guard_db_url(ENDPOINT, refusal=refusal)

@@ -41,7 +41,7 @@ MINT_HINT = (
 )
 
 
-def _structural_failures(
+def structural_failures(
     combinations: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     return [
@@ -56,7 +56,7 @@ def _structural_failures(
     ]
 
 
-def _crop_results(combinations: list[dict[str, object]]) -> list[dict[str, object]]:
+def crop_results(combinations: list[dict[str, object]]) -> list[dict[str, object]]:
     return [
         diff
         for entry in combinations
@@ -64,7 +64,7 @@ def _crop_results(combinations: list[dict[str, object]]) -> list[dict[str, objec
     ]
 
 
-def _mint_goldens(
+def mint_goldens(
     browser: Browser,
     structural: list[dict[str, object]],
     captures: Path,
@@ -129,11 +129,11 @@ def test_preview_visual_gate(
         captures=captures,
         golden=golden,
     )
-    structural = _structural_failures(combinations)
+    structural = structural_failures(combinations)
     if minting:
-        _mint_goldens(playwright_browser, structural, captures)
+        mint_goldens(playwright_browser, structural, captures)
         return
-    crops = _crop_results(combinations)
+    crops = crop_results(combinations)
     missing = sorted(
         {str(crop["surface"]) for crop in crops if crop["status"] == "baseline-missing"}
     )

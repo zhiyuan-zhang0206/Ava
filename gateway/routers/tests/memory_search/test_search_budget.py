@@ -21,14 +21,14 @@ from base.config import settings
 from gateway.app import app
 from gateway.routers import memory as memory_router
 from gateway.routers.tests.test_memory_search import (
-    _app_db as _app_db,
+    Judge,
+    StubProvider,
+    asgi_client,
+    memory_root,
+    patch_provider,
 )
 from gateway.routers.tests.test_memory_search import (
-    _asgi_client,
-    _Judge,
-    _memory_root,
-    _patch_provider,
-    _StubProvider,
+    _app_db as _app_db,
 )
 from gateway.routers.tests.test_memory_search import (
     judge as judge,
@@ -73,8 +73,8 @@ class _Pool:
                 return hits[:k]
 
         monkeypatch.setattr(factory, "get_backend", _Backend)
-        monkeypatch.setattr(memory_router, "gateway_memory_dir", partial(_memory_root, root))
-        _patch_provider(monkeypatch, _StubProvider)
+        monkeypatch.setattr(memory_router, "gateway_memory_dir", partial(memory_root, root))
+        patch_provider(monkeypatch, StubProvider)
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", _CANDIDATES)
         # The handler reads its gate from `app.state`, which only the gateway lifespan fills; a
         # fresh one per test (a semaphore binds to the loop of its first contended acquire).
@@ -90,7 +90,7 @@ def _search(**fields: Any) -> dict[str, Any]:
     return {"query": "q", "k": 3, "purpose": "recall", **fields}
 
 
-def _judged_numbers(judge: _Judge) -> list[str]:
+def _judged_numbers(judge: Judge) -> list[str]:
     """The note numbers the decision model was shown, in request order."""
     return [state.split("passage ")[1][:3] for _model, state, _question in judge.calls]
 
@@ -100,7 +100,7 @@ def _judged_numbers(judge: _Judge) -> list[str]:
 
 @pytest.mark.parametrize("excluded", [0, 10, 60])
 def test_decision_requests_do_not_grow_with_the_exclusion_list(
-    pool: _Pool, judge: _Judge, excluded: int
+    pool: _Pool, judge: Judge, excluded: int
 ) -> None:
     """A long-lived session excludes more notes every turn; the ranking work stays the same."""
     with TestClient(app) as client:
@@ -119,7 +119,7 @@ def test_decision_requests_do_not_grow_with_the_exclusion_list(
 
 
 def test_excluded_notes_never_reach_the_decision_model_or_the_response(
-    pool: _Pool, judge: _Judge
+    pool: _Pool, judge: Judge
 ) -> None:
     del pool
     judge.rules = {"passage 001": 0.99, "passage 002": 0.98, "passage 031": 0.97}
@@ -141,7 +141,7 @@ def test_excluded_notes_never_reach_the_decision_model_or_the_response(
 
 @pytest.mark.parametrize("k", [31, 60, 100])
 def test_a_large_k_does_not_raise_the_decision_request_count(
-    pool: _Pool, judge: _Judge, k: int
+    pool: _Pool, judge: Judge, k: int
 ) -> None:
     """Asking for more results than there are candidates ranks the candidates, not `k` notes."""
     with TestClient(app) as client:
@@ -154,7 +154,7 @@ def test_a_large_k_does_not_raise_the_decision_request_count(
 
 
 def test_dedup_ranks_its_own_smaller_candidate_count_whatever_k_is(
-    pool: _Pool, judge: _Judge, monkeypatch: pytest.MonkeyPatch
+    pool: _Pool, judge: Judge, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.services, "memory_dedup_candidates", 7)
 
@@ -281,7 +281,7 @@ async def test_the_caller_deadline_bounds_the_search_below_the_gateway_deadline(
     monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", 30.0)
 
     started = time.monotonic()
-    async with _asgi_client() as client:
+    async with asgi_client() as client:
         resp = await asyncio.wait_for(
             client.post("/api/memory/search", json=_search(deadline_seconds=0.3)), timeout=10
         )
@@ -303,7 +303,7 @@ async def test_a_caller_deadline_above_the_gateway_deadline_does_not_extend_it(
     monkeypatch.setattr(rerank, "ask_relevance", _Blocked())
     monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", 0.3)
 
-    async with _asgi_client() as client:
+    async with asgi_client() as client:
         resp = await asyncio.wait_for(
             client.post("/api/memory/search", json=_search(deadline_seconds=600)), timeout=10
         )
@@ -351,7 +351,7 @@ async def test_a_disconnect_cancels_the_decision_requests_still_in_flight(
     assert blocked.cancelled == _CANDIDATES
 
 
-async def test_a_connected_caller_gets_the_ranking(pool: _Pool, judge: _Judge) -> None:
+async def test_a_connected_caller_gets_the_ranking(pool: _Pool, judge: Judge) -> None:
     del pool
     gone = asyncio.Event()
 

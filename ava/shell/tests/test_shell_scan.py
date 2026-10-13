@@ -32,7 +32,7 @@ def findings(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[str]]]:
     recorded: list[tuple[str, list[str]]] = []
     monkeypatch.setattr(
         sec,
-        "_record_finding",
+        "record_finding",
         lambda source, hits: recorded.append((source, list(hits))),  # pyright: ignore[reportUnknownArgumentType]
     )
     return recorded

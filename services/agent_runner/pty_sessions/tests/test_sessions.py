@@ -414,10 +414,10 @@ def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) 
     themselves mid-flight."""
     import sys
 
-    from tests.path_scoped.pty_service import _REPO
+    from tests.path_scoped.pty_service import REPO
 
     name = "ava-test-hosting-1"
-    new(name, _REPO, {"AVA_HOME": str(unit_home), "AVA_CONFIG_FETCH": "skip"})
+    new(name, REPO, {"AVA_HOME": str(unit_home), "AVA_CONFIG_FETCH": "skip"})
     probe = (
         "from base.sessions.hosting import hosting_supervised_session as hosting; "
         "print('hosted-in=' + str(hosting()))"

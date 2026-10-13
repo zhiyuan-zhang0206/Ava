@@ -69,14 +69,14 @@ import ava.sdk_surface.agent_identity
 from ava.gateway_client.launch_retry import get_launch_attempt as get_launch_attempt
 from ava.gateway_client.launch_retry import retry_launch as retry_launch
 from ava.gateway_client.transport import (
-    _MEMORY_SEARCH_TIMEOUT_MARGIN_S as _MEMORY_SEARCH_TIMEOUT_MARGIN_S,
-)
-from ava.gateway_client.transport import (
     MEMORY_SEARCH_MAX_RETRIES,
     get,
     memory_search_timeout,
     post,
     raise_from_response,
+)
+from ava.gateway_client.transport import (
+    MEMORY_SEARCH_TIMEOUT_MARGIN_S as MEMORY_SEARCH_TIMEOUT_MARGIN_S,
 )
 from ava.gateway_client.transport import (
     patch as patch,
@@ -168,7 +168,7 @@ def memory_search(
         "/api/memory/search",
         body,
         timeout=(
-            httpx.Timeout(timeout + _MEMORY_SEARCH_TIMEOUT_MARGIN_S)
+            httpx.Timeout(timeout + MEMORY_SEARCH_TIMEOUT_MARGIN_S)
             if timeout is not None
             else memory_search_timeout(context)
         ),

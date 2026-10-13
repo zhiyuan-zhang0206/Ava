@@ -165,7 +165,7 @@ def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> Non
     import httpx
 
     from ava.gateway_client import get_born_chain, memory_search
-    from ava.gateway_client.transport import _agent_jitter_seconds
+    from ava.gateway_client.transport import agent_jitter_seconds
     from base.agents.context.identity import AgentIdentity
     from tests.fixtures.pin_agent import pin_no_identity
 
@@ -197,7 +197,7 @@ def test_explicit_host_context_routes_calls_without_a_local_sdk_binding() -> Non
     ):
         assert memory_search("query", 3, purpose="search", context=context) == []
         assert get_born_chain(44, context=context) == []
-        assert _agent_jitter_seconds(context) == 0.22
+        assert agent_jitter_seconds(context) == 0.22
     assert seen == [
         "http://host.test/api/memory/search",
         "http://host.test/api/agents/44/born-chain",

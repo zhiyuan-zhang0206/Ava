@@ -86,7 +86,7 @@ def prepare(
                 row = RuntimeRow(*values)
                 if row.retired_intent():
                     require_cold_end(conn, row.agent_id)
-        applied = _applied_capture(conn, hold, host_owner, holder, acquired_at)
+        applied = applied_capture(conn, hold, host_owner, holder, acquired_at)
         captured = _classify([RuntimeRow(*row) for row in rows], hold, host_owner, applied)
         cold = _cold_agents([RuntimeRow(*row) for row in rows], host_owner, host_absent=host_absent)
         settled = _settle_orphan_claims(conn, captured, cold)
@@ -289,7 +289,7 @@ def _require_live_owners(selected: list[RuntimeRow], owner: UUID | None, applied
         raise RuntimeError(f"maintenance requires the live original native owner: {invalid}")
 
 
-def _applied_capture(
+def applied_capture(
     conn: psycopg.Connection,
     hold: MaintenanceHold,
     owner: UUID | None,

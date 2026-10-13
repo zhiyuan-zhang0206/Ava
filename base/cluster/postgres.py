@@ -89,7 +89,7 @@ def _boot() -> str:
     return boot
 
 
-def _write(data: Path, receipt: Receipt) -> None:
+def write(data: Path, receipt: Receipt) -> None:
     path = receipt_path(data)
     ensure_private_dir(path.parent)
     write_text_atomic(path, receipt.model_dump_json() + "\n", sync_parent=True)
@@ -232,7 +232,7 @@ def _spawn(
     *,
     retained_children: list[subprocess.Popen[bytes]],
 ) -> Receipt:
-    _write(data, receipt)
+    write(data, receipt)
     with _admission(), (data / "pg.log").open("ab") as log:
         try:
             child = subprocess.Popen(  # noqa: S603 — explicit resolved PostgreSQL argv, never a shell
@@ -247,7 +247,7 @@ def _spawn(
         except OSError:
             # Popen's normal exec error guarantees it reaped its child. A
             # BaseException or later error has no such guarantee: keep pending.
-            _write(data, receipt.model_copy(update={"state": "not-started"}))
+            write(data, receipt.model_copy(update={"state": "not-started"}))
             raise
         retained_children.append(child)
         owner = OwnedProcess.capture(psutil.Process(child.pid))
@@ -260,7 +260,7 @@ def _spawn(
                 ),
             }
         )
-        _write(data, captured)
+        write(data, captured)
         return captured
 
 
@@ -285,7 +285,7 @@ def _complete_start(
                 update={"state": "ready", "pidfile": inode, "header": header}
             )
             if admitted != receipt:
-                _write(data, admitted)
+                write(data, admitted)
             return owner
         time.sleep(0.05)
     require_closed(data, receipt)
