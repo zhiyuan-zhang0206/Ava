@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from redis.exceptions import ResponseError
 
 import ava
 from ava import files as _files
@@ -296,7 +297,6 @@ class TestSelfEntries:
         pin_agent(900001)
         monkeypatch.setattr(ava.DB, "cursor", _FakeCursor)
         monkeypatch.setattr(ava.DB, "transaction", contextlib.nullcontext)
-        monkeypatch.setattr(self_mod, "_publish_self_inbound_wake", lambda: None)
         import base.telemetry.audit_events as _audit
 
         monkeypatch.setattr(_audit, "record_audit", lambda _conn, event: event)  # pyright: ignore[reportUnknownArgumentType]
@@ -305,6 +305,32 @@ class TestSelfEntries:
         with pytest.raises(SystemHalt):
             self_mod.compact(("summary",))  # pyright: ignore[reportArgumentType]
         assert seen["params"] == (900001, "summary")
+
+    def test_wake_publishes_the_agents_own_inbound_channel(self) -> None:
+        from ava.self import wake
+        from base.cluster import inbound_channel
+
+        class Redis:
+            def __init__(self) -> None:
+                self.published: list[tuple[str, str]] = []
+
+            def publish(self, channel: str, message: str) -> int:
+                self.published.append((channel, message))
+                return 0
+
+        redis = Redis()
+        wake.publish_inbound_wake(redis, 41)
+        assert redis.published == [(inbound_channel(41), "0")]
+
+    @pytest.mark.parametrize("failure", [ResponseError("NOPERM"), ConnectionError("down")])
+    def test_wake_never_raises_when_redis_refuses(self, failure: Exception) -> None:
+        from ava.self import wake
+
+        class Redis:
+            def publish(self, channel: str, message: str) -> int:
+                raise failure
+
+        wake.publish_inbound_wake(Redis(), 41)
 
     def test_compact_multi_element_type_errors(self) -> None:
         from ava import self as self_mod
