@@ -22,7 +22,7 @@ from typing import Any
 from ava.mcps.config import MCPCallError, MCPConnectError, ToolInfo
 
 
-class _RemoteMCPClient:
+class RemoteMCPClient:
     """Lightweight Unix socket client to MCP daemon."""
 
     def __init__(self, socket_path: str) -> None:
@@ -167,9 +167,9 @@ def _current_agent_id() -> int | None:
     return agent_identity.agent_id()
 
 
-def connect_remote(socket_path: str) -> _RemoteMCPClient:
+def connect_remote(socket_path: str) -> RemoteMCPClient:
     """A client of the MCP daemon listening on `socket_path` (it dials on its first request)."""
-    return _RemoteMCPClient(socket_path)
+    return RemoteMCPClient(socket_path)
 
 
 def _socket_path_for() -> str:
@@ -184,7 +184,7 @@ def _socket_path_for() -> str:
     return mcp_daemon_shared_socket()
 
 
-def _daemon_socket_path() -> str | None:
+def daemon_socket_path() -> str | None:
     """This process's machine MCP socket path, or None when absent.
 
     Presence does not prove liveness. An absent or stale socket fails the

@@ -1,8 +1,10 @@
 [uses]
 "daemon" = ["test_daemon.py"]
+"test_external_lease.py" = ["_mcps_helpers.py"]
 "test_mcps.py" = ["_mcps_helpers.py"]
 "test_mcps_remote.py" = ["_mcps_helpers.py"]
 "test_remote_timeout.py" = ["_mcps_helpers.py"]
+"test_retry_classify.py" = ["_mcps_helpers.py"]
 
 [debt.private-name]
 "daemon/test_handle_client_agent_id_none_without_identity.py -> test_daemon.py#_content" = 1

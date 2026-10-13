@@ -13,8 +13,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import ava.mcps._daemon as daemon
+import ava.mcps._remote as remote_mod
 from ava import mcps
+from ava.mcps._tools import call_raw
 from ava.mcps.config import is_transport_error
+from ava.mcps.tests._mcps_helpers import tool_source
 
 
 def test_transport_subclasses_keep_the_known_retry_contract() -> None:
@@ -58,12 +61,11 @@ def test_unrelated_io_failure_is_not_a_transport_retry() -> None:
 def test_daemon_reply_lost_does_not_fall_back_locally(monkeypatch: pytest.MonkeyPatch) -> None:
     sock = MagicMock()
     sock.recv.return_value = b""  # daemon may have executed the tool
-    client = mcps._RemoteMCPClient("unused")
+    client = remote_mod.RemoteMCPClient("unused")
     monkeypatch.setattr(socket, "socket", MagicMock(return_value=sock))
-    monkeypatch.setattr(mcps, "_get_remote_client", lambda: client)
 
     with pytest.raises(mcps.MCPCallError, match="result unknown"):
-        mcps._call_raw("fs", "charge")
+        call_raw(tool_source(lambda: client), "fs", "charge")
     sock.sendall.assert_called_once()
 
 
