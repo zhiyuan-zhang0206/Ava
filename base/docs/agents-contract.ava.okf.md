@@ -34,7 +34,7 @@ tags:
 ## Key dependencies
 
 - [[kwargs.ava.okf.md]] — the sibling contract module: the message-level half, typing the `ava_*` metadata inside a message's `additional_kwargs` where this module types the HTTP wire between the two processes
-- [[gateway-cli.ava.okf.md]] — spawn/respawn/launch/fork/resurrect implementations live behind `ops/agents/__init__.py` (`ops/agents/spawn.py` birth + `ops/agents/wake.py` wake); this module provides only types
+- [[gateway-cli.ava.okf.md]] — spawn/respawn/launch/fork/resurrect implementations live behind `ops/agents/__init__.py` (`base/agents/birth/spawn.py` birth + `ops/agents/wake.py` wake); this module provides only types
 - [[agent/docs/lifecycle.ava.okf.md]] — the host applies native lifecycle commands under exact-incarnation ownership.
 
 ## Entry points

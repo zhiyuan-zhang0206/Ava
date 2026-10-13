@@ -96,9 +96,9 @@ database read fails, without retrying through another connection.
 
 ## Birth transaction ownership
 
-`ops.agents.spawn.create_agent_row` retains its public transaction and
+`base.agents.birth.spawn.create_agent_row` retains its public transaction and
 post-commit announcement contract. Its cursor-owned SQL writer is
-`ops.agents.birth_transaction.insert_agent_birth`; see
+`base.agents.birth.transaction.insert_agent_birth`; see
 [creation transaction primitives](../../base/agents/tasks/docs/creation-transactions.ava.okf.md).
 The writer opens no connection, commits nothing and performs no launch.
 A keyed birth retains its original snapshot in this same transaction; see [[gateway/agents/docs/guarded-drafts.ava.okf.md]].

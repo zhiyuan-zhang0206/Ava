@@ -48,8 +48,8 @@ def spawn_agent(
     **kw: Any,
 ) -> int:
     """Allocate a real agent row and publish its normal host-dispatch wake."""
+    from base.agents.birth.spawn import create_agent_row
     from base.agents.impersonation.wake import publish_inbound_wake
-    from ops.agents.spawn import create_agent_row
 
     db, bus = Database.from_settings(gate=database_gate), EventBus.from_settings()
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(

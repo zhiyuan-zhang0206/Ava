@@ -12,6 +12,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from base.agents.birth.spawn import create_agent_row
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentity
@@ -22,7 +23,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from ops.agents import create_agent_row
 from tests.fixtures.model_catalog import AddModels
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

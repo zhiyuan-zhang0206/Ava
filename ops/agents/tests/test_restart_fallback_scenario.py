@@ -10,12 +10,12 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from base.agents.birth.spawn import create_agent_row
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
-from ops.agents.spawn import create_agent_row
 from tests.e2e.fakes.scenarios import lifecycle_restart
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

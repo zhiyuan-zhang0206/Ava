@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
+from base.agents.birth.spawn import create_agent_row
 from base.agents.history.delta_read_compat import (
     recovery_reconstruction_scope,
     wrap_saver_reads_with_delta_reconstruction,
@@ -26,7 +27,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
-from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host import host as host_module
 from services.agent_runner.agent_host import runtime as runtime_module
 from services.agent_runner.agent_host.host import AgentHost

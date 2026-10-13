@@ -7,12 +7,12 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.agents.birth import transaction
 from base.cluster.machine import MachineIdentity
 from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
-from ops.agents import birth_transaction
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -121,7 +121,7 @@ def test_snapshot_failure_rolls_back_birth_and_prompt(
     def fail(*args: object, **kwargs: object) -> None:
         raise RuntimeError("injected snapshot failure")
 
-    monkeypatch.setattr(birth_transaction, "record_creation_snapshot", fail)
+    monkeypatch.setattr(transaction, "record_creation_snapshot", fail)
     with pytest.raises(RuntimeError, match="injected snapshot"):
         client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)
     for table in ("agents", "inbound_messages", "agent_creation_snapshots"):
@@ -197,8 +197,8 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
+    from base.agents.birth.creation_identity import find_creation
     from gateway.app import app
-    from ops.agents.creation_identity import find_creation
     from ops.lifecycle.launch import _validate_launch_row
 
     first = client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)

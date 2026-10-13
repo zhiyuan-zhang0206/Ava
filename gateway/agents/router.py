@@ -21,6 +21,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents.birth.creation_identity import CreationConflictError
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.labels import publish_label_updated
 from base.agents.observation import roster
@@ -34,7 +35,6 @@ from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
 from gateway.inspect import neighbors
 from gateway.inspect.schemas import BornChainResponse, BornChainRow
 from gateway.schemas.models import ModelsResponse
-from ops.agents.creation_identity import CreationConflictError
 from ops.rpc_schemas import (
     SpawnAgentRequest,
     SpawnedAgent,

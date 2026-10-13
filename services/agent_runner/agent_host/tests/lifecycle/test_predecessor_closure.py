@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from base.agents.birth.spawn import create_agent_row
 from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceEvidenceError,
@@ -29,7 +30,6 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from ops.agents.spawn import create_agent_row
 from services.agent_runner.agent_host.lifecycle.maintenance import record_drained
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

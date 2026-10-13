@@ -8,6 +8,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.birth.spawn import create_agent_row
 from base.agents.incarnation.resources import ResourceEvidenceError
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -19,7 +20,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
-from ops.agents.spawn import create_agent_row
 from tests.components.ops.resurrection_support import force, status, unowned_receipt
 from tests.components.ops.test_resurrection_admission import (
     _admitted,

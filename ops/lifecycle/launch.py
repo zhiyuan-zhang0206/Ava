@@ -6,6 +6,7 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.birth.spawn import latest_checkpoint_id
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.api_contracts.agent_contract import ForkSourceEmpty
 from base.config import settings
@@ -14,7 +15,6 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from ops.agents import latest_checkpoint_id
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 

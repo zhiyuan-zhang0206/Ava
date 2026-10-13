@@ -27,6 +27,7 @@ from uuid import UUID
 import psycopg
 
 from base import telemetry
+from base.agents.birth.transaction import insert_agent_birth, validate_spawn_args
 from base.agents.inbox.insert import announce_spawn_prompt
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -34,10 +35,6 @@ from base.events.live.announce import publish_agent_spawned_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.log import logger
-from ops.agents.birth_transaction import _SPAWNER_AGENT_RE as _SPAWNER_AGENT_RE
-from ops.agents.birth_transaction import _spawner_agent_id_malformed as _spawner_agent_id_malformed
-from ops.agents.birth_transaction import insert_agent_birth
-from ops.agents.birth_transaction import validate_spawn_args as _validate_spawn_args
 
 
 def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
@@ -195,7 +192,7 @@ def create_agent_row(
         ForkCheckpointNotFound: fork_checkpoint does not exist on fork_from.
         ValueError: prompt / prompt_source not provided as a pair.
     """
-    _validate_spawn_args(spawner, fork_from, fork_checkpoint, prompt, prompt_source)
+    validate_spawn_args(spawner, fork_from, fork_checkpoint, prompt, prompt_source)
     with db.connect() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         birth = insert_agent_birth(
