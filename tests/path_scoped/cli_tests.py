@@ -35,8 +35,8 @@ from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 @pytest.fixture(autouse=True)
 def _cli_orchestration_guards(
     guard_health_port_gate: None,
-    _guard_service_readiness: None,
-    _test_homes_get_their_own_ports: None,
+    guard_service_readiness: None,
+    homes_get_their_own_ports: None,
     permissions_helper_native_io: None,
 ) -> None:
     """Protect the same CLI effects as the package-local CLI test owner."""
