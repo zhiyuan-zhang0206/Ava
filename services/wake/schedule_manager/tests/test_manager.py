@@ -548,7 +548,7 @@ def test_reap_failure_error_logs_are_rate_limited(
 
     with caplog.at_level(logging.ERROR, logger=sm.__name__):
         assert not manager._reap(sid)
-        clock["t"] += sm._PTY_FAILURE_LOG_INTERVAL_S - 1
+        clock["t"] += sm.PTY_FAILURE_LOG_INTERVAL_S - 1
         assert not manager._reap(sid)
         clock["t"] += 1
         assert not manager._reap(sid)
@@ -665,9 +665,9 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
     backend.kill_results = [False] * 10_000
     manager = sm.ScheduleManager(pool)
 
-    _tick(manager, clock, sm._BLOCKED_GIVE_UP_AFTER_S - 30)
+    _tick(manager, clock, sm.BLOCKED_GIVE_UP_AFTER_S - 30)
     retried = len(backend.killed)
-    assert retried == sm._BLOCKED_GIVE_UP_AFTER_S // 30 - 1  # every tick retried the reap
+    assert retried == sm.BLOCKED_GIVE_UP_AFTER_S // 30 - 1  # every tick retried the reap
     assert emitted == []
     assert _status(db_conn, sid) == "running"
 
@@ -703,7 +703,7 @@ def test_an_explicit_new_revision_lifts_the_give_up(
     backend.live.append(session_name(f"schedule-{sid}"))
     backend.kill_results = [False] * 10_000
     manager = sm.ScheduleManager(pool)
-    _tick(manager, clock, sm._BLOCKED_GIVE_UP_AFTER_S + 30)
+    _tick(manager, clock, sm.BLOCKED_GIVE_UP_AFTER_S + 30)
     assert _status(db_conn, sid) == "error"
     attempts = len(backend.killed)
 
@@ -734,7 +734,7 @@ def test_a_failure_streak_is_broken_by_a_gap(
 
     for _ in range(4):
         manager._note_blocked(sid, "x")
-        clock["t"] += sm._BLOCKED_STREAK_GAP_S + 1
+        clock["t"] += sm.BLOCKED_STREAK_GAP_S + 1
 
     assert emitted == []
     assert sid not in manager._abandoned

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -163,7 +163,7 @@ async def test_crashed_host_idle_active_work_is_not_new_cancel_eligible(
 ) -> None:
     machine_identity.set(name="claim-test")
     incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    _insert(db_conn, initial.agent_id)
+    insert(db_conn, initial.agent_id)
 
     original_error = RuntimeError("isolated unexpected graph failure")
 

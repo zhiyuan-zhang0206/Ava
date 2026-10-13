@@ -36,7 +36,7 @@ Ava agent's tool invocation and code execution layer—including normalization o
 
 - `agent/graph/tool_calls.py:normalize_tool_calls()` — Multiple tool_call normalization
 - `agent/graph/exec/node.py:exec_node()` — Execution node
-- `agent/graph/exec/node.py:_run_agent_code()` — Exec run (one disposable child)
+- `agent/graph/exec/node.py:run_agent_code()` — Exec run (one disposable child)
 
 ## Notes
 

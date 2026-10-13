@@ -65,7 +65,7 @@ The public signature, declaration order and external-plugin migration contract l
 - `base/packages/plugins/extensions.py:PluginContributions` — what a plugin's `contribute()` declares
 - `agent/graph/prompt/capabilities.py:capabilities_section(slices)` / `resolve_prompt_skills()` — the `# Capabilities` index and the name→skill resolver it shares with the preloaded-skills note
 - `agent/graph/prompt/capabilities.py:indexed_skills(prompt)` / `index_drift(known, prompt)` — what the index covers right now, and the diff against a snapshot of it
-- `agent/graph/hooks/capabilities.py:_newly_installed_skills` — the `before_llm` hook that names skills installed since the index was built
+- `agent/graph/hooks/capabilities.py:newly_installed_skills` — the `before_llm` hook that names skills installed since the index was built
 - `agent/graph/_init_context.py:init_context_node()` — caller of `build_system_prompt()`, and where the snapshot is recorded
 
 ## Notes

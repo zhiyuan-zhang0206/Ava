@@ -69,16 +69,16 @@ from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.messages.kwargs import ExecStatus
 from base.log import logger
 
-_INTERRUPTED_TOOL_RESULT = (
+INTERRUPTED_TOOL_RESULT = (
     "[interrupted: no result was recovered for this tool call. It may already "
     "have had effects; inspect the current state before retrying.]"
 )
 
 
-def _unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list[str]]]:
+def unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list[str]]]:
     """(index, ids) whose AI tool_calls lack a kept result anywhere later.
 
-    Called after `_redundant_tool_results` has established the global exactly-one-
+    Called after `redundant_tool_results` has established the global exactly-one-
     result rule, so any later ToolMessage with the same normalized id pairs it.
     """
     result_ids_after: set[str] = set()
@@ -106,10 +106,10 @@ def _unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list
 def _is_synthetic_tool_result(message: ToolMessage) -> bool:
     """Whether this ToolMessage is the recovery marker, not a real result."""
     content = cast(Any, message).content
-    return isinstance(content, str) and content == _INTERRUPTED_TOOL_RESULT
+    return isinstance(content, str) and content == INTERRUPTED_TOOL_RESULT
 
 
-def _redundant_tool_results(messages: Sequence[AnyMessage]) -> list[int]:
+def redundant_tool_results(messages: Sequence[AnyMessage]) -> list[int]:
     """Indices violating the global exactly-one-result-per-tool-call-id rule.
 
     A ToolMessage is removed when no preceding AIMessage declares its normalized
@@ -147,7 +147,7 @@ def _redundant_tool_results(messages: Sequence[AnyMessage]) -> list[int]:
 
 def _synthetic_tool_result(tool_call_id: str) -> ToolMessage:
     return exec_output_message(
-        content=_INTERRUPTED_TOOL_RESULT,
+        content=INTERRUPTED_TOOL_RESULT,
         tool_call_id=tool_call_id,
         status=ExecStatus.UNKNOWN,
         body_start=0,
@@ -166,9 +166,9 @@ def dangling_tool_pairing_repairs(
     history satisfies the global pairing rule and there are no deferred notes.
     Recovery appends deferred exec notes after the repaired tool results.
     """
-    redundant_indices = set(_redundant_tool_results(messages))
+    redundant_indices = set(redundant_tool_results(messages))
     survivors = [message for i, message in enumerate(messages) if i not in redundant_indices]
-    dangling = _unpaired_tool_calls(survivors)
+    dangling = unpaired_tool_calls(survivors)
     if not redundant_indices and not dangling:
         return list(pending_notes)
     # Insertion point per dangling AIMessage: after the trailing run of

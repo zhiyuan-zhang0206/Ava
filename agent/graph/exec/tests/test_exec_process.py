@@ -20,7 +20,7 @@ import pytest
 from agent.graph.exec import _process, _subprocess
 from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._process import (
-    _READER_JOIN_TIMEOUT_S,
+    READER_JOIN_TIMEOUT_S,
     DomainCloseOwner,
     ExecProcessDomain,
     ExecTeardownError,
@@ -34,9 +34,9 @@ from agent.graph.exec._process import (
     start_reap,
     wait_with_grace,
 )
-from agent.graph.exec._result import _ExecCrashed
+from agent.graph.exec._result import ExecCrashed
 from agent.graph.exec._stream import StreamingTextIO
-from agent.graph.exec._subprocess import _collect_child
+from agent.graph.exec._subprocess import collect_child
 from base.db import Database
 from base.native_process import exec_domain
 from base.native_process.ownership import OwnedProcess
@@ -171,7 +171,7 @@ async def test_reader_join_uses_its_own_bound() -> None:
         reader,  # type: ignore[arg-type]
         domain_close,
     )
-    await _collect_child(
+    await collect_child(
         proc,  # type: ignore[arg-type]
         StreamingTextIO(max_chars=1_000_000),
         None,
@@ -182,7 +182,7 @@ async def test_reader_join_uses_its_own_bound() -> None:
         domain_close=domain_close,
         reader_join_task=reader_join_task,
     )
-    assert reader.timeouts == [_READER_JOIN_TIMEOUT_S]
+    assert reader.timeouts == [READER_JOIN_TIMEOUT_S]
 
 
 async def test_reader_join_fails_loud_when_pipe_never_reaches_eof() -> None:
@@ -229,7 +229,7 @@ async def test_cleanup_failure_retains_leader_and_still_joins_reader() -> None:
 
     class _Reader:
         async def finish(self, timeout: float) -> None:
-            assert timeout == _READER_JOIN_TIMEOUT_S
+            assert timeout == READER_JOIN_TIMEOUT_S
             events.append("reader")
 
         closed = False
@@ -544,7 +544,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
 
     async def run() -> None:
         await service.turn()
-        outcome, _ = await _subprocess._run_legacy_subprocess(
+        outcome, _ = await _subprocess.run_legacy_subprocess(
             "private reader fixture",
             exec_context(None, resources=scope),
             asyncio.Event(),
@@ -552,7 +552,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
             exec_dir=tmp_path / "exec",
             accumulation_max_chars=1_000_000,
         )
-        assert isinstance(outcome, _ExecCrashed)
+        assert isinstance(outcome, ExecCrashed)
         assert isinstance(outcome.exc, ExecTeardownError)
         assert [failure.stage for failure in outcome.exc.failures] == ["reader_join"]
         assert spawned[0][0].returncode == 0
@@ -606,7 +606,7 @@ async def test_teardown_failure_is_returned_as_crash_with_partial_output(
 
     monkeypatch.setattr(_process, "settle_resources", _fail_after_settling)
 
-    result, _payload = await _subprocess._run_in_subprocess(
+    result, _payload = await _subprocess.run_in_subprocess(
         database,
         "print('partial before teardown')",
         exec_context(_AGENT_ID),
@@ -617,7 +617,7 @@ async def test_teardown_failure_is_returned_as_crash_with_partial_output(
         accumulation_max_chars=1_000_000,
     )
 
-    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result, ExecCrashed)
     assert isinstance(result.exc, _process.ExecTeardownError)
     assert "partial before teardown" in result.output
     assert "reader_join: RuntimeError: synthetic reader teardown failure" in result.output

@@ -69,7 +69,7 @@ async def test_retry_constructs_selected_backend_with_required_uri_reader(
         )
 
     monkeypatch.setattr(httpx, "Client", client)
-    backend = await daemon._connect_backend_with_retry(
+    backend = await daemon.connect_backend_with_retry(
         Database.from_settings(gate=database_gate),
         FakeProvider(),
         name="numpy",
@@ -97,7 +97,7 @@ async def test_backend_startup_retries_only_connection_failures(
     monkeypatch.setattr(daemon.asyncio, "sleep", sleep)
     if isinstance(error, httpx.ConnectError):
         assert (
-            await daemon._connect_backend_with_retry(
+            await daemon.connect_backend_with_retry(
                 Database.from_settings(gate=database_gate),
                 FakeProvider(),
                 name="numpy",
@@ -109,7 +109,7 @@ async def test_backend_startup_retries_only_connection_failures(
         sleep.assert_awaited_once_with(2.0)
     else:
         with pytest.raises(ValueError, match="bad configuration"):
-            await daemon._connect_backend_with_retry(
+            await daemon.connect_backend_with_retry(
                 Database.from_settings(gate=database_gate),
                 FakeProvider(),
                 name="numpy",

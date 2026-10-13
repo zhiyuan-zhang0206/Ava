@@ -17,9 +17,9 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import has_pending_interrupt
-from agent.graph.exec._subprocess import _run_in_subprocess
+from agent.graph.exec._subprocess import run_in_subprocess
 from agent.ownership import hosted
-from agent.tests.claim.test_inbound_ownership import _insert, agent_row
+from agent.tests.claim.test_inbound_ownership import agent_row, insert
 from base.agents.context import AvaContext
 from base.agents.incarnation.hosted_force import original_host_force
 from base.cluster.machine import MachineIdentity
@@ -267,7 +267,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
         elif work_kind == "thread":
             await asyncio.to_thread(_blocking_work, entered, release)
         else:
-            await _run_in_subprocess(
+            await run_in_subprocess(
                 database,
                 "from pathlib import Path\nimport time\n"
                 f"Path({str(marker)!r}).touch()\n"
@@ -301,7 +301,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
             _, _, _, command, _cutoff = await asyncio.to_thread(
                 _force_terminate_transaction, agent_id, pool, source="user"
             )
-        chat = _insert(db_conn, agent_id)
+        chat = insert(db_conn, agent_id)
         payload = json.dumps({"agent_id": agent_id, "command_id": command}).encode()
         await _cancel_live_force(
             db_conn,

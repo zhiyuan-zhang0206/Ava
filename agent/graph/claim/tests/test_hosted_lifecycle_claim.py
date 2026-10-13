@@ -3,7 +3,7 @@
 from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
-from agent.graph.claim._dispatch import _BatchState, _handle_restart
+from agent.graph.claim._dispatch import BatchState, handle_restart
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
@@ -12,8 +12,8 @@ from base.packages.plugin_providers import build_model_catalog
 
 
 async def test_hosted_restart_marker_does_not_claim_completion() -> None:
-    state = _BatchState()
-    await _handle_restart(
+    state = BatchState()
+    await handle_restart(
         AvaContext(
             agent=AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)

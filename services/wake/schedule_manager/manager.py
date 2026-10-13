@@ -10,7 +10,7 @@ launches or reaps that schedule's session, not by a periodic sweep.
 
 Convergence that keeps failing is bounded: a reap that survives, or a live
 session whose launch provenance cannot be read, is retried for at most
-``_BLOCKED_GIVE_UP_AFTER_S`` of one failure streak. The manager then stops,
+``BLOCKED_GIVE_UP_AFTER_S`` of one failure streak. The manager then stops,
 records the schedule as an error, emits ``schedule_convergence_abandoned`` and
 leaves the process alone until an explicit new revision (start, stop, restart,
 edit, delete) authorizes another attempt.
@@ -45,14 +45,14 @@ _log = logging.getLogger(__name__)
 # lag on a crash is fine and keeps the polling cheap.
 POLL_INTERVAL_S = 5.0
 
-_PTY_FAILURE_LOG_INTERVAL_S = 60.0
-_STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
+PTY_FAILURE_LOG_INTERVAL_S = 60.0
+STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 
 # One streak of failed convergence attempts for a schedule ends in a give-up after
 # this long. Two failures further apart than the gap (a maintenance hold or a
 # paused service sits between them) are not one streak.
-_BLOCKED_GIVE_UP_AFTER_S = 600.0
-_BLOCKED_STREAK_GAP_S = 60.0
+BLOCKED_GIVE_UP_AFTER_S = 600.0
+BLOCKED_STREAK_GAP_S = 60.0
 
 # Repo root (services/wake/schedule_manager/../../.. == <repo>/) — the cwd the runner launches from, so its
 # relative `.venv/bin/python` resolves into this checkout's venv.
@@ -268,7 +268,7 @@ class ScheduleManager:
                 "WHERE id = ANY(%s) AND stall_alerted_at IS NULL "
                 "AND not_live_since < clock_timestamp() - make_interval(secs => %s) "
                 "RETURNING id, EXTRACT(EPOCH FROM clock_timestamp() - not_live_since)",
-                (missing, _STALL_ALERT_AFTER_S),
+                (missing, STALL_ALERT_AFTER_S),
             )
             alerts = [(int(r[0]), float(r[1])) for r in cur.fetchall()]
         for schedule_id, stalled_seconds in alerts:
@@ -491,10 +491,10 @@ class ScheduleManager:
         """Count one failed convergence attempt; give up when the streak is old enough."""
         now = time.monotonic()
         first, latest = self._blocked.get(schedule_id, (now, now))
-        if now - latest > _BLOCKED_STREAK_GAP_S:
+        if now - latest > BLOCKED_STREAK_GAP_S:
             first = now
         self._blocked[schedule_id] = (first, now)
-        if now - first >= _BLOCKED_GIVE_UP_AFTER_S:
+        if now - first >= BLOCKED_GIVE_UP_AFTER_S:
             self._give_up(schedule_id, why, now - first)
 
     def _give_up(self, schedule_id: int, why: str, blocked_s: float) -> None:
@@ -533,7 +533,7 @@ class ScheduleManager:
         prior = self._reap_failure_logs.get(schedule_id)
         if prior is not None:
             last_logged, suppressed = prior
-            if now - last_logged < _PTY_FAILURE_LOG_INTERVAL_S:
+            if now - last_logged < PTY_FAILURE_LOG_INTERVAL_S:
                 self._reap_failure_logs[schedule_id] = (last_logged, suppressed + 1)
                 return
         else:

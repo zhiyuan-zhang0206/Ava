@@ -33,7 +33,7 @@ from base.native_process.os_platform import is_macos
 _log = logging.getLogger("services.desktop.browser.macos_readiness")
 
 _PROBE_TIMEOUT_S = 5.0
-_READINESS_RETRY_S = 5.0
+READINESS_RETRY_S = 5.0
 _READINESS_REPORT_INTERVAL_S = 300.0
 
 
@@ -46,7 +46,7 @@ class StartupReadiness:
 
 
 @dataclass(frozen=True)
-class _ProbeResult:
+class ProbeResult:
     """Normalized bounded system-query result, including a timeout as non-zero."""
 
     returncode: int
@@ -54,24 +54,24 @@ class _ProbeResult:
     stderr: str
 
 
-def _run_probe(argv: list[str]) -> _ProbeResult:
+def run_probe(argv: list[str]) -> ProbeResult:
     """Run a fixed read-only system query without letting a GUI prompt hang us."""
     try:
         completed = base.host.proc.run_bounded(
             argv, timeout=_PROBE_TIMEOUT_S, capture_output=True, text=True
         )
     except FileNotFoundError:
-        return _ProbeResult(127, "", f"{argv[0]} is unavailable")
+        return ProbeResult(127, "", f"{argv[0]} is unavailable")
     except subprocess.TimeoutExpired:
-        return _ProbeResult(124, "", f"timed out after {_PROBE_TIMEOUT_S:.0f}s")
-    return _ProbeResult(
+        return ProbeResult(124, "", f"timed out after {_PROBE_TIMEOUT_S:.0f}s")
+    return ProbeResult(
         completed.returncode,
         str(completed.stdout or ""),
         str(completed.stderr or ""),
     )
 
 
-def _current_account() -> tuple[str, Path]:
+def current_account() -> tuple[str, Path]:
     """Current process account and its home directory on macOS.
 
     This is intentionally account-derived rather than inherited from shell
@@ -96,8 +96,8 @@ def probe_startup_readiness() -> StartupReadiness:
     if not is_macos():
         return StartupReadiness(ready=True)
 
-    account, home = _current_account()
-    console = _run_probe(["/usr/bin/stat", "-f%Su", "/dev/console"])
+    account, home = current_account()
+    console = run_probe(["/usr/bin/stat", "-f%Su", "/dev/console"])
     console_user = console.stdout.strip()
     if console.returncode != 0 or console_user != account:
         actual = console_user or "none"
@@ -106,7 +106,7 @@ def probe_startup_readiness() -> StartupReadiness:
             reason=f"no active GUI login session for {account} (console user is {actual})",
         )
 
-    gui = _run_probe(["/bin/launchctl", "print", f"gui/{os.getuid()}"])
+    gui = run_probe(["/bin/launchctl", "print", f"gui/{os.getuid()}"])
     if gui.returncode != 0:
         return StartupReadiness(
             ready=False,
@@ -121,7 +121,7 @@ def probe_startup_readiness() -> StartupReadiness:
     # Keychain is. Report that distinctly — the Keychain probe below can only
     # blame the Keychain, and waiting never fixes a wrong domain. An empty or
     # failed answer is not evidence either way and falls through.
-    domain = _run_probe(["/bin/launchctl", "managername"])
+    domain = run_probe(["/bin/launchctl", "managername"])
     managed = domain.stdout.strip()
     if domain.returncode == 0 and managed and managed != "Aqua":
         return StartupReadiness(
@@ -134,7 +134,7 @@ def probe_startup_readiness() -> StartupReadiness:
         )
 
     keychain = home / "Library" / "Keychains" / "login.keychain-db"
-    keychain_probe = _run_probe(["/usr/bin/security", "show-keychain-info", str(keychain)])
+    keychain_probe = run_probe(["/usr/bin/security", "show-keychain-info", str(keychain)])
     if keychain_probe.returncode != 0:
         detail = keychain_probe.stderr.strip().splitlines()[-1:] or ["not available"]
         return StartupReadiness(ready=False, reason=f"login Keychain is not ready ({detail[0]})")
@@ -175,8 +175,8 @@ def wait_for_browser_startup_readiness() -> None:
             _log.warning(
                 "ava-browser DEGRADED: %s; waiting before Chrome launch and retrying every %.0fs",
                 reason,
-                _READINESS_RETRY_S,
+                READINESS_RETRY_S,
             )
             last_reason = reason
             last_reported_at = now
-        time.sleep(_READINESS_RETRY_S)
+        time.sleep(READINESS_RETRY_S)

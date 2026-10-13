@@ -434,9 +434,9 @@ def _checkpoint_clock(monkeypatch: pytest.MonkeyPatch, seconds: list[int | None]
         sec = seconds.pop(0) if len(seconds) > 1 else seconds[0]
         return None if sec is None else datetime(2026, 10, 7, 12, 0, sec, tzinfo=UTC)
 
-    monkeypatch.setattr(uc, "_newest_checkpoint_ts", newest)
+    monkeypatch.setattr(uc, "newest_checkpoint_ts", newest)
     monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(uc, "_SNAPSHOT_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(uc, "SNAPSHOT_POLL_SECONDS", 0.0)
     return polls
 
 

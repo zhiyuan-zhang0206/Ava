@@ -18,7 +18,7 @@ def archive_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     def overflow_dir(_agent_id: int) -> Path:
         return directory
 
-    monkeypatch.setattr(output, "_overflow_dir", overflow_dir)
+    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
     return directory
 
 

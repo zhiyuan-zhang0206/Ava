@@ -31,7 +31,7 @@ router = APIRouter()
 # The kinds read from `audit_events`; a notice comes from `agent_notices`.
 _AUDIT_KINDS: list[str] = [kind for kind in get_args(LinkKind) if kind != "notice"]
 # A transport page, not a display limit: the reader pages until the window is exhausted.
-_PAGE_SIZE = 500
+PAGE_SIZE = 500
 _AGENT_PREFIX = "agent:"
 _HUMAN_SOURCES = ("user", "ui:page:")
 
@@ -125,7 +125,7 @@ def read(db: Database, agents: list[int], start: datetime, end: datetime) -> lis
                 event_names=_AUDIT_KINDS,
                 from_=start,
                 to=end,
-                limit=_PAGE_SIZE,
+                limit=PAGE_SIZE,
                 offset=offset,
                 direction="forward",
             )
@@ -139,7 +139,7 @@ def read(db: Database, agents: list[int], start: datetime, end: datetime) -> lis
             if not has_more:
                 links.extend(_notices(conn, agents, start, end))
                 return sorted(links, key=lambda link: link.ts)
-            offset += _PAGE_SIZE
+            offset += PAGE_SIZE
 
 
 @router.get("/api/insights/run-timeline/links")

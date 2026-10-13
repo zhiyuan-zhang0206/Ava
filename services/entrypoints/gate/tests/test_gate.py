@@ -22,7 +22,7 @@ import pytest
 
 import services.entrypoints.gate.daemon as gate_daemon
 from base import paths
-from services.entrypoints.gate.daemon import Gate, _Handler
+from services.entrypoints.gate.daemon import Gate, Handler
 
 STATIC = (
     Path(__file__).parent.parent.parent.parent.parent
@@ -45,7 +45,7 @@ def test_login_template_carries_explicit_browser_entry() -> None:
     assert "http://192.0.2.2:20016" in gate.login_page
 
 
-class _FakeGateway(BaseHTTPRequestHandler):
+class FakeGateway(BaseHTTPRequestHandler):
     authenticated = False
     down = False
     requests = 0
@@ -60,27 +60,27 @@ class _FakeGateway(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self) -> None:
-        _FakeGateway.requests += 1
+        FakeGateway.requests += 1
         if self.path == "/api/auth/check":
-            hook = _FakeGateway.auth_hook
+            hook = FakeGateway.auth_hook
             if callable(hook):
                 hook()
-            if _FakeGateway.auth_status is not None:
-                self.send_response(_FakeGateway.auth_status)
+            if FakeGateway.auth_status is not None:
+                self.send_response(FakeGateway.auth_status)
                 self.end_headers()
                 return
-            if _FakeGateway.raw_body is not None:
-                body = _FakeGateway.raw_body.encode()
+            if FakeGateway.raw_body is not None:
+                body = FakeGateway.raw_body.encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if _FakeGateway.down:
+            if FakeGateway.down:
                 self.send_response(503)
                 self.end_headers()
                 return
-            body = json.dumps({"authenticated": _FakeGateway.authenticated}).encode()
+            body = json.dumps({"authenticated": FakeGateway.authenticated}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -109,7 +109,7 @@ _VARY = (
 )
 
 
-class _FakeApp(BaseHTTPRequestHandler):
+class FakeApp(BaseHTTPRequestHandler):
     not_found_paths: ClassVar[set[str]] = set()
     forwarded_origin_headers: ClassVar[list[dict[str, str | None]]] = []
     received_hosts: ClassVar[list[str | None]] = []
@@ -121,18 +121,18 @@ class _FakeApp(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self) -> None:
-        _FakeApp.requests += 1
-        _FakeApp.received_hosts.append(self.headers.get("host"))
-        _FakeApp.forwarded_origin_headers.append(
+        FakeApp.requests += 1
+        FakeApp.received_hosts.append(self.headers.get("host"))
+        FakeApp.forwarded_origin_headers.append(
             {
                 "x-forwarded-host": self.headers.get("x-forwarded-host"),
                 "x-forwarded-proto": self.headers.get("x-forwarded-proto"),
             }
         )
-        _FakeApp.received_nav_headers.append(
+        FakeApp.received_nav_headers.append(
             {name: self.headers.get(name) for name in _NAV_HEADER_NAMES}
         )
-        _FakeApp.received_stray_headers.append(
+        FakeApp.received_stray_headers.append(
             {name: self.headers.get(name) for name in _STRAY_HEADER_NAMES}
         )
         # Mirror Next's negotiation: an RSC request is answered with the
@@ -146,7 +146,7 @@ class _FakeApp(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if self.path in _FakeApp.not_found_paths:
+        if self.path in FakeApp.not_found_paths:
             body = f"NOT-FOUND {self.path}".encode()
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
@@ -167,7 +167,7 @@ class _FakeApp(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-class _Servers(TypedDict):
+class Servers(TypedDict):
     gate: str
     gw: ThreadingHTTPServer
     app: ThreadingHTTPServer
@@ -176,19 +176,19 @@ class _Servers(TypedDict):
 
 
 @pytest.fixture
-def servers(tmp_path: Path) -> Iterator[_Servers]:
-    _FakeGateway.requests = 0
-    _FakeGateway.auth_hook = None
-    _FakeGateway.auth_status = None
-    _FakeGateway.raw_body = None
-    _FakeApp.requests = 0
-    _FakeApp.forwarded_origin_headers = []
-    _FakeApp.received_hosts = []
-    _FakeApp.received_nav_headers = []
-    _FakeApp.received_stray_headers = []
-    gw = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGateway)
-    app = ThreadingHTTPServer(("127.0.0.1", 0), _FakeApp)
-    gate_server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+def servers(tmp_path: Path) -> Iterator[Servers]:
+    FakeGateway.requests = 0
+    FakeGateway.auth_hook = None
+    FakeGateway.auth_status = None
+    FakeGateway.raw_body = None
+    FakeApp.requests = 0
+    FakeApp.forwarded_origin_headers = []
+    FakeApp.received_hosts = []
+    FakeApp.received_nav_headers = []
+    FakeApp.received_stray_headers = []
+    gw = ThreadingHTTPServer(("127.0.0.1", 0), FakeGateway)
+    app = ThreadingHTTPServer(("127.0.0.1", 0), FakeApp)
+    gate_server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     # Where the retired updater wrote its UI marker; Gate never reads it.
     marker = tmp_path / "deploy-state.json"
     gate = Gate(
@@ -270,13 +270,13 @@ def test_classify_probe_error(exc: BaseException, expected: str) -> None:
 
 
 def test_probe_auth_failure_serves_down_and_emits_auth_event(
-    servers: _Servers, probe_events: list[dict[str, object]]
+    servers: Servers, probe_events: list[dict[str, object]]
 ) -> None:
     """The gateway answering 401/403 to the auth check is an AUTH failure —
     the route is auth-bypassed and always 200, so a 401/403 means the auth
     layer in front of it rejected the probe. External behavior stays the
     down page; internally the event says "auth"."""
-    _FakeGateway.auth_status = 401
+    FakeGateway.auth_status = 401
 
     status, body = _get(servers["gate"] + "/")
 
@@ -288,7 +288,7 @@ def test_probe_auth_failure_serves_down_and_emits_auth_event(
 
 
 def test_probe_timeout_serves_down_and_emits_timeout_event(
-    servers: _Servers,
+    servers: Servers,
     probe_events: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -296,7 +296,7 @@ def test_probe_timeout_serves_down_and_emits_timeout_event(
     the distinction the audit needed (a slow gateway needs different surgery
     than a dead one)."""
     monkeypatch.setattr(gate_daemon, "_PROBE_TIMEOUT_S", 0.2)
-    _FakeGateway.auth_hook = lambda: time.sleep(1.0)
+    FakeGateway.auth_hook = lambda: time.sleep(1.0)
 
     status, body = _get(servers["gate"] + "/")
 
@@ -306,7 +306,7 @@ def test_probe_timeout_serves_down_and_emits_timeout_event(
 
 
 def test_probe_network_failure_serves_down_and_emits_network_event(
-    servers: _Servers, probe_events: list[dict[str, object]]
+    servers: Servers, probe_events: list[dict[str, object]]
 ) -> None:
     """The gateway process gone (connection refused) is a NETWORK failure.
 
@@ -324,11 +324,11 @@ def test_probe_network_failure_serves_down_and_emits_network_event(
 
 
 def test_probe_gateway_error_serves_down_and_emits_application_event(
-    servers: _Servers, probe_events: list[dict[str, object]]
+    servers: Servers, probe_events: list[dict[str, object]]
 ) -> None:
     """The gateway up but answering the check with an error status is an
     APPLICATION failure — the machine is reachable, the service is failing."""
-    _FakeGateway.auth_status = 503
+    FakeGateway.auth_status = 503
 
     status, body = _get(servers["gate"] + "/")
 
@@ -339,11 +339,11 @@ def test_probe_gateway_error_serves_down_and_emits_application_event(
 
 
 def test_probe_garbage_body_serves_down_and_emits_application_event(
-    servers: _Servers, probe_events: list[dict[str, object]]
+    servers: Servers, probe_events: list[dict[str, object]]
 ) -> None:
     """The gateway answering 200 with a non-JSON body is an APPLICATION
     failure — the check contract is broken even though the transport worked."""
-    _FakeGateway.raw_body = "{not-json"
+    FakeGateway.raw_body = "{not-json"
 
     status, body = _get(servers["gate"] + "/")
 
@@ -396,16 +396,16 @@ def _write_v2(path: Path, *, kind: str = "rollout") -> None:
 
 
 def test_authenticated_proxies_app(servers) -> None:
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
     status, body = _get(servers["gate"] + "/fleet")  # pyright: ignore[reportUnknownArgumentType]
     assert status == 200
     assert body == "APP-PAGE /fleet"
 
 
-def test_app_proxy_forwards_browser_security_response_headers(servers: _Servers) -> None:
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
+def test_app_proxy_forwards_browser_security_response_headers(servers: Servers) -> None:
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
 
     status, body, headers = _request(servers["gate"] + "/fleet")
 
@@ -417,15 +417,15 @@ def test_app_proxy_forwards_browser_security_response_headers(servers: _Servers)
     assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
 
 
-def test_app_proxy_carries_next_rsc_navigation_contract(servers: _Servers) -> None:
+def test_app_proxy_carries_next_rsc_navigation_contract(servers: Servers) -> None:
     """The soft-navigation contract (task #3217): Next's client fetches
     `?_rsc=` payloads through the gate origin, and the app answers with the
     component payload only when the negotiation headers arrive. Assert the wire
     outcome the browser depends on — the same URL returns `text/x-component`
     through the gate — not merely that the headers were copied; and that a
     plain GET is still answered with the HTML document."""
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
     nav_headers = {
         "RSC": "1",
         "Next-Router-State-Tree": "tree-value",
@@ -442,7 +442,7 @@ def test_app_proxy_carries_next_rsc_navigation_contract(servers: _Servers) -> No
     assert body == "RSC-PAYLOAD /fleet?agent_id=1&_rsc=abc123"
     assert headers["Content-Type"] == "text/x-component"
     assert headers["Vary"] == _VARY
-    assert _FakeApp.received_nav_headers[-1] == {
+    assert FakeApp.received_nav_headers[-1] == {
         "rsc": "1",
         "next-router-state-tree": "tree-value",
         "next-url": "/fleet?agent_id=1",
@@ -456,15 +456,15 @@ def test_app_proxy_carries_next_rsc_navigation_contract(servers: _Servers) -> No
     assert status == 200
     assert body == "APP-PAGE /fleet"
     assert headers["Content-Type"] == "text/html"
-    assert _FakeApp.received_nav_headers[-1] == dict.fromkeys(_NAV_HEADER_NAMES)
+    assert FakeApp.received_nav_headers[-1] == dict.fromkeys(_NAV_HEADER_NAMES)
 
 
-def test_app_proxy_drops_hop_by_hop_and_stray_request_headers(servers: _Servers) -> None:
+def test_app_proxy_drops_hop_by_hop_and_stray_request_headers(servers: Servers) -> None:
     """The allowlist IS the boundary: hop-by-hop headers (RFC 9110 §7.6.1),
     including a name riding a Connection token, and any other stray header must
     never reach the app."""
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
 
     status, body, _ = _request(
         servers["gate"] + "/fleet",
@@ -478,7 +478,7 @@ def test_app_proxy_drops_hop_by_hop_and_stray_request_headers(servers: _Servers)
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
-    got = _FakeApp.received_stray_headers[-1]
+    got = FakeApp.received_stray_headers[-1]
     # `connection` may only carry the gate's OWN hop value (urllib sends
     # `close` on the gate→app hop); the browser's `keep-alive, x-smuggled`
     # token list and the other stray headers must not cross.
@@ -489,26 +489,26 @@ def test_app_proxy_drops_hop_by_hop_and_stray_request_headers(servers: _Servers)
 
 
 def test_app_proxy_preserves_browser_host_without_forwarded_origin_headers(
-    servers: _Servers,
+    servers: Servers,
 ) -> None:
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
 
     status, body, _ = _request(servers["gate"] + "/fleet")
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
-    assert _FakeApp.received_hosts == [servers["gate"].removeprefix("http://")]
-    assert _FakeApp.forwarded_origin_headers == [
+    assert FakeApp.received_hosts == [servers["gate"].removeprefix("http://")]
+    assert FakeApp.forwarded_origin_headers == [
         {"x-forwarded-host": None, "x-forwarded-proto": None}
     ]
 
 
-def test_app_proxy_forwards_browser_origin_headers_only_when_provided(servers: _Servers) -> None:
+def test_app_proxy_forwards_browser_origin_headers_only_when_provided(servers: Servers) -> None:
     """The Next.js CSP proxy needs the original browser origin, while callers
     without a TLS/proxy header retain the prior loopback behavior."""
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
 
     status, body, _ = _request(
         servers["gate"] + "/fleet",
@@ -520,7 +520,7 @@ def test_app_proxy_forwards_browser_origin_headers_only_when_provided(servers: _
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
-    assert _FakeApp.forwarded_origin_headers == [
+    assert FakeApp.forwarded_origin_headers == [
         {
             "x-forwarded-host": "console.example.test:3109",
             "x-forwarded-proto": "https",
@@ -531,15 +531,15 @@ def test_app_proxy_forwards_browser_origin_headers_only_when_provided(servers: _
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
-    assert _FakeApp.forwarded_origin_headers[-1] == {
+    assert FakeApp.forwarded_origin_headers[-1] == {
         "x-forwarded-host": None,
         "x-forwarded-proto": None,
     }
 
 
-def test_app_proxy_rejects_invalid_browser_origin_headers(servers: _Servers) -> None:
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
+def test_app_proxy_rejects_invalid_browser_origin_headers(servers: Servers) -> None:
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
 
     status, body, _ = _request(
         servers["gate"] + "/fleet",
@@ -551,7 +551,7 @@ def test_app_proxy_rejects_invalid_browser_origin_headers(servers: _Servers) -> 
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
-    assert _FakeApp.forwarded_origin_headers == [
+    assert FakeApp.forwarded_origin_headers == [
         {"x-forwarded-host": None, "x-forwarded-proto": None}
     ]
 
@@ -561,21 +561,21 @@ def test_app_404_passes_through_not_updating_page(servers) -> None:
     gate must pass the 404 through. A browser probing /favicon.ico relies on
     the 404 to drop its cached icon; an updating page instead would keep the
     stale favicon alive indefinitely (the icon-resurrection bug)."""
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
-    _FakeApp.not_found_paths.add("/favicon.ico")
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
+    FakeApp.not_found_paths.add("/favicon.ico")
     try:
         status, body = _get(servers["gate"] + "/favicon.ico")  # pyright: ignore[reportUnknownArgumentType]
         assert status == 404
         assert body == "NOT-FOUND /favicon.ico"
         assert "System updating" not in body
     finally:
-        _FakeApp.not_found_paths.clear()
+        FakeApp.not_found_paths.clear()
 
 
 def test_unauthenticated_serves_static_login(servers) -> None:
-    _FakeGateway.authenticated = False
-    _FakeGateway.down = False
+    FakeGateway.authenticated = False
+    FakeGateway.down = False
     status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
     assert status == 200
     assert "Sign in" in body
@@ -583,7 +583,7 @@ def test_unauthenticated_serves_static_login(servers) -> None:
 
 
 def test_a_leftover_update_marker_never_owns_the_entry(
-    servers: _Servers, monkeypatch: pytest.MonkeyPatch
+    servers: Servers, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No lifecycle produces Gate's update marker, and a stop takes Gate down
     with the rest of root. A marker file left by the retired updater in the
@@ -591,14 +591,14 @@ def test_a_leftover_update_marker_never_owns_the_entry(
     gateway/app."""
     monkeypatch.setattr(paths, "ava_home", lambda: servers["flag"].parent)
     _write_v2(servers["flag"])
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = True
+    FakeGateway.authenticated = True
+    FakeGateway.down = True
     status, body = _get(servers["gate"] + "/")
     assert status == 503
     assert "Service unavailable" in body
     assert "System updating" not in body
 
-    _FakeGateway.down = False
+    FakeGateway.down = False
     status, body = _get(servers["gate"] + "/fleet")
     assert (status, body) == (200, "APP-PAGE /fleet")
     status, body = _get(servers["gate"] + "/__ava/deploy-state")
@@ -608,8 +608,8 @@ def test_a_leftover_update_marker_never_owns_the_entry(
 def test_gateway_503_without_flag_serves_down_page(servers) -> None:
     """Gateway 503, no flag: the machine itself is not answering — the down page,
     and its copy must NOT promise an update."""
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = True
+    FakeGateway.authenticated = True
+    FakeGateway.down = True
     assert not servers["flag"].exists()  # pyright: ignore[reportUnknownMemberType]
     status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
     assert status == 503
@@ -620,7 +620,7 @@ def test_gateway_503_without_flag_serves_down_page(servers) -> None:
 def test_gateway_refused_without_flag_serves_down_page(servers) -> None:
     """Connection refused, no flag: the machine is down (powered off / crashed),
     not mid-update."""
-    _FakeGateway.authenticated = True
+    FakeGateway.authenticated = True
     servers["gw"].shutdown()  # pyright: ignore[reportUnknownMemberType]
     assert not servers["flag"].exists()  # pyright: ignore[reportUnknownMemberType]
     status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
@@ -635,8 +635,8 @@ def test_app_transport_failure_without_active_marker_is_service_unavailable(serv
     It must reuse the request's inactive snapshot; app transport failure cannot
     invent System Updating after the gateway auth probe succeeded.
     """
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
+    FakeGateway.authenticated = True
+    FakeGateway.down = False
     assert not servers["flag"].exists()  # pyright: ignore[reportUnknownMemberType]
     servers["app"].shutdown()  # pyright: ignore[reportUnknownMemberType]
 
@@ -644,7 +644,7 @@ def test_app_transport_failure_without_active_marker_is_service_unavailable(serv
     assert status == 503
     assert "Service unavailable" in body
     assert "System updating" not in body
-    assert _FakeGateway.requests == 1
+    assert FakeGateway.requests == 1
 
 
 @pytest.mark.parametrize("page", ["login_page", "down_page"])

@@ -14,13 +14,13 @@ from agent.graph import claim_node
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import (
-    _await_status,
     _set_agent_status,
+    await_status,
     committed_publishes,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.claim.claim_support import (
-    _await_inbound_visible,
+    await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
     thread_config,
@@ -330,7 +330,7 @@ async def test_claim_restart_preserves_chat_for_successor(
     ).fetchone() == ("pending", "hello")
 
 
-@pytest.mark.flaky  # poll _await_status for claim_node status transition
+@pytest.mark.flaky  # poll await_status for claim_node status transition
 async def test_claim_second_restart_batched_with_restart_completed_exits_again(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
@@ -346,7 +346,7 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
-    await _await_inbound_visible(aops_pool, restart_id)
+    await await_inbound_visible(aops_pool, restart_id)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
@@ -367,7 +367,7 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'", (tid,)
     ).fetchone() == ("pending",)
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")
 
 
 async def test_claim_restart_completed_while_idle_stays_silent(

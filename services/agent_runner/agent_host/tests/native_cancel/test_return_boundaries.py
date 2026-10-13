@@ -18,7 +18,7 @@ from agent.ownership.lifecycle_intent import accept_lifecycle_intent
 from agent.ownership.tests.test_lifecycle_intent import _command
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState
-from agent.tests.claim.test_inbound_ownership import _insert
+from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.native_cancel import accept_native_cancel, observe_native_work
@@ -61,7 +61,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
     ) as resources:
         pool: ConnectionPool
         incarnation, initial = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-        _insert(db_conn, initial.agent_id)
+        insert(db_conn, initial.agent_id)
         entered, release = asyncio.Event(), asyncio.Event()
         failure = FatalProviderError(
             "isolated provider rejection", error_class="permanent", status=401
@@ -114,7 +114,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
                 accepted = await asyncio.to_thread(
                     accept_native_cancel, pool, "return-boundary", initial.agent_id, target
                 )
-            queued = _insert(db_conn, initial.agent_id)
+            queued = insert(db_conn, initial.agent_id)
             release.set()
             if fault_site != "none":
                 with pytest.raises(psycopg.OperationalError):

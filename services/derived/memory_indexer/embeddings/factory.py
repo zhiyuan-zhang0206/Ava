@@ -39,7 +39,7 @@ _ProviderEntry = tuple[
     Callable[[float], float],
     EmbeddingDescriptor,
 ]
-_PROVIDERS: dict[str, _ProviderEntry] = {
+PROVIDERS: dict[str, _ProviderEntry] = {
     gemini.GeminiEmbeddingProvider.name: (
         lambda catalog, timeout_reader, api_key_reader: gemini.GeminiEmbeddingProvider(
             catalog, timeout_reader=timeout_reader, api_key_reader=api_key_reader
@@ -56,9 +56,9 @@ _PROVIDERS: dict[str, _ProviderEntry] = {
 
 def _provider_entry(name: str) -> _ProviderEntry:
     try:
-        return _PROVIDERS[name]
+        return PROVIDERS[name]
     except KeyError:
-        known = ", ".join(sorted(_PROVIDERS))
+        known = ", ".join(sorted(PROVIDERS))
         raise ValueError(f"unknown embedding provider {name!r} (known: {known})") from None
 
 

@@ -1,6 +1,6 @@
 """The page-server occupant scan survives a process-table read failure.
 
-`_page_server_occupants` maps live page-server processes by port before every
+`page_server_occupants` maps live page-server processes by port before every
 reconcile pass; one process whose cmdline read raises must be skipped, not
 abort the pass (task #4964 — the psutil 7.2.2 macOS cmdline read raised
 SystemError mid-iteration and killed the whole round).
@@ -37,7 +37,7 @@ def test_occupants_skips_a_process_whose_cmdline_read_fails(
     class _Occupant:
         def __init__(self, pid: int, port: int, home: str) -> None:
             self.pid = pid
-            self._cmdline = ["python", "-m", psd._PAGE_SERVER_MODULE, "--port", str(port)]
+            self._cmdline = ["python", "-m", psd.PAGE_SERVER_MODULE, "--port", str(port)]
             self._home = home
 
         def cmdline(self) -> list[str]:
@@ -57,7 +57,7 @@ def test_occupants_skips_a_process_whose_cmdline_read_fails(
         return iter(procs)
 
     monkeypatch.setattr(psd.psutil, "process_iter", process_iter)
-    assert psd._page_server_occupants() == {
+    assert psd.page_server_occupants() == {
         12001: (5001, "/home/a"),
         12002: (5002, "/home/b"),
     }

@@ -112,7 +112,7 @@ def test_atomic_json_preserves_bytes_and_tightens_private_modes(tmp_path: Path) 
     path.parent.chmod(0o755)
     payload = {"token": "café", "items": [1, 2]}
 
-    weixin._atomic_write_json(path, payload)
+    weixin.atomic_write_json(path, payload)
 
     assert path.read_bytes() == json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
@@ -138,7 +138,7 @@ def test_atomic_json_concurrent_writes_use_distinct_temps(
     values = [{"token": "first" * 4096}, {"token": "second" * 4096}]
 
     def write(value: dict[str, str]) -> None:
-        weixin._atomic_write_json(path, value)
+        weixin.atomic_write_json(path, value)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(write, values))
@@ -164,7 +164,7 @@ def test_atomic_json_failed_replace_keeps_old_content_and_cleans_temp(
 
     monkeypatch.setattr(os, "replace", fail_replace)
     with pytest.raises(OSError, match="replace failure"):
-        weixin._atomic_write_json(path, {"new": True})
+        weixin.atomic_write_json(path, {"new": True})
     assert path.read_bytes() == b"old"
     assert sorted(path.parent.iterdir()) == [path]
 

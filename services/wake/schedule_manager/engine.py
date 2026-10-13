@@ -73,11 +73,11 @@ _SAMPLE_INTERVAL_MAX_S = 30.0
 
 # Both failure writes together get this long after child cleanup; a DB that is
 # the reason for the stall cannot keep the runner alive past it.
-_FAILURE_RECORD_DEADLINE_S = 10.0
+FAILURE_RECORD_DEADLINE_S = 10.0
 
 # What ``close`` waits for an admitted action: child cleanup (3s TERM grace +
 # 5s reap), the record deadline, and 1s margin.
-_HARD_EXIT_WAIT_S = 9.0 + _FAILURE_RECORD_DEADLINE_S
+_HARD_EXIT_WAIT_S = 9.0 + FAILURE_RECORD_DEADLINE_S
 
 
 def _stall_check_interval_s() -> float:
@@ -99,7 +99,7 @@ _SUBPROCESS_FILENAME = subprocess.Popen[bytes].wait.__code__.co_filename
 _SELECTORS_FILENAME = selectors.SelectSelector.select.__code__.co_filename
 
 
-def _schedule_dir(schedule_id: int) -> Path:
+def schedule_dir(schedule_id: int) -> Path:
     return ava_home() / "schedules" / str(schedule_id)
 
 
@@ -110,7 +110,7 @@ def _schedule_dir(schedule_id: int) -> Path:
 _SCRIPT_SUFFIXES = frozenset({".py", ".sh", ".js", ".bash", ".zsh"})
 
 
-def _script_filename(command: str) -> str:
+def script_filename(command: str) -> str:
     """The file the script is written to — the first token in ``command``
     whose name ends in a known script extension, else ``schedule.py``. So
     ``python schedule.py`` -> ``schedule.py``; ``bash run.sh`` -> ``run.sh``;
@@ -122,7 +122,7 @@ def _script_filename(command: str) -> str:
     return "schedule.py"
 
 
-def _load(
+def load(
     database: Database, schedule_id: int, revision: int | None = None
 ) -> tuple[str, str] | None:
     """Return (script, command) for an enabled schedule, or None if it is gone /
@@ -146,7 +146,7 @@ def _load(
     return (row[0], row[1]) if row is not None else None
 
 
-def _record_error(database: Database, schedule_id: int, message: str) -> None:
+def record_error(database: Database, schedule_id: int, message: str) -> None:
     with database.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE schedules SET last_error = %s, updated_at = now() WHERE id = %s",
@@ -168,7 +168,7 @@ def _mark_completed(database: Database, schedule_id: int) -> None:
         )
 
 
-def _finish_completed(database: Database, schedule_id: int, run_id: int | None) -> None:
+def finish_completed(database: Database, schedule_id: int, run_id: int | None) -> None:
     """Record a clean finish: mark the schedule completed and close the run
     row ok=true. The completed-marker write is best-effort — if it fails, the
     manager may record process loss as an error, but does not relaunch the
@@ -179,12 +179,12 @@ def _finish_completed(database: Database, schedule_id: int, run_id: int | None) 
         _mark_completed(database, schedule_id)
     except Exception:
         logger.exception("schedule {} completed-marker write failed", schedule_id)
-        _record_run_end(database, run_id, ok=True, note="completed-marker write failed")
+        record_run_end(database, run_id, ok=True, note="completed-marker write failed")
     else:
-        _record_run_end(database, run_id, ok=True, note=None)
+        record_run_end(database, run_id, ok=True, note=None)
 
 
-def _record_run_start(database: Database, schedule_id: int) -> int | None:
+def record_run_start(database: Database, schedule_id: int) -> int | None:
     """Open a run-history row for this process execution (ok = NULL, in-progress).
 
     Returns the run id, or None when the write fails — run history is severable
@@ -203,7 +203,7 @@ def _record_run_start(database: Database, schedule_id: int) -> int | None:
         return None
 
 
-def _record_run_end(database: Database, run_id: int | None, *, ok: bool, note: str | None) -> None:
+def record_run_end(database: Database, run_id: int | None, *, ok: bool, note: str | None) -> None:
     """Close a run-history row with its outcome. No-op when the start write
     failed (run_id is None); a failure here is likewise never fatal."""
     if run_id is None:
@@ -234,7 +234,7 @@ def _crash_note(exc: BaseException, tb: str) -> str:
 _ORIGINAL_SLEEP = time.sleep
 
 
-def _patch_park_detection() -> None:
+def patch_park_detection() -> None:
     """Wrap ``time.sleep`` so the stall guard can see a deliberate park.
 
     ``time.sleep`` is a C builtin: the deepest *Python* frame of a main thread
@@ -250,8 +250,8 @@ def _patch_park_detection() -> None:
     time.sleep = sleep
 
 
-def _restore_park_detection() -> None:
-    """Undo ``_patch_park_detection``: put the stdlib ``time.sleep`` back.
+def restore_park_detection() -> None:
+    """Undo ``patch_park_detection``: put the stdlib ``time.sleep`` back.
 
     The wrapper exists only for the stall guard's judgment window; leaving it
     installed past the guard's stop swaps `time.sleep` for a Python function
@@ -264,7 +264,7 @@ def _restore_park_detection() -> None:
     time.sleep = _ORIGINAL_SLEEP
 
 
-def _stall_action(database: Database, schedule_id: int, message: str, run_id: int | None) -> None:
+def stall_action(database: Database, schedule_id: int, message: str, run_id: int | None) -> None:
     """Reap descendants, record the failure within a fixed deadline, hard-exit 1."""
     try:
         try:
@@ -278,15 +278,15 @@ def _stall_action(database: Database, schedule_id: int, message: str, run_id: in
         # One interpreter-level deadline covers both writes: if the DB never
         # answers, faulthandler dumps every thread's stack (the hang's location)
         # and exits 1.
-        faulthandler.dump_traceback_later(_FAILURE_RECORD_DEADLINE_S, exit=True)
+        faulthandler.dump_traceback_later(FAILURE_RECORD_DEADLINE_S, exit=True)
         try:
-            _record_error(database, schedule_id, message)
+            record_error(database, schedule_id, message)
         except Exception:
             logger.opt(exception=True).warning(
                 "Schedule {} stall message could not be recorded in last_error; exiting without it",
                 schedule_id,
             )
-        _record_run_end(database, run_id, ok=False, note=f"stalled ({_stall_timeout_s():.0f}s)")
+        record_run_end(database, run_id, ok=False, note=f"stalled ({_stall_timeout_s():.0f}s)")
     finally:
         os._exit(1)  # hard exit; the manager records the process loss
 
@@ -307,7 +307,7 @@ def _is_parked_frame(frame: FrameType) -> bool:
     ) == (_SUBPROCESS_FILENAME, "_communicate")
 
 
-class _StallGuard:
+class StallGuard:
     """Own frame observation and serialize script completion with stall admission.
 
     Sleep-family parks and actual subprocess waits retain their unlimited park
@@ -367,7 +367,7 @@ class _StallGuard:
                     "gateway / DB / network the script calls into"
                 )
                 if self._claim_stall():
-                    _stall_action(self.database, self.schedule_id, message, self.run_id)
+                    stall_action(self.database, self.schedule_id, message, self.run_id)
                 return
 
     def close(self, timeout: float = 1.0) -> None:
@@ -402,11 +402,11 @@ def _record_script_exit(
     note instead of being swallowed (QA N1)."""
     code = _script_exit_code(exc)
     if code == 0:
-        _finish_completed(database, schedule_id, run_id)
+        finish_completed(database, schedule_id, run_id)
     else:
         message = "" if isinstance(exc.code, int) else f": {exc.code}"
-        _record_error(database, schedule_id, f"script exited {code}{message}")
-        _record_run_end(database, run_id, ok=False, note=f"script exited {code}{message}")
+        record_error(database, schedule_id, f"script exited {code}{message}")
+        record_run_end(database, run_id, ok=False, note=f"script exited {code}{message}")
     return code
 
 
@@ -430,7 +430,7 @@ def run(
     )
 
 
-def _run_python_script(
+def run_python_script(
     database: Database,
     schedule_id: int,
     run_id: int | None,
@@ -451,8 +451,8 @@ def _run_python_script(
     # (2026-08-03 self-evolution miss). Started before plugin loading
     # so an import hang is covered too. Stopped before _mark_completed
     # so a clean return cannot be overtaken by a spurious kill.
-    _patch_park_detection()
-    guard = _StallGuard(database, schedule_id, run_id)
+    patch_park_detection()
+    guard = StallGuard(database, schedule_id, run_id)
     # The gateway launches this runner as `python -m services.wake.schedule_manager.runner
     # <id>`, so sys.argv carries the schedule id. The script must not
     # inherit that runner-only argv: hand it the argv `python <script>`
@@ -482,7 +482,7 @@ def _run_python_script(
             # its original error and already reported it immediately.
             logger.opt(exception=True).error("Schedule {} guard close failed", schedule_id)
         finally:
-            _restore_park_detection()
+            restore_park_detection()
             if guard.action_started:
                 # A real stall won admission before script completion.
                 # Never mark it completed, even if cleanup exhausted
@@ -499,15 +499,15 @@ def _run(
     load_plugins: Callable[[], None],
     inputs: ScheduleInputs,
 ) -> int:
-    loaded = _load(database, schedule_id, revision)
+    loaded = load(database, schedule_id, revision)
     if loaded is None:
         logger.warning("Schedule {} is gone or disabled; nothing to run", schedule_id)
         return 0
     script, command = loaded
 
-    work_dir = _schedule_dir(schedule_id)
+    work_dir = schedule_dir(schedule_id)
     work_dir.mkdir(parents=True, exist_ok=True)
-    script_name = _script_filename(command)
+    script_name = script_filename(command)
     script_path = work_dir / script_name
     script_path.write_text(script)
 
@@ -520,16 +520,14 @@ def _run(
     # the write. Both an abandoned write and a kill that leaves no code path to
     # close (SIGTERM/SIGHUP/SIGKILL) leave the row in-progress; the manager closes
     # it as 'interrupted' when it next launches or reaps the schedule.
-    run_id = _record_run_start(database, schedule_id)
+    run_id = record_run_start(database, schedule_id)
 
     try:
         if script_name.endswith(".py"):
-            _run_python_script(
+            run_python_script(
                 database, schedule_id, run_id, script_path, load_plugins=load_plugins, inputs=inputs
             )
-            _finish_completed(
-                database, schedule_id, run_id
-            )  # clean return => finished, not crashed
+            finish_completed(database, schedule_id, run_id)  # clean return => finished, not crashed
             return 0
         # A non-.py command runs as a child process — the stall guard's main-
         # thread frame watch cannot see inside it, and the runner parked in
@@ -554,23 +552,23 @@ def _run(
             message = (
                 f"command did not finish within {stall_timeout_s:.0f}s (stall timeout): {command!r}"
             )
-            _record_error(database, schedule_id, message)
+            record_error(database, schedule_id, message)
             logger.error("Schedule {} {}", schedule_id, message)
-            _record_run_end(
+            record_run_end(
                 database, run_id, ok=False, note=f"stall timeout ({stall_timeout_s:.0f}s)"
             )
             return 1
         if result.returncode != 0:
-            _record_error(database, schedule_id, f"command exited {result.returncode}: {command!r}")
-            _record_run_end(database, run_id, ok=False, note=f"command exited {result.returncode}")
+            record_error(database, schedule_id, f"command exited {result.returncode}: {command!r}")
+            record_run_end(database, run_id, ok=False, note=f"command exited {result.returncode}")
         else:
-            _finish_completed(database, schedule_id, run_id)
+            finish_completed(database, schedule_id, run_id)
         return result.returncode
     except SystemExit as exc:
         return _record_script_exit(database, schedule_id, run_id, exc)
     except Exception as exc:
         tb = traceback.format_exc()
-        _record_error(database, schedule_id, tb)
+        record_error(database, schedule_id, tb)
         logger.error("Schedule runner execution failed: {}", tb)
-        _record_run_end(database, run_id, ok=False, note=_crash_note(exc, tb))
+        record_run_end(database, run_id, ok=False, note=_crash_note(exc, tb))
         return 1

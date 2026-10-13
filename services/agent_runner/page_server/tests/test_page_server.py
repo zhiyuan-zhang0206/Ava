@@ -19,20 +19,20 @@ _TOKEN = "page-server-test-token"  # noqa: S105 - test-only liveness value
 @pytest.fixture(autouse=True)
 def _configure_page_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        page_server._PageHandler,
+        page_server.PageHandler,
         "extensions_map",
-        page_server._PageHandler.extensions_map.copy(),
+        page_server.PageHandler.extensions_map.copy(),
     )
-    monkeypatch.setattr(page_server._PageHandler, "token", _TOKEN)
-    page_server._configure_handler(_TOKEN)
+    monkeypatch.setattr(page_server.PageHandler, "token", _TOKEN)
+    page_server.configure_handler(_TOKEN)
 
 
 class _RunningPageServer:
     """Run the production page handler against one temporary directory."""
 
     def __init__(self, directory: Path) -> None:
-        handler = functools.partial(page_server._PageHandler, directory=str(directory))
-        self._server = page_server._ReuseTCPServer((_HOST, 0), handler)
+        handler = functools.partial(page_server.PageHandler, directory=str(directory))
+        self._server = page_server.ReuseTCPServer((_HOST, 0), handler)
         self.port = int(self._server.server_address[1])
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 

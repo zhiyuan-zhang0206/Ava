@@ -295,8 +295,8 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
         "ava.state_update['messages'] = [HumanMessage(content='plugin note', id='p1')]\n"
     )
     plugin_fields: dict[str, Any] = {"delta_test__sentinel": True}
-    state = state_cls(messages=[_ai_message_with_code(code)], halted=False, **plugin_fields)
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    state = state_cls(messages=[ai_message_with_code(code)], halted=False, **plugin_fields)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
 
@@ -443,7 +443,7 @@ def test_deepcopy_isolates_nested_pydantic_model():
 # ── Integration: exec_node full path ────────────────────────────────────────
 
 
-def _make_runtime_and_config(
+def make_runtime_and_config(
     redis_client: AsyncMock, pins: dict[str, Any] | None = None, *, database_gate: ProcessDbGate
 ) -> tuple[Runtime[AvaContext], RunnableConfig]:
     ctx = AvaContext(
@@ -465,7 +465,7 @@ def _make_runtime_and_config(
     return runtime, config
 
 
-def _ai_message_with_code(code: str) -> AIMessage:
+def ai_message_with_code(code: str) -> AIMessage:
     """Build an AIMessage with an execute_code tool_call — required by exec_node entry."""
     return AIMessage(
         content="",
@@ -489,11 +489,11 @@ async def test_exec_node_merges_plugin_state_update_into_command(
         plugin__counter: int = 0
 
     state = _StateWithPlugin(
-        messages=[_ai_message_with_code("import ava\nava.state_update['plugin__counter'] = 7")],
+        messages=[ai_message_with_code("import ava\nava.state_update['plugin__counter'] = 7")],
         halted=False,
         plugin__counter=0,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
@@ -509,10 +509,10 @@ async def test_exec_node_commits_the_skill_reads_the_sdk_writes(
     """`skill_reads` is a core channel the SDK itself writes (the skills module notes each body it
     hands over): no plugin declares it and it still passes the key guard into Command(update)."""
     state = BaseAgentState(
-        messages=[_ai_message_with_code("import ava\nava.state_update['skill_reads'] = ['alpha']")],
+        messages=[ai_message_with_code("import ava\nava.state_update['skill_reads'] = ['alpha']")],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
 
@@ -524,8 +524,8 @@ async def test_exec_node_never_binds_the_slot_in_the_parent(
 ):
     """The exec runs in a child process: the parent (host) process never has a bound slot,
     and reading `ava.state` there raises rather than returning None."""
-    state = BaseAgentState(messages=[_ai_message_with_code("pass")], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    state = BaseAgentState(messages=[ai_message_with_code("pass")], halted=False)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     await _exec_node_impl(state, runtime, config)
     assert not process_context.in_exec_turn()
@@ -537,10 +537,10 @@ async def test_exec_node_leaves_parent_unbound_even_on_crash(
     """user code raises exception → exec_node takes the _ExecCrashed path, not raising —
     the parent still holds no slot."""
     state = BaseAgentState(
-        messages=[_ai_message_with_code("raise RuntimeError('boom')")],
+        messages=[ai_message_with_code("raise RuntimeError('boom')")],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(state, runtime, config)
     assert cmd is not None
@@ -567,11 +567,11 @@ async def test_plugin_cannot_overwrite_base_field_via_ava_state(
         "ava.state_update['plugin__sentinel'] = True\n"
     )
     state = _StateWithSentinel(
-        messages=[_ai_message_with_code(code)],
+        messages=[ai_message_with_code(code)],
         halted=False,
         plugin__sentinel=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
@@ -604,10 +604,10 @@ async def test_state_update_base_field_key_raises(
     this turn, silently losing exec output or disrupting compact state machine."""
 
     state = BaseAgentState(
-        messages=[_ai_message_with_code(f"import ava\nava.state_update[{base_field!r}] = 'X'")],
+        messages=[ai_message_with_code(f"import ava\nava.state_update[{base_field!r}] = 'X'")],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(ValueError, match=f"base field.*{base_field}"):
         await _exec_node_impl(state, runtime, config)
@@ -621,11 +621,11 @@ async def test_state_update_unknown_key_raises(fake_cancel_event, database_gate:
         plugin__known: int = 0
 
     state = _State(
-        messages=[_ai_message_with_code("import ava\nava.state_update['plugin__typo'] = 1")],
+        messages=[ai_message_with_code("import ava\nava.state_update['plugin__typo'] = 1")],
         halted=False,
         plugin__known=0,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(ValueError, match=r"unregistered key.*plugin__typo"):
         await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
@@ -641,8 +641,8 @@ async def test_state_update_multiple_plugins_no_conflict(
         plugin_b__y: str = ""
 
     code = "import ava\nava.state_update['plugin_a__x'] = 10\nava.state_update['plugin_b__y'] = 'hello'\n"
-    state = _State(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    state = _State(messages=[ai_message_with_code(code)], halted=False)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
 
@@ -658,10 +658,10 @@ async def test_state_update_non_dict_raises_type_error(
     str → TypeError, not silent (`or {}` fallback against AGENTS.md fail-fast)."""
 
     state = BaseAgentState(
-        messages=[_ai_message_with_code("import ava\nava.state_update = None")],
+        messages=[ai_message_with_code("import ava\nava.state_update = None")],
         halted=False,
     )
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(TypeError, match=r"plugin tampered with ava.state_update"):
         await _exec_node_impl(state, runtime, config)
@@ -699,8 +699,8 @@ async def test_exec_node_preserves_state_update_on_cancel(
         f"open({str(marker)!r}, 'w').write('x')\n"
         "import time; time.sleep(30)\n"
     )
-    state = _State(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
+    state = _State(messages=[ai_message_with_code(code)], halted=False)
+    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     node_task = asyncio.create_task(_exec_node_impl(cast(BaseAgentState, state), runtime, config))
     deadline = time.monotonic() + 20.0
@@ -727,7 +727,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
 # after_exec hook delivers them (agent/graph/hooks/tests/test_security_findings.py).
 
 
-def _scan_flagged_code(*sources: str) -> str:
+def scan_flagged_code(*sources: str) -> str:
     """Agent code that scans flagged content once per source inside the real exec
     child, which is where scan_content writes a finding to the state update."""
     return "from ava.security import scan_content\n" + "".join(
@@ -735,7 +735,7 @@ def _scan_flagged_code(*sources: str) -> str:
     )
 
 
-def _messages_plugin_state_cls() -> type[BaseAgentState]:
+def messages_plugin_state_cls() -> type[BaseAgentState]:
     """The AgentState class of a registry whose test plugin declares the base `messages`
     channel, mirroring what ava_code does in production (user ruling 2026-08-11: context
     notes ride the exec's messages delta)."""

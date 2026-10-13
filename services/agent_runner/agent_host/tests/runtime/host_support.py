@@ -61,7 +61,7 @@ def host_plugin() -> dict[str, BaseModel]:
 # ── fakes ────────────────────────────────────────────────────────────────────
 
 
-class _Row:
+class Row:
     """One `agents_meta` row as `read_stored_config` selects it."""
 
     def __init__(
@@ -139,7 +139,7 @@ class _FakeConn:
         raise AssertionError(f"unexpected host fixture SQL: {sql}")
 
 
-class _FakeConnCtx:
+class FakeConnCtx:
     """The `async with pool.connection()` shape."""
 
     def __init__(self, pool: _FakePool) -> None:
@@ -162,12 +162,12 @@ class _FakePool:
     trivial and is not what has ever broken.
     """
 
-    def __init__(self, rows: dict[int, _Row]) -> None:
+    def __init__(self, rows: dict[int, Row]) -> None:
         self.rows = rows
         self.reads = 0
 
-    def connection(self, timeout: float | None = None) -> _FakeConnCtx:
-        return _FakeConnCtx(self)
+    def connection(self, timeout: float | None = None) -> FakeConnCtx:
+        return FakeConnCtx(self)
 
 
 class _PendingScanCursor:
@@ -179,7 +179,7 @@ class _PendingScanCursor:
 
 
 class _PendingScanConn:
-    def __init__(self, pool: _PendingScanPool) -> None:
+    def __init__(self, pool: PendingScanPool) -> None:
         self._pool = pool
 
     async def execute(self, sql: str, params: tuple[object, ...]) -> _PendingScanCursor:
@@ -188,7 +188,7 @@ class _PendingScanConn:
         return _PendingScanCursor(self._pool.rows)
 
 
-class _PendingScanPool:
+class PendingScanPool:
     """One host backstop query with captured SQL and returned candidates."""
 
     def __init__(self, rows: list[tuple[int]]) -> None:
@@ -201,7 +201,7 @@ class _PendingScanPool:
 
 
 class _PendingScanCtx:
-    def __init__(self, pool: _PendingScanPool) -> None:
+    def __init__(self, pool: PendingScanPool) -> None:
         self._pool = pool
 
     async def __aenter__(self) -> _PendingScanConn:
@@ -211,7 +211,7 @@ class _PendingScanCtx:
         return False
 
 
-class _Model:
+class Model:
     """A stand-in chat model that remembers which model name built it."""
 
     def __init__(self, name: str) -> None:
@@ -255,7 +255,7 @@ class _FakeGraph:
             agent_id=context.require_identity().agent_id,
             model=agent.brain.llm_model,
             plugin_marker=plugin_cfg.marker,
-            llm=cast(_Model, context.llm),
+            llm=cast(Model, context.llm),
             publisher=cast(_Publisher, context.event_publisher),
             ops_pool=context.ops_pool,
             machine=context.require_machine(),
@@ -277,7 +277,7 @@ class _FakeGraph:
         return {"exit_requested": False, "turn_idle": True, "restart_requested": False}
 
 
-class _GatedGraph:
+class GatedGraph:
     """`ainvoke` that blocks on an event, optionally swallowing its own
     cancellation (the C-call-blocked shape the bounded unwind cannot interrupt).
     """
@@ -306,10 +306,10 @@ class _GatedGraph:
         return {"exit_requested": False, "turn_idle": True, "restart_requested": False}
 
 
-_Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
+Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
 
 
-def _stub_host_transitions(
+def stub_host_transitions(
     monkeypatch: pytest.MonkeyPatch, flip: Callable[..., Awaitable[bool]]
 ) -> list[int]:
     import services.agent_runner.agent_host.host as host_mod
@@ -358,7 +358,7 @@ def wired(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
-) -> _Build:
+) -> Build:
     """An `AgentHost` over fakes, with the per-agent build stubbed.
 
     The per-agent build is stubbed because it needs a live key.
@@ -386,8 +386,8 @@ def wired(
 
     async def _fake_boot_agent_scope(
         _agent_id: int, llm_model: str, *_: object, **_kwargs: object
-    ) -> tuple[_Model, None]:
-        return _Model(llm_model), None
+    ) -> tuple[Model, None]:
+        return Model(llm_model), None
 
     monkeypatch.setattr(runtime_mod, "boot_agent_scope", _fake_boot_agent_scope)
 
@@ -410,7 +410,7 @@ def wired(
     async def _flip_hosted_status(*_args: object, **_kwargs: object) -> bool:
         return True
 
-    _stub_host_transitions(monkeypatch, _flip_hosted_status)
+    stub_host_transitions(monkeypatch, _flip_hosted_status)
 
     monkeypatch.setattr(agent_host_host, "release_hosted_owner", _noop_reconcile)
 
@@ -431,7 +431,7 @@ def wired(
     machine_identity.set(name="this-box")
 
     def _build(
-        rows: dict[int, _Row],
+        rows: dict[int, Row],
         results: dict[int, list[dict[str, Any]]] | None = None,
         *,
         catalog: ModelCatalog | None = None,
@@ -454,4 +454,4 @@ def wired(
     return _build
 
 
-__all__ = ["_GatedGraph"]
+__all__ = ["GatedGraph"]

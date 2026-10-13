@@ -37,8 +37,8 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
     database: Database,
 ) -> None:
     """Force before native attachment cannot freeze an unattached reservation."""
-    from agent.graph.exec._result import _ExecCrashed
-    from agent.graph.exec._subprocess import _run_in_subprocess
+    from agent.graph.exec._result import ExecCrashed
+    from agent.graph.exec._subprocess import run_in_subprocess
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents.incarnation.hosted_force import original_host_force
 
@@ -65,7 +65,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
 
     thread = threading.Thread(target=force_after_ready)
     thread.start()
-    result, _ = await _run_in_subprocess(
+    result, _ = await run_in_subprocess(
         database,
         f"from pathlib import Path; Path({str(marker)!r}).touch()",
         exec_context(target.agent_id, incarnation=target),
@@ -76,7 +76,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(
     )
     thread.join(10)
     assert not thread.is_alive() and failures == [] and len(commands) == 1
-    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result, ExecCrashed)
     assert not marker.exists()
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)

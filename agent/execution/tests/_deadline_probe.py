@@ -164,11 +164,11 @@ def _entry(mode: str, context: Path, ready: Path) -> None:
     else:
         if mode == "expired-stop":
 
-            def stalled(self: owner_child._DeadlineWatchdog) -> None:
+            def stalled(self: owner_child.DeadlineWatchdog) -> None:
                 time.sleep(60)
 
-            owner_child._DeadlineWatchdog._wait_until_deadline = stalled
-        with owner_child._DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=0.1)) as watchdog:
+            owner_child.DeadlineWatchdog._wait_until_deadline = stalled
+        with owner_child.DeadlineWatchdog(datetime.now(UTC) + timedelta(seconds=0.1)) as watchdog:
             if mode == "expired-stop":
                 # Keep the worker out of arbitration; close must not erase expiry.
                 time.sleep(0.15)

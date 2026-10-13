@@ -149,7 +149,7 @@ async def enqueue_closing_chunk(
 # the boundary anyway: the graph persists a super-step's checkpoint asynchronously, so the newest
 # row can lag the state by one step.
 SNAPSHOT_WAIT_SECONDS = 5.0
-_SNAPSHOT_POLL_SECONDS = 0.5
+SNAPSHOT_POLL_SECONDS = 0.5
 
 _NEWEST_CHECKPOINT_TS = (
     "SELECT checkpoint->>'ts' FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = ''"
@@ -170,7 +170,7 @@ def _read_time(message: AnyMessage) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
-async def _newest_checkpoint_ts(pool: AsyncConnectionPool, agent_id: int) -> datetime | None:
+async def newest_checkpoint_ts(pool: AsyncConnectionPool, agent_id: int) -> datetime | None:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(_NEWEST_CHECKPOINT_TS, (str(agent_id),))
         row = await cur.fetchone()
@@ -201,7 +201,7 @@ async def await_snapshot(
     started = time.monotonic()
     while last is not None:
         try:
-            newest = await _newest_checkpoint_ts(pool, agent_id)
+            newest = await newest_checkpoint_ts(pool, agent_id)
         except Exception:
             logger.opt(exception=True).warning("snapshot check failed for agent {}", agent_id)
             return
@@ -209,7 +209,7 @@ async def await_snapshot(
             return
         if time.monotonic() - started >= SNAPSHOT_WAIT_SECONDS:
             break
-        await asyncio.sleep(_SNAPSHOT_POLL_SECONDS)
+        await asyncio.sleep(SNAPSHOT_POLL_SECONDS)
     logger.warning(
         "compaction of agent {agent} stamps its boundary before the checkpoint is known to hold "
         "the last message {message}",

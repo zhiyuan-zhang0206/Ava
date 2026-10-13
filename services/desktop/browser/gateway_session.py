@@ -33,7 +33,7 @@ from services.desktop.browser.session import inject_session_cookie
 _SESSION_REFRESH_INTERVAL_S = 6 * 3600
 
 
-def _gateway_session_params() -> tuple[str, str] | None:
+def gateway_session_params() -> tuple[str, str] | None:
     """(gateway_url, login credential) when a gateway session can be minted, else
     None (with a logged reason) — the daemon keeps serving either way, the
     browser just cannot open auth-gated gateway URLs without the cookie.
@@ -86,7 +86,7 @@ class GatewaySession:
 
         Never raises: every failure is logged and left for the next tick to retry.
         """
-        params = _gateway_session_params()
+        params = gateway_session_params()
         if params is None:
             return
         gateway_url, secret = params

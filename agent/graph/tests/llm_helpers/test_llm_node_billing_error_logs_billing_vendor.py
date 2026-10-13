@@ -17,13 +17,13 @@ from agent.graph.llm._retry import Attempt, retry_wait
 from agent.graph.llm.node import llm_attempt
 from agent.graph.llm_errors import LlmLedger
 from agent.graph.tests.test_llm_helpers import (
-    _CONFIG,
-    _astream_raising,
-    _FakeAnthropicError,
-    _FakeOpenAIError,
-    _FakeProviderStatusError,
-    _fatal,
-    _make_runtime,
+    CONFIG,
+    FakeAnthropicError,
+    FakeOpenAIError,
+    FakeProviderStatusError,
+    astream_raising,
+    fatal,
+    make_runtime,
 )
 from agent.graph.tests.test_llm_helpers import (
     ledger as ledger,
@@ -58,7 +58,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
 
     monkeypatch.setattr(compact, "resolve_context_budget", fixture_budget)
     fake_llm = MagicMock()
-    fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(402))
+    fake_llm.astream.return_value = astream_raising(FakeProviderStatusError(402))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     original = settings.lm.llm_model
@@ -67,13 +67,13 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
         with pytest.raises(FatalProviderError) as exc_info:
             await llm_node(
                 state,
-                _make_runtime(
+                make_runtime(
                     resources=hosted_resources,
                     llm=fake_llm,
                     event_publisher=MagicMock(),
                     database_gate=database_gate,
                 ),
-                _CONFIG,
+                CONFIG,
                 ledger=ledger,
             )
     finally:
@@ -99,17 +99,17 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
     from agent.graph.llm_errors import FatalProviderError
 
     fake_llm = MagicMock()
-    fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(500))
+    fake_llm.astream.return_value = astream_raising(FakeProviderStatusError(500))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    runtime = _make_runtime(
+    runtime = make_runtime(
         resources=hosted_resources,
         llm=fake_llm,
         event_publisher=MagicMock(),
         database_gate=database_gate,
     )
-    with pytest.raises(_FakeProviderStatusError) as exc_info:
-        await llm_attempt(state, runtime, _CONFIG, Attempt(1, time.time()), ledger=ledger)
+    with pytest.raises(FakeProviderStatusError) as exc_info:
+        await llm_attempt(state, runtime, CONFIG, Attempt(1, time.time()), ledger=ledger)
     assert not isinstance(exc_info.value, FatalProviderError)
     assert (
         retry_wait(
@@ -140,11 +140,11 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
     original = settings.lm.llm_fatal_provider_error_types
     try:
         settings.lm.llm_fatal_provider_error_types = "engine_overloaded_error"
-        exc = _FakeProviderStatusError(
+        exc = FakeProviderStatusError(
             429, {"error": {"type": "engine_overloaded_error", "message": "overloaded"}}
         )
         fake_llm = MagicMock()
-        fake_llm.astream.return_value = _astream_raising(exc)
+        fake_llm.astream.return_value = astream_raising(exc)
         # A configured-fatal error type triggers _consume_llm's one non-streaming
         # fallback; make ainvoke fail the same way so the error survives to the
         # classify block instead of the fallback masking it.
@@ -154,13 +154,13 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
         with pytest.raises(FatalProviderError) as exc_info:
             await llm_node(
                 state,
-                _make_runtime(
+                make_runtime(
                     resources=hosted_resources,
                     llm=fake_llm,
                     event_publisher=MagicMock(),
                     database_gate=database_gate,
                 ),
-                _CONFIG,
+                CONFIG,
                 ledger=ledger,
             )
         assert exc_info.value.error_class == "transient"
@@ -195,13 +195,13 @@ async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(
         state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
         result = await llm_node(
             state,
-            _make_runtime(
+            make_runtime(
                 resources=hosted_resources,
                 llm=fake_llm,
                 event_publisher=MagicMock(),
                 database_gate=database_gate,
             ),
-            _CONFIG,
+            CONFIG,
             ledger=ledger,
         )
         assert isinstance(result, Command)
@@ -240,7 +240,7 @@ async def test_retried_llm_node_records_total_retry_duration(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _text_turn()
-    runtime = _make_runtime(
+    runtime = make_runtime(
         resources=hosted_resources,
         llm=fake_llm,
         event_publisher=MagicMock(),
@@ -250,7 +250,7 @@ async def test_retried_llm_node_records_total_retry_duration(
     await llm_attempt(
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
         runtime,
-        _CONFIG,
+        CONFIG,
         Attempt(2, time.time() - 3.0),
         ledger=ledger,
     )
@@ -288,13 +288,13 @@ async def test_silent_idle_streak_resets_after_normal_turn(
     fake_llm.astream.return_value = _reasoning_only()
     await llm_node(
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
     assert ledger.silent_idle_output_tokens("7") == 1
@@ -304,13 +304,13 @@ async def test_silent_idle_streak_resets_after_normal_turn(
     fake_llm.astream.return_value = _text_turn()
     result = await llm_node(
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
     assert result.update["halted"] is True  # text, no tool_call → halt
@@ -321,13 +321,13 @@ async def test_silent_idle_streak_resets_after_normal_turn(
     fake_llm.astream.return_value = _reasoning_only()
     result = await llm_node(
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
     assert result.update["halted"] is False
@@ -336,9 +336,9 @@ async def test_silent_idle_streak_resets_after_normal_turn(
 
 def test_parse_provider_error_type_openai_shape() -> None:
     """OpenAI SDK errors carry body.error.type — extract it."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    exc = _FakeOpenAIError(
+    exc = FakeOpenAIError(
         {
             "error": {
                 "type": "engine_overloaded_error",
@@ -346,14 +346,14 @@ def test_parse_provider_error_type_openai_shape() -> None:
             }
         }
     )
-    assert _parse_provider_error_type(exc) == "engine_overloaded_error"
+    assert parse_provider_error_type(exc) == "engine_overloaded_error"
 
 
 def test_parse_provider_error_type_anthropic_shape() -> None:
     """Anthropic SDK errors use the same body.error.type shape."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    exc = _FakeAnthropicError(
+    exc = FakeAnthropicError(
         {
             "error": {
                 "type": "overloaded_error",
@@ -361,85 +361,85 @@ def test_parse_provider_error_type_anthropic_shape() -> None:
             }
         }
     )
-    assert _parse_provider_error_type(exc) == "overloaded_error"
+    assert parse_provider_error_type(exc) == "overloaded_error"
 
 
 def test_parse_provider_error_type_no_body() -> None:
     """Exception without a body attribute returns None."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    assert _parse_provider_error_type(ConnectionError("net")) is None
+    assert parse_provider_error_type(ConnectionError("net")) is None
 
 
 def test_parse_provider_error_type_body_none() -> None:
     """Exception with body=None returns None."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    exc = _FakeOpenAIError(None)
-    assert _parse_provider_error_type(exc) is None
+    exc = FakeOpenAIError(None)
+    assert parse_provider_error_type(exc) is None
 
 
 def test_parse_provider_error_type_body_not_dict() -> None:
     """Exception with body as a non-dict (string, list) returns None."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    exc = _FakeOpenAIError("not a dict")  # type: ignore[arg-type]
-    assert _parse_provider_error_type(exc) is None
+    exc = FakeOpenAIError("not a dict")  # type: ignore[arg-type]
+    assert parse_provider_error_type(exc) is None
 
 
 def test_parse_provider_error_type_no_error_key() -> None:
     """body without 'error' key returns None."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    exc = _FakeOpenAIError({"status": "error"})
-    assert _parse_provider_error_type(exc) is None
+    exc = FakeOpenAIError({"status": "error"})
+    assert parse_provider_error_type(exc) is None
 
 
 def test_parse_provider_error_type_error_not_dict() -> None:
     """body.error not a dict returns None."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    exc = _FakeOpenAIError({"error": "server_error"})
-    assert _parse_provider_error_type(exc) is None
+    exc = FakeOpenAIError({"error": "server_error"})
+    assert parse_provider_error_type(exc) is None
 
 
 def test_parse_provider_error_type_no_type_key() -> None:
     """body.error without 'type' key returns None."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    exc = _FakeOpenAIError({"error": {"message": "oops"}})
-    assert _parse_provider_error_type(exc) is None
+    exc = FakeOpenAIError({"error": {"message": "oops"}})
+    assert parse_provider_error_type(exc) is None
 
 
 def test_parse_provider_error_type_empty_string() -> None:
     """body.error.type is an empty string — returns None (not a meaningful type)."""
-    from agent.graph.llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import parse_provider_error_type
 
-    exc = _FakeOpenAIError({"error": {"type": ""}})
-    assert _parse_provider_error_type(exc) is None
+    exc = FakeOpenAIError({"error": {"type": ""}})
+    assert parse_provider_error_type(exc) is None
 
 
 def test_is_fatal_provider_error_type_matches_configured() -> None:
     """When the error type is in the configured fatal set, returns True."""
-    assert _fatal("engine_overloaded_error", "engine_overloaded_error") is True
+    assert fatal("engine_overloaded_error", "engine_overloaded_error") is True
 
 
 def test_is_fatal_provider_error_type_not_in_set() -> None:
     """Error type not in the configured set returns False."""
-    assert _fatal("rate_limit_exceeded", "engine_overloaded_error") is False
+    assert fatal("rate_limit_exceeded", "engine_overloaded_error") is False
 
 
 def test_is_fatal_provider_error_type_empty_config() -> None:
     """Empty configured set is a fast no-op (always returns False)."""
-    assert _fatal("engine_overloaded_error", "") is False
+    assert fatal("engine_overloaded_error", "") is False
 
 
 def test_is_fatal_provider_error_type_no_body() -> None:
     """Exception without body (generic exception) returns False."""
-    from agent.graph.llm_errors import _is_fatal_provider_error_type
+    from agent.graph.llm_errors import is_fatal_provider_error_type
 
     assert (
-        _is_fatal_provider_error_type(
+        is_fatal_provider_error_type(
             ConnectionError("net"),
             AgentSlices.resolve(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
@@ -477,13 +477,13 @@ async def test_llm_usage_event_carries_latency_ms(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(
         state,
-        _make_runtime(
+        make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
         ),
-        _CONFIG,
+        CONFIG,
         ledger=ledger,
     )
 

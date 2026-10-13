@@ -16,15 +16,15 @@ from agent.graph.hooks.compact import compose_summary_message
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.state import AgentState, CompactState
 from agent.tests.claim.claim_status_support import (
-    _await_status,
-    _pair_compact_cycles,
     _set_agent_status,
+    await_status,
     compact_tail,
+    pair_compact_cycles,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.claim.claim_support import (
-    _await_inbound_visible,
     _fake_llm,
+    await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
     thread_config,
@@ -250,7 +250,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
         thread_config(tid),
     )
 
-    [(started, finished)] = _pair_compact_cycles(publisher)
+    [(started, finished)] = pair_compact_cycles(publisher)
     assert started["mode"] == "request"
     assert finished["status"] == "success"
     assert cmd.goto == "init_context"
@@ -300,7 +300,7 @@ async def test_claim_two_compact_requests_second_replaces_first(
         thread_config(tid),
     )
 
-    pairs = _pair_compact_cycles(publisher)
+    pairs = pair_compact_cycles(publisher)
     assert [p[1]["status"] for p in pairs] == ["replaced", "success"]
     assert llm.bind_tools.return_value.ainvoke.await_count == 2
     tail = compact_tail(cmd.update)
@@ -348,7 +348,7 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
         thread_config(tid),
     )
 
-    [(started, finished)] = _pair_compact_cycles(publisher)
+    [(started, finished)] = pair_compact_cycles(publisher)
     assert started["mode"] == "request"
     assert finished["status"] == "replaced"
     assert llm.bind_tools.return_value.ainvoke.await_count == 1
@@ -397,7 +397,7 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
         thread_config(tid),
     )
 
-    [(started, finished)] = _pair_compact_cycles(publisher)
+    [(started, finished)] = pair_compact_cycles(publisher)
     assert started["mode"] == "request"
     assert finished["status"] == "replaced"
     assert cmd.goto == "claim"
@@ -490,7 +490,7 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
             ),
         )
     assert failing.await_count == COMPACT_MAX_ATTEMPTS
-    [(started, finished)] = _pair_compact_cycles(publisher)
+    [(started, finished)] = pair_compact_cycles(publisher)
     assert started["mode"] == "request"
     assert finished["status"] == "failure"
 
@@ -664,7 +664,7 @@ async def test_claim_compact_summary_finalizes_claimed_history(
     assert [(r[0], r[1]) for r in rows] == [(chat1, "done"), (chat2, "done")]
 
 
-@pytest.mark.flaky  # poll _await_status for claim_node status transition
+@pytest.mark.flaky  # poll await_status for claim_node status transition
 async def test_claim_compact_request_batched_with_restart_is_dropped(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
@@ -680,7 +680,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
-    await _await_inbound_visible(aops_pool, restart_id)
+    await await_inbound_visible(aops_pool, restart_id)
     llm = _fake_llm()
 
     cmd = await claim_node(
@@ -698,10 +698,10 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
     assert not any(isinstance(m, RemoveMessage) for m in cmd.update["messages"])  # type: ignore[index]
     # idle preserved unchanged — silent after restart
     assert cmd.update["halted"] is True  # type: ignore[index]
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")
 
 
-@pytest.mark.flaky  # poll _await_status for claim_node status transition
+@pytest.mark.flaky  # poll await_status for claim_node status transition
 async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
@@ -718,13 +718,13 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
     # through it.  Every subsequent write goes through `aops_pool` too, so there
     # is no sync→async visibility window — the same pool is used for writes and
     # for the claim_node read.
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")
     await _set_agent_status_async(aops_pool, tid, "running")
     # Confirm the status update is visible before inserting inbounds — a second
     # read-after-write barrier on the same pool eliminates any residual
     # cross-connection visibility gap that could cause claim_node's
     # claim write to see a stale status.
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")
     await _insert_inbound_kind_async(
         aops_pool, tid, "compacted summary", "compact_summary", source="self"
     )
@@ -751,6 +751,6 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
     ).fetchone() == ("pending", "compacted summary")
     # external restart + idle before restart → halted=True preserved (restart silent)
     assert cmd.update["halted"] is True  # type: ignore[index]
-    # Read status on the pool claim_node wrote through; _await_status dumps full
+    # Read status on the pool claim_node wrote through; await_status dumps full
     # state on timeout (the CI-only `idling != restarting` flake).
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")

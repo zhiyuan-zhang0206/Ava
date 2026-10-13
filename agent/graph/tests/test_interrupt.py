@@ -293,8 +293,8 @@ class TestWatcherDecoupledFromSharedListener:
                 swallowed = True
             return await real(pool, agent_id, incarnation=incarnation, work=work)  # pyright: ignore[reportUnknownArgumentType]
 
-        monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 0.5)
-        monkeypatch.setattr(mod, "_INTERRUPT_POLL_S", 0.05)
+        monkeypatch.setattr(mod, "WATCHER_EXIT_TIMEOUT_S", 0.5)
+        monkeypatch.setattr(mod, "INTERRUPT_POLL_S", 0.05)
         monkeypatch.setattr(mod, "pending_interrupt_reason", _swallow_once)  # pyright: ignore[reportUnknownArgumentType]
 
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
@@ -341,7 +341,7 @@ class TestWatcherDecoupledFromSharedListener:
                 swallowed = True  # cancel lost; the SELECT "completes" normally
             return await real(pool, agent_id, incarnation=incarnation, work=work)  # pyright: ignore[reportUnknownArgumentType]
 
-        real_watch = mod._watch_for_interrupt
+        real_watch = mod.watch_for_interrupt
 
         async def _recording_watch(
             pool,
@@ -355,10 +355,10 @@ class TestWatcherDecoupledFromSharedListener:
             recorded_events.append(event)  # pyright: ignore[reportUnknownArgumentType]
             await real_watch(pool, event, agent_id, stop, incarnation=incarnation, work=work)  # pyright: ignore[reportUnknownArgumentType]
 
-        monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 1.0)
-        monkeypatch.setattr(mod, "_INTERRUPT_POLL_S", 0.05)
+        monkeypatch.setattr(mod, "WATCHER_EXIT_TIMEOUT_S", 1.0)
+        monkeypatch.setattr(mod, "INTERRUPT_POLL_S", 0.05)
         monkeypatch.setattr(mod, "pending_interrupt_reason", _swallow_once)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(mod, "_watch_for_interrupt", _recording_watch)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(mod, "watch_for_interrupt", _recording_watch)  # pyright: ignore[reportUnknownArgumentType]
 
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         async with subscribe_interrupt(
@@ -399,8 +399,8 @@ class TestWatcherExitBounded:
                 await release.wait()  # cleanup blocked, like a wedged DB call
                 raise
 
-        monkeypatch.setattr(mod, "_watch_for_interrupt", _wedged)
-        monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 0.2)
+        monkeypatch.setattr(mod, "watch_for_interrupt", _wedged)
+        monkeypatch.setattr(mod, "WATCHER_EXIT_TIMEOUT_S", 0.2)
         t0 = asyncio.get_running_loop().time()
         async with subscribe_interrupt(
             cast(AsyncConnectionPool, object()),
@@ -445,7 +445,7 @@ class TestWatcherExitBounded:
         async def _healthy(*_a: object, **_k: object) -> None:
             await asyncio.sleep(3600)
 
-        monkeypatch.setattr(mod, "_watch_for_interrupt", _healthy)
+        monkeypatch.setattr(mod, "watch_for_interrupt", _healthy)
         async with subscribe_interrupt(
             cast(AsyncConnectionPool, object()),
             1,
@@ -476,7 +476,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     from base.lm.context_budget import ContextBudget
 
     tid = create_agent(db_conn)
-    monkeypatch.setattr(interrupt, "_INTERRUPT_POLL_S", 0.01)
+    monkeypatch.setattr(interrupt, "INTERRUPT_POLL_S", 0.01)
 
     def small_budget(
         _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
@@ -595,7 +595,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
 
     from agent.graph._init_context import init_context_node
     from agent.graph.claim.node import claim_node
-    from agent.graph.hooks.compact import _compact_reminder, auto_compact_will_fire
+    from agent.graph.hooks.compact import auto_compact_will_fire, compact_reminder
     from agent.graph.llm.node import llm_node
     from agent.state import AgentState, checkpoint_msgpack_allowlist
     from base.agents.context import AvaContext
@@ -705,7 +705,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     assert not auto_compact_will_fire(
         state, runtime.context.require_agent(), catalog=build_model_catalog()
     )
-    assert await _compact_reminder(state, runtime, config) is None
+    assert await compact_reminder(state, runtime, config) is None
     generated = await llm_node(state, runtime, config, ledger=LlmLedger())
     assert generated.goto == "after_exec"
     state = apply(state, generated)

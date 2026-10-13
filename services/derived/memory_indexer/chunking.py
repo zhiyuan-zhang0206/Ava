@@ -19,7 +19,7 @@ _CHUNK_MAX_CHARS = 1800
 _CHUNK_OVERLAP_CHARS = 200
 
 
-def _split_note(content: str) -> tuple[str | None, str]:
+def split_note(content: str) -> tuple[str | None, str]:
     """Split one markdown file into (description, body).
 
     description is the frontmatter `description` (None when the file has no
@@ -34,7 +34,7 @@ def _split_note(content: str) -> tuple[str | None, str]:
     return description or None, note.body
 
 
-def _chunk_body(
+def chunk_body(
     body: str,
     *,
     max_chars: int = _CHUNK_MAX_CHARS,
@@ -103,11 +103,11 @@ def _file_rows(content: str) -> list[tuple[str, int, str]]:
     body splits into KIND_BODY chunks. A file with neither produces no rows
     (it is not searchable content; the cold-start reconcile tolerates that).
     """
-    description, body = _split_note(content)
+    description, body = split_note(content)
     rows: list[tuple[str, int, str]] = []
     if description:
         rows.append((KIND_DESC, 0, description))
-    for i, chunk in enumerate(_chunk_body(body)):
+    for i, chunk in enumerate(chunk_body(body)):
         rows.append((KIND_BODY, i, chunk))
     return rows
 

@@ -30,7 +30,7 @@ def test_factory_and_probe_registries_stay_in_sync() -> None:
     daemon's fail-fast preflight must not silently skip a backend."""
     from services.derived.memory_indexer.backends import probe
 
-    assert set(factory._BACKENDS) == set(probe._PROBES)
+    assert set(factory.BACKENDS) == set(probe.PROBES)
 
 
 def test_factory_default_is_numpy(*, database_gate: ProcessDbGate) -> None:

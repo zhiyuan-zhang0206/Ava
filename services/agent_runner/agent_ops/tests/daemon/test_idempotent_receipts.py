@@ -18,7 +18,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
 from services.agent_runner.agent_ops.tests.test_daemon import (
-    _fake_spawn_factory,
+    fake_spawn_factory,
 )
 from services.agent_runner.agent_ops.tests.test_daemon import (
     ops_pool as ops_pool,
@@ -42,9 +42,9 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
     the shared api_idempotency table (method='ops' rows: path=kind,
     op_status + result)."""
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
-    status, result = await daemon._dispatch_idempotent(
+    status, result = await daemon.dispatch_idempotent(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-1",
@@ -88,9 +88,9 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
     is NOT re-executed. This is what makes the gateway's retry of a non-
     idempotent op (spawn) safe: a lost response cannot create a twin agent."""
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
-    first = await daemon._dispatch_idempotent(
+    first = await daemon.dispatch_idempotent(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-2",
@@ -104,7 +104,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         image=ops_image,
         local_machine=machine_identity,
     )
-    second = await daemon._dispatch_idempotent(
+    second = await daemon.dispatch_idempotent(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-2",
@@ -137,8 +137,8 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
     machine_identity: MachineIdentity,
 ) -> None:
     """A duplicate lifecycle request waits within its bounded budget and replays its owner."""
-    monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
-    monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 60)
+    monkeypatch.setattr(daemon, "DEDUP_WAIT_STEP_S", 0.01)
+    monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 60)
     calls: dict[str, int] = {}
     started = asyncio.Event()
 
@@ -164,7 +164,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
 
     monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
-        daemon._dispatch_idempotent(
+        daemon.dispatch_idempotent(
             "lifecycle",
             {},
             "slow-lifecycle",
@@ -180,7 +180,7 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         )
     )
     await started.wait()
-    duplicate = await daemon._dispatch_idempotent(
+    duplicate = await daemon.dispatch_idempotent(
         "lifecycle",
         {},
         "slow-lifecycle",
@@ -213,8 +213,8 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
     machine_identity: MachineIdentity,
 ) -> None:
     """A duplicate wait expires without executing again or claiming completion."""
-    monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
-    monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 2)
+    monkeypatch.setattr(daemon, "DEDUP_WAIT_STEP_S", 0.01)
+    monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 2)
     calls: dict[str, int] = {}
     started = asyncio.Event()
 
@@ -240,7 +240,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
 
     monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
-        daemon._dispatch_idempotent(
+        daemon.dispatch_idempotent(
             "lifecycle",
             {},
             "stuck-lifecycle",
@@ -256,7 +256,7 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         )
     )
     await started.wait()
-    status, result = await daemon._dispatch_idempotent(
+    status, result = await daemon.dispatch_idempotent(
         "lifecycle",
         {},
         "stuck-lifecycle",
@@ -292,9 +292,9 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
 ) -> None:
     """Different keys are different logical ops — each executes."""
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
-    await daemon._dispatch_idempotent(
+    await daemon.dispatch_idempotent(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-a",
@@ -308,7 +308,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         image=ops_image,
         local_machine=machine_identity,
     )
-    await daemon._dispatch_idempotent(
+    await daemon.dispatch_idempotent(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         "key-b",
@@ -358,7 +358,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)
 
-    first = await daemon._dispatch_idempotent(
+    first = await daemon.dispatch_idempotent(
         "lifecycle",
         {"path": "garbage"},
         "key-3",
@@ -372,7 +372,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         image=ops_image,
         local_machine=machine_identity,
     )
-    second = await daemon._dispatch_idempotent(
+    second = await daemon.dispatch_idempotent(
         "lifecycle",
         {"path": "garbage"},
         "key-3",

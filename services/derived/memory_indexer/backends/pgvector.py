@@ -205,7 +205,7 @@ def _schema_problem(client: psycopg.Connection, dim: int) -> str | None:
     return None
 
 
-def _validate_schema(client: psycopg.Connection, dim: int) -> None:
+def validate_schema(client: psycopg.Connection, dim: int) -> None:
     """Validate the derived-cache table; runtime connections never create,
     drop or rebuild it (`prepare_table` at start is its only writer)."""
     problem = _schema_problem(client, dim)
@@ -303,7 +303,7 @@ class PGVectorBackend:
         self._pool = self._database.pool()
         try:
             with self._pool.connection() as conn:
-                _validate_schema(conn, self._dim)
+                validate_schema(conn, self._dim)
         except Exception:
             self.close()
             raise

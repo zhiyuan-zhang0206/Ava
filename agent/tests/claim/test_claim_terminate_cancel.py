@@ -14,10 +14,10 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import claim_node
 from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from agent.state import AgentState
-from agent.tests.claim.claim_status_support import _await_status, _set_agent_status
+from agent.tests.claim.claim_status_support import _set_agent_status, await_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.claim.claim_support import (
-    _await_inbound_visible,
+    await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
     thread_config,
@@ -289,7 +289,7 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
         db_conn, tid, "please also do X", source="user", bus=event_bus, database=database
     )
     cancel_id = insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
-    await _await_inbound_visible(aops_pool, cancel_id)
+    await await_inbound_visible(aops_pool, cancel_id)
     pub = MagicMock()
 
     cmd = await claim_node(
@@ -340,7 +340,7 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
     chat_id = insert_inbound_message(
         db_conn, tid, "new instruction", source="user", bus=event_bus, database=database
     )
-    await _await_inbound_visible(aops_pool, chat_id)
+    await await_inbound_visible(aops_pool, chat_id)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="earlier")]),
@@ -467,7 +467,7 @@ async def test_claim_self_terminate_retains_peer_chat_for_successor(
         database=database,
     )
     terminate_id = insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
-    await _await_inbound_visible(aops_pool, terminate_id)
+    await await_inbound_visible(aops_pool, terminate_id)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -502,7 +502,7 @@ async def test_claim_self_terminate_retains_older_user_chat(
     chat_id = insert_inbound_message(
         db_conn, tid, "queued before the suicide", source="user", bus=event_bus, database=database
     )
-    await _await_inbound_visible(aops_pool, chat_id)
+    await await_inbound_visible(aops_pool, chat_id)
     insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
 
     cmd = await claim_node(
@@ -537,7 +537,7 @@ async def test_claim_external_terminate_retains_newer_chat(
     chat_id = insert_inbound_message(
         db_conn, tid, "message after the kill", source="user", bus=event_bus, database=database
     )
-    await _await_inbound_visible(aops_pool, chat_id)
+    await await_inbound_visible(aops_pool, chat_id)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -574,7 +574,7 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     chat_id = insert_inbound_message(
         db_conn, tid, "old message before the kill", source="user", bus=event_bus, database=database
     )
-    await _await_inbound_visible(aops_pool, chat_id)
+    await await_inbound_visible(aops_pool, chat_id)
     insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
@@ -604,7 +604,7 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     tid = agent_row(db_conn)
     owner = await _admit(aops_pool, tid, database_gate=database_gate)
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
-    await _await_inbound_visible(aops_pool, restart_id)
+    await await_inbound_visible(aops_pool, restart_id)
 
     runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
     runtime = Runtime(context=replace(runtime.context, original_incarnation=owner))
@@ -621,7 +621,7 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "Restart was accepted from user" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     # The host has not applied the accepted restart yet.
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")
     assert db_conn.execute(
         "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (restart_id,)
     ).fetchone() == ("claimed", None, None)
@@ -651,7 +651,7 @@ async def test_claim_restart_before_terminate_preserves_serial_order(
     )
 
     assert cmd.goto == END
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (terminate_id,)
     ).fetchone() == ("pending",)
@@ -692,7 +692,7 @@ async def test_claim_terminate_before_restart_completed_still_exits(
     ).fetchone() == ("pending",)
 
 
-@pytest.mark.flaky  # poll _await_status for claim_node status transition
+@pytest.mark.flaky  # poll await_status for claim_node status transition
 async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
@@ -708,7 +708,7 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
-    await _await_inbound_visible(aops_pool, restart_id)
+    await await_inbound_visible(aops_pool, restart_id)
     pub = MagicMock()
 
     cmd = await claim_node(
@@ -728,10 +728,10 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'", (tid,)
     ).fetchone() == ("pending",)
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")
 
 
-@pytest.mark.flaky  # poll _await_status for claim_node status transition
+@pytest.mark.flaky  # poll await_status for claim_node status transition
 async def test_claim_terminate_then_restart_preserves_serial_order(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
@@ -750,7 +750,7 @@ async def test_claim_terminate_then_restart_preserves_serial_order(
     # A later restart cannot replace the active command pointer.
     insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
-    await _await_inbound_visible(aops_pool, restart_id)
+    await await_inbound_visible(aops_pool, restart_id)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
@@ -761,7 +761,7 @@ async def test_claim_terminate_then_restart_preserves_serial_order(
     )
 
     assert cmd.goto == END
-    await _await_status(aops_pool, tid, "running")
+    await await_status(aops_pool, tid, "running")
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (restart_id,)
     ).fetchone() == ("pending",)

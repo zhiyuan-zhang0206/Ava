@@ -12,9 +12,9 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.runtime import Runtime
 
-from agent.graph.exec._result import _ExecDone
+from agent.graph.exec._result import ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
-from agent.graph.exec.node import _run_agent_code, exec_node
+from agent.graph.exec.node import exec_node, run_agent_code
 from agent.state import AgentState
 from ava.boot import process_clients
 from base.agents.context import AvaContext
@@ -87,7 +87,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     )
 
     async def execute(agent_id: int, slices: AgentSlices | None = None) -> list[object]:
-        result, *_ = await _run_agent_code(
+        result, *_ = await run_agent_code(
             AgentState(),
             AvaContext(
                 agent=slices
@@ -107,7 +107,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             code,
             ExecOutputChunkPublisher(MagicMock(), agent_id, str(agent_id)),
         )
-        assert isinstance(result, _ExecDone), result
+        assert isinstance(result, ExecDone), result
         line = next(line for line in result.output.splitlines() if line.startswith("CONFIG="))
         return json.loads(line.removeprefix("CONFIG="))
 
