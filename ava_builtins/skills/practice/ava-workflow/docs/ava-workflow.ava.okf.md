@@ -14,8 +14,9 @@ tags:
 `ava-workflow` is the entry skill for choosing and adjusting how to work. Load it
 for non-trivial, ambiguous, consequential, sustained, or parallel tasks. Its
 selection dimensions are independent; loading it does not require an interview,
-a written plan, sustained goal supervision, or delegation. Direct execution with
-appropriate evidence is a valid strategy.
+a written plan or sustained goal supervision. Parallelize independent work;
+choose fork, fresh spawn or a suitable available peer by context. Short or
+dependent work can execute directly with appropriate evidence.
 
 The user supplies intent, preferences, and authority. Agents discover facts and
 choose routine methods, asking about unresolved material trade-offs in terms of
