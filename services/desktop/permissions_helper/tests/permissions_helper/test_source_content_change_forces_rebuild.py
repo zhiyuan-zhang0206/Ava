@@ -11,13 +11,13 @@ import pytest
 from base import paths
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     _TEST_CERT_SHA1,
-    _argvs,
     _fake_tools,
     _install_env,
     _sign_command,
     _stage_bundle,
     _test_dr,
     _write_current_build_state,
+    recorded_argvs,
 )
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
@@ -38,7 +38,7 @@ def test_source_content_change_forces_rebuild(
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
 def test_locale_content_change_forces_rebuild(
@@ -56,7 +56,7 @@ def test_locale_content_change_forces_rebuild(
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
 def test_entitlements_content_change_forces_rebuild(
@@ -74,7 +74,7 @@ def test_entitlements_content_change_forces_rebuild(
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
 def test_build_copies_locale_resources_into_the_bundle(
@@ -105,7 +105,7 @@ def test_missing_build_state_forces_rebuild(
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
 
 def test_expected_dr_uses_the_named_identity_sha1(
@@ -123,7 +123,7 @@ def test_expected_dr_uses_the_named_identity_sha1(
         ),
     )
 
-    assert lifecycle._expected_dr() == (
+    assert lifecycle.pinned_designated_requirement() == (
         f'identifier "{lifecycle.HELPER_BUNDLE_ID}" and certificate leaf = H"{mixed_case_sha1.lower()}"'
     )
 
@@ -141,7 +141,7 @@ def test_expected_dr_rejects_a_missing_or_misnamed_identity(
     )
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="missing or name mismatch"):
-        lifecycle._expected_dr()
+        lifecycle.pinned_designated_requirement()
 
 
 def test_verify_dr_rejects_permission_reset_risk(
@@ -173,7 +173,7 @@ def test_identity_change_warns_and_rebuilds(
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
     assert (
         "code-signing identity changed — macOS permissions may need re-granting"
         in capsys.readouterr().err
@@ -195,7 +195,7 @@ def test_ad_hoc_signed_bundle_is_rebuilt_onto_the_stable_certificate(
     with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
-    assert not any(c[0] == "codesign" and "--force" in c for c in _argvs(recorded))
+    assert not any(c[0] == "codesign" and "--force" in c for c in recorded_argvs(recorded))
 
 
 def test_locked_keychain_refuses_instead_of_downgrading_to_ad_hoc(
@@ -210,8 +210,8 @@ def test_locked_keychain_refuses_instead_of_downgrading_to_ad_hoc(
         lifecycle.build_and_sign()
     assert "User interaction is not allowed" in str(err.value)
     assert "unlock-keychain" in str(err.value)
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--force"] for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
+    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
 
 
 def test_codesign_failure_names_the_ad_hoc_refusal(
@@ -258,7 +258,7 @@ def test_swiftc_hang_fails_the_build_instead_of_blocking(
     with pytest.raises(lifecycle.PermissionsHelperTimeoutError) as err:
         lifecycle.build_and_sign()
     assert f"{lifecycle._TIMEOUTS_S['swiftc']:.0f}s" in str(err.value)
-    assert not any(c[:2] == ["codesign", "--force"] for c in _argvs(recorded))
+    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
 
 
 def test_codesign_hang_fails_with_the_acl_remedy_not_the_unlock(
@@ -288,7 +288,7 @@ def test_acl_probe_precedes_the_build_and_signs_a_scratch_file(
     recorded = _fake_tools(monkeypatch, authority=None)
 
     assert lifecycle.build_and_sign() == (app, True)
-    argvs = _argvs(recorded)
+    argvs = recorded_argvs(recorded)
     probe = next(c for c in argvs if c[:2] == ["codesign", "--sign"])
     assert probe[2] == lifecycle._CERT_CN
     # A scratch path, never the bundle: a probe that DOES trip the dialog must not
@@ -307,7 +307,7 @@ def test_signing_smoke_signs_scratch_and_reads_matching_requirement(
 
     lifecycle.preflight_signing_smoke()
 
-    argvs = _argvs(recorded)
+    argvs = recorded_argvs(recorded)
     sign = next(c for c in argvs if c[:2] == ["codesign", "--sign"])
     scratch = Path(sign[-1])
     assert sign[:-1] == [
@@ -353,7 +353,7 @@ def test_signing_smoke_exit_25300_names_repair_and_present_search_list(
     message = str(err.value)
     assert lifecycle._SIGNING_REACH_REMEDY in message
     assert "is present in the user keychain search list" in message
-    assert ["security", "list-keychains", "-d", "user"] in _argvs(recorded)
+    assert ["security", "list-keychains", "-d", "user"] in recorded_argvs(recorded)
 
 
 def test_signing_smoke_item_not_found_text_names_repair(
@@ -448,7 +448,7 @@ def test_rebuild_runs_signing_smoke_after_acl_probe_before_compile(
     )
 
     assert lifecycle.build_and_sign() == (app, True)
-    argvs = _argvs(recorded)
+    argvs = recorded_argvs(recorded)
     acl_probe_index = next(
         i
         for i, cmd in enumerate(argvs)
@@ -471,8 +471,8 @@ def test_acl_prompt_refuses_before_anything_is_built(
         lifecycle.build_and_sign()
     assert "SecurityAgent" in str(err.value)
     assert "set-key-partition-list" in str(err.value)
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--force"] for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
+    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
 
 
 def test_acl_probe_nonzero_is_inconclusive_and_the_build_proceeds(

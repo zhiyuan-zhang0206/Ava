@@ -21,7 +21,6 @@ from base.host.converge.screen_capture import ScreenCaptureState
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
-    _argvs,
     _fake_tools,
     _FakeHelper,
     _is_whitelisted_file_path,
@@ -32,6 +31,7 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
     _stage_bundle,
     _test_dr,
     _write_current_build_state,
+    recorded_argvs,
 )
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
@@ -506,8 +506,8 @@ def test_current_stable_signed_bundle_is_not_resigned(
     _write_current_build_state(app, lifecycle._source_content_hash())
 
     assert lifecycle.build_and_sign() == (app, False)
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--force"] for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
+    assert not any(c[:2] == ["codesign", "--force"] for c in recorded_argvs(recorded))
 
 
 def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -536,7 +536,9 @@ def test_signing_cert_import_uses_supported_security_argv(
 
     lifecycle.ensure_signing_cert()
 
-    import_argv = next(argv for argv in _argvs(recorded) if argv[:2] == ["security", "import"])
+    import_argv = next(
+        argv for argv in recorded_argvs(recorded) if argv[:2] == ["security", "import"]
+    )
     assert import_argv[:2] == ["security", "import"]
     assert import_argv[2].endswith("ident.p12")
     assert import_argv[3:] == [
@@ -563,8 +565,8 @@ def test_locked_keychain_does_not_fail_a_current_host(
     _write_current_build_state(app, lifecycle._source_content_hash())
 
     assert lifecycle.build_and_sign() == (app, False)
-    assert not any(c[:2] == ["security", "show-keychain-info"] for c in _argvs(recorded))
-    assert not any(c[:2] == ["codesign", "--sign"] for c in _argvs(recorded))
+    assert not any(c[:2] == ["security", "show-keychain-info"] for c in recorded_argvs(recorded))
+    assert not any(c[:2] == ["codesign", "--sign"] for c in recorded_argvs(recorded))
 
 
 def test_current_stable_signed_bundle_skips_signing_smoke(
@@ -647,4 +649,4 @@ def test_source_mtime_change_does_not_rebuild_identical_content(
     os.utime(lifecycle._SOURCE, (newer, newer))
 
     assert lifecycle.build_and_sign() == (app, False)
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+    assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))

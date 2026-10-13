@@ -70,7 +70,7 @@ def _worker_probe(credentials_path: str, work_path: str, roots: tuple[str, ...])
         artifact.write_bytes(b"")
         return artifact
 
-    backup._run_backup = _empty_dump
+    backup.run_locked_backup = _empty_dump
     work = Path(work_path)
     work.mkdir()
 

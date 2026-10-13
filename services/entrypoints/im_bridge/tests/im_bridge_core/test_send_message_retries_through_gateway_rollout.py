@@ -20,12 +20,12 @@ from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakePlainAdapter,
     FakeTypingAdapter,
     _core,
-    _text,
     assert_effort_layer_after_pro,
     assert_model_layer_after_coder,
     assert_preset_layer,
     models_data,
     preset,
+    reply_text,
     row,
 )
 from services.entrypoints.im_bridge.types import (
@@ -356,7 +356,7 @@ async def test_commands_lists_everything() -> None:
     async with owned_tasks() as _owned_tasks:
         core = _core(FakeGateway(), tasks=_owned_tasks)
         out = core._cmd_help()  # sync — no gateway call
-        text = _text(out)
+        text = reply_text(out)
         assert "/list" in text and "/spawn" in text
         assert "/status" in text and "/commands" in text
         assert "/switch" not in text  # /list buttons switch now (user ruling 2026-08-04)
@@ -417,7 +417,7 @@ async def test_commands_empty_catalog() -> None:
         gateway.commands = []
         core = _core(gateway, tasks=_owned_tasks)
         out = await core._cmd_commands("telegram")
-        assert _text(out) == copy.NO_COMMANDS_REGISTERED
+        assert reply_text(out) == copy.NO_COMMANDS_REGISTERED
 
 
 async def test_unknown_slash_command_forwards_to_current_agent() -> None:
@@ -440,7 +440,7 @@ async def test_unknown_slash_command_without_agent_errors() -> None:
         state = ChatState("telegram", "12345")
         out = await core._handle_command(state, "/audio-transcribe go")
         assert out is not None
-        assert copy.NO_AGENT_SWITCHED in _text(out)
+        assert copy.NO_AGENT_SWITCHED in reply_text(out)
         assert gateway.sent == []
 
 

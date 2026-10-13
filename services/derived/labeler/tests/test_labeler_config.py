@@ -114,7 +114,7 @@ def _assert_run_lifecycle(
     def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
         return ServiceEndpoint("labeler", 1, Path("/nonexistent/labeler.pid"))
 
-    monkeypatch.setattr(daemon, "_endpoint", endpoint_for_entry)
+    monkeypatch.setattr(daemon, "labeler_endpoint", endpoint_for_entry)
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", fake_dispatch)
 

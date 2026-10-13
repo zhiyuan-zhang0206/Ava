@@ -32,7 +32,7 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
     candidate = tmp_path / "candidate"
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "_source_content_hash", lambda: "source")
-    monkeypatch.setattr(lifecycle, "_expected_dr", lambda: "stable-dr")
+    monkeypatch.setattr(lifecycle, "pinned_designated_requirement", lambda: "stable-dr")
 
     def verify(_app: Path) -> str:
         return "stable-dr"
@@ -93,7 +93,7 @@ def _stale_installed_helper(
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path / "agents")
     monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "_source_content_hash", lambda: "new")
-    monkeypatch.setattr(lifecycle, "_expected_dr", lambda: "stable-dr")
+    monkeypatch.setattr(lifecycle, "pinned_designated_requirement", lambda: "stable-dr")
     monkeypatch.setattr(lifecycle, "_is_valid_stable_app", Path.exists)  # present = validly signed
     monkeypatch.setattr(jobs, "retirement_query", _recorder(events, "launchd"))
     monkeypatch.setattr(jobs, "_executable_pids", _recorder(events, "scan", []))

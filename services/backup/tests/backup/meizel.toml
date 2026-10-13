@@ -4,8 +4,8 @@
 [debt.first-party-patch]
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.artifact.offsite.publish" = 1
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.PROGRESS_INTERVAL_S" = 2
-"test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump._run_backup" = 1
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.backup_lock" = 1
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.prune" = 1
+"test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.run_locked_backup" = 1
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.run_with_progress" = 1
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.subprocess.run" = 1

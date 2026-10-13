@@ -60,7 +60,6 @@ exports = ["adapters"]
 [debt.private-name]
 "im_bridge_core/test_push_snapshot_watermark_is_per_chat.py -> test_im_bridge_core.py#_core" = 1
 "im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_core" = 1
-"im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_text" = 1
 "test_im_bridge_watermark.py -> test_im_bridge_core.py#_core" = 1
 
 [debt.unresolved-patch]
