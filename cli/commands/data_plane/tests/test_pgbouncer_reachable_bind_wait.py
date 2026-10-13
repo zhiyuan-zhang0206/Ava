@@ -55,7 +55,7 @@ def _noop_write(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(_pb.OwnedPooler, "_stop_requested", Mock(return_value=False))
     # Unchanged files: the reload-vs-restart decision is the bind posture alone.
-    monkeypatch.setattr(_pb, "_write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     # ensure_pgbouncer's binary-exists guard must pass on every runner: the fake
     # `pgbouncer_bin` path only exists on macOS (brew), and CI is Linux without
     # pgbouncer installed. `shutil.which` answering non-None satisfies the guard.
@@ -441,7 +441,7 @@ def test_running_pooler_with_changed_userlist_is_restarted_never_reloaded(
         killed.append(custodian.identity.pid)
         return True
 
-    monkeypatch.setattr(_pb, "_write_config", lambda **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "write_config", lambda **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _pb.ownership, "pooler", Mock(return_value=SimpleNamespace(pid=4242, live=lambda: True))
     )

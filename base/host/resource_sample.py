@@ -30,7 +30,7 @@ from base.native_process.os_platform import primary_disk_path
 # call returns 0.0 and later ones cover whatever interval the last poller left
 # behind. A short blocking measurement is self-contained; the callers already
 # run this off the event loop.
-_CPU_INTERVAL_S = 0.1
+CPU_INTERVAL_S = 0.1
 
 # task #3696 exception inventory: a protective bound on one best-effort local
 # read (`pmset -g batt`) so a hung command cannot stall the status probe that
@@ -40,7 +40,7 @@ _BATTERY_READ_TIMEOUT_S = 2.0
 
 
 class _BatteryFields(TypedDict, total=False):
-    """The battery keys `_parse_battery` may emit; an absent key means unknown."""
+    """The battery keys `parse_battery` may emit; an absent key means unknown."""
 
     battery_percent: int
     battery_power: Literal["ac", "battery"]
@@ -69,7 +69,7 @@ class ResourceSample(BaseModel):
     battery_remaining_min: int | None = None
 
 
-def _parse_battery(out: str) -> _BatteryFields:
+def parse_battery(out: str) -> _BatteryFields:
     """Parse `pmset -g batt` text into the battery fields; {} when no battery.
 
     Sample input (a battery-powered macOS host on AC):
@@ -101,7 +101,7 @@ def _parse_battery(out: str) -> _BatteryFields:
     return fields
 
 
-def _battery_sample() -> _BatteryFields:
+def battery_sample() -> _BatteryFields:
     """One best-effort battery reading; {} off macOS / on failure / no battery.
 
     Swallows failures by design: the sample degrades to None fields, it does
@@ -119,7 +119,7 @@ def _battery_sample() -> _BatteryFields:
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return {}
-    return _parse_battery(out)
+    return parse_battery(out)
 
 
 def resource_sample() -> ResourceSample:
@@ -152,12 +152,12 @@ def resource_sample() -> ResourceSample:
 
     return ResourceSample(
         ts=time.time(),
-        cpu_pct=psutil.cpu_percent(interval=_CPU_INTERVAL_S),
+        cpu_pct=psutil.cpu_percent(interval=CPU_INTERVAL_S),
         mem_used_gb=round(mem_used / (1024**3), 2),
         mem_total_gb=round(mem.total / (1024**3), 2),
         mem_pct=mem.percent,
         disk_used_gb=round(disk.used / (1024**3), 2),
         disk_total_gb=round(disk_total / (1024**3), 2),
         disk_pct=disk.percent,
-        **_battery_sample(),
+        **battery_sample(),
     )

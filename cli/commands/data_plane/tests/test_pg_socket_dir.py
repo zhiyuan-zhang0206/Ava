@@ -34,7 +34,7 @@ def test_pgbouncer_ini_uses_only_canonical_socket(
 ) -> None:
     canonical = tmp_path / "canonical"
     monkeypatch.setattr(pooler, "pg_socket_dir", lambda: canonical)
-    ini = pooler._render_ini(
+    ini = pooler.render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava",

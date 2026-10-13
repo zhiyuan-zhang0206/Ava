@@ -41,7 +41,7 @@ WINDOWS: dict[str, tuple[int, int]] = {
     "7d": (604800, 3600),
 }
 
-_GRID_ORIGIN = OPS_GRID_ORIGIN
+GRID_ORIGIN = OPS_GRID_ORIGIN
 _LLM_ERROR_EVENTS = list(family_events(LLM_ERROR_FAMILY))
 
 
@@ -51,8 +51,8 @@ def _bucket_starts(anchor: datetime, window_s: int, bucket_s: int) -> list[datet
     (start <= anchor < start + bucket_s), so the panel's live-most point is
     always present; the series arrays are indexed by position in this list."""
     n = window_s // bucket_s
-    elapsed = int((anchor - _GRID_ORIGIN).total_seconds())
-    last = _GRID_ORIGIN + timedelta(seconds=elapsed - (elapsed % bucket_s))
+    elapsed = int((anchor - GRID_ORIGIN).total_seconds())
+    last = GRID_ORIGIN + timedelta(seconds=elapsed - (elapsed % bucket_s))
     return [last - timedelta(seconds=(n - 1 - i) * bucket_s) for i in range(n)]
 
 

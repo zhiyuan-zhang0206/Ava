@@ -21,9 +21,9 @@ from base import config
 from base.api_contracts.agent_contract import AgentNotFound, AvaAgentError, ErrorReason
 from base.host.db_authority.api import AcceptanceCache
 from gateway.app import (
-    _cluster_auth_middleware,
-    _cluster_pause_middleware,
     app,
+    cluster_auth_middleware,
+    cluster_pause_middleware,
 )
 from gateway.http.auth import rejection_log
 from gateway.http.middleware.cors import cors_allowed_origins
@@ -211,7 +211,7 @@ def _unauthorized_auth_response(request: Request) -> Response:
     async def call_next(_request: Request) -> Response:
         raise AssertionError("authentication middleware must short-circuit")
 
-    return asyncio.run(_cluster_auth_middleware(request, call_next))
+    return asyncio.run(cluster_auth_middleware(request, call_next))
 
 
 def _auth401_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -230,7 +230,7 @@ def test_auth_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     async def call_next(_request: Request) -> Response:
         raise AssertionError("authentication middleware must short-circuit")
 
-    response = asyncio.run(_cluster_auth_middleware(_request(), call_next))
+    response = asyncio.run(cluster_auth_middleware(_request(), call_next))
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
 
 
@@ -243,7 +243,7 @@ def test_auth_middleware_requires_cluster_auth_for_alert_reads(
     async def call_next(_request: Request) -> Response:
         raise AssertionError("unauthenticated alert reads must short-circuit")
 
-    response = asyncio.run(_cluster_auth_middleware(_request(path="/api/alerts"), call_next))
+    response = asyncio.run(cluster_auth_middleware(_request(path="/api/alerts"), call_next))
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
 
 
@@ -257,7 +257,7 @@ def test_auth_middleware_leaves_alert_webhook_auth_to_router(
         return Response(status_code=204)
 
     response = asyncio.run(
-        _cluster_auth_middleware(
+        cluster_auth_middleware(
             _request(method="POST", path="/api/alerts"),
             call_next,
         )
@@ -275,7 +275,7 @@ def test_auth_middleware_accepts_bearer_for_alert_reads(
         return Response(status_code=204)
 
     response = asyncio.run(
-        _cluster_auth_middleware(
+        cluster_auth_middleware(
             _request(
                 path="/api/alerts",
                 headers=[(b"authorization", b"Bearer test-secret")],
@@ -499,8 +499,8 @@ def test_cluster_pause_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch)
     async def call_next(_request: Request) -> Response:
         raise AssertionError("pause middleware must short-circuit")
 
-    monkeypatch.setattr(gateway_app, "_cluster_is_paused", paused)
-    response = asyncio.run(_cluster_pause_middleware(_request(), call_next))
+    monkeypatch.setattr(gateway_app, "cluster_is_paused", paused)
+    response = asyncio.run(cluster_pause_middleware(_request(), call_next))
     _assert_envelope(response, status=503, code="cluster_updating", retryable=True)
     assert response.headers["retry-after"] == "30"
 

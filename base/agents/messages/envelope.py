@@ -42,8 +42,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
+from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 from base.clock import Clock
-from base.events.caller_identity import CallerIdentity, is_caller_source
 
 __all__ = [
     "EnvelopeReadInputs",

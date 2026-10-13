@@ -67,9 +67,9 @@ def active_codex_lease(
 
     from base.agents import impersonation as leases
     from base.agents.impersonation.tests.test_host_transport import FakeAppServer
+    from base.api_contracts.caller_identity import CallerIdentity
     from base.db import create_agent
     from base.db.test_db_guard import assert_test_db_url
-    from base.events.caller_identity import CallerIdentity
     from base.native_process.runtime_incarnation import RuntimeIncarnation
     from base.sessions import env_forwarding
     from tests.impersonation_support import recorded_tree

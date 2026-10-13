@@ -16,8 +16,8 @@ from base.cluster import machines
 from base.cluster.tests.machines.setup import (
     MachineSetup,
     _db,
-    _read_description,
-    _read_machine,
+    read_description,
+    read_machine,
 )
 from base.cluster.tests.machines.setup import (
     _machine_setup as _machine_setup,
@@ -66,7 +66,7 @@ def test_register_self_composes_single_unit_row(
     """Single unit (runner style): composed machines row reflects that unit's caps + url."""
     _machine_setup(name="runner-a", role="agent-runner")
     _machine_setup.register(_db(database_gate=database_gate), url="http://runner-a:9100")
-    gateway_url, role, _desc, stopped_at = _read_machine("runner-a")
+    gateway_url, role, _desc, stopped_at = read_machine("runner-a")
     assert gateway_url == "http://runner-a:9100"
     assert role == ["agent-runner"]
     assert stopped_at is None
@@ -113,7 +113,7 @@ def test_register_self_station_only_composes_row(
             gateway=settings.gateway.gateway_url,
         ),
     )
-    gateway_url, role, _desc, stopped_at = _read_machine("station-a")
+    gateway_url, role, _desc, stopped_at = read_machine("station-a")
     assert gateway_url == "http://10.0.0.9:4318"
     assert role == ["observability-station"]
     assert stopped_at is None
@@ -130,7 +130,7 @@ def test_register_self_co_located_station_composes_with_gateway(
     _machine_setup.register(_db(database_gate=database_gate), url="http://gw:8000")
     _machine_setup(name="combo", role="observability-station", home="~/.ava_station")
     _machine_setup.register(_db(database_gate=database_gate), url=None)
-    gateway_url, role, _desc, stopped_at = _read_machine("combo")
+    gateway_url, role, _desc, stopped_at = read_machine("combo")
     assert role == ["gateway", "observability-station"]
     # the composed dial URL stays the gateway unit's (the station adds no target)
     assert gateway_url == "http://gw:8000"
@@ -472,7 +472,7 @@ def test_colocated_units_compose_union_and_ops_dial(
     _machine_setup(name="test-host", role="agent-runner", home="~/.ava")
     _machine_setup.register(_db(database_gate=database_gate), url="http://localhost:8600")
 
-    gateway_url, role, _desc, stopped_at = _read_machine("test-host")
+    gateway_url, role, _desc, stopped_at = read_machine("test-host")
     assert role == ["agent-runner", "gateway"]  # sorted union
     assert gateway_url == "http://localhost:8600"  # ops URL of the agent-runner unit
     assert stopped_at is None
@@ -496,7 +496,7 @@ def test_colocated_stop_one_unit_retracts_only_its_caps(
         _db(database_gate=database_gate), "test-host", "~/.ava"
     )  # stop the agent-runner unit
 
-    gateway_url, role, _desc, stopped_at = _read_machine("test-host")
+    gateway_url, role, _desc, stopped_at = read_machine("test-host")
     assert role == ["gateway"]  # agent-runner cap retracted
     assert gateway_url == "http://test-host:8000"  # now the gateway unit's url
     assert stopped_at is None  # gateway unit still live
@@ -517,7 +517,7 @@ def test_colocated_restart_unit_recomposes_union(
     _machine_setup(name="test-host", role="agent-runner", home="~/.ava")
     _machine_setup.register(_db(database_gate=database_gate), url="http://localhost:8600")
 
-    _gateway_url, role, _desc, _stopped = _read_machine("test-host")
+    _gateway_url, role, _desc, _stopped = read_machine("test-host")
     assert role == ["agent-runner", "gateway"]
 
 
@@ -562,7 +562,7 @@ def test_register_self_allows_loopback_station_url_when_gateway_colocated(
     may register a loopback dial URL — the zero-config single-box posture."""
     _machine_setup(name="station-local", role="observability-station")
     _machine_setup.register(_db(database_gate=database_gate), url="http://localhost:4318")
-    gateway_url, role, _desc, _stopped = _read_machine("station-local")
+    gateway_url, role, _desc, _stopped = read_machine("station-local")
     assert gateway_url == "http://localhost:4318"
     assert role == ["observability-station"]
 
@@ -605,7 +605,7 @@ def test_register_self_writes_description(
     _machine_setup(name="desc-machine")
     _machine_setup.machine.set(description="voice IO + browser")
     _machine_setup.register(_db(database_gate=database_gate), url="http://d:8000")
-    assert _read_description("desc-machine") == "voice IO + browser"
+    assert read_description("desc-machine") == "voice IO + browser"
 
 
 def test_register_self_description_none_stores_null(
@@ -616,7 +616,7 @@ def test_register_self_description_none_stores_null(
     _machine_setup(name="nodesc-machine")
     _machine_setup.machine.set(description=None)
     _machine_setup.register(_db(database_gate=database_gate), url="http://n:8000")
-    assert _read_description("nodesc-machine") is None
+    assert read_description("nodesc-machine") is None
 
 
 def test_register_self_updates_description_on_conflict(
@@ -629,7 +629,7 @@ def test_register_self_updates_description_on_conflict(
     _machine_setup.register(_db(database_gate=database_gate), url="http://u:8000")
     _machine_setup.machine.set(description="new")
     _machine_setup.register(_db(database_gate=database_gate), url="http://u:8000")
-    assert _read_description("upd-machine") == "new"
+    assert read_description("upd-machine") == "new"
 
 
 # up_since_at — the announce stamp (#981)

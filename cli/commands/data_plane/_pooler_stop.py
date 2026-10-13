@@ -22,7 +22,7 @@ from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.native_process.ownership import OwnedProcess
 
 
-def _native_birth(identity: OwnedProcess) -> dict[str, int | float | None]:
+def native_birth(identity: OwnedProcess) -> dict[str, int | float | None]:
     # Linux custody is the kernel starttime tick, independent of corrections
     # to the wall-clock timestamp reported by separate process readers.
     return {
@@ -62,7 +62,7 @@ class OwnedPooler:
         )
         if not valid_birth:
             raise RuntimeError("invalid PgBouncer stop intent; custody retained")
-        return value == _native_birth(self.identity)
+        return value == native_birth(self.identity)
 
     def require_accepting(self) -> None:
         """Preparation cannot rewrite or reload an already-stopping native birth."""
@@ -72,8 +72,8 @@ class OwnedPooler:
 
     def _process(self) -> psutil.Process:
         process = psutil.Process(self.identity.pid)
-        current = _native_birth(OwnedProcess.capture(process))
-        if current != _native_birth(self.identity) or not self.identity.live():
+        current = native_birth(OwnedProcess.capture(process))
+        if current != native_birth(self.identity) or not self.identity.live():
             raise RuntimeError("PgBouncer native birth changed before signal")
         return process
 
@@ -109,7 +109,7 @@ class OwnedPooler:
             if not requested:
                 write_private_bytes(
                     self.config.with_name("stop-intent.json"),
-                    json.dumps(_native_birth(self.identity)).encode(),
+                    json.dumps(native_birth(self.identity)).encode(),
                 )
             if admitted:
                 if time.monotonic() >= deadline:

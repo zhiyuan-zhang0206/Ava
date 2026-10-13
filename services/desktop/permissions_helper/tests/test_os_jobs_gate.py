@@ -271,7 +271,7 @@ def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_p
     """An OS probe observes its owning home and carries no release policy."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path / ".ava-x"))
     monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
-    body = cron._launchd_plist_content(300)
+    body = cron.launchd_plist_content(300)
     import plistlib
 
     assert plistlib.loads(body.encode())["ProgramArguments"] == [
@@ -287,7 +287,7 @@ def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_p
 @pytest.mark.parametrize(
     "render",
     [
-        pytest.param(autostart._autostart_plist_content, id="autostart"),
+        pytest.param(autostart.autostart_plist_content, id="autostart"),
     ],
 )
 def test_every_launchagent_pins_ava_home(

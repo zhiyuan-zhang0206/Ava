@@ -15,7 +15,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import runtime_config, settings
 from base.host.env import dotenv_file
 from gateway.app import app
-from gateway.routers.tests.test_config_api import REMOTE, _seed_machine
+from gateway.routers.tests.test_config_api import REMOTE, seed_machine
 from gateway.routers.tests.test_config_api import (
     _clean_overrides as _clean_overrides,
 )
@@ -50,7 +50,7 @@ def test_get_explicit_self_is_host_view_not_cluster(
 def test_put_remote_rejects_cluster_key(_clean_overrides: Path) -> None:
     """PUT ?machine=<remote> carrying a cluster key -> 400 (cluster config is
     machine-independent)."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     with TestClient(app) as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"llm_model": "x"})
     assert resp.status_code == 400, resp.text
@@ -63,7 +63,7 @@ def test_put_remote_host_field_dispatches_config_write(
     """PUT ?machine=<remote> with a host remote_writable key -> dispatches a
     config_write carrying the overrides + gateway-stamped actor/trace, and
     returns the stubbed ConfigWriteResult."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     stub_result = {
         "machine": REMOTE,
         "results": {"ops_concurrency": {"ok": True, "reason": None}},
@@ -100,7 +100,7 @@ def test_put_remote_rejects_writable_non_remote_host_field(
     rejected at the gate on a machine-addressed PUT — 400 before any dispatch,
     rather than a 200 applied=False from the host-side op. Locks the shared
     field_editable gate: remote host edits require remote_writable."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     dispatched = AsyncMock()
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatched)
     with TestClient(app) as client:
@@ -119,7 +119,7 @@ def test_put_remote_rejects_oss_credential_fields(
     400s at the gate (remote_writable=False), so a remote admin can never point a
     machine at arbitrary credential files. Locks the security boundary the
     writable flip must not loosen."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     dispatched = AsyncMock()
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatched)
     with TestClient(app) as client:
@@ -138,7 +138,7 @@ def test_put_remote_rejects_oss_credential_fields(
 
 def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path) -> None:
     """PUT ?machine=<known-but-offline>: config_write times out -> 503."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
 
@@ -150,7 +150,7 @@ def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, _clean_override
 
 def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, _clean_overrides: Path) -> None:
     """PUT ?machine=<known>: the remote config_write fails (row marked failed) -> 503."""
-    _seed_machine(REMOTE)
+    seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpFailed({"error": "boom"}))
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
 
@@ -181,10 +181,10 @@ def test_request_actor_reads_only_middleware_state() -> None:
     """The write-audit actor comes from verified request state, not caller JSON."""
     from types import SimpleNamespace
 
-    from gateway.routers.configuration.runtime import _request_actor
+    from gateway.routers.configuration.runtime import request_actor
 
     anon = cast("Any", SimpleNamespace(state=SimpleNamespace()))
-    assert _request_actor(anon) == (None, None)
+    assert request_actor(anon) == (None, None)
 
     authed = cast(
         "Any",
@@ -196,7 +196,7 @@ def test_request_actor_reads_only_middleware_state() -> None:
             ),
         ),
     )
-    assert _request_actor(authed) == ("user_session:administrator", "trace-7")
+    assert request_actor(authed) == ("user_session:administrator", "trace-7")
 
     bearer = cast(
         "Any",
@@ -204,7 +204,7 @@ def test_request_actor_reads_only_middleware_state() -> None:
             state=SimpleNamespace(source_verified_by="cluster_bearer", auth_principal=None)
         ),
     )
-    assert _request_actor(bearer) == ("cluster_bearer", None)
+    assert request_actor(bearer) == ("cluster_bearer", None)
 
 
 def test_put_records_write_audit_with_value_diff(_clean_overrides: Path) -> None:

@@ -13,7 +13,7 @@ import pytest
 from psycopg import sql
 
 from base.agents.observation import snapshot
-from base.agents.observation.roster import _LIVE_SQL, AgentCard, list_directory, select_roster
+from base.agents.observation.roster import LIVE_SQL, AgentCard, list_directory, select_roster
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.tests.fakes import fake_database
@@ -285,7 +285,7 @@ def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.
             FROM generate_series(1,20000)i
         """)
         cur.execute("ANALYZE agent_notices")
-        cur.execute(sql.SQL("EXPLAIN (ANALYZE, FORMAT JSON) ") + _LIVE_SQL)
+        cur.execute(sql.SQL("EXPLAIN (ANALYZE, FORMAT JSON) ") + LIVE_SQL)
         row = cur.fetchone()
         assert row is not None
         plan: dict[str, Any] = row[0][0]["Plan"]

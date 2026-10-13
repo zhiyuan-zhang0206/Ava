@@ -66,8 +66,8 @@ def test_linux_autostart_has_one_native_manager(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(autostart, "install", install)
     monkeypatch.setattr(autostart, "uninstall", uninstall)
-    autostart._register_linux()
-    autostart._unregister_linux()
+    autostart.register_linux()
+    autostart.unregister_linux()
     assert calls == ["install", "uninstall"]
 
 
@@ -76,4 +76,4 @@ def test_linux_autostart_propagates_unavailable_systemd(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
     with pytest.raises(RuntimeError, match="systemd"):
-        autostart._register_linux()
+        autostart.register_linux()

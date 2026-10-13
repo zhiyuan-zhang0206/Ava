@@ -47,14 +47,14 @@ def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:
         return cur.fetchone()
 
 
-def _returned_id(cur: psycopg.Cursor) -> int:
+def returned_id(cur: psycopg.Cursor) -> int:
     """Read an integer primary key from a RETURNING cursor."""
     row = cur.fetchone()
     assert row is not None
     return cast(int, row[0])
 
 
-def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
+def inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT content, kind, source FROM inbound_messages WHERE agent_id = %s ORDER BY id",
@@ -63,7 +63,7 @@ def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str,
         return cur.fetchall()
 
 
-def _terminate_hosted(db: psycopg.Connection, agent_id: int) -> None:
+def terminate_hosted(db: psycopg.Connection, agent_id: int) -> None:
     """Terminate a hosted incarnation; resurrection resumes only retained hosted authority."""
     db.execute(
         "UPDATE agents_meta SET status = 'terminated', runtime_kind = 'hosted', "
@@ -265,13 +265,13 @@ class TestSpawn:
         # spawner defaults to 'user' (triggered by UI button)
         assert row == (new_id, "user", None, None, "idling")
         # No inbound delivered
-        assert _inbound_rows(db_conn, new_id) == []
+        assert inbound_rows(db_conn, new_id) == []
 
     def test_spawn_with_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
             resp = spawn_via_http(client, {"prompt": "\u67e5 X", "prompt_source": "user"})
         new_id = resp.json()["id"]
-        assert _inbound_rows(db_conn, new_id) == [("\u67e5 X", "chat", "user")]
+        assert inbound_rows(db_conn, new_id) == [("\u67e5 X", "chat", "user")]
 
     def test_spawn_with_long_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
         """Long reports are delivered through the shared user-content schema."""
@@ -280,7 +280,7 @@ class TestSpawn:
             resp = spawn_via_http(client, {"prompt": prompt, "prompt_source": "user"})
         assert resp.status_code == 201
         new_id = resp.json()["id"]
-        assert _inbound_rows(db_conn, new_id) == [(prompt, "chat", "user")]
+        assert inbound_rows(db_conn, new_id) == [(prompt, "chat", "user")]
 
     def test_spawn_with_explicit_spawner(self, db_conn: psycopg.Connection) -> None:
         """spawner can be passed explicitly — e.g., when claude-code starts an ava agent, pass 'claude-code'."""
@@ -427,7 +427,7 @@ class TestTerminate:
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+        assert inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
@@ -444,7 +444,7 @@ class TestTerminate:
             "open_tasks": None,
             "shell_sessions": None,
         }
-        assert _inbound_rows(db_conn, agent_id) == []  # not delivered
+        assert inbound_rows(db_conn, agent_id) == []  # not delivered
 
     def test_terminate_nonexistent_404(
         self,
@@ -471,7 +471,7 @@ class TestTerminate:
         assert row is not None and row[4] == "terminated"
 
         # should have inserted an audit inbound (terminate kind)
-        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+        assert inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_force_with_custom_source(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -487,7 +487,7 @@ class TestTerminate:
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
 
         # inbound source should be agent:42, not default user
-        rows = _inbound_rows(db_conn, agent_id)
+        rows = inbound_rows(db_conn, agent_id)
         assert rows == [("", "terminate", "agent:42")]
 
     def test_terminate_force_already_terminated_returns_already_terminated(
@@ -520,7 +520,7 @@ class TestTerminate:
         assert before is not None and after is not None
         assert after[0] == before[0]
         assert after[1] is not None
-        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+        assert inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_force_nonexistent_404(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -541,13 +541,13 @@ class TestAutoResurrect:
         INSERT 'resurrect' lifecycle inbound."""
         with TestClient(app) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            _terminate_hosted(db_conn, agent_id)
+            terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
                 json={"content": "resume your work", "source": "user"},
             )
         assert resp.status_code == 201
-        rows = _inbound_rows(db_conn, agent_id)
+        rows = inbound_rows(db_conn, agent_id)
         # Auto-resurrect inserts a 'resurrect' inbound (source='system') before the chat
         assert ("", "resurrect", "system") in rows
         assert ("resume your work", "chat", "user") in rows
@@ -562,7 +562,7 @@ class TestAutoResurrect:
             )
         assert resp.status_code == 201
         # Only the chat, no resurrect marker
-        rows = _inbound_rows(db_conn, agent_id)
+        rows = inbound_rows(db_conn, agent_id)
         assert ("hello", "chat", "user") in rows
         # No resurrect row
         resurrect_rows = [r for r in rows if r[1] == "resurrect"]

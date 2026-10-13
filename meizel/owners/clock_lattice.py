@@ -122,11 +122,11 @@ def _parse_registered_clocks() -> frozenset[str]:
     return frozenset(names)
 
 
-_REGISTERED_CLOCKS: frozenset[str] = _parse_registered_clocks()
+REGISTERED_CLOCKS: frozenset[str] = _parse_registered_clocks()
 
 
 def _registered_clock_names() -> frozenset[str]:
-    return _REGISTERED_CLOCKS
+    return REGISTERED_CLOCKS
 
 
 # Explicit exemptions: `(relative_path, NAME)` -> why this lattice-vocabulary
@@ -204,7 +204,7 @@ def _is_unregistered_clock(rel: str, name: str, value: ast.expr | None) -> bool:
     return not (isinstance(value, ast.Name) and value.id in _registered_clock_names())
 
 
-def _scan_file(path: Path) -> list[str]:
+def scan_file(path: Path) -> list[str]:
     try:
         rel = path.relative_to(_REPO_ROOT).as_posix()
     except ValueError:
@@ -275,9 +275,9 @@ def _scan(paths: list[Path], scope: frozenset[str] | None = None) -> list[str]:
                     continue
                 if scope is not None and rel not in scope:
                     continue
-                errors.extend(_scan_file(p))
+                errors.extend(scan_file(p))
         elif path.suffix == ".py":
-            errors.extend(_scan_file(path))
+            errors.extend(scan_file(path))
     return errors
 
 

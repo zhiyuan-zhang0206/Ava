@@ -40,7 +40,7 @@ def _historical(metadata: InspectMetricsMetadata, *, spawned_at: datetime) -> bo
     return max(metadata.window_start, spawned_at) < metadata.collection_started_at
 
 
-def _conditions(
+def conditions(
     metadata: InspectMetricsMetadata,
 ) -> list[tuple[str, str, str]]:
     """(family, condition, availability) triples for one read."""
@@ -73,7 +73,7 @@ def note_inspect_metrics_coverage(
     module docstring."""
     try:
         historical = _historical(metadata, spawned_at=spawned_at)
-        for family, condition, availability in _conditions(metadata):
+        for family, condition, availability in conditions(metadata):
             if _unexpected(condition, historical=historical):
                 logger.warning(
                     "inspect metrics coverage gap",

@@ -87,7 +87,7 @@ class MaterializeResult:
         return bool(self.landed or self.updated)
 
 
-def _last_written_hash(name: str) -> str | None:
+def last_written_hash(name: str) -> str | None:
     """The tree hash this machine last wrote for `name`, from the per-machine
     install registry — the "has a person touched it since" reference.
 
@@ -162,7 +162,7 @@ def _classify(name: str, row_hash: str, dest: Path) -> str:
         return "unchanged"
     # The row and the disk disagree. Only the per-machine record of what WE last
     # wrote can say whether the disk moved or the row did.
-    return "stale" if _last_written_hash(name) == local else "local-edit"
+    return "stale" if last_written_hash(name) == local else "local-edit"
 
 
 def _replace_tree(archive: bytes, dest: Path) -> None:

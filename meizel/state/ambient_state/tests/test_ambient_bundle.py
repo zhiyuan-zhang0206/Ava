@@ -22,7 +22,7 @@ _BUNDLE_SOURCE = """
 def _sites(
     root: pathlib.Path, source: str, rel: str = "gateway/routers/thing.py"
 ) -> dict[str, int]:
-    bundle._bundles_defined_in.cache_clear()
+    bundle.bundles_defined_in.cache_clear()
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(source), encoding="utf-8")

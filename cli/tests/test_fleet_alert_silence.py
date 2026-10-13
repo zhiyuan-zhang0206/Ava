@@ -167,7 +167,7 @@ def test_a_refused_credential_is_reported_not_raised(
     _fake, base = grafana
     monkeypatch.setattr(silence, "_grafana", lambda: (base, "wrong"))
     assert silence.main(["close"]) == 0
-    assert capsys.readouterr().out == f"SILENCE failed: GET {silence._SILENCES}: HTTP 401\n"
+    assert capsys.readouterr().out == f"SILENCE failed: GET {silence.SILENCES}: HTTP 401\n"
 
 
 def test_a_home_without_the_admin_password_skips(

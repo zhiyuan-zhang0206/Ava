@@ -104,7 +104,7 @@ def extract_reasoning_tokens(
         # output_token_details is absent. Estimate from thinking content.
         reasoning_chars = total_reasoning_chars
         if reasoning_chars == 0 and content is not None:
-            reasoning_chars = _count_thinking_chars(content)
+            reasoning_chars = count_thinking_chars(content)
         if reasoning_chars > 0:
             # Rough token estimate: English ~4 chars/token, CJK ~1.5 chars/token.
             # A mixed ratio of 3 chars/token is a reasonable default.
@@ -112,7 +112,7 @@ def extract_reasoning_tokens(
     return 0
 
 
-def _count_thinking_chars(content: str | list[Any]) -> int:
+def count_thinking_chars(content: str | list[Any]) -> int:
     """Count total characters in thinking/reasoning blocks of a message content."""
     if isinstance(content, str):
         return 0  # string content has no block-type metadata

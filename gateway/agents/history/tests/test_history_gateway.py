@@ -115,7 +115,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     from agent.impersonation_handoff import start_marker
     from base.agents.history.timeline import build_timeline_items
     from base.agents.history.timeline_item import hydrate
-    from gateway.agents.history.timeline import _window_before
+    from gateway.agents.history.timeline import window_before
 
     lease = start(
         owner,
@@ -141,7 +141,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     assert page[-1].payload == "Message 14"
     cursor = page[-5].item_id
     older = hydrate(database, items, owner.agent_id, limit=5, before=cursor)
-    window, more = _window_before(older, cursor, 5)
+    window, more = window_before(older, cursor, 5)
     assert [item.payload for item in window] == [f"Message {i}" for i in range(5, 10)]
     assert more
     assert page[-1].impersonation is not None

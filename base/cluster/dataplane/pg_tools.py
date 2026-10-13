@@ -54,7 +54,7 @@ _PG_SHM_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
 # option, flip this to False: `pg_shm_args` then keeps macOS on its status quo
 # (no explicit settings) while Linux keeps the pin — the fallback the task
 # named ("incompatible -> Linux only").
-_PG_SHM_MMAP_OK_ON_MACOS = True
+PG_SHM_MMAP_OK_ON_MACOS = True
 
 
 def pg_shm_args() -> str:
@@ -68,7 +68,7 @@ def pg_shm_args() -> str:
     the host is configured with. A platform that must not set them yields "" —
     callers splice the return value into their `-o` string, so empty is a no-op.
     """
-    if is_macos() and not _PG_SHM_MMAP_OK_ON_MACOS:
+    if is_macos() and not PG_SHM_MMAP_OK_ON_MACOS:
         return ""
     return _PG_SHM_ARGS
 
@@ -129,7 +129,7 @@ def pg_start_env() -> dict[str, str]:
 
 # Prefix of every throwaway instance directory this module creates. Load-bearing:
 # the sweep below reaps ONLY `<a throwaway root>/<this prefix>*` directories.
-_THROWAWAY_PREFIX = "ava-pg-"
+THROWAWAY_PREFIX = "ava-pg-"
 
 # Where throwaway instance dirs live — the platform default (/dev/shm on Linux,
 # else the OS temp dir), the AVA_PG_THROWAWAY_BASE override, and the
@@ -170,9 +170,9 @@ def pg_tool(name: str) -> Path:
     )
 
 
-def _free_port() -> int:
+def free_port() -> int:
     """Ask the OS for an unused localhost TCP port. The socket is closed
-    immediately, so the port is only a PROBE — it is not reserved; `_allocate_port`
+    immediately, so the port is only a PROBE — it is not reserved; `allocate_port`
     makes the reservation atomic."""
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(("127.0.0.1", 0))
@@ -223,8 +223,8 @@ def _free_port() -> int:
 #
 # Safety — a real cluster can never be selected. The reap target is not read from
 # the lock's *contents*; it is the lock file's own parent directory, re-verified
-# against the shape this module itself creates (`_resolved_throwaway_dir`): the name
-# carries `_THROWAWAY_PREFIX`, the resolved directory is a direct child of the
+# against the shape this module itself creates (`resolved_throwaway_dir`): the name
+# carries `THROWAWAY_PREFIX`, the resolved directory is a direct child of the
 # throwaway root under its own name, and `data` is not a symlink. For a real
 # cluster to be selected its `$AVA_HOME` would have to BE an `ava-pg-*` child of
 # the throwaway root and keep its data dir at `data` instead of `pg` — two
@@ -234,12 +234,12 @@ def _free_port() -> int:
 # is ever signalled.
 
 # Owner lock, one per instance dir, beside that instance's `data/` and `pg.log`.
-_OWNER_LOCK_NAME = "owner.lock"
+OWNER_LOCK_NAME = "owner.lock"
 # The claim's private name. The claim file is created, flocked, and written under
-# it, then renamed onto `_OWNER_LOCK_NAME` (same inode, lock intact): no glob
+# it, then renamed onto `OWNER_LOCK_NAME` (same inode, lock intact): no glob
 # matches it, so a sweep can only ever see the final name already-locked (skip) or
 # absent (not yet claimed) — never a claim it would judge stale mid-flight (#3629).
-_CLAIM_LOCK_NAME = "owner.lock.claim"
+CLAIM_LOCK_NAME = "owner.lock.claim"
 
 
 def _throwaway_locks() -> list[Path]:
@@ -250,11 +250,11 @@ def _throwaway_locks() -> list[Path]:
     return sorted(
         lock
         for root in _throwaway_base.throwaway_roots()
-        for lock in root.glob(f"{_THROWAWAY_PREFIX}*/{_OWNER_LOCK_NAME}")
+        for lock in root.glob(f"{THROWAWAY_PREFIX}*/{OWNER_LOCK_NAME}")
     )
 
 
-class _Registration(NamedTuple):
+class Registration(NamedTuple):
     """The held flock fd + its lock path. `fd` stays open for the instance's whole
     life: closing it is what tells the next sweep the owner is gone."""
 
@@ -262,7 +262,7 @@ class _Registration(NamedTuple):
     lock: Path
 
 
-def _register_throwaway(instance_dir: Path, port: int) -> _Registration:
+def register_throwaway(instance_dir: Path, port: int) -> Registration:
     """Claim `instance_dir` as this process's throwaway cluster by taking the
     lifetime flock on its own `owner.lock`. The body carries owner diagnostics only —
     never a path.
@@ -274,16 +274,16 @@ def _register_throwaway(instance_dir: Path, port: int) -> _Registration:
     created-but-unlocked `owner.lock` and reap a claim in flight (#3629)."""
     import fcntl
 
-    lock = instance_dir / _OWNER_LOCK_NAME
-    claim = instance_dir / _CLAIM_LOCK_NAME
+    lock = instance_dir / OWNER_LOCK_NAME
+    claim = instance_dir / CLAIM_LOCK_NAME
     fd = os.open(claim, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     os.write(fd, json.dumps({"owner_pid": os.getpid(), "port": port}).encode())
     claim.rename(lock)  # same inode: the published lock is the one already held
-    return _Registration(fd, lock)
+    return Registration(fd, lock)
 
 
-def _unregister_throwaway(registration: _Registration) -> None:
+def unregister_throwaway(registration: Registration) -> None:
     """Release the flock and drop the lock file — the instance is torn down. The
     instance dir (and with it the lock) is usually already gone by this point; the
     close is what matters, and it cannot fail."""
@@ -291,15 +291,15 @@ def _unregister_throwaway(registration: _Registration) -> None:
     registration.lock.unlink(missing_ok=True)
 
 
-def _resolved_throwaway_dir(instance_dir: Path) -> Path | None:
+def resolved_throwaway_dir(instance_dir: Path) -> Path | None:
     """`instance_dir` resolved, when it really is a throwaway instance dir this
-    module created: `_THROWAWAY_PREFIX`-named, a real directory that resolves to a
+    module created: `THROWAWAY_PREFIX`-named, a real directory that resolves to a
     direct child of a throwaway root under that same name, holding a `data` entry
     that is not a symlink. None otherwise, and the sweeper then touches nothing.
 
     The name-preservation and non-symlink checks are what stop a stray symlink from
     aiming `pg_ctl` (or the rmtree) at a path outside every throwaway root."""
-    if not instance_dir.name.startswith(_THROWAWAY_PREFIX) or not instance_dir.is_dir():
+    if not instance_dir.name.startswith(THROWAWAY_PREFIX) or not instance_dir.is_dir():
         return None
     resolved = instance_dir.resolve()
     roots = {root.resolve() for root in _throwaway_base.throwaway_roots()}
@@ -349,7 +349,7 @@ def _reap_locked(lock: Path, fd: int) -> int:
     provably gone. Returns 1 if an instance was removed."""
     if os.fstat(fd).st_nlink == 0:
         return 0  # a racing sweeper already reaped it between our open and our lock
-    instance_dir = _resolved_throwaway_dir(lock.parent)
+    instance_dir = resolved_throwaway_dir(lock.parent)
     if instance_dir is None:
         # Nothing safely reapable: the lock sits somewhere that is not one of this
         # module's instance dirs. Drop the stray lock, touch nothing else.
@@ -376,7 +376,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
     Concurrency-safe (xdist workers all call it): the flock that proves deadness is
     the reap lock too, so one instance is reaped once, and a claim mid-flight is not
     observable — `owner.lock` is published only already-locked (see
-    `_register_throwaway`). On a shared tmpfs another user's instance dirs are
+    `register_throwaway`). On a shared tmpfs another user's instance dirs are
     `0700`, so the glob simply does not see them."""
     import fcntl
 
@@ -399,7 +399,7 @@ def sweep_orphaned_throwaway_clusters() -> int:
 
 # ── Throwaway port allocation: serialized, so parallel workers never collide ──
 #
-# `_free_port` alone is a TOCTOU race: it binds port 0 (the OS picks a free port),
+# `free_port` alone is a TOCTOU race: it binds port 0 (the OS picks a free port),
 # closes the socket, and the caller's postmaster binds that port roughly a second
 # later (after initdb). Two xdist workers in the same window can be handed the SAME
 # port — the OS sees it free both times — and the second postmaster then fails with
@@ -460,7 +460,7 @@ def _port_lock_root() -> Path:
     return _throwaway_base.default_base()
 
 
-def _allocate_port(instance_dir: Path) -> tuple[int, _Registration]:
+def allocate_port(instance_dir: Path) -> tuple[int, Registration]:
     """Reserve a localhost TCP port no LIVE throwaway cluster already holds, and
     register it under `instance_dir`'s owner lock. Probe, registry check, and
     registration all happen under one host-wide flock, so the reservation is
@@ -472,10 +472,10 @@ def _allocate_port(instance_dir: Path) -> tuple[int, _Registration]:
         fcntl.flock(root_fd, fcntl.LOCK_EX)
         try:
             while True:
-                port = _free_port()
+                port = free_port()
                 if port not in _live_throwaway_ports():
                     break
-            return port, _register_throwaway(instance_dir, port)
+            return port, register_throwaway(instance_dir, port)
         finally:
             fcntl.flock(root_fd, fcntl.LOCK_UN)
     finally:
@@ -488,13 +488,13 @@ def _allocate_port(instance_dir: Path) -> tuple[int, _Registration]:
 # itself the diagnosis, while an absent artifact is indistinguishable from the
 # capture being broken. Worded to stay true whether the file is missing or bare,
 # since both land here.
-_NO_PG_LOG_NOTE = "<no pg.log content — postgres never got far enough to write any>"
+NO_PG_LOG_NOTE = "<no pg.log content — postgres never got far enough to write any>"
 
 
 def _read_log_tail(log: Path, lines: int = 40) -> str:
     """The last `lines` of a pg.log, for the raised error's message. Best-effort:
     a log that vanished, is unreadable, or is empty degrades to "", which the
-    caller renders as `_NO_PG_LOG_NOTE` — reading it must never mask the start
+    caller renders as `NO_PG_LOG_NOTE` — reading it must never mask the start
     failure it is describing."""
     with contextlib.suppress(OSError):
         if log.is_file():
@@ -524,13 +524,13 @@ class ThrowawayPgStartError(subprocess.CalledProcessError):
         parts = [super().__str__()]
         if self.preserved_log is not None:
             parts.append(f"pg.log artifact: {self.preserved_log}")
-        parts.append(f"--- pg.log tail ---\n{self.log_tail}" if self.log_tail else _NO_PG_LOG_NOTE)
+        parts.append(f"--- pg.log tail ---\n{self.log_tail}" if self.log_tail else NO_PG_LOG_NOTE)
         return "\n".join(parts)
 
 
 def _preserve_failed_fixture_log(instance_dir: Path) -> Path | None:
     """Copy a failed throwaway cluster's pg.log out of the tmpfs before the
-    teardown rmtree deletes it, writing `_NO_PG_LOG_NOTE` in its place when
+    teardown rmtree deletes it, writing `NO_PG_LOG_NOTE` in its place when
     postgres never opened one. Best-effort: an unwritable artifact dir must not
     mask the start failure itself. Returns the artifact path, or None when
     nothing could be written."""
@@ -542,7 +542,7 @@ def _preserve_failed_fixture_log(instance_dir: Path) -> Path | None:
         if log.is_file():
             shutil.copy2(log, dest)
         else:
-            dest.write_text(f"{_NO_PG_LOG_NOTE}\n")
+            dest.write_text(f"{NO_PG_LOG_NOTE}\n")
         return dest
     except OSError:
         logger.warning(f"could not preserve failed fixture pg.log into {dest_dir}")
@@ -560,10 +560,10 @@ def _is_port_bind_failure(exc: subprocess.CalledProcessError, log: Path) -> bool
     return "Address already in use" in f"{exc.stderr or ''}\n{_read_log_tail(log)}"
 
 
-def _teardown_throwaway(
+def teardown_throwaway(
     tmp: Path,
     data: Path,
-    registration: _Registration,
+    registration: Registration,
     process: subprocess.Popen[bytes] | None = None,
     *,
     foreground: bool = False,
@@ -580,7 +580,7 @@ def _teardown_throwaway(
             capture_output=True,
         )
     shutil.rmtree(tmp, ignore_errors=True)
-    _unregister_throwaway(registration)
+    unregister_throwaway(registration)
 
 
 @contextmanager
@@ -634,15 +634,15 @@ def throwaway_postgres(
         attempt += 1
         tmp = Path(
             tempfile.mkdtemp(
-                prefix=_THROWAWAY_PREFIX, dir=base or _throwaway_base.select_throwaway_base()
+                prefix=THROWAWAY_PREFIX, dir=base or _throwaway_base.select_throwaway_base()
             )
         )
         data = tmp / "data"
         log = tmp / "pg.log"
-        # Registered BEFORE initdb (inside `_allocate_port`): a kill in the window
+        # Registered BEFORE initdb (inside `allocate_port`): a kill in the window
         # between here and a running postmaster must still leave a record, or the
         # instance dir leaks unswept.
-        port, registration = _allocate_port(tmp)
+        port, registration = allocate_port(tmp)
         try:
             try:
                 subprocess.run(  # noqa: S603 — argv is the resolved initdb path + static flags
@@ -717,7 +717,7 @@ def throwaway_postgres(
                 if _is_port_bind_failure(exc, log) and attempt < _PG_START_ATTEMPTS:
                     # Lost the race: another process bound our port before the
                     # postmaster could. Tear this attempt down and try a fresh one.
-                    _teardown_throwaway(tmp, data, registration, process, foreground=foreground)
+                    teardown_throwaway(tmp, data, registration, process, foreground=foreground)
                     process = None
                     continue
                 # The cluster lives on a tmpfs and the teardown rmtree deletes it, so
@@ -728,7 +728,7 @@ def throwaway_postgres(
                 raise ThrowawayPgStartError(exc, log, preserved) from exc
             break
         except BaseException:
-            _teardown_throwaway(tmp, data, registration, process, foreground=foreground)
+            teardown_throwaway(tmp, data, registration, process, foreground=foreground)
             raise
 
     admin = f"postgresql://ava@127.0.0.1:{port}/postgres"
@@ -756,4 +756,4 @@ def throwaway_postgres(
         with stall_guard(admin, port) if watch_stalls else contextlib.nullcontext():
             yield url
     finally:
-        _teardown_throwaway(tmp, data, registration, process, foreground=foreground)
+        teardown_throwaway(tmp, data, registration, process, foreground=foreground)

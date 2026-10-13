@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from base import config, paths
-from base.config.base import _unit_home
+from base.config.base import unit_home
 from base.host.env import bootstrap, dotenv_file
 from base.paths.home import resolve_ava_home
 
@@ -102,7 +102,7 @@ _CONSUMERS: list[tuple[str, Callable[[], Path], str]] = [
     ("paths.run_dir", paths.run_dir, "run"),
     ("dotenv_file.env_file_path", dotenv_file.env_file_path, ".env"),
     ("bootstrap snapshot", bootstrap._snapshot_path, "run/bootstrap-snapshot.json"),
-    ("config path-field default", _unit_home, ""),
+    ("config path-field default", unit_home, ""),
 ]
 
 

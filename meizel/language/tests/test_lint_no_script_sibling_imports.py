@@ -34,7 +34,7 @@ def _write(scan_tmp, rel: str, body: str) -> Path:
 
 
 def _errors(scan_tmp, rel: str, body: str) -> list[str]:
-    return _lint._scan_file(_write(scan_tmp, rel, body))
+    return _lint.scan_file(_write(scan_tmp, rel, body))
 
 
 # All bodies are assembled at one uniform indentation so dedent produces a

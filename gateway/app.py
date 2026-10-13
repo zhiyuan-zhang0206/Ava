@@ -392,7 +392,7 @@ app = FastAPI(
 # deliberate declaration, not an incident patch.
 
 
-async def _cluster_is_paused(_request: Request) -> bool:
+async def cluster_is_paused(_request: Request) -> bool:
     """Read this home's durable admission state without a stale posture cache."""
     from base.deploy.maintenance.admission import business_paused
 
@@ -400,7 +400,7 @@ async def _cluster_is_paused(_request: Request) -> bool:
 
 
 @app.middleware("http")
-async def _cluster_pause_middleware(
+async def cluster_pause_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
@@ -416,7 +416,7 @@ async def _cluster_pause_middleware(
     """
     if not pause_policy.should_bypass_pause(
         request.method, request.url.path
-    ) and await _cluster_is_paused(request):
+    ) and await cluster_is_paused(request):
         return error_response(
             request,
             code="cluster_updating",
@@ -488,7 +488,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
 
 
 @app.middleware("http")
-async def _cluster_auth_middleware(
+async def cluster_auth_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:

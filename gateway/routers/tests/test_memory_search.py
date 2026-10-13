@@ -500,11 +500,11 @@ class TestRequestValidation:
 
 # --- a stalled backend must degrade the endpoint, not pin it ---
 
-_SEARCH_PERMITS = 2  # the stub's per-test semaphore size (the knob is a setting)
+SEARCH_PERMITS = 2  # the stub's per-test semaphore size (the knob is a setting)
 _TEST_DEADLINE_S = 0.5
 
 
-async def _never_returns(*_args: object, **_kwargs: object) -> list[ChunkHit]:
+async def never_returns(*_args: object, **_kwargs: object) -> list[ChunkHit]:
     """A backend call that accepts the request and then never answers.
 
     Takes its arguments loosely on purpose: the point is the handler's
@@ -514,12 +514,12 @@ async def _never_returns(*_args: object, **_kwargs: object) -> list[ChunkHit]:
     raise AssertionError("unreachable")
 
 
-def _stub_search_backend(
+def stub_search_backend(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     search: Any,
-    permits: int = _SEARCH_PERMITS,
+    permits: int = SEARCH_PERMITS,
 ) -> asyncio.Semaphore:
     """Point the search handler at a stubbed backend and a short deadline.
 
@@ -568,7 +568,7 @@ async def _search(client: httpx.AsyncClient) -> httpx.Response:
     return await client.post("/api/memory/search", json={"query": "x", "k": 1, "purpose": "search"})
 
 
-async def _assert_semaphore_locked(sem: asyncio.Semaphore, timeout_s: float = 5.0) -> None:
+async def assert_semaphore_locked(sem: asyncio.Semaphore, timeout_s: float = 5.0) -> None:
     """Wait for concurrent requests to acquire every memory-search permit."""
     deadline = time.monotonic() + timeout_s
     while not sem.locked() and time.monotonic() < deadline:

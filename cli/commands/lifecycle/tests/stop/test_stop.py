@@ -62,7 +62,7 @@ def _restart_stop(
     **kwargs: Any,
 ) -> int:
     """The stop leg of `ava restart`: no prompt; the data plane and browser stay."""
-    return entry._do_stop(
+    return entry.do_stop(
         Path("/unused"),
         require_confirmation=False,
         keep_infra=True,
@@ -187,26 +187,26 @@ def test_smooth_restart_replaces_services_and_closes_shells_but_keeps_data_plane
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", record_root_stop)
     monkeypatch.setattr(command, "stop_data_plane", record("data-plane-stopped"))
-    monkeypatch.setattr(command, "_stop_browser", record("browser-stopped"))
-    monkeypatch.setattr(command, "_stop_extras", record("extras-stopped"))
+    monkeypatch.setattr(command, "stop_browser", record("browser-stopped"))
+    monkeypatch.setattr(command, "stop_extras", record("extras-stopped"))
     monkeypatch.setattr(command, "close_terminals", close_terminals)
     monkeypatch.setattr(command, "announce_stopping", record("announced"))
     runtime = MagicMock()
-    monkeypatch.setattr(stop_commands, "_restart_runtime", lambda: runtime)
-    monkeypatch.setattr(stop_commands, "_require_restart_runtime", lambda _runtime: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop_commands, "restart_runtime", lambda: runtime)
+    monkeypatch.setattr(stop_commands, "require_restart_runtime", lambda _runtime: None)  # pyright: ignore[reportUnknownArgumentType]
 
     def preflight(_db: object, *, command: CommandRuntime) -> int:
         assert command is command_runtime
         del _db
         return 0
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_readiness_preflight,
         "preflight_start_readiness",
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(start_commands, "_cmd_start_body", record_start)
+    monkeypatch.setattr(start_commands, "cmd_start_body", record_start)
 
     assert (
         entry.cmd_restart(
@@ -385,9 +385,9 @@ def test_only_explicit_force_enters_legacy_force_stop(
 ) -> None:
     normal, force = MagicMock(return_value=0), MagicMock(return_value=0)
     monkeypatch.setattr(command, "stop", normal)
-    monkeypatch.setattr(entry, "_force_stop", force)
+    monkeypatch.setattr(entry, "force_stop", force)
     assert (
-        entry._do_stop(
+        entry.do_stop(
             Path("/unused"),
             database_factory=operator_database,
             producer=operator_pipeline,

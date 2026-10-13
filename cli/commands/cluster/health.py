@@ -42,16 +42,16 @@ _LIVENESS_ATTEMPTS = 3
 _LIVENESS_RETRY_INTERVAL_S = 30.0
 
 # Data-volume used fraction at which the probe fails (alert-only, see
-# `_disk_usage_failure`). One line shared across the statvfs family: the
+# `disk_usage_failure`). One line shared across the statvfs family: the
 # trace auto-degrade watermark (`AVA_TRACE_DISK_WATERMARK=0.9`), the 312
 # resource watcher's CRITICAL threshold, and the 2026-08-08 incident level.
 # The disk the checkpoint/trace mirrors grow on filling is the
 # gateway-can't-start outage class, so the owner should hear as the trace
-# auto-degrade line is reached, not after (metric canon: `_disk_usage_fraction`).
+# auto-degrade line is reached, not after (metric canon: `disk_usage_fraction`).
 DEFAULT_DISK_USAGE_WATERMARK = 0.90
 
 
-def _gateway_liveness() -> bool:
+def gateway_liveness() -> bool:
     """Check that the gateway's health endpoint returns HTTP 200.
 
     Uses the gateway's own `/api/health` (or equivalent). On a single-box
@@ -71,17 +71,17 @@ def _gateway_liveness() -> bool:
         return False
 
 
-def _gateway_liveness_with_retry() -> bool:
+def gateway_liveness_with_retry() -> bool:
     """Filter a short gateway/data-plane restart window before declaring failure."""
     for attempt in range(_LIVENESS_ATTEMPTS):
-        if _gateway_liveness():
+        if gateway_liveness():
             return True
         if attempt < _LIVENESS_ATTEMPTS - 1:
             time.sleep(_LIVENESS_RETRY_INTERVAL_S)
     return False
 
 
-def _data_plane_abnormal(*, database_factory: DatabaseFactory) -> bool:
+def data_plane_abnormal(*, database_factory: DatabaseFactory) -> bool:
     """True when either dependency behind the gateway is currently unreachable."""
     from base.events.live.bus import EventBus
 
@@ -101,7 +101,7 @@ def _data_plane_abnormal(*, database_factory: DatabaseFactory) -> bool:
     return False
 
 
-def _agent_population(min_agents: int, *, database_factory: DatabaseFactory) -> bool:
+def agent_population(min_agents: int, *, database_factory: DatabaseFactory) -> bool:
     """Check that at least `min_agents` agents are in running/idling status.
 
     Queries the central DB directly — the probe runs on the gateway machine
@@ -125,7 +125,7 @@ def _agent_population(min_agents: int, *, database_factory: DatabaseFactory) -> 
         return False
 
 
-def _agent_population_failure_class(
+def agent_population_failure_class(
     min_agents: int, *, database_factory: DatabaseFactory
 ) -> str | None:
     """Classify observed low population against DB availability and local intent."""
@@ -196,7 +196,7 @@ def _alert_only_failure(check: str, message: str) -> int:
     return 1
 
 
-def _schema_health(*, database_factory: DatabaseFactory) -> bool:
+def schema_health(*, database_factory: DatabaseFactory) -> bool:
     """Check that the applied schema version matches the required version.
 
     Reuses the existing `check_schema_version` invariant that every daemon
@@ -230,7 +230,7 @@ def _schema_health(*, database_factory: DatabaseFactory) -> bool:
         return True
 
 
-def _service_probes(*, machine: MachineIdentity) -> list[str]:
+def service_probes(*, machine: MachineIdentity) -> list[str]:
     """Probe every service this host's roles should be running; return the failing
     services, each annotated with why (empty = all responding).
 
@@ -266,7 +266,7 @@ def _service_probes(*, machine: MachineIdentity) -> list[str]:
     return failing
 
 
-def _redis_bridge_probe(*, machine: MachineIdentity, config: ConfigBoot) -> str | None:
+def redis_bridge_probe(*, machine: MachineIdentity, config: ConfigBoot) -> str | None:
     """End-to-end Redis relay failure text, or None when healthy/not required.
 
     Gateway-only and alert-only: a failed host listener is an
@@ -290,7 +290,7 @@ def _redis_bridge_probe(*, machine: MachineIdentity, config: ConfigBoot) -> str 
     return None
 
 
-def _disk_usage_fraction() -> float | None:
+def disk_usage_fraction() -> float | None:
     """Used fraction of the data volume, statvfs-family, or None when unmeasurable.
 
     Uses ``shutil.disk_usage`` — the same measurement the trace disk-watermark
@@ -312,7 +312,7 @@ def _disk_usage_fraction() -> float | None:
     return usage.used / usage.total
 
 
-def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str | None:
+def disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str | None:
     """Alert text when the data volume is over the watermark, else None.
 
     Reported through check 6. A full disk
@@ -322,20 +322,20 @@ def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str 
     reported as `alert-only`, repeated on every run while the volume stays over
     the watermark.
     """
-    fraction = _disk_usage_fraction()
+    fraction = disk_usage_fraction()
     if fraction is None or fraction <= watermark:
         return None
     return f"data volume {fraction:.1%} used (watermark {watermark:.0%})"
 
 
-def _walg_archive_failure(*, path_reader: Callable[[], Path | None]) -> str | None:
+def walg_archive_failure(*, path_reader: Callable[[], Path | None]) -> str | None:
     """The first broken WAL-archiving condition, or None (also None while WAL-G is off)."""
     from services.backup.walg import probe
 
     return probe.failure(path_reader=path_reader)
 
 
-def _editable_install_failure() -> str | None:
+def editable_install_failure() -> str | None:
     """Alert text when the prod venv's editable-install records name source
     outside the allowlist, else None.
 
@@ -365,7 +365,7 @@ def _editable_install_failure() -> str | None:
     )
 
 
-def _source_tree_failure() -> str | None:
+def source_tree_failure() -> str | None:
     """Report source tamper or unavailable inspection without repairing files.
 
     Applies to a home that executes its source checkout. This alert-only check
@@ -390,7 +390,7 @@ def _run_source_tree_check() -> int | None:
     """Run check 8 — alert-only, so it reports as `alert-only` (a tampered
     tree is the 2026-08-28 outage class, but rollback does not undo an on-disk
     edit). Returns None when the check passes, 1 when it fails."""
-    failure = _source_tree_failure()
+    failure = source_tree_failure()
     if failure is None:
         return None
     return _alert_only_failure("source_tree", f"FAIL: source tree — {failure}")
@@ -444,14 +444,14 @@ def _observe_cluster_health(
     # Check disk before gateway liveness: a full data volume can keep the
     # gateway from starting, and its alert must name the cause of that outage.
     # Keep the existing success line in check 6's output position below.
-    disk_failure = _disk_usage_failure()
+    disk_failure = disk_usage_failure()
     if disk_failure is not None:
         return _alert_only_failure("disk_usage", f"FAIL: disk usage — {disk_failure}")
 
     # 1. Gateway liveness (primary signal)
-    if not _gateway_liveness_with_retry():
+    if not gateway_liveness_with_retry():
         failure_class = (
-            "environment" if _data_plane_abnormal(database_factory=database_factory) else "code"
+            "environment" if data_plane_abnormal(database_factory=database_factory) else "code"
         )
         return _unhealthy(
             "gateway_liveness",
@@ -468,11 +468,11 @@ def _observe_cluster_health(
         from base.config import settings
 
         agent_min = settings.daemon.health_probe_agent_min
-    if not _agent_population(agent_min, database_factory=database_factory):
+    if not agent_population(agent_min, database_factory=database_factory):
         return _unhealthy(
             "agent_population",
             f"FAIL: agent population — fewer than {agent_min} agent(s) running/idling",
-            failure_class=_agent_population_failure_class(
+            failure_class=agent_population_failure_class(
                 agent_min, database_factory=database_factory
             )
             or "code",
@@ -481,7 +481,7 @@ def _observe_cluster_health(
 
     # 3. Schema health
     if check_schema:
-        if not _schema_health(database_factory=database_factory):
+        if not schema_health(database_factory=database_factory):
             return _unhealthy(
                 "schema",
                 "FAIL: schema health — applied version behind required (CodeBehindSchema)",
@@ -495,9 +495,9 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
     """Observe the remaining service, host, and provider health signals."""
 
     # 5. Per-service health and the host-level Redis bridge.
-    failing = _service_probes(machine=command.machine) + [
+    failing = service_probes(machine=command.machine) + [
         failure
-        for failure in (_redis_bridge_probe(machine=command.machine, config=command.config),)
+        for failure in (redis_bridge_probe(machine=command.machine, config=command.config),)
         if failure is not None
     ]
     if failing:
@@ -520,7 +520,7 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
             config.read_process_environment()
         return config.view.walg.walg_config_file
 
-    archive_failure = _walg_archive_failure(path_reader=path_reader)
+    archive_failure = walg_archive_failure(path_reader=path_reader)
     if archive_failure is not None:
         return _alert_only_failure("walg_archive", f"FAIL: {archive_failure}")
     from services.backup.walg.config import enabled as walg_enabled
@@ -533,7 +533,7 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
     # VIRTUAL_ENV repointed the prod venv at disposable source), but rolling
     # back code does not fix a venv record. Explicit installation repair owns
     # recovery; this probe and ordinary startup never rewrite these records.
-    editable_failure = _editable_install_failure()
+    editable_failure = editable_install_failure()
     if editable_failure is not None:
         return _alert_only_failure(
             "editable_install", f"FAIL: editable install — {editable_failure}"

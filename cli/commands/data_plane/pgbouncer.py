@@ -77,7 +77,7 @@ _DEFAULT_POOL_SIZE = 25
 _IGNORE_STARTUP_PARAMETERS = "extra_float_digits,options"
 
 
-def _userlist_path() -> Path:
+def userlist_path() -> Path:
     return pooler.pooler_dir() / "userlist.txt"
 
 
@@ -100,7 +100,7 @@ def pgbouncer_bin() -> str:
     return "pgbouncer"  # last resort — subprocess will surface a clear error
 
 
-def _render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: MachineIdentity) -> str:
+def render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: MachineIdentity) -> str:
     """The pgbouncer.ini for this cluster's pooler. One [databases] entry mapping the
     cluster db to the local Postgres over its owner-only unix socket; [pgbouncer]
     sets transaction pooling, SCRAM client auth against the userlist (always), and
@@ -157,7 +157,7 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: Machin
             f"listen_addr = {listen_addr}",
             f"listen_port = {listen_port}",
             "auth_type = scram-sha-256",
-            f"auth_file = {_userlist_path()}",
+            f"auth_file = {userlist_path()}",
             "pool_mode = transaction",
             server_reset,
             # always=0 (SV_ACTIVE-window reset only; rationale in docstring).
@@ -178,18 +178,18 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, machine: Machin
     )
 
 
-def _write_config(
+def write_config(
     *, pg_port: int, listen_port: int, db_name: str, userlist: bytes, machine: MachineIdentity
 ) -> bool:
     """Write pgbouncer.ini + userlist.txt (0600); True when either file's bytes
     changed, which requires a pooler restart (a reload never revokes a user)."""
     from base.host.private_storage import write_private_bytes
 
-    ini = _render_ini(
+    ini = render_ini(
         pg_port=pg_port, listen_port=listen_port, db_name=db_name, machine=machine
     ).encode()
     changed = False
-    for path, body in ((pooler.ini_path(), ini), (_userlist_path(), userlist)):
+    for path, body in ((pooler.ini_path(), ini), (userlist_path(), userlist)):
         try:
             current = path.read_bytes()
         except FileNotFoundError:
@@ -250,7 +250,7 @@ def pid_is_our_pooler(pid: int) -> bool:
         return False
 
 
-def _running_pid() -> int | None:
+def running_pid() -> int | None:
     """The pid of a live pgbouncer OWNED BY THIS HOME (from its pidfile), or None.
 
     Stop uses this for stale-pidfile cleanup before capturing native custody.
@@ -341,7 +341,7 @@ def ensure_pgbouncer(
         )
         return 1
     custodian = _accepting_pooler(listen_port)
-    changed = _write_config(
+    changed = write_config(
         pg_port=pg_port,
         listen_port=listen_port,
         db_name=db_name,
@@ -475,7 +475,7 @@ def stop_pgbouncer(*, force: bool = False) -> PoolerStop:
     already-revoked data plane passes it. Returns how the stop ended: no pooler
     of this home was running, the safe shutdown completed, or force escalated.
     """
-    pid = _running_pid()
+    pid = running_pid()
     if pid is None:
         return "not-running"
     owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())

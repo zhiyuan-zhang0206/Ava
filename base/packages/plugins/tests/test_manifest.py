@@ -23,7 +23,7 @@ def _manifest(**overrides: object) -> pm.PluginManifest:
         "engines": {"ava": ">=0.1.0"},
     }
     data.update(overrides)
-    return pm._validate(cast(dict[str, Any], data))
+    return pm.validate(cast(dict[str, Any], data))
 
 
 def _deps(python_packages: dict[str, str] | None = None) -> pm.PluginManifest:
@@ -107,7 +107,7 @@ def test_minimal_manifest_valid() -> None:
 
 def test_validation_reports_every_problem() -> None:
     with pytest.raises(ManifestError) as exc:
-        pm._validate(
+        pm.validate(
             {
                 "apiVersion": 3,
                 "name": "BadName",
@@ -131,7 +131,7 @@ def test_unknown_top_level_field_fails() -> None:
 
 def test_engines_required() -> None:
     with pytest.raises(ManifestError):
-        pm._validate({"apiVersion": 2, "name": "acme", "version": "1.0.0"})
+        pm.validate({"apiVersion": 2, "name": "acme", "version": "1.0.0"})
 
 
 def test_bad_engine_range_fails() -> None:
@@ -212,7 +212,7 @@ def test_python_packages_missing_range_fails() -> None:
 
 def test_python_packages_duplicate_fails() -> None:
     with pytest.raises(ManifestError, match="duplicate"):
-        pm._validate(
+        pm.validate(
             {
                 "apiVersion": 2,
                 "name": "acme",
@@ -474,7 +474,7 @@ def _commit_repo(tmp_path: Path) -> tuple[Path, str, str]:
 def test_requires_commit_alone_is_a_valid_manifest() -> None:
     """engines and requires_commit are alternatives (design §5.5: core content
     may be commit-pinned only)."""
-    m = pm._validate(
+    m = pm.validate(
         {
             "apiVersion": 2,
             "name": "acme",

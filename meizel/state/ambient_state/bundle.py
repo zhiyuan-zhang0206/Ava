@@ -34,7 +34,7 @@ def _is_bundle(node: ast.ClassDef) -> bool:
 
 
 @cache
-def _bundles_defined_in(path: Path) -> frozenset[str]:
+def bundles_defined_in(path: Path) -> frozenset[str]:
     """The `@root_bundle` class names a source file defines."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -62,7 +62,7 @@ def _imported_bundles(tree: ast.Module, repo_root: Path) -> set[str]:
         source = _module_file(repo_root, node.module)
         if source is None:
             continue
-        defined = _bundles_defined_in(source)
+        defined = bundles_defined_in(source)
         found.update(a.asname or a.name for a in node.names if a.name in defined)
     return found
 

@@ -26,7 +26,7 @@ _START_GENERATION = "00000000-0000-4000-8000-000000000001"
 def _marker_write(case: str, path: Path) -> None:
     payload: dict[str, object] = {"z": 1, "a": "value"}
     if case == "start":
-        start_serving._write_state(
+        start_serving.write_state(
             start_serving.ServingState(state="starting", generation=_START_GENERATION)
         )
     elif case == "owner":
@@ -39,11 +39,11 @@ def _marker_write(case: str, path: Path) -> None:
             )
         )
     elif case == "pause":
-        pause_owner._write_atomic(path, payload)
+        pause_owner.write_atomic(path, payload)
     elif case == "freeze":
-        allocation_freeze._write_atomic(path, payload)
+        allocation_freeze.write_atomic(path, payload)
     elif case == "locks":
-        home_lifecycle_locks._write_atomic(path, payload)
+        home_lifecycle_locks.write_atomic(path, payload)
     else:
         raise AssertionError(case)
 
@@ -146,7 +146,7 @@ def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) ->
     path = tmp_path / "state.json"
 
     def write(index: int) -> None:
-        pause_owner._write_atomic(path, {"index": index, "data": "x" * 4096})
+        pause_owner.write_atomic(path, {"index": index, "data": "x" * 4096})
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(write, range(24)))

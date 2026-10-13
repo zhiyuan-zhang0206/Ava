@@ -31,7 +31,7 @@ from base.native_process.os_platform import is_macos
 # How long the cluster may stay unresponsive before we call it stalled and
 # fail fast. Probe cadence is deliberately coarse: the cluster is disposable
 # test infrastructure, and a real stall costs the suite minutes either way.
-_PROBE_INTERVAL_S = 5.0
+PROBE_INTERVAL_S = 5.0
 _PROBE_TIMEOUT_S = 4
 _PROBE_CONSECUTIVE_FAILURES = 2
 
@@ -169,7 +169,7 @@ class StallWatchdog(threading.Thread):
         import psycopg
 
         failures = 0
-        while not self._stop_requested.wait(_PROBE_INTERVAL_S):
+        while not self._stop_requested.wait(PROBE_INTERVAL_S):
             try:
                 with (
                     psycopg.connect(self._admin_url, connect_timeout=_PROBE_TIMEOUT_S) as conn,

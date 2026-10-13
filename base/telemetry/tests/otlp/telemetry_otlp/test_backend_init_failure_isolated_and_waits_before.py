@@ -14,7 +14,7 @@ from base import config, paths, telemetry
 from base.telemetry.delivery import loss
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.tests.otlp.test_telemetry_otlp import _AGENT, _event, _metrics
+from base.telemetry.tests.otlp.test_telemetry_otlp import AGENT, _event, _metrics
 from base.telemetry.tests.otlp.test_telemetry_otlp import (
     _bind_telemetry as _bind_telemetry,
 )
@@ -43,7 +43,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(
         attempts.append(endpoint)
         raise RuntimeError("collector unreachable")
 
-    monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)
+    monkeypatch.setattr(telemetry_otlp, "build_providers", boom)
     backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     assert backend.export_batch([_event()]) is None  # does not raise
     assert backend._logs is None
@@ -89,7 +89,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
             raise RuntimeError("collector booting")
         return logs, metrics
 
-    monkeypatch.setattr(telemetry_otlp, "_build_providers", build)
+    monkeypatch.setattr(telemetry_otlp, "build_providers", build)
     backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     try:
         assert backend._ensure() is False
@@ -176,7 +176,7 @@ def test_pipeline_exports_to_otlp(otlp_backend) -> None:
     telemetry.emit(
         "telemetry",
         "llm_usage",
-        agent_id=_AGENT,
+        agent_id=AGENT,
         attributes={"model": "m", "in_total": 7, "latency_ms": 1.5},
     )
     telemetry.sync()
@@ -207,7 +207,7 @@ def test_pipeline_mirror_survives_otlp_failure(
         raise RuntimeError("collector unreachable")
 
     monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
-    monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(telemetry_otlp, "build_providers", boom)  # pyright: ignore[reportUnknownMemberType]
     backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
 
     def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
@@ -216,7 +216,7 @@ def test_pipeline_mirror_survives_otlp_failure(
     monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)  # pyright: ignore[reportUnknownMemberType]
     pipeline = telemetry.process_state["pipeline"]
     pipeline._exporter = backend
-    telemetry.emit("log", "log", agent_id=_AGENT, attributes={"msg": "boom"})
+    telemetry.emit("log", "log", agent_id=AGENT, attributes={"msg": "boom"})
     telemetry.sync()
 
     day = datetime.now(UTC).strftime("%Y%m%d")

@@ -7,7 +7,7 @@ benign substitution into a permanent flood. A single long-context agent wrote
 2,072 of these records into the file sink and the event stream in one day
 (2026-09-13).
 
-Fix: `_install_stdlib_intercept` attaches `_GenaiEmptyPartsWarningFilter` to the
+Fix: `_install_stdlib_intercept` attaches `GenaiEmptyPartsWarningFilter` to the
 root intercept handler. It drops exactly the two warning variants and lets every
 other `langchain_google_genai` record through — including the library's own
 "cannot be represented as a Gemini part" warning — which is why gating the whole
@@ -23,7 +23,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_google_genai.chat_models import _parse_chat_history
 
 from base.log import (
-    _GenaiEmptyPartsWarningFilter,
+    GenaiEmptyPartsWarningFilter,
     _install_stdlib_intercept,
     _StdlibInterceptHandler,
 )
@@ -112,6 +112,6 @@ def test_repeated_install_does_not_stack_filters(loguru_records: list[dict]) -> 
     installed_filters = [
         flt
         for flt in intercept_handlers[0].filters
-        if isinstance(flt, _GenaiEmptyPartsWarningFilter)
+        if isinstance(flt, GenaiEmptyPartsWarningFilter)
     ]
     assert len(installed_filters) == 1

@@ -169,7 +169,7 @@ def live_identities(identities: Iterable[OwnedProcess]) -> list[OwnedProcess]:
     return sorted(present, key=lambda identity: identity.pid)
 
 
-def _identity_matches(identity: OwnedProcess) -> bool:
+def identity_matches(identity: OwnedProcess) -> bool:
     """Whether `identity` is still the process it was captured as.
 
     Guards the report's live reads exactly as signal delivery is guarded: a
@@ -197,7 +197,7 @@ def capture_survivor(
     pgid = pgid_hint
     status: str | None = None
     cmdline: str | None = None
-    if _identity_matches(identity):
+    if identity_matches(identity):
         try:
             process = psutil.Process(identity.pid)
             ppid = process.ppid()

@@ -51,7 +51,7 @@ def loaded() -> None:
         stop_requested.wait()
 
     tracing._arm_tracing = arm  # type: ignore[assignment]
-    tracing._start_arm_thread("http://local-test-collector", machine_identity(), Path(".ava"))
+    tracing.start_arm_thread("http://local-test-collector", machine_identity(), Path(".ava"))
     assert entered.wait(5)
     owners.append(tracing._state["arm_owner"])
 

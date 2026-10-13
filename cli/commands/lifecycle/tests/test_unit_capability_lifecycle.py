@@ -12,7 +12,7 @@ from base.cluster.authority.tests.unit_capability_support import runner_home as 
 from base.host.db_authority import delivery, unit
 from base.host.env import bootstrap
 from cli.commands.data_plane import bringup
-from cli.commands.lifecycle.start_generation import _write_generation
+from cli.commands.lifecycle.start_generation import write_generation
 
 
 def test_a_pure_runners_launcher_delivers_the_installed_capability(
@@ -27,8 +27,8 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
         bringup.db_delivery("gateway")
     # The launch digest binds the capability's non-secret reference.
-    assert _write_generation(runner_home) == runner_boot.reference
+    assert write_generation(runner_home) == runner_boot.reference
     unit.unit_capability_path(runner_home).unlink()
-    assert _write_generation(runner_home) is None
+    assert write_generation(runner_home) is None
     with pytest.raises(unit.UnitCapabilityError, match="holds no database capability"):
         bringup.db_delivery("runner")

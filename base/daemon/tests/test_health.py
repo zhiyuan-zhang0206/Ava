@@ -22,17 +22,17 @@ import pytest
 from base.config import get_field
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, OK, component
-from base.daemon.tests._health_helpers import _find_free_port, _http_get
+from base.daemon.tests._health_helpers import find_free_port, http_get
 from base.daemon.tests.health_support import token_digest, unknown_image
 from base.host.env.health_ports import DEFAULT_PORTS, health_port
 
 
 @pytest.mark.asyncio
 async def test_healthz_returns_200_with_json_body() -> None:
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
-        status, body = await _http_get(port, "/healthz")
+        status, body = await http_get(port, "/healthz")
         assert status == 200
         payload = json.loads(body)
         assert payload["name"] == "agent_host"
@@ -134,7 +134,7 @@ def test_liveness_group_reports_the_worst_loop(
 @pytest.mark.asyncio
 async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> None:
     """The audit regression: a beating sibling cannot keep a wedged loop's healthz at 200."""
-    port = _find_free_port()
+    port = find_free_port()
     group = health.LivenessGroup()
     dispatch = group.register("dispatch", timeout_s=60.0)
     trim = group.register("trim", timeout_s=60.0)
@@ -144,7 +144,7 @@ async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> No
         "events_maintenance", port=port, liveness=group, image=unknown_image()
     )
     try:
-        status, body = await _http_get(port, "/healthz")
+        status, body = await http_get(port, "/healthz")
         payload = json.loads(body)
         assert status == 503
         assert set(payload["loops"]) == {"dispatch", "trim"}
@@ -158,13 +158,13 @@ async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> No
 async def test_healthz_503_when_liveness_stale() -> None:
     """A stale main loop must flip /healthz to 503 so the watchdog respawns it.
     timeout_s=-1.0 keeps stale_for() (always >= 0) permanently over the bound."""
-    port = _find_free_port()
+    port = find_free_port()
     stale = health.Liveness(timeout_s=-1.0)
     server = await health.start_health_server(
         "agent_host", port=port, liveness=stale, image=unknown_image()
     )
     try:
-        status, body = await _http_get(port, "/healthz")
+        status, body = await http_get(port, "/healthz")
         assert status == 503
         payload = json.loads(body)
         assert payload["name"] == "agent_host"
@@ -179,13 +179,13 @@ async def test_healthz_503_when_liveness_stale() -> None:
 @pytest.mark.asyncio
 async def test_healthz_200_when_liveness_fresh() -> None:
     """A beating loop keeps /healthz at 200, with stale_for reported."""
-    port = _find_free_port()
+    port = find_free_port()
     fresh = health.Liveness(timeout_s=1e9)
     server = await health.start_health_server(
         "agent_host", port=port, liveness=fresh, image=unknown_image()
     )
     try:
-        status, body = await _http_get(port, "/healthz")
+        status, body = await http_get(port, "/healthz")
         assert status == 200
         assert "stale_for" in json.loads(body)
     finally:
@@ -194,7 +194,7 @@ async def test_healthz_200_when_liveness_fresh() -> None:
 
 @pytest.mark.asyncio
 async def test_healthz_component_failure_surfaces_the_component_reason() -> None:
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server(
         "agent_host",
         port=port,
@@ -202,7 +202,7 @@ async def test_healthz_component_failure_surfaces_the_component_reason() -> None
         image=unknown_image(),
     )
     try:
-        status, body = await _http_get(port, "/healthz")
+        status, body = await http_get(port, "/healthz")
         assert status == 503
         payload = json.loads(body)
         assert payload["status"] == "degraded"
@@ -221,7 +221,7 @@ async def test_healthz_evaluates_component_provider_for_each_request() -> None:
         calls += 1
         return [component("worker", OK, progress=f"run {calls}")]
 
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server(
         "agent_host",
         port=port,
@@ -230,8 +230,8 @@ async def test_healthz_evaluates_component_provider_for_each_request() -> None:
         image=unknown_image(),
     )
     try:
-        _first_status, first = await _http_get(port, "/healthz")
-        _second_status, second = await _http_get(port, "/healthz")
+        _first_status, first = await http_get(port, "/healthz")
+        _second_status, second = await http_get(port, "/healthz")
         assert json.loads(first)["components"][0]["progress"] == "run 1"
         assert json.loads(second)["components"][0]["progress"] == "run 2"
         assert json.loads(second)["saturation"] == 2
@@ -241,10 +241,10 @@ async def test_healthz_evaluates_component_provider_for_each_request() -> None:
 
 @pytest.mark.asyncio
 async def test_unknown_path_returns_404() -> None:
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server("labeler", port=port, image=unknown_image())
     try:
-        status, _ = await _http_get(port, "/garbage")
+        status, _ = await http_get(port, "/garbage")
         assert status == 404
     finally:
         await health.stop_health_server(server)
@@ -276,7 +276,7 @@ async def _ok_route(_body: bytes) -> tuple[int, bytes, str]:
 @pytest.mark.asyncio
 async def test_extra_route_requires_auth_when_token_set() -> None:
     """auth_digests set: a missing / wrong bearer gets 401; a listed digest's token passes."""
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server(
         "ops",
         port=port,
@@ -300,7 +300,7 @@ async def test_extra_route_requires_auth_when_token_set() -> None:
 async def test_healthz_unauthenticated_even_with_auth_token() -> None:
     """/healthz stays open even when extra routes require a token — the watchdog
     probes it locally and it leaks no secret."""
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server(
         "ops",
         port=port,
@@ -309,7 +309,7 @@ async def test_healthz_unauthenticated_even_with_auth_token() -> None:
         image=unknown_image(),
     )
     try:
-        status, _ = await _http_get(port, "/healthz")  # no Authorization header
+        status, _ = await http_get(port, "/healthz")  # no Authorization header
         assert status == 200
     finally:
         await health.stop_health_server(server)
@@ -318,7 +318,7 @@ async def test_healthz_unauthenticated_even_with_auth_token() -> None:
 @pytest.mark.asyncio
 async def test_extra_route_open_when_no_auth_token() -> None:
     """No auth_digests (the loopback daemons): extra routes need no bearer."""
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server(
         "memory_indexer",
         port=port,
@@ -334,7 +334,7 @@ async def test_extra_route_open_when_no_auth_token() -> None:
 
 @pytest.mark.asyncio
 async def test_stop_idempotent() -> None:
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server("labeler", port=port, image=unknown_image())
     await health.stop_health_server(server)
     # Second stop does not raise

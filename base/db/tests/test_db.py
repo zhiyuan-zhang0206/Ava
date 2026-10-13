@@ -80,7 +80,7 @@ def test_async_pool_fixes_the_transport_posture(
     )
     check = captured["check"]
     assert isinstance(check, partial)
-    assert check.func is connections._restore_pooled_session_async
+    assert check.func is connections.restore_pooled_session_async
     assert check.keywords == {"gate": database_gate}
     assert captured == {
         "conninfo": "postgresql://u@127.0.0.1:1/x",
@@ -119,7 +119,7 @@ def _spy_dials(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any
         raise AssertionError("an explicit-target dial must not scrub a pooled session")
 
     monkeypatch.setattr(psycopg, "connect", spy)
-    monkeypatch.setattr(connections, "_restore_pooled_session", no_scrub)
+    monkeypatch.setattr(connections, "restore_pooled_session", no_scrub)
     return dials
 
 
@@ -210,8 +210,8 @@ def test_pool_check_connections_flag(
     configure = captured["configure"]
     check = captured["check"]
     assert isinstance(configure, partial) and isinstance(check, partial)
-    assert configure.func is connections._restore_pooled_session
-    assert check.func is connections._restore_pooled_session
+    assert configure.func is connections.restore_pooled_session
+    assert check.func is connections.restore_pooled_session
     assert configure.keywords == check.keywords == {"gate": database_gate}
     captured.clear()
     # Direct: no scrub; the flag keeps arming the plain dead-connection check.

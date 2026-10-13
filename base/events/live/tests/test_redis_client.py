@@ -17,7 +17,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from base.config import settings
 from base.events.live import redis_client as mod
 from base.events.live.bus import EventBus
-from base.events.live.redis_client import _TransportAwareAsyncConnection
+from base.events.live.redis_client import TransportAwareAsyncConnection
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 
 _bus = EventBus.from_settings()
@@ -132,8 +132,8 @@ async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
         delays.append(delay)
 
     patch_async_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
-    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
+    monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
+    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
     assert await _bus.publish_best_effort("payload", channel="ava:events") == 3
     assert publisher.attempts == 3
@@ -150,8 +150,8 @@ async def test_publish_auth_retry_stops_within_its_total_wait_budget(
         delays.append(delay)
 
     patch_async_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
-    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
+    monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
+    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
     assert await _bus.publish_best_effort("payload", channel="ava:events") is None
     assert publisher.attempts > 1
@@ -169,7 +169,7 @@ async def test_publish_does_not_retry_connection_errors(
         delays.append(delay)
 
     patch_async_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
+    monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
 
     assert await _bus.publish_best_effort("payload", channel="ava:events") is None
     assert publisher.attempts == 1
@@ -189,7 +189,7 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     """
     publisher = _HalfOpenHealthCheckPublisher()
     patch_async_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S", 0.01, raising=False)
+    monkeypatch.setattr(mod, "BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S", 0.01, raising=False)
 
     task = asyncio.create_task(_bus.publish_best_effort("payload", channel="ava:events"))
     await asyncio.wait_for(publisher.read_started.wait(), timeout=1.0)
@@ -214,8 +214,8 @@ def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
         delays.append(delay)
 
     patch_sync_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "_sleep_sync", _record_sleep, raising=False)
-    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
+    monkeypatch.setattr(mod, "sleep_sync", _record_sleep, raising=False)
+    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
     assert _bus.publish_best_effort_sync("payload", channel="ava:events") == 3
     assert publisher.attempts == 3
@@ -279,7 +279,7 @@ def test_sync_client_weak_network_resilient() -> None:
         client.close()
 
 
-# ── IPv4-literal dial pinning (_PinnedIPv4Connection): a DNS64/NAT64 network
+# ── IPv4-literal dial pinning (PinnedIPv4Connection): a DNS64/NAT64 network
 # can synthesize an AAAA answer even for a getaddrinfo() call on a plain IPv4
 # literal (base.host.net.predicates.is_ipv4_literal); redis-py's sync
 # Connection._connect calls getaddrinfo unconditionally (unlike
@@ -290,7 +290,7 @@ def test_sync_client_weak_network_resilient() -> None:
 def test_sync_redis_uses_pinned_connection_class() -> None:
     client = _bus.sync_redis()
     try:
-        assert client.connection_pool.connection_class is mod._PinnedIPv4Connection
+        assert client.connection_pool.connection_class is mod.PinnedIPv4Connection
     finally:
         client.close()
 
@@ -317,7 +317,7 @@ class TestPinnedIPv4ConnectionConnect:
 
         monkeypatch.setattr(socket, "getaddrinfo", _boom)
 
-        conn = mod._PinnedIPv4Connection(
+        conn = mod.PinnedIPv4Connection(
             host="127.0.0.1", port=port, socket_connect_timeout=3, socket_timeout=3
         )
         sock = conn._connect()
@@ -342,12 +342,12 @@ class TestPinnedIPv4ConnectionConnect:
             return "stub-socket"
 
         monkeypatch.setattr("redis.Connection._connect", fake_super_connect, raising=True)
-        conn = mod._PinnedIPv4Connection(host="redis.example.com", port=6379)
+        conn = mod.PinnedIPv4Connection(host="redis.example.com", port=6379)
         assert conn._connect() == "stub-socket"
         assert called["host"] == "redis.example.com"
 
 
-# ── dead-transport detection (_TransportAwareAsyncConnection): after a network
+# ── dead-transport detection (TransportAwareAsyncConnection): after a network
 # outage, asyncio fires `connection_lost` on a redis connection's transport
 # (nulling `_SelectorSocketTransport._write_ready`), but redis-py's
 # `Connection.is_connected` still returns True (it only checks _reader/_writer
@@ -386,11 +386,11 @@ class TestTransportAwareAsyncConnection:
     """`is_connected` sees an asyncio transport that already died."""
 
     async def test_is_connected_false_after_transport_abort(self) -> None:
-        client = _make_client(connection_class=_TransportAwareAsyncConnection)
+        client = _make_client(connection_class=TransportAwareAsyncConnection)
         await client.ping()  # pyright: ignore[reportUnknownMemberType]
         pool = client.connection_pool
         conn = pool._available_connections[0]
-        assert isinstance(conn, _TransportAwareAsyncConnection)
+        assert isinstance(conn, TransportAwareAsyncConnection)
         assert conn.is_connected
 
         await _abort_transport(conn)
@@ -416,7 +416,7 @@ class TestDeadTransportRecovery:
     TypeError and recovers (pool publish and pubsub read paths)."""
 
     async def test_pool_publish_recovers_after_transport_death(self) -> None:
-        client = _make_client(connection_class=_TransportAwareAsyncConnection)
+        client = _make_client(connection_class=TransportAwareAsyncConnection)
         await client.ping()  # pyright: ignore[reportUnknownMemberType]
         conn = client.connection_pool._available_connections[0]
         await _abort_transport(conn)
@@ -435,11 +435,11 @@ class TestDeadTransportRecovery:
         mid-read. `parse_response` -> check_health -> PING used to write the
         dead transport and raise TypeError; now it reconnects and re-subscribes,
         and a post-recovery publish still wakes the consumer."""
-        client = _make_client(connection_class=_TransportAwareAsyncConnection)
+        client = _make_client(connection_class=TransportAwareAsyncConnection)
         pubsub = client.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
         await pubsub.subscribe("ava:test:dead-transport-pubsub")
         conn = pubsub.connection
-        assert isinstance(conn, _TransportAwareAsyncConnection)
+        assert isinstance(conn, TransportAwareAsyncConnection)
 
         await _abort_transport(conn)
         # Force the health-check PING to fire on the next parse_response (the
@@ -501,8 +501,8 @@ async def test_async_command_and_publish_keep_one_auth_retry_budget(
         delays.append(delay)
 
     monkeypatch.setattr(aredis.Redis, "execute_command", execute)
-    monkeypatch.setattr(mod, "_sleep_async", sleep)
-    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter)
+    monkeypatch.setattr(mod, "sleep_async", sleep)
+    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter)
     client = mod.open_async_redis(settings.data_plane.redis_url)
     try:
         if best_effort:
@@ -532,8 +532,8 @@ def test_sync_command_and_publish_keep_one_auth_retry_budget(
         raise NoPermissionError("ACL transition")
 
     monkeypatch.setattr(redis.Redis, "execute_command", execute)
-    monkeypatch.setattr(mod, "_sleep_sync", delays.append)
-    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter)
+    monkeypatch.setattr(mod, "sleep_sync", delays.append)
+    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter)
     client = mod.open_sync_redis(settings.data_plane.redis_url)
     try:
         if best_effort:
@@ -569,8 +569,8 @@ async def test_task_started_during_publish_keeps_its_own_command_retry_budget(
         await asyncio.sleep(0)
 
     monkeypatch.setattr(aredis.Redis, "execute_command", execute)
-    monkeypatch.setattr(mod, "_sleep_async", sleep)
-    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter)
+    monkeypatch.setattr(mod, "sleep_async", sleep)
+    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter)
     try:
         assert await mod.publish_via(lambda: client, "channel", "payload", warn_last={}) == 3
         assert child is not None

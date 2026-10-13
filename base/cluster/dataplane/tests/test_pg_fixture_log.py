@@ -70,7 +70,7 @@ def test_failed_start_preserves_pg_log_into_artifacts(
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
         blocker.bind(("127.0.0.1", 0))
         blocker.listen(1)
-        monkeypatch.setattr(pg_tools, "_free_port", lambda: blocker.getsockname()[1])
+        monkeypatch.setattr(pg_tools, "free_port", lambda: blocker.getsockname()[1])
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
             # __enter__() runs the generator body — the bare call only builds it.
             pg_tools.throwaway_postgres().__enter__()
@@ -106,10 +106,10 @@ def test_failure_before_any_pg_log_still_writes_an_artifact(
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
         pg_tools.throwaway_postgres().__enter__()
 
-    assert pg_tools._NO_PG_LOG_NOTE in str(excinfo.value)
+    assert pg_tools.NO_PG_LOG_NOTE in str(excinfo.value)
     saved = list(artifact_dir.glob("*.pg.log"))
     assert len(saved) == 1
-    assert pg_tools._NO_PG_LOG_NOTE in saved[0].read_text()
+    assert pg_tools.NO_PG_LOG_NOTE in saved[0].read_text()
 
 
 def test_artifact_dir_defaults_under_repo_tmp() -> None:

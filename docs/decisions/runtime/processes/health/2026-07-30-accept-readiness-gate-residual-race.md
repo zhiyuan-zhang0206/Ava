@@ -43,7 +43,7 @@ and the distinction matters:
 
 - *Before #956*, it was the weaker fix for the systematic case: it left the ordering
   bug in place and merely made it usually survivable
-  (`cli/commands/_gateway_ready.py`, `cli/commands/_repo.py:_probe_gateway_or_die`).
+  (`cli/commands/_gateway_ready.py`, `cli/commands/_repo.py:probe_gateway_or_die`).
 - *After #956*, that objection is gone — there is no ordering bug left to hide, and
   this is exactly the transient failure a retry is normally the right tool for. So it
   is **not** enough to cite the earlier rejection. Two of the three original

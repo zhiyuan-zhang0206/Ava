@@ -59,7 +59,7 @@ def test_schema_health_db_flake_is_healthy(
             raise ConnectionError("pgbouncer blip")
 
     patch_database(monkeypatch, connect=_FlakyConnect)
-    assert cluster_health._schema_health(database_factory=operator_database) is True
+    assert cluster_health.schema_health(database_factory=operator_database) is True
 
 
 def test_schema_health_real_skew_is_unhealthy(
@@ -92,7 +92,7 @@ def test_schema_health_real_skew_is_unhealthy(
             raise CodeBehindSchema("DB has migrations this checkout lacks")
 
     patch_database(monkeypatch, connect=_AheadConnect)
-    assert cluster_health._schema_health(database_factory=operator_database) is False
+    assert cluster_health.schema_health(database_factory=operator_database) is False
 
 
 def test_agent_population_db_error_is_environment_class(
@@ -105,7 +105,7 @@ def test_agent_population_db_error_is_environment_class(
 
     patch_database(monkeypatch, connect=_down)
     assert (
-        cluster_health._agent_population_failure_class(1, database_factory=operator_database)
+        cluster_health.agent_population_failure_class(1, database_factory=operator_database)
         == "environment"
     )
 
@@ -115,23 +115,23 @@ def test_liveness_retry_recovers_before_reporting_outage(
 ) -> None:
     """A brief data-plane restart window is healthy once liveness recovers."""
     answers = iter([False, False, True])
-    monkeypatch.setattr(cluster_health, "_gateway_liveness", lambda: next(answers))
+    monkeypatch.setattr(cluster_health, "gateway_liveness", lambda: next(answers))
 
     def _no_sleep(_seconds: float) -> None:
         return None
 
     monkeypatch.setattr(cluster_health.time, "sleep", _no_sleep)
-    monkeypatch.setattr(cluster_health, "_agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cluster_health, "_schema_health", healthy)
+    monkeypatch.setattr(cluster_health, "agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster_health, "schema_health", healthy)
     monkeypatch.setattr(
-        cluster_health, "_service_probes", partial(service_probe_verdict, failures=[])
+        cluster_health, "service_probes", partial(service_probe_verdict, failures=[])
     )
     monkeypatch.setattr(
-        cluster_health, "_redis_bridge_probe", partial(redis_bridge_verdict, result=None)
+        cluster_health, "redis_bridge_probe", partial(redis_bridge_verdict, result=None)
     )
-    monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: None)
+    monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: None)
     # Keep the editable-install check independent of the real prod venv.
-    monkeypatch.setattr(cluster_health, "_editable_install_failure", lambda: None)
+    monkeypatch.setattr(cluster_health, "editable_install_failure", lambda: None)
 
     assert probe() == 0
 
@@ -141,8 +141,8 @@ def test_environment_liveness_failure_signals_without_counting(
 ) -> None:
     """A data-plane failure signals but cannot launch an unrelated code rollback."""
     rollback_commands: list[list[str]] = []
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", healthy)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "data_plane_abnormal", healthy)
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -157,8 +157,8 @@ def test_code_liveness_failure_is_unhealthy(
     probe: Probe, _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A gateway failure with a healthy data plane remains unhealthy."""
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", unhealthy)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "data_plane_abnormal", unhealthy)
 
     assert probe() == 1
 
@@ -167,14 +167,14 @@ def test_agent_population_classifies_db_failure_as_environment(
     probe: Probe, _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Population-query connection failure is environmental; a low count is code-class."""
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(cluster_health, "_agent_population", unhealthy)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
+    monkeypatch.setattr(cluster_health, "agent_population", unhealthy)  # pyright: ignore[reportUnknownArgumentType]
 
     def _environment(_min_agents: int, *, database_factory: DatabaseFactory) -> str:
         assert callable(database_factory)
         return "environment"
 
-    monkeypatch.setattr(cluster_health, "_agent_population_failure_class", _environment)
+    monkeypatch.setattr(cluster_health, "agent_population_failure_class", _environment)
 
     assert probe() == 1
 
@@ -182,7 +182,7 @@ def test_agent_population_classifies_db_failure_as_environment(
         assert callable(database_factory)
         return "code"
 
-    monkeypatch.setattr(cluster_health, "_agent_population_failure_class", _code)
+    monkeypatch.setattr(cluster_health, "agent_population_failure_class", _code)
     assert probe() == 1
 
 
@@ -213,11 +213,11 @@ def test_every_run_emits_the_heartbeat_healthy_or_not(
 
     monkeypatch.setattr(
         cluster_health,
-        "_service_probes",
+        "service_probes",
         partial(service_probe_verdict, failures=["ava-main-frontend"]),
     )
     assert probe() == 1  # the alert-only path
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
     assert probe() == 1  # the primary-check path
     assert ran == [{"unhealthy_checks": 0}, {"unhealthy_checks": 1}, {"unhealthy_checks": 1}]
     assert len(signals) == 2
@@ -254,7 +254,7 @@ def test_service_probe_failure_emits_the_alert_only_signal(
     """A dead selected service fails the probe and emits its failing check."""
     monkeypatch.setattr(
         cluster_health,
-        "_service_probes",
+        "service_probes",
         partial(service_probe_verdict, failures=["ava-main-frontend"]),
     )
 
@@ -281,7 +281,7 @@ def test_disk_over_watermark_fails_and_signals(
     2026-08-08 outage class: checkpoint growth filled the disk and the gateway
     could not start)."""
     monkeypatch.setattr(
-        cluster_health, "_disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
+        cluster_health, "disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
     )
 
     assert probe() == 1
@@ -305,7 +305,7 @@ def test_wal_archiving_failure_signals_with_its_message(
     def failing_archiver(**_inputs: object) -> str:
         return failure
 
-    monkeypatch.setattr(cluster_health, "_walg_archive_failure", failing_archiver)
+    monkeypatch.setattr(cluster_health, "walg_archive_failure", failing_archiver)
 
     assert probe() == 1
 
@@ -347,7 +347,7 @@ def test_disk_usage_fraction_uses_statvfs_family(monkeypatch: pytest.MonkeyPatch
         return _Usage()
 
     monkeypatch.setattr(cluster_health.shutil, "disk_usage", _disk_usage)
-    frac = cluster_health._disk_usage_fraction()
+    frac = cluster_health.disk_usage_fraction()
     assert frac is not None
     assert abs(frac - 0.87) < 1e-9
 
@@ -359,16 +359,16 @@ def test_disk_usage_fraction_oserror_is_quiet(monkeypatch: pytest.MonkeyPatch) -
         raise OSError("statvfs unavailable")
 
     monkeypatch.setattr(cluster_health.shutil, "disk_usage", _raise_usage)
-    assert cluster_health._disk_usage_fraction() is None
-    assert cluster_health._disk_usage_failure() is None
+    assert cluster_health.disk_usage_fraction() is None
+    assert cluster_health.disk_usage_failure() is None
 
 
 def test_disk_usage_failure_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exactly at the watermark is healthy; strictly over it alerts."""
-    monkeypatch.setattr(cluster_health, "_disk_usage_fraction", lambda: 0.90)
-    assert cluster_health._disk_usage_failure() is None
-    monkeypatch.setattr(cluster_health, "_disk_usage_fraction", lambda: 0.9001)
-    assert cluster_health._disk_usage_failure() is not None
+    monkeypatch.setattr(cluster_health, "disk_usage_fraction", lambda: 0.90)
+    assert cluster_health.disk_usage_failure() is None
+    monkeypatch.setattr(cluster_health, "disk_usage_fraction", lambda: 0.9001)
+    assert cluster_health.disk_usage_failure() is not None
 
 
 def test_source_tree_failure_signals(
@@ -383,7 +383,7 @@ def test_source_tree_failure_signals(
     2026-08-28 outage class: edited source broke `import ava` for every agent on
     the box)."""
     message = "prod source tree tampered: untracked outside whitelist: junk.txt"
-    monkeypatch.setattr(cluster_health, "_source_tree_failure", lambda: message)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster_health, "source_tree_failure", lambda: message)  # pyright: ignore[reportUnknownArgumentType]
 
     assert probe() == 1
 
@@ -401,7 +401,7 @@ def test_source_tree_clean_passes(
     """A clean tree must not fail the probe — the whitelist exists so the
     routine frontend/ build output never fires a false alarm. The check is
     patched so the test does not depend on this host's prod tree state."""
-    monkeypatch.setattr(cluster_health, "_source_tree_failure", lambda: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster_health, "source_tree_failure", lambda: None)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = probe()
 
@@ -422,7 +422,7 @@ def test_source_tree_guard_skipped_is_a_distinct_alert(
     monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
     monkeypatch.setattr(source_tree_guard, "source_tree_violations", _violations_skipped)
 
-    failure = cluster_health._source_tree_failure()
+    failure = cluster_health.source_tree_failure()
 
     assert failure == "prod source tree guard skipped: git unavailable"
 
@@ -439,12 +439,12 @@ def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
     """The probe fires every few minutes; a persistent outage emits the signal on
     every run (a Grafana `for:` needs continuous samples), a healthy run emits
     nothing, and no state file is kept."""
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
     assert probe() == 1
     assert probe() == 1
     assert [signal["check"] for signal in signals] == ["gateway_liveness"] * 2
 
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
     assert probe() == 0
     assert len(signals) == 2
     assert not list(_home.iterdir())
@@ -462,11 +462,11 @@ def test_signal_names_the_failed_check(
     """A changed failure reason is a different check, grouped separately by Grafana."""
     monkeypatch.setattr(
         cluster_health,
-        "_service_probes",
+        "service_probes",
         partial(service_probe_verdict, failures=["ava-main-frontend"]),
     )
     assert probe() == 1
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
     assert probe() == 1
 
     assert [signal["check"] for signal in signals] == ["service_probe", "gateway_liveness"]
@@ -488,7 +488,7 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
     rollback is not the remedy."""
     monkeypatch.setattr(
         cluster_health,
-        "_service_probes",
+        "service_probes",
         partial(service_probe_verdict, failures=["gate entry :3000 not answering (dark)"]),
     )
     assert probe() == 1
@@ -521,7 +521,7 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
 
     monkeypatch.setattr(bridge, "probe_redis_bridge", probe)
 
-    failure = cluster_health._redis_bridge_probe(
+    failure = cluster_health.redis_bridge_probe(
         machine=command_runtime.machine, config=command_runtime.config
     )
 
@@ -539,7 +539,7 @@ def test_redis_bridge_failure_signals_without_arming_rollback(
 ) -> None:
     failure = "Redis bridge 10.64.0.7:6380 failed authenticated PING (connection refused)"
     monkeypatch.setattr(
-        cluster_health, "_redis_bridge_probe", partial(redis_bridge_verdict, result=failure)
+        cluster_health, "redis_bridge_probe", partial(redis_bridge_verdict, result=failure)
     )
 
     assert probe() == 1

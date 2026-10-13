@@ -38,7 +38,7 @@ def ui_base(sessions: Collection[str]) -> str | None:
     return None
 
 
-def _at_terminal() -> bool:
+def at_terminal() -> bool:
     return sys.stdout.isatty()
 
 
@@ -80,7 +80,7 @@ def print_login_link(sessions: Collection[str]) -> None:
     secret = settings.data_plane.cluster_secret
     if base is None or not secret:
         return
-    if not _at_terminal():
+    if not at_terminal():
         print("\n→ one-time UI login link skipped (output is not a terminal)")
         return
     try:

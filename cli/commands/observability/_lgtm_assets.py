@@ -9,7 +9,7 @@ import yaml
 
 from base.telemetry.lgtm_local import NATIVE_SERVICES
 
-_NATIVE_CONSTANTS = NATIVE_SERVICES
+NATIVE_CONSTANTS = NATIVE_SERVICES
 
 
 def load_versions(repo: Path, tag: str) -> dict[str, dict[str, str]]:
@@ -20,7 +20,7 @@ def load_versions(repo: Path, tag: str) -> dict[str, dict[str, str]]:
     entries = cast(dict[str, object], raw)
     versions: dict[str, dict[str, str]] = {}
     asset_tag = tag.replace("_", "-")
-    for name, constants in _NATIVE_CONSTANTS.items():
+    for name, constants in NATIVE_CONSTANTS.items():
         service = entries[name]
         if not isinstance(service, dict):
             raise TypeError(f"native LGTM version entry for {name} must be a mapping")

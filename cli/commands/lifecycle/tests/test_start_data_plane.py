@@ -1,6 +1,6 @@
 """`ava start`'s gateway data-plane dispatch brings up this cluster's own instance.
 
-Every cluster owns its Postgres+Redis; `_ensure_gateway_data_plane` reads the
+Every cluster owns its Postgres+Redis; `ensure_gateway_data_plane` reads the
 cluster's registry record and starts the per-cluster instance on the record's
 pg/redis ports. A missing record (defensive) is a hard error, not a silent
 fall-through onto some shared instance.
@@ -49,7 +49,7 @@ def test_gateway_data_plane_brings_up_own_instance(
     monkeypatch.setattr(_ci, "ensure_cluster_storage", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert (
-        _start._ensure_gateway_data_plane(
+        _start.ensure_gateway_data_plane(
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -94,7 +94,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
         lambda **_kw: pytest.fail("native effect on a legacy home"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert (
-        _start._ensure_gateway_data_plane(
+        _start.ensure_gateway_data_plane(
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -119,7 +119,7 @@ def test_gateway_data_plane_no_record_is_error(
     )
 
     assert (
-        _start._ensure_gateway_data_plane(
+        _start.ensure_gateway_data_plane(
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -158,7 +158,7 @@ def test_gateway_hint_names_where_the_web_login_password_lives(
     from base.paths import ava_home
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "never-printed-secret")
-    _start._print_gateway_hint(machine=command_runtime.machine)
+    _start.print_gateway_hint(machine=command_runtime.machine)
     out = capsys.readouterr().out
     assert "web login password" in out and "AVA_CLUSTER_SECRET" in out
     assert str(ava_home() / ".env") in out

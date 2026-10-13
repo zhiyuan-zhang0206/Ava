@@ -14,11 +14,11 @@ from base.deploy.git import memory_repo
 def test_download_pool_snapshot_streams_and_enforces_cap_midstream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_download_pool_snapshot streams the body and aborts the moment the cap is
-    crossed — it does not buffer past _POOL_SNAPSHOT_MAX_BYTES."""
+    """download_pool_snapshot streams the body and aborts the moment the cap is
+    crossed — it does not buffer past POOL_SNAPSHOT_MAX_BYTES."""
     import httpx
 
-    monkeypatch.setattr(memory_repo, "_POOL_SNAPSHOT_MAX_BYTES", 16)
+    monkeypatch.setattr(memory_repo, "POOL_SNAPSHOT_MAX_BYTES", 16)
 
     class _FakeResp:
         status_code: ClassVar[int] = 200
@@ -50,7 +50,7 @@ def test_download_pool_snapshot_streams_and_enforces_cap_midstream(
     monkeypatch.setattr(httpx, "Client", _FakeClient)
 
     with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="exceeds"):
-        memory_repo._download_pool_snapshot("http://gw/api/memory/pool", {})
+        memory_repo.download_pool_snapshot("http://gw/api/memory/pool", {})
 
 
 def test_download_pool_snapshot_declared_oversize_rejected_before_body(
@@ -60,7 +60,7 @@ def test_download_pool_snapshot_declared_oversize_rejected_before_body(
     read."""
     import httpx
 
-    monkeypatch.setattr(memory_repo, "_POOL_SNAPSHOT_MAX_BYTES", 16)
+    monkeypatch.setattr(memory_repo, "POOL_SNAPSHOT_MAX_BYTES", 16)
 
     class _FakeResp:
         status_code: ClassVar[int] = 200
@@ -92,7 +92,7 @@ def test_download_pool_snapshot_declared_oversize_rejected_before_body(
     monkeypatch.setattr(httpx, "Client", _FakeClient)
 
     with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="declared"):
-        memory_repo._download_pool_snapshot("http://gw/api/memory/pool", {})
+        memory_repo.download_pool_snapshot("http://gw/api/memory/pool", {})
 
 
 def test_download_pool_snapshot_transport_error_wrapped(
@@ -117,4 +117,4 @@ def test_download_pool_snapshot_transport_error_wrapped(
     monkeypatch.setattr(httpx, "Client", _FailingClient)
 
     with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="failed: boom"):
-        memory_repo._download_pool_snapshot("http://gw/api/memory/pool", {})
+        memory_repo.download_pool_snapshot("http://gw/api/memory/pool", {})

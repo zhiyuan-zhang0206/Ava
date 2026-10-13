@@ -18,25 +18,25 @@ def _request(scope: str | None = "principal-v1", principal: AuthPrincipal | None
 
 
 def test_reconciliation_uses_the_original_message_identity() -> None:
-    from gateway.agents.state import _scoped_message_key
+    from gateway.agents.state import scoped_message_key
 
     request = _request(principal=AuthPrincipal("cluster", "administrator"))
-    assert _scoped_message_key(request, "k") == chat_message_key("k")
+    assert scoped_message_key(request, "k") == chat_message_key("k")
 
 
 @pytest.mark.parametrize("scope", [None, "principal-v2"])
 def test_message_key_requires_the_principal_scope(scope: str | None) -> None:
-    from gateway.agents.state import _scoped_message_key
+    from gateway.agents.state import scoped_message_key
 
     request = _request(scope, AuthPrincipal("cluster", "administrator"))
     with pytest.raises(HTTPException) as caught:
-        _scoped_message_key(request, "k")
+        scoped_message_key(request, "k")
     assert caught.value.status_code == 422
 
 
 def test_message_key_requires_a_verified_principal() -> None:
-    from gateway.agents.state import _scoped_message_key
+    from gateway.agents.state import scoped_message_key
 
     with pytest.raises(HTTPException) as caught:
-        _scoped_message_key(_request(), "k")
+        scoped_message_key(_request(), "k")
     assert caught.value.status_code == 422

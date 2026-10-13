@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from base.cluster import rate_limit
-from base.cluster.rate_limit import LoginRateLimiter, _Entry
+from base.cluster.rate_limit import Entry, LoginRateLimiter
 from base.config import ConfigBoot, settings
 
 
@@ -28,7 +28,7 @@ def test_sweep_trims_oldest_active_entries_over_cap(monkeypatch: pytest.MonkeyPa
     now = 1000.0
     for i in range(8):
         ip = f"10.0.0.{i}"
-        limiter._entries[ip] = _Entry(
+        limiter._entries[ip] = Entry(
             failures=settings.gateway.login_max_failures - 1,
             locked_until=0.0,
             last_failure_at=now - (8 - i),
@@ -51,8 +51,8 @@ def test_sweep_stale_removed_first() -> None:
         lockout_seconds_reader=lambda: settings.gateway.login_lockout_seconds,
     )
     now = 1000.0
-    limiter._entries["stale-ip"] = _Entry(failures=1, locked_until=0.0, last_failure_at=now - 99999)
-    limiter._entries["active-ip"] = _Entry(failures=1, locked_until=0.0, last_failure_at=now)
+    limiter._entries["stale-ip"] = Entry(failures=1, locked_until=0.0, last_failure_at=now - 99999)
+    limiter._entries["active-ip"] = Entry(failures=1, locked_until=0.0, last_failure_at=now)
     limiter._sweep(now, settings.gateway.login_lockout_seconds)
     assert "stale-ip" not in limiter._entries
     assert "active-ip" in limiter._entries

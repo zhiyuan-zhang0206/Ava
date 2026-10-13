@@ -24,7 +24,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from ops.agents.tests.test_agents_internals import _insert_checkpoint, _spawn_agent
+from ops.agents.tests.test_agents_internals import insert_checkpoint, spawn_agent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -207,21 +207,21 @@ class TestSpawnFork:
 
         from base.paths import logs_dir
 
-        source = _spawn_agent(
+        source = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        executor = _spawn_agent(
+        executor = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _insert_checkpoint(db_conn, source, "ck")
+        insert_checkpoint(db_conn, source, "ck")
 
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             spawner=f"agent:{executor}",
             fork_from=source,
             fork_checkpoint="ck",
@@ -275,13 +275,13 @@ class TestSpawnFork:
 
         from base.paths import logs_dir
 
-        parent = _spawn_agent(
+        parent = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             spawner=f"agent:{parent}",
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -335,13 +335,13 @@ class TestSpawnFork:
 
         from base.paths import logs_dir
 
-        source = _spawn_agent(
+        source = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,

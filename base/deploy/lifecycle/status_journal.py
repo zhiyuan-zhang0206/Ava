@@ -93,7 +93,7 @@ def _write(op: LifecycleOp) -> None:
         logger.warning("lifecycle status journal write failed: {}", exc)
 
 
-def _writer_alive(op: LifecycleOp) -> bool:
+def writer_alive(op: LifecycleOp) -> bool:
     """Whether `op`'s writer process can still be recording into the journal.
 
     A zombie counts as dead: it has finished executing and can never write
@@ -128,7 +128,7 @@ def begin(operation: str, *, deadline: float | None = None) -> bool:
     """
     op = read()
     if op is not None and not op.complete:
-        if _writer_alive(op):
+        if writer_alive(op):
             return False
         _write(
             LifecycleOp(

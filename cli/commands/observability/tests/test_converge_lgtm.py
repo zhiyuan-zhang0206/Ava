@@ -348,7 +348,7 @@ def test_native_provisioning_pg_stays_on_data_plane_when_db_url_is_loopback(
         "db_url",
         "postgresql:///ava_main?host=/tmp/ava-pg-ava-test&port=5433",
     )
-    loki, prometheus, pg = observatory_urls._observability_datasource_urls(
+    loki, prometheus, pg = observatory_urls.observability_datasource_urls(
         database_factory=operator_database
     )
     assert loki == "http://10.0.0.46:3100"
@@ -370,7 +370,7 @@ def test_observability_url_validation_warns_and_falls_back(
         "observability_url",
         "10.0.0.1:1234",  # no scheme — malformed
     )
-    loki, prometheus, pg = observatory_urls._observability_datasource_urls(
+    loki, prometheus, pg = observatory_urls.observability_datasource_urls(
         database_factory=operator_database
     )
     assert loki == "http://127.0.0.1:3100"

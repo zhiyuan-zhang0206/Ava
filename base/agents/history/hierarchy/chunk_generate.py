@@ -15,7 +15,7 @@ nothing else — no audience, no notion of what matters, nor how many groups or 
 
 The model is built the way the agent builds its own (the caller passes it;
 `generate.build_generation_llm`), the tool schema stays bound for cache parity,
-and a tool-call response is refused and re-invoked (`generate._invoke_agent_shaped`).
+and a tool-call response is refused and re-invoked (`generate.invoke_agent_shaped`).
 A reply whose numbers cannot be resolved goes back in the same conversation (tools
 still bound, so the request keeps the agent's cache prefix) with every problem found, and
 only the groups are asked again, up to the correction budget; past it the call
@@ -36,7 +36,7 @@ from base.agents.history.hierarchy.generate import (
     GenerateError,
     GenParams,
     ModelCall,
-    _invoke_agent_shaped,
+    invoke_agent_shaped,
 )
 from base.agents.history.hierarchy.group import GroupReplyError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup, parse_reply, resolve_groups
@@ -141,7 +141,7 @@ def generate_chunk(
     rounds = 0
 
     def ask(messages: list[Any], sent: str, kind: str) -> tuple[str, Any, int]:
-        """One `_invoke_agent_shaped` request; its text, final response and that call's row index."""
+        """One `invoke_agent_shaped` request; its text, final response and that call's row index."""
         nonlocal rounds
         first = rounds
         final_rows: list[int] = []
@@ -165,7 +165,7 @@ def generate_chunk(
             if call.response is not None:
                 final_rows.append(len(buffer) - 1)
 
-        text = _invoke_agent_shaped(
+        text = invoke_agent_shaped(
             llm,
             messages,
             catalog=catalog,

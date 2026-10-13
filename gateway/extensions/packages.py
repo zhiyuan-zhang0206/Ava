@@ -32,7 +32,7 @@ PackageKind = Literal["skill", "plugin", "mcp"]
 # Per-kind framing handed to the agent: what the thing is, and how much trust
 # installing it costs. The skill turns the second half into the confirm gate
 # (a plugin/MCP runs code here, so the user confirms the candidate first).
-_KIND_BRIEF: dict[str, str] = {
+KIND_BRIEF: dict[str, str] = {
     "skill": (
         "a skill — an instruction pack an agent reads and follows; installing it runs "
         "no code of its own"
@@ -68,7 +68,7 @@ async def guarded_draft_package(
         "before installing anything that runs code, install, spawn a test agent to "
         "verify it works, read the package to judge whether it is any good, and "
         "report back — including what adaptation it needs if it falls short.\n\n"
-        f"Kind: {body.kind} — {_KIND_BRIEF[body.kind]}\n\n"
+        f"Kind: {body.kind} — {KIND_BRIEF[body.kind]}\n\n"
         f"Request:\n\n{body.nl}"
     )
     body_obj = SpawnAgentRequest(

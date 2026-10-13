@@ -62,13 +62,13 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
         captured["agent_id"] = aid
         return AgentStatus.RUNNING, None, [], 91, 0
 
-    monkeypatch.setattr(lifecycle, "_terminate_force_blocking", _fake_force_blocking)
+    monkeypatch.setattr(lifecycle, "terminate_force_blocking", _fake_force_blocking)
     cancelled: list[tuple[int, int]] = []
 
     async def _fake_cancel(aid: int, command_id: int) -> None:
         cancelled.append((aid, command_id))
 
-    monkeypatch.setattr(lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
+    monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _fake_cancel)
 
     async def _fake_page_closed(*_a: object, **_k: object) -> None:
         return None

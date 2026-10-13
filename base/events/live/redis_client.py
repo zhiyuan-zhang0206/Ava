@@ -24,8 +24,8 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from base.events.live.redis_resilience import (
-    _HEALTH_CHECK_INTERVAL_S,
-    _SOCKET_CONNECT_TIMEOUT_S,
+    HEALTH_CHECK_INTERVAL_S,
+    SOCKET_CONNECT_TIMEOUT_S,
     keepalive_options,
 )
 from base.host.net.predicates import is_ipv4_literal
@@ -48,12 +48,12 @@ RESILIENCE_KWARGS: dict[str, Any] = {
     "socket_timeout": None,
     "socket_keepalive": True,
     "socket_keepalive_options": keepalive_options(),
-    "socket_connect_timeout": _SOCKET_CONNECT_TIMEOUT_S,
-    "health_check_interval": _HEALTH_CHECK_INTERVAL_S,
+    "socket_connect_timeout": SOCKET_CONNECT_TIMEOUT_S,
+    "health_check_interval": HEALTH_CHECK_INTERVAL_S,
 }
 
 
-class _PinnedIPv4Connection(_redis_sync.Connection):
+class PinnedIPv4Connection(_redis_sync.Connection):
     """`redis.Connection` whose `_connect` bypasses `getaddrinfo` for an
     IPv4-literal host, connecting directly over `AF_INET`.
 
@@ -91,7 +91,7 @@ class _PinnedIPv4Connection(_redis_sync.Connection):
         return sock
 
 
-class _TransportAwareAsyncConnection(aredis.Connection):
+class TransportAwareAsyncConnection(aredis.Connection):
     """`aredis.Connection` whose `is_connected` also sees a dead asyncio transport.
 
     redis-py's own `is_connected` only checks that `_reader` / `_writer` are
@@ -143,15 +143,15 @@ _AUTH_RETRY_ERRORS = (AuthenticationError, NoPermissionError)
 # shared client deliberately pins ``socket_timeout=None`` because listeners use
 # the same connection class and legitimately block while idle; command callers
 # that are only a latency optimization need their own operation-level bound.
-_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S = 2.0
+BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S = 2.0
 
 # The two indirections make the retry contract deterministic in unit tests
 # without making real callers choose a scheduler or clock implementation.
-_sleep_sync = time.sleep
-_sleep_async = asyncio.sleep
+sleep_sync = time.sleep
+sleep_async = asyncio.sleep
 
 
-def _auth_retry_jitter(delay_cap: float) -> float:
+def auth_retry_jitter(delay_cap: float) -> float:
     """Return equal jitter within one exponential-delay cap."""
     return random.uniform(delay_cap / 2, delay_cap)  # noqa: S311 — scheduling jitter, not a secret
 
@@ -169,7 +169,7 @@ def _next_auth_retry_delay(*, failure_count: int, waited_s: float, started_at: f
         _AUTH_RETRY_DELAY_CAP_S,
         remaining_s,
     )
-    return max(0.0, min(_auth_retry_jitter(exponential_cap), exponential_cap, remaining_s))
+    return max(0.0, min(auth_retry_jitter(exponential_cap), exponential_cap, remaining_s))
 
 
 async def retry_auth_failures_async[T](
@@ -201,7 +201,7 @@ async def retry_auth_failures_async[T](
             )
             if delay_s <= 0:
                 raise
-            await _sleep_async(delay_s)
+            await sleep_async(delay_s)
             waited_s += delay_s
 
 
@@ -222,11 +222,11 @@ def retry_auth_failures_sync[T](operation: Callable[[], T]) -> T:
             )
             if delay_s <= 0:
                 raise
-            _sleep_sync(delay_s)
+            sleep_sync(delay_s)
             waited_s += delay_s
 
 
-class _AuthRetryAsyncRedis(aredis.Redis):
+class AuthRetryAsyncRedis(aredis.Redis):
     """Redis client whose ordinary async commands survive ACL re-affirmation."""
 
     async def execute_command(self, *args: Any, auth_retry: bool = True, **options: Any) -> Any:
@@ -241,7 +241,7 @@ class _AuthRetryAsyncRedis(aredis.Redis):
         return await retry_auth_failures_async(_execute) if auth_retry else await _execute()
 
 
-class _AuthRetrySyncRedis(_redis_sync.Redis):
+class AuthRetrySyncRedis(_redis_sync.Redis):
     """Redis client whose ordinary synchronous commands survive ACL re-affirmation."""
 
     def execute_command(self, *args: Any, auth_retry: bool = True, **options: Any) -> Any:
@@ -256,7 +256,7 @@ class _AuthRetrySyncRedis(_redis_sync.Redis):
         return retry_auth_failures_sync(_execute) if auth_retry else _execute()
 
 
-def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> _AuthRetryAsyncRedis:
+def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> AuthRetryAsyncRedis:
     """Open an async Redis client for a caller-owned connection lifecycle.
 
     Pub/sub subscribers use this rather than the per-loop shared publisher
@@ -264,11 +264,11 @@ def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> _AuthR
     still receive the same ACL-transition retry policy.
     """
     return cast(
-        _AuthRetryAsyncRedis,
-        _AuthRetryAsyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
+        AuthRetryAsyncRedis,
+        AuthRetryAsyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
             redis_url,
             decode_responses=decode_responses,
-            connection_class=_TransportAwareAsyncConnection,
+            connection_class=TransportAwareAsyncConnection,
             **RESILIENCE_KWARGS,
         ),
     )
@@ -325,7 +325,7 @@ def _log_publish_failure(
 
 
 async def publish_via(
-    client: Callable[[], _AuthRetryAsyncRedis],
+    client: Callable[[], AuthRetryAsyncRedis],
     channel: str,
     payload: str,
     *,
@@ -346,7 +346,7 @@ async def publish_via(
             )
 
         return await retry_auth_failures_async(
-            _publish, attempt_timeout_s=_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S
+            _publish, attempt_timeout_s=BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S
         )
     except (ResponseError, RedisConnectionError, RedisTimeoutError, OSError, TimeoutError) as exc:
         _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
@@ -354,7 +354,7 @@ async def publish_via(
 
 
 def publish_sync_via(
-    open_client: Callable[[], _AuthRetrySyncRedis],
+    open_client: Callable[[], AuthRetrySyncRedis],
     channel: str,
     payload: str,
     *,
@@ -379,14 +379,14 @@ def publish_sync_via(
         return None
 
 
-def open_sync_redis(redis_url: str, *, decode_responses: bool = False) -> _AuthRetrySyncRedis:
+def open_sync_redis(redis_url: str, *, decode_responses: bool = False) -> AuthRetrySyncRedis:
     """A new synchronous client on `redis_url` with the cluster's resilience settings."""
     return cast(
-        _AuthRetrySyncRedis,
-        _AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
+        AuthRetrySyncRedis,
+        AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
             redis_url,
             decode_responses=decode_responses,
-            connection_class=_PinnedIPv4Connection,
+            connection_class=PinnedIPv4Connection,
             **RESILIENCE_KWARGS,
         ),
     )

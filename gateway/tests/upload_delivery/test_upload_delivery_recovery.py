@@ -23,7 +23,7 @@ from base.agents.upload_delivery.models import (
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.app import app
-from gateway.tests.events.test_notices_endpoint import _seed_agent
+from gateway.tests.events.test_notices_endpoint import seed_agent
 from gateway.upload_delivery.worker import UploadRecovery
 from ops import upload_delivery as receiver
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -49,7 +49,7 @@ def uploaded_agent(
 
     monkeypatch.setattr(UploadRecovery, "start", no_background)
     unit = current_unit(local_machine=machine_identity.name())
-    agent = _seed_agent(db_conn)
+    agent = seed_agent(db_conn)
     db_conn.execute(
         "INSERT INTO machines(name,gateway_url) VALUES (%s,'http://runner:7001') "
         "ON CONFLICT(name) DO UPDATE SET gateway_url=excluded.gateway_url",
