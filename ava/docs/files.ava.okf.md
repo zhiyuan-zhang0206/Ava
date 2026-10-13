@@ -26,4 +26,4 @@ Persistent file operation interface for agents. Relative paths resolve to the ag
 - Does not operate on directories (`delete` only deletes files)
 
 ## Key Dependencies
-- [[self.ava.okf.md]] — workspace belongs to the agent itself, `ava.self` carries identity
+- [[ava/self/docs/self.ava.okf.md|self]] — workspace belongs to the agent itself, `ava.self` carries identity

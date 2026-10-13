@@ -21,7 +21,7 @@ _INVENTORY: dict[str, str] = {
     "agent/graph/hooks/compact.py::auto_compact_for_llm": "ineligible",
     "agent/ownership/hosted.py::admit_hosted_runtime": "ineligible",
     "agent/ownership/hosted.py::settle_hosted_runtime": "ineligible",
-    "ava/self.py::compact": "local",
+    "ava/self/__init__.py::compact": "local",
     "ava/skills/__init__.py::_record_skill_invoked": "local",
     "ava_builtins/plugins/ava_fleet/_task_update.py::_log_task_update": "local",
     "base/agents/tasks/creation.py::insert_task": "local",
