@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .client import _call, require_capability
+from .client import call, require_capability
 from .wire import (
     ClipboardReadResult,
     ClipboardWriteResult,
@@ -39,7 +39,7 @@ def mouse_down(
         raise ValueError("mouse_down takes both x and y, or neither")
     if modifiers is not None:
         args["modifiers"] = modifiers
-    return _call("mouse_down", sock_path=sock_path, **args)
+    return call("mouse_down", sock_path=sock_path, **args)
 
 
 def mouse_up(
@@ -57,14 +57,14 @@ def mouse_up(
         args.update(x=x, y=y)
     elif x is not None or y is not None:
         raise ValueError("mouse_up takes both x and y, or neither")
-    return _call("mouse_up", sock_path=sock_path, **args)
+    return call("mouse_up", sock_path=sock_path, **args)
 
 
 def mouse_release_all(*, sock_path: str | Path | None = None) -> MouseReleaseAllResult:
     """Release whatever button Ava holds, quietly and regardless of a stop gesture: the cleanup
     the daemon runs when the screen changes hands. Names the buttons it released."""
     require_capability("mouse_hold_v1", "mouse_down/mouse_up", sock_path=sock_path)
-    return _call("mouse_release_all", sock_path=sock_path)
+    return call("mouse_release_all", sock_path=sock_path)
 
 
 def clipboard_read(*, sock_path: str | Path | None = None) -> ClipboardReadResult:
@@ -73,7 +73,7 @@ def clipboard_read(*, sock_path: str | Path | None = None) -> ClipboardReadResul
     `text` is None when no plain text is on the clipboard. The content is returned to the
     caller only; nothing in this layer logs it."""
     require_capability("clipboard_v1", "the clipboard", sock_path=sock_path)
-    return _call("clipboard_read", sock_path=sock_path)
+    return call("clipboard_read", sock_path=sock_path)
 
 
 def clipboard_write(text: str, *, sock_path: str | Path | None = None) -> ClipboardWriteResult:
@@ -81,4 +81,4 @@ def clipboard_write(text: str, *, sock_path: str | Path | None = None) -> Clipbo
 
     The reply carries the length only, so the text is never echoed into a log or an audit row."""
     require_capability("clipboard_v1", "the clipboard", sock_path=sock_path)
-    return _call("clipboard_write", text=text, sock_path=sock_path)
+    return call("clipboard_write", text=text, sock_path=sock_path)

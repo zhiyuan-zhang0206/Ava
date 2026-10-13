@@ -167,8 +167,8 @@ def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
 
 
 def test_writer_alive_tracks_pid_state(home: Path) -> None:
-    assert journal._writer_alive(_op_with_pid(os.getpid())) is True
-    assert journal._writer_alive(_op_with_pid(_reaped_pid())) is False
+    assert journal.writer_alive(_op_with_pid(os.getpid())) is True
+    assert journal.writer_alive(_op_with_pid(_reaped_pid())) is False
 
     # A zombie has finished executing and can never write again — but it still
     # holds the pid, so a liveness check that misses it would block takeover.
@@ -180,7 +180,7 @@ def test_writer_alive_tracks_pid_state(home: Path) -> None:
                 break
             time.sleep(0.01)
         assert psutil.Process(zombie.pid).status() == psutil.STATUS_ZOMBIE
-        assert journal._writer_alive(_op_with_pid(zombie.pid)) is False
+        assert journal.writer_alive(_op_with_pid(zombie.pid)) is False
     finally:
         zombie.wait(timeout=30)
 

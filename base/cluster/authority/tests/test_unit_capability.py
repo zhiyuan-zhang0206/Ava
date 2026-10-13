@@ -23,11 +23,11 @@ from base.cluster import authority
 from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import (
     _ENDPOINT,
-    _MACHINE,
-    _install,
-    _issue,
-    _no_probe,
+    MACHINE,
     _open,
+    install,
+    issue,
+    no_probe,
 )
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
@@ -53,7 +53,7 @@ _MUTATIONS: dict[str, Callable[[dict[str, Any]], None]] = {
 
 @pytest.mark.parametrize("mutation", sorted(_MUTATIONS))
 def test_a_tampered_bundle_is_refused(gateway: Path, runner_home: Path, mutation: str) -> None:
-    issued = _issue(gateway, runner_home)
+    issued = issue(gateway, runner_home)
     assert _open(issued).capability.unit.home == str(runner_home)
     data = json.loads(issued.envelope)
     _MUTATIONS[mutation](data)
@@ -63,7 +63,7 @@ def test_a_tampered_bundle_is_refused(gateway: Path, runner_home: Path, mutation
 
 
 def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_home: Path) -> None:
-    issued, other = _issue(gateway, runner_home), _issue(gateway, runner_home)
+    issued, other = issue(gateway, runner_home), issue(gateway, runner_home)
     assert issued.transport_key != other.transport_key
     with pytest.raises(unit.UnitCapabilityError, match="does not authenticate"):
         unit.open_bundle(issued.envelope, other.transport_key)
@@ -79,7 +79,7 @@ def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_ho
 
 
 def test_an_expired_bundle_is_refused(gateway: Path, runner_home: Path) -> None:
-    issued = _issue(gateway, runner_home, ttl_s=60, now=time.time() - 120)
+    issued = issue(gateway, runner_home, ttl_s=60, now=time.time() - 120)
     with pytest.raises(unit.UnitCapabilityError, match="expired"):
         _open(issued)
 
@@ -93,11 +93,11 @@ def test_issue_refuses_a_lifetime_outside_the_cap(
     gateway: Path, runner_home: Path, ttl_s: float
 ) -> None:
     with pytest.raises(unit.UnitCapabilityError, match="lifetime"):
-        _issue(gateway, runner_home, ttl_s=ttl_s)
+        issue(gateway, runner_home, ttl_s=ttl_s)
 
 
 def test_issue_takes_up_to_the_capped_lifetime(gateway: Path, runner_home: Path) -> None:
-    issued = _issue(gateway, runner_home, ttl_s=UNIT_BUNDLE_MAX_TTL_S, now=1_000_000.0)
+    issued = issue(gateway, runner_home, ttl_s=UNIT_BUNDLE_MAX_TTL_S, now=1_000_000.0)
     assert issued.expires_at == 1_000_000.0 + UNIT_BUNDLE_MAX_TTL_S
 
 
@@ -105,12 +105,12 @@ def test_issue_needs_an_active_generation(tmp_path: Path, runner_home: Path) -> 
     bare = (tmp_path / "bare").resolve()
     bare.mkdir(mode=0o700)
     with pytest.raises(authority.AuthorityRefusedError, match="no database authority ledger"):
-        _issue(bare, runner_home)
+        issue(bare, runner_home)
 
 
 def test_issue_names_only_the_credential_free_endpoint(gateway: Path, runner_home: Path) -> None:
     with pytest.raises(unit.UnitCapabilityError, match="credential-free"):
-        _issue(gateway, runner_home, endpoint="postgresql://ava:pw@10.0.0.7:6433/ava")
+        issue(gateway, runner_home, endpoint="postgresql://ava:pw@10.0.0.7:6433/ava")
 
 
 # ── install: binding, private store ─────────────────────────────────────────
@@ -119,23 +119,23 @@ def test_issue_names_only_the_credential_free_endpoint(gateway: Path, runner_hom
 def test_install_binds_the_unit_and_the_served_endpoint(
     gateway: Path, runner_home: Path, tmp_path: Path
 ) -> None:
-    issued = _issue(gateway, runner_home)
+    issued = issue(gateway, runner_home)
     bundle = _open(issued)
     with pytest.raises(unit.UnitCapabilityError, match="issued for"):
         unit.install_bundle(
-            runner_home, bundle, machine="other", served_endpoint=_ENDPOINT, probe=_no_probe
+            runner_home, bundle, machine="other", served_endpoint=_ENDPOINT, probe=no_probe
         )
     elsewhere = (tmp_path / "elsewhere").resolve()
     elsewhere.mkdir()
     with pytest.raises(unit.UnitCapabilityError, match="issued for"):
         unit.install_bundle(
-            elsewhere, bundle, machine=_MACHINE, served_endpoint=_ENDPOINT, probe=_no_probe
+            elsewhere, bundle, machine=MACHINE, served_endpoint=_ENDPOINT, probe=no_probe
         )
     with pytest.raises(unit.UnitCapabilityError, match="another database endpoint"):
-        _install(runner_home, issued, served_endpoint="postgresql://ava@10.0.0.8:6433/ava")
+        install(runner_home, issued, served_endpoint="postgresql://ava@10.0.0.8:6433/ava")
     assert unit.load_unit_capability(runner_home) is None
 
-    installed = _install(runner_home, issued)
+    installed = install(runner_home, issued)
     assert unit.unit_capability_path(runner_home).stat().st_mode & 0o777 == 0o600
     assert (unit.unit_capability_path(runner_home).parent.stat().st_mode & 0o777) == 0o700
     assert installed == unit.require_unit_capability(runner_home)

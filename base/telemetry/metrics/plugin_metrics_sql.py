@@ -18,7 +18,7 @@ class InvalidMetricQuery(PluginMetricError):  # noqa: N818
 # that is not a whitelisted function / macro / column / operator / literal is
 # rejected. Subqueries are allowed (FROM (SELECT ...) FROM agents_meta ...) — every
 # FROM clause is still required to reference only `agents_meta`.
-_SQL_KEYWORDS = frozenset(
+SQL_KEYWORDS = frozenset(
     {
         "SELECT",
         "FROM",
@@ -55,7 +55,7 @@ _SQL_KEYWORDS = frozenset(
 # operators. They are denied even though they would be harmless against the
 # live `agents_meta` table — the template contract is a single plain SELECT, and
 # keeping the grammar small makes the whitelist auditable.
-_SQL_DENIED_KEYWORDS = frozenset(
+SQL_DENIED_KEYWORDS = frozenset(
     {
         "UNION",
         "INTERSECT",
@@ -79,7 +79,7 @@ _SQL_DENIED_KEYWORDS = frozenset(
 # Aggregate / scalar functions that are read-only and safe on the agents_meta table.
 # percentile_cont (with WITHIN GROUP) is the ordered-set aggregate used for
 # per-bucket duration percentiles (W18 ava_observability pack).
-_SQL_FUNCTIONS = frozenset(
+SQL_FUNCTIONS = frozenset(
     {
         "COUNT",
         "SUM",
@@ -104,7 +104,7 @@ _SQL_FUNCTIONS = frozenset(
 # Operators / punctuation. `->`, `->>`, `?`, `@>`, `<@`, `#>`, `#>>` are the
 # JSONB access/containment operators used by the existing dashboards
 # (the `latency_ms` / `status` payload keys).
-_SQL_OPS = frozenset(
+SQL_OPS = frozenset(
     {
         "(",
         ")",
@@ -139,9 +139,9 @@ _SQL_OPS = frozenset(
 # ASCII to keep the rendered JSON predictable; `<`, `>`, `/` are allowed so
 # display labels like "stalled <60s" / "tokens/s" stay verbatim (2026-08-06,
 # Task #882 core-panel migration).
-_DOUBLE_QUOTED_OK = re.compile(r"^[A-Za-z0-9 _%+\-.:<>/]{1,64}$")
+DOUBLE_QUOTED_OK = re.compile(r"^[A-Za-z0-9 _%+\-.:<>/]{1,64}$")
 
-_TOKEN_RE = re.compile(
+TOKEN_RE = re.compile(
     r"""
       (?P<ws>\s+)
     | (?P<num>\d+(?:\.\d+)?)
@@ -152,7 +152,7 @@ _TOKEN_RE = re.compile(
     """,
     re.VERBOSE,
 )
-_QUOTED_RE = re.compile(r"\'(?:[^\']|\'\')*\'|\"(?:[^\"])*\"")
+QUOTED_RE = re.compile(r"\'(?:[^\']|\'\')*\'|\"(?:[^\"])*\"")
 
 
 _FROM_FOLLOW = frozenset({"WHERE", "GROUP", "ORDER", "LIMIT", "OFFSET"})
@@ -194,7 +194,7 @@ def _consume_alias_and_cols(
         if j < len(tokens) and tokens[j] == ("op", "("):
             cols_start = j
             j = _skip_paren(tokens, j, sql)
-            alias_positions |= _check_from_clauses(
+            alias_positions |= check_from_clauses(
                 tokens[cols_start + 1 : j - 1],
                 sql,
                 offset=offset + cols_start + 1,
@@ -215,7 +215,7 @@ def _check_table_ref(
     if tokens[j] == ("op", "("):
         inner_start = j
         j = _skip_paren(tokens, j, sql)
-        alias_positions |= _check_from_clauses(
+        alias_positions |= check_from_clauses(
             tokens[inner_start + 1 : j - 1], sql, offset=offset + inner_start + 1
         )
         # optional subquery alias (bare word or AS word) + optional column list
@@ -238,7 +238,7 @@ def _check_table_ref(
         # skipped by the recursive walk's function-call rule.
         args_start = j + 1
         j = _skip_paren(tokens, args_start, sql)
-        alias_positions |= _check_from_clauses(
+        alias_positions |= check_from_clauses(
             tokens[args_start + 1 : j - 1], sql, offset=offset + args_start + 1
         )
         # Optional alias: `AS g` or bare `g`, with an optional column list
@@ -265,7 +265,7 @@ def _check_left_join(
         )
     inner_start = j
     j = _skip_paren(tokens, j, sql)
-    alias_positions |= _check_from_clauses(
+    alias_positions |= check_from_clauses(
         tokens[inner_start + 1 : j - 1],
         sql,
         offset=offset + inner_start + 1,
@@ -295,7 +295,7 @@ def _skip_on_condition(
             if tokens[j] == ("op", "("):
                 inner_start = j
                 j = _skip_paren(tokens, j, sql)
-                alias_positions |= _check_from_clauses(
+                alias_positions |= check_from_clauses(
                     tokens[inner_start + 1 : j - 1],
                     sql,
                     offset=offset + inner_start + 1,
@@ -326,7 +326,7 @@ def _check_from_item(
     return j, alias_positions
 
 
-def _check_from_clauses(
+def check_from_clauses(
     tokens: list[tuple[str, str]],
     sql: str,
     offset: int = 0,
@@ -359,7 +359,7 @@ def _check_from_clauses(
             kind == "word"
             and i + 1 < len(tokens)
             and tokens[i + 1] == ("op", "(")
-            and value.upper() in _SQL_FUNCTIONS
+            and value.upper() in SQL_FUNCTIONS
         ):
             # function call — the argument list itself is not a FROM clause
             # (extract(epoch FROM ts) is legal), but a parenthesized
@@ -372,7 +372,7 @@ def _check_from_clauses(
             while k < args_end - 1:
                 if tokens[k] == ("op", "("):
                     inner_end = _skip_paren(tokens, k, sql)
-                    alias_positions |= _check_from_clauses(
+                    alias_positions |= check_from_clauses(
                         tokens[k + 1 : inner_end - 1],
                         sql,
                         offset=offset + k + 1,
@@ -385,9 +385,7 @@ def _check_from_clauses(
         if kind == "op" and value == "(":
             # non-function paren (subquery / stray paren) — recurse
             j = _skip_paren(tokens, i, sql)
-            alias_positions |= _check_from_clauses(
-                tokens[i + 1 : j - 1], sql, offset=offset + i + 1
-            )
+            alias_positions |= check_from_clauses(tokens[i + 1 : j - 1], sql, offset=offset + i + 1)
             i = j
             continue
         i += 1

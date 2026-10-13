@@ -23,13 +23,13 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.history.checkpoint import _is_delta_snapshot_blob
+from base.agents.history.checkpoint import is_delta_snapshot_blob
 from base.agents.history.checkpoint_postgres_walks import (
     HistoryAsyncPostgresSaver as AsyncPostgresSaver,
 )
 from base.agents.history.delta_read_compat import (
-    _fold_messages,
     areconstruct_delta_messages,
+    fold_messages,
     recovery_reconstruction_scope,
     wrap_saver_reads_with_delta_reconstruction,
 )
@@ -319,10 +319,10 @@ def test_delta_snapshot_markers_cover_ext_and_fixext() -> None:
     predicate must accept both families and still reject a plain array head."""
     _type, payload = JsonPlusSerializer().dumps_typed(_DeltaSnapshot([]))
     assert payload[0] in (0xC7, 0xC8, 0xC9, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8)
-    assert _is_delta_snapshot_blob("msgpack", payload[:5]) is True
+    assert is_delta_snapshot_blob("msgpack", payload[:5]) is True
     for marker in (b"\xc7", b"\xc8", b"\xc9", b"\xd4", b"\xd5", b"\xd6", b"\xd7", b"\xd8"):
-        assert _is_delta_snapshot_blob("msgpack", marker) is True
-    assert _is_delta_snapshot_blob("msgpack", b"\x92") is False
+        assert is_delta_snapshot_blob("msgpack", marker) is True
+    assert is_delta_snapshot_blob("msgpack", b"\x92") is False
 
 
 def test_fold_fast_path_equals_per_write_add_messages() -> None:
@@ -346,7 +346,7 @@ def test_fold_fast_path_equals_per_write_add_messages() -> None:
         expected: Any = base
         for write in writes:
             expected = add_messages(expected, write)
-        fast = _fold_messages(base, writes)
+        fast = fold_messages(base, writes)
         assert _ids(fast) == _ids(expected)
         assert [m.content for m in fast] == [m.content for m in expected]
 

@@ -62,7 +62,7 @@ def _stub_query(monkeypatch: pytest.MonkeyPatch, *, state: str | None, apps: str
             return apps
         raise AssertionError(f"unexpected query: {args}")
 
-    monkeypatch.setattr(fw, "_query", fake)
+    monkeypatch.setattr(fw, "query", fake)
 
 
 def _darwin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,7 +122,7 @@ def test_non_macos_is_a_no_op(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     monkeypatch.setattr(fw.platform, "system", lambda: "Linux")
     monkeypatch.setattr(
         fw,
-        "_query",
+        "query",
         lambda *_a: pytest.fail("queried socketfilterfw on a non-macOS host"),  # pyright: ignore[reportUnknownArgumentType]
     )
     audit = fw.audit_allowlist((_existing(tmp_path, "python3.12"),), machine_host="10.0.0.4")
@@ -503,9 +503,9 @@ def _stub_mutating_daemon(
                 state.pop(path, None)
         return _FakeProc(rc=rc)
 
-    monkeypatch.setattr(fw, "_query", fake_query)
+    monkeypatch.setattr(fw, "query", fake_query)
     monkeypatch.setattr(fw, "run_bounded", fake_run)
-    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
+    monkeypatch.setattr(fw, "VERIFY_RETRY_S", 0.0)
     return calls
 
 
@@ -561,9 +561,9 @@ def test_repair_reports_partial_failure(monkeypatch: pytest.MonkeyPatch, tmp_pat
             return _FakeProc()
         return _FakeProc(rc=1)
 
-    monkeypatch.setattr(fw, "_query", fake_query)
+    monkeypatch.setattr(fw, "query", fake_query)
     monkeypatch.setattr(fw, "run_bounded", fake)
-    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
+    monkeypatch.setattr(fw, "VERIFY_RETRY_S", 0.0)
     repair = fw.repair_allowlist((py,), rules={})
     assert repair.allowed == ()
     assert repair.failed == (py,)
@@ -618,9 +618,9 @@ def test_repair_retries_verification_until_the_rule_appears(
             state[cmd[-1]] = True
         return _FakeProc()
 
-    monkeypatch.setattr(fw, "_query", fake_query)
+    monkeypatch.setattr(fw, "query", fake_query)
     monkeypatch.setattr(fw, "run_bounded", fake)
-    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
+    monkeypatch.setattr(fw, "VERIFY_RETRY_S", 0.0)
     repair = fw.repair_allowlist((py,), rules={})
     assert repair.allowed == (py,)
     assert repair.failed == ()

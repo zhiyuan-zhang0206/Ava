@@ -15,7 +15,7 @@ from typing import cast
 from langchain_core.messages import UsageMetadata
 
 from base.lm.reasoning import (
-    _count_thinking_chars,
+    count_thinking_chars,
     extract_reasoning_tokens,
     to_canonical_reasoning,
 )
@@ -176,11 +176,11 @@ def test_extract_none_usage_returns_zero_unless_fallback():
 
 
 def test_count_thinking_chars_empty():
-    assert _count_thinking_chars([]) == 0
+    assert count_thinking_chars([]) == 0
 
 
 def test_count_thinking_chars_string():
-    assert _count_thinking_chars("plain string") == 0
+    assert count_thinking_chars("plain string") == 0
 
 
 def test_count_thinking_chars_mixed_blocks():
@@ -189,4 +189,4 @@ def test_count_thinking_chars_mixed_blocks():
         {"type": "text", "text": "def", "index": 1},
         {"type": "thinking", "thinking": "ghi", "index": 2},
     ]
-    assert _count_thinking_chars(content) == 6
+    assert count_thinking_chars(content) == 6

@@ -29,13 +29,13 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 @pytest.fixture
 def isolated_host_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect runtime_config._ava_home to a fresh per-test tmp dir.
+    """Redirect runtime_config.ava_home to a fresh per-test tmp dir.
 
-    Tests that read/write this machine's .env pin `runtime_config._ava_home`
+    Tests that read/write this machine's .env pin `runtime_config.ava_home`
     directly, so the `.env` they touch is this tmp dir's whatever else the test
     does with `AVA_HOME`.
     """
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: unit_home)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: unit_home)
     return unit_home
 
 

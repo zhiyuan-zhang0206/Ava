@@ -190,7 +190,7 @@ def inflight_build_read_timeout_raises_retryable() -> None:
     import base.config._full as full
     import base.config._lite as lite
 
-    lite._BUILD_WAIT_TIMEOUT_SECONDS = 0.3
+    lite.BUILD_WAIT_TIMEOUT_SECONDS = 0.3
     real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
@@ -312,7 +312,7 @@ def inflight_build_get_field_timeout_raises_retryable() -> None:
     import base.config._full as full
     import base.config._lite as lite
 
-    lite._BUILD_WAIT_TIMEOUT_SECONDS = 0.3
+    lite.BUILD_WAIT_TIMEOUT_SECONDS = 0.3
     real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
@@ -445,7 +445,7 @@ def current_facade_resolves_after_upgrade() -> None:
     served_ok = all(hasattr(c, n) for n in lite_served) and c._boot_state()["mode"] == "lite"
     from base.config import _full
 
-    missing = [n for n in _full._facade_exports() if not hasattr(c, n)]
+    missing = [n for n in _full.facade_exports() if not hasattr(c, n)]
     pinned = c.Settings.__module__
     same = pickle.loads(pickle.dumps(c.Settings)) is c.Settings  # noqa: S301
     emit("FACADE", served_ok, missing, pinned, same, c._boot_state()["mode"])

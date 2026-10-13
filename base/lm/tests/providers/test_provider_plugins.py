@@ -155,7 +155,7 @@ def test_repo_plugin_prices_equal_archive_at_frozen_instant(
         ).read_text()
     )
     archive_models = archive_raw["models"]
-    archive_only = pricing.PriceBook(pricing._parse_catalog(archive_raw), {})
+    archive_only = pricing.PriceBook(pricing.parse_catalog(archive_raw), {})
     frozen_instant = datetime(2026, 9, 5, tzinfo=UTC)
     assert set(plugin_prices) == _REPO_MODEL_VENDORS.keys()
     for model, plugin_price in plugin_prices.items():

@@ -15,12 +15,12 @@ from typing import Annotated, Any, cast
 from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
-from base.config.base import _unit_home
+from base.config.base import unit_home
 from base.config.domains.services.health_ports_fields import ServiceHealthPortFields
-from base.config.domains.services.runtime import _ServiceRuntimeSettings
+from base.config.domains.services.runtime import ServiceRuntimeSettings
 
 
-class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
+class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     labeler_max_chars: int = Field(
         default=64,
         gt=0,
@@ -125,7 +125,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     )
 
     gateway_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "gateway.pid",
+        default_factory=lambda: unit_home() / "run" / "gateway.pid",
         alias="AVA_GATEWAY_PIDFILE",
         description="Gateway uvicorn pidfile path. healthcheck goes via HTTP; this is auxiliary only.",
         json_schema_extra={

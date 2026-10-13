@@ -93,7 +93,7 @@ def test_bootstrap_serves_explicit_set_to_empty(
     silently revert the recipient to the field default — a bench agent then
     got the default skill index back and crashed on the disabled ava.skills
     (issue #948)."""
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)  # no .env overrides
+    monkeypatch.setattr(rt, "ava_home", lambda: tmp_path)  # no .env overrides
     serve_generation(tmp_path)
     monkeypatch.setattr(config.settings.agent, "skills_to_inject_into_system_prompt", [])
 
@@ -113,7 +113,7 @@ def test_bootstrap_still_skips_none(
 ) -> None:
     """None (no value at all) stays unserved — env text can't express it; the
     recipient falls back to the field default. Distinct from set-to-empty."""
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(rt, "ava_home", lambda: tmp_path)
     serve_generation(tmp_path)
     monkeypatch.setattr(config.settings.observability, "trace_retention_days", None)
 
@@ -211,7 +211,7 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
     address (host swapped, identity/port/db preserved verbatim)."""
     from urllib.parse import urlsplit
 
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)  # no .env overrides
+    monkeypatch.setattr(rt, "ava_home", lambda: tmp_path)  # no .env overrides
     serve_generation(tmp_path)
     monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
 
@@ -241,7 +241,7 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
     """A gateway whose own reachable host is loopback (single box) serves the
     URLs as-is — there is no remote runner to reach it, and swapping to
     `localhost` would be a no-op."""
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(rt, "ava_home", lambda: tmp_path)
     serve_generation(tmp_path)
     monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
 
@@ -265,7 +265,7 @@ def test_bootstrap_keeps_existing_reachable_url_host(
 ) -> None:
     """A .env URL that already names the reachable host (prod's historical
     hand-set URLs) passes through verbatim — no rewrite of a non-loopback host."""
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(rt, "ava_home", lambda: tmp_path)
     serve_generation(tmp_path)
     monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
     dp = config.settings.data_plane

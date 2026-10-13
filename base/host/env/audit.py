@@ -48,7 +48,7 @@ def _armed_path(env_path: Path) -> Path:
     return env_path.with_name(".env.audit.armed")
 
 
-def _env_key_names(env_path: Path) -> list[str]:
+def env_key_names(env_path: Path) -> list[str]:
     """Return present key names without retaining or emitting their values."""
     if not env_path.exists():
         return []
@@ -80,7 +80,7 @@ def env_values_from_text(text: str) -> dict[str, str]:
     return values
 
 
-def _load_alias_metadata() -> dict[str, tuple[str, bool]]:
+def load_alias_metadata() -> dict[str, tuple[str, bool]]:
     from base.host.env.config_registry import field_alias, fields, schema_extra
 
     metadata: dict[str, tuple[str, bool]] = {}
@@ -99,7 +99,7 @@ def _load_alias_metadata() -> dict[str, tuple[str, bool]]:
 def _alias_metadata() -> dict[str, tuple[str, bool]]:
     """Project declaration facts; invalid metadata prevents audit preparation."""
     try:
-        return _load_alias_metadata()
+        return load_alias_metadata()
     except Exception:
         logger.bind(_no_emitter=True).opt(exception=True).error(
             "could not load declared config metadata for the .env audit"
@@ -270,7 +270,7 @@ def record_env_write(
         "trace_id": trace_id,
         "keys_written": sorted(keys_written),
         "keys_removed": sorted(keys_removed),
-        "keys_after": _env_key_names(env_path),
+        "keys_after": env_key_names(env_path),
         "digest_after": digest_after,
     }
     if isinstance(changes, _PreparedEnvChanges):
@@ -435,7 +435,7 @@ def check_env_integrity(*, machine_reader: Callable[[], str]) -> dict[str, objec
             current = hashlib.sha256(
                 env_path.read_bytes() if env_path.exists() else b""
             ).hexdigest()
-            current_keys = set(_env_key_names(env_path))
+            current_keys = set(env_key_names(env_path))
             if history_reason is not None:
                 detection = _unauthorized_record(
                     current_digest=current,

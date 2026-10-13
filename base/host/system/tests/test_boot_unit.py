@@ -131,7 +131,7 @@ def test_unit_enabled_reads_the_one_systemctl_seam(
         return subprocess.CompletedProcess(args, 0, "enabled\n", "")
 
     monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
-    monkeypatch.setattr(boot_unit, "_systemctl", fake_systemctl)
+    monkeypatch.setattr(boot_unit, "systemctl", fake_systemctl)
     assert unit_enabled() is True
     assert calls == [("is-enabled", "ava-boot.service")]
 
@@ -139,7 +139,7 @@ def test_unit_enabled_reads_the_one_systemctl_seam(
     def disabled(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 0, "disabled\n", "")
 
-    monkeypatch.setattr(boot_unit, "_systemctl", disabled)
+    monkeypatch.setattr(boot_unit, "systemctl", disabled)
     assert unit_enabled() is False
     # A host without systemd can never have an enabled unit.
     monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
@@ -254,7 +254,7 @@ def _manager_reports(
         return subprocess.CompletedProcess(["systemctl", *args], 0, f"{active_state}\n", "")
 
     monkeypatch.setattr(boot_unit, "privileged", fake_privileged)
-    monkeypatch.setattr(boot_unit, "_systemctl", show)
+    monkeypatch.setattr(boot_unit, "systemctl", show)
     return units, recorded
 
 

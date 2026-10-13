@@ -16,7 +16,7 @@ from gateway.routers.configuration import runtime as config_router
 @pytest.fixture
 def configured_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A gateway home whose `.env` carries a valid sandbox timeout pair."""
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: tmp_path)
     runtime_config.write_fields(
         {"exec_timeout_seconds": 300, "exec_node_timeout_seconds": 1200}, set()
     )

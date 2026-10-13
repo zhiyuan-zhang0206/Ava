@@ -363,9 +363,9 @@ def test_render_escapes_quotes_defensively() -> None:
     # event_name/category are validated identifiers, but the literal renderer must
     # still single-quote-escape — defense in depth (a future schema change
     # widening the event_name charset cannot turn into SQL injection).
-    from base.telemetry.metrics.plugin_metrics import _sql_literal
+    from base.telemetry.metrics.plugin_metrics import sql_literal
 
-    assert _sql_literal("a'b") == "'a''b'"
+    assert sql_literal("a'b") == "'a''b'"
 
 
 # ── time basis: the registry renders the title suffix and the divisor ─────────

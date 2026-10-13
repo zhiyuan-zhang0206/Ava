@@ -9,7 +9,7 @@ from typing import Any, cast
 
 from base.lm import pricing
 from base.lm.catalog import ModelCatalog
-from base.lm.pricing import CostQuote, Rates, _parse_catalog, quote, rates_at
+from base.lm.pricing import CostQuote, Rates, parse_catalog, quote, rates_at
 
 _ARCHIVE_PATH = Path(__file__).resolve().parents[4] / "base/lm/pricing/pricing_catalog_archive.json"
 _HISTORICAL = datetime(2026, 8, 1, tzinfo=UTC)
@@ -20,7 +20,7 @@ _FUTURE = datetime(2027, 1, 5, tzinfo=UTC)
 
 def _archive_catalog() -> dict[str, pricing.ModelPrice]:
     raw = cast(dict[str, Any], json.loads(_ARCHIVE_PATH.read_text(encoding="utf-8")))
-    return _parse_catalog(raw)
+    return parse_catalog(raw)
 
 
 def test_qa_pricing_scenarios_use_plugin_runtime_semantics(model_catalog: ModelCatalog) -> None:

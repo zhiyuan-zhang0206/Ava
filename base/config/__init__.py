@@ -353,7 +353,7 @@ _boot_state = _lite.boot_state
 def __getattr__(name: str) -> Any:
     """Eager-only names (Settings, BOOTSTRAP_FIELDS, the metadata /
     service-read / turn-view re-exports) are reached through the same
-    boot-lite gate as every other full-chain read — `_lite._maybe_upgrade`: a
+    boot-lite gate as every other full-chain read — `_lite.maybe_upgrade`: a
     read that races another thread's in-flight build waits for it (bounded),
     only the building thread's own re-entrant read raises the window error,
     and a name the build never installs stays an AttributeError (PEP 562,
@@ -392,8 +392,8 @@ def __getattr__(name: str) -> Any:
             "CONFIG_UNCHANGED_SENTINEL": CONFIG_UNCHANGED_SENTINEL,
             "ConfigFieldMeta": ConfigFieldMeta,
         }[name]
-    if not _lite._maybe_upgrade(f"module attribute {name!r}"):
-        raise AttributeError(_lite._build_window_message(f"module attribute {name!r}"))
+    if not _lite.maybe_upgrade(f"module attribute {name!r}"):
+        raise AttributeError(_lite.build_window_message(f"module attribute {name!r}"))
     try:
         return globals()[name]
     except KeyError:

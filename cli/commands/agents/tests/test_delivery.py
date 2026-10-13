@@ -40,7 +40,7 @@ def active(
     from base.host.env import runtime_config
 
     window, attempts = getattr(request, "param", (180, 2))
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: tmp_path)
     (tmp_path / ".env").write_text(
         f"AVA_IMPERSONATION_ACK_WINDOW_SECONDS={window}\n"
         f"AVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS={attempts}\n"

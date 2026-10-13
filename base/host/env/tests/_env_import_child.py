@@ -9,9 +9,9 @@ import sys
 
 
 def declaration_projection() -> None:
-    from base.host.env.audit import _load_alias_metadata
+    from base.host.env.audit import load_alias_metadata
 
-    metadata = _load_alias_metadata()
+    metadata = load_alias_metadata()
     assert metadata["AVA_DB_URL"][1] is True
     assert "base.config._full" not in sys.modules
     assert "base.config.admin.metadata" not in sys.modules

@@ -59,7 +59,7 @@ _FULL = "full"
 # (base/host/env/bootstrap.py _FETCH_TIMEOUT_S = 10s) -- the slowest legitimate
 # segment of a build. A slower build degrades to the retryable
 # ConfigBuildWaitTimeoutError, so no operator knob is warranted.
-_BUILD_WAIT_TIMEOUT_SECONDS = 30.0
+BUILD_WAIT_TIMEOUT_SECONDS = 30.0
 
 # The one upgrade lock: prepare, the build, and the install run under it.
 
@@ -217,7 +217,7 @@ class _DomainView:
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
         if not self._owner._maybe_upgrade(f"settings.{domain}.{name}"):
-            raise AttributeError(_build_window_message(f"settings.{domain}.{name}"))
+            raise AttributeError(build_window_message(f"settings.{domain}.{name}"))
         return getattr(getattr(self._owner._current_settings(), domain), name)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -277,7 +277,7 @@ class _SettingsView:
                 view = domains[name] = _DomainView(self._owner, name)
             return view
         if not self._owner._maybe_upgrade(f"settings attribute {name!r}"):
-            raise AttributeError(_build_window_message(f"settings.{name}"))
+            raise AttributeError(build_window_message(f"settings.{name}"))
         return getattr(self._owner._current_settings(), name)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -286,7 +286,7 @@ class _SettingsView:
         setattr(self._owner._current_settings(), name, value)
 
 
-def _build_window_message(target: str) -> str:
+def build_window_message(target: str) -> str:
     return f"config boot-lite: {target} is not readable while the eager config build is in flight"
 
 
@@ -303,7 +303,7 @@ class ConfigBuildWaitTimeoutError(AttributeError):
 def _build_wait_timeout_message(target: str) -> str:
     return (
         f"config boot-lite: {target} is not readable yet: the in-flight eager config "
-        f"build exceeded the {_BUILD_WAIT_TIMEOUT_SECONDS:g}s wait bound; retry shortly"
+        f"build exceeded the {BUILD_WAIT_TIMEOUT_SECONDS:g}s wait bound; retry shortly"
     )
 
 
@@ -619,7 +619,7 @@ class ConfigBoot:
         itself so the real error surfaces. On expiry the read raises the
         retryable ConfigBuildWaitTimeoutError -- the other thread's build keeps running
         and installs when it finishes, so a retry is the right move."""
-        if not self._lock.acquire(timeout=_BUILD_WAIT_TIMEOUT_SECONDS):
+        if not self._lock.acquire(timeout=BUILD_WAIT_TIMEOUT_SECONDS):
             raise ConfigBuildWaitTimeoutError(_build_wait_timeout_message(reason))
         try:
             if self.mode != _FULL:
@@ -744,7 +744,7 @@ def upgrade(reason: str) -> Any:
     return _state.upgrade(reason)
 
 
-def _maybe_upgrade(reason: str) -> bool:
+def maybe_upgrade(reason: str) -> bool:
     return _state._maybe_upgrade(reason)
 
 

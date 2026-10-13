@@ -16,7 +16,7 @@ from dotenv import dotenv_values
 from base import config
 from base.cluster import authority
 from base.cluster.authority import unit
-from base.cluster.authority.tests.unit_capability_support import _HUMAN, _MACHINE
+from base.cluster.authority.tests.unit_capability_support import HUMAN, MACHINE
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.host.env import bootstrap
@@ -40,7 +40,7 @@ def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAut
     the co-located runner under test."""
     from base.host.env import runtime_config
 
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: born.home)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: born.home)
     monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")
     complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
@@ -56,7 +56,7 @@ def _runner_args(bundle: Path) -> Any:
             "--serve-agent-runner",
             "--no-serve-gateway",
             "--machine-name",
-            _MACHINE,
+            MACHINE,
             "--gateway-url",
             "http://127.0.0.1:1",
             "--db-capability",
@@ -70,7 +70,7 @@ def _issue_bundle(out: Path, runner: Path, capsys: pytest.CaptureFixture[str]) -
     from cli.commands.cluster.control import cmd_db_authority_issue_unit
 
     assert (
-        cmd_db_authority_issue_unit(machine=_MACHINE, home=str(runner), out=str(out), ttl_hours=1)
+        cmd_db_authority_issue_unit(machine=MACHINE, home=str(runner), out=str(out), ttl_hours=1)
         == 0
     )
     printed = capsys.readouterr().out
@@ -94,7 +94,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
 ) -> None:
     bootstrap_authority = _serve_on_loopback(monkeypatch, born)
     # The gateway's API is authenticated: the bundle carries the unit's API admission.
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", HUMAN)
     runner = (tmp_path / "runner").resolve()
     bundle = tmp_path / "mini.bundle"
     printed, key = _issue_bundle(bundle, runner, capsys)
@@ -161,6 +161,6 @@ def test_a_remote_unit_home_holding_the_human_secret_refuses_to_join(tmp_path: P
     it refuses before any fetch or identity effect."""
     home = (tmp_path / "legacy-runner").resolve()
     home.mkdir(mode=0o700)
-    values = {"AVA_GATEWAY_URL": "http://10.0.0.7:8000", "AVA_CLUSTER_SECRET": _HUMAN}
+    values = {"AVA_GATEWAY_URL": "http://10.0.0.7:8000", "AVA_CLUSTER_SECRET": HUMAN}
     with pytest.raises(ValueError, match="records the human cluster secret"):
         unit_join.join_gateway(values, home, None)

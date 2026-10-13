@@ -131,7 +131,7 @@ def test_set_list_field_writes_bare_env_and_round_trips(
         )
     )
     monkeypatch.setattr(cfg, "_get_config", lambda _machine: view)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: tmp_path)
 
     def _persist(body: dict[str, Any], _machine: str | None) -> ConfigWriteResult:
         runtime_config.write_fields(body, set())
@@ -674,7 +674,7 @@ def test_config_audit_local_reads_newest_first_and_filters(
     """No --machine: reads this unit's own JSONL; --key keeps one alias's records."""
     from base.host.env.audit import record_env_write
 
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: tmp_path)
     env_path = tmp_path / ".env"
     env_path.write_text("AVA_MODEL=m\n")
     record_env_write(

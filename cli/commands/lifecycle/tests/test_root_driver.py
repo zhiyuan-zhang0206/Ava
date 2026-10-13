@@ -488,16 +488,16 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
 
     ambient = (
         registry.HOST_PASSTHROUGH_KEYS
-        | registry._TEMP_DIR_KEYS
+        | registry.TEMP_DIR_KEYS
         | registry.NETWORK_PROXY_KEYS
         | {"PYTHONUTF8"}
     )
     declared = (
-        {row.key for row in registry._PASSTHROUGH_ROWS}
+        {row.key for row in registry.PASSTHROUGH_ROWS}
         | set(registry.FIELD_ALIASES.values())
         | {"PYTHONUTF8"}
     )
-    paths = {"HOME", "PATH", *registry._TEMP_DIR_KEYS}
+    paths = {"HOME", "PATH", *registry.TEMP_DIR_KEYS}
     for key in declared:
         monkeypatch.setenv(key, str(tmp_path) if key in paths else "ambient")
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))

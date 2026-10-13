@@ -57,7 +57,7 @@ def _unadmit(home: Path) -> None:
     """The state of a birth that has minted its generation but not admitted it:
     the generation is pending, nothing is active."""
     current = ledger.require_ledger(home)
-    ledger._write(home, ledger._replace(current, active=None, pending=current.active))
+    ledger.write(home, ledger._replace(current, active=None, pending=current.active))
 
 
 @pytest.fixture
@@ -318,7 +318,7 @@ def test_a_machine_token_cannot_choose_the_human_secret(
 
     store = tmp_path / "config-store"
     store.mkdir()
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
     with gateway_test_client(config_app(), machine=machine_identity) as client:
@@ -343,7 +343,7 @@ def test_a_machine_token_cannot_open_the_mcp_endpoint(
 
     store = tmp_path / "config-store"
     store.mkdir()
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
     with gateway_test_client(config_app(), machine=machine_identity) as client:

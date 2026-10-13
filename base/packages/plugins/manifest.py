@@ -57,28 +57,28 @@ _MANIFEST_OPS = ("==", ">=", "<=", ">", "<", "=")
 # the manifest grammar is deliberately the narrow, auditable subset the spec
 # defines; pyproject specifiers outside the same subset (plus `~=`, `==X.Y.*`)
 # are refused by `_parse_py_spec` below rather than half-analyzed.
-_UPPER_OPS = ("<", "<=", "==")
-_LOWER_OPS = (">", ">=", "==")
+UPPER_OPS = ("<", "<=", "==")
+LOWER_OPS = (">", ">=", "==")
 
-_CLAUSE_SPLIT_RE = re.compile(r"[,\s]+")
+CLAUSE_SPLIT_RE = re.compile(r"[,\s]+")
 
 
 @dataclass(frozen=True)
-class _Clause:
+class Clause:
     op: str  # normalized: "=" folded to "=="
     version: Version
 
 
-def parse_range(raw: str) -> tuple[_Clause, ...]:
+def parse_range(raw: str) -> tuple[Clause, ...]:
     """Parse a manifest range; raises `ManifestError` on anything unsupported.
 
     A clause against a version that fails to parse is refused too — a range is
     a contract, and a typo'd version must not silently read as "any".
     """
-    parts = [p for p in _CLAUSE_SPLIT_RE.split(raw.strip()) if p]
+    parts = [p for p in CLAUSE_SPLIT_RE.split(raw.strip()) if p]
     if not parts:
         raise ManifestError(f"empty version range {raw!r}")
-    clauses: list[_Clause] = []
+    clauses: list[Clause] = []
     for part in parts:
         op = next((o for o in _MANIFEST_OPS if part.startswith(o)), None)
         rest = part
@@ -91,12 +91,12 @@ def parse_range(raw: str) -> tuple[_Clause, ...]:
         ver = parse_version(rest)
         if ver is None:
             raise ManifestError(f"range {raw!r}: {rest!r} is not a version")
-        clauses.append(_Clause("==" if op == "=" else op, ver))
+        clauses.append(Clause("==" if op == "=" else op, ver))
     return tuple(clauses)
 
 
-def _has_upper(clauses: tuple[_Clause, ...]) -> bool:
-    return any(c.op in _UPPER_OPS for c in clauses)
+def _has_upper(clauses: tuple[Clause, ...]) -> bool:
+    return any(c.op in UPPER_OPS for c in clauses)
 
 
 def range_allows(raw: str, version: str) -> bool:
@@ -133,7 +133,7 @@ def range_allows(raw: str, version: str) -> bool:
 _NAME_FORMAT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 # Leading package name of a PEP 508 requirement (`name[extras] >=1,<2`); shared
 # with `base/packages/plugins/pyproject_mirror.py` (its pyproject-side parser imports this).
-_NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)")
+NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
 HOOK_POINTS = ("after_init", "before_llm", "before_exec", "after_exec")
 CONTRIBUTION_KEYS = {
@@ -377,7 +377,7 @@ def _validate_python_packages(dependencies: dict[str, Any], errors: list[str]) -
             errors.append("dependencies.pythonPackages entries must be non-empty strings")
             continue
         entry = raw_entry.strip()
-        m = _NAME_RE.match(entry)
+        m = NAME_RE.match(entry)
         if m is None:
             errors.append(f"dependencies.pythonPackages: cannot read a package name from {entry!r}")
             continue
@@ -476,7 +476,7 @@ def _validate_lifecycle(data: dict[str, Any], errors: list[str]) -> Lifecycle:
     )
 
 
-def _validate(data: dict[str, Any]) -> PluginManifest:
+def validate(data: dict[str, Any]) -> PluginManifest:
     """Validate a parsed manifest dict; raises `ManifestError` listing every
     problem found (one report instead of first-error iteration)."""
     errors: list[str] = []
@@ -527,7 +527,7 @@ def load_manifest(pkg_dir: Path) -> PluginManifest:
         raise ManifestError(f"{path} is not valid JSON: {e}") from e
     if not isinstance(data, dict):
         raise ManifestError(f"{path}: manifest must be a JSON object; got {type(data).__name__}")
-    return _validate(data)
+    return validate(data)
 
 
 def load_optional_manifest(pkg_dir: Path) -> PluginManifest | None:

@@ -21,11 +21,11 @@ MIGRATIONS_DIR: Path = Path(__file__).resolve().parents[3] / "migrations"
 
 # Filename schema: `YYYYMMDDTHHMMSS_<kebab-name>.sql`. Timestamp = 8-digit date +
 # 'T' + 6-digit time; name = lowercase alnum words joined by single hyphens.
-_STEM_RE = r"(\d{8}T\d{6}_[a-z0-9]+(?:-[a-z0-9]+)*)"
-_FILENAME_RE = re.compile(rf"^{_STEM_RE}\.sql$")
+STEM_RE = r"(\d{8}T\d{6}_[a-z0-9]+(?:-[a-z0-9]+)*)"
+FILENAME_RE = re.compile(rf"^{STEM_RE}\.sql$")
 
 
-def _git_probe(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def git_probe(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     """Read-only git probe: capture output, never raise.
 
     The three call sites share this shape (argv is repo-internal literals + a
@@ -40,14 +40,14 @@ def _git_probe(args: list[str], *, cwd: Path | None = None) -> subprocess.Comple
     )
 
 
-def _migration_stem(filename: str) -> str | None:
+def migration_stem(filename: str) -> str | None:
     """Return the migration NAME (stem without `.sql`) if `filename` is a valid
     up-migration name, else None. Dotfiles / non-.sql -> None."""
-    m = _FILENAME_RE.match(filename)
+    m = FILENAME_RE.match(filename)
     return m.group(1) if m else None
 
 
-def _assert_unique(names: Iterable[str]) -> None:
+def assert_unique(names: Iterable[str]) -> None:
     """Assert migration names are unique. Raises MigrationLayoutError naming a
     collision. Timestamp prefixes make collisions rare, but a hand-copied name
     could still duplicate; the primary key would reject it at apply, so catch it
@@ -59,7 +59,7 @@ def _assert_unique(names: Iterable[str]) -> None:
         seen.add(name)
 
 
-def _tracked_migration_paths() -> set[Path] | None:
+def tracked_migration_paths() -> set[Path] | None:
     """The absolute paths under migrations/ that git tracks in this checkout.
 
     `None` when migrations/ is not inside a git worktree (either `git
@@ -76,7 +76,7 @@ def _tracked_migration_paths() -> set[Path] | None:
     """
 
     migrations_dir = MIGRATIONS_DIR
-    root_result = _git_probe(["-C", str(migrations_dir), "rev-parse", "--show-toplevel"])
+    root_result = git_probe(["-C", str(migrations_dir), "rev-parse", "--show-toplevel"])
     if root_result.returncode != 0:
         return None
     root = Path(root_result.stdout.strip())
@@ -84,7 +84,7 @@ def _tracked_migration_paths() -> set[Path] | None:
         rel = migrations_dir.resolve().relative_to(root)
     except ValueError:
         return None  # migrations dir outside the worktree — cannot verify
-    listing = _git_probe(["-C", str(root), "ls-files", "-z", "--", str(rel)])
+    listing = git_probe(["-C", str(root), "ls-files", "-z", "--", str(rel)])
     if listing.returncode != 0:
         return None
     return {root / entry for entry in listing.stdout.split("\0") if entry}
@@ -112,7 +112,7 @@ def _list_migration_files() -> list[tuple[str, Path]]:
     if not migrations_dir.is_dir():
         raise MigrationLayoutError(f"migrations dir does not exist: {migrations_dir}")
 
-    tracked = _tracked_migration_paths()
+    tracked = tracked_migration_paths()
     if tracked is None:
         raise MigrationLayoutError(
             f"{migrations_dir} is not inside a git worktree — cannot verify which "
@@ -130,7 +130,7 @@ def _list_migration_files() -> list[tuple[str, Path]]:
         if path not in tracked:
             skipped.append(path)
             continue
-        stem = _migration_stem(path.name)
+        stem = migration_stem(path.name)
         if stem is None:
             raise MigrationLayoutError(
                 f"migration filename does not match YYYYMMDDTHHMMSS_<kebab-name>.sql: {path.name}"
@@ -145,7 +145,7 @@ def _list_migration_files() -> list[tuple[str, Path]]:
             names=", ".join(p.name for p in skipped),
         )
     files.sort(key=lambda f: f[0])
-    _assert_unique([n for n, _ in files])
+    assert_unique([n for n, _ in files])
     return files
 
 
@@ -162,7 +162,7 @@ def untracked_migration_files() -> list[str]:
     would add nothing.
     """
     migrations_dir = MIGRATIONS_DIR
-    tracked = _tracked_migration_paths()
+    tracked = tracked_migration_paths()
     if tracked is None:
         return []
     return sorted(
@@ -222,13 +222,13 @@ def validate_migration_layout(names: Iterable[str]) -> None:
     for name in names:
         if name.startswith(".") or not name.endswith(".sql"):
             continue
-        stem = _migration_stem(name)
+        stem = migration_stem(name)
         if stem is None:
             raise MigrationLayoutError(
                 f"migration filename does not match YYYYMMDDTHHMMSS_<kebab-name>.sql: {name}"
             )
         stems.append(stem)
-    _assert_unique(stems)
+    assert_unique(stems)
 
 
 def validate_migrations_at_ref(ref: str, *, repo_root: Path | None = None) -> None:
@@ -247,7 +247,7 @@ def validate_migrations_at_ref(ref: str, *, repo_root: Path | None = None) -> No
     """
 
     root = repo_root if repo_root is not None else MIGRATIONS_DIR.parent
-    result = _git_probe(["ls-tree", "-r", "--name-only", "-z", ref, "--", "migrations"], cwd=root)
+    result = git_probe(["ls-tree", "-r", "--name-only", "-z", ref, "--", "migrations"], cwd=root)
     if result.returncode != 0:
         raise MigrationLayoutError(
             f"cannot read migrations/ at git ref {ref!r}: "

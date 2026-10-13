@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
 
-from base.config.base import EnvSettings, _unit_home
+from base.config.base import EnvSettings, unit_home
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.predicates import is_ipv4_literal, is_loopback_host
 from base.host.net.url_secret import url_host, url_with_host, url_with_query_param
@@ -512,7 +512,7 @@ class DataPlaneSettings(EnvSettings):
             and not _is_runner_db_url(self.db_url)
             and is_loopback_host(urlsplit(self.db_url).hostname or "")
         )
-        home = _unit_home().expanduser().resolve()
+        home = unit_home().expanduser().resolve()
         on_default_home = home == (Path.home() / ".ava").resolve()
         # AVA_PROCESS_PROFILE is a launcher-only process marker, not a Settings
         # field. It must remain an environment read so agent startup can preserve

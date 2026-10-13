@@ -2,7 +2,7 @@
 
 `base/host/env/runtime_config.py` reads/writes `.env` by each field's env alias.
 
-`fake_ava_home` redirects `_ava_home()` (and so `.env`) to tmp_path.
+`fake_ava_home` redirects `ava_home()` (and so `.env`) to tmp_path.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from base.host.env import runtime_config as rt
 
 @pytest.fixture
 def fake_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Redirect _ava_home (and so this unit's .env) to tmp_path."""
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    """Redirect ava_home (and so this unit's .env) to tmp_path."""
+    monkeypatch.setattr(rt, "ava_home", lambda: tmp_path)
     return tmp_path
 
 

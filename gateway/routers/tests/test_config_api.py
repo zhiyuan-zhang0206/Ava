@@ -342,7 +342,7 @@ def _clean_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     so a PUT in these tests writes there instead of the real unit .env. The PUT no
     longer mutates the in-memory Settings (strict persist-and-signal), so there is
     nothing to save/restore."""
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: tmp_path)
     return tmp_path
 
 

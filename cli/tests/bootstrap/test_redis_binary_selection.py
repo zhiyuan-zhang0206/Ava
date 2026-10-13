@@ -137,7 +137,7 @@ def test_local_config_write_only_changes_target_home(
     target = _home(tmp_path / "gateway", None)
     sibling = _home(tmp_path / "preview", None)
     sibling_bytes = (sibling / ".env").read_bytes()
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: target)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: target)
     target_bytes = (target / ".env").read_bytes()
     assert config_cli.cmd_config_set(["redis_bin_dir=relative/bin"], None, local=True) == 1
     assert (target / ".env").read_bytes() == target_bytes

@@ -32,5 +32,5 @@ def serving_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> RootBirth:
         launch_digest="b" * 64,
         runtime=runtime,
     )
-    monkeypatch.setattr(start_serving, "_observe_root", lambda: birth)
+    monkeypatch.setattr(start_serving, "observe_root", lambda: birth)
     return birth

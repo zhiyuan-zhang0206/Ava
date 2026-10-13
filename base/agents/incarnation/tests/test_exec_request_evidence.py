@@ -194,10 +194,10 @@ def test_bounded_age_resolves_profile_safely_without_the_sandbox_domain(
     monkeypatch.setattr(
         runtime_config, "read_env_aliases", lambda: {"AVA_EXEC_NODE_TIMEOUT_SECONDS": "600"}
     )
-    assert exec_request_evidence._exec_node_ceiling_s() == 600.0
+    assert exec_request_evidence.exec_node_ceiling_s() == 600.0
 
     monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
-    assert exec_request_evidence._exec_node_ceiling_s() == 1200.0
+    assert exec_request_evidence.exec_node_ceiling_s() == 1200.0
 
 
 def test_routine_stale_quarantine_is_not_the_bounded_alert(
@@ -450,7 +450,7 @@ def test_cli_entry_captures_once_and_keeps_the_database_gated(
     monkeypatch.setattr(code_version, "first_parent_count", count)
     monkeypatch.setattr(exec_request_evidence, "process_name", lambda: "diagnostic")
     monkeypatch.setattr(exec_request_evidence.Database, "from_settings", create)
-    monkeypatch.setattr(exec_request_evidence, "_row_identity", identity)
+    monkeypatch.setattr(exec_request_evidence, "row_identity", identity)
     monkeypatch.setattr(exec_request_evidence, "survey", Mock(return_value=[]))
     monkeypatch.setattr(exec_request_evidence, "_report", Mock())
 

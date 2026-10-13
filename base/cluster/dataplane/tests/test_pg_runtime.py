@@ -139,7 +139,7 @@ def test_platform_without_an_artifact_and_without_an_install_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(runtime_binaries, "vendored_pg_supported", lambda: False)
-    monkeypatch.setattr(pg_runtime, "_installed_server", lambda: None)
+    monkeypatch.setattr(pg_runtime, "installed_server", lambda: None)
     with pytest.raises(RuntimeError, match="no installed PostgreSQL 17"):
         pg_runtime.ensure_pg_runtime()
 

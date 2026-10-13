@@ -63,7 +63,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
     )
     monkeypatch.setattr(
         loop,
-        "_load_segments",
+        "load_segments",
         lambda _db, _agent_id, _boundary: (seen.get("history", inbound_history()), None),
     )
 
@@ -81,7 +81,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
         seen["kw"] = kw
         return seen["answer"](located) if "answer" in seen else _result(located)
 
-    monkeypatch.setattr(loop, "_describe", describe)
+    monkeypatch.setattr(loop, "describe", describe)
     return seen
 
 
@@ -150,7 +150,7 @@ async def test_a_database_blink_fails_the_job_with_an_event_and_is_not_retried(
     def blink(*_a: object) -> object:
         raise psycopg.OperationalError("the database closed the connection")
 
-    monkeypatch.setattr(loop, "_load_segments", blink)
+    monkeypatch.setattr(loop, "load_segments", blink)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 2, model_catalog=model_catalog)
     [(status, attempts, error)] = await _status(aops_pool)
@@ -237,9 +237,9 @@ async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
         await asyncio.sleep(3600)
         return loop.Outcome("done")
 
-    monkeypatch.setattr(loop, "_run_job", hang)
+    monkeypatch.setattr(loop, "run_job", hang)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    consumer = loop._Consumer(
+    consumer = loop.Consumer(
         aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     )
     task = asyncio.create_task(consumer.run_until_idle())
@@ -309,7 +309,7 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
     monkeypatch.setattr(
         loop.telemetry, "emit", lambda _k, name, attributes=None: events.append((name, attributes))
     )
-    monkeypatch.setattr(loop, "_load_segments", lambda *_a: (inbound_history(), 0))
+    monkeypatch.setattr(loop, "load_segments", lambda *_a: (inbound_history(), 0))
     await enqueue_chunk(
         aops_pool,
         5,
@@ -337,7 +337,7 @@ async def test_generation_error_fails_on_the_first_attempt_with_an_event(
     def boom(*_a: object, **_k: object) -> str:
         raise GenerateError("provider down")
 
-    monkeypatch.setattr(loop, "_describe", boom)
+    monkeypatch.setattr(loop, "describe", boom)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await _status(aops_pool)
@@ -399,7 +399,7 @@ async def test_checkpoint_read_failure_fails_the_job(
     def fail(*_a: object) -> None:
         raise CheckpointReadError("db blip")
 
-    monkeypatch.setattr(loop, "_load_segments", fail)
+    monkeypatch.setattr(loop, "load_segments", fail)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await _status(aops_pool)
@@ -491,7 +491,7 @@ async def test_raw_calls_are_persisted_for_a_done_job(
         args[5].append(_call(0, reply))  # type: ignore[attr-defined]
         return _result(args[3])  # type: ignore[arg-type]
 
-    monkeypatch.setattr(loop, "_describe", describe)
+    monkeypatch.setattr(loop, "describe", describe)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [row] = await _calls(aops_pool)
@@ -513,7 +513,7 @@ async def test_a_failed_call_is_recorded_and_the_job_fails(
         args[5].append(_call(0, None, "provider down"))  # type: ignore[attr-defined]
         raise GenerateError("provider down")
 
-    monkeypatch.setattr(loop, "_describe", boom)
+    monkeypatch.setattr(loop, "describe", boom)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [row] = await _calls(aops_pool)
@@ -531,13 +531,13 @@ async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
     monkeypatch.setattr(loop.telemetry, "emit", lambda _kind, name, **_kw: emitted.append(name))
     from base.agents.history.hierarchy import chunks
 
-    monkeypatch.setattr(chunks, "_INSERT_CALL_SQL", "INSERT INTO no_such_table VALUES (1)")
+    monkeypatch.setattr(chunks, "INSERT_CALL_SQL", "INSERT INTO no_such_table VALUES (1)")
 
     def describe(*args: object, **_k: object) -> ChunkResult:
         args[5].append(_call(0, AIMessage(content="x")))  # type: ignore[attr-defined]
         return _result(args[3])  # type: ignore[arg-type]
 
-    monkeypatch.setattr(loop, "_describe", describe)
+    monkeypatch.setattr(loop, "describe", describe)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert "understanding_call_record_failed" in emitted
@@ -551,7 +551,7 @@ async def _run_rounds(
     """`count` times: claim at most one job and finish it (the loop's claim, one step at a time)."""
     for _ in range(count):
         async with asyncio.TaskGroup() as tg:
-            await loop._Consumer(
+            await loop.Consumer(
                 pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
             ).claim(tg)
 
@@ -594,7 +594,7 @@ async def test_a_refused_grouping_fails_the_job_at_once_without_nodes(
     def refused(*_a: object, **_k: object) -> str:
         raise GenerateError("grouping reply refused after 2 correction(s): no <groups>")
 
-    monkeypatch.setattr(loop, "_describe", refused)
+    monkeypatch.setattr(loop, "describe", refused)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await _status(aops_pool)
@@ -651,7 +651,7 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
     _seams["answer"] = answer
     await _enqueue_ends(aops_pool, 1, "m1", "m3")  # agent 1: a1 then a2
     await _enqueue_ends(aops_pool, 2, "m2")  # agent 2: b
-    await loop._Consumer(
+    await loop.Consumer(
         aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     ).run_until_idle()
     assert [s for s, *_ in await _status(aops_pool)] == ["done"] * 3
@@ -671,7 +671,7 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
     _seams["answer"] = answer
     for agent in range(1, 6):
         await _enqueue_ends(aops_pool, agent, "m1")
-    consumer = loop._Consumer(
+    consumer = loop.Consumer(
         aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     )
     await consumer.run_until_idle()
@@ -690,7 +690,7 @@ async def test_one_jobs_failure_touches_no_other_job(
     _seams["answer"] = answer
     for agent, end in ((1, "m1"), (2, "m2"), (3, "m1")):
         await _enqueue_ends(aops_pool, agent, end)
-    await loop._Consumer(
+    await loop.Consumer(
         aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     ).run_until_idle()
     status = [(s, e) for s, _, e in await _status(aops_pool)]
@@ -711,7 +711,7 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
     monkeypatch.setattr(loop, "_settle", settle)
     for agent in (1, 2):
         await _enqueue_ends(aops_pool, agent, "m1")
-    consumer = loop._Consumer(
+    consumer = loop.Consumer(
         aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     )
     await consumer.run_until_idle()  # does not raise
@@ -727,7 +727,7 @@ async def test_the_backlog_event_carries_in_flight(
         loop.telemetry, "emit", lambda _k, _name, attributes=None: seen.append(attributes or {})
     )
     await _enqueue_ends(aops_pool, 1, "m1")
-    consumer = loop._Consumer(
+    consumer = loop.Consumer(
         aops_pool, MagicMock(), [], catalog=model_catalog, llm_override="", inputs=read_inputs()
     )
     consumer.in_flight = 1

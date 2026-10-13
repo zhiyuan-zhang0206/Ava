@@ -55,7 +55,7 @@ class _FieldInfoLike(Protocol):
 # single capability (cluster-wide policy, or the host/carrier identity both
 # capabilities on a box share). DISPLAY grouping only — orthogonal to `scope`,
 # which alone drives distribution + write routing.
-_ALLOWED_CAPABILITIES = frozenset({"gateway", "agent-runner", "common"})
+ALLOWED_CAPABILITIES = frozenset({"gateway", "agent-runner", "common"})
 # The resolved capability of a field — the top-level config-panel section.
 Capability = Literal["gateway", "agent-runner", "common"]
 
@@ -167,13 +167,13 @@ Lifecycle = Literal["frozen", "live"]
 # kind that must CONSUME the field (see the profile cross-check in
 # _build_registry); "schedule" is the gateway-hosted schedule runner, which has
 # no config profile and reads every domain.
-_ALLOWED_RESTART_REQUIRED = frozenset({"", "agent", "all", "gateway", "ops", "schedule"})
+ALLOWED_RESTART_REQUIRED = frozenset({"", "agent", "all", "gateway", "ops", "schedule"})
 # restart_required -> the PROCESS_PROFILES set that must contain the field's
 # domain for the value to make sense (the profile sets ARE the consumption
 # matrix, verified bidirectionally by cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py).
 # "schedule" / "all" / "" have no named-kind constraint ("schedule" runs without
 # a profile and constructs every domain; "all" is satisfied by any consumer).
-_RESTART_REQUIRED_PROFILE = {
+RESTART_REQUIRED_PROFILE = {
     "agent": "agent",
     "gateway": "gateway",
     "ops": "runner",
@@ -186,10 +186,10 @@ def _validate_field(name: str, attr: str, extra: dict[str, Any], default_capabil
     # The field's capability is its explicit override or the domain default;
     # a bad override can never load (same fail-fast posture as scope).
     capability = extra.get("capability", default_capability)
-    if capability not in _ALLOWED_CAPABILITIES:
+    if capability not in ALLOWED_CAPABILITIES:
         raise RuntimeError(
             f"config field {name!r} ({attr}) has capability={capability!r}; must be "
-            f"one of {sorted(_ALLOWED_CAPABILITIES)} — it names the config-panel "
+            f"one of {sorted(ALLOWED_CAPABILITIES)} — it names the config-panel "
             f"section the field renders under"
         )
     if scope not in _ALLOWED_SCOPES:
@@ -244,10 +244,10 @@ def _validate_lifecycle(name: str, attr: str, extra: dict[str, Any]) -> None:
 
 def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> None:
     restart_required = extra.get("restart_required", "")
-    if restart_required not in _ALLOWED_RESTART_REQUIRED:
+    if restart_required not in ALLOWED_RESTART_REQUIRED:
         raise RuntimeError(
             f"config field {name!r} ({attr}) has restart_required={restart_required!r}; "
-            f"must be one of {sorted(_ALLOWED_RESTART_REQUIRED)} — it names the process "
+            f"must be one of {sorted(ALLOWED_RESTART_REQUIRED)} — it names the process "
             f"the operator must restart after a change, and the panel/CLI prompt from it"
         )
     # Cross-check against the consumption matrix: restart_required names a
@@ -259,7 +259,7 @@ def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> N
     # effect (the telegram/feishu/im_* 11-field bug this check seals, lost
     # in the main rebuild and re-landed by #1226). "schedule" / "all" / ""
     # carry no constraint.
-    profile_kind = _RESTART_REQUIRED_PROFILE.get(restart_required)
+    profile_kind = RESTART_REQUIRED_PROFILE.get(restart_required)
     if profile_kind is not None:
         from base.config.profiles import PROCESS_PROFILES
 
@@ -309,7 +309,7 @@ def _build_registry() -> dict[str, _FieldRef]:
                 name=name,
                 domain=attr,
                 group=label,
-                # Validated against _ALLOWED_CAPABILITIES just above (a bad value
+                # Validated against ALLOWED_CAPABILITIES just above (a bad value
                 # already raised), so the narrowing to Capability is sound.
                 capability=cast(Capability, capability),
                 info=info,

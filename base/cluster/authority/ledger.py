@@ -89,7 +89,7 @@ def _require_private(path: Path, info: os.stat_result, *, directory: bool) -> No
         raise LedgerRefusedError(f"database authority path {path} is not owner-only")
 
 
-def _read_private(path: Path) -> bytes:
+def read_private(path: Path) -> bytes:
     """Bounded read of an owner-only regular file; FileNotFoundError passes through."""
     _require_private(path, path.lstat(), directory=False)
     try:
@@ -130,7 +130,7 @@ def load_ledger(home: Path) -> Ledger | None:
         return None
     _require_private(directory, info, directory=True)
     try:
-        body = _read_private(ledger_path(home))
+        body = read_private(ledger_path(home))
     except FileNotFoundError:
         if _secret_published(home):
             raise LedgerRefusedError("the generation secret exists without a ledger") from None
@@ -154,7 +154,7 @@ def require_ledger(home: Path) -> Ledger:
 
 
 @contextmanager
-def _locked(home: Path) -> Generator[None]:
+def locked(home: Path) -> Generator[None]:
     """Serialize mutations; an existing store must already be private (never repaired)."""
     if not home.is_absolute():
         raise LedgerRefusedError("the database authority home must be absolute")
@@ -167,7 +167,7 @@ def _locked(home: Path) -> Generator[None]:
         yield
 
 
-def _write(home: Path, ledger: Ledger) -> None:
+def write(home: Path, ledger: Ledger) -> None:
     write_private_bytes(ledger_path(home), _encode(ledger))
 
 
@@ -183,7 +183,7 @@ def _fsync_dir(directory: Path) -> None:
         os.close(fd)
 
 
-def _publish_exclusive(path: Path, data: bytes) -> None:
+def publish_exclusive(path: Path, data: bytes) -> None:
     """Publish ``data`` at ``path`` complete or not at all; never overwrite."""
     directory = ensure_private_dir(path.parent)
     temporary = directory / f".{path.name}.{uuid.uuid4().hex}.tmp"
@@ -208,7 +208,7 @@ def create_ledger(home: Path, *, owner: str, groups: Groups) -> Ledger:
 
     Birth is the only path that establishes a home's authority store.
     """
-    with _locked(home):
+    with locked(home):
         existing = load_ledger(home)
         if existing is not None:
             if (existing.owner, existing.groups) != (owner, groups):
@@ -217,7 +217,7 @@ def create_ledger(home: Path, *, owner: str, groups: Groups) -> Ledger:
         if _secret_published(home):
             raise LedgerRefusedError("the generation secret exists without a ledger")
         ledger = Ledger(version=1, home=str(home), owner=owner, groups=groups)
-        _write(home, ledger)
+        write(home, ledger)
         return ledger
 
 
@@ -248,7 +248,7 @@ def begin_mint(home: Path, *, encrypt: Encrypt) -> Generation:
     the ledger does not yet name; it never mints another set of credentials.
     Refuses once the generation is active.
     """
-    with _locked(home):
+    with locked(home):
         ledger = require_ledger(home)
         if ledger.pending is not None:
             return ledger.pending
@@ -260,10 +260,10 @@ def begin_mint(home: Path, *, encrypt: Encrypt) -> Generation:
                 child.unlink()  # never published, so never referenced by the ledger
         path = secret_path(home)
         try:
-            body = _read_private(path)
+            body = read_private(path)
         except FileNotFoundError:
             body = _encode(_new_secret(home, encrypt))
-            _publish_exclusive(path, body)
+            publish_exclusive(path, body)
         _parse_secret(home, body)
         gateway, runner = GENERATION_NAMES
         pending = Generation(
@@ -273,13 +273,13 @@ def begin_mint(home: Path, *, encrypt: Encrypt) -> Generation:
             credential_digest=credential_digest(body),
             origin=Origin(kind="birth"),
         )
-        _write(home, _replace(ledger, pending=pending))
+        write(home, _replace(ledger, pending=pending))
         return pending
 
 
 def read_secret(home: Path, generation: Generation) -> GenerationSecret:
     """The generation's secret, bound to the ledger's credential digest."""
-    body = _read_private(secret_path(home))
+    body = read_private(secret_path(home))
     if credential_digest(body) != generation.credential_digest:
         raise LedgerRefusedError("the generation secret does not match the ledger")
     return _parse_secret(home, body)
@@ -291,7 +291,7 @@ def activate(home: Path, verified: VerifiedGeneration) -> Generation:
     The caller performs every activation precondition outside the catalog (the
     pooler userlist and its proof) between ``verify`` and this call.
     """
-    with _locked(home):
+    with locked(home):
         ledger = require_ledger(home)
         current = ledger.generation
         if current is None or (current.number, current.credential_digest, current.roles) != (
@@ -302,5 +302,5 @@ def activate(home: Path, verified: VerifiedGeneration) -> Generation:
             raise LedgerRefusedError("activation must name the exact pending generation")
         if ledger.active is not None:
             return ledger.active
-        _write(home, _replace(ledger, active=current, pending=None))
+        write(home, _replace(ledger, active=current, pending=None))
         return current

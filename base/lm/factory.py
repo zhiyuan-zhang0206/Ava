@@ -75,7 +75,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     # Annotation-only at module scope (`_LLMFactory`, `build_chat_model`);
-    # the runtime isinstance check in `_resolve_override` imports it at the
+    # the runtime isinstance check in `resolve_override` imports it at the
     # call site. Keeps the chat-model stack off the provider-registration path
     # (exec-child boot, task #3633; `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -110,7 +110,7 @@ class _LLMFactory(Protocol):
 
     Newly written fake factories should conform to this signature: take
     model name and explicit agent id (None outside an agent), return a
-    BaseChatModel subclass. `_resolve_override` runs
+    BaseChatModel subclass. `resolve_override` runs
     isinstance(BaseChatModel) validation at the end; bad factories blow up
     at build time rather than crashing deep in the graph.
     """
@@ -287,7 +287,7 @@ def _ensure_provider_key(effective_model: str, *, catalog: ModelCatalog) -> None
     )
 
 
-def _resolve_override(override: str, model: str, *, agent_id: int | None = None) -> BaseChatModel:
+def resolve_override(override: str, model: str, *, agent_id: int | None = None) -> BaseChatModel:
     """Parse `AVA_LLM_OVERRIDE=mod:factory` env; report failure errors in four
     classes hierarchically ("format / module not found / factory not found /
     return type wrong"), so the user can pinpoint."""
@@ -456,7 +456,7 @@ def build_chat_model_bound(
         logger.warning(
             f"AVA_LLM_OVERRIDE active: model={model!r} does not go through real LLM, routed via {override!r}"
         )
-        return _resolve_override(override, model, agent_id=agent_id), None
+        return resolve_override(override, model, agent_id=agent_id), None
 
     # The composition root supplies a complete catalog, including for services
     # that never load agent-side plugin.py.

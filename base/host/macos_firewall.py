@@ -89,7 +89,7 @@ SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 # successful add appears in `--listapps` within a second. Re-read up to
 # `_VERIFY_ATTEMPTS` times before declaring a mutation a no-op.
 _VERIFY_ATTEMPTS = 3
-_VERIFY_RETRY_S = 1.0
+VERIFY_RETRY_S = 1.0
 
 # Both queries are pure reads that answer as an unprivileged user. Short timeout:
 # socketfilterfw talks to a local daemon and answers in milliseconds, and this
@@ -158,7 +158,7 @@ class FirewallAudit:
         )
 
 
-def _query(*args: str) -> str | None:
+def query(*args: str) -> str | None:
     """Run one read-only `socketfilterfw` query. None when it cannot be asked.
 
     Every failure mode collapses to None on purpose: this module's callers report
@@ -188,7 +188,7 @@ def firewall_enabled() -> bool | None:
     `Firewall is disabled. (State = 0)`; the `State = N` tail is matched rather
     than the prose because it is the machine-readable half of the same line.
     """
-    out = _query("--getglobalstate")
+    out = query("--getglobalstate")
     if out is None:
         return None
     match = re.search(r"State\s*=\s*(\d+)", out)
@@ -204,7 +204,7 @@ def allowlisted_paths() -> dict[str, bool] | None:
     built-in service entries (`/usr/sbin/smbd`, `/usr/libexec/sharingd`, …), which
     is harmless here: this is only ever consulted for membership of paths Ava owns.
     """
-    out = _query("--listapps")
+    out = query("--listapps")
     if out is None:
         return None
     rules: dict[str, bool] = {}
@@ -656,7 +656,7 @@ def _persisted_after(paths: tuple[Path, ...]) -> tuple[Path, ...]:
             present = tuple(p for p in paths if _covered(p, rules))
             if len(present) == len(paths):
                 return present
-        time.sleep(_VERIFY_RETRY_S)
+        time.sleep(VERIFY_RETRY_S)
     rules = allowlisted_paths()
     if rules is None:
         return ()

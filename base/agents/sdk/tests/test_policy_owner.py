@@ -17,7 +17,7 @@ def test_stop_retains_late_failure_and_actual_worker(monkeypatch: pytest.MonkeyP
         assert release.wait(5)
         raise original
 
-    monkeypatch.setattr(call_policy, "_read_policy", read)
+    monkeypatch.setattr(call_policy, "read_policy", read)
     owner = call_policy.SamplingPolicyOwner()
     owner.read()
     assert entered.wait(2)
@@ -46,7 +46,7 @@ def test_stop_precedes_success_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
         assert release.wait(5)
         raise original
 
-    monkeypatch.setattr(call_policy, "_read_policy", read)
+    monkeypatch.setattr(call_policy, "read_policy", read)
     owner = call_policy.SamplingPolicyOwner()
     owner.read()
     assert entered.wait(2)

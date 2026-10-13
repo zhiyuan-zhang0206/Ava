@@ -27,11 +27,11 @@ def test_local_policy_reads_live_file(
     monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", lambda: False)
     monkeypatch.setattr(runtime_config, "env_file_path", lambda: env_file)
     env_file.write_text("AVA_SDK_CALL_SAMPLING_ENABLED=true\nAVA_SDK_CALL_SAMPLE_EVERY=4\n")
-    assert call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=4)
+    assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=4)
     env_file.write_text("AVA_SDK_CALL_SAMPLING_ENABLED=false\nAVA_SDK_CALL_SAMPLE_EVERY=7\n")
-    assert call_policy._read_policy() == SamplingPolicy(sampling_enabled=False, sample_every=7)
+    assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=False, sample_every=7)
     env_file.write_text("")
-    assert call_policy._read_policy() == SamplingPolicy()
+    assert call_policy.read_policy() == SamplingPolicy()
 
 
 def test_remote_policy_refreshes_without_waiting_for_network(
@@ -46,7 +46,7 @@ def test_remote_policy_refreshes_without_waiting_for_network(
         assert release.wait(5)
         return SamplingPolicy(sampling_enabled=True, sample_every=3)
 
-    monkeypatch.setattr(call_policy, "_read_policy", read)
+    monkeypatch.setattr(call_policy, "read_policy", read)
     original = cache.refresh
 
     def refresh() -> None:
@@ -74,7 +74,7 @@ def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPat
         raise httpx.ConnectError("gateway unavailable")
 
     reports: list[Any] = []
-    monkeypatch.setattr(call_policy, "_read_policy", read)
+    monkeypatch.setattr(call_policy, "read_policy", read)
     from loguru import logger
 
     sink = logger.add(lambda message: reports.append(message.record))
@@ -108,7 +108,7 @@ def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) 
         return {"AVA_SDK_CALL_SAMPLING_ENABLED": "true", "AVA_SDK_CALL_SAMPLE_EVERY": "2"}
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
-    assert call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
+    assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
     assert requests == [{"timeout": 2.0, "attempts": 1}]
 
 
@@ -144,7 +144,7 @@ def test_expected_fetch_failure_retains_the_valid_snapshot(
     def read() -> SamplingPolicy:
         raise error
 
-    monkeypatch.setattr(call_policy, "_read_policy", read)
+    monkeypatch.setattr(call_policy, "read_policy", read)
     cache.refresh()
     assert cache.read() is snapshot
 
@@ -170,7 +170,7 @@ def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
     def read() -> SamplingPolicy:
         raise error
 
-    monkeypatch.setattr(call_policy, "_read_policy", read)
+    monkeypatch.setattr(call_policy, "read_policy", read)
     cache.refresh()
     depths: list[int] = []
     for _ in range(2):
@@ -183,12 +183,12 @@ def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
     def unavailable() -> SamplingPolicy:
         raise httpx.ConnectError("still offline")
 
-    monkeypatch.setattr(call_policy, "_read_policy", unavailable)
+    monkeypatch.setattr(call_policy, "read_policy", unavailable)
     cache.refresh()
     with pytest.raises(type(error)):
         cache.read()  # An outage must not clear an already-invalid configuration.
     recovered = SamplingPolicy(sampling_enabled=True, sample_every=7)
-    monkeypatch.setattr(call_policy, "_read_policy", lambda: recovered)
+    monkeypatch.setattr(call_policy, "read_policy", lambda: recovered)
     cache.refresh()
     assert cache.read() is recovered
 
@@ -198,7 +198,7 @@ def test_invalid_schema_is_not_reported_as_a_retained_policy(
 ) -> None:
     cache = call_policy.SamplingPolicyOwner()
     cache.value = SamplingPolicy()
-    monkeypatch.setattr(call_policy, "_read_policy", lambda: SamplingPolicy(sample_every=0))
+    monkeypatch.setattr(call_policy, "read_policy", lambda: SamplingPolicy(sample_every=0))
     cache.refresh()
     with pytest.raises(ValidationError):
         cache.read()
@@ -216,7 +216,7 @@ def test_failed_policy_read_still_starts_one_refresh_when_due(
 
     clock = [10.0]
     monkeypatch.setattr(call_policy.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(call_policy, "_read_policy", fail)
+    monkeypatch.setattr(call_policy, "read_policy", fail)
     cache.refresh()
     assert cache.next_refresh == 15.0
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
@@ -230,7 +230,7 @@ def test_failed_policy_read_still_starts_one_refresh_when_due(
         assert release.wait(5)
         return snapshot
 
-    monkeypatch.setattr(call_policy, "_read_policy", recover)
+    monkeypatch.setattr(call_policy, "read_policy", recover)
     original = cache.refresh
 
     def refresh() -> None:

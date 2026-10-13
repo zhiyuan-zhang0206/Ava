@@ -251,14 +251,14 @@ def record_relay_failure(db: Database, lease_id: str, incarnation: RuntimeIncarn
     return row is not None
 
 
-_ABORTED_REASON_PREFIX = "aborted: "
+ABORTED_REASON_PREFIX = "aborted: "
 
 
 def aborted_detail(reason: object) -> str | None:
     """The component-death detail of a supervisor-aborted lease, else None."""
-    if not isinstance(reason, str) or not reason.startswith(_ABORTED_REASON_PREFIX):
+    if not isinstance(reason, str) or not reason.startswith(ABORTED_REASON_PREFIX):
         return None
-    return reason.removeprefix(_ABORTED_REASON_PREFIX).strip() or None
+    return reason.removeprefix(ABORTED_REASON_PREFIX).strip() or None
 
 
 def abort_lease(
@@ -284,7 +284,7 @@ def abort_lease(
     detail = detail.strip()
     if not detail:
         raise ValueError("A nonempty abort detail is required")
-    reason = f"{_ABORTED_REASON_PREFIX}{detail}"
+    reason = f"{ABORTED_REASON_PREFIX}{detail}"
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)

@@ -38,20 +38,20 @@ def test_owned_group_model_readers_are_lazy_isolated_and_live(
             )
             assert not first.is_full() and not second.is_full()
             assert (
-                gc._group_model(MagicMock(), 7, catalog=model_catalog, inputs=first_inputs)[0]
+                gc.group_model(MagicMock(), 7, catalog=model_catalog, inputs=first_inputs)[0]
                 == "first-model"
             )
             assert (
-                gc._group_model(MagicMock(), 7, catalog=model_catalog, inputs=second_inputs)[0]
+                gc.group_model(MagicMock(), 7, catalog=model_catalog, inputs=second_inputs)[0]
                 == "second-model"
             )
             first.set_field("understanding_group_model", "first-update")
             assert (
-                gc._group_model(MagicMock(), 7, catalog=model_catalog, inputs=first_inputs)[0]
+                gc.group_model(MagicMock(), 7, catalog=model_catalog, inputs=first_inputs)[0]
                 == "first-update"
             )
             assert (
-                gc._group_model(MagicMock(), 7, catalog=model_catalog, inputs=second_inputs)[0]
+                gc.group_model(MagicMock(), 7, catalog=model_catalog, inputs=second_inputs)[0]
                 == "second-model"
             )
     finally:

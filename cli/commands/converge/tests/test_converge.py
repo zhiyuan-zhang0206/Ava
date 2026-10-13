@@ -286,7 +286,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     # Seed pgvector too; its injection is covered by the runtime smoke test.
     seeded_ext = rb.vendored_pg_dir() / "share/postgresql/extension"
     seeded_ext.mkdir(parents=True)
-    (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
+    (seeded_ext / rb.PGVECTOR_SQL).write_text("-- seeded\n")
     monkeypatch.setattr(_repo_commands, "_repo_root", lambda: repo)
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
 

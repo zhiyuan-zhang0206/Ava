@@ -64,9 +64,9 @@ from base.cluster.authority.delivery import (
     require_admitted_runtime,
 )
 from base.cluster.authority.ledger import (
-    _locked,
-    _read_private,
     authority_dir,
+    locked,
+    read_private,
     read_secret,
 )
 from base.cluster.authority.model import AuthorityRefusedError, Digest, RoleName
@@ -385,7 +385,7 @@ def load_unit_capability(home: Path) -> UnitCapability | None:
     """The installed capability, bound to `home`; None when none is installed."""
     path = unit_capability_path(home)
     try:
-        capability = _parse(UnitCapability, _read_private(path), path)
+        capability = _parse(UnitCapability, read_private(path), path)
     except FileNotFoundError:
         return None
     if capability.unit.home != str(home):
@@ -443,7 +443,7 @@ def install_bundle(
             f"the cluster refuses generation {capability.generation.number}'s runner login "
             f"(or the endpoint is unreachable): {exc}"
         ) from exc
-    with _locked(home):
+    with locked(home):
         write_private_bytes(unit_capability_path(home), _canonical(capability) + b"\n")
     return capability
 

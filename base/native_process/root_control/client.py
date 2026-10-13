@@ -68,7 +68,7 @@ def peer_pid(sock: socket.socket) -> int:
     raise RootClientError("native Unix peer identity is unavailable on this platform")
 
 
-def _validate_status_peer(raw: bytes, peer: OwnedProcess) -> None:
+def validate_status_peer(raw: bytes, peer: OwnedProcess) -> None:
     response = parse_response(raw)
     if not response["ok"]:
         return
@@ -197,7 +197,7 @@ class RootClient:
                 sock.sendall(payload)
                 raw = _read_line(sock)
                 if peer is not None:
-                    _validate_status_peer(raw, peer)
+                    validate_status_peer(raw, peer)
                 return raw
         except (OSError, psutil.Error, ProtocolError, ValueError) as exc:
             raise RootClientError(

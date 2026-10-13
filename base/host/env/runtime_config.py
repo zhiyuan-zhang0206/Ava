@@ -46,7 +46,7 @@ from base.native_process.os_platform import file_lock
 _log = logging.getLogger(__name__)
 
 
-def _ava_home() -> Path:
+def ava_home() -> Path:
     """$AVA_HOME directory, created if missing.
 
     Routed through `base.paths.home.resolve_ava_home()`: this module's callers run
@@ -62,7 +62,7 @@ def _ava_home() -> Path:
 
 def env_file_path() -> Path:
     """This unit's `.env` — the single config source of truth."""
-    return _ava_home() / ".env"
+    return ava_home() / ".env"
 
 
 def _field_alias_map() -> dict[str, str]:

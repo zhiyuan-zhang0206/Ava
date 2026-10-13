@@ -44,7 +44,7 @@ SOURCE_TREE_WHITELIST: tuple[str, ...] = ("frontend/",)
 GUARD_SKIPPED_PREFIX = "guard skipped: "
 
 
-def _git(
+def git(
     source: Path, *args: str, timeout: float = _READ_TIMEOUT_S
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a bounded git command in ``source``; None only when the checkout is
@@ -70,7 +70,7 @@ def _pattern_matches(pattern: str, rel_path: str) -> bool:
     return pattern.endswith("/") and rel_path.startswith(pattern)
 
 
-def _is_whitelisted(rel_path: str) -> bool:
+def is_whitelisted(rel_path: str) -> bool:
     """True when a git-relative path is a legal runtime artifact."""
     return any(_pattern_matches(pattern, rel_path) for pattern in SOURCE_TREE_WHITELIST)
 
@@ -81,7 +81,7 @@ def _is_whitelisted(rel_path: str) -> bool:
 _WHITELIST_CATCHALL_PROBES = ("guard-must-not-be-whitelisted.txt", "guard-must-not-be-whitelisted/")
 
 
-def _validate_whitelist(patterns: tuple[str, ...]) -> None:
+def validate_whitelist(patterns: tuple[str, ...]) -> None:
     """Refuse a misconfigured whitelist (a test runs it over `SOURCE_TREE_WHITELIST`).
 
     Two misconfigurations make the guard a silent no-op on one side or a
@@ -128,7 +128,7 @@ def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:
         return ()
     if not (source / ".git").exists():
         return (f"{GUARD_SKIPPED_PREFIX}not a git checkout",)
-    status = _git(source, "status", "--porcelain")
+    status = git(source, "status", "--porcelain")
     if status is None or status.returncode != 0:
         return (f"{GUARD_SKIPPED_PREFIX}git unavailable",)
     violations: list[str] = []
@@ -138,7 +138,7 @@ def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:
             continue
         if entry.startswith("??"):
             rel = entry[2:].strip()
-            if not _is_whitelisted(rel):
+            if not is_whitelisted(rel):
                 violations.append(f"untracked outside whitelist: {rel}")
         else:
             violations.append(f"tracked change: {entry}")

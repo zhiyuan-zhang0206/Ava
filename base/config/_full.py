@@ -177,10 +177,10 @@ def build(
             for name, model in domain_model_classes().items()
         }
         settings = Settings(profile=profile, env_boot=env_boot, **domains)
-    return FullBundle(settings=settings, exports=_facade_exports())
+    return FullBundle(settings=settings, exports=facade_exports())
 
 
-def _facade_exports() -> dict[str, Any]:
+def facade_exports() -> dict[str, Any]:
     """The names `base.config` gains when a lite process upgrades."""
     from base.config.admin.metadata import (
         CONFIG_UNCHANGED_SENTINEL,

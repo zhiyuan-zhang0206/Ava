@@ -86,16 +86,16 @@ from base.deploy.schema.migration_errors import SchemaVersionMismatch as SchemaV
 from base.deploy.schema.migration_history import _RESET_ANCHOR, assert_reset_history
 from base.deploy.schema.migration_history import _V010_PRE_RESET_SET as _V010_PRE_RESET_SET
 from base.deploy.schema.migration_layout import _BASELINE_NAME as _BASELINE_NAME
-from base.deploy.schema.migration_layout import _FILENAME_RE as _FILENAME_RE
-from base.deploy.schema.migration_layout import _STEM_RE as _STEM_RE
-from base.deploy.schema.migration_layout import _assert_unique as _assert_unique
-from base.deploy.schema.migration_layout import _git_probe as _git_probe
+from base.deploy.schema.migration_layout import FILENAME_RE as FILENAME_RE
+from base.deploy.schema.migration_layout import STEM_RE as STEM_RE
 from base.deploy.schema.migration_layout import _list_migration_files as _list_migration_files
-from base.deploy.schema.migration_layout import _migration_stem as _migration_stem
-from base.deploy.schema.migration_layout import (
-    _tracked_migration_paths as _tracked_migration_paths,
-)
+from base.deploy.schema.migration_layout import assert_unique as assert_unique
+from base.deploy.schema.migration_layout import git_probe as git_probe
+from base.deploy.schema.migration_layout import migration_stem as migration_stem
 from base.deploy.schema.migration_layout import required_migration_set as required_migration_set
+from base.deploy.schema.migration_layout import (
+    tracked_migration_paths as tracked_migration_paths,
+)
 from base.deploy.schema.migration_layout import (
     unreadable_migration_files as unreadable_migration_files,
 )

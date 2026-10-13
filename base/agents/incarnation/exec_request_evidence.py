@@ -82,7 +82,7 @@ _EXEC_CHILD_MODULE = "agent.execution.child"
 _REQUEST_REFERENCE_ENV = "AVA_EXEC_REQUEST_FILE"
 
 
-def _exec_node_ceiling_s() -> float:
+def exec_node_ceiling_s() -> float:
     """The outer exec-node timeout, resolved profile-safely.
 
     Classification also runs in gateway-profile processes (cold prepare),
@@ -280,7 +280,7 @@ def classify_request(
     # the protocol ceiling stands in, so a hidden-environment exec child born
     # anywhere inside a legitimate request's lifetime is never excluded.
     declared_timeout_s = (
-        attribution.timeout_s if attribution.timeout_s is not None else _exec_node_ceiling_s()
+        attribution.timeout_s if attribution.timeout_s is not None else exec_node_ceiling_s()
     )
     live = live_domain_pids(
         path,
@@ -523,7 +523,7 @@ def _write_receipt(
     path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _row_identity(db: Database, agent_id: int) -> tuple[RuntimeIncarnation | None, object]:
+def row_identity(db: Database, agent_id: int) -> tuple[RuntimeIncarnation | None, object]:
     """The row's current incarnation and stored resources, for the CLI."""
     with db.write_transaction() as conn:
         row = conn.execute(
@@ -565,7 +565,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     version = CodeVersion(LoadedCommit.capture())
     gate = ProcessDbGate(version=version.get, process=process_name())
     db = Database.from_settings(gate=gate)
-    incumbent, resources = _row_identity(db, args.agent)
+    incumbent, resources = row_identity(db, args.agent)
     entries = survey(args.agent, incumbent=incumbent, resources=resources)
     if not args.quarantine:
         _report(args.agent, entries)

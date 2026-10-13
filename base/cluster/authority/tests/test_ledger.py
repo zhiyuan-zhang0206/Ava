@@ -94,9 +94,9 @@ def test_secret_published_before_a_crash_is_adopted_not_regenerated(
 
 def test_publication_never_overwrites_an_existing_secret(home: Path) -> None:
     target = home / "db-authority" / "generations" / "5.json"
-    store._publish_exclusive(target, b"first")
+    store.publish_exclusive(target, b"first")
     with pytest.raises(FileExistsError):
-        store._publish_exclusive(target, b"second")
+        store.publish_exclusive(target, b"second")
     assert target.read_bytes() == b"first"
     assert [p.name for p in target.parent.iterdir()] == ["5.json"]
 
@@ -119,7 +119,7 @@ def test_a_ledger_written_before_generations_stopped_rotating_loads(home: Path) 
     path.write_text(json.dumps(recorded))
     ledger = store.require_ledger(home)
     assert ledger.active is not None and ledger.active.origin == Origin(kind="cutover")
-    store._write(home, ledger)
+    store.write(home, ledger)
     rewritten = json.loads(path.read_text())
     assert "counter" not in rewritten and "revoked" not in rewritten
     assert rewritten["active"]["origin"] == {"kind": "cutover"}

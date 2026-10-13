@@ -406,7 +406,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         # forced one (raw wire -- the client has no force) are both refused.
         refusals = (
             _refusal(lambda: helper_client.stop_root(sock_path=helper_sock)),
-            _refusal(lambda: helper_client._call("root_stop", force=True, sock_path=helper_sock)),
+            _refusal(lambda: helper_client.call("root_stop", force=True, sock_path=helper_sock)),
         )
         if "native recovery is required" not in refusals[0] or "force" not in refusals[1]:
             _fail("conflict", f"root_stop over the orphan root was not refused: {refusals}")

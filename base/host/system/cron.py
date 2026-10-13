@@ -328,7 +328,7 @@ def _launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_HEALTH_PROBE_LABEL}.plist"
 
 
-def _launchd_plist_content(interval_s: int) -> str:
+def launchd_plist_content(interval_s: int) -> str:
     """Generate the observation-only health-probe launchd job."""
     ava_path = ava_binary_path()
     label = _HEALTH_PROBE_LABEL
@@ -378,7 +378,7 @@ def _own_probe_job_of(own_labels: set[str]) -> str | None:
     return None
 
 
-def _register_macos(interval_s: int) -> int:
+def register_macos(interval_s: int) -> int:
     """Register the health probe as a launchd User LaunchAgent.
 
     Writes the plist to ~/Library/LaunchAgents/ and loads it with
@@ -403,7 +403,7 @@ def _register_macos(interval_s: int) -> int:
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write the plist.
-    plist_path.write_text(_launchd_plist_content(interval_s))
+    plist_path.write_text(launchd_plist_content(interval_s))
     logger.info("Wrote plist to {}", plist_path)
 
     # Unload any existing instance (ignore errors if not loaded).
@@ -427,7 +427,7 @@ def _register_macos(interval_s: int) -> int:
     return 0
 
 
-def _unregister_macos() -> int:
+def unregister_macos() -> int:
     """Remove the health probe's launchd job and plist."""
     plist_path = _launchd_plist_path()
     label = _HEALTH_PROBE_LABEL
@@ -448,7 +448,7 @@ def _unregister_macos() -> int:
     return 0
 
 
-def _register_linux(interval_s: int) -> int:
+def register_linux(interval_s: int) -> int:
     """Add the health probe to the user's crontab.
 
     Reads the current crontab, removes any existing Ava health-probe entry,
@@ -488,7 +488,7 @@ def _register_linux(interval_s: int) -> int:
     return rc
 
 
-def _unregister_linux() -> int:
+def unregister_linux() -> int:
     """Remove the health-probe entry from the user's crontab."""
 
     def report_read_failure() -> None:
@@ -573,8 +573,8 @@ def register_os_cron(
         return
     register_platform_job(
         "cron",
-        macos=lambda: _register_macos(interval_s),
-        linux=lambda: _register_linux(interval_s),
+        macos=lambda: register_macos(interval_s),
+        linux=lambda: register_linux(interval_s),
     )
 
 
@@ -586,4 +586,4 @@ def unregister_os_cron() -> None:
     """
     if not owns_os_jobs("health-probe"):
         return
-    unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)
+    unregister_platform_job(macos=unregister_macos, linux=unregister_linux)

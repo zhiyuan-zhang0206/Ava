@@ -24,7 +24,7 @@ def _capture(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]
         seen.append((method, args))
         return {}
 
-    monkeypatch.setattr(client, "_call", fake_call)
+    monkeypatch.setattr(client, "call", fake_call)
     return seen
 
 

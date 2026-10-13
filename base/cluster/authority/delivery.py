@@ -24,10 +24,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from base.cluster.authority.ledger import (
     Encrypt,
-    _locked,
-    _publish_exclusive,
-    _read_private,
     authority_dir,
+    locked,
+    publish_exclusive,
+    read_private,
     read_secret,
     require_ledger,
 )
@@ -69,7 +69,7 @@ def _parse_pooler_admin(body: bytes) -> PoolerAdmin:
 def read_pooler_admin(home: Path) -> PoolerAdmin:
     """The admin-console credential; missing or loose files refuse."""
     try:
-        return _parse_pooler_admin(_read_private(pooler_admin_path(home)))
+        return _parse_pooler_admin(read_private(pooler_admin_path(home)))
     except FileNotFoundError:
         raise LedgerRefusedError("no pooler admin credential: birth creates it") from None
 
@@ -82,14 +82,14 @@ def ensure_pooler_admin(home: Path, *, encrypt: Encrypt) -> PoolerAdmin:
     """
     import secrets
 
-    with _locked(home):
+    with locked(home):
         path = pooler_admin_path(home)
         if path.exists():
-            return _parse_pooler_admin(_read_private(path))
+            return _parse_pooler_admin(read_private(path))
         password = secrets.token_urlsafe(32)
         admin = PoolerAdmin(password=password, verifier=encrypt(POOLER_ADMIN, password))
-        _publish_exclusive(path, (admin.model_dump_json() + "\n").encode())
-        return _parse_pooler_admin(_read_private(path))
+        publish_exclusive(path, (admin.model_dump_json() + "\n").encode())
+        return _parse_pooler_admin(read_private(path))
 
 
 def _quoted(value: str) -> str:

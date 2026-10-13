@@ -141,7 +141,7 @@ def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
     """The served home's ledger authenticates machine tokens; returns the human secret."""
     secret = uuid4().hex
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr("base.paths.ava_home", rt._ava_home)
+    monkeypatch.setattr("base.paths.ava_home", rt.ava_home)
     return secret
 
 
@@ -189,7 +189,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
     issued = unit.issue_bundle(
-        rt._ava_home(),
+        rt.ava_home(),
         unit=unit.UnitIdentity(machine="mini", home=str(runner)),
         endpoint=config.bootstrap_config_values(
             bootstrap_authority,

@@ -150,13 +150,13 @@ _GUIDE_PASSTHROUGH_KEYS = frozenset(
 # `child_env` below (a child without TMPDIR falls back to the OS default temp
 # root and any tool that pins a boot file to $TMPDIR drifts).
 _OS_CANONICAL_KEYS = frozenset({"PATH", "VIRTUAL_ENV"})
-_TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
+TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
 
-_PASSTHROUGH_ROWS = (
+PASSTHROUGH_ROWS = (
     _HOST_PASSTHROUGH_ROWS
     + _NETWORK_PROXY_ROWS
     + tuple(EnvField(key) for key in _GUIDE_PASSTHROUGH_KEYS | {REDIS_PASSWORD_ENV})
-    + tuple(EnvField(key) for key in _OS_CANONICAL_KEYS | _TEMP_DIR_KEYS)
+    + tuple(EnvField(key) for key in _OS_CANONICAL_KEYS | TEMP_DIR_KEYS)
 )
 
 # ── Health ports: service -> env-var alias (a derived view of Settings) ──
@@ -277,7 +277,7 @@ def agent_runner_cluster_aliases() -> frozenset[str]:
 def env_identity_keys() -> frozenset[str]:
     """Machine-IDENTITY env keys — stripped from the inherited environment when
     spawning a cluster's subprocess (alongside `derived_env_keys()`), and
-    enforced by base.host.env.dotenv_boot._enforce_cluster_env_authority in EVERY
+    enforced by base.host.env.dotenv_boot.enforce_cluster_env_authority in EVERY
     process that loads a unit's .env: a key the unit's .env declares is forced
     from the file, an inherited one is dropped (the host-scoped gateway URL
     key stays env-suppliable — dotenv_boot's `_identity_env_only`)."""
@@ -351,7 +351,7 @@ def _ensure_validated() -> None:
     if getattr(_ensure_validated, "_done", False):
         return
     aliases = set(FIELD_ALIASES.values())
-    for row in _PASSTHROUGH_ROWS:
+    for row in PASSTHROUGH_ROWS:
         if row.key in aliases:
             raise RuntimeError(
                 f"env key {row.key!r} is declared BOTH as a Settings field alias and as a "
@@ -380,7 +380,7 @@ def child_env(role: Literal["gateway", "runner"]) -> dict[str, str]:
         raise ValueError(f"unknown daemon role {role!r} — must be gateway or runner")
     _ensure_validated()
     env = {k: os.environ[k] for k in session_forward_keys() if k in os.environ}
-    for key in HOST_PASSTHROUGH_KEYS | _TEMP_DIR_KEYS | NETWORK_PROXY_KEYS:
+    for key in HOST_PASSTHROUGH_KEYS | TEMP_DIR_KEYS | NETWORK_PROXY_KEYS:
         if os.environ.get(key):
             env[key] = os.environ[key]
     return env

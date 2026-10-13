@@ -37,7 +37,7 @@ def test_delivery_policy_is_configurable_and_bootstrapped(
     assert not extra["restart_required"]
     monkeypatch.setenv(alias, "17")
     assert getattr(AgentRuntimeSettings(), name) == 17
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: tmp_path)
     (tmp_path / ".env").write_text(
         f"{alias}=17\nAVA_DB_URL=postgresql://ava@localhost:5433/ava\n"
         "AVA_RUNNER_DB_PASSWORD=test-only\n"

@@ -591,7 +591,7 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     holder = tmp_path / unit
     content = boot_unit.render_unit(ctx)
     exec_line = next(row for row in content.splitlines() if row.startswith("ExecStart="))
-    replacement = f"ExecStart=:{boot_unit._quote(sys.executable, 'python')} {boot_unit._quote(str(starter), 'test starter')}"
+    replacement = f"ExecStart=:{boot_unit.quote(sys.executable, 'python')} {boot_unit.quote(str(starter), 'test starter')}"
     holder.write_text(
         content.replace(exec_line, replacement).replace("Restart=on-failure", "Restart=no")
     )

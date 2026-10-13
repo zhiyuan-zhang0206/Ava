@@ -89,7 +89,7 @@ def _boot() -> str:
     return boot
 
 
-def _write(data: Path, receipt: Receipt) -> None:
+def write(data: Path, receipt: Receipt) -> None:
     path = receipt_path(data)
     ensure_private_dir(path.parent)
     write_text_atomic(path, receipt.model_dump_json() + "\n", sync_parent=True)
@@ -117,7 +117,7 @@ def _directory_matches(process: psutil.Process, data: Path, receipt: Receipt | N
     return "-D" in argv and Path(argv[argv.index("-D") + 1]).resolve() == data
 
 
-def _require_closed(data: Path, receipt: Receipt | None) -> None:
+def require_closed(data: Path, receipt: Receipt | None) -> None:
     """A dead postmaster alone cannot prove that its old workers have closed."""
     session = (
         receipt.owner.pid
@@ -187,12 +187,12 @@ def observe(data: Path) -> OwnedProcess | None:
     if receipt is None:
         if (data / "postmaster.pid").exists():
             raise RuntimeError("PostgreSQL pidfile has no native launch receipt; reconcile custody")
-        _require_closed(data, None)
+        require_closed(data, None)
         return None
     if receipt.state == "pending":
         raise RuntimeError("PostgreSQL launch custody is unresolved; reconcile pending receipt")
     if receipt.boot_id != _boot() or receipt.owner is None or not receipt.process().live():
-        _require_closed(data, receipt)
+        require_closed(data, receipt)
         return None
     owner = _require_process(data, receipt)
     _pidfile(data, receipt)
@@ -232,7 +232,7 @@ def _spawn(
     *,
     retained_children: list[subprocess.Popen[bytes]],
 ) -> Receipt:
-    _write(data, receipt)
+    write(data, receipt)
     with _admission(), (data / "pg.log").open("ab") as log:
         try:
             child = subprocess.Popen(  # noqa: S603 — explicit resolved PostgreSQL argv, never a shell
@@ -247,7 +247,7 @@ def _spawn(
         except OSError:
             # Popen's normal exec error guarantees it reaped its child. A
             # BaseException or later error has no such guarantee: keep pending.
-            _write(data, receipt.model_copy(update={"state": "not-started"}))
+            write(data, receipt.model_copy(update={"state": "not-started"}))
             raise
         retained_children.append(child)
         owner = OwnedProcess.capture(psutil.Process(child.pid))
@@ -260,7 +260,7 @@ def _spawn(
                 ),
             }
         )
-        _write(data, captured)
+        write(data, captured)
         return captured
 
 
@@ -285,10 +285,10 @@ def _complete_start(
                 update={"state": "ready", "pidfile": inode, "header": header}
             )
             if admitted != receipt:
-                _write(data, admitted)
+                write(data, admitted)
             return owner
         time.sleep(0.05)
-    _require_closed(data, receipt)
+    require_closed(data, receipt)
     raise RuntimeError(f"PostgreSQL exited before readiness; inspect {data / 'pg.log'}")
 
 
@@ -455,7 +455,7 @@ def stop(
                 escalation = _escalate(owner, tree, timeout, immediate_wait, kill_wait)
                 break
             time.sleep(0.05)
-        _require_closed(data, receipt)
+        require_closed(data, receipt)
         require_listener(None, receipt.port, required=False)
         if retained_children is not None:
             for child in tuple(retained_children):

@@ -18,7 +18,7 @@ from gateway.tests.events.test_notices_endpoint import _seed_agent
 def test_config_write_rejects_invalid_default_without_changing_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, minimum: int, maximum: int
 ) -> None:
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: tmp_path)
     runtime_config.write_fields({"notices_open_default_limit": 200}, set())
     env_path = tmp_path / ".env"
     before = env_path.read_bytes()
@@ -34,7 +34,7 @@ def test_config_write_rejects_invalid_default_without_changing_file(
 def test_config_write_accepts_boundary_defaults_without_clamping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, minimum: int, maximum: int
 ) -> None:
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime_config, "ava_home", lambda: tmp_path)
     alias = DisplaySettings.model_fields[name].alias
     assert isinstance(alias, str)
     with TestClient(app) as client:

@@ -209,7 +209,7 @@ def connect(path: str) -> socket.socket:
     raise PermissionsHelperError(f"permissions helper not reachable at {path}: {last}")
 
 
-def _call(
+def call(
     method: str,
     *,
     sock_path: str | Path | None = None,
@@ -262,25 +262,25 @@ def parse_reply(buf: bytes, method: str) -> Any:
 
 def ping(*, sock_path: str | Path | None = None) -> PingResult:
     """Report the helper's liveness and whether it holds the desktop grants."""
-    return _call("ping", sock_path=sock_path)
+    return call("ping", sock_path=sock_path)
 
 
 def screencapture_region(
     x: int, y: int, w: int, h: int, path: str, *, sock_path: str | Path | None = None
 ) -> ScreencaptureResult:
     """Capture the screen rectangle (x, y, w, h) to a PNG at `path`."""
-    return _call("screencapture_region", x=x, y=y, w=w, h=h, path=path, sock_path=sock_path)
+    return call("screencapture_region", x=x, y=y, w=w, h=h, path=path, sock_path=sock_path)
 
 
 def list_dir(path: str, *, sock_path: str | Path | None = None) -> list[PermissionsFileEntry]:
     """List a whitelisted directory's immediate entries, sorted by name."""
-    result: FileListResult = _call("file_list", path=path, sock_path=sock_path)
+    result: FileListResult = call("file_list", path=path, sock_path=sock_path)
     return result["entries"]
 
 
 def read_file(path: str, *, sock_path: str | Path | None = None) -> bytes:
     """Read a whitelisted regular file of at most 32 MiB."""
-    result: FileReadResult = _call("file_read", path=path, sock_path=sock_path)
+    result: FileReadResult = call("file_read", path=path, sock_path=sock_path)
     try:
         content_b64 = result["content_b64"]
     except (KeyError, TypeError) as exc:
@@ -319,7 +319,7 @@ def click(
         args["duration_ms"] = duration_ms
     if args:
         _require_native_input(sock_path)
-    return _call("click", x=x, y=y, double=double, sock_path=sock_path, **args)
+    return call("click", x=x, y=y, double=double, sock_path=sock_path, **args)
 
 
 def _require_native_input(sock_path: str | Path | None) -> None:
@@ -333,14 +333,14 @@ def move(
     x: float, y: float, *, modifiers: list[str] | None = None, sock_path: str | Path | None = None
 ) -> MoveResult:
     """Move the pointer without pressing a button (logical global coordinates)."""
-    return _call(
+    return call(
         "move", x=x, y=y, modifiers=[] if modifiers is None else modifiers, sock_path=sock_path
     )
 
 
 def cursor_position(*, sock_path: str | Path | None = None) -> ClickPoint:
     """Read the actual global pointer position in logical points."""
-    return _call("cursor_position", sock_path=sock_path)
+    return call("cursor_position", sock_path=sock_path)
 
 
 def require_capability(capability: str, use: str, *, sock_path: str | Path | None = None) -> None:
@@ -373,7 +373,7 @@ def drag(
         args["modifiers"] = modifiers
     if args:
         require_capability("mouse_hold_v1", "drag options", sock_path=sock_path)
-    return _call(
+    return call(
         "drag",
         start_x=start_x,
         start_y=start_y,
@@ -386,7 +386,7 @@ def drag(
 
 def type_text(text: str, *, sock_path: str | Path | None = None) -> TypeResult:
     """Type `text` as keyboard input into the focused field (handles CJK)."""
-    return _call("type", text=text, sock_path=sock_path)
+    return call("type", text=text, sock_path=sock_path)
 
 
 def key(
@@ -405,7 +405,7 @@ def key(
         args["duration_ms"] = duration_ms
     if args:
         _require_native_input(sock_path)
-    return _call("key", code=code, cmd=cmd, sock_path=sock_path, **args)
+    return call("key", code=code, cmd=cmd, sock_path=sock_path, **args)
 
 
 def scroll(
@@ -425,7 +425,7 @@ def scroll(
         args["modifiers"] = modifiers
     if args:
         _require_native_input(sock_path)
-    return _call("scroll", x=x, y=y, dy=dy, sock_path=sock_path, **args)
+    return call("scroll", x=x, y=y, dy=dy, sock_path=sock_path, **args)
 
 
 def _require_capture_indicator(sock_path: str | Path | None) -> None:
@@ -442,37 +442,37 @@ def indicator_stop(*, sock_path: str | Path | None = None) -> IndicatorStopResul
     ten idle seconds; this is for handing the screen over sooner.
     """
     _require_capture_indicator(sock_path)
-    return _call("indicator_stop", sock_path=sock_path)
+    return call("indicator_stop", sock_path=sock_path)
 
 
 def list_apps(*, sock_path: str | Path | None = None) -> AppsResult:
     """List running GUI applications by process and bundle identity."""
-    return _call("list_apps", sock_path=sock_path)
+    return call("list_apps", sock_path=sock_path)
 
 
 def list_windows(app: str | None = None, *, sock_path: str | Path | None = None) -> WindowsResult:
     """List live window-server identities, optionally for one exact application."""
     args: dict[str, object] = {} if app is None else {"app": app}
-    return _call("list_windows", sock_path=sock_path, **args)
+    return call("list_windows", sock_path=sock_path, **args)
 
 
 def focus_app(target: dict[str, object], *, sock_path: str | Path | None = None) -> FocusAppResult:
     """Explicitly activate a running app selected by pid or unique bundle identity."""
-    return _call("focus_app", sock_path=sock_path, **target)
+    return call("focus_app", sock_path=sock_path, **target)
 
 
 def screencapture_window(
     pid: int, window_id: int, path: str, *, sock_path: str | Path | None = None
 ) -> WindowCaptureResult:
     """Capture the identified window, verifying its live owning process."""
-    return _call(
+    return call(
         "screencapture_window", pid=pid, window_id=window_id, path=path, sock_path=sock_path
     )
 
 
 def ax_window_info(app: str, *, sock_path: str | Path | None = None) -> AxWindowInfo:
     """Report the on-screen geometry of `app`'s focused window via accessibility."""
-    return _call("ax_window_info", app=app, sock_path=sock_path)
+    return call("ax_window_info", app=app, sock_path=sock_path)
 
 
 def ax_tree(
@@ -508,7 +508,7 @@ def ax_tree(
         req.update(target)
     elif app is not None:
         req["app"] = app
-    return _call("ax_tree", sock_path=sock_path, **req)
+    return call("ax_tree", sock_path=sock_path, **req)
 
 
 def ax_act(
@@ -543,17 +543,17 @@ def ax_act(
     ):
         if supplied is not None:
             req[name] = supplied
-    return _call("ax_act", app=app, id=raw_id, action=action, sock_path=sock_path, **req)
+    return call("ax_act", app=app, id=raw_id, action=action, sock_path=sock_path, **req)
 
 
 def window_info(owner: str, *, sock_path: str | Path | None = None) -> WindowInfo:
     """Report the geometry of `owner`'s normal on-screen window via the window list."""
-    return _call("window_info", owner=owner, sock_path=sock_path)
+    return call("window_info", owner=owner, sock_path=sock_path)
 
 
 def session_info(*, sock_path: str | Path | None = None) -> SessionInfo:
     """Report whether the login session is locked or off-console."""
-    return _call("session_info", sock_path=sock_path)
+    return call("session_info", sock_path=sock_path)
 
 
 def spawn_process(
@@ -567,7 +567,7 @@ def spawn_process(
     sock_path: str | Path | None = None,
 ) -> SpawnResult:
     """Spawn or reuse a named direct child of the permissions helper."""
-    result: SpawnResult = _call(
+    result: SpawnResult = call(
         "spawn",
         name=name,
         argv=argv,
@@ -582,13 +582,13 @@ def spawn_process(
 
 def session_list(prefix: str = "", *, sock_path: str | Path | None = None) -> list[SessionProc]:
     """List helper-owned process sessions whose names start with `prefix`."""
-    result: SessionListResult = _call("session_list", prefix=prefix, sock_path=sock_path)
+    result: SessionListResult = call("session_list", prefix=prefix, sock_path=sock_path)
     return result["sessions"]
 
 
 def session_has(name: str, *, sock_path: str | Path | None = None) -> bool:
     """Report whether the named helper-owned process session is alive."""
-    result: AliveResult = _call("session_has", name=name, sock_path=sock_path)
+    result: AliveResult = call("session_has", name=name, sock_path=sock_path)
     return result["alive"]
 
 
@@ -603,9 +603,9 @@ def signal_session(
     if (name is None) == (pid is None):
         raise ValueError("exactly one of name or pid is required")
     if name is not None:
-        result: SignalResult = _call("signal", name=name, sig=sig, sock_path=sock_path)
+        result: SignalResult = call("signal", name=name, sig=sig, sock_path=sock_path)
     else:
-        result = _call("signal", pid=pid, sig=sig, sock_path=sock_path)
+        result = call("signal", pid=pid, sig=sig, sock_path=sock_path)
     return result["sent"]
 
 
@@ -616,25 +616,25 @@ def seed_root(config: RootSeedConfig, *, sock_path: str | Path | None = None) ->
     next spawn. A run dir already held by another live root leaves the keeper
     in `conflict`: nothing is spawned, nothing is killed.
     """
-    result: RootStatus = _call("root_seed", config=config, sock_path=sock_path)
+    result: RootStatus = call("root_seed", config=config, sock_path=sock_path)
     return result
 
 
 def root_status(*, sock_path: str | Path | None = None) -> RootStatus:
     """Report the root keeper's state (works even when no seed is configured)."""
-    result: RootStatus = _call("root_status", sock_path=sock_path)
+    result: RootStatus = call("root_status", sock_path=sock_path)
     return result
 
 
 def stop_root(*, sock_path: str | Path | None = None) -> RootStatus:
     """Durably stop the owned root; foreign or unknown custody always refuses."""
-    result: RootStatus = _call("root_stop", sock_path=sock_path)
+    result: RootStatus = call("root_stop", sock_path=sock_path)
     return result
 
 
 def shutdown_helper(run_dir: Path, *, sock_path: str | Path) -> HelperShutdownResult:
     """Close this home's native admission, retain intent, and request exit zero."""
-    return _call("helper_shutdown", run_dir=str(run_dir), sock_path=sock_path)
+    return call("helper_shutdown", run_dir=str(run_dir), sock_path=sock_path)
 
 
 def screen_size(*, sock_path: str | Path | None = None) -> ScreenSize:
@@ -642,12 +642,12 @@ def screen_size(*, sock_path: str | Path | None = None) -> ScreenSize:
 
     Computer-use callers use this to map screenshot pixels (physical) to
     click coordinates (logical): divide by `scale`."""
-    return _call("screen_size", sock_path=sock_path)
+    return call("screen_size", sock_path=sock_path)
 
 
 def frontmost_app(*, sock_path: str | Path | None = None) -> FrontmostApp:
     """Report the frontmost application's display name ("" when none)."""
-    return _call("frontmost_app", sock_path=sock_path)
+    return call("frontmost_app", sock_path=sock_path)
 
 
 _NO_GRANT_DIAGNOSTIC = (
