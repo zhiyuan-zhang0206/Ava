@@ -26,6 +26,7 @@ from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     Impact,
     base_checkout,
     build_impact,
+    code_names,
     module_files,
     plugin_modules,
     python_files,
@@ -342,6 +343,13 @@ def _path_tests(
     path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
 ) -> set[str]:
     """What one changed path contributes to the candidate subset."""
+    return _class_tests(path, path_class, checkout, reverse_map) | _doc_readers(path, checkout)
+
+
+def _class_tests(
+    path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
+) -> set[str]:
+    """The contribution of a path's class rule."""
     runtime = _runtime_tests(path, reverse_map)
     if path_class is PathClass.TEST:
         return {path} | runtime
@@ -368,7 +376,7 @@ def _manifest_tests(
     selected = {test for test in checkout.collectable if test.startswith("meizel/")}
     for file in python_files(checkout.repo_root):
         relative = file.relative_to(checkout.repo_root).as_posix()
-        if not _names_file(file, manifest):
+        if not code_names(file, manifest, exact=True):
             continue
         if relative in checkout.collectable:
             selected.add(relative)
@@ -377,24 +385,21 @@ def _manifest_tests(
     return selected
 
 
-def _names_file(file: Path, name: str) -> bool:
-    """Whether a Python file holds ``name`` as a string constant outside a docstring."""
-    text = file.read_text(encoding="utf-8")
-    if name not in text:
-        return False
-    tree = ast.parse(text, filename=str(file))
-    docstrings = {
-        id(node.body[0].value)
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.body
-        and isinstance(node.body[0], ast.Expr)
-        and isinstance(node.body[0].value, ast.Constant)
+def _doc_readers(path: str, checkout: Checkout) -> set[str]:
+    """Tests known to read skill or OKF documents at run time, when one of those changed.
+
+    The unanchored-read rule does not count Markdown as data, so the readers that are known by
+    name are pinned the way the tree-scan family is: every collectable test whose code holds
+    ``SKILL.md`` (a skill) or ``.okf.md`` (an OKF document) as part of a string constant."""
+    name = Path(path).name
+    needle = "SKILL.md" if name == "SKILL.md" else ".okf.md" if name.endswith(".okf.md") else None
+    if needle is None:
+        return set()
+    return {
+        test
+        for test in checkout.collectable
+        if code_names(checkout.repo_root / test, needle, exact=False)
     }
-    return any(
-        isinstance(node, ast.Constant) and node.value == name and id(node) not in docstrings
-        for node in ast.walk(tree)
-    )
 
 
 def _runtime_tests(path: str, reverse_map: dict[str, set[str]]) -> set[str]:
@@ -588,9 +593,12 @@ def _runtime_candidates(
 
 
 def _is_data_change(path: str) -> bool:
-    """Whether a changed path is a data file a test could read: anything but Python source and
-    the meizel manifests (declarations that no runtime behavior reads)."""
-    return not path.endswith(".py") and Path(path).name not in _MANIFEST_FILES
+    """Whether a changed path is a data file a test could read: anything but Python source,
+    Markdown and the meizel manifests (declarations that no runtime behavior reads).
+
+    Markdown is prose. The tests known to read skill and OKF documents are pinned by
+    ``_doc_readers``, and the Trunk queue runs the full suite before anything reaches main."""
+    return not path.endswith((".py", ".md")) and Path(path).name not in _MANIFEST_FILES
 
 
 def _blocking(impact: Impact, *, data_changed: bool) -> tuple[Unknown, ...]:
