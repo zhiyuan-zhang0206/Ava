@@ -8,7 +8,3 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 
 [debt.private-name]
 "tests/test_no_silent_resurrection.py -> no_silent_resurrection.py#_classify" = 1
-"tests/test_refresh_test_durations.py -> refresh_test_durations.py#_DURATIONS_PATH" = 11
-"tests/test_refresh_test_durations.py -> refresh_test_durations.py#_load_durations" = 4
-"tests/test_refresh_test_durations.py -> refresh_test_durations.py#_run_suite" = 5
-"tests/test_refresh_test_durations.py -> refresh_test_durations.py#_write_durations" = 3

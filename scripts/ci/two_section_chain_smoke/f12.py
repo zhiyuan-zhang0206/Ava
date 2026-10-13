@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .support import SmokeError, _fail, _pid_alive, _run, _save, _wait_for
+from .support import SmokeError, _run, _save, fail, pid_alive, wait_for
 
 _F12_ROUND_WAIT_S = 10.0
 
@@ -42,10 +42,10 @@ def _f12_round(workdir: Path, unit_id: str, tag: str, pid: int, timeout: float) 
                 return record
         return None
 
-    return _wait_for(f"round {tag} from unit {unit_id} pid {pid}", _found, timeout, "f12")
+    return wait_for(f"round {tag} from unit {unit_id} pid {pid}", _found, timeout, "f12")
 
 
-def _f12_point(
+def f12_point(
     workdir: Path, tag: str, units: list[tuple[str, int]], pids: list[int]
 ) -> dict[str, Any]:
     """Trigger one probe round per unit id; collect per-pid replies; snapshot chains.
@@ -59,7 +59,7 @@ def _f12_point(
         (workdir / f"unit-results-{unit_id}.json.req").write_text(tag)
     rows = []
     for unit_id, pid in units:
-        if not _pid_alive(pid):
+        if not pid_alive(pid):
             record: dict[str, Any] = {"round": tag, "pid": pid, "error": "unit dead"}
         else:
             try:
@@ -201,7 +201,7 @@ def _f12_summary_text(label: str, samples: dict[str, Any]) -> str:
     )
 
 
-def _f12_finish(
+def f12_finish(
     evidence: Path,
     samples: dict[str, Any],
     label: str,
@@ -215,7 +215,7 @@ def _f12_finish(
         samples["violations"] = violations
     _save(evidence, f"{label}-sampling.json", json.dumps(samples, indent=2))
     if violations:
-        _fail(label, f"attribution violations: {'; '.join(violations)}")
+        fail(label, f"attribution violations: {'; '.join(violations)}")
 
 
 def _f12_join_tccd(

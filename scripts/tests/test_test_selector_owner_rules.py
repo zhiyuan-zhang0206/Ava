@@ -263,7 +263,7 @@ def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> N
     checkout = test_selector.load_checkout(_REPO_ROOT)
     for changed, readers in expectations.items():
         root = changed.split("/", maxsplit=1)[0]
-        assert set(readers) <= test_selector._referencing_tests(root, checkout), changed
+        assert set(readers) <= test_selector.referencing_tests(root, checkout), changed
     result = _select(_REPO_ROOT, ".github/workflows/ci.yml")
     if result.decision == "SELECTED":
         assert set(expectations[".github/workflows/ci.yml"]) <= set(result.tests)
