@@ -17,6 +17,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
+from gateway.extensions import packages
 
 DRAFT_PATH = "/api/keyed/v1/packages/draft"
 
@@ -48,7 +49,7 @@ def spawn_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         calls["spawner"] = body.spawner
         return SpawnedAgent(id=901)
 
-    monkeypatch.setattr("gateway.extensions.packages.create_and_launch_agent", _fake_create_launch)
+    monkeypatch.setattr(packages, "create_and_launch_agent", _fake_create_launch)
     return calls
 
 
