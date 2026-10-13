@@ -11,6 +11,7 @@ heavily, but never the context-note registry, the recall hook or the check.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 
@@ -24,7 +25,7 @@ from agent.graph.prompt.context_notes import (
     RANK_INHERITED_MEMORY,
     RANK_PER_AGENT_MEMORY,
 )
-from agent.graph.recall.memory_recall import passive_memory_recall
+from agent.graph.recall.memory_recall import PassiveRecall, passive_memory_recall
 from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message, tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState, PluginStateHandle
@@ -204,7 +205,10 @@ class _PassiveMemoryRecallHook(Hook):
     recallable inbound (only a watcher or shell wake-up), when auto-compact
     would replace messages this same turn
     (deferring avoids two before_llm hooks writing `messages` in one pass), or
-    when recall finds nothing new to add.
+    when recall finds nothing new to add. After a compaction it also replaces the
+    window's record of injected notes, with or without a note: the compaction
+    summarized them away, so they are neither excluded from the search nor counted
+    against the gateway's `exclude` limit.
 
     The whole recall pass runs under `memory_recall_deadline_seconds`: recall
     is an enhancement sitting in front of the turn's first LLM call, so a
@@ -219,11 +223,32 @@ class _PassiveMemoryRecallHook(Hook):
         runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         agent = runtime.context.require_agent()
         if not agent.memory.passive_memory_recall_enabled:
             return None
 
+        version = state.compact.version
+        stale = version > state.memory.window
+        injected = set[str]() if stale else state.memory.injected_paths
+        recall = await self._recall(state, runtime, injected=injected)
+        if recall is not None:
+            # Write only the fresh paths; the `memory` channel's reducer unions them onto
+            # this window's record, or starts the record of a new window.
+            return {
+                "messages": [recall.note],
+                "memory": MemoryState(injected_paths=recall.paths, window=version),
+            }
+        return {"memory": MemoryState(window=version)} if stale else None
+
+    async def _recall(
+        self,
+        state: AgentState,
+        runtime: Runtime[AvaContext],
+        *,
+        injected: Collection[str],
+    ) -> PassiveRecall | None:
+        agent = runtime.context.require_agent()
         if not tail_has_recallable_inbound(state.messages):
             return None
 
@@ -238,10 +263,10 @@ class _PassiveMemoryRecallHook(Hook):
 
         deadline = agent.memory.memory_recall_deadline_seconds
         try:
-            recall = await asyncio.wait_for(
+            return await asyncio.wait_for(
                 passive_memory_recall(
                     state.messages,
-                    injected_paths=state.memory.injected_paths,
+                    injected_paths=injected,
                     agent=agent,
                     context=runtime.context,
                 ),
@@ -258,15 +283,6 @@ class _PassiveMemoryRecallHook(Hook):
                 event="passive_recall",
             )
             return None
-        if recall is None:
-            return None
-
-        # Write only the fresh paths; the `memory` channel's union reducer
-        # accumulates them onto the current set.
-        return {
-            "messages": [recall.note],
-            "memory": MemoryState(injected_paths=recall.paths),
-        }
 
 
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()

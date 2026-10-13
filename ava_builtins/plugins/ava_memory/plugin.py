@@ -68,10 +68,13 @@ Firing gates:
   exclusive with hooks that fire on a bare AIMessage tail (e.g. silent-idle), so
   they never contend for the write.
 
-Same-session dedup: the injected paths accumulate in `state.memory` via the
-`memory` channel's union reducer (`_memory_state_merge`); this hook passes the
+Same-window dedup: the injected paths accumulate in `state.memory` via the
+`memory` channel's reducer (`memory_state_merge`); this hook passes the
 accumulated set into the recall call and writes back only the fresh paths, so a
-note surfaces at most once per session.
+note surfaces at most once per context window. A compaction summarizes the
+injected notes away, so the record belongs to one window (`MemoryState.window`
+is the `compact.version` it was written under) and the hook replaces it with an
+empty one when the version moves on.
 
 compact clobber-safety: auto-compact is also a before_llm hook. `messages`
 carries the add_messages reducer, so co-writing it does NOT fail-loud — the

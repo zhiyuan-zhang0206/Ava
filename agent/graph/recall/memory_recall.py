@@ -18,8 +18,8 @@ on), and a no-op whenever the search does not come back with results -- index
 down, ranking model down, gateway erroring, feature off -- so the call site degrades
 to nothing rather than failing the turn (the next turn tries again). It runs before
 the LLM on every inbound turn, so a search failure that escaped would kill the agent
-process, not just the recall. Same-session dedup is the caller's job (it passes the
-already-injected paths in and persists the ones this call added); the search leaves them out.
+process, not just the recall. Same-window dedup is the caller's job (it passes the
+paths injected in the current context window in and persists the ones this call added); the search leaves them out.
 """
 
 from __future__ import annotations
@@ -179,7 +179,7 @@ async def passive_memory_recall(
     `None` when: the feature is disabled, the conversation yields no query, the
     search failed (index or ranking model unavailable, or the gateway answered with
     an error status), or no match both reaches `memory_recall_inject_threshold`
-    and is new to this session and present on this machine. `injected_paths` and the
+    and is new to this window and present on this machine. `injected_paths` and the
     returned `PassiveRecall.paths` are memory-pool-relative.
 
     Never raises on a failed search: the caller is a before_llm hook, so an
@@ -193,7 +193,7 @@ async def passive_memory_recall(
     query = build_conversation_query(messages)
     if not query:
         return None
-    # Notes injected earlier this session are excluded from the search itself: they neither
+    # Notes injected earlier in this context window are excluded from the search itself: they neither
     # take a result slot nor cost a ranking request, so one pass costs the same at any age.
     search_started = time.monotonic()
     results = await _search_or_none(
