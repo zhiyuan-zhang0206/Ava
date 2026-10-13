@@ -1,0 +1,24 @@
+exports = ["aggregate.py", "aggregate_sql.py", "ci_runs_metrics.py", "core", "event_sql.py", "grafana_dashboard.py", "logql.py", "observed_metrics.py", "plugin_metrics.py", "usage.py"]
+
+[uses]
+"__init__.py" = ["core", "report.py"]
+"aggregate.py" = ["__init__.py", "aggregate_sql.py"]
+"aggregate_sql.py" = ["event_sql.py"]
+"core" = ["logql.py", "plugin_metrics.py"]
+"grafana_dashboard.py" = ["plugin_metrics.py"]
+"logql.py" = ["plugin_metrics_sql.py"]
+"observed_metrics.py" = ["aggregate_sql.py"]
+"plugin_metrics.py" = ["logql.py", "plugin_metrics_sql.py"]
+"tests" = ["__init__.py", "aggregate.py", "core", "observed_metrics.py", "plugin_metrics.py"]
+"usage.py" = ["event_sql.py"]
+
+[debt.private-name]
+"plugin_metrics.py -> plugin_metrics_sql.py#_DOUBLE_QUOTED_OK" = 1
+"plugin_metrics.py -> plugin_metrics_sql.py#_QUOTED_RE" = 1
+"plugin_metrics.py -> plugin_metrics_sql.py#_SQL_DENIED_KEYWORDS" = 1
+"plugin_metrics.py -> plugin_metrics_sql.py#_SQL_FUNCTIONS" = 1
+"plugin_metrics.py -> plugin_metrics_sql.py#_SQL_KEYWORDS" = 1
+"plugin_metrics.py -> plugin_metrics_sql.py#_SQL_OPS" = 1
+"plugin_metrics.py -> plugin_metrics_sql.py#_TOKEN_RE" = 1
+"plugin_metrics.py -> plugin_metrics_sql.py#_check_from_clauses" = 1
+"tests/test_plugin_metrics.py -> plugin_metrics.py#_sql_literal" = 1

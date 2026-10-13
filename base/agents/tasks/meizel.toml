@@ -1,0 +1,9 @@
+exports = ["creation.py", "delivery.py", "model.py", "notes.py", "owner_notifications.py", "priority.py", "reparent.py", "rules.py", "status.py"]
+
+[uses]
+"creation.py" = ["delivery.py", "model.py", "owner_notifications.py", "priority.py", "rules.py"]
+"delivery.py" = ["owner_notifications.py"]
+"model.py" = ["priority.py", "status.py", "timestamps.py"]
+"reparent.py" = ["rules.py"]
+"rules.py" = ["status.py"]
+"tests" = ["rules.py"]

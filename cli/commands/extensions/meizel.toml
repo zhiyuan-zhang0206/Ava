@@ -1,2 +1,23 @@
+exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plugins.py", "skill.py", "skills_sync.py"]
+
+[uses]
+"external_skills.py" = ["external_skill_host"]
+"mcp.py" = ["_manifest_gate.py", "_pkg_source.py"]
+"memory.py" = ["_plugin_scaffold.py"]
+"packages" = ["_pkg_source.py", "_refresh_rules.py", "skills_sync.py"]
+"parsers" = ["mcp.py", "memory.py", "packages", "plugins.py", "plugins_inspect.py", "skill.py"]
+"plugins.py" = ["_claude_code_plugin.py", "_manifest_gate.py", "_pkg_source.py", "skill_package.py", "skills_sync.py"]
+"skill.py" = ["_manifest_gate.py", "_pkg_source.py", "packages", "skill_package.py", "skills_sync.py"]
+"skill_package.py" = ["_pkg_source.py"]
+"skills_sync.py" = ["skill_package.py"]
+"tests" = ["_pkg_source.py", "_refresh_rules.py", "external_skill_host", "external_skills.py", "materialize.py", "mcp.py", "packages", "plugins.py", "plugins_inspect.py", "skill.py", "skill_package.py", "skills_sync.py"]
+
 [external]
 "_plugin_scaffold.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
+
+[debt.private-name]
+"packages/refresh.py -> skills_sync.py#_Source" = 1
+"skill.py -> skills_sync.py#_Source" = 1
+"tests/test_external_skills.py -> external_skills.py#_SKILL_NAMES" = 1
+"tests/test_external_skills_adversarial.py -> external_skills.py#_SKILL_NAMES" = 1
+"tests/test_external_skills_crash_safety.py -> external_skills.py#_SKILL_NAMES" = 1

@@ -1,0 +1,10 @@
+exports = ["app.py", "config.py", "daemon.py", "run_timeline"]
+
+[uses]
+"app.py" = ["config.py", "run_timeline"]
+"daemon.py" = ["app.py", "config.py"]
+"run_timeline" = ["config.py"]
+"tests" = ["app.py", "config.py", "daemon.py", "run_timeline"]
+
+[debt.private-name]
+"tests/test_insights_service.py -> daemon.py#_hard_exit" = 1

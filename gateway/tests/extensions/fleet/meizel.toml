@@ -1,0 +1,5 @@
+[uses]
+"test_dismissing_response_notice_refreshes_inspector_snapshot.py" = ["test_fleet_notices_via_gateway.py"]
+
+[debt.private-name]
+"test_dismissing_response_notice_refreshes_inspector_snapshot.py -> test_fleet_notices_via_gateway.py#_load_activity_plugin" = 1

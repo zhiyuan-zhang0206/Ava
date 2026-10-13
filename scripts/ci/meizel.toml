@@ -1,0 +1,14 @@
+exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts.py", "test_impact.py", "test_selector.py", "tests"]
+
+[uses]
+"cli.py" = ["pull_requests"]
+"file_shard_runtime.py" = ["file_shard_shadow.py"]
+"test_selector.py" = ["test_impact.py"]
+"tests" = ["cli.py", "collection_tracebacks.py", "coverage_gates.py", "dependency_audit.py", "file_shard_runtime.py", "file_shard_shadow.py", "no_silent_resurrection.py", "pull_requests", "refresh_test_durations.py"]
+
+[debt.private-name]
+"tests/test_no_silent_resurrection.py -> no_silent_resurrection.py#_classify" = 1
+"tests/test_refresh_test_durations.py -> refresh_test_durations.py#_DURATIONS_PATH" = 11
+"tests/test_refresh_test_durations.py -> refresh_test_durations.py#_load_durations" = 4
+"tests/test_refresh_test_durations.py -> refresh_test_durations.py#_run_suite" = 5
+"tests/test_refresh_test_durations.py -> refresh_test_durations.py#_write_durations" = 3

@@ -1,0 +1,11 @@
+exports = ["notes.py", "seeds.py"]
+
+[uses]
+"test_create_unique_title_no_conflict.py" = ["seeds.py"]
+"test_creation_receipt_identity.py" = ["seeds.py"]
+"test_creation_receipts.py" = ["seeds.py"]
+"test_notification_fences.py" = ["seeds.py"]
+"test_notification_recovery.py" = ["seeds.py"]
+"test_update_non_owner_notifies_owner.py" = ["notes.py", "seeds.py"]
+"test_update_receipt_identity.py" = ["seeds.py"]
+"test_update_receipts.py" = ["seeds.py"]

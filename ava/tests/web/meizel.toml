@@ -1,0 +1,4 @@
+[uses]
+"test_web.py" = ["_web_helpers.py"]
+"test_web_injection.py" = ["_web_helpers.py"]
+"test_web_search.py" = ["_web_helpers.py"]

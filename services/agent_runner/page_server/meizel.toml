@@ -1,0 +1,9 @@
+exports = ["daemon.py", "resources.py"]
+
+[uses]
+"daemon.py" = ["config.py", "dead_pages.py", "degradation.py", "resources.py"]
+"dead_pages.py" = ["config.py"]
+"tests" = ["config.py", "daemon.py", "dead_pages.py", "resources.py", "server.py"]
+
+[debt.private-name]
+"tests/test_daemon_entry.py -> daemon.py#_hard_exit" = 1

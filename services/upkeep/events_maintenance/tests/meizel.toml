@@ -1,0 +1,12 @@
+[uses]
+"test_alert_reconciler.py" = ["slices.py"]
+"test_auto_dismiss_cadence.py" = ["slices.py", "test_events_maintenance_resolution.py"]
+"test_blob_vacuum.py" = ["slices.py"]
+"test_events_maintenance_daemon.py" = ["slices.py"]
+"test_events_maintenance_failure_budget.py" = ["slices.py"]
+"test_events_maintenance_pass_owner.py" = ["slices.py"]
+"test_events_maintenance_quiesced.py" = ["slices.py"]
+"test_events_maintenance_resolution.py" = ["slices.py"]
+
+[debt.private-name]
+"test_auto_dismiss_cadence.py -> test_events_maintenance_resolution.py#_record" = 1

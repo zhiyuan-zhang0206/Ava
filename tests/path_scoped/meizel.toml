@@ -1,0 +1,14 @@
+exports = ["api_keys.py", "ava_tests.py", "cli_tests.py", "db_authority_tests.py", "gateway_tests.py", "pty_jobs.py", "pty_reaper.py", "pty_service.py", "pty_shells.py", "structure_tests.py"]
+
+[uses]
+"ava_tests.py" = ["api_keys.py", "pty_service.py"]
+"cli_tests.py" = ["pty_reaper.py"]
+"gateway_tests.py" = ["api_keys.py"]
+"integration_tests.py" = ["api_keys.py", "gateway_tests.py"]
+"pty_jobs.py" = ["pty_shells.py"]
+
+[debt.private-name]
+"ava_tests.py -> api_keys.py#_mock_api_keys" = 1
+"gateway_tests.py -> api_keys.py#_mock_api_keys" = 1
+"integration_tests.py -> api_keys.py#_mock_api_keys" = 1
+"integration_tests.py -> gateway_tests.py#_local_spawn_in_process" = 1

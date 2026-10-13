@@ -1,0 +1,6 @@
+exports = ["ledger.py", "shutdown_budget.py"]
+
+[uses]
+"daemon.py" = ["ledger.py", "service.py", "shutdown_budget.py"]
+"service.py" = ["ledger.py", "session.py"]
+"tests" = ["ledger.py", "service.py", "session.py"]

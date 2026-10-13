@@ -1,0 +1,4 @@
+exports = ["support.py"]
+
+[uses]
+"test_shell_sessions_identity.py" = ["support.py"]

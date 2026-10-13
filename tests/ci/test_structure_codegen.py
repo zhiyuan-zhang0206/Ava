@@ -38,8 +38,20 @@ OTHER_CI = {
 }
 # Hooks CI's structure gate skips because another job runs the same tool directly. The
 # changed-files `frontend-eslint` is a commit-stage hook; its whole-project twin is pre-push.
-CI_OWNED = {"pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"}
-PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint-full", "frontend-vitest"}
+CI_OWNED = {
+    "pyright",
+    "frontend-tsc",
+    "frontend-eslint",
+    "frontend-vitest",
+    "meizel-check-changed",
+}
+PREPUSH = {
+    "pyright",
+    "frontend-tsc",
+    "frontend-eslint-full",
+    "frontend-vitest",
+    "meizel-check-full",
+}
 # Pre-push-stage-only hooks with no direct 1:1 CI job duplicate: local
 # safety nets that re-run the pre-commit stage over the real branch diff, an
 # unconditional rerun of the generated-artifact family, the full scan of the

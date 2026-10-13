@@ -1,0 +1,6 @@
+exports = ["launch_retry.py", "resurrection_retry.py", "wake.py"]
+
+[uses]
+"__init__.py" = ["wake.py"]
+"tests" = ["resurrection_retry.py", "wake.py"]
+"wake.py" = ["resurrection_retry.py"]

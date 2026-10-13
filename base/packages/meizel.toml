@@ -1,3 +1,14 @@
+exports = ["dashboard_supply.py", "docs", "extensions", "plugin_config_admin.py", "plugin_config_images.py", "plugin_providers.py", "plugins", "skills"]
+
+[uses]
+"dashboard_supply.py" = ["extensions", "plugins"]
+"extensions" = ["plugins", "skills"]
+"plugin_config_admin.py" = ["plugin_config_images.py", "plugins"]
+"plugin_providers.py" = ["plugins"]
+"plugins" = ["plugin_config_images.py", "skills"]
+"skills" = ["docs"]
+"tests" = ["extensions", "plugin_config_admin.py", "plugin_providers.py", "plugins"]
+
 [external]
 "dashboard_supply.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "plugin_providers.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"

@@ -1,0 +1,10 @@
+exports = ["ava_root", "ava_root_glue", "healthchecks", "roster"]
+
+[uses]
+"ava_root" = ["ava_root_glue", "healthchecks"]
+"ava_root_glue" = ["ava_root", "healthchecks", "roster"]
+"roster" = ["ava_root_glue", "healthchecks"]
+
+[debt.manifest-cycle]
+"ava_root_glue -> ava_root" = 1
+"roster -> ava_root_glue" = 1

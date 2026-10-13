@@ -1,0 +1,5 @@
+exports = ["test_preview_visual_gate.py"]
+
+[uses]
+"test_layout_invariants.py" = ["stubbed_home.py"]
+"test_visual_regression.py" = ["_visual_snapshot.py"]

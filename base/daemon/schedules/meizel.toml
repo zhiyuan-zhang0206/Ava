@@ -1,0 +1,4 @@
+exports = ["builtin_schedules.py", "completion_notices.py", "inputs.py", "watcher.py"]
+
+[uses]
+"tests" = ["builtin_schedules.py", "completion_notices.py"]

@@ -1,0 +1,8 @@
+exports = ["git", "lifecycle", "maintenance", "progress_timeout.py", "release", "schedule_timing.py", "schema", "state", "timing.py"]
+
+[uses]
+"tests" = ["maintenance", "progress_timeout.py", "schema", "timing.py"]
+"timing.py" = ["progress_timeout.py", "schedule_timing.py"]
+
+[debt.private-name]
+"tests/test_migrations.py -> schema/tests/migration_support.py#_reset_schema_migrations_state" = 1

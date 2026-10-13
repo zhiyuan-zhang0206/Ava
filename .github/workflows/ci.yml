@@ -709,8 +709,23 @@ jobs:
       - name: Run pre-commit structural gates (--all-files)
         # Segment A: keep the existing exclusions and move only codegen to B.
         env:
-          SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install,types-codegen-fresh,constants-codegen-fresh,events-registry-fresh,config-lite-table-fresh
+          SKIP: ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install,types-codegen-fresh,constants-codegen-fresh,events-registry-fresh,config-lite-table-fresh
         run: env -u VIRTUAL_ENV uv run pre-commit run --all-files
+
+      - name: Locality gate (meizel check, whole repository)
+        run: env -u VIRTUAL_ENV uv run python -m meizel check
+
+      - name: Recorded locality debt against the base (warns on growth)
+        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
+        run: |
+          set +e
+          out="$(env -u VIRTUAL_ENV uv run python -m meizel debt diff --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=warn 2>&1)"
+          status=$?
+          echo "$out"
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          if grep -q "debt grew" <<<"$out"; then
+            echo "::warning title=Recorded locality debt grew::Strict-to-be debt may only shrink. Fix the new violation instead of running 'meizel debt record'; see docs/contributing.md (Locality gate)."
+          fi
 
       - name: Save pre-commit environments
         if: success() && steps.precommit-cache.outputs.cache-hit != 'true'

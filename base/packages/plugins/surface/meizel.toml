@@ -1,0 +1,4 @@
+exports = ["inspector.py", "stats.py", "ui_contributions.py"]
+
+[uses]
+"tests" = ["stats.py"]

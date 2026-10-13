@@ -1,0 +1,5 @@
+exports = ["creation_identity.py", "spawn.py", "transaction.py"]
+
+[uses]
+"spawn.py" = ["transaction.py"]
+"transaction.py" = ["creation_identity.py"]

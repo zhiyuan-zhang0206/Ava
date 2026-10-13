@@ -1,0 +1,8 @@
+exports = ["gateway_auth.py"]
+
+[uses]
+"test_agent_launch_retry_sdk.py" = ["sdk_support.py"]
+"test_agents_sdk.py" = ["sdk_support.py"]
+"test_agents_sdk_queries.py" = ["sdk_support.py"]
+"test_agents_sdk_system_note.py" = ["sdk_support.py"]
+"test_external_agent_source.py" = ["gateway_auth.py"]

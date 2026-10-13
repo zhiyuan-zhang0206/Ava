@@ -1,0 +1,5 @@
+exports = ["http.py", "types.py"]
+
+[uses]
+"http.py" = ["types.py"]
+"tests" = ["types.py"]

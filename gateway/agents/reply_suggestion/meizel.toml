@@ -1,0 +1,7 @@
+exports = ["configuration.py", "router.py"]
+
+[uses]
+"configuration.py" = ["service.py"]
+"router.py" = ["schemas.py", "service.py"]
+"service.py" = ["excerpt.py", "schemas.py"]
+"tests" = ["configuration.py", "excerpt.py", "router.py", "schemas.py", "service.py"]

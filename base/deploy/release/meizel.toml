@@ -1,0 +1,8 @@
+exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "start_inputs.py"]
+
+[uses]
+"tests" = ["collector_artifact.py", "editable_install.py"]
+
+[debt.private-name]
+"tests/test_collector_artifact_retry.py -> collector_artifact.py#_download_with_retry" = 2
+"tests/test_collector_artifact_retry.py -> collector_artifact.py#_stream_download" = 1

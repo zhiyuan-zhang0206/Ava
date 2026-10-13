@@ -1,0 +1,24 @@
+exports = ["browser_reach.py", "frontend.py", "gate.py", "lgtm.py", "maintenance_hold.py", "otel_collector.py", "permissions_helper.py", "prod_venv.py", "protocol_probe.py", "redis_acl.py", "redis_bridge.py"]
+
+[uses]
+"lgtm.py" = ["protocol_probe.py"]
+"protocol_probe.py" = ["insights.py", "memory_search.py"]
+"tests" = ["browser_mcp.py", "browser_reach.py", "computer_mcp.py", "frontend.py", "gateway.py", "insights.py", "lgtm.py", "maintenance_hold.py", "mcp_daemon.py", "memory_search.py", "otel_collector.py", "permissions_helper.py", "prod_venv.py", "protocol_probe.py", "redis_acl.py", "redis_bridge.py"]
+
+[debt.private-name]
+"protocol_probe.py -> insights.py#_probe" = 1
+"protocol_probe.py -> memory_search.py#_probe" = 1
+"tests/test_healthcheck_browser_mcp.py -> browser_mcp.py#_is_alive" = 3
+"tests/test_healthcheck_browser_mcp.py -> browser_mcp.py#_probe" = 3
+"tests/test_healthcheck_computer_mcp.py -> computer_mcp.py#_is_alive" = 2
+"tests/test_healthcheck_gateway.py -> gateway.py#_probe" = 8
+"tests/test_healthcheck_insights.py -> insights.py#_probe" = 3
+"tests/test_healthcheck_mcp_daemon.py -> mcp_daemon.py#_is_alive" = 3
+"tests/test_healthcheck_mcp_daemon.py -> mcp_daemon.py#_probe" = 3
+"tests/test_healthcheck_memory_search.py -> memory_search.py#_probe" = 4
+"tests/test_healthcheck_otel_collector.py -> otel_collector.py#_is_alive" = 5
+"tests/test_healthcheck_permissions_helper.py -> permissions_helper.py#_ParentEvidenceError" = 2
+"tests/test_healthcheck_permissions_helper.py -> permissions_helper.py#_classify" = 2
+"tests/test_healthcheck_permissions_helper.py -> permissions_helper.py#_helper_parent" = 2
+"tests/test_healthcheck_permissions_helper.py -> permissions_helper.py#_parent_still_live" = 1
+"tests/test_healthcheck_permissions_helper.py -> permissions_helper.py#_ping" = 5

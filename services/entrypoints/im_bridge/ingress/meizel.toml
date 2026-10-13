@@ -1,0 +1,8 @@
+exports = ["identity.py", "runtime.py", "store.py", "types.py"]
+
+[uses]
+"commands.py" = ["identity.py", "types.py"]
+"identity.py" = ["types.py"]
+"runtime.py" = ["commands.py", "identity.py", "store.py", "types.py"]
+"store.py" = ["types.py"]
+"tests" = ["store.py", "types.py"]

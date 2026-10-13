@@ -40,6 +40,36 @@ has Python, frontend and e2e commands, environment details and cleanup guidance.
 Full suites run in CI. The [migration guide](../db/docs/migrations.md) covers
 schema changes, immutable migration history and baseline verification.
 
+### Locality gate (meizel)
+
+`python -m meizel check` judges every first-party dependency against the
+`meizel.toml` manifests (see [the checker](../meizel/docs/checker/checker.ava.okf.md)).
+A commit runs `check --changed` on the staged files, a push and CI run the whole
+`check`, and CI also compares recorded debt with the base branch.
+
+Directories that still carry recorded debt are strict-to-be: the recorded
+violations pass, anything new fails, and the debt may only shrink
+([recorded debt](../meizel/docs/checker/debt.ava.okf.md)).
+
+- Fix a violation instead of recording it. Move the code, use the public door,
+  inject the collaborator, or declare the edge in the manifest of the directory
+  where the two sides meet.
+- After a rebase or a move, run `python -m meizel check`, then `python -m meizel
+  sync --declare` for `undeclared-edge` and `not-exported` (it declares only the
+  legal new dependencies of your changed files and prunes stale ones). An edge
+  that closes a cycle, a private name, an underscore module or a restricted form
+  is not declared; change the code. Run `python -m meizel debt prune` for
+  `debt-paid`.
+- `python -m meizel debt record` is for a deliberate exception that has been
+  discussed with the maintainers and is explained in the PR. It is never the way
+  to make a failing check pass.
+- When a change pays debt down, run `python -m meizel debt prune` in the same
+  change so the baseline drops with the fix. `python -m meizel debt` shows what
+  is left.
+- CI warns when the recorded total grows against the base
+  (`debt diff --on-growth=warn`). It does not fail yet; growth without a
+  discussed reason is still not accepted.
+
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes
 to current project and domain rules; another reviewer agent, a reviewer persona,

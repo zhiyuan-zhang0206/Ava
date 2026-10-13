@@ -1,0 +1,28 @@
+exports = ["adapters", "daemon.py", "ingress", "types.py"]
+
+[uses]
+"adapters" = ["config.py", "core.py", "cursor_store.py", "daemon.py", "gateway_client.py", "ingress", "outbound", "state.py", "tests", "types.py"]
+"alert_outbound.py" = ["outbound", "types.py"]
+"core.py" = ["config.py", "copy.py", "cursor_store.py", "gateway_client.py", "notice_bridge.py", "outbound", "push_watchdog.py", "spawn_menu.py", "state.py", "timeline_acceptance.py", "types.py"]
+"daemon.py" = ["adapters", "alert_outbound.py", "config.py", "core.py", "gateway_client.py", "types.py"]
+"gateway_client.py" = ["config.py", "types.py"]
+"ingress" = ["copy.py", "timeline_acceptance.py", "types.py"]
+"notice_bridge.py" = ["config.py", "copy.py", "notice_poll_store.py", "outbound", "types.py"]
+"notice_poll_store.py" = ["outbound"]
+"outbound" = ["cursor_store.py", "types.py"]
+"push_watchdog.py" = ["config.py", "copy.py", "types.py"]
+"spawn_menu.py" = ["copy.py", "gateway_client.py", "types.py"]
+"tests" = ["alert_outbound.py", "config.py", "copy.py", "core.py", "cursor_store.py", "daemon.py", "gateway_client.py", "notice_bridge.py", "outbound", "push_watchdog.py", "state.py", "timeline_acceptance.py", "types.py"]
+"timeline_acceptance.py" = ["outbound", "types.py"]
+
+[debt.manifest-cycle]
+"daemon.py -> adapters" = 1
+
+[debt.private-name]
+"tests/im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> push_watchdog.py#_sleep" = 3
+"tests/test_im_bridge_daemon.py -> daemon.py#_hard_exit" = 1
+"tests/test_im_bridge_daemon.py -> daemon.py#_is_running" = 2
+"tests/test_im_bridge_daemon.py -> daemon.py#_remove_pidfile" = 3
+"tests/test_im_bridge_daemon.py -> daemon.py#_write_pidfile" = 2
+"tests/test_im_bridge_notify.py -> push_watchdog.py#_sleep" = 1
+"tests/test_push_watchdog_retry.py -> push_watchdog.py#_sleep" = 1

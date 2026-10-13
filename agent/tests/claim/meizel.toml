@@ -1,0 +1,18 @@
+exports = ["claim_support.py", "test_inbound_ownership.py"]
+
+[uses]
+"test_claim.py" = ["claim_status_support.py", "claim_support.py"]
+"test_claim_compact.py" = ["claim_status_support.py", "claim_support.py"]
+"test_claim_compact_summary.py" = ["claim_status_support.py", "claim_support.py"]
+"test_claim_dispatch.py" = ["claim_status_support.py", "claim_support.py"]
+"test_claim_restart.py" = ["claim_status_support.py", "claim_support.py"]
+"test_claim_terminate_cancel.py" = ["claim_status_support.py", "claim_support.py", "test_inbound_ownership.py"]
+
+[debt.private-name]
+"test_claim.py -> claim_support.py#_fake_llm" = 1
+"test_claim_compact.py -> claim_status_support.py#_set_agent_status" = 1
+"test_claim_compact.py -> claim_support.py#_fake_llm" = 1
+"test_claim_dispatch.py -> claim_status_support.py#_set_agent_status" = 1
+"test_claim_restart.py -> claim_status_support.py#_set_agent_status" = 1
+"test_claim_terminate_cancel.py -> claim_status_support.py#_set_agent_status" = 1
+"test_claim_terminate_cancel.py -> test_inbound_ownership.py#_admit" = 1

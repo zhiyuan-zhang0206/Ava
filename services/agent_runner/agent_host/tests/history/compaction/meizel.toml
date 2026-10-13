@@ -1,0 +1,4 @@
+[uses]
+"test_acceptance.py" = ["helpers.py"]
+"test_attempt_claim.py" = ["helpers.py"]
+"test_authority.py" = ["helpers.py"]

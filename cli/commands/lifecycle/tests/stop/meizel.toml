@@ -1,0 +1,9 @@
+exports = ["stop_support.py"]
+
+[uses]
+"test_data_plane_stop.py" = ["stop_support.py"]
+"test_maintenance_stop_report.py" = ["stop_support.py"]
+"test_stop.py" = ["stop_support.py"]
+"test_stop_close_notices.py" = ["stop_support.py"]
+"test_stop_escalation_report.py" = ["stop_support.py"]
+"test_stop_terminals.py" = ["stop_support.py"]

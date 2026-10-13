@@ -1,0 +1,11 @@
+exports = ["test_hosted_compact_failure.py"]
+
+[uses]
+"compaction" = ["test_hosted_compact_failure.py"]
+
+[debt.private-name]
+"compaction/helpers.py -> test_hosted_compact_failure.py#_prepare_graph" = 1
+
+[debt.restricted-python]
+"test_hosted_compact_failure.py#string patch target 'agent.graph.hooks.compact.generate_summary'" = 1
+"test_hosted_compact_failure.py#string patch target 'services.agent_runner.agent_host.runtime.validate_model_config'" = 1

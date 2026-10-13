@@ -1,0 +1,5 @@
+exports = ["fakes.py"]
+
+[uses]
+"test_publish_best_effort.py" = ["fakes.py"]
+"test_redis_client.py" = ["fakes.py"]

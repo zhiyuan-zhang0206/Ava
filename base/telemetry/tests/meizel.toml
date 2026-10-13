@@ -1,0 +1,17 @@
+[uses]
+"_lower_exit_child.py" = ["otlp"]
+"test_observability.py" = ["otlp"]
+"test_pipeline_sink_isolation.py" = ["otlp"]
+"test_telemetry.py" = ["otlp"]
+"test_telemetry_otlp_gate.py" = ["otlp"]
+"test_tracing.py" = ["otlp"]
+"test_tracing_lifecycle.py" = ["otlp"]
+"tracing" = ["otlp", "test_tracing.py"]
+
+[debt.private-name]
+"tracing/test_arm_thread_base_exception_marks_attempt_spent.py -> test_tracing.py#_collector_up" = 1
+"tracing/test_arm_thread_base_exception_marks_attempt_spent.py -> test_tracing.py#_production_process_by_default" = 1
+"tracing/test_arm_thread_base_exception_marks_attempt_spent.py -> test_tracing.py#_reset_init_flag" = 1
+"tracing/test_strip_content_removes_llm_content_keeps_metadata.py -> test_tracing.py#_collector_up" = 1
+"tracing/test_strip_content_removes_llm_content_keeps_metadata.py -> test_tracing.py#_production_process_by_default" = 1
+"tracing/test_strip_content_removes_llm_content_keeps_metadata.py -> test_tracing.py#_reset_init_flag" = 1

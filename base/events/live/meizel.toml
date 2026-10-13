@@ -1,0 +1,14 @@
+exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.py", "redis_client.py", "redis_listener.py", "tests"]
+
+[uses]
+"announce.py" = ["bus.py", "projection.py"]
+"bus.py" = ["redis_client.py"]
+"coalescer.py" = ["projection.py"]
+"publisher.py" = ["redis_client.py"]
+"redis_client.py" = ["redis_resilience.py"]
+"redis_listener.py" = ["redis_client.py", "redis_resilience.py"]
+"tests" = ["bus.py", "coalescer.py", "projection.py", "publisher.py", "redis_client.py", "redis_listener.py"]
+
+[debt.private-name]
+"tests/test_events_wire_format.py -> projection.py#_ROLE_CLASSES" = 2
+"tests/test_redis_listener_ownership.py -> redis_listener.py#_CONSUME_ABANDON_GRACE" = 2

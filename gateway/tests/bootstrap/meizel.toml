@@ -1,0 +1,6 @@
+[uses]
+"child_gateway_scenarios.py" = ["test_server_shutdown.py"]
+"test_auth_enforcement.py" = ["test_auth.py"]
+
+[debt.private-name]
+"test_auth_enforcement.py -> test_auth.py#_patch_secret" = 1

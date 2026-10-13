@@ -1,0 +1,5 @@
+[uses]
+"test_dotenv_boot_launcher_context.py" = ["test_dotenv_boot.py"]
+
+[debt.private-name]
+"test_dotenv_boot_launcher_context.py -> test_dotenv_boot.py#_restore_authority_env" = 1

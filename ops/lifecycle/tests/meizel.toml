@@ -1,0 +1,7 @@
+[uses]
+"operations" = ["test_operations.py"]
+"test_agents_internals_lifecycle.py" = ["resurrection_setup.py"]
+"test_resurrection_fences.py" = ["resurrection_setup.py"]
+
+[debt.private-name]
+"operations/test_resurrect_if_terminated_placement.py -> test_operations.py#_db" = 1

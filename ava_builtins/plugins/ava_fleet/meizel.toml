@@ -1,0 +1,31 @@
+exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task_registry.py", "tests"]
+
+[uses]
+"_task_receipts.py" = ["_task_update.py"]
+"agent_runtime.py" = ["default_config.py"]
+"plugin.py" = ["task_registry.py"]
+"services.py" = ["default_config.py"]
+"task_maintenance" = ["default_config.py"]
+"task_registry.py" = ["_task_assignment.py", "_task_creation_receipts.py", "_task_receipts.py", "_task_update.py"]
+"tests" = ["_task_creation_receipts.py", "_task_receipts.py", "_task_update.py", "agent_runtime.py", "default_config.py", "plugin.py", "services.py", "task_maintenance", "task_registry.py"]
+
+[debt.private-name]
+"_task_receipts.py -> _task_update.py#_UNSET" = 1
+"task_registry.py -> _task_update.py#_DEFAULT_PRIORITY" = 1
+"task_registry.py -> _task_update.py#_STATUSES" = 1
+"task_registry.py -> _task_update.py#_UNSET" = 1
+"task_registry.py -> _task_update.py#_Unset" = 1
+"task_registry.py -> _task_update.py#_collect_update_fields" = 1
+"task_registry.py -> _task_update.py#_nothing_to_update" = 1
+"task_registry.py -> _task_update.py#_owner_actually_changed" = 1
+"task_registry.py -> _task_update.py#_validate_status" = 1
+"task_registry.py -> _task_update.py#_write_task_update" = 1
+"tests/roster/test_task_maintenance_pidfile_guard.py -> task_maintenance/daemon.py#_is_running" = 1
+"tests/roster/test_task_maintenance_pidfile_guard.py -> task_maintenance/daemon.py#_pidfile" = 1
+"tests/task_registry/test_creation_receipt_identity.py -> task_registry.py#_create" = 1
+"tests/task_registry/test_creation_receipts.py -> task_registry.py#_create" = 1
+"tests/task_registry/test_update_receipt_identity.py -> task_registry.py#_update" = 1
+"tests/task_registry/test_update_receipts.py -> task_registry.py#_update" = 1
+"tests/test_task_maintenance_daemon.py -> task_maintenance/daemon.py#_run_reminders" = 2
+"tests/test_task_maintenance_daemon_part2.py -> task_maintenance/daemon.py#_run_escalate" = 1
+"tests/test_task_registry.py -> task_registry.py#_is_terminated" = 1

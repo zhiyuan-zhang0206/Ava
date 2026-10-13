@@ -1,0 +1,4 @@
+exports = ["client.py", "ipc.py"]
+
+[uses]
+"client.py" = ["ipc.py"]

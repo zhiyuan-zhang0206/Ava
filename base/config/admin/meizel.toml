@@ -1,0 +1,4 @@
+exports = ["candidate.py", "editing.py", "metadata.py"]
+
+[uses]
+"editing.py" = ["metadata.py"]

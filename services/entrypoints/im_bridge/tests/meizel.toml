@@ -1,0 +1,21 @@
+exports = ["slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]
+
+[uses]
+"conftest.py" = ["test_im_bridge_core.py"]
+"im_bridge_core" = ["slices.py", "task_scope.py", "test_im_bridge_core.py"]
+"test_alert_outbound.py" = ["test_timeline_outbox.py"]
+"test_im_bridge_core.py" = ["slices.py", "task_scope.py"]
+"test_im_bridge_durable_cursors.py" = ["slices.py", "task_scope.py", "test_im_bridge_core.py"]
+"test_im_bridge_gateway_client.py" = ["slices.py"]
+"test_im_bridge_notify.py" = ["slices.py", "task_scope.py"]
+"test_im_bridge_watermark.py" = ["task_scope.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
+"test_notice_bridge.py" = ["slices.py", "task_scope.py", "test_im_bridge_core.py"]
+"test_notice_outbox.py" = ["slices.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
+"test_push_watchdog_retry.py" = ["slices.py"]
+"test_timeline_selection.py" = ["task_scope.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
+
+[debt.private-name]
+"im_bridge_core/test_push_snapshot_watermark_is_per_chat.py -> test_im_bridge_core.py#_core" = 1
+"im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_core" = 1
+"im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_text" = 1
+"test_im_bridge_watermark.py -> test_im_bridge_core.py#_core" = 1

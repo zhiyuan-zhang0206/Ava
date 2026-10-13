@@ -1,0 +1,6 @@
+exports = ["evidence.py", "relay_supervision.py", "roster.py", "snapshot.py", "turn_progress.py"]
+
+[uses]
+"roster.py" = ["evidence.py"]
+"snapshot.py" = ["evidence.py"]
+"tests" = ["evidence.py", "roster.py", "snapshot.py"]

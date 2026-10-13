@@ -1,0 +1,8 @@
+[uses]
+"ava_code_plugin" = ["surface_support.py", "test_ava_code_plugin.py"]
+"test_after_exec_hook.py" = ["surface_support.py"]
+"test_ava_code_plugin.py" = ["surface_support.py"]
+
+[debt.private-name]
+"ava_code_plugin/test_read_wrap_corrupted_state_field_raises.py -> test_ava_code_plugin.py#_load_ava_code_plugin" = 1
+"ava_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py -> test_ava_code_plugin.py#_load_ava_code_plugin" = 1

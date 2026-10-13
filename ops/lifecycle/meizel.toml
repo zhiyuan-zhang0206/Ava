@@ -1,0 +1,15 @@
+exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "native_restart.py", "termination.py"]
+
+[uses]
+"__init__.py" = ["events.py", "launch.py", "native_restart.py", "resurrect_gates.py", "termination.py"]
+"delivery.py" = ["__init__.py"]
+"termination.py" = ["events.py"]
+"tests" = ["__init__.py", "launch.py", "termination.py"]
+
+[debt.private-name]
+"__init__.py -> termination.py#_enqueue_termination_inbounds" = 1
+"__init__.py -> termination.py#_force_terminate_transaction" = 1
+"tests/operations/test_resurrect_if_terminated_placement.py -> __init__.py#_cluster_rpc" = 2
+"tests/test_termination_message.py -> termination.py#_enqueue_termination_inbounds" = 2
+"tests/test_termination_message.py -> termination.py#_force_terminate_transaction" = 1
+"tests/test_termination_recovery_wake.py -> termination.py#_force_terminate_transaction" = 5

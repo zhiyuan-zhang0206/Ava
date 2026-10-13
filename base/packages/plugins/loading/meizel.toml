@@ -1,2 +1,8 @@
+exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py"]
+
+[uses]
+"faces.py" = ["__init__.py", "discovery.py", "plugin_loader.py", "registry.py"]
+"registry.py" = ["__init__.py", "discovery.py"]
+
 [external]
 "plugin_loader.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"

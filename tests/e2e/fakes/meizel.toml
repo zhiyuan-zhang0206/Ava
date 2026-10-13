@@ -1,2 +1,12 @@
+exports = ["scenario_recording.py", "scenarios"]
+
+[uses]
+"scenario_recording.py" = ["scripted_model.py"]
+"scenarios" = ["scenario_recording.py", "scripted_model.py"]
+"test_budget_handoff.py" = ["scenarios"]
+"test_chat_model.py" = ["scripted_model.py"]
+"test_recording.py" = ["scenario_recording.py", "scripted_model.py"]
+"test_watcher_resurrection.py" = ["scenarios"]
+
 [external]
 "child_budget_writer.py" = "executes the generated scenario program passed on its command line"

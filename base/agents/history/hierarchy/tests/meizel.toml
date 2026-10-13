@@ -1,0 +1,6 @@
+exports = ["consumer_helpers.py"]
+
+[uses]
+"test_chunk_consumer.py" = ["consumer_helpers.py", "consumer_history.py"]
+"test_chunk_consumer_quiesced.py" = ["consumer_helpers.py"]
+"test_rebuild.py" = ["consumer_helpers.py"]

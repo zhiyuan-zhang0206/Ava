@@ -1,0 +1,5 @@
+exports = ["graphs.py", "imports.py", "model.py", "scopes.py", "universe.py"]
+
+[uses]
+"imports.py" = ["model.py", "scopes.py", "universe.py"]
+"universe.py" = ["model.py"]

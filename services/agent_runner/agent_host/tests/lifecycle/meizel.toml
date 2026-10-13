@@ -1,0 +1,6 @@
+exports = ["recovery_admission.py", "test_hosted_lifecycle.py", "test_predecessor_closure.py"]
+
+[uses]
+"test_hosted_backlog_recovery.py" = ["recovery_admission.py"]
+"test_hosted_force_cleanup.py" = ["force_host_setup.py"]
+"test_hosted_idle_recovery.py" = ["recovery_admission.py"]

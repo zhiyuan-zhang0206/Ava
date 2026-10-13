@@ -1,3 +1,7 @@
+[uses]
+"syntax_fix" = ["test_syntax_fix.py"]
+"test_syntax_fix_helpers.py" = ["legacy_fixers_support.py"]
+
 [external]
 "legacy_fixers_support.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "test_syntax_fix.py" = "checks the syntax repairer's output with the same compile the agent code goes through"

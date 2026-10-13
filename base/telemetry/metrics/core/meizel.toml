@@ -1,0 +1,5 @@
+exports = ["catalog.py"]
+
+[uses]
+"catalog.py" = ["ci.py", "cost.py", "dismissed.py", "events.py", "exec_envelope.py", "fleet.py", "frontend.py", "host.py", "observability.py", "panels.py", "pr_flow.py"]
+"tests" = ["catalog.py", "exec_envelope.py", "frontend.py", "observability.py"]

@@ -1,0 +1,2 @@
+[uses]
+"test_cold_owner.py" = ["child_fixture.py"]

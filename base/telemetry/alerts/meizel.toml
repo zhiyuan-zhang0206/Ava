@@ -1,0 +1,6 @@
+exports = ["copy.py", "native.py", "shadow.py"]
+
+[uses]
+"__init__.py" = ["copy.py"]
+"native.py" = ["__init__.py"]
+"shadow.py" = ["__init__.py", "native.py"]

@@ -1,0 +1,2 @@
+[uses]
+"test_commands_restart_stop.py" = ["restart_inputs.py"]

@@ -1,0 +1,4 @@
+[uses]
+"test_computer_clipboard.py" = ["test_computer_input.py"]
+"test_computer_mouse_hold.py" = ["test_computer_input.py"]
+"test_computer_observations.py" = ["test_computer_input.py"]
