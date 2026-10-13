@@ -15,7 +15,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.invocation.compact.source import produce_source
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
-    _prepare_graph,
+    prepare_graph,
 )
 from services.agent_runner.agent_host.tests.managed_work import managed_work
 
@@ -29,7 +29,7 @@ async def source(
     database_gate: ProcessDbGate,
 ) -> tuple[Any, ...]:
     incarnation, work = await managed_work(conn, pool, database_gate=database_gate)
-    graph, saver, config, history = await _prepare_graph(pool, work.agent_id, 1, [])
+    graph, saver, config, history = await prepare_graph(pool, work.agent_id, 1, [])
     await graph.aupdate_state(
         config,
         {

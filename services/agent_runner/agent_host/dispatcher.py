@@ -68,7 +68,7 @@ from services.agent_runner.agent_host.stall_guard import (
 # The pattern one subscription covers: every agent's inbound channel. Kept
 # derived from `inbound_channel` (via the shared prefix) so the publish side
 # and this pattern cannot drift — the same reason `inbound_channel` exists.
-_INBOUND_PATTERN_SUFFIX = ":inbound:*"
+INBOUND_PATTERN_SUFFIX = ":inbound:*"
 
 # The subscription supplies the fast path. This deadline supplies the recovery
 # boundary: a private-network connection can remain TCP-established while its
@@ -87,7 +87,7 @@ _DEFAULT_RECONNECT_DELAY_S = 1.0
 # Ten attempts one second apart ride out a data-plane restart of a few seconds,
 # and a half-open peer burns a full read deadline per attempt, so it takes
 # minutes of unanswered reads to reach the limit.
-_MAX_CONSECUTIVE_RECONNECT_FAILURES = 10
+MAX_CONSECUTIVE_RECONNECT_FAILURES = 10
 # The database scan is a durable backstop, not the subscription's liveness
 # probe. Bound its outage retries independently so a long DB outage does not
 # turn into an unbounded delay before the next reconciliation attempt.
@@ -501,7 +501,7 @@ class InboundWakeDispatcher:
         """Subscribe and feed wakes to the scheduler until cancelled.
 
         Subscription failures reconnect with a short delay; after
-        `_MAX_CONSECUTIVE_RECONNECT_FAILURES` in a row without one completed
+        `MAX_CONSECUTIVE_RECONNECT_FAILURES` in a row without one completed
         read, `run` raises `DispatcherReconnectExhaustedError` so the daemon
         exits and its supervisor's bounded restart budget takes over. The
         periodic database scan catches a wake published while the subscription
@@ -509,7 +509,7 @@ class InboundWakeDispatcher:
         with bounded backoff. This shared scan supplies durable wake recovery
         for all agents.
         """
-        pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
+        pattern = f"{redis_channel_prefix()}{INBOUND_PATTERN_SUFFIX}"
         consecutive_failures = 0
         while True:  # quiesce-exempt: the scan itself is gated by quiesced()
             redis = self._bus.open_async_redis()
@@ -563,7 +563,7 @@ class InboundWakeDispatcher:
                 # WARNING without the traceback. A run of failures that never
                 # completes a read is not noise: exit for the supervisor.
                 consecutive_failures += 1
-                if consecutive_failures >= _MAX_CONSECUTIVE_RECONNECT_FAILURES:
+                if consecutive_failures >= MAX_CONSECUTIVE_RECONNECT_FAILURES:
                     logger.error(
                         "hosted dispatcher subscription failed {failures} times in a row — "
                         "exiting for supervisor recovery",
