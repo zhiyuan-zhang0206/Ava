@@ -30,10 +30,23 @@ application code or executes test code.
 
 Global fixture dependencies can therefore reach most tests. This is conservative
 runtime coupling: the duration guard reports `subset-too-close` and keeps FULL rather than
-removing those edges to produce a smaller subset. An opaque dynamic input may load any
-changed path, so every test whose reachable dependency graph holds one joins every
-candidate subset; its source location and reason stay in the JSON `diagnostics` field
-and stderr. Explicit edges do not certify that an unrelated opaque input is resolved.
+removing those edges to produce a smaller subset. Two kinds of gap keep a test in every
+candidate subset (its location and reason stay in the JSON `diagnostics` field and stderr):
+
+- An unresolved load (`import_module` of a computed name, a file loader, `python -c`
+  source that cannot be read) may run any code, so it always counts.
+- A read whose path cannot be anchored to the checkout or to an outside root
+  (`path.read_text()` on a parameter) can only matter to a data file: Python sources reach
+  tests through the import graph, and the tests that read source text are the pinned
+  tree-scan family. It counts only when the change includes a file that is neither Python
+  nor a meizel manifest.
+
+A gap is not one when the file declares it. The shared fact collection reads
+`meizel.policy.toml`: a `[loads]` entry becomes dependency edges to its directories, and an
+`[external]` entry (honored for sources only; a listed test may load a repository file by
+path) says the loaded content is not part of the repository. An existence probe
+(`importlib.util.find_spec`) loads nothing and is never a gap. Explicit edges do not
+certify that an unrelated opaque input is resolved.
 When those tests alone push a subset past the duration guard, FULL reports
 `incomplete-impact` instead of `subset-too-close`. Syntax errors, malformed
 declarations and unexpected analysis errors fail the selector job and the required
@@ -68,12 +81,21 @@ matching row decides.
 | 3 | Any other `conftest.py` (also when deleted) | CONFTEST | every collectable test below its directory plus runtime consumers |
 | 4 | Absent from the head tree | DELETED | base-tree impact; FULL with a diagnostic when base facts are unavailable |
 | 5 | A collectable test file | TEST | itself and its transitive test consumers |
-| 6 | A global path (below) | GLOBAL | full suite |
+| 6a | A root meizel manifest (`meizel.toml`, `meizel.policy.toml`) | MANIFEST | runtime readers, meizel's own tests, every test naming the file and the tests of each source module that names it (below) |
+| 6b | A global path (below) | GLOBAL | full suite |
 | 7a | `.github/`, `.agents/`, `.ava/`, `.trunk/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
-| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, `.test_durations`, `.test_durations.source.json` | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
+| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE` | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
 | 8 | A non-Python file under `ui/` | FRONTEND | recognized backend resource consumers, when backend selection runs; the frontend job also owns it |
 | 9 | Any other file under agent/, ava/, ava_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | transitive runtime consumers plus the owning package's tests |
 | 10 | Anything else | UNMAPPED | full suite |
+
+The root meizel manifests are declarations: `[roles]` names the top-level packages the
+selector classifies by, and `[uses]`, `[debt.*]` and the policy feed the meizel checks, which
+the structure job runs over the whole tree on every CI run. No runtime behavior reads them,
+so a change selects the tests that can observe them: every collectable test under `meizel/`,
+every test whose code holds the file name as a string constant (outside docstrings), and the
+runtime and package tests of each source module that does. The readers are derived by that
+scan, never listed. The test hosts come from `pyproject.toml`, which stays global.
 
 Global paths apply to every test: `pyproject.toml`, `uv.lock`, `.python-version`,
 `.env.example`, the root `conftest.py`, the modules its `pytest_plugins` lists
