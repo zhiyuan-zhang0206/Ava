@@ -20,6 +20,7 @@ from __future__ import annotations
 import inspect
 import json
 import keyword
+import sys
 import time
 import types
 from contextlib import suppress
@@ -373,3 +374,22 @@ def __getattr__(name: str) -> Any:
 def __dir__() -> list[str]:
     """List every configured server name plus the module's public helpers."""
     return [*servers(), "servers", "description"]
+
+
+class _McpsModule(types.ModuleType):
+    """The class of the `ava.mcps` module object itself.
+
+    Carries `__all_for_ava__` as a property, like `ava.skills`: the agent-visible members are
+    the two helpers below plus every configured server (`ava.mcps.<server>`, served by the
+    module `__getattr__`), and the servers come from `$AVA_HOME/mcp.json` and the plugins'
+    bundled `.mcp.json`, so the list is live rather than a literal. Only this list decides what
+    `help()` and the metering wrappers see; a new public name or submodule here widens nothing.
+    """
+
+    @property
+    def __all_for_ava__(self) -> list[str]:
+        """The configured server names and the two helpers, sorted."""
+        return sorted([*servers(), "servers", "description"])
+
+
+sys.modules[__name__].__class__ = _McpsModule
