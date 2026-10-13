@@ -13,6 +13,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
 from schedules import entry
+from ava.sdk_surface import process_context
 
 
 def test_quiet_schedule_exit_never_builds_a_writer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,7 +52,7 @@ def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a template must not build a second entry owner")
 
-    monkeypatch.setattr(ava, "loaded_code_image", forbidden)
+    monkeypatch.setattr(process_context, "loaded_code_image", forbidden)
     monkeypatch.setattr(entry, "ClientSet", forbidden)
     database = Mock()
     producer = Mock()

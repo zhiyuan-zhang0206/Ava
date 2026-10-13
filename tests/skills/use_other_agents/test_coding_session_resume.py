@@ -54,9 +54,9 @@ class _FakeShell:
         return self.screen
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> _FakeShell:
-        monkeypatch.setattr(codex.ava.shell.sessions, "send", self.send)
-        monkeypatch.setattr(codex.ava.shell.sessions, "send_keys", self.send_keys)
-        monkeypatch.setattr(codex.ava.shell.sessions, "capture", self.capture)
+        monkeypatch.setattr(codex.sessions, "send", self.send)
+        monkeypatch.setattr(codex.sessions, "send_keys", self.send_keys)
+        monkeypatch.setattr(codex.sessions, "capture", self.capture)
         return self
 
 

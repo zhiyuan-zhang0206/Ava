@@ -1,4 +1,4 @@
-"""`ava.mcp_config` — the shared MCP config loader.
+"""`ava.mcps.config` — the shared MCP config loader.
 
 Covers the three concerns the loader factors out of the two `_load_config`
 call sites: reading one file's `mcpServers` section (with fail-fast on bad
@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-import ava.mcp_config as cfg_mod
+import ava.mcps.config as cfg_mod
 
 
 def _write(path: Path, servers: dict[str, dict[str, str]]) -> None:

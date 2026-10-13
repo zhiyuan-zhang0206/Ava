@@ -258,6 +258,7 @@ def host_refuses_env_context_and_attachment() -> None:
     else:
         stopped = False
     assert stopped, "boot did not stop"
+    from ava import boot
     from ava.sdk_surface import agent_identity, process_context
 
     os.environ["AVA_AGENT_ID"] = "5"
@@ -267,7 +268,7 @@ def host_refuses_env_context_and_attachment() -> None:
     assert getattr(ava, "context", None) is None
     _expect_refusal(lambda: ava.external.attach("must-not-be-read"), "native agent runtime")
     _expect_refusal(
-        lambda: process_context.bind_context(process_context.launched_context()),  # pyright: ignore[reportArgumentType]
+        lambda: process_context.bind_context(boot.launched_context()),  # pyright: ignore[reportArgumentType]
         "shared agent host",
     )
     _expect_refusal(process_context.unbind_context, "startup posture")

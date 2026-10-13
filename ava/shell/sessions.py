@@ -73,7 +73,7 @@ def _renewal_update(cur: Any, agent_id: int, session_id: int, ttl: float) -> dat
 class ShellSessions:
     """One agent's persistent shell sessions on a backend and a database.
 
-    Built by `ava.sdk_surface.settings.shell_sessions()` from this process's settings and agent identity
+    Built by `shell_sessions()` below from this process's settings and agent identity
     (the same SDK root as `database()` / `bus()`); the module functions below delegate to it.
     A test builds one over a fake backend and database.
     """
@@ -224,7 +224,7 @@ class ShellSessions:
         activate_venv = cwd_is_inside_checkout(session_cwd, repo_root())
         session_env = forward_env_dict(activate_venv=activate_venv)
         # The session is the agent's own: the owner's id rides the environment so a script run
-        # in it builds a full AvaContext (`process_context.launched_context`,
+        # in it builds a full AvaContext (`ava.boot.launched_context`,
         # `owns_loop=False`) and `ava.DB` / `ava.REDIS` / the gateway-backed calls work as in
         # the exec child (ruling 2026-10-04, docs/decisions/agents/context/2026-10-04-ava-state-and-context.md,
         # source 2). Per-creation, from this session's owner — not the creating process's
@@ -397,9 +397,29 @@ class ShellSessions:
         return new_expires
 
 
-def _handle() -> ShellSessions:
-    from ava.sdk_surface.settings import shell_sessions
+def shell_sessions() -> ShellSessions:
+    """This agent's persistent shell sessions, on the shell backend and the cluster database.
 
+    Raises RuntimeError when this process has no agent identity: shell sessions are an agent's,
+    so a standalone script that imports ava gets an explicit refusal, never another agent's or
+    a global's sessions."""
+    from ava.sdk_surface import agent_identity
+    from ava.sdk_surface.settings import database
+    from base.sessions.backend import get_shell_backend
+
+    agent_id = agent_identity.agent_id()
+    if agent_id is None:
+        raise RuntimeError(
+            "Cannot use shell sessions: this process has no agent identity. "
+            "ava.shell.sessions requires an agent process or a background "
+            "script launched by one (which derives the identity from "
+            "AVA_AGENT_ID). Running a standalone script that imports ava "
+            "does not set an agent identity."
+        )
+    return ShellSessions(backend=get_shell_backend(), database=database(), agent_id=agent_id)
+
+
+def _handle() -> ShellSessions:
     return shell_sessions()
 
 

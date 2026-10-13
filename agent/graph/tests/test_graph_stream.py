@@ -26,7 +26,7 @@ from langgraph.types import Command
 from agent.graph import LlmLedger, exec_node, llm_node
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock

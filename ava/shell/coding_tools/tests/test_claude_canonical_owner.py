@@ -202,10 +202,10 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
 
     monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
-    monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", _send)
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
-    monkeypatch.setattr(claude.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(claude.sessions, "new", _new)
+    monkeypatch.setattr(claude.sessions, "send", _send)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "kill", _kill)
     monkeypatch.setattr(claude, "_claude_command", _missing_command)
     monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
     monkeypatch.setattr(claude.coding_session_owner, "terminate_generation", _terminate)
@@ -296,8 +296,8 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "init_file", _unexpected)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
-    monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(claude.sessions, "new", _new)
+    monkeypatch.setattr(claude.sessions, "send", _send)
     monkeypatch.setattr(claude, "_wait_for_ready", _ready)
     monkeypatch.setattr(claude, "_verify_start_receipt", _receipt)
     monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
@@ -364,8 +364,8 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
 
     monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
-    monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(claude.sessions, "new", _new)
+    monkeypatch.setattr(claude.sessions, "send", _send)
     monkeypatch.setattr(claude, "_wait_for_ready", _ready)
     monkeypatch.setattr(claude, "_verify_start_receipt", _receipt)
     monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
@@ -420,7 +420,7 @@ def test_start_receipt_survives_a_dead_session_at_the_enter_retry(
         raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
 
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", dead_keys)
+    monkeypatch.setattr(claude.sessions, "send_keys", dead_keys)
 
     _claude_checks._verify_start_receipt(7, no_receipt, timeout=0.01)
     out = capsys.readouterr().out
@@ -442,8 +442,8 @@ def test_start_receipt_does_not_press_enter_when_the_bootstrap_is_submitted(
     def unexpected_send(_sid: int, _message: str) -> None:
         pytest.fail("submitted bootstrap must not be sent again")
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", unexpected_enter)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", unexpected_send)
+    monkeypatch.setattr(claude.sessions, "send_keys", unexpected_enter)
+    monkeypatch.setattr(claude.sessions, "send", unexpected_send)
 
     _claude_checks._verify_start_receipt(7, transcript_evidence)
 
@@ -468,8 +468,8 @@ def test_start_receipt_accepts_evidence_that_appears_after_the_enter_retry(
         pytest.fail("the bootstrap must not be sent a second time")
 
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", send_enter)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", unexpected_send)
+    monkeypatch.setattr(claude.sessions, "send_keys", send_enter)
+    monkeypatch.setattr(claude.sessions, "send", unexpected_send)
 
     _claude_checks._verify_start_receipt(7, transcript_evidence, timeout=0.0)
 
@@ -501,8 +501,8 @@ def test_start_receipt_warns_and_never_resends_when_one_enter_leaves_no_evidence
         sent.append(message)
 
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", send_enter)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", record_send)
+    monkeypatch.setattr(claude.sessions, "send_keys", send_enter)
+    monkeypatch.setattr(claude.sessions, "send", record_send)
 
     _claude_checks._verify_start_receipt(7, no_receipt, timeout=0.0)
 
@@ -639,11 +639,11 @@ def test_failed_early_publish_kills_claude_session_before_startup(
 
     monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
-    monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(claude.sessions, "new", _new)
+    monkeypatch.setattr(claude.sessions, "send", _send)
     monkeypatch.setattr(claude, "_wait_for_ready", _ready)
     monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
-    monkeypatch.setattr(claude.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(claude.sessions, "kill", _kill)
     monkeypatch.setattr(claude.coding_session_owner, "terminate_generation", _terminate)
 
     workspace = Path(launching.key.workspace)

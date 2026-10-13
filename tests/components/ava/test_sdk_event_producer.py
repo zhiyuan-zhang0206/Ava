@@ -7,6 +7,7 @@ from collections.abc import Iterator
 import pytest
 
 import ava
+from ava import boot
 from ava.sdk_surface import metering, process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
@@ -163,7 +164,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
     import atexit
 
     from agent import extensions
-    from ava.sdk_surface import install, process_context
+    from ava.sdk_surface import install
     from base.config import ConfigBoot
     from base.config.service_read import ConfigAuthority
     from base.lm.catalog import ModelCatalog
@@ -205,7 +206,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         captured.append(producer)
 
     captured: list[object] = []
-    monkeypatch.setattr(process_context, "process_clients", clients)
+    monkeypatch.setattr(boot, "process_clients", clients)
     monkeypatch.setattr(extensions, "load_extensions", load)
     monkeypatch.setattr(atexit, "register", register)
     process_context.bind_context(

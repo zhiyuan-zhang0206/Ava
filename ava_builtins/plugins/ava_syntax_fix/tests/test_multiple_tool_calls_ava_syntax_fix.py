@@ -15,7 +15,7 @@ from agent.graph.exec.node import _exec_node_impl
 from agent.graph.interrupt import InterruptEvent
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity

@@ -461,7 +461,7 @@ def test_install_claude_code_plugin_with_bundled_mcp(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    from ava.mcp_config import load_mcp_config
+    from ava.mcps.config import load_mcp_config
 
     url = _make_claude_code_plugin_repo(tmp_path, agents=True, mcp=True)
     assert (
@@ -489,7 +489,7 @@ def test_install_claude_code_plugin_mcp_only(
     *,
     command_machine: MachineIdentity,
 ) -> None:
-    from ava.mcp_config import load_mcp_config
+    from ava.mcps.config import load_mcp_config
 
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=True)
     assert (
@@ -686,7 +686,7 @@ def test_upgrade_failure_keeps_previous_version(
 def test_dot_prefixed_plugin_dirs_are_not_mcp_sources(unit_home: Path) -> None:
     """Atomic-install residue (.name.staging / .name.backup-<pid>) must not
     register ghost MCP servers from a bundled .mcp.json."""
-    from ava.mcp_config import load_mcp_config
+    from ava.mcps.config import load_mcp_config
 
     ghost = unit_home / "plugins" / ".pr-toolkit.backup-999"
     ghost.mkdir(parents=True)

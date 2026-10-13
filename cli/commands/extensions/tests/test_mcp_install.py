@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from ava.mcp_config import installed_mcp_dir, load_mcp_config
+from ava.mcps.config import installed_mcp_dir, load_mcp_config
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions import mcp
 from cli.commands.extensions.mcp import (

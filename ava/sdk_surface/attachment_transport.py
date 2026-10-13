@@ -8,9 +8,9 @@ registering turn (user ruling 2026-08-26). The SDK keeps no buffer of its own.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
-from ava.files import resolve
 from ava.sdk_surface import process_context
 from ava.sdk_surface.validation import coerce_str
 from base.lm.attach.constants import (
@@ -106,15 +106,11 @@ def _validate_modality(suffix: str) -> None:
     )
 
 
-def attach(path: str | Path, *, label: str | None = None) -> None:
-    """Register a local media file for your next turn.
+def register(path: str | Path, *, label: str | None, resolve: Callable[[str | Path], Path]) -> None:
+    """The body of `ava.self.attach`: validate and record one media registration.
 
-    Use this when your next response needs to inspect a file generated during
-    this turn. The file is read when this turn ends, so keep it available until
-    then. Your model receives supported media natively; a file whose modality
-    your model cannot receive (e.g. video on an image-only model) is rejected
-    with an error naming the allowed set. Attach at most 8 files and 48 MiB per
-    turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
+    `resolve` is the files namespace's path resolution, supplied by the caller so this module
+    stays below `ava.files`.
     """
     from ava.sdk_surface import settings as sdk_settings
 

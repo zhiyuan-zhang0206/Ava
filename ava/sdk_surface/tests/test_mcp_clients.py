@@ -4,9 +4,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from ava import mcps
+from ava.boot import process_clients
 from ava.mcps import McpClients
 from ava.sdk_surface import process_context
-from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.paths import mcp_daemon_shared_socket
 

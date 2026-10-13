@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
-from ava.mcp_config import MCPConnectError
+from ava.mcps.config import MCPConnectError
 
 from . import _remote
 from ._remote import _RemoteMCPClient, connect_remote

@@ -563,13 +563,15 @@ def _run(
         producer=ava.context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
     )
+    from ava.boot import initialize_context
+
     # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
     # same explicit load a watcher child runs. Idempotent, surface-only: a
     # request carrying a state snapshot arms a lazy slot whose first use
     # upgrades to the agent-runtime faces (state fields feed the state schema)
     # — the child start stays off the agent runtime either way (task #3633).
     # The install applies the env baseline AVA_SDK_DISABLE as part of the load.
-    ava.initialize_context(
+    initialize_context(
         ava.context,
         config=config,
         clock_factory=clock_factory,
@@ -648,7 +650,7 @@ def main() -> None:
     try:
         _line_buffered_output()
         _install_signal_handlers()
-        from ava.sdk_surface.process_context import process_clients
+        from ava.boot import process_clients
         from base.agents.context import AvaContext
         from base.cluster.machine.boot import machine_from_boot
         from base.config import ConfigBoot

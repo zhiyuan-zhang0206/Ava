@@ -23,7 +23,7 @@ from agent.graph.interrupt import InterruptEvent
 from agent.hooks.security import deliver_security_findings
 from agent.state import AgentState, build_agent_state
 from agent.tests._fakes import make_fake_ops_pool
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag, read_ava_kwargs

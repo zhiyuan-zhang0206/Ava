@@ -27,7 +27,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable, Generator
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 import pytest
@@ -194,11 +194,10 @@ def test_shell_session_index_passes_the_resilience_kwargs(
     session-index allocation hands libpq `PG_KEEPALIVE_KWARGS` and never
     prepares (`prepare_threshold=None`)."""
     import ava.sdk_surface.agent_identity
-    from ava.sdk_surface.settings import shell_sessions
-    from ava.shell.sessions import ShellSessions
+    from ava.shell.sessions import shell_sessions
 
     monkeypatch.setattr(ava.sdk_surface.agent_identity, "agent_id", lambda: 1)
-    handle = cast("ShellSessions", shell_sessions())
+    handle = shell_sessions()
     seen = _record_connect_kwargs(monkeypatch)
     with pytest.raises(psycopg.OperationalError):
         handle._next_session_index_from_db()
@@ -230,11 +229,10 @@ def test_shell_session_ttl_sites_never_prepare(monkeypatch: pytest.MonkeyPatch) 
     from datetime import UTC, datetime
 
     import ava.sdk_surface.agent_identity
-    from ava.sdk_surface.settings import shell_sessions
-    from ava.shell.sessions import ShellSessions
+    from ava.shell.sessions import shell_sessions
 
     monkeypatch.setattr(ava.sdk_surface.agent_identity, "agent_id", lambda: 1)
-    handle = cast("ShellSessions", shell_sessions())
+    handle = shell_sessions()
     dials: list[Callable[[], object]] = [
         lambda: handle.record_ttl(1, 60.0),
         lambda: handle._read_expiry_row(2),

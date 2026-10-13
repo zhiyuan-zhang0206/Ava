@@ -1,4 +1,4 @@
-"""`ava.mcp_config.load_mcp_config` — per-host enable overlay filtering.
+"""`ava.mcps.config.load_mcp_config` — per-host enable overlay filtering.
 
 The loader drops servers the per-host overlay (`~/.ava/mcp_enabled.json`) marks
 disabled by default; `include_disabled=True` returns the full merged map. A
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-import ava.mcp_config as cfg_mod
+import ava.mcps.config as cfg_mod
 from base.packages.plugins.mcp_enabled import (
     McpEnabledConfig,
     McpEnabledConfigError,

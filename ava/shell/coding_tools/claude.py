@@ -22,7 +22,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-import ava
+from ava.shell import sessions
 from base.sessions import coding_session_owner
 
 from . import impersonator_guide
@@ -186,11 +186,11 @@ def _run_supervised_launch(
     # mandatory (2026-08-27 ruling); the default 24h is a generous cap for a
     # coding session. A session reclaimed before its work is done is reopened
     # with --resume and the claude_session printed below.
-    sid = ava.shell.sessions.new(name=session_name, ttl=ttl_seconds)
+    sid = sessions.new(name=session_name, ttl=ttl_seconds)
     try:
         with tempfile.TemporaryDirectory(prefix="ava-claude-launch-") as marker_dir:
             marker = Path(marker_dir) / "missing-claude"
-            ava.shell.sessions.send(
+            sessions.send(
                 sid,
                 _claude_command(
                     workspace,
@@ -203,7 +203,7 @@ def _run_supervised_launch(
             print(f"+ persistent shell session: {sid} ({session_name})")
             _wait_for_ready(sid, failure_marker=marker, resumed=resume)
 
-        ava.shell.sessions.send(
+        sessions.send(
             sid, worker_bootstrap(contract, workspace, tasks_file, work_file, resumed=resume)
         )
     except BaseException:
@@ -255,7 +255,7 @@ def _run_takeover_launch(
     try:
         relay_stub = None if plugin_dir is None else _generation_relay_stub(owner.state_dir)
         _pretrust(workspace)
-        sid = ava.shell.sessions.new(name=expected_suffix, ttl=ttl_seconds)
+        sid = sessions.new(name=expected_suffix, ttl=ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
         active = coding_session_owner.publish_active(
             key,
@@ -265,7 +265,7 @@ def _run_takeover_launch(
         )
         with tempfile.TemporaryDirectory(prefix="ava-claude-launch-") as marker_dir:
             marker = Path(marker_dir) / "missing-claude"
-            ava.shell.sessions.send(
+            sessions.send(
                 sid,
                 _claude_command(
                     workspace,

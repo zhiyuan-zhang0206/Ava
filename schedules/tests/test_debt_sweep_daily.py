@@ -17,6 +17,7 @@ from ava.agents import AgentStatus as S
 from base.config import settings
 from base.cluster.machine import MachineIdentity
 from base.native_process.loaded_commit import LoadedCommit
+from ava.sdk_surface import process_context
 from schedules import entry
 from base import db
 from base import telemetry
@@ -69,7 +70,7 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     monkeypatch.setattr(module.ava.agents, "spawn", forbidden)
     monkeypatch.setattr(module.ava.agents, "resurrect", forbidden)
     monkeypatch.setattr(module.ava.agents, "send_message", forbidden)
-    monkeypatch.setattr(module.ava, "loaded_code_image", forbidden)
+    monkeypatch.setattr(process_context, "loaded_code_image", forbidden)
     monkeypatch.setattr(entry, "Database", forbidden)
     monkeypatch.setattr(module, "fire_slot_once", forbidden)
     monkeypatch.setattr(module, "ava_home", forbidden)

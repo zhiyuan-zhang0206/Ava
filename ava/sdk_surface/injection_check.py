@@ -145,7 +145,14 @@ async def page_probability(
     return max(answers) if answers else None
 
 
-def begin_check(url: str, title: str, content: str) -> Callable[[], None]:
+def begin_check(
+    url: str,
+    title: str,
+    content: str,
+    *,
+    delivery_active: Callable[[], bool],
+    record: Callable[[str, float], None],
+) -> Callable[[], None]:
     """Start judging a fetched page; the returned `finish` waits and records the finding.
 
     The judgement runs in a worker thread beside the caller's own work, so it adds no
@@ -160,7 +167,6 @@ def begin_check(url: str, title: str, content: str) -> Callable[[], None]:
     """
     from ava.sdk_surface import agent_identity
     from ava.sdk_surface.settings import config_authority, model_catalog
-    from ava.security import finding_delivery_active, record_model_finding
 
     def nothing() -> None:
         return None
@@ -168,7 +174,7 @@ def begin_check(url: str, title: str, content: str) -> Callable[[], None]:
     authority = config_authority()
     if not authority.service_field_value("web_fetch_injection_check_enabled"):
         return nothing
-    if not finding_delivery_active():
+    if not delivery_active():
         return nothing
     text = f"{title}\n\n{content}" if title else content
     if not text.strip():
@@ -198,8 +204,6 @@ def begin_check(url: str, title: str, content: str) -> Callable[[], None]:
         if probability is not None and probability >= threshold:
             # The finding's source names the page; whitespace is collapsed so a URL cannot
             # add lines.
-            record_model_finding(
-                f"web.fetch ({' '.join(url.split())[:_MAX_URL_CHARS]})", probability
-            )
+            record(f"web.fetch ({' '.join(url.split())[:_MAX_URL_CHARS]})", probability)
 
     return finish

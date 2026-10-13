@@ -14,7 +14,7 @@ import pytest
 
 import ava.mcps._daemon as daemon
 from ava import mcps
-from ava.mcp_config import is_transport_error
+from ava.mcps.config import is_transport_error
 
 
 def test_transport_subclasses_keep_the_known_retry_contract() -> None:

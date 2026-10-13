@@ -31,12 +31,12 @@ to avoid one stdio child per agent connection. `"shared": "browser"`
 at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one daemon-wide child for every connection, serialized per server
 (only safe for stateless servers; stateful servers stay per-connection).
 
-**Remote servers**: a `url` entry (validated by `ava/mcp_config.py:server_url`) is an http(s) Streamable HTTP endpoint — mutually exclusive with `command` — with one auth mode: static `headers` (str → str, API-key style) or `"oauth": true`, a full OAuth 2.1 authorization-code + PKCE browser flow ([[oauth.ava.okf.md]]).
+**Remote servers**: a `url` entry (validated by `ava/mcps/config.py:server_url`) is an http(s) Streamable HTTP endpoint — mutually exclusive with `command` — with one auth mode: static `headers` (str → str, API-key style) or `"oauth": true`, a full OAuth 2.1 authorization-code + PKCE browser flow ([[oauth.ava.okf.md]]).
 
 
 **Context ownership**: the SDK stores one daemon socket client on the bound `AvaContext` (`ava/mcps/_clients.py:McpClients`). Closing the context closes that client. No portal, local MCP session or SDK-owned server subprocess is created.
 
-`ava.sdk_surface.process_context.process_clients` supplies a narrow timeout
+`ava.boot.process_clients` supplies a narrow timeout
 reader through `ClientSet`'s factory configuration. `McpClients` is still built
 on first use without reading that configuration or starting a transport. Closing the set clears its clients; a later use rebuilds them
 with the same reader. The daemon supplies its own reader to each connection scope.
@@ -64,7 +64,7 @@ reads the current configuration again.
 
 ## Where Servers Come From
 
-The server set is determined by config (not enumerated in `ava/` source code). `ava/mcp_config.py:load_mcp_config` **four-layer merge** (later overwrites same name):
+The server set is determined by config (not enumerated in `ava/` source code). `ava/mcps/config.py:load_mcp_config` **four-layer merge** (later overwrites same name):
 1. builtin `<repo>/ava_builtins/mcps/*/.mcp.json` (builtin layer, symmetric with builtin skills/plugins);
 2. bundled `.mcp.json` under each plugin root (`mcpServers` section);
 3. installed `$AVA_HOME/mcps/*/.mcp.json` (installed outside core via `ava mcp install`, gated by `install_registry` rows of `type="mcp"`);
@@ -82,7 +82,7 @@ still list prior tools; it does not authorize their execution.
 Installed server spawn cwd is given by `installed_mcp_dir(name)` (its package directory), allowing its relative `.venv/bin/python` command to resolve to an isolated venv; builtin/plugin/machine returns None (keeping daemon cwd).
 
 Server entries may carry `requires` host-capability pre-checks. The shared
-`ava/mcp_config.py:validate_requirements` accepts missing, null or an empty map
+`ava/mcps/config.py:validate_requirements` accepts missing, null or an empty map
 as no requirements; otherwise only `display` with a boolean
 value is valid. Invalid declarations fail before a host probe in connections,
 inventory capability checks and CLI list/enable. The CLI checks only declaration

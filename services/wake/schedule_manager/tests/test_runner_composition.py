@@ -137,12 +137,12 @@ def test_process_owns_one_gate_and_closes_its_pipeline(
         assert not pipelines[0].stopped
         # A later source fact must not replace the entry's captured image.
         monkeypatch.setattr(
-            runner.ava, "loaded_code_image", lambda: LoadedCommit(Path("/late"), "b")
+            process_context, "loaded_code_image", lambda: LoadedCommit(Path("/late"), "b")
         )
         database()
         return 0
 
-    monkeypatch.setattr(runner.ava, "loaded_code_image", lambda: image)
+    monkeypatch.setattr(process_context, "loaded_code_image", lambda: image)
     monkeypatch.setattr(runner, "CodeVersion", version)
     monkeypatch.setattr(runner, "Database", database)
     monkeypatch.setattr(runner.engine, "run", execute)
@@ -196,11 +196,13 @@ def test_runpy_script_receives_the_same_entry_builders(
     script = (
         "import ava\n"
         "from pathlib import Path\n"
+        "from ava.sdk_surface import process_context\n"
         "from schedules.entry import schedule_entry\n"
         "with schedule_entry(AVA_SCHEDULE_INPUTS) as inputs:\n"
         "    assert inputs is AVA_SCHEDULE_INPUTS\n"
         "    assert inputs.producer == ava.context.clients.event_pipeline\n"
-        "    assert inputs.image is ava.loaded_code_image()\n    assert inputs.machine is ava.context.require_machine()\n"
+        "    assert inputs.image is process_context.loaded_code_image()\n"
+        "    assert inputs.machine is ava.context.require_machine()\n"
         f"    Path({str(marker)!r}).write_text('borrowed')\n"
     )
     db_conn.execute("UPDATE schedules SET script = %s WHERE id = %s", (script, sid))

@@ -9,7 +9,9 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-import ava
+from ava import agents
+from ava.sdk_surface import agent_identity
+from ava.shell import sessions
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.log import logger
 from base.sessions import coding_session_owner
@@ -83,7 +85,7 @@ def worker_bootstrap(
 
 def owner_terminated(agent_id: int) -> bool:
     try:
-        return ava.agents.get_status(agent_id) is AgentStatus.TERMINATED
+        return agents.get_status(agent_id) is AgentStatus.TERMINATED
     except AgentNotFound:
         return True
     except GatewayUnavailable:
@@ -100,7 +102,7 @@ def owner_terminated(agent_id: int) -> bool:
 def kill_session_after_failed_launch(session_id: int) -> None:
     """Reclaim the PTY of a launch that is already failing; the launch's own error stays primary."""
     try:
-        ava.shell.sessions.kill(session_id)
+        sessions.kill(session_id)
     except Exception:
         logger.opt(exception=True).warning(
             "reclaiming shell session {} after a failed coding-session launch failed; "
@@ -133,7 +135,7 @@ def new_generation(
     """A fresh generation of our own; dead siblings under ``key`` are reclaimed first."""
     return coding_session_owner.launch_generation(
         key,
-        owner_agent_id=ava.self.AGENT_ID,
+        owner_agent_id=agent_identity.require_agent_id(),
         tasks_file=tasks_file,
         work_file=work_file,
         ttl_seconds=ttl_seconds,
