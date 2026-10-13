@@ -38,8 +38,11 @@ candidate subset (its location and reason stay in the JSON `diagnostics` field a
 - A read whose path cannot be anchored to the checkout or to an outside root
   (`path.read_text()` on a parameter) can only matter to a data file: Python sources reach
   tests through the import graph, and the tests that read source text are the pinned
-  tree-scan family. It counts only when the change includes a file that is neither Python
-  nor a meizel manifest.
+  tree-scan family. It counts only when the change includes a file that is not Python, not
+  Markdown and not a meizel manifest. Markdown is prose, and the tests that read skill or OKF
+  documents are pinned by name instead: a changed `SKILL.md` or `*.okf.md` selects every
+  collectable test whose code holds that name as part of a string constant (docstrings and
+  comments read nothing). The queue's full run catches anything else before main.
 
 A gap is not one when the file declares it. The shared fact collection reads
 `meizel.policy.toml`: a `[loads]` entry becomes dependency edges to its directories, and an
