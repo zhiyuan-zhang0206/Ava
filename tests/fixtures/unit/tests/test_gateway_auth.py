@@ -1,4 +1,4 @@
-"""Default credentials for in-process Gateway clients (`tests.fixtures.unit.gateway_auth`)."""
+"""Default credentials for in-process Gateway clients (`gateway.tests.agents.gateway_auth`)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from gateway.tests.agents.gateway_auth import gateway_credentials, without_credentials
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.gateway_auth import gateway_credentials, without_credentials
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

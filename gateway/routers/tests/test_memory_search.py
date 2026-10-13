@@ -21,11 +21,11 @@ from base.lm import usage
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.routers.memory import MemorySearchInputs
+from gateway.tests.agents.gateway_auth import gateway_credentials
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
-from tests.fixtures.unit.gateway_auth import gateway_credentials
 
 
 def _memory_inputs() -> MemorySearchInputs:

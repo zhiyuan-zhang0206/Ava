@@ -27,7 +27,7 @@ def gateway_unit(
 
     The client is authenticated: the autouse `_clean_state` gives every
     `TestClient` over the gateway app the suite's cluster secret as its bearer
-    (`tests.fixtures.unit.gateway_auth`), so endpoint tests carry no auth headers.
+    (`gateway.tests.agents.gateway_auth`), so endpoint tests carry no auth headers.
     Tests that exercise rejection drop it with `without_credentials(client)`.
     """
     from gateway import app as gateway_app

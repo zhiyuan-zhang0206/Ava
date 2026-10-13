@@ -27,10 +27,10 @@ from base.host.net.auth import bearer_header
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from gateway.app import app
+from gateway.tests.agents.gateway_auth import without_credentials
 from tests.components.agent.test_maintenance import WHEN
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.fixtures.configuration import snapshot_process_config
-from tests.fixtures.unit.gateway_auth import without_credentials
 
 
 @pytest.fixture(autouse=True)

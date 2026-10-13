@@ -32,7 +32,7 @@ from base.host.db_authority.api import AcceptanceCache
 from base.telemetry.alerts.native import load_native_group, stamp_native_sent
 from gateway.alerts import router as alerts_router
 from gateway.app import app
-from tests.fixtures.unit.gateway_auth import without_credentials
+from gateway.tests.agents.gateway_auth import without_credentials
 
 
 def native_sender(callback: Callable[[str], bool]) -> Callable[[int], bool]:
