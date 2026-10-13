@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pathlib
+from collections.abc import Callable
 
 import pytest
 
 import ava
-from ava import watcher
 from ava.watcher import files, wiring
 
 pytestmark = [
@@ -17,6 +17,10 @@ pytestmark = [
     # own kill_all/list calls hit the daemon.
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
+
+
+def _ignore_send(_session_id: int, _line: str) -> None:
+    """Accept the launch command without running it: these tests inspect the generated files."""
 
 
 def _watchers_dir() -> pathlib.Path:
@@ -45,13 +49,12 @@ def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:
     assert d.is_dir()
 
 
-def test_spawn_prunes_stale_watcher_files(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spawn_prunes_stale_watcher_files(
+    _agent_row: int, launch_watcher: Callable[..., int]
+) -> None:
     # Every launch deletes generated watcher files from earlier watchers: a
     # hard-killed watcher cannot self-clean, and its pair would otherwise
     # accumulate forever. Non-generated files are left alone.
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     d = _watchers_dir()
     stale_script = d / "watcher_999.py"
     stale_boot = d / "watcher_999_boot.py"
@@ -62,7 +65,7 @@ def test_spawn_prunes_stale_watcher_files(_agent_row: int, monkeypatch: pytest.M
     keep = d / "keep_me.py"
     keep.write_text("not generated")
 
-    wid = watcher.launch("import ava\n", timeout="1h", name="test-prune")
+    wid = launch_watcher("import ava\n", "1h", "test-prune", send=_ignore_send)
 
     assert not stale_script.exists()
     assert not stale_boot.exists()
@@ -73,27 +76,24 @@ def test_spawn_prunes_stale_watcher_files(_agent_row: int, monkeypatch: pytest.M
 
 
 def test_prune_does_not_touch_other_agents_files(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+    _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
     # Isolation is per-agent: pruning this agent's stale files must never
     # reach into another agent's subdir (the old global dir let agents
     # overwrite each other — that is the bug this layout exists to prevent).
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     d = _watchers_dir()
     other = d.parent / str(ava.self.AGENT_ID + 1) / "watchers"
     other.mkdir(parents=True, exist_ok=True)
     foreign = other / "watcher_999.py"
     foreign.write_text("someone else's")
 
-    watcher.launch("import ava\n", timeout="1h", name="test-isolation")
+    launch_watcher("import ava\n", "1h", "test-isolation", send=_ignore_send)
 
     assert foreign.exists()  # untouched
 
 
 def test_spawn_keeps_sibling_files_while_session_alive(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+    _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
     """Bug A (task #1116): a generated pair whose SESSION still exists must
     not be pruned — launch is asynchronous (the command is sent into a fresh
@@ -101,10 +101,6 @@ def test_spawn_keeps_sibling_files_while_session_alive(
     launch deleting it would make that watcher's python start fail with
     "can't open file ... _boot.py". Only provably-dead pairs (session gone)
     are pruned."""
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "list", lambda: {4242: "test-sibling"})
     d = _watchers_dir()
     live_script = d / "watcher_4242.py"
     live_boot = d / "watcher_4242_boot.py"
@@ -119,7 +115,13 @@ def test_spawn_keeps_sibling_files_while_session_alive(
     dead_launch = d / "watcher_4243_launch.sh"
     dead_launch.write_text("dead launch")
 
-    wid = watcher.launch("import ava\n", timeout="1h", name="test-prune-live")
+    wid = launch_watcher(
+        "import ava\n",
+        "1h",
+        "test-prune-live",
+        send=_ignore_send,
+        live_session_ids=lambda: {4242},
+    )
 
     # live sibling's pair survives (session 4242 exists); dead pair is pruned
     assert live_script.exists() and live_boot.exists() and live_launch.exists()
@@ -128,13 +130,10 @@ def test_spawn_keeps_sibling_files_while_session_alive(
 
 
 def test_spawn_back_to_back_keeps_all_files(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+    _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
     """Back-to-back launches must keep every live sibling's boot file (task #1116).
     The fake exposes each session immediately, as the backend does."""
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     alive: set[int] = set()
     counter = iter(range(1000, 1003))
 
@@ -145,13 +144,18 @@ def test_spawn_back_to_back_keeps_all_files(
         alive.add(sid)
         return sid, name
 
-    monkeypatch.setattr(_sessions, "create_session", _fake_create)
-    monkeypatch.setattr(_sessions, "list", lambda: dict.fromkeys(alive, "w"))
     d = _watchers_dir()
 
     ids: list[int] = []
     for name in ("b2b-1", "b2b-2", "b2b-3"):
-        wid = watcher.launch("import ava\n", timeout="1h", name=name)
+        wid = launch_watcher(
+            "import ava\n",
+            "1h",
+            name,
+            send=_ignore_send,
+            create_session=_fake_create,
+            live_session_ids=lambda: set(alive),
+        )
         ids.append(wid)
 
     # all three pairs on disk — none pruned while its session is live
