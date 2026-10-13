@@ -4,7 +4,7 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 "cli.py" = ["pull_requests"]
 "file_shard_runtime.py" = ["file_shard_shadow.py"]
 "test_selector.py" = ["test_impact.py"]
-"tests" = ["cli.py", "collection_tracebacks.py", "coverage_gates.py", "dependency_audit.py", "file_shard_runtime.py", "file_shard_shadow.py", "no_silent_resurrection.py", "pull_requests", "refresh_test_durations.py"]
+"tests" = ["cli.py", "collection_tracebacks.py", "coverage_gates.py", "dependency_audit.py", "e2e_scope.py", "file_shard_runtime.py", "file_shard_shadow.py", "no_silent_resurrection.py", "pull_requests", "refresh_test_durations.py"]
 
 [debt.private-name]
 "tests/test_no_silent_resurrection.py -> no_silent_resurrection.py#_classify" = 1
