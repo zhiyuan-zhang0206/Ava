@@ -11,5 +11,5 @@ exports = ["birth", "compaction", "context", "history", "impersonation", "inbox"
 "observation" = ["impersonation", "tasks"]
 "sdk" = ["impersonation", "messages"]
 "tasks" = ["inbox", "messages"]
-"tests" = ["history", "impersonation", "inbox", "messages", "model", "upload_delivery"]
+"tests" = ["context", "history", "impersonation", "inbox", "incarnation", "messages", "model", "upload_delivery"]
 "upload_delivery" = ["inbox", "messages"]

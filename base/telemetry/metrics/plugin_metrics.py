@@ -263,7 +263,7 @@ def _validate_promql(template: str) -> None:
 # ── rendering + export ────────────────────────────────────────────────────────
 
 
-def _sql_literal(value: str) -> str:
+def sql_literal(value: str) -> str:
     """Render a validated identifier/enum as a single-quoted SQL literal.
     Kind/category are validated to ``^[a-z][a-z0-9_]*$`` / a Literal at spec
     construction, so the escaping is defense in depth."""
@@ -276,7 +276,7 @@ def _render_template(template: str, spec: MetricSpec, agent_id: int | None) -> s
     SQL wants single quotes, LogQL wants double quotes; PromQL is static."""
     if spec.query_type == "promql":
         return template
-    literal = _sql_literal if spec.query_type == "sql" else _logql_literal
+    literal = sql_literal if spec.query_type == "sql" else _logql_literal
     rendered = template.replace("{event_name}", literal(spec.event_name)).replace(
         "{category}", literal(spec.category)
     )

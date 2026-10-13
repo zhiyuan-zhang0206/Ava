@@ -101,10 +101,14 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
     two direct-import edges (`agent.db` -> base.db.connections, `agent.graph` ->
     exec._crop)."""
     if existing_images:
-        from base.packages.plugin_config_admin import update_all_disk_images
-
-        updated = update_all_disk_images()
-        assert not any(entry.status == "error" for entry in updated.entries), updated
+        # A separate process writes the plugin images, so this test imports nothing from packages.
+        updated = _spawn(
+            "-c",
+            "from base.packages.plugin_config_admin import update_all_disk_images as update\n"
+            "result = update()\n"
+            "assert not any(entry.status == 'error' for entry in result.entries), result\n",
+        )
+        assert updated.returncode == 0, updated.stderr
         assert (Path(os.environ["AVA_HOME"]) / "configs" / "ava_fleet" / "config.json").is_file()
     request = tmp_path / "req.json"
     result = tmp_path / "res.json"

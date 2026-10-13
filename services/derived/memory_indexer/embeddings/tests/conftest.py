@@ -1,6 +1,6 @@
 """Consumer-local opt-in fixtures for this test directory."""
 
-from base.tests.fixtures.retry_waits import retry_waits as retry_waits
+from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from tests.fixtures.log_capture import loguru_records as loguru_records
 from tests.fixtures.model_catalog import add_bindings as add_bindings
 from tests.fixtures.model_catalog import add_models as add_models
