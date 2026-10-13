@@ -14,16 +14,16 @@ from agent.ownership import hosted
 from agent.ownership.corpse_reap import ReapedCorpse
 from services.agent_runner.agent_host import invocation
 from services.agent_runner.agent_host.runtime import _config_fingerprint
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     _Build,
     _GatedGraph,
     _Row,
     _stub_host_transitions,
 )
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     host_plugin as host_plugin,
 )
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
 from tests.components.base.poll_until import poll_until_async

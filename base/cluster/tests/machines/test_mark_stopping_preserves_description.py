@@ -5,18 +5,18 @@ from __future__ import annotations
 import psycopg
 
 from base.cluster import machines
-from base.cluster.tests.machines.setup import MachineSetup
-from base.cluster.tests.test_machines import (
+from base.cluster.tests.machines.setup import (
+    MachineSetup,
     _db,
     _read_description,
     _read_machine,
     _read_unit_up_since,
     _read_up_since,
 )
-from base.cluster.tests.test_machines import (
+from base.cluster.tests.machines.setup import (
     _machine_setup as _machine_setup,
 )
-from base.cluster.tests.test_machines import (
+from base.cluster.tests.machines.setup import (
     _truncate_machines as _truncate_machines,
 )
 from base.config import settings

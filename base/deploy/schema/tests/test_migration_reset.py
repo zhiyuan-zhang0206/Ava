@@ -14,13 +14,13 @@ from base.deploy.schema.migrations import (
     _BASELINE_NAME,
     apply_pending_migrations,
 )
-from base.deploy.tests.migration_support import (
+from base.deploy.schema.tests.migration_support import (
     _SYN,
     SYN_ORPHAN,
     _init_repo,
     db_url,
 )
-from base.deploy.tests.migration_support import (
+from base.deploy.schema.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
 
@@ -276,7 +276,7 @@ def test_current_reset_refuses_missing_history_without_mutation(
 ) -> None:
     from base.deploy.schema.migration_history import _PRE_RESET_SET
     from base.deploy.schema.migrations import MigrationHistoryGap, applied_migration_names
-    from base.deploy.tests.migration_support import _set_table_to
+    from base.deploy.schema.tests.migration_support import _set_table_to
 
     assert len(_PRE_RESET_SET) == 101
     before = {_BASELINE_NAME, *sorted(_PRE_RESET_SET)[:applied_count]}
@@ -297,7 +297,7 @@ def test_current_reset_converges_complete_history(
         check_schema_version,
         required_migration_set,
     )
-    from base.deploy.tests.migration_support import (
+    from base.deploy.schema.tests.migration_support import (
         _schema_sql_stamped_migration_names,
         _set_table_to,
     )
@@ -324,7 +324,7 @@ def test_integer_history_is_refused_without_conversion(
     machine_identity: MachineIdentity,
 ) -> None:
     from base.deploy.schema.migrations import MigrationLayoutError, check_schema_version
-    from base.deploy.tests.migration_support import _set_table_to
+    from base.deploy.schema.tests.migration_support import _set_table_to
 
     _set_table_to(db_conn, "legacy", range(1, 82))
     with psycopg.connect(db_url()) as conn:
@@ -345,7 +345,7 @@ def test_reset_anchor_and_history_deletion_roll_back_together(
 ) -> None:
     from base.deploy.schema import migrations
     from base.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
-    from base.deploy.tests.migration_support import _set_table_to
+    from base.deploy.schema.tests.migration_support import _set_table_to
 
     (tmp_path / f"{_RESET_ANCHOR}.sql").write_text("SELECT 1;")
     _init_repo(tmp_path)
@@ -380,7 +380,7 @@ def test_failed_reset_anchor_preserves_history_for_retry(
 ) -> None:
     from base.deploy.schema import migrations
     from base.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
-    from base.deploy.tests.migration_support import _set_table_to
+    from base.deploy.schema.tests.migration_support import _set_table_to
 
     anchor = tmp_path / f"{_RESET_ANCHOR}.sql"
     anchor.write_text("SELECT 1 / 0;")

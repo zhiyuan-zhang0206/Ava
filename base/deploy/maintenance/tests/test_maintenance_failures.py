@@ -8,14 +8,14 @@ import pytest
 
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     _Build,
     _FakeConnCtx,
     _FakePool,
     _Row,
 )
-from services.agent_runner.agent_host.tests.test_agent_host import host_plugin as host_plugin
-from services.agent_runner.agent_host.tests.test_agent_host import wired as wired
+from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
+from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import (
     FC10_FOREIGN,
     Alerts,
