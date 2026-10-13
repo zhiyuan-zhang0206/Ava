@@ -27,7 +27,7 @@ from services.supervision.ava_root.probes import Probe, ProbeError, ProbeRegistr
 _log = logging.getLogger(__name__)
 
 
-def _monotonic() -> float:
+def monotonic() -> float:
     """Wall-independent startup clock, replaceable in tests."""
     return time.monotonic()
 
@@ -479,7 +479,7 @@ class HealthMonitor:
         if state.generation is None or state.generation_ready:
             return 0.0
         grace = self._startup_graces.get(unit_id, self._config.startup_grace_s)
-        return max(0.0, state.generation[1] + grace - _monotonic())
+        return max(0.0, state.generation[1] + grace - monotonic())
 
     def _unit_state(self, unit_id: str) -> UnitHealth:
         state = self._units.get(unit_id)

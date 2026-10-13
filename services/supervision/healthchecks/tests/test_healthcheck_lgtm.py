@@ -71,7 +71,7 @@ def test_write_path_probe_rejects_400_push(monkeypatch: pytest.MonkeyPatch) -> N
     def _raise(_request: object, **_kwargs: object) -> None:
         raise urllib.error.HTTPError("http://loki/otlp/v1/logs", 400, "rejected", {}, None)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr(hc, "_open_local", _raise)
+    monkeypatch.setattr(hc, "open_local", _raise)
 
     assert hc.write_path_probe() == (False, "push_http_400")
 
@@ -88,7 +88,7 @@ def test_write_path_probe_retries_429_with_bounded_backoff(
             request.full_url, 429, "throttled", email.message.Message(), None
         )
 
-    monkeypatch.setattr(hc, "_open_local", _reject)
+    monkeypatch.setattr(hc, "open_local", _reject)
     monkeypatch.setattr(hc.time, "sleep", sleeps.append)
 
     assert hc.write_path_probe() == (False, "push_http_429")
@@ -107,7 +107,7 @@ def test_write_path_probe_identifies_stuck_ingester(monkeypatch: pytest.MonkeyPa
             io.BytesIO(b"RPC error: code = Unknown desc = InGeStEr Is ShUtTiNg DoWn"),
         )
 
-    monkeypatch.setattr(hc, "_open_local", _raise)
+    monkeypatch.setattr(hc, "open_local", _raise)
 
     assert hc.write_path_probe() == (False, "ingester_shutting_down")
 
@@ -124,7 +124,7 @@ def test_write_path_probe_does_not_misclassify_plain_503(
             io.BytesIO(b"write throttled because disk usage is too high"),
         )
 
-    monkeypatch.setattr(hc, "_open_local", _raise)
+    monkeypatch.setattr(hc, "open_local", _raise)
 
     assert hc.write_path_probe() == (False, "push_http_503")
 
@@ -133,7 +133,7 @@ def test_write_path_probe_reports_push_request_error(monkeypatch: pytest.MonkeyP
     def _raise(_request: object, **_kwargs: object) -> None:
         raise OSError("connection refused")
 
-    monkeypatch.setattr(hc, "_open_local", _raise)
+    monkeypatch.setattr(hc, "open_local", _raise)
 
     assert hc.write_path_probe() == (False, "push_error")
 
@@ -147,7 +147,7 @@ def test_write_path_probe_reports_marker_not_visible(monkeypatch: pytest.MonkeyP
             return _Response(status=204)
         return _Response(status=200, body=b'{"data":{"result":[]}}')
 
-    monkeypatch.setattr(hc, "_open_local", _open)
+    monkeypatch.setattr(hc, "open_local", _open)
 
     assert hc.write_path_probe() == (False, "probe_not_visible")
     request_body = requests[0].data
@@ -192,7 +192,7 @@ def test_write_path_probe_finds_marker_in_numeric_query_window(
         body = json.dumps({"data": {"result": [{"values": [["1", marker]]}]}}).encode()
         return _Response(status=200, body=body)
 
-    monkeypatch.setattr(hc, "_open_local", _open)
+    monkeypatch.setattr(hc, "open_local", _open)
 
     assert hc.write_path_probe() == (True, "ok")
     query = urllib.parse.parse_qs(urllib.parse.urlparse(requests[1].full_url).query)
@@ -217,7 +217,7 @@ def test_write_path_probe_reports_query_request_error(monkeypatch: pytest.Monkey
             return _Response(status=204)
         raise OSError("query unavailable")
 
-    monkeypatch.setattr(hc, "_open_local", _open)
+    monkeypatch.setattr(hc, "open_local", _open)
 
     assert hc.write_path_probe() == (False, "query_error")
 
@@ -258,8 +258,8 @@ def test_unready_http_cannot_certify_backend(monkeypatch: pytest.MonkeyPatch, st
     def response(*_args: object, **_kw: object) -> _Response:
         return _Response(status=status)
 
-    monkeypatch.setattr(hc, "_open_local", response)
-    assert not hc._protocol_readiness("loki").alive
+    monkeypatch.setattr(hc, "open_local", response)
+    assert not hc.protocol_readiness("loki").alive
 
 
 @pytest.mark.parametrize("database,ready", [("ok", True), ("failed", False)])
@@ -269,8 +269,8 @@ def test_grafana_health_requires_database_ready(
     def response(*_args: object, **_kw: object) -> _Response:
         return _Response(status=200, body=json.dumps({"database": database}).encode())
 
-    monkeypatch.setattr(hc, "_open_local", response)
-    assert hc._protocol_readiness("grafana").alive is ready
+    monkeypatch.setattr(hc, "open_local", response)
+    assert hc.protocol_readiness("grafana").alive is ready
 
 
 def test_backend_health_needs_no_native_owner(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -282,5 +282,5 @@ def test_backend_health_needs_no_native_owner(monkeypatch: pytest.MonkeyPatch) -
     def ready(_name: str) -> DaemonProbe:
         return DaemonProbe.up("ready")
 
-    monkeypatch.setattr(hc, "_protocol_readiness", ready)
+    monkeypatch.setattr(hc, "protocol_readiness", ready)
     assert hc.probe_backend("loki").alive
