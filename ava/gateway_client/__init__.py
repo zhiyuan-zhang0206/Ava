@@ -62,6 +62,7 @@ Design trade-offs:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from typing import Any, Literal, NamedTuple
 
 import ava
@@ -117,7 +118,9 @@ def memory_search(
     k: int,
     *,
     purpose: MemorySearchPurpose,
+    exclude: Collection[str] = (),
     timeout: float | None = None,
+    attempts: int = _MEMORY_SEARCH_MAX_RETRIES,
     context: AvaContext | None = None,
 ) -> list[MemorySearchResult]:
     """POST /api/memory/search → list of `MemorySearchResult`, most relevant first.
@@ -140,19 +143,37 @@ def memory_search(
     written, the query is that note), which selects the question the gateway's ranking model
     answers.
 
-    `timeout` overrides the per-attempt HTTP timeout (seconds). The default
-    is the gateway's own search deadline plus a 3s margin (18s at default
-    settings): keep it above `AVA_MEMORY_SEARCH_DEADLINE_SECONDS`, or the
-    client reads out first and the caller sees `GatewayUnavailable` instead
-    of the informative `IndexerUnavailable`.
+    `exclude` lists memory-pool-relative note paths the gateway leaves out before ranking: they
+    cost no ranking request and take no candidate slot. At most `k` results come back, and never
+    more than the notes the gateway ranks per search.
+
+    `timeout` is how long one attempt may take (seconds). It travels in the request, so the gateway
+    stops ranking when it passes: a call whose caller has stopped waiting must not keep spending
+    ranking requests. The HTTP timeout is `timeout` plus a 3s margin, so the gateway's answer
+    (`IndexerUnavailable`) arrives before the client reads out and reports `GatewayUnavailable`.
+    The default is no request deadline, and the gateway's own search deadline plus the margin
+    (18s at default settings) as the HTTP timeout.
+
+    `attempts` is how many times a transient failure is tried in all (default 2: one retry). A
+    caller that gives up on its own deadline passes 1: a retry would start a second search after
+    the caller has stopped waiting for the first.
     """
     import httpx
 
+    body: dict[str, object] = {"query": query, "k": k, "purpose": purpose}
+    if exclude:
+        body["exclude"] = sorted(exclude)
+    if timeout is not None:
+        body["deadline_seconds"] = timeout
     resp = post(
         "/api/memory/search",
-        {"query": query, "k": k, "purpose": purpose},
-        timeout=httpx.Timeout(timeout) if timeout is not None else _memory_search_timeout(context),
-        max_retries=_MEMORY_SEARCH_MAX_RETRIES,
+        body,
+        timeout=(
+            httpx.Timeout(timeout + _MEMORY_SEARCH_TIMEOUT_MARGIN_S)
+            if timeout is not None
+            else _memory_search_timeout(context)
+        ),
+        max_retries=attempts,
         context=context,
     )
     raise_from_response(resp)

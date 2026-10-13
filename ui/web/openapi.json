@@ -6577,7 +6577,7 @@
     "/api/memory/search": {
       "post": {
         "summary": "Post Memory Search",
-        "description": "Search the memory pool; return the `k` notes most relevant to the query,\neach with the chunk that matched and a relevance score.\n\nTwo stages. Vector search finds the best chunk of the closest\n`memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`\npurpose); a decision model then judges each chunk\nagainst the query, and the response is ordered by the probability that the\nchunk is relevant (`score`). No text is generated on this path.\n\nPaths are relative to memory pool root (settings.services.memory_root, e.g.\n`~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to\nreconstruct the absolute path. fs-neutral so gateway fs (e.g.\n/Users/x) and agent-runner fs (/home/y) being different still works.\n\nOnly the gateway hosts the search backend (numpy by default), so\nthis endpoint always runs on the gateway; agent-runner SDK calls reach this\nhandler via the gateway URL they were configured with (CF Tunnel /\nprivate network) and never enter via a local agent-runner gateway\n(agent-runners run no gateway process).\n\nRaises:\n    IndexerUnavailable: embedder API / search backend unreachable, the\n        decision model failed, or the search exceeded its deadline (wire 503)",
+        "description": "Search the memory pool; return the `k` notes most relevant to the query,\neach with the chunk that matched and a relevance score.\n\nTwo stages. Vector search finds the best chunk of the closest\n`memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`\npurpose); a decision model then judges each chunk\nagainst the query, and the response is ordered by the probability that the\nchunk is relevant (`score`). No text is generated on this path.\n\nOne search issues at most that many decision requests, whatever `k` is: `k` above the\ncandidate count returns the candidates. Notes in `exclude` are dropped from the vector\ncandidates before ranking and take no slot. The ranking stops, and its unanswered requests\nare cancelled, when the client disconnects or the deadline passes (the gateway's own, or\nthe request's `deadline_seconds` when that is shorter).\n\nPaths are relative to memory pool root (settings.services.memory_root, e.g.\n`~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to\nreconstruct the absolute path. fs-neutral so gateway fs (e.g.\n/Users/x) and agent-runner fs (/home/y) being different still works.\n\nOnly the gateway hosts the search backend (numpy by default), so\nthis endpoint always runs on the gateway; agent-runner SDK calls reach this\nhandler via the gateway URL they were configured with (CF Tunnel /\nprivate network) and never enter via a local agent-runner gateway\n(agent-runners run no gateway process).\n\nRaises:\n    IndexerUnavailable: embedder API / search backend unreachable, the\n        decision model failed, or the search exceeded its deadline (wire 503)",
         "operationId": "post_memory_search_api_memory_search_post",
         "requestBody": {
           "content": {
@@ -13389,7 +13389,7 @@
             "maximum": 100.0,
             "minimum": 1.0,
             "title": "K",
-            "description": "result count",
+            "description": "most results wanted; never more than the candidates the purpose ranks (`memory_rerank_candidates`, `memory_dedup_candidates` for 'dedup')",
             "default": 5
           },
           "purpose": {
@@ -13401,6 +13401,30 @@
             ],
             "title": "Purpose",
             "description": "why the query was issued: 'recall' (passive recall; the query is the recent conversation), 'search' (an agent's own search) or 'dedup' (the duplicate check on a note an agent just wrote; the query is that note); selects the ranking question"
+          },
+          "exclude": {
+            "items": {
+              "type": "string",
+              "maxLength": 1024,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 800,
+            "title": "Exclude",
+            "description": "memory-pool-relative note paths to leave out: they are dropped from the vector candidates before ranking, so they neither cost a ranking request nor take a candidate slot"
+          },
+          "deadline_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Seconds",
+            "description": "how long the caller waits, in seconds: the search stops, and the ranking requests still running are cancelled, when this passes. Can only shorten the gateway's own search deadline. Omitted: the gateway's deadline applies"
           }
         },
         "type": "object",

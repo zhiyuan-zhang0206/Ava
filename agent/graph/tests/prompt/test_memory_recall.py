@@ -9,6 +9,7 @@ the scores come from the search result.
 """
 
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import httpx
 import pytest
@@ -52,12 +53,20 @@ def _result(
     return MemorySearchResult(path, description, tags, score, chunk)
 
 
-def _set_search(monkeypatch: pytest.MonkeyPatch, results: list[MemorySearchResult]) -> list[int]:
-    """Serve `results` from search; the returned list records each `k` search was asked for."""
-    asked: list[int] = []
+class _Asked(NamedTuple):
+    """What one search call asked the gateway for."""
 
-    def _search(_q: str, k: int, **_kwargs: object) -> list[MemorySearchResult]:
-        asked.append(k)
+    k: int
+    exclude: frozenset[str]
+    timeout: float | None
+
+
+def _set_search(monkeypatch: pytest.MonkeyPatch, results: list[MemorySearchResult]) -> list[_Asked]:
+    """Serve `results` from search; the returned list records each call's request."""
+    asked: list[_Asked] = []
+
+    def _search(_q: str, k: int, **kwargs: Any) -> list[MemorySearchResult]:
+        asked.append(_Asked(k, frozenset(kwargs.get("exclude", ())), kwargs.get("timeout")))
         return results
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
@@ -242,40 +251,6 @@ async def test_zero_cap_disables_injection_without_searching(
     assert asked == []
 
 
-async def test_already_injected_notes_are_set_aside_before_the_cap(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A note surfaced earlier this session does not use up a slot: the cap fills with the
-    next-best qualifying notes."""
-    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 2)
-    for name in ("a", "b", "c", "d"):
-        _write_note(memory_root, f"{name}.md", name)
-    _set_search(
-        monkeypatch,
-        [
-            _result("a.md", score=0.99),
-            _result("b.md", score=0.95),
-            _result("c.md", score=0.9),
-            _result("d.md", score=0.85),
-        ],
-    )
-
-    result = await _recall(injected={"a.md", "b.md"})
-
-    assert result is not None
-    assert result.paths == {"c.md", "d.md"}
-    assert "- a.md" not in _content(result)
-
-
-async def test_returns_none_when_every_qualifying_note_is_already_injected(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_note(memory_root, "a.md", "note a")
-    _set_search(monkeypatch, [_result("a.md")])
-
-    assert await _recall(injected={"a.md"}) is None
-
-
 async def test_skips_path_not_synced_to_this_machine(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -295,17 +270,32 @@ async def test_skips_path_not_synced_to_this_machine(
 # ── what search is asked for ──
 
 
-async def test_search_asks_for_the_cap_plus_the_notes_already_injected(
+@pytest.mark.parametrize("already_count", [0, 3, 40, 500])
+async def test_search_asks_for_the_cap_whatever_the_session_has_injected(
+    memory_root: Path, monkeypatch: pytest.MonkeyPatch, already_count: int
+) -> None:
+    """Notes injected earlier ride along as an exclusion list; the number of results asked for
+    stays the cap, so the ranking work of one pass does not grow with the session's age."""
+    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 5)
+    injected = {f"n{i}.md" for i in range(already_count)}
+    asked = _set_search(monkeypatch, [])
+
+    await _recall(injected=injected)
+
+    assert [(call.k, call.exclude) for call in asked] == [(5, frozenset(injected))]
+
+
+async def test_search_is_bounded_by_the_recall_deadline(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Already-injected notes still rank, so the request leaves room for them."""
-    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 5)
+    """The search request carries the pass's budget, so the gateway stops ranking when the
+    pass has given up."""
+    monkeypatch.setattr(config.settings.agent, "memory_recall_deadline_seconds", 2.5)
     asked = _set_search(monkeypatch, [])
 
     await _recall()
-    await _recall(injected={"a.md", "b.md", "c.md"})
 
-    assert asked == [5, 8]
+    assert [call.timeout for call in asked] == [2.5]
 
 
 async def test_search_is_issued_for_recall_not_as_an_agent_search(
@@ -323,16 +313,6 @@ async def test_search_is_issued_for_recall_not_as_an_agent_search(
     await _recall()
 
     assert purposes == ["recall"]
-
-
-async def test_search_request_never_exceeds_the_gateway_limit(
-    memory_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    asked = _set_search(monkeypatch, [])
-
-    await _recall(injected={f"n{i}.md" for i in range(500)})
-
-    assert asked == [100]
 
 
 def test_defaults_are_the_calibrated_values() -> None:
@@ -474,9 +454,8 @@ async def test_gateway_search_receives_each_explicit_host_context(
     seen: list[AvaContext] = []
 
     def search(
-        _query: str, _k: int, *, purpose: str, context: AvaContext
+        _query: str, _k: int, *, context: AvaContext, **_search: object
     ) -> list[MemorySearchResult]:
-        del purpose
         seen.append(context)
         return []
 

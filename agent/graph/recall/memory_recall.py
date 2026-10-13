@@ -19,7 +19,7 @@ down, ranking model down, gateway erroring, feature off -- so the call site degr
 to nothing rather than failing the turn (the next turn tries again). It runs before
 the LLM on every inbound turn, so a search failure that escaped would kill the agent
 process, not just the recall. Same-session dedup is the caller's job (it passes the
-already-injected paths in and persists the ones this call added).
+already-injected paths in and persists the ones this call added); the search leaves them out.
 """
 
 from __future__ import annotations
@@ -43,8 +43,6 @@ from base.paths import memory_dir
 
 # Which notes are injected is decided by score (`memory_recall_inject_threshold`) and bounded
 # by `memory_recall_inject_max`, because notes crowd the context they are meant to inform.
-# The gateway's search request limit on results; recall never asks for more.
-_SEARCH_K_CAP = 100
 
 # Agent-visible framing. Observational, no implementation detail (obeys the SDK
 # docstring discipline since the agent reads this text).
@@ -69,14 +67,27 @@ class PassiveRecall(NamedTuple):
 
 
 async def _search_or_none(
-    query: str, k: int, ctx: AvaContext
+    query: str, k: int, *, exclude: Collection[str], deadline: float, ctx: AvaContext
 ) -> list[gateway_client.MemorySearchResult] | None:
-    """The memory-pool search results, or None when the search is unavailable or failed."""
+    """The `k` best results outside `exclude`, or None when the search is unavailable or failed.
+
+    `deadline` is the pass's whole budget and travels in the request, so the gateway stops
+    ranking when the pass gives up. The blocking call cannot be interrupted from here, and
+    `attempts=1` keeps it from starting a second search after the pass has moved on: the next
+    turn is the retry.
+    """
     import httpx  # deferred: stays off the child boot path
 
     try:
         return await asyncio.to_thread(
-            gateway_client.memory_search, query, k, purpose="recall", context=ctx
+            gateway_client.memory_search,
+            query,
+            k,
+            purpose="recall",
+            exclude=exclude,
+            timeout=deadline,
+            attempts=1,
+            context=ctx,
         )
     except (GatewayUnavailable, IndexerUnavailable) as exc:
         # Recall is an enhancement; a memory-index outage must not crash the
@@ -120,11 +131,10 @@ def _qualifying(
     results: list[gateway_client.MemorySearchResult],
     *,
     threshold: float,
-    already: Collection[str],
     limit: int,
 ) -> list[gateway_client.MemorySearchResult]:
-    """The results to inject: best score first, at or above `threshold`, not injected
-    before, present on this machine, at most `limit`.
+    """The results to inject: best score first, at or above `threshold`, present on this
+    machine, at most `limit`.
 
     Search can return a path not yet synced to this machine; it is skipped (it will
     be recallable once it arrives).
@@ -134,7 +144,7 @@ def _qualifying(
     for item in sorted(results, key=lambda r: r.score, reverse=True):
         if item.score < threshold or len(picked) >= limit:
             break
-        if item.path in already or not (root / item.path).is_file():
+        if not (root / item.path).is_file():
             continue
         picked.append(item)
     return picked
@@ -183,12 +193,16 @@ async def passive_memory_recall(
     query = build_conversation_query(messages)
     if not query:
         return None
-    already = set(injected_paths)
-    # Notes already injected still rank, so ask for enough results to fill the cap after
-    # they are set aside.
-    k = min(memory.memory_recall_inject_max + len(already), _SEARCH_K_CAP)
+    # Notes injected earlier this session are excluded from the search itself: they neither
+    # take a result slot nor cost a ranking request, so one pass costs the same at any age.
     search_started = time.monotonic()
-    results = await _search_or_none(query, k, context)
+    results = await _search_or_none(
+        query,
+        memory.memory_recall_inject_max,
+        exclude=injected_paths,
+        deadline=memory.memory_recall_deadline_seconds,
+        ctx=context,
+    )
     if results is None:
         return None
     search_ms = round((time.monotonic() - search_started) * 1000)
@@ -196,7 +210,6 @@ async def passive_memory_recall(
     picked = _qualifying(
         results,
         threshold=memory.memory_recall_inject_threshold,
-        already=already,
         limit=memory.memory_recall_inject_max,
     )
     # The search leg is the one a congested gateway stretches (a fleet wake queues

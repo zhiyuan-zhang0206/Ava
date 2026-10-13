@@ -507,21 +507,48 @@ class TestTransientHttpRetry:
         ]
 
     @pytest.mark.usefixtures("retry_waits")
-    def test_memory_search_caller_timeout_overrides_default(self, mock_client: MagicMock):
-        """An explicit `timeout` replaces the derived default for that one call."""
+    def test_memory_search_caller_timeout_travels_in_the_request(self, mock_client: MagicMock):
+        """An explicit `timeout` is the caller's deadline: the gateway is told, and the HTTP
+        timeout sits a margin above it so the gateway's own answer arrives first."""
+        from ava import gateway_client as gc
+
+        mock_client.post.return_value = _transient_resp(200, {"results": []})
+        gc.memory_search("query", 5, purpose="search", timeout=9.0)
+        call = mock_client.post.call_args.kwargs
+        assert call["timeout"].read == 9.0 + gc._MEMORY_SEARCH_TIMEOUT_MARGIN_S
+        assert call["json"]["deadline_seconds"] == 9.0
+
+    def test_memory_search_without_a_timeout_sends_no_deadline(self, mock_client: MagicMock):
         from ava.gateway_client import memory_search
 
+        mock_client.post.return_value = _transient_resp(200, {"results": []})
+        memory_search("query", 5, purpose="search")
+        assert "deadline_seconds" not in mock_client.post.call_args.kwargs["json"]
+
+    def test_memory_search_sends_the_exclusion_sorted_and_only_when_given(
+        self, mock_client: MagicMock
+    ):
+        from ava.gateway_client import memory_search
+
+        mock_client.post.return_value = _transient_resp(200, {"results": []})
+        memory_search("query", 3, purpose="recall", exclude={"b.md", "a/c.md", "a.md"})
+        assert mock_client.post.call_args.kwargs["json"]["exclude"] == ["a.md", "a/c.md", "b.md"]
+        memory_search("query", 3, purpose="recall", exclude=())
+        assert "exclude" not in mock_client.post.call_args.kwargs["json"]
+
+    @pytest.mark.usefixtures("retry_waits")
+    def test_memory_search_attempts_bound_the_retries(self, mock_client: MagicMock):
+        """A caller that gives up on its own deadline asks for one attempt: a retry would start
+        a second search after it stopped waiting for the first."""
+        from ava.gateway_client import memory_search
+        from base.api_contracts.agent_contract import IndexerUnavailable
+
         mock_client.post.return_value = _transient_resp(
-            200,
-            {
-                "results": [
-                    {"path": "a.md", "description": "", "tags": [], "score": 0.5, "chunk": "c"}
-                ]
-            },
+            503, {"reason": "indexer_unavailable", "detail": "busy"}
         )
-        memory_search("query", 5, purpose="search", timeout=9.0)
-        passed = mock_client.post.call_args.kwargs["timeout"]
-        assert passed.read == 9.0
+        with pytest.raises(IndexerUnavailable):
+            memory_search("query", 5, purpose="recall", attempts=1)
+        assert mock_client.post.call_count == 1
 
     @pytest.mark.usefixtures("retry_waits")
     def test_transient_5xx_exhausted_surfaces_wire_error(self, mock_client: MagicMock):

@@ -99,9 +99,19 @@ async def _rank(
     query: str = "q",
     purpose: MemorySearchPurpose = "recall",
     k: int = 5,
+    limit: int = 30,
+    exclude: frozenset[str] = frozenset(),
 ) -> list[rerank.RankedChunk]:
     return await rerank.rerank(
-        query, hits, purpose=purpose, model="m", catalog=catalog, k=k, memory_root=tmp_path
+        query,
+        hits,
+        purpose=purpose,
+        model="m",
+        catalog=catalog,
+        k=k,
+        limit=limit,
+        exclude=exclude,
+        memory_root=tmp_path,
     )
 
 
@@ -279,6 +289,100 @@ async def test_stale_hits_are_skipped(
     assert len(judge.calls) == 1
 
 
+# ── how many notes are ranked ──
+
+
+def _numbered_notes(root: Path, count: int) -> list[ChunkHit]:
+    hits: list[ChunkHit] = []
+    for i in range(count):
+        _write(root, f"n{i}.md", f"---\ntype: Memory\n---\n\nbody {i}")
+        hits.append(_hit(root, f"n{i}.md"))
+    return hits
+
+
+async def test_at_most_limit_candidates_are_ranked_whatever_k_is(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hits = _numbered_notes(tmp_path, 12)
+    judge = _FakeJudge()
+    _install(monkeypatch, judge)
+
+    ranked = await _rank(tmp_path, catalog, hits, k=100, limit=5)
+
+    assert len(judge.calls) == 5
+    assert [item.path for item in ranked] == [f"n{i}.md" for i in range(5)]
+
+
+async def test_excluded_notes_are_neither_read_nor_ranked_and_take_no_slot(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hits = _numbered_notes(tmp_path, 12)
+    judge = _FakeJudge()
+    _install(monkeypatch, judge)
+
+    ranked = await _rank(
+        tmp_path, catalog, hits, k=100, limit=5, exclude=frozenset({"n0.md", "n2.md", "n3.md"})
+    )
+
+    assert [item.path for item in ranked] == ["n1.md", "n4.md", "n5.md", "n6.md", "n7.md"]
+    assert len(judge.calls) == 5
+    assert not any(f"body {i}" in state for i in (0, 2, 3) for _m, state, _q in judge.calls)
+
+
+async def test_a_stale_hit_does_not_take_one_of_the_limited_slots(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hits = [_hit(tmp_path, "gone.md"), *_numbered_notes(tmp_path, 4)]
+    _install(monkeypatch, _FakeJudge())
+
+    ranked = await _rank(tmp_path, catalog, hits, k=100, limit=2)
+
+    assert [item.path for item in ranked] == ["n0.md", "n1.md"]
+
+
+async def test_exclusion_matches_the_pool_relative_path_of_an_index_path(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The index stores absolute paths; an excluded path is pool-relative."""
+    hits = _numbered_notes(tmp_path, 2)
+    _write(tmp_path, "sub/n0.md", "---\ntype: Memory\n---\n\nnested")
+    _install(monkeypatch, _FakeJudge())
+
+    ranked = await _rank(
+        tmp_path, catalog, [*hits, _hit(tmp_path, "sub/n0.md")], exclude=frozenset({"n0.md"})
+    )
+
+    assert sorted(item.path for item in ranked) == ["n1.md", "sub/n0.md"]
+
+
+async def test_cancelling_a_search_cancels_the_requests_still_running(
+    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hits = _numbered_notes(tmp_path, 8)
+    started = asyncio.Event()
+    cancelled: list[str] = []
+
+    async def never_answers(_model: str, state: str, *_a: object, **_k: object) -> float:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append(state)
+            raise
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(rerank, "ask_relevance", never_answers)
+    search = asyncio.create_task(_rank(tmp_path, catalog, hits))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await asyncio.sleep(0)
+
+    search.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await search
+
+    assert len(cancelled) == 8
+
+
 def test_description_and_tags_survive_malformed_frontmatter(tmp_path: Path) -> None:
     """A note that says nothing usable about itself surfaces empty metadata, never a crash:
     non-string values coerce, malformed frontmatter is a plain body."""
@@ -290,7 +394,7 @@ def test_description_and_tags_survive_malformed_frontmatter(tmp_path: Path) -> N
         *(_hit(tmp_path, n) for n in ("bad_yaml.md", "plain.md")),
     ]
 
-    scalar, bad_yaml, plain = rerank._load_candidates(hits, tmp_path)
+    scalar, bad_yaml, plain = rerank._load_candidates(hits, tmp_path, frozenset(), 30)
 
     assert (scalar.description, scalar.tags, scalar.chunk) == ("123", [], "123")
     assert (bad_yaml.description, bad_yaml.tags) == ("", [])
@@ -320,7 +424,7 @@ async def test_requests_run_concurrently_up_to_the_cap(
     judge = _FakeJudge()
     _install(monkeypatch, judge)
 
-    ranked = await _rank(tmp_path, catalog, hits, k=count)
+    ranked = await _rank(tmp_path, catalog, hits, k=count, limit=count)
 
     assert len(judge.calls) == count
     assert len(ranked) == count
