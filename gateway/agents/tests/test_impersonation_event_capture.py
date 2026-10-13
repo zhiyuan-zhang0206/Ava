@@ -48,6 +48,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import audit_event_uid, prepare_event_log
 from tests._containers import grant_runner_login
+from tests.fixtures.unit.config_authority import config_authority as config_authority
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.impersonation_support import attested_caller, recorded_tree
 

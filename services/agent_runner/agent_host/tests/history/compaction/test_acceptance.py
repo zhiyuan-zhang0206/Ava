@@ -11,10 +11,10 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import claim_inbound_batch
 from base.agents.compaction.commands import accept, observe
 from base.agents.compaction.models import CompactConflictError, CompactHeldError
-from base.agents.compaction.tests.helpers import source
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host.tests.history.compaction.helpers import source
 
 
 async def test_fresh_concurrent_acceptance_and_changed_body(

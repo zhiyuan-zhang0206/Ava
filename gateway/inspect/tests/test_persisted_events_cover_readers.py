@@ -22,7 +22,7 @@ from pathlib import Path
 
 from base.events.contract import EVENTS, LLM_ERROR_FAMILY, family_events
 
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 _SKIPPED_DIRS = frozenset(
     {".git", ".venv", ".worktrees", "node_modules", "tests", "__pycache__", "migrations"}
 )
