@@ -56,7 +56,10 @@ def test_progressed_start_must_use_ordinary_drain(partial_home: Path, phase: str
 def test_any_application_evidence_refuses_partial_shortcut(
     partial_home: Path, evidence: str
 ) -> None:
-    from services.supervision.ava_root.singleton import acquire_instance_lock, release_instance_lock
+    from base.native_process.root_control.instance_lock import (
+        acquire_instance_lock,
+        release_instance_lock,
+    )
 
     fd = None
     if evidence == "serving":

@@ -701,12 +701,12 @@ def _wait_for_root_services_ready(
 
 
 def require_root_absent() -> None:
+    from base.native_process.root_control import instance_lock
     from base.paths import root_run_dir
-    from services.supervision.ava_root.singleton import acquire_instance_lock, release_instance_lock
 
     run_dir = root_run_dir()
-    fd = acquire_instance_lock(run_dir)
-    release_instance_lock(fd)
+    fd = instance_lock.acquire_instance_lock(run_dir)
+    instance_lock.release_instance_lock(fd)
 
 
 def _root_tree_plan(preserve: frozenset[str] = frozenset()) -> list[str]:

@@ -15,7 +15,6 @@ exports = ["failure_state.py", "health.py", "inputs.py", "manifest.py", "probes.
 
 [loads]
 "probes.py" = ["services/supervision/healthchecks"]
-"wiring.py" = ["services/supervision/ava_root_glue"]
 
 [external]
 "probes.py" = "resolves the healthcheck module an operator-installed plugin names"

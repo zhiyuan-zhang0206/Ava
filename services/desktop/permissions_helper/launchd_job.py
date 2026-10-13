@@ -238,7 +238,10 @@ def unregister_helper(
         return
     if not home.is_absolute() or home.resolve() != home or not 0 < helper_port < 65536:
         raise ValueError("helper retirement requires a canonical home and registered port")
-    from services.supervision.ava_root.singleton import acquire_instance_lock, release_instance_lock
+    from base.native_process.root_control.instance_lock import (
+        acquire_instance_lock,
+        release_instance_lock,
+    )
 
     run_dir = home / "run" / "ava-root"
     run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
