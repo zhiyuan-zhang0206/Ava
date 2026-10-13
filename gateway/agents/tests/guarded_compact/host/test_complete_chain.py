@@ -15,10 +15,10 @@ from base.agents.incarnation.resources import ResourceBirth
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from gateway.agents.tests.guarded_compact.host.faults import install
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
-from services.agent_runner.agent_host.tests.guarded_compact.faults import install
-from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
+from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel, make_host
 from tests.fixtures.model_catalog import AddBindings
 
 

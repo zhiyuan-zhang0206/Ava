@@ -18,7 +18,7 @@ from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.guarded_compact.helpers import make_host
+from services.agent_runner.agent_host.tests.guarded_compact_support import make_host
 
 
 @dataclass
