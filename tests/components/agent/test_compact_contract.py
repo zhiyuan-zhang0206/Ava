@@ -7,7 +7,7 @@ from base.packages.plugins.extensions import EMPTY
 
 
 @pytest.fixture
-def _ava_compact_loaded():
+def ava_compact_loaded():
     """Compact is built-in (Issue #1284). The wrapper function lives in
     agent.graph.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
@@ -18,7 +18,7 @@ def _ava_compact_loaded():
     return build_agent_state(EMPTY), compact_reminder
 
 
-def test_compact_triggers_point_at_the_contract(_ava_compact_loaded):
+def test_compact_triggers_point_at_the_contract(ava_compact_loaded):
     """Each compaction trigger (forced/auto instruction, the reminder nudge, the
     /compact command) names the `ava.self.compact` contract. Forced compaction
     appends the SDK-owned text; other triggers can discover it on demand."""

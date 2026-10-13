@@ -1,7 +1,7 @@
-exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand.py", "watcher"]
+exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand", "watcher"]
 
 [uses]
-"__init__.py" = ["agents", "boot.py", "files.py", "impersonation", "mcps", "sdk_surface", "self", "shell", "skills", "ui.py", "understand.py", "watcher", "web.py"]
+"__init__.py" = ["agents", "boot.py", "files.py", "impersonation", "mcps", "sdk_surface", "self", "shell", "skills", "ui.py", "understand", "watcher", "web.py"]
 "agents" = ["gateway_client", "sdk_surface", "security.py", "skills"]
 "boot.py" = ["gateway_client", "mcps", "sdk_surface"]
 "files.py" = ["sdk_surface", "security.py", "skills"]
@@ -12,9 +12,9 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "self" = ["boot.py", "files.py", "sdk_surface"]
 "shell" = ["agents", "impersonation", "sdk_surface", "security.py"]
 "skills" = ["sdk_surface"]
-"tests" = ["__init__.py", "agents", "boot.py", "files.py", "gateway_client", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand.py", "watcher", "web.py"]
+"tests" = ["__init__.py", "agents", "boot.py", "files.py", "gateway_client", "mcps", "sdk_surface", "security.py", "self", "shell", "skills", "ui.py", "understand", "watcher", "web.py"]
 "ui.py" = ["boot.py", "gateway_client", "sdk_surface"]
-"understand.py" = ["files.py", "sdk_surface", "security.py"]
+"understand" = ["files.py", "sdk_surface", "security.py"]
 "watcher" = ["sdk_surface", "shell"]
 "web.py" = ["sdk_surface", "security.py"]
 

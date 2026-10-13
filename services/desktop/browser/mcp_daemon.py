@@ -587,7 +587,7 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
     death ends the process; no browser action or session is automatically replayed.
     """
     browser_url = f"http://127.0.0.1:{browser_cdp_port}"
-    sock = chrome_mcp_socket()
+    sock = chrome_mcp_socket(browser_cdp_port)
     # Single-instance guard: the old code unlinked the socket unconditionally,
     # so a second daemon (watchdog misjudged the first dead and respawned)
     # stole the socket out from under the live instance — its clients all

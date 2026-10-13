@@ -29,7 +29,7 @@ def _clean_deferral_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 

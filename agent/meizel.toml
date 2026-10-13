@@ -59,10 +59,6 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 [debt.private-name]
 "execution/child.py -> process_boot.py#_apply_per_agent_eval_isolation" = 1
 "execution/child.py -> process_boot.py#_apply_per_agent_sdk_disable" = 1
-"tests/claim/test_claim_compact.py -> graph/tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
-"tests/claim/test_claim_dispatch.py -> graph/tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
-"tests/claim/test_claim_restart.py -> graph/tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
-"tests/claim/test_claim_terminate_cancel.py -> graph/tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
 "tests/execution/test_exec_child.py -> execution/child.py#_ChildContext" = 1
 "tests/execution/test_exec_child.py -> execution/child.py#_build_state_slot" = 1
 "tests/execution/test_exec_child.py -> execution/child.py#_emit_child_boot_timing" = 1

@@ -28,6 +28,5 @@ exports = ["agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm"
 "tests/test_node_log.py -> exec/_stream.py" = 1
 
 [debt.private-name]
-"claim/tests/test_claim_markers_and_idle.py -> tests/cursor_fixture.py#_fresh_snapshot_cursor" = 1
 "tests/llm_helpers/test_security_findings.py -> exec/node.py#_exec_node_impl" = 1
 "tests/prompt/test_system_prompt_sections.py -> prompt/system_prompt.py#_workspace_section" = 1

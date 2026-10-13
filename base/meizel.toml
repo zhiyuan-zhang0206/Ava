@@ -15,7 +15,6 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "log" = ["paths"]
 "native_process" = ["log", "paths"]
 "packages" = ["api_contracts", "cluster", "config", "db", "host", "lm", "log", "native_process", "paths", "telemetry"]
-"paths" = ["config"]
 "sessions" = ["cluster", "config", "host", "log", "native_process", "paths"]
 "telemetry" = ["api_contracts", "clock", "cluster", "config", "db", "events", "host", "log", "native_process", "paths"]
 "tests" = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "db", "deploy", "events", "host", "lm", "log", "native_process", "packages", "paths", "sessions", "telemetry"]
@@ -31,7 +30,6 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "host/env/tests/test_registry.py -> config/__init__.py" = 1
 "host/system/tests/test_packages_job.py -> config/__init__.py" = 3
 "host/system/tests/test_walg_job.py -> config/__init__.py" = 1
-"paths/__init__.py -> config/__init__.py" = 2
 
 [debt.private-module]
 "tests/config/bootstrap/_lite_parity_child.py -> config/_full.py" = 1

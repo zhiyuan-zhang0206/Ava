@@ -17,7 +17,7 @@ from base.daemon.health import DaemonProbe
 from base.host.permissions_helper import client
 from base.native_process.os_platform import is_macos
 from base.native_process.ownership import OwnedProcess
-from base.paths import permissions_helper_socket
+from base.sessions.helperproc import helper_client
 from services.desktop.permissions_helper.launchd_job import (
     HelperJobState,
     parse_job_state,
@@ -74,7 +74,7 @@ def _parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int)
 
 def _ping() -> bool:
     """Ping the real helper protocol with a watchdog-sized response timeout."""
-    sock = client.connect(str(permissions_helper_socket()))
+    sock = client.connect(str(helper_client().sock_path))
     try:
         sock.settimeout(_PING_TIMEOUT_S)
         root, parent = _helper_parent(sock)

@@ -12,7 +12,3 @@
 "test_ava_code_plugin.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_ava_code_plugin.py#monkeypatch.setattr base.config.settings.sandbox.exec_output_max_chars" = 1
 "test_ava_code_plugin.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 1
-
-[debt.private-name]
-"ava_code_plugin/test_read_wrap_corrupted_state_field_raises.py -> test_ava_code_plugin.py#_load_ava_code_plugin" = 1
-"ava_code_plugin/test_read_wrap_hash_dedup_primary_path_blocks.py -> test_ava_code_plugin.py#_load_ava_code_plugin" = 1

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import services.desktop.computer.ocr as ocr_mod
-from base.host.permissions_helper import client as helper
+from base.host.permissions_helper.client import PermissionsHelperClient
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.screen import _capture_screen, _to_logical
 
@@ -77,7 +77,10 @@ def _match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list
 
 
 def _find_text_tool(
-    args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
+    helper: PermissionsHelperClient,
+    args: dict[str, Any],
+    agent_id: int,
+    ocr_cache: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """find_text: OCR the screen and return the boxes matching ``text``.
 
@@ -95,7 +98,7 @@ def _find_text_tool(
         items: list[dict[str, Any]] = cached_items  # the screen the caller last saw
         fresh = False
     else:
-        path, _size, _scale, _pixels = _capture_screen(agent_id)
+        path, _size, _scale, _pixels = _capture_screen(helper, agent_id)
         items = _ocr_screen(path, ocr_cache)
         fresh = True
     matches = _match_ocr_boxes(items, query, mode)
@@ -109,7 +112,10 @@ def _find_text_tool(
 
 
 def _click_text_tool(
-    args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
+    helper: PermissionsHelperClient,
+    args: dict[str, Any],
+    agent_id: int,
+    ocr_cache: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """click_text: OCR -> locate -> click, one audited action.
 
@@ -125,7 +131,7 @@ def _click_text_tool(
     _validate_text_query(query, mode)
     if index < 0:
         raise ComputerUseError("index must be >= 0")
-    path, _size, scale, _pixels = _capture_screen(agent_id)
+    path, _size, scale, _pixels = _capture_screen(helper, agent_id)
     matches = _match_ocr_boxes(_ocr_screen(path, ocr_cache), query, mode)
     if not matches:
         raise ComputerUseError(f"no on-screen text matching {query!r} (match={mode})")

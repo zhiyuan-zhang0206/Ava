@@ -13,7 +13,7 @@ from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
-    _load_activity_plugin as _load_activity_plugin,
+    load_activity_plugin as load_activity_plugin,
 )
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
     sdk_via_inprocess_gateway as sdk_via_inprocess_gateway,
@@ -25,7 +25,7 @@ from tests.fixtures.pin_agent import pin_agent
 
 def test_dismissing_response_notice_refreshes_inspector_snapshot(
     sdk_via_inprocess_gateway: None,
-    _load_activity_plugin: None,
+    load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
@@ -61,7 +61,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
 
 def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     sdk_via_inprocess_gateway: None,
-    _load_activity_plugin: None,
+    load_activity_plugin: None,
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
@@ -122,7 +122,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
 
 
 def test_notice_return_int_and_edit_dismiss_take_no_id(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     """notify returns a Notice (int subclass); edit/dismiss act on the single
     open notice with no id argument."""
@@ -156,7 +156,7 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
 
 
 def test_notify_with_expire_at_valid(
-    sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
+    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     from datetime import datetime, timedelta
 
@@ -188,7 +188,7 @@ def test_notify_with_expire_at_valid(
 
 
 def test_notify_with_expire_at_in_past_raises_value_error(
-    _load_activity_plugin: None, db_conn: psycopg.Connection
+    load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     from datetime import datetime, timedelta
 

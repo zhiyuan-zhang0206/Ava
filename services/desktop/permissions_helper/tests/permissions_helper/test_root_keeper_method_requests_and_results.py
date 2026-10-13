@@ -19,7 +19,7 @@ from base.config import settings
 from base.host.converge.accessibility import AccessibilityState
 from base.host.converge.screen_capture import ScreenCaptureState
 from base.host.permissions_helper import client
-from base.host.permissions_helper.client import PermissionsHelperError
+from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     _argvs,
     _fake_tools,
@@ -79,21 +79,21 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
         "env": {"AVA_TEST": "1"},
     }
 
-    seeded = client.seed_root(config, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    seeded = PermissionsHelperClient(path).seed_root(config)  # pyright: ignore[reportUnknownArgumentType]
     assert seeded["state"] == "running"
     assert seeded.get("pid") == 5150
     assert seen[0] == {"method": "root_seed", "config": config}
 
-    status = client.root_status(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(path).root_status()  # pyright: ignore[reportUnknownArgumentType]
     assert status["state"] == "conflict"
     assert status.get("conflict") == {"pid": 4090, "since": 1_700_000_000.0}
     assert seen[1] == {"method": "root_status"}
 
-    stopped = client.stop_root(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    stopped = PermissionsHelperClient(path).stop_root()  # pyright: ignore[reportUnknownArgumentType]
     assert stopped["state"] == "stopping"
     assert stopped["stop_requested"] is True
     assert seen[2] == {"method": "root_stop"}
-    shutdown = client.shutdown_helper(Path("/opt/ava/run"), sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    shutdown = PermissionsHelperClient(path).shutdown_helper(Path("/opt/ava/run"))  # pyright: ignore[reportUnknownArgumentType]
     assert shutdown == {"stopping": True, "pid": 4242, "run_dir": "/opt/ava/run"}
     assert seen[3] == {"method": "helper_shutdown", "run_dir": "/opt/ava/run"}
 
@@ -111,7 +111,7 @@ def test_file_method_mapping_and_list_result(fake_helper) -> None:
         }
 
     path = fake_helper(handler)
-    assert client.list_dir("/Users/ava/Downloads", sock_path=path) == entries  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).list_dir("/Users/ava/Downloads") == entries  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["file_list"]
 
 
@@ -128,7 +128,7 @@ def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None:
         }
 
     path = fake_helper(handler)
-    assert client.read_file("/Users/ava/Downloads/example.bin", sock_path=path) == content  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).read_file("/Users/ava/Downloads/example.bin") == content  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["file_read"]
 
 
@@ -140,10 +140,7 @@ def test_read_file_rejects_missing_or_malformed_content(
         return {"id": req["id"], "ok": True, "result": result}
 
     with pytest.raises(PermissionsHelperError, match="invalid file_read response"):
-        client.read_file(
-            "/Users/ava/Downloads/example.bin",
-            sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
-        )
+        PermissionsHelperClient(fake_helper(handler)).read_file("/Users/ava/Downloads/example.bin")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_file_operations_raise_server_errors(fake_helper) -> None:
@@ -153,9 +150,9 @@ def test_file_operations_raise_server_errors(fake_helper) -> None:
 
     path = fake_helper(handler)
     with pytest.raises(PermissionsHelperError, match="outside whitelist"):
-        client.list_dir("/private/secret", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).list_dir("/private/secret")  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(PermissionsHelperError, match="file too large"):
-        client.read_file("/Users/ava/Downloads/large.bin", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).read_file("/Users/ava/Downloads/large.bin")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
@@ -193,12 +190,12 @@ def test_gui_ops_wire_requests(fake_helper) -> None:
         return {"id": req["id"], "ok": True, "result": {}}
 
     path = fake_helper(handler)
-    client.key(76, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.key(9, cmd=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.scroll(10, 20, -50, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.window_info("Notes", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.session_info(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    client.click(5, 6, double=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).key(76)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).key(9, cmd=True)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).scroll(10, 20, -50)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).window_info("Notes")  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).session_info()  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).click(5, 6, double=True)  # pyright: ignore[reportUnknownArgumentType]
     assert seen == [
         {"method": "key", "code": 76, "cmd": False},
         {"method": "key", "code": 9, "cmd": True},
@@ -248,14 +245,14 @@ def test_recv_reassembles_across_chunks(fake_helper) -> None:
         time.sleep(0.05)
         conn.sendall(payload[5:])
 
-    assert client.ping(sock_path=fake_helper(raw=raw)) == {"pong": True}  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(fake_helper(raw=raw)).ping() == {"pong": True}  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_closed_without_response_raises(fake_helper) -> None:
     with pytest.raises(PermissionsHelperError, match="closed without a response"):
-        client.ping(
-            sock_path=fake_helper(raw=_read_line)  # pyright: ignore[reportUnknownArgumentType]
-        )  # read, then close, no reply
+        PermissionsHelperClient(
+            fake_helper(raw=_read_line)  # pyright: ignore[reportUnknownArgumentType]
+        ).ping()  # read, then close, no reply
 
 
 def test_truncated_response_raises(fake_helper) -> None:
@@ -264,7 +261,7 @@ def test_truncated_response_raises(fake_helper) -> None:
         conn.sendall(b'{"id":1,"ok":tr')  # partial JSON, no trailing newline
 
     with pytest.raises(PermissionsHelperError, match="truncated"):
-        client.ping(sock_path=fake_helper(raw=raw))  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -275,7 +272,7 @@ def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> No
         time.sleep(1.0)  # accept, never reply
 
     with pytest.raises(PermissionsHelperError, match="did not respond"):
-        client.ping(sock_path=fake_helper(raw=raw))  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -286,7 +283,7 @@ def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
         conn.sendall(b"x" * 64)  # oversized, newline-less
 
     with pytest.raises(PermissionsHelperError, match="exceeded line limit"):
-        client.ping(sock_path=fake_helper(raw=raw))  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,7 +303,7 @@ def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     t = threading.Thread(target=late_start, daemon=True)
     t.start()
     try:
-        assert client.ping(sock_path=path) == {"pong": True}
+        assert PermissionsHelperClient(path).ping() == {"pong": True}
     finally:
         t.join(timeout=2)
         for s in holder:
@@ -331,14 +328,14 @@ def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
         seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
         return _ping_reply(True)(req)
 
-    status = client.check_screen_capture(sock_path=fake_helper(handler))  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(handler)).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["ping"]  # measured in the helper, not in whoever is asking
     assert status.state is ScreenCaptureState.AVAILABLE
     assert status.available is True
 
 
 def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:
-    status = client.check_screen_capture(sock_path=fake_helper(_ping_reply(False)))  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(_ping_reply(False))).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is ScreenCaptureState.NO_GRANT
     assert status.available is False
     # The fix is authorizing the helper, not restarting the cluster from a local
@@ -349,9 +346,8 @@ def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:
 
 
 def test_screen_capture_probe_keeps_unreachable_distinct_from_denied() -> None:
-    status = client.check_screen_capture(
-        sock_path="/tmp/ava-native-does-not-exist.sock",  # noqa: S108 — nonexistent by design
-        settle_s=0.0,
+    status = PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").check_screen_capture(  # noqa: S108 — nonexistent by design
+        settle_s=0.0
     )
     assert status.state is ScreenCaptureState.HELPER_UNREACHABLE
     assert status.available is False
@@ -361,32 +357,38 @@ def test_screen_capture_probe_keeps_unreachable_distinct_from_denied() -> None:
     assert "System Settings" not in status.diagnostic
 
 
-def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    # launchd may have only just bootstrapped the helper, so one unreachable ping
-    # inside the settle window is a cold start rather than a dead daemon.
-    calls: list[int] = []
+class _ColdHelper(PermissionsHelperClient):
+    """The first ping finds the helper unreachable, as when launchd has only just bootstrapped it."""
 
-    def flaky(*, sock_path=None):
-        calls.append(1)
-        if len(calls) == 1:
+    def __init__(self) -> None:
+        super().__init__("/unused.sock")
+        self.calls = 0
+
+    def ping(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+        self.calls += 1
+        if self.calls == 1:
             raise PermissionsHelperError("permissions helper not reachable")
         return {"pong": True, "preflight_screen": True, "ax_trusted": True}
 
-    monkeypatch.setattr(client, "ping", flaky)  # pyright: ignore[reportUnknownArgumentType]
+
+def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    # launchd may have only just bootstrapped the helper, so one unreachable ping
+    # inside the settle window is a cold start rather than a dead daemon.
+    helper = _ColdHelper()
     monkeypatch.setattr(client, "PROBE_RETRY_DELAY_S", 0.01)
-    status = client.check_screen_capture(settle_s=2.0)
-    assert len(calls) == 2
+    status = helper.check_screen_capture(settle_s=2.0)
+    assert helper.calls == 2
     assert status.state is ScreenCaptureState.AVAILABLE
 
 
 def test_accessibility_probe_reads_the_helpers_grant(fake_helper) -> None:
-    status = client.check_accessibility(sock_path=fake_helper(_ping_reply(True, True)))  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(_ping_reply(True, True))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is AccessibilityState.GRANTED
     assert status.available is True
 
 
 def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:
-    status = client.check_accessibility(sock_path=fake_helper(_ping_reply(True, False)))  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(_ping_reply(True, False))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is AccessibilityState.NOT_GRANTED
     assert status.available is False
     assert "System Settings" in status.diagnostic
@@ -394,9 +396,8 @@ def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:
 
 
 def test_accessibility_probe_keeps_unreachable_distinct_from_missing_grant() -> None:
-    status = client.check_accessibility(
-        sock_path="/tmp/ava-native-does-not-exist.sock",  # noqa: S108 — nonexistent by design
-        settle_s=0.0,
+    status = PermissionsHelperClient("/tmp/ava-native-does-not-exist.sock").check_accessibility(  # noqa: S108 — nonexistent by design
+        settle_s=0.0
     )
     assert status.state is AccessibilityState.HELPER_UNREACHABLE
     assert status.available is False

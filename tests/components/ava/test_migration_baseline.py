@@ -23,7 +23,7 @@ from base.deploy.schema.tests.migration_support import (
     throwaway_database,
 )
 from base.deploy.schema.tests.migration_support import (
-    _reset_schema_migrations_state as _reset_schema_migrations_state,
+    reset_schema_migrations_state as reset_schema_migrations_state,
 )
 
 _MIGRATIONS = SCHEMA_SQL.parents[1] / "migrations"

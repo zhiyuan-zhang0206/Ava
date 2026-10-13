@@ -28,7 +28,7 @@ def _render_help(target: object) -> str:
 
 
 @pytest.fixture
-def _load_ava_code_plugin(
+def load_ava_code_plugin(
     monkeypatch: pytest.MonkeyPatch, model_installation: Installation
 ) -> Iterator[None]:
     from ava_builtins.plugins.ava_code import plugin
@@ -73,7 +73,7 @@ def _load_ava_fleet_plugin(
     install.uninstall()
 
 
-def test_shell_run_wrapper_renders_trimmed_docstring(_load_ava_code_plugin: None) -> None:
+def test_shell_run_wrapper_renders_trimmed_docstring(load_ava_code_plugin: None) -> None:
     """The ava_code wrap of shell.run carries its own docstring; the prompt
     renders that one, so the trimmed name restatement must be gone there."""
     out = _render_help(ava.shell.run)

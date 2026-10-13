@@ -86,7 +86,7 @@ ORIG_REAP = daemon_mod.reap_stale_daemons
 
 
 @pytest.fixture(autouse=True)
-def _no_reap_stale_daemons(monkeypatch: pytest.MonkeyPatch) -> None:
+def no_reap_stale_daemons(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep run_daemon tests from scanning the real process table.
 
     `reap_stale_daemons` walks psutil.process_iter on every daemon start; the

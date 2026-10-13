@@ -9,7 +9,7 @@ from base.paths import skills_dir
 
 
 @pytest.fixture(autouse=True)
-def _overlay_all_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def overlay_all_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default: treat every directory in the per-test load dir (`<home>/skills`)
     as a tracked+enabled skill, so the parse/merge tests below stay
     focused on scanning rather than the install-registry reservation.

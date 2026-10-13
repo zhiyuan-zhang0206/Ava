@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperClient
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     _retire_env,
     _write_agent_plist,
@@ -84,7 +85,7 @@ def test_unrelated_cluster_plists_are_left_alone(
         str(tmp_path / ".." / "z") + "/.ava-demo/run/permissions-helper.1234.sock",
         env_key="AVA_PERMISSIONS_HELPER_SOCKET",
     )
-    monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: Path(sock))
+    monkeypatch.setattr(lifecycle, "helper_socket", lambda: Path(sock))
 
     assert lifecycle._foreign_label_plists() == []
     assert other.exists()
@@ -96,7 +97,7 @@ def test_long_mac_ipc_path_refuses_before_signing_or_native_jobs(
     from services.desktop.permissions_helper import lifecycle
 
     long_socket = tmp_path / ("s" * 104)
-    monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: long_socket)
+    monkeypatch.setattr(lifecycle, "helper_socket", lambda: long_socket)
     monkeypatch.setattr(
         lifecycle, "ensure_signing_cert", lambda: pytest.fail("must refuse before signing")
     )
@@ -106,7 +107,7 @@ def test_long_mac_ipc_path_refuses_before_signing_or_native_jobs(
 
 def test_overlong_socket_is_typed_unavailability() -> None:
     with pytest.raises(client.PermissionsHelperError, match="not reachable"):
-        client.ping(sock_path="/" + "x" * 200)
+        PermissionsHelperClient("/" + "x" * 200).ping()
 
 
 @pytest.mark.parametrize("capability", ["root_stop_intent_v1", "helper_shutdown_v1"])
@@ -118,6 +119,6 @@ def test_helper_ping_refuses_missing_stop_capability(
 
     reply = {"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True}
     reply.pop(capability)
-    monkeypatch.setattr(client, "ping", lambda: reply)
+    monkeypatch.setattr(client.PermissionsHelperClient, "ping", lambda _self: reply)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="upgrade its signed artifact"):
         lifecycle._helper_answers_ping()

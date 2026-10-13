@@ -20,7 +20,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.node import claim_node
 from agent.graph.prompt.context_notes import FRAMEWORK_NOTES
-from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
+from agent.graph.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.messages import NoteTag
 from agent.state import AgentState
 from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config

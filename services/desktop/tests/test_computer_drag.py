@@ -13,6 +13,7 @@ from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperClient
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
@@ -82,6 +83,7 @@ def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) ->
         ComputerUseConfig(30, 0.01, 30, 60, 1),
         Database.from_settings(gate=database_gate),
         sock="/unused.sock",
+        helper=PermissionsHelperClient("/unused.sock"),
     )
     return daemon, requests, events
 
