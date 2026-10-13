@@ -22,7 +22,7 @@ AGENT = 8902
 
 
 @pytest.fixture(autouse=True)
-def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Most cases exercise an allowed production backend; gate tests override it."""
     monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
@@ -674,7 +674,7 @@ def test_flag_defaults_on_with_standard_endpoint(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator[None]:
+def bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator[None]:
     pipeline = telemetry.build_pipeline(
         database=lambda: database, machine=machine_identity(), home=Path(".ava")
     )

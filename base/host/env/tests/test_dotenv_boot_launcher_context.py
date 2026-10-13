@@ -22,8 +22,8 @@ import pytest
 
 from base.host.env import dotenv_boot
 from base.host.env.tests.test_dotenv_boot import (
-    _restore_authority_env,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
     point_env_at_without_db_url,
+    restore_authority_env,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 from base.paths.home import resolve_ava_home
 from tests.fixtures.units import use_env_files

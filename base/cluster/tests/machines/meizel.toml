@@ -10,5 +10,3 @@ exports = ["setup.py"]
 
 [debt.private-name]
 "test_mark_stopping_preserves_description.py -> setup.py#_db" = 1
-"test_mark_stopping_preserves_description.py -> setup.py#_machine_setup" = 1
-"test_mark_stopping_preserves_description.py -> setup.py#_truncate_machines" = 1

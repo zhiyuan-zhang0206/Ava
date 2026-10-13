@@ -70,7 +70,7 @@ def _mirror_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
 
 
 @pytest.fixture(autouse=True)
-def _bind_telemetry(database: Database) -> Iterator[None]:
+def bind_telemetry(database: Database) -> Iterator[None]:
     """Bind a stable identity to this test's explicit native writer owner."""
     pipeline = telemetry.build_pipeline(
         database=lambda: database, machine=machine_identity(), home=Path(".ava")

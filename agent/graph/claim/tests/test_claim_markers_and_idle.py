@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
+from agent.graph.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_support import make_runtime, thread_config
 from base.cluster.machine import MachineIdentity

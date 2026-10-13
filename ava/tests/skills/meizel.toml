@@ -15,9 +15,3 @@
 "test_skills_state_note.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_skills_state_note.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
 "test_skills_state_note.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_reported" = 2
-
-[debt.private-name]
-"test_skills.py -> _skills_helpers.py#_overlay_all_enabled" = 1
-"test_skills_attribution.py -> _skills_helpers.py#_overlay_all_enabled" = 1
-"test_skills_mount.py -> _skills_helpers.py#_overlay_all_enabled" = 1
-"test_skills_state_note.py -> _skills_helpers.py#_overlay_all_enabled" = 1

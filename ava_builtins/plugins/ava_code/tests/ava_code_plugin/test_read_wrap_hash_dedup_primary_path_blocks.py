@@ -20,12 +20,12 @@ from agent.state import BaseAgentState, build_agent_state
 from ava.sdk_surface import process_context
 from ava_builtins.plugins.ava_code import agent_runtime
 from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
-    _load_ava_code_plugin as _load_ava_code_plugin,
-)
-from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
     get_injected_context_notes,
     make_git_repo,
     make_state_with_cwd,
+)
+from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
+    load_ava_code_plugin as load_ava_code_plugin,
 )
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity

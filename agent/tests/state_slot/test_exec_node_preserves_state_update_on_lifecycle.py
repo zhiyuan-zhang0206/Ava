@@ -12,13 +12,13 @@ from langgraph.types import Overwrite
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from agent.tests.test_state_slot import (
-    _reset_state_slot as _reset_state_slot,
-)
-from agent.tests.test_state_slot import (
     ai_message_with_code,
     make_runtime_and_config,
     messages_plugin_state_cls,
     scan_flagged_code,
+)
+from agent.tests.test_state_slot import (
+    reset_state_slot as reset_state_slot,
 )
 from ava.sdk_surface import process_context
 from base.agents.messages.security_finding import SecurityFindingEntry

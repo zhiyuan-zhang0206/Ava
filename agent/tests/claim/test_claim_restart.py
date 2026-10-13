@@ -11,7 +11,7 @@ from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
-from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_snapshot_cursor
+from agent.graph.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import (
     _set_agent_status,

@@ -26,7 +26,7 @@ from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
 @pytest.fixture(autouse=True)
-def _load_ava_code_plugin(
+def load_ava_code_plugin(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, config_authority: ConfigAuthority
 ):
     """Install ava_code's declared SDK surface (cwd namespace, wraps, skill source) for each
@@ -108,7 +108,7 @@ def test_get_cwd_returns_state_value(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_files_module_docstring_keeps_core_path_claim(_load_ava_code_plugin):
+def test_files_module_docstring_keeps_core_path_claim(load_ava_code_plugin):
     """The core owns the overview, including the optional coding directory."""
     assert ava.files.__doc__ is not None
     assert "workspace by default" in ava.files.__doc__
