@@ -27,7 +27,7 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 - [[web.ava.okf.md]] — network access
 - [[understand.ava.okf.md]] — multimodal understanding primitives
 - [[watcher.ava.okf.md]] — background watchers
-- [[self.ava.okf.md]] — agent self
+- [[ava/self/docs/self.ava.okf.md|self]] — agent self
 - [[ui.ava.okf.md]] — user interface
 - [[ava_builtins/plugins/ava_memory/docs/memory-api.ava.okf.md]] — long-term memory pool
 - [[ava/skills/docs/skills.ava.okf.md]] — skill registry

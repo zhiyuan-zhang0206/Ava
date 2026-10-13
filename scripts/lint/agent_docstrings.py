@@ -222,7 +222,7 @@ def _declares_agent_surface(tree: ast.Module) -> bool:
     return False
 
 
-def _top_level_surface(repo_root: Path) -> list[str]:
+def top_level_surface(repo_root: Path) -> list[str]:
     """Names in `ava/__init__.py`'s `__all_for_ava__` list literal."""
     tree = ast.parse((repo_root / "ava/__init__.py").read_text(encoding="utf-8"))
     for node in tree.body:
@@ -239,13 +239,13 @@ def _top_level_surface(repo_root: Path) -> list[str]:
     raise ValueError("ava/__init__.py declares no __all_for_ava__ list literal")
 
 
-def _discover_agent_surface_modules(repo_root: Path) -> set[Path]:
+def discover_agent_surface_modules(repo_root: Path) -> set[Path]:
     """`ava/` module files on the agent surface: a module declaring
     `__all_for_ava__`, or the module / package `__init__` of a top-level
     namespace. Everything else under `ava/` is framework code, whatever its name."""
     namespaces = {
         path
-        for name in _top_level_surface(repo_root)
+        for name in top_level_surface(repo_root)
         for path in (repo_root / f"ava/{name}.py", repo_root / f"ava/{name}/__init__.py")
         if path.is_file()
     }
@@ -260,7 +260,7 @@ def _discover_agent_surface_modules(repo_root: Path) -> set[Path]:
     return surface
 
 
-def _is_in_scope(
+def is_in_scope(
     path: Path, plugin_namespace_files: set[Path], ava_surface_files: set[Path]
 ) -> bool:
     """True if file's docstrings need linting."""
@@ -280,10 +280,10 @@ def _is_in_scope(
 # SDK docstrings must not name skills (layering: SDK below, skills above —
 # the skills index section owns skill discovery). `ava/skills/__init__.py` is the one
 # module whose subject IS skills, so it is exempt.
-_SKILL_REF_RE = re.compile(r"\bskills?\b", re.IGNORECASE)
+SKILL_REF_RE = re.compile(r"\bskills?\b", re.IGNORECASE)
 
 
-def _docstring_violations(
+def docstring_violations(
     node: ast.AST,
     source_lines: list[str],
     *,
@@ -348,7 +348,7 @@ def _line_violations(
 _CODE_SPAN_RE = re.compile(r"`[^`]+`")
 
 
-def _module_doc_child_reference_violations(
+def module_doc_child_reference_violations(
     tree: ast.Module, source_lines: list[str]
 ) -> list[tuple[int, str]]:
     """A module docstring must not restate its own children — they render
@@ -487,7 +487,7 @@ def _check_file(path: Path) -> list[tuple[Path, int, str]]:
     if not (path.name == "__init__.py" and path.parent.name == "skills"):
         extra.append(
             (
-                _SKILL_REF_RE,
+                SKILL_REF_RE,
                 "SDK<->skill coupling: docstrings must not reference skills "
                 "(discovery belongs to the skills index)",
             )
@@ -499,15 +499,15 @@ def _check_file(path: Path) -> list[tuple[Path, int, str]]:
     is_plugin_module = rel.endswith("/plugin.py")
     skip_module_doc = any(rel.endswith("/" + exempt) for exempt in _PLUGIN_MODULE_DOCSTRING_EXEMPT)
     if not skip_module_doc:
-        for line_no, reason in _docstring_violations(tree, source_lines, extra=extra):
+        for line_no, reason in docstring_violations(tree, source_lines, extra=extra):
             out.append((path, line_no, reason))
-        for line_no, reason in _module_doc_child_reference_violations(tree, source_lines):
+        for line_no, reason in module_doc_child_reference_violations(tree, source_lines):
             out.append((path, line_no, reason))
 
     # Walk top-level functions/classes only. Nested defs (closures, methods)
     # are not directly agent-visible from `help(ava.X)`.
     for node in _agent_visible_nodes(tree, is_plugin_module=is_plugin_module):
-        for line_no, reason in _docstring_violations(node, source_lines, extra=extra):
+        for line_no, reason in docstring_violations(node, source_lines, extra=extra):
             out.append((path, line_no, reason))
 
     return out
@@ -530,16 +530,16 @@ def _check_agents_md(repo_root: Path) -> list[tuple[Path, int, str]]:
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent.parent
     plugin_namespace_files = _discover_plugin_namespace_modules(repo_root)
-    ava_surface_files = _discover_agent_surface_modules(repo_root)
+    ava_surface_files = discover_agent_surface_modules(repo_root)
     files = sorted(
         p
         for root in (
             repo_root / "ava",
             repo_root / "ava_builtins/plugins",
-        )  # all `_is_in_scope` accepts
+        )  # all `is_in_scope` accepts
         for p in root.rglob("*.py")
         if ".venv" not in p.parts
-        and _is_in_scope(p.relative_to(repo_root), plugin_namespace_files, ava_surface_files)
+        and is_in_scope(p.relative_to(repo_root), plugin_namespace_files, ava_surface_files)
     )
 
     violations: list[tuple[Path, int, str]] = []

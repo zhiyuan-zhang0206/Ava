@@ -16,7 +16,7 @@ from scripts.model_registry import check_model_updates
 _SCRIPT = Path(check_model_updates.__file__)
 
 
-def _write_env_file(tracker: Any, path: Path, *, missing: str | None = None) -> None:
+def write_env_file(tracker: Any, path: Path, *, missing: str | None = None) -> None:
     path.write_text(
         "\n".join(
             f"{source.key_alias}=test-{source.provider}"
@@ -27,7 +27,7 @@ def _write_env_file(tracker: Any, path: Path, *, missing: str | None = None) -> 
     )
 
 
-def _known_models(tracker: Any, source: Any) -> list[str]:
+def known_models(tracker: Any, source: Any) -> list[str]:
     return [
         model_id
         for model_id, spec in tracker.build_model_catalog().models.items()
@@ -35,19 +35,19 @@ def _known_models(tracker: Any, source: Any) -> list[str]:
     ][:1]
 
 
-def _stub_fetcher(
+def stub_fetcher(
     tracker: Any, overrides: dict[str, list[str]] | None = None
 ) -> Callable[[Any, str], list[str]]:
     def fetch(source: Any, api_key: str) -> list[str]:
         assert api_key == f"test-{source.provider}"
         if overrides is not None and source.provider in overrides:
             return overrides[source.provider]
-        return _known_models(tracker, source)
+        return known_models(tracker, source)
 
     return fetch
 
 
-def _missing_environment_value(_alias: str) -> None:
+def missing_environment_value(_alias: str) -> None:
     return None
 
 
@@ -270,13 +270,13 @@ def test_candidate_is_reported_once_then_recorded_in_state(
     tracker: Any,
 ) -> None:
     env_file = tmp_path / ".env"
-    _write_env_file(tracker, env_file)
-    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
     # This id must stay unregistered; bump to the next GLM id when glm-5.4 lands.
     monkeypatch.setattr(
         tracker,
         "fetch_provider_models",
-        _stub_fetcher(tracker, {"glm": ["glm-5.4"]}),
+        stub_fetcher(tracker, {"glm": ["glm-5.4"]}),
     )
 
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
@@ -305,11 +305,11 @@ def test_check_sources_compares_against_the_provider_catalog(
     monkeypatch.setattr(
         tracker,
         "fetch_provider_models",
-        _stub_fetcher(tracker, {"gemini": ["gemini-3.5-flash-lite", "gemini-3.6-flash-lite"]}),
+        stub_fetcher(tracker, {"gemini": ["gemini-3.5-flash-lite", "gemini-3.6-flash-lite"]}),
     )
     env_file = tmp_path / ".env"
-    _write_env_file(tracker, env_file)
-    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
 
     reports = tracker.check_sources(
         tracker._read_env_file(env_file),
@@ -492,9 +492,9 @@ def test_missing_key_is_a_provider_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
-    _write_env_file(tracker, env_file, missing="GLM_API_KEY")
-    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
-    monkeypatch.setattr(tracker, "fetch_provider_models", _stub_fetcher(tracker))
+    write_env_file(tracker, env_file, missing="GLM_API_KEY")
+    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
+    monkeypatch.setattr(tracker, "fetch_provider_models", stub_fetcher(tracker))
 
     assert tracker.main(["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]) == 0
     state = json.loads((tmp_path / "state" / "state.json").read_text())
@@ -574,14 +574,14 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
-    _write_env_file(tracker, env_file)
-    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
     real_fetch = tracker.fetch_provider_models
 
     def fetch(source: Any, api_key: str) -> list[str]:
         if source.provider == "gemini":
             return real_fetch(source, api_key)
-        return _known_models(tracker, source)
+        return known_models(tracker, source)
 
     monkeypatch.setattr(tracker, "fetch_provider_models", fetch)
 
@@ -611,14 +611,14 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
-    _write_env_file(tracker, env_file)
-    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
     real_fetch = tracker.fetch_provider_models
 
     def fetch(source: Any, api_key: str) -> list[str]:
         if source.provider == "gemini":
             return real_fetch(source, api_key)
-        return _known_models(tracker, source)
+        return known_models(tracker, source)
 
     monkeypatch.setattr(tracker, "fetch_provider_models", fetch)
 

@@ -143,7 +143,7 @@ def build_state(scope: str = "both") -> RotationState:
     )
 
 
-def _redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
+def redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
     try:
         with redis.Redis(
             host=host,
@@ -162,16 +162,14 @@ def _checks(state: RotationState, admin: str, runtime: str) -> list[tuple[str, b
     checks = [
         (
             "Redis default",
-            _redis_probe(state.redis_host, state.redis_port, admin, username="default"),
+            redis_probe(state.redis_host, state.redis_port, admin, username="default"),
         )
     ]
     if state.rotates_runner:
         checks.append(
             (
                 "Redis ACL user",
-                _redis_probe(
-                    state.redis_host, state.redis_port, runtime, username=state.redis_user
-                ),
+                redis_probe(state.redis_host, state.redis_port, runtime, username=state.redis_user),
             )
         )
     return checks
@@ -185,9 +183,9 @@ def preflight(state: RotationState) -> bool:
     return all(ok for _label, ok in checks)
 
 
-def _working_redis_admin_password(state: RotationState) -> str:
+def working_redis_admin_password(state: RotationState) -> str:
     for password in (state.new_redis_admin_password, state.old_redis_admin_password):
-        if _redis_probe(state.redis_host, state.redis_port, password, username="default"):
+        if redis_probe(state.redis_host, state.redis_port, password, username="default"):
             return password
     raise RuntimeError("Redis default user rejects both recorded admin passwords")
 
@@ -196,7 +194,7 @@ def apply_admin(state: RotationState) -> None:
     """Rotate the Redis default user, keeping the runtime ACL user live."""
     if not state.rotates_admin:
         return
-    current = _working_redis_admin_password(state)
+    current = working_redis_admin_password(state)
     with redis.Redis(
         host=state.redis_host,
         port=state.redis_port,
@@ -212,7 +210,7 @@ def apply_runner(state: RotationState) -> None:
     """Rotate the Redis runtime ACL password."""
     if not state.rotates_runner:
         return
-    admin_password = _working_redis_admin_password(state)
+    admin_password = working_redis_admin_password(state)
     ensure_cluster_redis_acl(
         state.redis_user,
         redis_admin_url=(f"redis://default:{admin_password}@{state.redis_host}:{state.redis_port}"),

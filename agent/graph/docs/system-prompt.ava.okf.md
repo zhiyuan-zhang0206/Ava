@@ -31,14 +31,14 @@ The public signature, declaration order and external-plugin migration contract l
 - `_prefer_sdk_section` — "Prefer SDK"
 - `_codeact_section` (in `agent/graph/prompt/_codeact.py`, registered by `system_prompt`) — "CodeAct — batch work into fewer calls": batch known operations when no intermediate review is needed. Toggle `AVA_SYSTEM_PROMPT_CODEACT` (default on; explicit cluster settings and per-agent overlays can disable it).
 - `_keep_it_simple_section` — "Keep It Simple"
-- `conversation.user_reply_section` — Owns ordinary assistant-text reply routing, including text alongside tools; answer humans or reply before investigation, including resumed handoff requests, with every style. Continue investigating only concrete remaining questions; no courtesy replies for wakes or peers.
-- `_communication_style_section` — How verbose to be while working; `AVA_AGENT_COMMUNICATION_STYLE` selects `off` (default; section omitted entirely) / `oriented` (short progress reports while working) / `concise` (only speak at milestones) / `silent` (work silently, provide a complete summary at the end)
+- `conversation.user_reply_section` — Always-on reply, language and milestone rules: ordinary text is self-contained, substantive communication with the user. Follow user language, default to meaningful milestones, preserve answers/questions/deliverables, and skip routine operations or wake/peer courtesy summaries. See [prompt architecture](../../docs/prompt-architecture.md).
+- `_communication_style_section` — Optional `AVA_AGENT_COMMUNICATION_STYLE`: `off` (default; omitted), `oriented` (live pairing), `concise` (brief milestones), `silent` (one human-requested report plus blockers/questions). Per-agent overlays may select pairing; core language and text usefulness remain active.
 - `_output_conciseness_section` — Output conciseness
 - `_outcome_reporting_section` — Honest reporting
 - `_action_caution_section` — Confirm before irreversible actions
 - `_align_before_action_section` — Resolve material outcome, cost, autonomy, and authority choices; respect existing consent rather than reapprove settled work after planning
 - `_cross_machine_delegation_section` — One sentence (user-finalized wording, verbatim): when work spans machines, let an agent on the target machine do it rather than reaching across. Toggle `AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION` (default on); semantic steer only — no API detail, so it cannot go stale.
-- `_delegation_check_section` — Consult the capability index and load `ava-workflow` when available for non-trivial or consequential work. Select methods and peer collaboration by need, without forcing interviews, plans, supervision, or delegation. The index step is omitted and steps renumbered when the index is empty.
+- `delegation_check_section` — Consult capabilities and existing ownership; proactively parallelize independent work. Fork for valuable existing context, otherwise spawn fresh or reuse a suitable available agent. Omit the index step and renumber when the index is empty.
 - `_file_driven_work_section` — File-driven workflow
 - `_long_running_operation_section` — Lifecycle and cost principles without fleet; the long-running-agent skill supplies procedures.
 - `_temporal_awareness_section` — Time awareness, including the `ava-workflow.capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments

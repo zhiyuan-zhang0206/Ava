@@ -332,14 +332,17 @@ def test_communication_style_only_renders_optional_narration(
 
 
 def test_oriented_style_keeps_the_user_oriented(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The default style is the historical section: interleave brief updates,
-    surface direction changes, flag blockers early."""
+    """Explicit live pairing allows substantive checkpoints, not a tool log."""
     monkeypatch.setattr(settings.agent, "agent_communication_style", "oriented")
 
     rendered = communication_style_section(_slices(), catalog=build_model_catalog())
 
     assert rendered.startswith("# Keeping the user oriented")
-    assert "Do not work in long silences" in rendered
+    assert "This agent is configured for live pairing" in rendered
+    assert "meaningful findings and checkpoints" in rendered
+    assert "why it matters and what remains unresolved" in rendered
+    assert "self-contained and useful to the user" in rendered
+    assert "alongside each action" not in rendered
 
 
 def test_silent_style_asks_for_no_narration_and_a_closing_report(

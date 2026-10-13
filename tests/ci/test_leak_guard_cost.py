@@ -86,9 +86,9 @@ def modules(repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> list[types.Modu
 
 
 @pytest.fixture
-def run(repo_root: Path, modules: list[types.ModuleType]) -> leak_guard._Run:
+def run(repo_root: Path, modules: list[types.ModuleType]) -> leak_guard.Run:
     del modules  # registered before the guard looks
-    guard = leak_guard._Run()
+    guard = leak_guard.Run()
     guard.configure(str(repo_root))
     return guard
 
@@ -96,7 +96,7 @@ def run(repo_root: Path, modules: list[types.ModuleType]) -> leak_guard._Run:
 # -- locating modules ----------------------------------------------------------------------------
 
 
-def test_locating_the_modules_enters_no_python_frame_per_module(run: leak_guard._Run) -> None:
+def test_locating_the_modules_enters_no_python_frame_per_module(run: leak_guard.Run) -> None:
     """The first pass judges everything already imported (thousands of installed modules)."""
     assert len(sys.modules) > _FAKE_MODULES
     assert _python_calls(run.watch.sync) <= _FRAMES_TO_LOCATE
@@ -104,7 +104,7 @@ def test_locating_the_modules_enters_no_python_frame_per_module(run: leak_guard.
 
 
 def test_a_module_is_judged_once_and_only_a_new_name_is_judged_again(
-    run: leak_guard._Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    run: leak_guard.Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run.watch.sync()
     judged = run.watch.judged
@@ -121,7 +121,7 @@ def test_a_module_is_judged_once_and_only_a_new_name_is_judged_again(
 
 
 def test_a_module_another_thread_is_still_importing_is_watched_once_it_is_done(
-    run: leak_guard._Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    run: leak_guard.Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A background thread's lazy import registers the module before its body ran. The names the body
     then defines are that import's, not a leak of the test that happens to be running."""
@@ -145,7 +145,7 @@ def test_a_module_another_thread_is_still_importing_is_watched_once_it_is_done(
 
 
 def test_an_unchanged_state_names_nothing_and_makes_no_second_look(
-    run: leak_guard._Run, modules: list[types.ModuleType]
+    run: leak_guard.Run, modules: list[types.ModuleType]
 ) -> None:
     before = run.capture()
     assert run.compare(before) == []
@@ -158,7 +158,7 @@ def test_an_unchanged_state_names_nothing_and_makes_no_second_look(
 
 
 def test_the_slow_path_names_exactly_the_dicts_that_grew(
-    run: leak_guard._Run, modules: list[types.ModuleType]
+    run: leak_guard.Run, modules: list[types.ModuleType]
 ) -> None:
     before = run.capture()
     modules[3].__dict__.update(leaked=1, __dunder__=2, sub=types.ModuleType("sub"))
@@ -175,7 +175,7 @@ def test_the_slow_path_names_exactly_the_dicts_that_grew(
 
 
 def test_a_dict_that_shrank_is_a_new_baseline_not_a_finding(
-    run: leak_guard._Run, modules: list[types.ModuleType]
+    run: leak_guard.Run, modules: list[types.ModuleType]
 ) -> None:
     modules[1].__dict__["temporary"] = 1
     before = run.capture()  # a change between two tests belongs to no test
@@ -189,7 +189,7 @@ def test_a_dict_that_shrank_is_a_new_baseline_not_a_finding(
 
 
 def test_a_change_between_two_tests_belongs_to_no_test(
-    run: leak_guard._Run, modules: list[types.ModuleType]
+    run: leak_guard.Run, modules: list[types.ModuleType]
 ) -> None:
     modules[4].__dict__["set_up_by_a_wider_fixture"] = 1
     before = run.capture()
@@ -199,7 +199,7 @@ def test_a_change_between_two_tests_belongs_to_no_test(
 # -- the steady state: a handful of frames per phase ----------------------------------------------
 
 
-def test_a_test_enters_a_handful_of_python_frames(run: leak_guard._Run) -> None:
+def test_a_test_enters_a_handful_of_python_frames(run: leak_guard.Run) -> None:
     run.watch.sync()  # the one-time pass is paid by the first test of a worker, not by every test
     before = run.capture()
     assert _python_calls(run.capture) <= _FRAMES_PER_PHASE
@@ -207,7 +207,7 @@ def test_a_test_enters_a_handful_of_python_frames(run: leak_guard._Run) -> None:
 
 
 def test_the_signals_are_read_without_the_python_wrapper(
-    run: leak_guard._Run, monkeypatch: pytest.MonkeyPatch
+    run: leak_guard.Run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`signal.getsignal` is three frames and an enum construction per signal: the raw answer is enough."""
 
@@ -225,11 +225,9 @@ def _handler(_signum: int, _frame: object) -> None:  # pragma: no cover - never 
 
 def test_a_changed_signal_is_named_as_the_wrapper_names_it() -> None:
     """`_signal.getsignal` answers 0 and 1 as plain ints: they are named SIG_DFL and SIG_IGN again."""
-    rest = (0,) * (len(leak_guard._SIGNALS) - 4)
-    found = leak_guard._signal_findings(
-        (0, 1, None, _handler, *rest), (1, 0, _handler, None, *rest)
-    )
-    first = [signal.Signals(sig).name for sig in leak_guard._SIGNALS[:4]]
+    rest = (0,) * (len(leak_guard.SIGNALS) - 4)
+    found = leak_guard.signal_findings((0, 1, None, _handler, *rest), (1, 0, _handler, None, *rest))
+    first = [signal.Signals(sig).name for sig in leak_guard.SIGNALS[:4]]
     assert found == [
         ("signal", f"{first[0]} handler SIG_DFL -> SIG_IGN"),
         ("signal", f"{first[1]} handler SIG_IGN -> SIG_DFL"),
@@ -282,7 +280,7 @@ FILES = [
 
 @pytest.mark.parametrize("file", FILES)
 def test_the_first_party_pattern_applies_the_same_rule(file: str) -> None:
-    assert bool(leak_guard._first_party_pattern(ROOT).match(file)) is _the_rule(file)
+    assert bool(leak_guard.first_party_pattern(ROOT).match(file)) is _the_rule(file)
 
 
 def test_every_first_party_module_of_this_process_is_located(
@@ -295,7 +293,7 @@ def test_every_first_party_module_of_this_process_is_located(
     for the real repository: a first-party file loaded under an installed package's name fails here.
     """
     root = str(request.config.rootpath).rstrip(os.sep) + os.sep  # the root the guard itself uses
-    watch = leak_guard._ModuleWatch(leak_guard._first_party_pattern(root).match)
+    watch = leak_guard.ModuleWatch(leak_guard.first_party_pattern(root).match)
     watch.sync()
     expected = {
         name
@@ -311,7 +309,7 @@ def test_every_first_party_module_of_this_process_is_located(
 
 
 def test_a_first_party_file_loaded_inside_an_installed_package_is_not_looked_at(
-    run: leak_guard._Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    run: leak_guard.Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The documented edge of skipping by top-level module: its own file decides, not the submodule's."""
     for name, file in (
@@ -329,7 +327,7 @@ def test_a_first_party_file_loaded_inside_an_installed_package_is_not_looked_at(
 
 
 def test_a_module_removed_and_added_back_is_not_judged_twice_and_a_new_one_is_found(
-    run: leak_guard._Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    run: leak_guard.Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The names the last discovery saw are a prefix of the keys until a module leaves."""
     run.watch.sync()
@@ -345,7 +343,7 @@ def test_a_module_removed_and_added_back_is_not_judged_twice_and_a_new_one_is_fo
 
 
 def test_a_module_without_a_string_file_is_never_first_party(
-    run: leak_guard._Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    run: leak_guard.Run, repo_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A namespace package has `__file__ = None`, a built-in has none, `sys.modules` may hold a non-module."""
     odd = {

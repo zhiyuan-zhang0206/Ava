@@ -158,7 +158,7 @@ def changed_scope(
     missing = [a for a in only if not os.path.lexists(repo_root / a)]
     if missing:
         raise SystemExit(f"error: target path(s) not found: {', '.join(missing)}")
-    changed = frozenset(_rel_or_abs((repo_root / a).absolute(), repo_root) for a in only)
+    changed = frozenset(rel_or_abs((repo_root / a).absolute(), repo_root) for a in only)
     widening = (*LINT_TOOLING, *inputs)
     if any(path.startswith(widening) and not is_test_path(path) for path in changed):
         return None  # a lint's own tests are not its tooling
@@ -169,7 +169,7 @@ def restrict(paths: Iterable[Path], scope: frozenset[str] | None, repo_root: Pat
     """The enumerated files `scope` judges: all of them, or only the changed ones."""
     if scope is None:
         return list(paths)
-    return [path for path in paths if _rel_or_abs(path, repo_root) in scope]
+    return [path for path in paths if rel_or_abs(path, repo_root) in scope]
 
 
 def tracked_files(repo_root: Path) -> list[str]:
@@ -185,7 +185,7 @@ def tracked_files(repo_root: Path) -> list[str]:
     return [path for path in out.stdout.splitlines() if path]
 
 
-def _rel_or_abs(path: Path, repo_root: Path) -> str:
+def rel_or_abs(path: Path, repo_root: Path) -> str:
     """Use a repo-relative path, or an absolute path outside the repo."""
     try:
         return path.relative_to(repo_root).as_posix()
@@ -204,9 +204,9 @@ def _resolved_target(argument: str, repo_root: Path) -> Path:
 
 def _files_in_target(target: Path, repo_root: Path) -> list[str]:
     if target.is_file():
-        return [_rel_or_abs(target, repo_root)]
+        return [rel_or_abs(target, repo_root)]
     if target.is_dir():
-        return [_rel_or_abs(path, repo_root) for path in target.rglob("*") if path.is_file()]
+        return [rel_or_abs(path, repo_root) for path in target.rglob("*") if path.is_file()]
     return []
 
 

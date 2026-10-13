@@ -58,7 +58,7 @@ def _launchd_jobs() -> set[str]:
     }
 
 
-def _crontab_jobs() -> set[str]:
+def crontab_jobs() -> set[str]:
     """Ava-marked lines in the user's crontab. A host with no `crontab` binary
     (macOS ships one, a hermetic container may not) contributes none."""
     try:
@@ -77,4 +77,4 @@ def _crontab_jobs() -> set[str]:
 def host_ava_os_jobs() -> frozenset[str]:
     """Every OS-scheduled job on this host that belongs to Ava, as opaque ids that
     change when the job's definition does."""
-    return frozenset(_launchd_jobs() | _crontab_jobs())
+    return frozenset(_launchd_jobs() | crontab_jobs())

@@ -32,12 +32,12 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.fixture(autouse=True)
     def _default_unsuppressed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _db, _aid: False)
-        monkeypatch.setattr(lifecycle, "_clear_wake_suppression", lambda _db, _aid: None)
+        monkeypatch.setattr(lifecycle, "recovery_halted", lambda _db, _aid: False)
+        monkeypatch.setattr(lifecycle, "clear_wake_suppression", lambda _db, _aid: None)
         # The notice guard reads the trigger row from the DB; these tests pin
         # dispatch placement, not the guard — default it to "not a notice".
         monkeypatch.setattr(
-            lifecycle, "_system_notice_source_of_trigger", lambda _db, _aid, _iid: None
+            lifecycle, "system_notice_source_of_trigger", lambda _db, _aid, _iid: None
         )
 
     @pytest.mark.asyncio
@@ -55,7 +55,7 @@ class TestResurrectIfTerminatedPlacement:
         from base.api_contracts.agent_contract import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _db, _aid: True)
+        monkeypatch.setattr(lifecycle, "recovery_halted", lambda _db, _aid: True)
 
         def _no_machine_read(_db, _aid: int) -> str:
             raise AssertionError("halted auto-resurrect must not read or contact the home")
@@ -116,7 +116,7 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(
             lifecycle,
-            "_clear_wake_suppression",
+            "clear_wake_suppression",
             _record_clear,
         )
 
@@ -343,8 +343,8 @@ class TestResurrectIfTerminatedNotificationGuard:
 
     @pytest.fixture(autouse=True)
     def _default_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _db, _aid: False)
-        monkeypatch.setattr(lifecycle, "_clear_wake_suppression", lambda _db, _aid: None)
+        monkeypatch.setattr(lifecycle, "recovery_halted", lambda _db, _aid: False)
+        monkeypatch.setattr(lifecycle, "clear_wake_suppression", lambda _db, _aid: None)
 
     @pytest.mark.asyncio
     async def test_system_notice_trigger_skips_forward_and_launch(
@@ -359,7 +359,7 @@ class TestResurrectIfTerminatedNotificationGuard:
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(
-            lifecycle, "_system_notice_source_of_trigger", lambda _db, _aid, _iid: "system"
+            lifecycle, "system_notice_source_of_trigger", lambda _db, _aid, _iid: "system"
         )
 
         def _no_machine_read(_db, _aid: int) -> str:
@@ -447,7 +447,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         def _boom(_db: object, _aid: int, _iid: int) -> str | None:
             raise RuntimeError("trigger read failed")
 
-        monkeypatch.setattr(lifecycle, "_system_notice_source_of_trigger", _boom)
+        monkeypatch.setattr(lifecycle, "system_notice_source_of_trigger", _boom)
         with pytest.raises(RuntimeError, match="trigger read failed"):
             await lifecycle.resurrect_if_terminated(
                 _db(database_gate=database_gate),
@@ -498,16 +498,16 @@ class TestResurrectIfTerminatedNotificationGuard:
             db_conn, aid, "wake", source="watcher:7", bus=event_bus, database=database
         )
 
-        assert lifecycle._system_notice_source_of_trigger(database, aid, sys_iid) == "system"
+        assert lifecycle.system_notice_source_of_trigger(database, aid, sys_iid) == "system"
         assert (
-            lifecycle._system_notice_source_of_trigger(database, aid, var_iid)
+            lifecycle.system_notice_source_of_trigger(database, aid, var_iid)
             == "system:notice-reply"
         )
-        assert lifecycle._system_notice_source_of_trigger(database, aid, user_iid) is None
-        assert lifecycle._system_notice_source_of_trigger(database, aid, note_iid) is None
-        assert lifecycle._system_notice_source_of_trigger(database, aid, watcher_iid) is None
-        assert lifecycle._system_notice_source_of_trigger(database, aid, 10**12) is None
-        assert lifecycle._system_notice_source_of_trigger(database, aid + 999, sys_iid) is None
+        assert lifecycle.system_notice_source_of_trigger(database, aid, user_iid) is None
+        assert lifecycle.system_notice_source_of_trigger(database, aid, note_iid) is None
+        assert lifecycle.system_notice_source_of_trigger(database, aid, watcher_iid) is None
+        assert lifecycle.system_notice_source_of_trigger(database, aid, 10**12) is None
+        assert lifecycle.system_notice_source_of_trigger(database, aid + 999, sys_iid) is None
 
         recovery_iid = insert_inbound_message(
             db_conn,
@@ -518,7 +518,7 @@ class TestResurrectIfTerminatedNotificationGuard:
             bus=event_bus,
             database=database,
         )
-        assert lifecycle._system_notice_source_of_trigger(database, aid, recovery_iid) == "system"
+        assert lifecycle.system_notice_source_of_trigger(database, aid, recovery_iid) == "system"
         user_marker_iid = insert_inbound_message(
             db_conn,
             aid,
@@ -528,7 +528,7 @@ class TestResurrectIfTerminatedNotificationGuard:
             bus=event_bus,
             database=database,
         )
-        assert lifecycle._system_notice_source_of_trigger(database, aid, user_marker_iid) is None
+        assert lifecycle.system_notice_source_of_trigger(database, aid, user_marker_iid) is None
 
         fail_closed: tuple[tuple[str, dict[str, object] | None], ...] = (
             ("payload-absent", None),
@@ -548,7 +548,7 @@ class TestResurrectIfTerminatedNotificationGuard:
                 bus=event_bus,
                 database=database,
             )
-            assert lifecycle._system_notice_source_of_trigger(database, aid, iid) == "system", label
+            assert lifecycle.system_notice_source_of_trigger(database, aid, iid) == "system", label
 
 
 @pytest.mark.asyncio

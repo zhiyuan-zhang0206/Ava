@@ -239,9 +239,10 @@ class AgentPromptSettings(EnvSettings):
         default=None,
         alias="AVA_AGENT_COMMUNICATION_STYLE",
         description=(
-            "How much the agent narrates while it works. 'oriented': brief "
-            "interleaved updates. 'concise': speak only at real milestones. 'silent': "
-            "one report at the end. 'off': the section is omitted entirely. Unset "
+            "Optional communication style. 'oriented': live pairing with substantive "
+            "findings and checkpoints. 'concise': brief milestone updates. 'silent': "
+            "one report for human-requested work. 'off': only the optional style "
+            "section is omitted; language and substantive communication rules remain active. Unset "
             "resolves the per-model default (base/lm/registry.py; shared floor "
             "'off')."
         ),
@@ -378,8 +379,9 @@ class AgentPromptSettings(EnvSettings):
         description=(
             "Inject a 'Before you act \u2014 check' section: does a skill already "
             "cover this, is someone else already responsible, do they have better "
-            "tools, would delegation improve the result, which collaboration method "
-            "fits? Route non-trivial work through ava-workflow when available. "
+            "tools, and proactively parallelize independent work. Fork for valuable "
+            "existing context; otherwise spawn fresh or reuse a suitable available agent. "
+            "Route non-trivial work through ava-workflow when available. "
             "The skill-index step is dropped when this agent renders "
             "no Capabilities section. Unset resolves the per-model default (shared "
             "floor: on)."

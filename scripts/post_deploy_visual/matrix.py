@@ -313,7 +313,7 @@ def _record_delayed_mount_wait(
         )
 
 
-def _observe_login_redirect(page: Page, *, ready_selector: str) -> None:
+def observe_login_redirect(page: Page, *, ready_selector: str) -> None:
     """Fail fast when a non-login surface lands on the login page.
 
     The up-front session probe cannot see a cookie that dies after it runs;
@@ -357,7 +357,7 @@ def inspect_combination(
         spec = STRUCTURAL_SPECS[surface]
         ready_selector = cast(str, spec["ready"])
         if surface != "login":
-            _observe_login_redirect(page, ready_selector=ready_selector)
+            observe_login_redirect(page, ready_selector=ready_selector)
         wait_for_layout_settled(page, ready_selector)
         failures = measure_structure(page, surface=surface, viewport=viewport, spec=spec)
         diffs = []

@@ -376,10 +376,8 @@ def align_before_action_section(slices: AgentSlices, *, catalog: ModelCatalog) -
     )
 
 
-# The five steps of the pre-work check, as bodies without their numbers: step 1
-# only renders when there is a `# Capabilities` section to read, so the
-# numbering — and the cost step's back-reference to the two delegation steps —
-# is computed rather than written in.
+# The capability-index step is omitted when there is no index; number the
+# remaining steps from their actual rendered order.
 _STEP_SKILL_INDEX = (
     "Does a skill already cover this? Read the `# Capabilities` index "
     "and match the task against descriptions and expected outputs before "
@@ -387,14 +385,13 @@ _STEP_SKILL_INDEX = (
     "For non-trivial, ambiguous, consequential, sustained, or parallel work, "
     "load ava-workflow when available to choose how to work. Its lightweight "
     "entry selects only the needed methods; it does not mandate an interview, "
-    "goal supervision, a plan document, or delegation."
+    "goal supervision, or a plan document."
 )
 
 _STEP_NEIGHBORS = (
     "Is someone else already responsible? Look at the agents around you "
     "and check existing responsibility before taking over shared work. "
-    "Reuse a suitable peer when collaboration helps; an absent domain owner "
-    "does not require spawning a worker. If you were assigned a specific "
+    "Coordinate with the existing owner to avoid duplicate work. If you were assigned a specific "
     "task, finish it without expanding into adjacent domains."
 )
 
@@ -407,54 +404,32 @@ _STEP_TOOLS = (
     "acceptance evidence; peers discover skills through their own index."
 )
 
-_STEP_COST = (
-    "Would delegation improve the result? If steps {delegation_steps} named no better agent, "
-    "choose working yourself, reusing a peer, or spawning peers based on "
-    "context, cost, latency, and verification needs. Existing authorization "
-    "and budget boundaries govern every choice."
-)
-
 _STEP_PARALLEL = (
-    "Can the work be parallelized? Choose a few persistent peers for simple "
-    "collaboration, or load ava-dynamic-workflow when available to generate "
-    "an orchestration script for large fan-outs or repeated stages. Decide "
-    "when to gather results and wake; parallelizable work does not require "
-    "delegation or one model turn per peer completion."
+    "Proactively parallelize independent work. Fork when your existing context "
+    "is valuable to the task; otherwise spawn fresh or reuse a suitable, "
+    "available agent."
 )
 
 
 def delegation_check_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Toggle via settings.agent.prompt_delegation_check_enabled (env
-    AVA_SYSTEM_PROMPT_DELEGATION_CHECK, default on). Before taking on any work, run a
-    30-second capability and delegation check rather than rebuilding from
-    general knowledge what a listed skill already covers. The skill-index step
-    selects a working strategy without forcing delegation. It is the trigger
-    for the `# Capabilities` index: an agent that never consults the index
-    cannot know it is reinventing one of its own skills, so the obligation has
-    to live in the one process the prompt marks as mandatory rather than in the
-    index itself. It is dropped (and the rest renumbered) when this agent has no
-    Capabilities section at all — see `capability_index_is_empty`."""
+    AVA_SYSTEM_PROMPT_DELEGATION_CHECK, default on). Consult capabilities and
+    existing responsibilities, then parallelize independent work. The index
+    step is omitted and the rest renumbered when the index is empty."""
     if not _resolved("prompt_delegation_check_enabled", slices, catalog):
         return ""
     steps: list[str] = []
     if not capability_index_is_empty(slices.prompt):
         steps.append(_STEP_SKILL_INDEX)
-    first_delegation_step = len(steps) + 1
     steps.append(_STEP_NEIGHBORS)
     steps.append(_STEP_TOOLS)
-    steps.append(
-        _STEP_COST.format(delegation_steps=f"{first_delegation_step}-{first_delegation_step + 1}")
-    )
     steps.append(_STEP_PARALLEL)
     body = "\n".join(f"{n}. {step}" for n, step in enumerate(steps, start=1))
     return (
         "# Before you act — check\n\n"
-        "You are one agent in a fleet. Before taking on work yourself, run this "
-        "30-second check; skipping it is the most common failure mode in this "
-        "fleet.\n\n"
-        f"{body}\n\n"
-        "Then proceed — delegate, or do it yourself as a conscious choice "
-        "rather than a default."
+        "Before taking on work, check capabilities and existing responsibilities. "
+        "Respect existing authorization and budget boundaries.\n\n"
+        f"{body}"
     )
 
 

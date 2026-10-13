@@ -21,7 +21,7 @@ def test_report_uses_one_captured_gated_database(
     create = Mock(return_value=database)
     report = Mock()
     monkeypatch.setattr(sys, "argv", ["replay", "report", "42"])
-    monkeypatch.setattr(replay, "_require_preview", Mock())
+    monkeypatch.setattr(replay, "require_preview", Mock())
     monkeypatch.setattr(replay, "ConfigBoot", Mock(return_value=Mock()))
     monkeypatch.setattr(LoadedCommit, "capture", capture)
     monkeypatch.setattr(code_version, "first_parent_count", count)
@@ -47,7 +47,7 @@ def test_preview_refusal_precedes_capture_and_database(
     capture = Mock()
     create = Mock()
     monkeypatch.setattr(sys, "argv", ["replay", "report", "42"])
-    monkeypatch.setattr(replay, "_DOCKERENV", tmp_path / "missing")
+    monkeypatch.setattr(replay, "DOCKERENV", tmp_path / "missing")
     monkeypatch.setattr(LoadedCommit, "capture", capture)
     monkeypatch.setattr(replay.Database, "from_settings", create)
     with pytest.raises(SystemExit, match="preview container only"):

@@ -56,7 +56,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
 
-_SCAN_DIR = "ava_builtins/plugins"
+SCAN_DIR = "ava_builtins/plugins"
 
 _EXEMPTION = "# wrap-ok:"
 
@@ -170,7 +170,7 @@ def _under_plugins(path: Path) -> bool:
         rel = path.resolve().relative_to(_REPO_ROOT).as_posix()
     except ValueError:
         return False
-    return rel == _SCAN_DIR or rel.startswith(f"{_SCAN_DIR}/")
+    return rel == SCAN_DIR or rel.startswith(f"{SCAN_DIR}/")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         targets = [p for p in (Path(a).resolve() for a in argv) if _under_plugins(p)]
     else:
-        targets = lint_common.scan_roots(_REPO_ROOT, (_SCAN_DIR,))
+        targets = lint_common.scan_roots(_REPO_ROOT, (SCAN_DIR,))
 
     scope = lint_common.changed_scope(only, _REPO_ROOT)
 

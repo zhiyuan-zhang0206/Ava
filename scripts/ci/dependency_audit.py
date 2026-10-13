@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_MARKER = "<!-- weekly-dependency-audit -->"
+MARKER = "<!-- weekly-dependency-audit -->"
 _TITLE = "Weekly dependency audit: findings need attention"
 _UV_PIN = ("uv", "base/host/brew_pin.py", r'^UV_VERSION = "([^"]+)"')
 _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2, "low": 1, "unknown": 0}
@@ -155,7 +155,7 @@ def npm_vulnerabilities(audit_json: dict[str, Any]) -> list[Vulnerability]:
     return found
 
 
-def _run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
+def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
     """Accept findings (exit 1), but reject tool/registry errors as incomplete audits."""
     result = subprocess.run(  # noqa: S603 — fixed audit tool argv
         argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False
@@ -177,7 +177,7 @@ def _run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
 
 # (display name, file, regex with one group for the pinned version). A constant that is
 # renamed or moved makes `pinned_version` raise, so a stale entry cannot silently drop a row.
-_PINS: tuple[tuple[str, str, str], ...] = (
+PINS: tuple[tuple[str, str, str], ...] = (
     ("zonky Postgres", "base/cluster/dataplane/runtime_binaries.py", r'^_PG_VERSION = "([^"]+)"'),
     ("pgvector", "base/cluster/dataplane/runtime_binaries.py", r'^_PGVECTOR_VERSION = "([^"]+)"'),
     ("wal-g", "base/cluster/dataplane/walg_binary.py", r'^WALG_VERSION = "([^"]+)"'),
@@ -210,7 +210,7 @@ def zonky_latest(pinned: str, metadata_xml: str) -> str:
 def latest_binaries(
     gh_api: Fetch, fetch_text: Callable[[str], str], root: Path = _REPO_ROOT
 ) -> list[Binary]:
-    pins = {name: pinned_version(path, pattern, root) for name, path, pattern in _PINS}
+    pins = {name: pinned_version(path, pattern, root) for name, path, pattern in PINS}
 
     def release(repo: str) -> str:
         data = gh_api(f"repos/{repo}/releases/latest")
@@ -256,7 +256,7 @@ def is_actionable(vulnerabilities: list[Vulnerability], binaries: list[Binary]) 
 
 def render(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> str:
     lines = [
-        _MARKER,
+        MARKER,
         "",
         "Weekly dependency audit (`scripts/ci/dependency_audit.py`). No pin was changed.",
         "",
@@ -314,7 +314,7 @@ def sync_issue(
     repo: str, body: str, *, actionable: bool, gh: Callable[[list[str]], str] = _gh
 ) -> str:
     """Keep the single tracked issue: update or open it when actionable, close it when clean."""
-    marked = f'select((.body // "") | contains("{_MARKER}"))'
+    marked = f'select((.body // "") | contains("{MARKER}"))'
     listing = gh(
         [
             "api",
@@ -380,7 +380,7 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    uv_json = _run_json(
+    uv_json = run_json(
         [
             "uvx",
             "--from",
@@ -393,7 +393,7 @@ def main(argv: list[str]) -> int:
         ],
         _REPO_ROOT,
     )
-    npm_json = _run_json(
+    npm_json = run_json(
         ["npm", "audit", "--json", "--registry=https://registry.npmjs.org"],
         _REPO_ROOT / "ui/web",
     )

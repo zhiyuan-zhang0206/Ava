@@ -372,7 +372,7 @@ def check_links(doc: Path, line: str, *, allow_planned: bool = False) -> list[st
 
 
 @functools.cache
-def _okf_nodes() -> frozenset[str]:
+def okf_nodes() -> frozenset[str]:
     """Every tracked `.ava.okf.md` path — the universe a wikilink resolves in."""
     out = subprocess.run(  # noqa: S603 — fixed argv; REPO comes from git rev-parse, not input
         ["git", "-C", str(REPO), "ls-files", "*.ava.okf.md"],
@@ -403,7 +403,7 @@ def check_wikilinks(doc: Path, line: str, *, allow_planned: bool = False) -> lis
         target = match.group(1).strip()
         if _in_code_span(line, match.start()):
             continue
-        if resolve_wikilink(cur, target, set(_okf_nodes())) is not None:
+        if resolve_wikilink(cur, target, set(okf_nodes())) is not None:
             continue
         if allow_planned and _PLANNED.match(line, match.end()):
             continue

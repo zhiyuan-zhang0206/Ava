@@ -27,7 +27,7 @@ _FALLBACK_REPO = "zhiyuan-zhang0206/Ava"
 
 POLL_INTERVAL = 30
 MAX_CONSECUTIVE_ERRORS = 3
-_LIMBO_AGE_SECONDS = 600.0
+LIMBO_AGE_SECONDS = 600.0
 TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
 MAIN_CI_WORKFLOW_NAME = "CI"
 CORE_SUITE_CHECK_PREFIXES = ("backend shard (", "e2e shard (")
@@ -70,7 +70,7 @@ def _derive_repo() -> str:
 DEFAULT_REPO = _derive_repo()
 
 
-def _parse_ts(iso: str | None) -> float | None:
+def parse_ts(iso: str | None) -> float | None:
     """Parse a GitHub RFC3339 timestamp, returning None for bad probes."""
     try:
         return datetime.fromisoformat(iso.strip().strip('"')).timestamp() if iso else None
@@ -101,7 +101,7 @@ class CIResult:
     # an otherwise green PR into a perpetual PENDING verdict.
     trunk_checks: list[dict[str, Any]] = field(default_factory=list)
     # Runs stuck in GitHub limbo (task #3275): `queued`, zero jobs, aged past
-    # `_LIMBO_AGE_SECONDS`. Detail on a PENDING verdict — never a basis for
+    # `LIMBO_AGE_SECONDS`. Detail on a PENDING verdict — never a basis for
     # green. Queued runs are missing execution evidence.
     limbo: list[LimboRun] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
@@ -146,7 +146,7 @@ class CIResult:
         return f"Error: {self.error_detail}"
 
 
-def _repo_has_workflows() -> bool:
+def repo_has_workflows() -> bool:
     """True when this checkout defines GitHub Actions workflows.
     Bounds the NO_WORKFLOW_RUNS guard to repos where workflow checks are actually expected — a
     repo with no workflows at all is legitimately green on app checks alone.
@@ -155,7 +155,7 @@ def _repo_has_workflows() -> bool:
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
 
 
-def _core_suite_skipped(checks: list[dict]) -> list[str] | None:
+def core_suite_skipped(checks: list[dict]) -> list[str] | None:
     """Names of the core suite checks when every attached core check is SKIPPED."""
     core = [c for c in checks if str(c.get("name", "")).startswith(CORE_SUITE_CHECK_PREFIXES)]
     if not core or any(
@@ -177,7 +177,7 @@ def _core_skip_note(names: list[str]) -> str:
     return f"core CI jobs are skipped by draft gating ({shown}{extra}); the suite has not run for this head"
 
 
-def _pending_reason(result: CIResult) -> str:
+def pending_reason(result: CIResult) -> str:
     """The --wait deadline reason; names the gate-skip when the core suite is skipped."""
     return (
         f"CI still pending — {_core_skip_note(result.core_skipped)}"
@@ -234,7 +234,7 @@ def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
         if current is None:
             latest[name] = c
             continue
-        if (_parse_ts(c.get("completedAt")) or 0) >= (_parse_ts(current.get("completedAt")) or 0):
+        if (parse_ts(c.get("completedAt")) or 0) >= (parse_ts(current.get("completedAt")) or 0):
             latest[name] = c
     kept: list[dict] = []
     for c in checks:
@@ -249,7 +249,7 @@ def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
     return kept
 
 
-def _partition_checks(checks: list[dict[str, Any]], result: CIResult) -> None:
+def partition_checks(checks: list[dict[str, Any]], result: CIResult) -> None:
     """Sort each rollup check into completed / passed / failed / pending on
     `result`, and record which of them a workflow produced.
 
@@ -302,7 +302,7 @@ def _partition_checks(checks: list[dict[str, Any]], result: CIResult) -> None:
             result.pending.append(name)
 
 
-def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None:
+def runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None:
     """Names of workflow runs for `head_sha` that are scheduled but have not
     attached a check to the commit yet.
 
@@ -353,7 +353,7 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None
     return [str(n) for n in names] if isinstance(names, list) else None
 
 
-def _main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None:
+def main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None:
     """Whether the main CI workflow has a completed, non-skipped run for `head_sha`.
     The incomplete-runs probe cannot prove the suite was ever seen: seconds after a head change
     the rollup can carry a few second-scale checks — GitHub Apps and small proof workflows, all
@@ -432,10 +432,10 @@ def _run_job_count(owner: str, run_id: int) -> int | None:
         return None
 
 
-def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
+def limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
     """Runs for `head_sha` that look permanently stuck in GitHub limbo.
     The class (task #3275, 2026-09-13): `queued`, ZERO jobs ever created, and past
-    `_LIMBO_AGE_SECONDS`. Such a run stays in every non-completed answer forever, so without this
+    `LIMBO_AGE_SECONDS`. Such a run stays in every non-completed answer forever, so without this
     probe it holds an all-green rollup PENDING until the caller's timeout -- silently. None means
     the probe could not answer (missing evidence, never "no limbo"); a candidate whose job count
     cannot be read is skipped, not assumed stuck.
@@ -451,11 +451,11 @@ def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
             continue
         raw_id = candidate.get("id")
         created_at = candidate.get("created_at")
-        created_ts = _parse_ts(created_at if isinstance(created_at, str) else None)
+        created_ts = parse_ts(created_at if isinstance(created_at, str) else None)
         if type(raw_id) is not int or created_ts is None:
             continue
         age = now - created_ts
-        if age < _LIMBO_AGE_SECONDS:
+        if age < LIMBO_AGE_SECONDS:
             continue
         if _run_job_count(owner, raw_id) == 0:
             limbo.append(
@@ -477,7 +477,7 @@ def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> 
     encodes: a gh / network failure must not produce the very settled NO_CHECKS the probe exists to
     rule out.
     """
-    scheduled = _runs_not_yet_reporting(head_sha, repo)
+    scheduled = runs_not_yet_reporting(head_sha, repo)
     if scheduled is None:
         result.verdict = CIStatus.ERROR
         result.error_detail = (
@@ -486,7 +486,7 @@ def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> 
     elif scheduled:
         result.pending.extend(scheduled)
         result.verdict = CIStatus.PENDING
-        result.limbo = _limbo_runs(head_sha, repo) or []
+        result.limbo = limbo_runs(head_sha, repo) or []
     else:
         result.verdict = CIStatus.NO_CHECKS
 
@@ -515,12 +515,12 @@ def _attached_checks_verdict(result: CIResult, head_sha: str, repo: str | None) 
     # MonsoraV2 #774: ALL_PASSED in ~2s while ci.yml run 34487002348 was still queued), and a
     # green verdict there ends the watch early. Ask the runs API once, before any green
     # verdict, whether more is coming.
-    scheduled = _runs_not_yet_reporting(head_sha, repo)
+    scheduled = runs_not_yet_reporting(head_sha, repo)
     if scheduled:
         result.pending.extend(scheduled)
         result.verdict = CIStatus.PENDING
-        result.limbo = _limbo_runs(head_sha, repo) or []
-    elif not result.workflow_checks and _repo_has_workflows():
+        result.limbo = limbo_runs(head_sha, repo) or []
+    elif not result.workflow_checks and repo_has_workflows():
         # Nothing from a workflow is attached — and nothing is confirmed scheduled (an
         # unanswerable probe, None, reads the same here) — while this checkout does define
         # workflows: the suite did not run. Reporting ALL_PASSED here is how a broken `runs-on`
@@ -558,13 +558,13 @@ def _attached_checks_verdict(result: CIResult, head_sha: str, repo: str | None) 
         # therefore also confirms the main CI workflow has been SEEN for this head — a
         # completed, non-skipped run of MAIN_CI_WORKFLOW_NAME — and a check-set far smaller
         # than the repo's suite is the tell to corroborate by hand. Scoped by
-        # _repo_has_workflows(): a checkout with no workflows is legitimately green on app
+        # repo_has_workflows(): a checkout with no workflows is legitimately green on app
         # checks alone.
         #
         # Not seen -> PENDING with the run name in `pending`: --wait keeps
         # polling (bounded by --timeout), and the one-shot keeps its legacy
         # contract — it prints this pending summary, never "all green".
-        main_run = _main_workflow_run_completed(head_sha, repo) if _repo_has_workflows() else True
+        main_run = main_workflow_run_completed(head_sha, repo) if repo_has_workflows() else True
         if main_run is None:
             # Same asymmetry as every probe here: unanswerable is unknown,
             # never green (--wait exits 3 if it persists).
@@ -658,9 +658,9 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
         _empty_rollup_verdict(result, data.get("headRefOid", ""), repo)
         return result
 
-    core_skipped = _core_suite_skipped(checks)
+    core_skipped = core_suite_skipped(checks)
     result.core_skipped = core_skipped or []
-    _partition_checks(checks, result)
+    partition_checks(checks, result)
 
     # Determine verdict
     if result.failed:

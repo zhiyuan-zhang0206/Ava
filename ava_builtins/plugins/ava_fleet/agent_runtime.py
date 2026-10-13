@@ -24,7 +24,7 @@ def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         "Fleet provides optional labels (`ava.self.set_label`), user notices "
         "(`ava.ui.notify`), task tracking (`ava.tasks`), and peer collaboration. "
         "Workflow selection belongs to `ava-workflow`; enabling Fleet does not "
-        "require delegation, a registry task, or a management tree. Agents are "
+        "require a registry task or a management tree. Agents are "
         "peers; accepted assignments determine reporting, not spawn ancestry. "
         "Before using Fleet coordination or task tracking, load `ava-fleet` "
         "and its applicable operating contract.\n\n"

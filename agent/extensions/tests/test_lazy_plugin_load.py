@@ -343,7 +343,7 @@ def _spy_member_loader(
 
 def test_member_lazy_load_on_ava_self(monkeypatch: pytest.MonkeyPatch) -> None:
     # ava.self exists as a module, so ava.__getattr__ never fires for
-    # ava.self.<missing member> — ava/self.py's own __getattr__ must trigger
+    # ava.self.<missing member> — ava/self/__init__.py's own __getattr__ must trigger
     # the shared lazy load in a launched child.
     _as_launched_child(monkeypatch)
     calls = _spy_member_loader(monkeypatch, namespace="self", member="lazylog")

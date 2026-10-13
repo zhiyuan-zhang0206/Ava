@@ -133,10 +133,10 @@ def test_syntax_error_is_reported_not_skipped() -> None:
 
 
 def test_default_scan_skips_tests_and_conftest() -> None:
-    assert _lint._is_test_file("services/x/tests/test_a.py")
-    assert _lint._is_test_file("services/x/test_a.py")
-    assert _lint._is_test_file("services/x/conftest.py")
-    assert not _lint._is_test_file("services/x/a.py")
+    assert _lint.is_test_file("services/x/tests/test_a.py")
+    assert _lint.is_test_file("services/x/test_a.py")
+    assert _lint.is_test_file("services/x/conftest.py")
+    assert not _lint.is_test_file("services/x/a.py")
 
 
 def test_cli_exit_codes(tmp_path: Path) -> None:

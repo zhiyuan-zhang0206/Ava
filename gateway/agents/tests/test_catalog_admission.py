@@ -62,7 +62,7 @@ def test_runner_catalog_refusal_precedes_transaction(
     monkeypatch.setattr(transaction, "write_transaction", unexpected_transaction)
     request = RestartAgentRequest(config_overlay={"llm_model": "unknown-model"})
     with pytest.raises(InvalidModelConfig, match="not a registered model"):
-        lifecycle._restart_blocking(
+        lifecycle.restart_blocking(
             MagicMock(), MagicMock(), 1, request, MagicMock(), catalog=_catalog()
         )
 

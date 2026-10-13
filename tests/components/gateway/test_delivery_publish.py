@@ -176,7 +176,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
         calls.append((agent_id, trigger_inbound_id, trigger_inbound_kind))
         return AgentStatus.IDLING
 
-    monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _resurrect)
+    monkeypatch.setattr(delivery.ops, "resurrect_if_terminated", _resurrect)
 
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
@@ -246,7 +246,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
         db_conn.commit()
         return AgentStatus.IDLING
 
-    monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _resurrect_once)
+    monkeypatch.setattr(delivery.ops, "resurrect_if_terminated", _resurrect_once)
 
     with _sync_pool() as pool:
         first = await deliver_chat_inbound(
@@ -395,7 +395,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
                 observed_status = AgentStatus.IDLING
         return observed_status
 
-    monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _real_guard)
+    monkeypatch.setattr(delivery.ops, "resurrect_if_terminated", _real_guard)
     with _sync_pool() as pool:
         first, second = await asyncio.gather(
             deliver_chat_inbound(
@@ -507,7 +507,7 @@ async def test_cancelled_caller_stops_live_publish_and_reconciles_same_receipt(
 
     with _sync_pool() as pool:
         with monkeypatch.context() as patch:
-            patch.setattr(delivery._ops, "publish_inbound_arrived", hold_publish)
+            patch.setattr(delivery.ops, "publish_inbound_arrived", hold_publish)
             caller = asyncio.create_task(
                 deliver_chat_inbound(
                     pool,

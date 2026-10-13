@@ -25,7 +25,7 @@ files. Run from the repository root.
 python -m meizel check [paths... | --changed files...] [--limit N]
 python -m meizel debt [--json] | record <paths...> | prune | diff --against <ref> --on-growth fail|warn
 python -m meizel explain <path>
-python -m meizel sync --prune
+python -m meizel sync [--prune] [--declare [paths...]]
 python -m meizel bootstrap --out <dir>
 python -m meizel roles list <role>... | check | write
 ```
@@ -43,9 +43,8 @@ python -m meizel roles list <role>... | check | write
   shrink: [[meizel/docs/checker/debt.ava.okf.md|recorded debt]].
 - `explain` prints a node's place in its parent's local graph (declared to use
   and to be used by, exported or not) and the fact edges that cross its boundary.
-- `sync --prune` removes declared edges and `[loads]` entries that no fact
-  needs, repeating until nothing stale remains. Comments outside the edited
-  lists survive; an emptied manifest is deleted. Adding an edge is a manual edit.
+- `sync --prune` drops stale declarations; `sync --declare` writes the legal new
+  dependencies of the changed files: [[meizel/docs/checker/sync.ava.okf.md|keeping manifests current]].
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
   the current fact edges (keeping every non-edge table), plus
   `DIR/report.json`: edge counts, transitive-reduction sizes, strongly connected

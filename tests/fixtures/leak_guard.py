@@ -79,7 +79,7 @@ STRICT_KINDS = ("env", "module-attr", "cwd", "signal")
 _VERDICT_STAGES = ("snapshot", "compare")  # a fault of either leaves no verdict: loud in fail mode
 NOTE_KINDS = ("sys.path",)
 
-_SIGNALS = tuple(
+SIGNALS = tuple(
     getattr(signal, name)
     for name in (
         "SIGINT",
@@ -136,7 +136,7 @@ def _show_handler(handler: object) -> str:
     return signal.Handlers(handler).name if isinstance(handler, int) else _show(handler)
 
 
-def _first_party_pattern(root: str) -> re.Pattern[str]:
+def first_party_pattern(root: str) -> re.Pattern[str]:
     """What the file of a production module of this repository looks like.
 
     A path below `root` (ending in a separator) that is not inside a top-level dot-directory
@@ -147,7 +147,7 @@ def _first_party_pattern(root: str) -> re.Pattern[str]:
     return re.compile(re.escape(root) + rf"(?!\.)(?!(?:[^\\/]*[\\/])*?{_EXCLUDED_DIRS}[\\/])")
 
 
-class _ModuleWatch:
+class ModuleWatch:
     """Which first-party module dicts gained a name inside one test.
 
     Locating modules is bulk C-level work, and a test costs a handful of Python calls under a
@@ -316,7 +316,7 @@ def _cwd() -> str | None:
 
 def _handlers() -> tuple[Any, ...]:
     """The raw handler of every watched signal: one C call, no Python frame per signal."""
-    return tuple(map(_getsignal, _SIGNALS))
+    return tuple(map(_getsignal, SIGNALS))
 
 
 class _Snapshot:
@@ -351,13 +351,13 @@ def _cwd_findings(before: str | None, now: str | None) -> list[_Finding]:
     return [("cwd", f"{before} -> {now or 'a directory that no longer exists'}")]
 
 
-def _signal_findings(before: tuple[Any, ...], now: tuple[Any, ...]) -> list[_Finding]:
+def signal_findings(before: tuple[Any, ...], now: tuple[Any, ...]) -> list[_Finding]:
     return [
         (
             "signal",
             f"{signal.Signals(sig).name} handler {_show_handler(old)} -> {_show_handler(new)}",
         )
-        for sig, old, new in zip(_SIGNALS, before, now, strict=True)
+        for sig, old, new in zip(SIGNALS, before, now, strict=True)
         if new != old
     ]
 
@@ -380,18 +380,18 @@ def _restore_env(before: dict[Any, Any]) -> None:
 
 
 def _restore_signals(before: tuple[Any, ...]) -> None:
-    for sig, old_handler in zip(_SIGNALS, before, strict=True):
+    for sig, old_handler in zip(SIGNALS, before, strict=True):
         if old_handler is not None and _getsignal(sig) != old_handler:
             signal.signal(sig, old_handler)
 
 
-class _Run:
+class Run:
     """The per-process state: configuration, the module watch, self-timing and the guard's faults."""
 
     def __init__(self) -> None:
         self.mode = "off"
         # Until configured nothing is first-party.
-        self.watch = _ModuleWatch(re.compile(r"(?!)").match)
+        self.watch = ModuleWatch(re.compile(r"(?!)").match)
         self.checked = 0
         self.ns = 0
         self.scan_ns = 0  # time in the module scans, locating included
@@ -406,7 +406,7 @@ class _Run:
         if mode not in MODES:
             raise pytest.UsageError(f"AVA_LEAK_GUARD={mode!r}: expected one of {', '.join(MODES)}")
         self.mode = mode
-        self.watch = _ModuleWatch(_first_party_pattern(rootpath.rstrip(os.sep) + os.sep).match)
+        self.watch = ModuleWatch(first_party_pattern(rootpath.rstrip(os.sep) + os.sep).match)
 
     def fault(self, stage: str, exc: Exception) -> bool:
         """Count a fault of the guard itself; True the first time `stage` faults in this process."""
@@ -449,7 +449,7 @@ class _Run:
             found += _cwd_findings(before.cwd, cwd_now)
         handlers_now = _handlers()
         if handlers_now != before.signals:
-            found += _signal_findings(before.signals, handlers_now)
+            found += signal_findings(before.signals, handlers_now)
         scanned = _now()
         found += self.watch.check()
         self.scan_ns += _now() - scanned
@@ -487,7 +487,7 @@ class _Run:
         }
 
 
-_RUN = _Run()
+_RUN = Run()
 
 
 def _contained[T](
