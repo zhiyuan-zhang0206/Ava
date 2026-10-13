@@ -109,7 +109,7 @@ def test_anthropic_ignores_openai_responses_status(model_catalog: ModelCatalog):
 
 
 def test_core_stop_classifier_has_no_openai_provider_branch():
-    source = (Path(__file__).resolve().parents[4] / "base/lm/compat/stop.py").read_text()
+    source = (Path(__file__).resolve().parents[5] / "base/lm/compat/stop.py").read_text()
     assert 'provider == "openai"' not in source
 
 
