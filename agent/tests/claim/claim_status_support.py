@@ -14,13 +14,13 @@ from psycopg_pool import AsyncConnectionPool
 
 import ava
 from agent.state import ContextReset
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 __all__ = ["committed_publishes", "compact_tail", "running_agent"]
 
