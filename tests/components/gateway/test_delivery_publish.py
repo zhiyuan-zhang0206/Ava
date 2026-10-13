@@ -14,7 +14,7 @@ from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-import ops.agents.delivery as agents_delivery
+import ops.lifecycle.delivery as agents_delivery
 from base.api_contracts.agent_contract import AgentStatus
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -22,7 +22,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
-from ops.agents.delivery import deliver_chat_inbound
+from ops.lifecycle.delivery import deliver_chat_inbound
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -158,7 +158,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
 ) -> None:
     """The durable chat id is the evidence the home runner re-checks before
     reviving; delivery must not fall back to an unguarded resurrect."""
-    from ops.agents import delivery
+    from ops.lifecycle import delivery
 
     tid = _seed_idling_agent(db_conn)
     calls: list[tuple[int, int | None, str | None]] = []
@@ -207,7 +207,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     machine_identity: MachineIdentity,
 ) -> None:
     """A same-key retry reuses one chat and cannot create two resurrection effects."""
-    from ops.agents import delivery
+    from ops.lifecycle import delivery
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -346,7 +346,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     The exact-trigger/fence SQL itself has real-DB coverage in
     test_agents_internals; this test concentrates on the delivery fan-in.
     """
-    from ops.agents import delivery
+    from ops.lifecycle import delivery
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -492,7 +492,7 @@ async def test_cancelled_caller_stops_live_publish_and_reconciles_same_receipt(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    from ops.agents import delivery
+    from ops.lifecycle import delivery
 
     tid = _seed_idling_agent(db_conn)
     entered = asyncio.Event()
