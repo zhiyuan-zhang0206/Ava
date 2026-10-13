@@ -1,4 +1,7 @@
+exports = ["configuration.py"]
+
 [debt.env-patch]
+"configuration.py#patch.dict os.environ" = 1
 "test_config_authority.py#monkeypatch.setenv os.environ.AVA_HOME" = 3
 "test_config_authority.py#monkeypatch.setenv os.environ.HOME" = 2
 "test_config_authority.py#monkeypatch.setitem os.environ.AVA_IM_SEND_RETRY_DELAYS" = 1

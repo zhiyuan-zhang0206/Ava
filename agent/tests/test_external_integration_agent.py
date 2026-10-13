@@ -24,6 +24,7 @@ from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
+from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -33,7 +34,6 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from tests.fixtures.pin_agent import pin_agent
-from tests.impersonation_support import attested_caller, recorded_tree
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:

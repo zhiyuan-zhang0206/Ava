@@ -1,20 +1,16 @@
-exports = ["collection_guard.py", "configuration.py", "env_bootstrap.py", "gateway_config.py", "guards.py", "identity_restore.py", "leak_guard.py", "model_catalog.py", "path_scopes.py", "pin_agent.py", "plugin_registrations.py", "provisioning.py", "static_environment.py", "unit", "units.py"]
+exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guards.py", "identity_restore.py", "leak_guard.py", "model_catalog.py", "path_scopes.py", "pin_agent.py", "plugin_registrations.py", "provisioning.py", "static_environment.py", "unit", "units.py"]
 
 [uses]
-"env_bootstrap.py" = ["configuration.py"]
-"gateway_config.py" = ["configuration.py"]
 "guards.py" = ["env_bootstrap.py"]
-"pin_agent.py" = ["configuration.py"]
 "provisioning.py" = ["env_bootstrap.py", "guards.py", "static_environment.py"]
 "static_environment.py" = ["guards.py"]
-"tests" = ["configuration.py", "env_bootstrap.py", "guards.py", "provisioning.py", "static_environment.py"]
-"unit" = ["configuration.py", "gateway_config.py", "identity_restore.py", "pin_agent.py"]
+"tests" = ["env_bootstrap.py", "guards.py", "provisioning.py", "static_environment.py"]
+"unit" = ["gateway_config.py", "identity_restore.py", "pin_agent.py"]
 
 [loads]
 "path_scopes.py" = ["tests/path_scoped"]
 
 [debt.env-patch]
-"configuration.py#patch.dict os.environ" = 1
 "provisioning.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
 "provisioning.py#monkeypatch.setitem os.environ.AVA_REDIS_URL" = 1
 "units.py#monkeypatch.setenv os.environ.AVA_HOME" = 1

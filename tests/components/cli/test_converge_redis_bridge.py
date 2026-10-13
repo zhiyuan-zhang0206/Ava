@@ -14,6 +14,7 @@ from base.cluster.dataplane.redis_bridge import RedisBridgeEndpoint
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.ports import new_home_ports
 from base.config import ConfigBoot
+from base.config.tests.configuration import snapshot_process_config
 from base.telemetry import EventPipeline
 from cli.commands.converge import redis_bridge as bridge
 from cli.commands.converge.spec import ConvergeCtx
@@ -21,7 +22,6 @@ from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.redis_bridge import relay
-from tests.fixtures.configuration import snapshot_process_config
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

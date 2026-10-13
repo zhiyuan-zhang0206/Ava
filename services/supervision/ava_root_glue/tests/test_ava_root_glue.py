@@ -15,6 +15,7 @@ import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
+from base.config.tests.configuration import snapshot_process_config
 from base.daemon.health import DaemonProbe
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -31,7 +32,6 @@ from services.supervision.ava_root.supervisor import Supervisor
 from services.supervision.ava_root.wiring import WiringContext
 from services.supervision.ava_root_glue import drill, glue
 from services.supervision.ava_root_glue.diagnostics import Diagnostic, RootHealthRounds
-from tests.fixtures.configuration import snapshot_process_config
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(60)"]
 

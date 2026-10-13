@@ -5,8 +5,8 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.config.tests.configuration import snapshot_process_config
 from cli.database.runtime import CommandRuntime
-from tests.fixtures.configuration import snapshot_process_config
 
 __all__ = ["command_config_machine", "command_machine", "command_runtime"]
 
