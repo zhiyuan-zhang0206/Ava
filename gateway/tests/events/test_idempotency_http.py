@@ -9,9 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
-from gateway.tests.test_idempotency import _count_inbounds
 from gateway.tests.test_idempotency import agent_id as agent_id
 from gateway.tests.test_idempotency import client as client
+from gateway.tests.test_idempotency import count_inbounds
 
 
 def test_authenticated_admin_retry_and_scoped_reconcile(
@@ -36,7 +36,7 @@ def test_authenticated_admin_retry_and_scoped_reconcile(
     assert reconciled.json()["inbound_id"] == first.json()["inbound_id"]
     conflict = client.post(url, json=body | {"content": "changed"}, headers=headers)
     assert conflict.status_code == 409
-    assert _count_inbounds(db_conn, agent_id, "admin principal retry") == 1
+    assert count_inbounds(db_conn, agent_id, "admin principal retry") == 1
 
 
 @pytest.mark.parametrize("route", ["", "/reconcile"])
@@ -54,7 +54,7 @@ def test_key_without_principal_scope_is_rejected_before_any_write(
         headers={"Idempotency-Key": "unscoped", "Idempotency-Scope": "principal-v2"},
     )
     assert wrong.status_code == 422
-    assert _count_inbounds(db_conn, agent_id, "unscoped key") == 0
+    assert count_inbounds(db_conn, agent_id, "unscoped key") == 0
 
 
 def test_browser_rotation_and_bearer_share_admin_retry_namespace(
@@ -94,7 +94,7 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
     assert (
         first.json()["inbound_id"] == repeated.json()["inbound_id"] == bearer.json()["inbound_id"]
     )
-    assert _count_inbounds(db_conn, agent_id, body["content"]) == 1
+    assert count_inbounds(db_conn, agent_id, body["content"]) == 1
 
 
 def test_same_key_retry_lands_once(
@@ -114,7 +114,7 @@ def test_same_key_retry_lands_once(
     )
     assert resp2.status_code == 201, resp2.text
     assert resp1.json()["inbound_id"] == resp2.json()["inbound_id"]
-    assert _count_inbounds(db_conn, agent_id, "hello once") == 1
+    assert count_inbounds(db_conn, agent_id, "hello once") == 1
 
 
 def test_same_key_different_body_fails_closed(client: TestClient, agent_id: int) -> None:
@@ -186,7 +186,7 @@ def test_concurrent_same_key_requests_land_once(
         assert isinstance(inbound_id, int)
         inbound_ids.add(inbound_id)
     assert len(inbound_ids) == 1
-    assert _count_inbounds(db_conn, agent_id, "from two tabs") == 1
+    assert count_inbounds(db_conn, agent_id, "from two tabs") == 1
 
 
 def test_different_keys_land_twice(
@@ -203,7 +203,7 @@ def test_different_keys_land_twice(
         headers=keyed_headers("key-b"),
     )
     assert resp1.status_code == 201 and resp2.status_code == 201
-    assert _count_inbounds(db_conn, agent_id, "twice") == 2
+    assert count_inbounds(db_conn, agent_id, "twice") == 2
 
 
 def test_client_message_unique_index_allows_nulls_but_rejects_duplicate_keys(
@@ -242,7 +242,7 @@ def test_no_key_passes_through(
         json={"content": "legacy", "source": "user"},
     )
     assert resp.status_code == 201, resp.text
-    assert _count_inbounds(db_conn, agent_id, "legacy") == 1
+    assert count_inbounds(db_conn, agent_id, "legacy") == 1
 
 
 def test_non_alwk_route_ignores_key(client: TestClient) -> None:

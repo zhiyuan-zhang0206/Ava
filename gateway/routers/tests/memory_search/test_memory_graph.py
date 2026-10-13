@@ -543,18 +543,18 @@ def test_primary_tag_prefers_a_domain_tag_over_the_type_tag() -> None:
     """Every note carries a `type/<x>`, so grouping the graph on it would
     collapse the view into six buckets and hide the domain structure it exists
     to show."""
-    from gateway.routers.memory import _primary_tag
+    from gateway.routers.memory import primary_tag
 
-    assert _primary_tag(["type/env", "tech-ops"]) == "tech-ops"
-    assert _primary_tag(["tech-ops", "type/env"]) == "tech-ops"
+    assert primary_tag(["type/env", "tech-ops"]) == "tech-ops"
+    assert primary_tag(["tech-ops", "type/env"]) == "tech-ops"
 
 
 def test_primary_tag_falls_back_to_the_type_tag_when_it_is_all_there_is() -> None:
     """Better a coarse label than an unlabeled node."""
-    from gateway.routers.memory import _primary_tag
+    from gateway.routers.memory import primary_tag
 
-    assert _primary_tag(["type/user"]) == "type/user"
-    assert _primary_tag([]) == ""
+    assert primary_tag(["type/user"]) == "type/user"
+    assert primary_tag([]) == ""
 
 
 def _memory_root(root: Path, *, roles: MachineRoles) -> Path:

@@ -34,7 +34,7 @@ from gateway.app import app
 from tests.fixtures.gateway_config import create_mcp_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
-_ACCEPT = "application/json, text/event-stream"
+ACCEPT = "application/json, text/event-stream"
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +58,7 @@ def _sse_messages(body: str) -> list[dict[str, Any]]:
     return out
 
 
-def _create_token(client: TestClient, *, name: str = "test", scope: str = "write") -> str:
+def create_token(client: TestClient, *, name: str = "test", scope: str = "write") -> str:
     response = create_mcp_client(client, name, scope)
     assert response.status_code == 200, response.text
     return str(response.json()["token"])
@@ -66,7 +66,7 @@ def _create_token(client: TestClient, *, name: str = "test", scope: str = "write
 
 def _post(client: TestClient, token: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
     headers = {
-        "Accept": _ACCEPT,
+        "Accept": ACCEPT,
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}",
     }
@@ -75,7 +75,7 @@ def _post(client: TestClient, token: str, payload: dict[str, Any]) -> list[dict[
     return _sse_messages(resp.text)
 
 
-def _initialize(client: TestClient, token: str) -> list[dict[str, Any]]:
+def initialize(client: TestClient, token: str) -> list[dict[str, Any]]:
     return _post(
         client,
         token,
@@ -92,7 +92,7 @@ def _initialize(client: TestClient, token: str) -> list[dict[str, Any]]:
     )
 
 
-def _tool_call(
+def tool_call(
     client: TestClient,
     token: str,
     name: str,
@@ -113,7 +113,7 @@ def _tool_call(
     return messages[0]
 
 
-def _tool_result(message: dict[str, Any]) -> Any:
+def tool_result(message: dict[str, Any]) -> Any:
     """The tool's return value out of a tools/call response.
 
     MCPServer wraps dict/list return values as `structuredContent.result`
@@ -155,7 +155,7 @@ def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
         resp = client.post(
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-            headers={"Accept": _ACCEPT, "Content-Type": "application/json"},
+            headers={"Accept": ACCEPT, "Content-Type": "application/json"},
         )
     assert resp.status_code == 404
     assert resp.json()["detail"] == "mcp endpoint is disabled"
@@ -167,8 +167,8 @@ def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_initialize_negotiates_and_lists_guarded_creation_tool() -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
-        init = _initialize(client, token)
+        token = create_token(client)
+        init = initialize(client, token)
         assert init[0]["result"]["protocolVersion"]
         messages = _post(client, token, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     tools = {t["name"]: t for t in messages[0]["result"]["tools"]}
@@ -249,8 +249,8 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(endpoint.roster, "list_directory", fake_list_directory)
     with TestClient(app) as client:
-        token = _create_token(client)
-        result = _tool_call(
+        token = create_token(client)
+        result = tool_call(
             client,
             token,
             "list_agents",
@@ -262,7 +262,7 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
             },
         )
     assert seen == {"scope": "all", "query": "worker", "before_id": 42, "limit": 5}
-    assert _tool_result(result) == page.model_dump(mode="json")
+    assert tool_result(result) == page.model_dump(mode="json")
     assert not result["result"].get("isError")
 
 
@@ -278,8 +278,8 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
 )
 def test_list_agents_rejects_invalid_directory_arguments(arguments: dict[str, object]) -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
-        result = _tool_call(client, token, "list_agents", arguments)
+        token = create_token(client)
+        result = tool_call(client, token, "list_agents", arguments)
     assert result["result"].get("isError") is True
 
 
@@ -288,9 +288,9 @@ def test_list_agents_rejects_invalid_directory_arguments(arguments: dict[str, ob
 
 def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
-        payload = _tool_result(
-            _tool_call(
+        token = create_token(client)
+        payload = tool_result(
+            tool_call(
                 client,
                 token,
                 "spawn_agent_guarded_v1",
@@ -299,12 +299,12 @@ def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
         )
         agent_id = int(payload["id"])
 
-        row = _tool_result(_tool_call(client, token, "get_agent", {"agent_id": agent_id}))
+        row = tool_result(tool_call(client, token, "get_agent", {"agent_id": agent_id}))
         assert row["agent_id"] == agent_id
         assert row["spawner"] == "mcp"
 
-        status = _tool_result(
-            _tool_call(
+        status = tool_result(
+            tool_call(
                 client,
                 token,
                 "terminate_agent",
@@ -334,15 +334,15 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
 
     monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
-        token = _create_token(client)
-        response = _tool_call(
+        token = create_token(client)
+        response = tool_call(
             client,
             token,
             "spawn_agent_guarded_v1",
             {"idempotency_key": "birth-intent", "prompt": "Keep this task"},
         )
     assert response["result"]["isError"] is True
-    message = _tool_result(response)
+    message = tool_result(response)
     assert "agent_id=" in message
     assert "retry_launch_path=/api/keyed/v1/agents/" in message
     assert "launch_unreachable" in message
@@ -350,18 +350,18 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
 
 def test_get_agent_not_found_is_an_error() -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
-        result = _tool_call(client, token, "get_agent", {"agent_id": 999999})
+        token = create_token(client)
+        result = tool_call(client, token, "get_agent", {"agent_id": 999999})
     assert result["result"].get("isError") is True
-    assert "does not exist" in _tool_result(result)
+    assert "does not exist" in tool_result(result)
 
 
 def test_send_message_and_get_messages() -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
+        token = create_token(client)
         agent_id = int(
-            _tool_result(
-                _tool_call(
+            tool_result(
+                tool_call(
                     client,
                     token,
                     "spawn_agent_guarded_v1",
@@ -370,8 +370,8 @@ def test_send_message_and_get_messages() -> None:
             )["id"]
         )
 
-        sent = _tool_result(
-            _tool_call(
+        sent = tool_result(
+            tool_call(
                 client,
                 token,
                 "send_message",
@@ -382,8 +382,8 @@ def test_send_message_and_get_messages() -> None:
         # agent — the same value the REST endpoint returns in tests.
         assert sent["status"] in {"queued", "claimed", "idling"}
 
-        payload = _tool_result(
-            _tool_call(
+        payload = tool_result(
+            tool_call(
                 client,
                 token,
                 "get_messages",
@@ -399,11 +399,11 @@ def test_send_message_and_get_messages() -> None:
 
 def test_token_clients_same_key_are_isolated_and_body_reuse_conflicts() -> None:
     with TestClient(app) as client:
-        first = _create_token(client, name="idem-first")
-        second = _create_token(client, name="idem-second")
+        first = create_token(client, name="idem-first")
+        second = create_token(client, name="idem-second")
         agent_id = int(
-            _tool_result(
-                _tool_call(
+            tool_result(
+                tool_call(
                     client,
                     first,
                     "spawn_agent_guarded_v1",
@@ -412,14 +412,14 @@ def test_token_clients_same_key_are_isolated_and_body_reuse_conflicts() -> None:
             )["id"]
         )
         args = {"agent_id": agent_id, "content": "same", "idempotency_key": "same-key"}
-        one = _tool_result(_tool_call(client, first, "send_message", args))
-        repeat = _tool_result(_tool_call(client, first, "send_message", args))
-        two = _tool_result(_tool_call(client, second, "send_message", args))
+        one = tool_result(tool_call(client, first, "send_message", args))
+        repeat = tool_result(tool_call(client, first, "send_message", args))
+        two = tool_result(tool_call(client, second, "send_message", args))
         assert one["inbound_id"] == repeat["inbound_id"]
         assert one["inbound_id"] != two["inbound_id"]
-        conflict = _tool_call(client, first, "send_message", args | {"content": "different"})
+        conflict = tool_call(client, first, "send_message", args | {"content": "different"})
         assert conflict["result"].get("isError") is True
-        assert "different message" in _tool_result(conflict)
+        assert "different message" in tool_result(conflict)
 
 
 def test_revoked_client_cannot_replay_prior_key() -> None:
@@ -427,8 +427,8 @@ def test_revoked_client_cannot_replay_prior_key() -> None:
         created = create_mcp_client(client, "idem-revoked", "write").json()
         token = created["token"]
         agent_id = int(
-            _tool_result(
-                _tool_call(
+            tool_result(
+                tool_call(
                     client,
                     token,
                     "spawn_agent_guarded_v1",
@@ -437,11 +437,11 @@ def test_revoked_client_cannot_replay_prior_key() -> None:
             )["id"]
         )
         args = {"agent_id": agent_id, "content": "same", "idempotency_key": "prior-key"}
-        _tool_call(client, token, "send_message", args)
+        tool_call(client, token, "send_message", args)
         client.post(f"/api/mcp/clients/{created['id']}/revoke").raise_for_status()
         response = client.post(
             "/mcp",
-            headers={"Accept": _ACCEPT, "Authorization": f"Bearer {token}"},
+            headers={"Accept": ACCEPT, "Authorization": f"Bearer {token}"},
             json={
                 "jsonrpc": "2.0",
                 "id": 2,
@@ -454,25 +454,25 @@ def test_revoked_client_cannot_replay_prior_key() -> None:
 
 def test_read_scope_cannot_call_write_tools() -> None:
     with TestClient(app) as client:
-        token = _create_token(client, name="read-client", scope="read")
-        denied = _tool_call(
+        token = create_token(client, name="read-client", scope="read")
+        denied = tool_call(
             client,
             token,
             "spawn_agent_guarded_v1",
             {"idempotency_key": "birth-intent", "prompt": "must not run"},
         )
-        agents = _tool_result(_tool_call(client, token, "list_agents", {}))
+        agents = tool_result(tool_call(client, token, "list_agents", {}))
 
     assert denied["result"].get("isError") is True
-    assert "requires write scope" in _tool_result(denied)
+    assert "requires write scope" in tool_result(denied)
     assert agents == {"agents": [], "next_cursor": None}
 
 
 def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
     prompt = "blocked sensitive prompt"
     with TestClient(app) as client:
-        token = _create_token(client, name="audit-read-client", scope="read")
-        _tool_call(
+        token = create_token(client, name="audit-read-client", scope="read")
+        tool_call(
             client,
             token,
             "spawn_agent_guarded_v1",
@@ -490,10 +490,10 @@ def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
 def test_tool_error_does_not_reintroduce_raw_args_into_audit() -> None:
     scope = "private-invalid-scope"
     with TestClient(app) as client:
-        token = _create_token(client, name="audit-error-client", scope="read")
-        result = _tool_call(client, token, "list_agents", {"scope": scope})
+        token = create_token(client, name="audit-error-client", scope="read")
+        result = tool_call(client, token, "list_agents", {"scope": scope})
 
-    assert scope in _tool_result(result)
+    assert scope in tool_result(result)
     hits = _audit_hits("list_agents", "audit-error-client")
     assert hits, "no mcp_tool_call event for invalid scope reached the mirror"
     attributes = hits[-1]["attributes"]
@@ -507,8 +507,8 @@ def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> No
     # host serves).
     with TestClient(app) as client:
         app.state.machine.set(role="gateway")
-        token = _create_token(client)
-        payload = _tool_result(_tool_call(client, token, "cluster_status", {}))
+        token = create_token(client)
+        payload = tool_result(tool_call(client, token, "cluster_status", {}))
     assert payload["machine_name"]
     assert isinstance(payload["paused"], bool)
 
@@ -518,7 +518,7 @@ def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> No
 
 @pytest.mark.parametrize("authorization", [None, "Bearer not-a-client-token"])
 def test_mcp_rejects_missing_or_bad_client_token(authorization: str | None) -> None:
-    headers = {"Accept": _ACCEPT, "Content-Type": "application/json"}
+    headers = {"Accept": ACCEPT, "Content-Type": "application/json"}
     if authorization is not None:
         headers["Authorization"] = authorization
     with TestClient(app) as client:
@@ -540,7 +540,7 @@ def test_cluster_secret_bearer_is_not_an_mcp_client_token(
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
             headers={
-                "Accept": _ACCEPT,
+                "Accept": ACCEPT,
                 "Content-Type": "application/json",
                 **bearer_header(_SECRET),
             },
@@ -582,7 +582,7 @@ def test_revoked_client_token_is_rejected() -> None:
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
             headers={
-                "Accept": _ACCEPT,
+                "Accept": ACCEPT,
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {body['token']}",
             },
@@ -601,7 +601,7 @@ def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
         created = create_mcp_client(client, "audit-write-client", "write")
         assert created.status_code == 200, created.text
         body = created.json()
-        _tool_call(
+        tool_call(
             client,
             body["token"],
             "spawn_agent_guarded_v1",
@@ -655,23 +655,23 @@ def test_sse_messages_keeps_unicode_line_separators(ch: str) -> None:
 
 def test_creation_key_replays_identity_conflicts_and_scopes_to_client() -> None:
     with TestClient(app) as client:
-        first = _create_token(client, name="creation-first")
-        second = _create_token(client, name="creation-second")
+        first = create_token(client, name="creation-first")
+        second = create_token(client, name="creation-second")
         args = {"prompt": "same goal", "idempotency_key": "creation-a"}
-        original = _tool_result(_tool_call(client, first, "spawn_agent_guarded_v1", args))
-        replay = _tool_result(_tool_call(client, first, "spawn_agent_guarded_v1", args))
+        original = tool_result(tool_call(client, first, "spawn_agent_guarded_v1", args))
+        replay = tool_result(tool_call(client, first, "spawn_agent_guarded_v1", args))
         assert replay["id"] == original["id"]
-        changed = _tool_call(
+        changed = tool_call(
             client,
             first,
             "spawn_agent_guarded_v1",
             {"idempotency_key": "birth-intent", **args, "prompt": "changed goal"},
         )
         assert changed["result"].get("isError") is True
-        other = _tool_result(_tool_call(client, second, "spawn_agent_guarded_v1", args))
+        other = tool_result(tool_call(client, second, "spawn_agent_guarded_v1", args))
         assert other["id"] != original["id"]
-        new = _tool_result(
-            _tool_call(
+        new = tool_result(
+            tool_call(
                 client, first, "spawn_agent_guarded_v1", {**args, "idempotency_key": "creation-b"}
             )
         )
@@ -681,8 +681,8 @@ def test_creation_key_replays_identity_conflicts_and_scopes_to_client() -> None:
 @pytest.mark.parametrize("key", ["", "x" * 129])
 def test_creation_tool_rejects_invalid_key(key: str) -> None:
     with TestClient(app) as client:
-        token = _create_token(client)
-        response = _tool_call(
+        token = create_token(client)
+        response = tool_call(
             client, token, "spawn_agent_guarded_v1", {"prompt": "goal", "idempotency_key": key}
         )
     assert response["result"].get("isError") is True
@@ -692,11 +692,11 @@ def test_concurrent_mcp_creation_retries_share_one_identity() -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     with TestClient(app) as client:
-        token = _create_token(client)
+        token = create_token(client)
 
         def submit(index: int) -> int:
-            result = _tool_result(
-                _tool_call(
+            result = tool_result(
+                tool_call(
                     client,
                     token,
                     "spawn_agent_guarded_v1",
@@ -739,8 +739,8 @@ def test_concurrent_requests_keep_verified_clients_and_ignore_context_arguments(
         ]
 
         def submit(index: int) -> int:
-            result = _tool_result(
-                _tool_call(
+            result = tool_result(
+                tool_call(
                     client,
                     credentials[index]["token"],
                     "spawn_agent_guarded_v1",
