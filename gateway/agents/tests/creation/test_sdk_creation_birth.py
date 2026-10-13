@@ -17,6 +17,7 @@ from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
 from gateway.app import app
+from ops.cluster import rpc
 from ops.lifecycle.launch import _validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client
@@ -51,7 +52,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
         return {}
 
     monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
-    monkeypatch.setattr("ops.cluster.rpc.dispatch_to_machine", reconcile)
+    monkeypatch.setattr(rpc, "dispatch_to_machine", reconcile)
     http = MagicMock()
     lose = True
     target: TestClient

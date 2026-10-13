@@ -17,11 +17,13 @@ from fastapi.testclient import TestClient
 from base.cluster.authority.api import AcceptanceCache
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
+from base.lm import usage
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.routers.memory import MemorySearchInputs
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
+from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from tests.fixtures.unit.gateway_auth import gateway_credentials
 
@@ -108,9 +110,7 @@ def _patch_provider(monkeypatch: pytest.MonkeyPatch, provider: object) -> None:
         del name, catalog, timeout_reader, api_key_reader
         return provider
 
-    monkeypatch.setattr(
-        "services.derived.memory_indexer.embeddings.factory.get_provider", construct
-    )
+    monkeypatch.setattr(factory, "get_provider", construct)
 
 
 class _StubProvider:
@@ -600,7 +600,7 @@ async def test_query_usage_failure_propagates_without_network_replay(
         seen.append(catalog)
         raise failure
 
-    monkeypatch.setattr("base.lm.usage.log_usage_fields", fail_usage)
+    monkeypatch.setattr(usage, "log_usage_fields", fail_usage)
     state = SimpleNamespace(
         catalog=model_catalog,
         memory_search_gate=asyncio.Semaphore(1),

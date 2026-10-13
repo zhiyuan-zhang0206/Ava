@@ -10,8 +10,13 @@ from typing import Any, cast
 
 import pytest
 
+import base.host.permissions_helper.client as permissions_helper_client
+import base.paths as base_paths
+import cli.commands.lifecycle.start_generation as lifecycle_start_generation
 from base.daemon.health import DaemonProbe
+from cli.commands.data_plane import bringup
 from cli.commands.lifecycle import root_driver as driver
+from services.supervision.roster import plugin_services
 from services.supervision.roster.service_spec import ServiceSpec
 
 # Keep the public readiness entry point real when this owner suite reaches it.
@@ -147,7 +152,7 @@ def test_helper_admission_requires_normal_retirement_protocol(
     capabilities = {"root_stop_intent_v1": True, "helper_shutdown_v1": True}
     if missing is not None:
         del capabilities[missing]
-    monkeypatch.setattr("base.host.permissions_helper.client.ping", lambda: capabilities)
+    monkeypatch.setattr(permissions_helper_client, "ping", lambda: capabilities)
     assert driver._helper_wire_ok() is (missing is None)
 
 
@@ -160,7 +165,7 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     config = tmp_path / "collector.yaml"
     config.write_text("receivers: {otlp: {}}\n")
     monkeypatch.setattr(roster, "otel_collector_config", lambda: config)
-    monkeypatch.setattr("services.supervision.roster.plugin_services.plugin_services", tuple)
+    monkeypatch.setattr(plugin_services, "plugin_services", tuple)
     collector = next(s for s in roster.build_services() if s.session == "otel-collector")
     before = driver.tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
     rows = cast("list[dict[str, object]]", before["units"])
@@ -178,7 +183,7 @@ def test_obsolete_custody_records_do_not_block_an_absent_root(
     directory = tmp_path / "custody"
     directory.mkdir()
     (directory / "gateway.json").write_text("unknown")
-    monkeypatch.setattr("base.paths.root_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(base_paths, "root_run_dir", lambda: tmp_path)
     driver.require_root_absent()
 
 
@@ -335,8 +340,8 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
         snapshot["units"].append({"id": "agent-host", "state": "running"})
     published = tmp_path / "manifests.json"
     published.write_text("old generation")
-    monkeypatch.setattr("base.paths.root_run_dir", lambda: tmp_path)
-    monkeypatch.setattr("base.paths.root_manifests_path", lambda: published)
+    monkeypatch.setattr(base_paths, "root_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(base_paths, "root_manifests_path", lambda: published)
 
     def tree(*_args: object, **_kwargs: object) -> dict[str, object]:
         return manifest
@@ -353,7 +358,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     def source_identity(_repo: Path) -> str:
         return "a" * 64
 
-    monkeypatch.setattr("cli.commands.lifecycle.start_generation.source_digest", source_identity)
+    monkeypatch.setattr(lifecycle_start_generation, "source_digest", source_identity)
     monkeypatch.setattr(driver, "root_child_env", dict)
     monkeypatch.setattr(driver, "tree_manifest", tree)
     monkeypatch.setattr(driver, "root_client", object)
@@ -543,7 +548,7 @@ def test_plugin_birth_config_is_part_of_the_existing_unit_generation(
     def no_api_delivery(_cls: str) -> dict[str, str]:
         return {}
 
-    monkeypatch.setattr("cli.commands.data_plane.bringup.api_delivery", no_api_delivery)
+    monkeypatch.setattr(bringup, "api_delivery", no_api_delivery)
     base = replace(spec(), plugin_config=("probe", Config(interval=40)))
     same = replace(base, plugin_config=("probe", Config(interval=40)))
     changed = replace(base, plugin_config=("probe", Config(interval=41)))
