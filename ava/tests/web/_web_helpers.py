@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 
-class _FakeResp:
+class FakeResp:
     """Minimum urllib.request.urlopen return object — supports `with` + `.read()`."""
 
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
 
-    def __enter__(self) -> _FakeResp:
+    def __enter__(self) -> FakeResp:
         return self
 
     def __exit__(self, *_args: Any) -> None:

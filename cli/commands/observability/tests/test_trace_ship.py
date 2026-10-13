@@ -15,11 +15,11 @@ from base.host.db_authority import unit
 from base.telemetry import trace_mirror
 from cli.commands.observability import trace
 from cli.commands.observability.trace import (
+    ShipTarget,
     TraceShipError,
-    _load_watermark,
-    _post_line,
-    _ShipTarget,
     cmd_trace_ship,
+    load_watermark,
+    post_line,
 )
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
@@ -35,7 +35,7 @@ def test_load_watermark_drops_entries_for_missing_files(
         json.dumps({"spans.jsonl": 2, "spans-2020-01-01T00-00-00.000-size.jsonl": 5}),
         encoding="utf-8",
     )
-    marks = _load_watermark()
+    marks = load_watermark()
     assert marks == {"spans.jsonl": 2}
 
 
@@ -112,9 +112,9 @@ def test_post_line_converts_otlp_json_hex_ids_to_protobuf_bytes() -> None:
 
     client = cast(httpx.Client, _Client())
     assert (
-        _post_line(
+        post_line(
             client,
-            _ShipTarget(endpoint="http://tempo.test/v1/traces", headers={}, label="tempo"),
+            ShipTarget(endpoint="http://tempo.test/v1/traces", headers={}, label="tempo"),
             line,
         )
         == 1

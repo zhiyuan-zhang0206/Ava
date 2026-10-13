@@ -48,7 +48,7 @@ class _Clock:
 
 @pytest.fixture
 def preflight(monkeypatch: pytest.MonkeyPatch):
-    """Drive `_probe_gateway_or_die` against a scripted sequence of probe results.
+    """Drive `probe_gateway_or_die` against a scripted sequence of probe results.
 
     Returns a callable taking the sequence (its last element repeats forever, so an
     "always down" gateway is one element) and yielding (rc, clock)."""
@@ -62,7 +62,7 @@ def preflight(monkeypatch: pytest.MonkeyPatch):
             return remaining.pop(0) if len(remaining) > 1 else remaining[0]
 
         monkeypatch.setattr(_repo, "probe_gateway_once", _probe)
-        return _repo._probe_gateway_or_die(URL), clock
+        return _repo.probe_gateway_or_die(URL), clock
 
     return _drive
 

@@ -318,7 +318,7 @@ def test_linux_ipc_requires_both_observed_tick_identities(
         )
     )
     with pytest.raises(RootClientError, match="requires observed Linux start ticks"):
-        client._validate_status_peer(response, OwnedProcess(42, 123.0, captured))
+        client.validate_status_peer(response, OwnedProcess(42, 123.0, captured))
 
 
 @pytest.mark.parametrize(
@@ -365,10 +365,10 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
     )
     peer = OwnedProcess(42, 123.0, captured)
     if accepted:
-        client._validate_status_peer(response, peer)
+        client.validate_status_peer(response, peer)
     else:
         with pytest.raises(RootClientError, match="exact native IPC peer"):
-            client._validate_status_peer(response, peer)
+            client.validate_status_peer(response, peer)
 
 
 class _DeadWriter:

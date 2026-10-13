@@ -27,14 +27,14 @@ from base.sessions import coding_session_owner
 
 from . import impersonator_guide
 from ._claude_checks import (
-    _bootstrap_count,
-    _generation_relay_stub,
-    _login_marker,
-    _pretrust,
-    _send_bootstrap,
-    _session_exists,
-    _verify_start_receipt,
-    _wait_for_ready,
+    bootstrap_count,
+    generation_relay_stub,
+    login_marker,
+    pretrust,
+    send_bootstrap,
+    session_exists,
+    verify_start_receipt,
+    wait_for_ready,
 )
 from ._common import cancel as _cancel_generation
 from ._common import (
@@ -48,12 +48,12 @@ from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from ._common import session_uuid as session_uuid
 from ._common import status as _owner_status
-from ._first_run import _preset_claude_first_run
+from ._first_run import preset_claude_first_run
 
 DEFAULT_TTL_SECONDS = 24 * 3600
 
 
-def _claude_command(
+def claude_command(
     workspace: Path,
     caller_instance: str | None = None,
     *,
@@ -94,7 +94,7 @@ def _claude_command(
     # A signed-out CLI still renders a ready panel and only fails on its first
     # turn, so ask it directly before exec (exit 1 when logged out).
     mark_logout = (
-        f"printf '%s\\n' 'not logged in' > {shlex.quote(_login_marker(failure_marker).as_posix())}; "
+        f"printf '%s\\n' 'not logged in' > {shlex.quote(login_marker(failure_marker).as_posix())}; "
         if failure_marker is not None
         else ""
     )
@@ -160,7 +160,7 @@ def cancel(workspace: Path, generation: str) -> int:
     )
 
 
-def _run_supervised_launch(
+def run_supervised_launch(
     workspace: Path,
     tasks_file: Path,
     work_file: Path,
@@ -173,10 +173,10 @@ def _run_supervised_launch(
 ) -> int:
     init_file(tasks_file, "")
     init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
-    _pretrust(workspace)
+    pretrust(workspace)
 
     session_name = f"claude-{workspace.name}"
-    if _session_exists(session_name):
+    if session_exists(session_name):
         print(
             f"session '{session_name}' already exists. session id: see `ava.shell.sessions.list()`"
         )
@@ -192,7 +192,7 @@ def _run_supervised_launch(
             marker = Path(marker_dir) / "missing-claude"
             sessions.send(
                 sid,
-                _claude_command(
+                claude_command(
                     workspace,
                     caller_instance,
                     failure_marker=marker,
@@ -201,7 +201,7 @@ def _run_supervised_launch(
                 ),
             )
             print(f"+ persistent shell session: {sid} ({session_name})")
-            _wait_for_ready(sid, failure_marker=marker, resumed=resume)
+            wait_for_ready(sid, failure_marker=marker, resumed=resume)
 
         sessions.send(
             sid, worker_bootstrap(contract, workspace, tasks_file, work_file, resumed=resume)
@@ -222,7 +222,7 @@ def _run_supervised_launch(
     return 0
 
 
-def _run_takeover_launch(
+def run_takeover_launch(
     workspace: Path,
     takeover_name: str,
     takeover_brief: str,
@@ -253,8 +253,8 @@ def _run_takeover_launch(
     owner_agent_id = owner.owner_agent_id
     sid: int | None = None
     try:
-        relay_stub = None if plugin_dir is None else _generation_relay_stub(owner.state_dir)
-        _pretrust(workspace)
+        relay_stub = None if plugin_dir is None else generation_relay_stub(owner.state_dir)
+        pretrust(workspace)
         sid = sessions.new(name=expected_suffix, ttl=ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
         active = coding_session_owner.publish_active(
@@ -267,7 +267,7 @@ def _run_takeover_launch(
             marker = Path(marker_dir) / "missing-claude"
             sessions.send(
                 sid,
-                _claude_command(
+                claude_command(
                     workspace,
                     caller_instance,
                     failure_marker=marker,
@@ -277,7 +277,7 @@ def _run_takeover_launch(
                     resume=resume,
                 ),
             )
-            _wait_for_ready(sid, failure_marker=marker, resumed=resume)
+            wait_for_ready(sid, failure_marker=marker, resumed=resume)
         guide = impersonator_guide()
         message = _takeover_bootstrap_message(
             owner_agent_id,
@@ -286,9 +286,9 @@ def _run_takeover_launch(
             guide,
             relay_resident=plugin_dir is not None,
         )
-        baseline = _bootstrap_count(claude_session)
-        _send_bootstrap(sid, message)
-        _verify_start_receipt(sid, lambda: _bootstrap_count(claude_session) > baseline)
+        baseline = bootstrap_count(claude_session)
+        send_bootstrap(sid, message)
+        verify_start_receipt(sid, lambda: bootstrap_count(claude_session) > baseline)
     except BaseException:
         # Another launch's sweep may have reclaimed this generation's record by
         # now, so its CAS cannot reclaim this PTY. The launcher still owns the
@@ -343,10 +343,10 @@ def launch(
     # Validate before creating files, owner records, or sessions.
     launch_caller_assignment("claude_code", caller_instance)
     claude_session = resume or str(uuid.uuid4())
-    _preset_claude_first_run()
+    preset_claude_first_run()
     if takeover_name is None:
         assert tasks_file is not None and work_file is not None  # noqa: S101 — checked above
-        return _run_supervised_launch(
+        return run_supervised_launch(
             workspace,
             tasks_file,
             work_file,
@@ -356,7 +356,7 @@ def launch(
             claude_session,
             resume=resume is not None,
         )
-    return _run_takeover_launch(
+    return run_takeover_launch(
         workspace,
         takeover_name,
         takeover_brief,

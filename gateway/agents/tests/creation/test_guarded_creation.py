@@ -15,7 +15,7 @@ from gateway.agents import creation as agent_creation
 from gateway.agents.creation import scoped_creation_key
 from gateway.app import app
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
-from gateway.tests.extensions.test_mcp_endpoint import _tool_call, _tool_result
+from gateway.tests.extensions.test_mcp_endpoint import tool_call, tool_result
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -129,8 +129,8 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
     ) as mcp:
         credentials = create_mcp_client(mcp, "prior", "write").json()
         token = credentials["token"]
-        original = _tool_result(
-            _tool_call(
+        original = tool_result(
+            tool_call(
                 mcp,
                 token,
                 "spawn_agent_guarded_v1",
@@ -152,8 +152,8 @@ def test_preexisting_mcp_canonical_hash_replays_original_agent(
             (original["id"],),
         ).fetchone()
         assert recorded == (canonical, fingerprint)
-        replay = _tool_result(
-            _tool_call(
+        replay = tool_result(
+            tool_call(
                 mcp,
                 token,
                 "spawn_agent_guarded_v1",

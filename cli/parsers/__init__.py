@@ -31,27 +31,27 @@ from cli.commands.agents.parsers import add_agents_parser
 from cli.commands.extensions.parsers.mcp import add_mcp_parser, add_memory_parser
 from cli.commands.extensions.parsers.packages import add_packages_parser
 from cli.commands.extensions.parsers.plugins import add_plugins_parser, add_skill_parser
-from cli.parsers.backup import _add_backup_parser
-from cli.parsers.cluster import _add_cluster_parser
-from cli.parsers.computer import _add_computer_parser
+from cli.parsers.backup import add_backup_parser
+from cli.parsers.cluster import add_cluster_parser
+from cli.parsers.computer import add_computer_parser
 from cli.parsers.host import (
-    _add_converge_parser,
-    _add_firewall_parser,
-    _add_init_parser,
-    _add_lgtm_parser,
-    _add_restart_parser,
-    _add_start_parser,
-    _add_status_parser,
-    _add_stop_parser,
-    _add_trace_parser,
+    add_converge_parser,
+    add_firewall_parser,
+    add_init_parser,
+    add_lgtm_parser,
+    add_restart_parser,
+    add_start_parser,
+    add_status_parser,
+    add_stop_parser,
+    add_trace_parser,
 )
-from cli.parsers.logs import _add_logs_parser
+from cli.parsers.logs import add_logs_parser
 from cli.parsers.management import (
-    _add_config_parser,
-    _add_presets_parser,
-    _add_schedules_parser,
+    add_config_parser,
+    add_presets_parser,
+    add_schedules_parser,
 )
-from cli.parsers.pty import _add_pty_parser
+from cli.parsers.pty import add_pty_parser
 
 __all__ = ["build_parser", "command_options", "parse_args"]
 
@@ -71,25 +71,25 @@ def build_parser(
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    _add_init_parser(sub)
-    _add_start_parser(sub, retained_children=retained_children)
-    _add_stop_parser(sub, retained_children=retained_children)
-    _add_restart_parser(sub, retained_children=retained_children)
-    _add_status_parser(sub)
-    _add_pty_parser(sub)
-    _add_converge_parser(sub)
-    _add_firewall_parser(sub)
-    _add_lgtm_parser(sub, retained_children=retained_children)
-    _add_cluster_parser(sub)
-    _add_computer_parser(sub)
-    _add_trace_parser(sub)
-    _add_logs_parser(sub)
-    _add_backup_parser(sub)
+    add_init_parser(sub)
+    add_start_parser(sub, retained_children=retained_children)
+    add_stop_parser(sub, retained_children=retained_children)
+    add_restart_parser(sub, retained_children=retained_children)
+    add_status_parser(sub)
+    add_pty_parser(sub)
+    add_converge_parser(sub)
+    add_firewall_parser(sub)
+    add_lgtm_parser(sub, retained_children=retained_children)
+    add_cluster_parser(sub)
+    add_computer_parser(sub)
+    add_trace_parser(sub)
+    add_logs_parser(sub)
+    add_backup_parser(sub)
     add_agents_parser(sub)
     add_impersonation_parser(sub)
-    _add_config_parser(sub)
-    _add_presets_parser(sub)
-    _add_schedules_parser(sub)
+    add_config_parser(sub)
+    add_presets_parser(sub)
+    add_schedules_parser(sub)
     add_plugins_parser(sub)
     add_skill_parser(sub)
     add_mcp_parser(sub)

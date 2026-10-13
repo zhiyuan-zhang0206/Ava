@@ -277,7 +277,7 @@ def agent_runner_cluster_aliases() -> frozenset[str]:
 def env_identity_keys() -> frozenset[str]:
     """Machine-IDENTITY env keys — stripped from the inherited environment when
     spawning a cluster's subprocess (alongside `derived_env_keys()`), and
-    enforced by base.host.env.dotenv_boot._enforce_cluster_env_authority in EVERY
+    enforced by base.host.env.dotenv_boot.enforce_cluster_env_authority in EVERY
     process that loads a unit's .env: a key the unit's .env declares is forced
     from the file, an inherited one is dropped (the host-scoped gateway URL
     key stays env-suppliable — dotenv_boot's `_identity_env_only`)."""

@@ -14,13 +14,13 @@ from gateway.app import app
 from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_handlers import cors_headers
 from gateway.tests.bootstrap.test_auth import (
-    _SECRET,
-    _auth,
-    _legacy_hmac_cookie,
-    _login,
-    _rebuilt_cors_middleware,
-    _request_with_origin,
-    _session_cookie,
+    SECRET,
+    auth,
+    legacy_hmac_cookie,
+    login,
+    rebuilt_cors_middleware,
+    request_with_origin,
+    session_cookie,
 )
 from gateway.tests.bootstrap.test_auth import _patch_secret as _patch_secret
 from tests.fixtures.gateway_config import gateway_test_client
@@ -91,7 +91,7 @@ def test_cors_preflight_login_from_gateway_frontend_origin_passes(
         "gateway_url",
         "http://10.0.0.72:8000",
     )
-    with _rebuilt_cors_middleware(), TestClient(app) as client:
+    with rebuilt_cors_middleware(), TestClient(app) as client:
         resp = client.options(
             "/api/auth/login",
             headers={
@@ -123,12 +123,12 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
         "http://10.0.0.72:8000",
     )
     with gateway_test_client(app, machine=machine_identity) as client:
-        token = _login(client)
+        token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
             headers={
-                **_session_cookie(token),
+                **session_cookie(token),
                 "Origin": "http://10.0.0.72:3000",
             },
         )
@@ -176,7 +176,7 @@ def test_cors_headers_reflect_allowed_origin(monkeypatch: pytest.MonkeyPatch) ->
         ["https://allowed.example"],
     )
 
-    assert cors_headers(_request_with_origin("https://allowed.example")) == {
+    assert cors_headers(request_with_origin("https://allowed.example")) == {
         "Access-Control-Allow-Origin": "https://allowed.example",
         "Vary": "Origin",
         "Access-Control-Allow-Credentials": "true",
@@ -190,7 +190,7 @@ def test_cors_headers_omit_disallowed_origin(monkeypatch: pytest.MonkeyPatch) ->
         ["https://allowed.example"],
     )
 
-    assert cors_headers(_request_with_origin("https://disallowed.example")) == {}
+    assert cors_headers(request_with_origin("https://disallowed.example")) == {}
 
 
 # ── Bearer token works ────────────────────────────────────────────────
@@ -198,14 +198,14 @@ def test_cors_headers_omit_disallowed_origin(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_api_agents_accepts_bearer(*, machine_identity: MachineIdentity) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        resp = client.get("/api/agents", headers=_auth())
+        resp = client.get("/api/agents", headers=auth())
     assert resp.status_code == 200
 
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_api_bootstrap_accepts_bearer(*, machine_identity: MachineIdentity) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        resp = client.get("/api/bootstrap", headers=_auth())
+        resp = client.get("/api/bootstrap", headers=auth())
     assert resp.status_code == 200
 
 
@@ -214,7 +214,7 @@ def test_api_bootstrap_accepts_bearer(*, machine_identity: MachineIdentity) -> N
 
 def test_api_agents_rejects_x_cluster_secret(*, machine_identity: MachineIdentity) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        resp = client.get("/api/agents", headers={"X-Cluster-Secret": _SECRET})
+        resp = client.get("/api/agents", headers={"X-Cluster-Secret": SECRET})
     assert resp.status_code == 401
 
 
@@ -223,14 +223,14 @@ def test_api_agents_rejects_x_cluster_secret(*, machine_identity: MachineIdentit
 
 def test_api_agents_accepts_valid_cookie(*, machine_identity: MachineIdentity) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        token = _login(client)
-        resp = client.get("/api/agents", headers=_session_cookie(token))
+        token = login(client)
+        resp = client.get("/api/agents", headers=session_cookie(token))
     assert resp.status_code == 200
 
 
 def test_api_agents_rejects_invalid_cookie(*, machine_identity: MachineIdentity) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        resp = client.get("/api/agents", headers=_session_cookie("bad-token"))
+        resp = client.get("/api/agents", headers=session_cookie("bad-token"))
     assert resp.status_code == 401
 
 
@@ -243,12 +243,12 @@ def test_cookie_authenticated_post_rejects_disallowed_origin(
         ["https://allowed.example"],
     )
     with gateway_test_client(app, machine=machine_identity) as client:
-        token = _login(client)
+        token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
             headers={
-                **_session_cookie(token),
+                **session_cookie(token),
                 "Origin": "https://disallowed.example",
             },
         )
@@ -272,7 +272,7 @@ def test_bearer_authenticated_post_allows_disallowed_origin(
             "/api/frontend-telemetry",
             content=b"{}",
             headers={
-                **_auth(),
+                **auth(),
                 "Origin": "https://disallowed.example",
             },
         )
@@ -300,12 +300,12 @@ def test_cookie_authenticated_post_allows_gateway_own_origin(
         "http://10.0.0.72:8000",
     )
     with gateway_test_client(app, machine=machine_identity) as client:
-        token = _login(client)
+        token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
             headers={
-                **_session_cookie(token),
+                **session_cookie(token),
                 "Origin": "http://10.0.0.72:8000",
             },
         )
@@ -325,11 +325,11 @@ def test_cookie_authenticated_post_allows_missing_origin(
         ["https://allowed.example"],
     )
     with gateway_test_client(app, machine=machine_identity) as client:
-        token = _login(client)
+        token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
-            headers=_session_cookie(token),
+            headers=session_cookie(token),
         )
 
     assert resp.status_code == 422
@@ -341,24 +341,24 @@ def test_legacy_self_contained_hmac_cookie_is_rejected(
     with gateway_test_client(app, machine=machine_identity) as client:
         resp = client.get(
             "/api/agents",
-            headers=_session_cookie(_legacy_hmac_cookie()),
+            headers=session_cookie(legacy_hmac_cookie()),
         )
     assert resp.status_code == 401
 
 
 def test_revoke_endpoint_invalidates_another_session(*, machine_identity: MachineIdentity) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        first = _login(client)
+        first = login(client)
         client.cookies.clear()
-        second = _login(client)
+        second = login(client)
         client.cookies.clear()
 
         revoke = client.post(
             f"/api/auth/sessions/{second}/revoke",
-            headers=_session_cookie(first),
+            headers=session_cookie(first),
         )
-        replay = client.get("/api/agents", headers=_session_cookie(second))
-        listed = client.get("/api/auth/sessions", headers=_session_cookie(first))
+        replay = client.get("/api/agents", headers=session_cookie(second))
+        listed = client.get("/api/auth/sessions", headers=session_cookie(first))
 
     assert revoke.status_code == 200
     assert replay.status_code == 401
@@ -367,7 +367,7 @@ def test_revoke_endpoint_invalidates_another_session(*, machine_identity: Machin
 
 def test_revoke_endpoint_refuses_current_session(*, machine_identity: MachineIdentity) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        current = _login(client)
+        current = login(client)
         response = client.post(f"/api/auth/sessions/{current}/revoke")
 
     assert response.status_code == 409
@@ -382,11 +382,11 @@ def test_revoke_endpoint_returns_404_for_missing_or_revoked_session(
     *, machine_identity: MachineIdentity
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        current = _login(client)
+        current = login(client)
         client.cookies.clear()
-        target = _login(client)
+        target = login(client)
         client.cookies.clear()
-        headers = _session_cookie(current)
+        headers = session_cookie(current)
 
         first = client.post(f"/api/auth/sessions/{target}/revoke", headers=headers)
         second = client.post(f"/api/auth/sessions/{target}/revoke", headers=headers)
@@ -401,7 +401,7 @@ def test_middleware_touches_session_at_most_once_per_minute(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
     with gateway_test_client(app, machine=machine_identity) as client:
-        token = _login(client)
+        token = login(client)
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE web_sessions SET last_seen_at = now() - interval '1 day' WHERE id = %s",
@@ -442,7 +442,7 @@ def test_middleware_bounds_session_touch_bookkeeping(
     monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 3600)
 
     with gateway_test_client(app, machine=machine_identity) as client:
-        token = _login(client)
+        token = login(client)
         last_touch = app.state.session_touch.last_touch
         last_touch["stale"] = now - 3601
         last_touch.update({f"recent-{index}": now - index for index in range(1025)})

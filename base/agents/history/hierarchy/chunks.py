@@ -708,7 +708,7 @@ class ChunkCall:
     problem: str | None = None
 
 
-_INSERT_CALL_SQL = """
+INSERT_CALL_SQL = """
 INSERT INTO understanding_chunk_calls (
     job_id, agent_id, attempt, round, model, instruction, prefix_len, start_offset,
     content, tool_calls, additional_kwargs, usage_metadata, response_metadata,
@@ -756,7 +756,7 @@ async def write_chunk_calls(
     ]
     try:
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-            await cur.executemany(_INSERT_CALL_SQL, rows)
+            await cur.executemany(INSERT_CALL_SQL, rows)
     except Exception as exc:
         logger.opt(exception=True).warning(
             "understanding call record failed for job {job}", job=job.id

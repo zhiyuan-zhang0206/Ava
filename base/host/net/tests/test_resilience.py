@@ -282,7 +282,7 @@ class TestHttpClassifier:
     def test_override_inputs_are_snapshots(self) -> None:
         permanent = {429}
         transient = {404}
-        classifier = resilience._HttpClassifier(permanent=permanent, transient=transient)
+        classifier = resilience.HttpClassifier(permanent=permanent, transient=transient)
         permanent.clear()
         permanent.add(500)
         transient.clear()
@@ -370,7 +370,7 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return random_value
 
-        monkeypatch.setattr(resilience, "_agent_phase", self._fixed_phase)
+        monkeypatch.setattr(resilience, "agent_phase", self._fixed_phase)
         monkeypatch.setattr(resilience.random, "uniform", _uniform)
         assert jittered(2.0, span=5.0, mode="phase") == 3.25
 
@@ -411,7 +411,7 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return 100.0
 
-        monkeypatch.setattr(resilience, "_agent_phase", self._fixed_phase)
+        monkeypatch.setattr(resilience, "agent_phase", self._fixed_phase)
         monkeypatch.setattr(resilience.random, "uniform", _uniform)
         f = _Flaky(urllib.error.URLError("boom"), 1)
         assert retry(Policy(max_attempts=2, jitter="phase", jitter_span=5.0))(f) == "ok"
@@ -426,7 +426,7 @@ class TestJitter:
         def _uniform(_low: float, _high: float) -> float:
             return 0.5
 
-        monkeypatch.setattr(resilience, "_agent_phase", _unexpected_phase)
+        monkeypatch.setattr(resilience, "agent_phase", _unexpected_phase)
         monkeypatch.setattr(resilience.random, "uniform", _uniform)
         f = _Flaky(urllib.error.URLError("boom"), 1)
         assert retry(Policy(max_attempts=2, jitter="relative", jitter_span=0.5))(f) == "ok"

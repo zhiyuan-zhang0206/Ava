@@ -1,12 +1,14 @@
 """Attach local Python tools to a trusted external controller lease."""
 
-# Package door. This `__init__` is the `ava.external` attachment API; `state` is
-# its checkpoint-compatible plugin-delta codec and snapshot reader, shared with
-# the agent kernel's takeover return path (`agent.impersonation`).
+# The attachment behind `ava.impersonation.attach` (its door loads this module on
+# first use: it is heavy and `import ava` must not pay for it). The checkpoint-
+# compatible plugin-delta codec and snapshot reader are the agent kernel's
+# (`agent.extensions.plugin_state_codec`), shared with its takeover return path.
 
 from __future__ import annotations
 
 import dataclasses
+import importlib
 import sys
 from collections.abc import Mapping
 from contextlib import ExitStack
@@ -35,8 +37,6 @@ from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
-
-__all_for_ava__ = ["attach", "Attachment"]
 
 _attachment_lock = Lock()
 _close_flush_permission = local()
@@ -115,11 +115,15 @@ def _attachment_database(
     )
 
 
-def _state_gate() -> Any:
-    """The agent kernel's plugin-state check (interim: reached by name until this package moves above `agent`)."""
-    import importlib
+def _agent_codec() -> Any:
+    """The agent kernel's plugin-state codec: the one place `ava` reaches `agent` by name.
 
-    return importlib.import_module("agent.state").plugin_state_schema
+    A bare script that attaches needs the kernel's state codec and state admission
+    check, and `ava` sits below `agent`. This load is declared in this directory's
+    `meizel.toml` as a debt: the plugin system review replaces it with a codec the
+    plugin system provides.
+    """
+    return importlib.import_module("agent.extensions.plugin_state_codec")
 
 
 class Attachment:
@@ -208,7 +212,7 @@ class Attachment:
             surface=False,
             config=config,
             clock_factory=self._clock_factory,
-            validate_state=_state_gate(),
+            validate_state=_agent_codec().plugin_state_schema,
         )
         if config is None:
             from ava.sdk_surface.settings import config_authority
@@ -221,7 +225,7 @@ class Attachment:
             self._event_seal_wait_reader = lambda: (
                 config.view.general.impersonation_event_seal_wait_seconds
             )
-        state, overlay, birth = self._codec().load_snapshot(
+        state, overlay, birth = _agent_codec().load_snapshot(
             self.agent_id, database=self._database()
         )
         self._state_cls = type(state)
@@ -231,7 +235,7 @@ class Attachment:
         receipt = state.impersonation_applied
         checkpoint_version = receipt["version"] if receipt.get("lease_id") == self.lease_id else 0
         applied = max(lease["applied_version"], checkpoint_version)
-        codec = self._codec()
+        codec = _agent_codec()
         for encoded in lease["plugin_delta"][applied:]:
             codec.apply_plugin_delta(state, codec.decode_plugin_delta(encoded, self._state_cls))
         self._validate()
@@ -239,19 +243,13 @@ class Attachment:
         process_context.set_state(state)
         process_context.set_state_update({})
 
-    def _codec(self) -> Any:
-        """The agent layer's plugin-state codec (interim: reached by name until this package moves above `agent`)."""
-        import importlib
-
-        return importlib.import_module("agent.extensions.plugin_state_codec")
-
     def native_snapshot(self) -> Any:
         """The agent's saved state, as its checkpoint holds it.
 
         Unlike `ava.state` this excludes the journal replay, so a controller's staged
         updates cannot stand in for what the agent itself saved."""
         self._validate()
-        snapshot, _overlay, _birth = self._codec().load_snapshot(
+        snapshot, _overlay, _birth = _agent_codec().load_snapshot(
             self.agent_id, database=self._database()
         )
         return snapshot
@@ -350,7 +348,7 @@ class Attachment:
         if not isinstance(update, dict):
             raise TypeError("external plugin state update must be a dict")
         if update:
-            encoded = self._codec().encode_plugin_delta(update, self._state_cls)
+            encoded = _agent_codec().encode_plugin_delta(update, self._state_cls)
             control.merge_plugin_delta(
                 self._database(),
                 self.lease_id,

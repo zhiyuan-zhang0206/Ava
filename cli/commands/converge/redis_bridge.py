@@ -28,7 +28,7 @@ from cli.commands.converge.spec import ConvergeCtx
 
 logger = logging.getLogger("cli.converge.redis_bridge")
 
-_LABEL = "com.ava.redis-bridge"
+LABEL = "com.ava.redis-bridge"
 _BOOTOUT_TIMEOUT_S = 10.0
 _BOOTOUT_POLL_INTERVAL_S = 0.25
 
@@ -47,7 +47,7 @@ def _installed_path(home: Path) -> Path:
 
 
 def launchd_plist_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
+    return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
 
 def launchctl(*args: str) -> subprocess.CompletedProcess[str]:
@@ -60,11 +60,11 @@ def launchctl(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def job_loaded() -> bool:
-    return launchctl("print", f"gui/{os.getuid()}/{_LABEL}").returncode == 0
+    return launchctl("print", f"gui/{os.getuid()}/{LABEL}").returncode == 0
 
 
 def bootout_and_wait() -> bool:
-    launchctl("bootout", f"gui/{os.getuid()}/{_LABEL}")
+    launchctl("bootout", f"gui/{os.getuid()}/{LABEL}")
     deadline = time.monotonic() + _BOOTOUT_TIMEOUT_S
     while job_loaded():
         if time.monotonic() >= deadline:
@@ -73,7 +73,7 @@ def bootout_and_wait() -> bool:
     return True
 
 
-def _retire_launchd_bridge(home: Path) -> None:
+def retire_launchd_bridge(home: Path) -> None:
     """Unload and remove the standalone launchd job and installed copy."""
     plist_path = launchd_plist_path()
     installed_path = _installed_path(home)
@@ -82,7 +82,7 @@ def _retire_launchd_bridge(home: Path) -> None:
         return
     if loaded and not bootout_and_wait():
         raise RuntimeError(
-            f"Redis bridge LaunchAgent {_LABEL} remained loaded after "
+            f"Redis bridge LaunchAgent {LABEL} remained loaded after "
             f"{_BOOTOUT_TIMEOUT_S:.0f}s; retained {plist_path} for inspection"
         )
     plist_path.unlink(missing_ok=True)
@@ -93,7 +93,7 @@ def _retire_launchd_bridge(home: Path) -> None:
 def retire_launchd_redis_bridge(ctx: ConvergeCtx) -> None:
     """Leave the relay to the root supervisor: no standalone launchd job may hold its port."""
     if sys.platform == "darwin":
-        _retire_launchd_bridge(ctx.ava_home)
+        retire_launchd_bridge(ctx.ava_home)
 
 
 def probe_redis_bridge(

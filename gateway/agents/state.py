@@ -162,7 +162,7 @@ def _message_content_size_bytes(content: str | list[ContentBlock]) -> int:
     return len(json.dumps(wire_content, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
-def _scoped_message_key(request: Request, key: str) -> str:
+def scoped_message_key(request: Request, key: str) -> str:
     """Delivery and reconciliation identify the same logical chat message.
 
     The key is stored under the chat identity the delivery outbox flush shares.
@@ -227,7 +227,7 @@ async def post_agent_message(
     """
     provenance = request_inbound_provenance(request)
     if idempotency_key is not None:
-        idempotency_key = _scoped_message_key(request, idempotency_key)
+        idempotency_key = scoped_message_key(request, idempotency_key)
     if _message_content_size_bytes(body.content) > _MAX_MESSAGE_CONTENT_BYTES:
         raise HTTPException(
             status_code=413,
@@ -388,7 +388,7 @@ async def reconcile_agent_message(
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
     """Resolve a timed-out POST and heal its still-pending delivery tail."""
-    idempotency_key = _scoped_message_key(request, idempotency_key)
+    idempotency_key = scoped_message_key(request, idempotency_key)
     if _message_content_size_bytes(body.content) > _MAX_MESSAGE_CONTENT_BYTES:
         raise HTTPException(
             status_code=413,

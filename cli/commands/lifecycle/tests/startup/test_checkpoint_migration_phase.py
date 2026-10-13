@@ -389,16 +389,16 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
 ) -> None:
     from base.cluster import provision
     from base.deploy.schema.migration_layout import required_migration_set
-    from base.deploy.schema.tests.migration_support import _git, _init_repo
+    from base.deploy.schema.tests.migration_support import git, init_repo
 
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     name = "20990101T000000_checkpoint-v10"
     if write_up:
         (tmp_path / f"{name}.sql").write_text("SELECT 1;\n")
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     if tracked:
-        _git(tmp_path, "add", "-A")
+        git(tmp_path, "add", "-A")
 
     with pytest.raises(provision.CheckpointDependencyDriftError, match="git-tracked Ava migration"):
         provision.assert_checkpoint_dependency_pinned(required_migration_set())
@@ -411,13 +411,13 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
 
     from base.cluster import provision
     from base.deploy.schema.migration_layout import required_migration_set
-    from base.deploy.schema.tests.migration_support import _init_repo
+    from base.deploy.schema.tests.migration_support import init_repo
 
     name = "20990101T000000_checkpoint-v10"
     hour = tmp_path / "2099/01/01/00"
     hour.mkdir(parents=True)
     (hour / f"{name}.sql").write_text("SELECT 1;\n")
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {10: name})
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1;"])

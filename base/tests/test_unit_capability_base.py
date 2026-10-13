@@ -12,7 +12,7 @@ from base.cluster.authority.tests.unit_capability_support import _ENDPOINT
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_boot as runner_boot
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
-from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
+from base.db.connections import NoDatabaseAuthorityError, guard_db_url
 from base.host.db_authority import delivery, unit
 from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env import bootstrap, dotenv_boot
@@ -25,9 +25,9 @@ def _boot_with_bootstrap() -> dotenv_boot.EnvBootResult:
     """The runner's boot order: the authority pass, the unit delivery (which
     supplies the fetch's API token), then the bootstrap payload (the
     credential-free endpoint)."""
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     result = dotenv_boot.deliver_unit_authority()
-    bootstrap._apply_bootstrap_values(
+    bootstrap.apply_bootstrap_values(
         "http://gateway.invalid", {"AVA_DB_URL": _ENDPOINT, "AVA_EVENTS_CHANNEL": "ava:events"}
     )
     return result
@@ -69,7 +69,7 @@ def test_a_forged_login_is_replaced_by_the_endpoint_and_refused(
     refusal = result.db_authority_refusal
     assert refusal is not None and "only the root launcher delivers" in refusal
     with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):
-        _guard_db_url(_ENDPOINT, refusal=refusal)
+        guard_db_url(_ENDPOINT, refusal=refusal)
 
 
 def test_an_admitted_operator_process_consumes_the_installed_login(
@@ -101,4 +101,4 @@ def test_a_runner_without_a_capability_is_refused_by_name(
     assert refusal is not None and "holds no database capability" in refusal
     assert "ava cluster db-authority issue-unit" in refusal
     with pytest.raises(NoDatabaseAuthorityError, match="issue-unit"):
-        _guard_db_url(_ENDPOINT, refusal=refusal)
+        guard_db_url(_ENDPOINT, refusal=refusal)

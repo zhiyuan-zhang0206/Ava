@@ -29,7 +29,7 @@ class ListenerDiscoveryError(RuntimeError):
 # lsof in /usr/sbin, which cron's /usr/bin:/bin PATH never reaches — so PATH
 # lookup alone cannot be trusted. PATH wins when it resolves (fast, and it
 # honours an operator's own binary), then these candidates, in order.
-_LSOF_CANDIDATE_PATHS = (
+LSOF_CANDIDATE_PATHS = (
     "/usr/sbin/lsof",  # macOS and most Linux distros
     "/usr/bin/lsof",
     "/sbin/lsof",
@@ -40,7 +40,7 @@ _LSOF_CANDIDATE_PATHS = (
 )
 
 
-def _lsof_argv(*args: str) -> list[str] | None:
+def lsof_argv(*args: str) -> list[str] | None:
     """Resolved lsof argv for `args`, or None when no lsof is reachable.
 
     None means the inspection cannot run at all — the caller reports a
@@ -48,7 +48,7 @@ def _lsof_argv(*args: str) -> list[str] | None:
     """
     binary = shutil.which("lsof")
     if binary is None:
-        for candidate in _LSOF_CANDIDATE_PATHS:
+        for candidate in LSOF_CANDIDATE_PATHS:
             if os.access(candidate, os.X_OK):
                 binary = candidate
                 break
@@ -96,7 +96,7 @@ def _lsof_listeners_on(port: int) -> list[int]:
     """
     import subprocess
 
-    argv = _lsof_argv("-nP", "-Fp", "-sTCP:LISTEN", f"-iTCP:{port}")
+    argv = lsof_argv("-nP", "-Fp", "-sTCP:LISTEN", f"-iTCP:{port}")
     if argv is None:
         raise ListenerDiscoveryError(
             f"listener discovery failed on port {port}: lsof is not on PATH "
@@ -171,7 +171,7 @@ def _lsof_listener_name_addrs(port: int) -> set[str]:
     """`listener_addrs` fallback: lsof's machine-readable name fields (POSIX only)."""
     import subprocess
 
-    argv = _lsof_argv("-nP", "-Fpn", "-sTCP:LISTEN", f"-iTCP:{port}")
+    argv = lsof_argv("-nP", "-Fpn", "-sTCP:LISTEN", f"-iTCP:{port}")
     if argv is None:
         return set()
     try:

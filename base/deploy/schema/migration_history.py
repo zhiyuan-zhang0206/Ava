@@ -6,13 +6,13 @@ Keep the 2026-08-14 inventory until older backup/PITR restores are ruled out.
 
 from base.deploy.schema.migration_errors import MigrationHistoryGap
 
-_RESET_ANCHOR = "20260923T031516_schema-baseline"
+RESET_ANCHOR = "20260923T031516_schema-baseline"
 
 # The 59 timestamped migrations squashed into db/schema.sql at the v0.1.0
 # release (2026-08-14 schema reset). Frozen at reset time — do not bump. A DB
 # whose applied set contains ANY of these must contain ALL of them before the
 # convergence path may delete their tracking rows (see assert_reset_history); a partial set means schema effects that never ran.
-_V010_PRE_RESET_SET = frozenset(
+V010_PRE_RESET_SET = frozenset(
     {
         "20260719T223436_root-task-default-parent",
         "20260720T050943_agents-meta-last-active-at",
@@ -78,7 +78,7 @@ _V010_PRE_RESET_SET = frozenset(
 
 
 # Exact up-file inventory folded on 2026-09-23 from ff598105f. Never extend it.
-_PRE_RESET_SET = frozenset(
+PRE_RESET_SET = frozenset(
     {
         "20260814T235959_v010-baseline",
         "20260818T142518_llm-cost-rollup-columns",
@@ -188,13 +188,13 @@ _PRE_RESET_SET = frozenset(
 def assert_reset_history(applied: set[str], required: set[str]) -> None:
     """Refuse partial generations before deleting any applied-set evidence."""
     for generation, history in (
-        ("2026-08-14", _V010_PRE_RESET_SET),
-        ("2026-09-23", _PRE_RESET_SET),
+        ("2026-08-14", V010_PRE_RESET_SET),
+        ("2026-09-23", PRE_RESET_SET),
     ):
         present = applied & history
         missing = history - applied
         crossing = (
-            history is _PRE_RESET_SET and _RESET_ANCHOR in required and _RESET_ANCHOR not in applied
+            history is PRE_RESET_SET and RESET_ANCHOR in required and RESET_ANCHOR not in applied
         )
         if missing and (present or crossing):
             raise MigrationHistoryGap(

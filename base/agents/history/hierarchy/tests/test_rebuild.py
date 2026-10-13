@@ -259,7 +259,7 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
 
     monkeypatch.setattr(loop, "run_rebuild", fake_rebuild)
     rebuild_id = await _enqueue_rebuild(aops_pool)
-    await loop._Consumer(
+    await loop.Consumer(
         aops_pool,
         MagicMock(),
         [],
@@ -286,7 +286,7 @@ async def test_a_failing_rebuild_is_retried_then_failed(
     monkeypatch.setattr(loop, "run_rebuild", broken)
     monkeypatch.setattr(loop.telemetry, "emit", lambda *_a, **_kw: None)
     rebuild_id = await _enqueue_rebuild(aops_pool)
-    consumer = loop._Consumer(
+    consumer = loop.Consumer(
         aops_pool,
         MagicMock(),
         [],

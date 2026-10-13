@@ -15,26 +15,26 @@ from base.telemetry import tracing as tracing_mod
 from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import _collector_up as _collector_up
 from base.telemetry.tests.test_tracing import (
-    _otlp_with_attrs,
-    _under_watermark,
-    _wait_init_resolved,
-)
-from base.telemetry.tests.test_tracing import (
     _production_process_by_default as _production_process_by_default,
 )
 from base.telemetry.tests.test_tracing import (
     _reset_init_flag as _reset_init_flag,
 )
+from base.telemetry.tests.test_tracing import (
+    otlp_with_attrs,
+    under_watermark,
+    wait_init_resolved,
+)
 from base.telemetry.tracing import OtlpJsonHttpSpanExporter, initialize_tracing
 
 
 def test_strip_content_removes_llm_content_keeps_metadata():
-    """_strip_content_attributes removes gen_ai.task.input/output,
+    """strip_content_attributes removes gen_ai.task.input/output,
     traceloop.entity.input/output and messages-like keys; chain metadata and
     status survive."""
-    from base.telemetry.tracing import _strip_content_attributes
+    from base.telemetry.tracing import strip_content_attributes
 
-    otlp = _otlp_with_attrs(
+    otlp = otlp_with_attrs(
         {
             "gen_ai.task.input": '{"inputs": {"messages": ["you are ava..."]}}',
             "gen_ai.task.output": "the full completion...",
@@ -52,7 +52,7 @@ def test_strip_content_removes_llm_content_keeps_metadata():
             "session.id": "238",
         }
     )
-    _strip_content_attributes(otlp)  # pyright: ignore[reportUnknownArgumentType]
+    strip_content_attributes(otlp)  # pyright: ignore[reportUnknownArgumentType]
     keys = {kv["key"] for kv in otlp["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
     assert keys == {
         "traceloop.association.properties.agent_id",
@@ -66,18 +66,18 @@ def test_strip_content_removes_llm_content_keeps_metadata():
 
 def test_strip_content_size_guard_drops_huge_strings():
     """The size guard drops any single attribute whose string payload exceeds
-    _MAX_ATTR_STRING_CHARS even when the key is not a known content key — a
+    MAX_ATTR_STRING_CHARS even when the key is not a known content key — a
     future instrumentor-invented content key cannot leak megabytes back."""
-    from base.telemetry.tracing import _MAX_ATTR_STRING_CHARS, _strip_content_attributes
+    from base.telemetry.tracing import MAX_ATTR_STRING_CHARS, strip_content_attributes
 
-    big = "x" * (_MAX_ATTR_STRING_CHARS + 1)
-    otlp = _otlp_with_attrs(
+    big = "x" * (MAX_ATTR_STRING_CHARS + 1)
+    otlp = otlp_with_attrs(
         {
             "traceloop.association.properties.agent_id": "238",
             "mystery.new.content.key": big,
         }
     )
-    _strip_content_attributes(otlp)  # pyright: ignore[reportUnknownArgumentType]
+    strip_content_attributes(otlp)  # pyright: ignore[reportUnknownArgumentType]
     keys = {kv["key"] for kv in otlp["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
     assert keys == {"traceloop.association.properties.agent_id"}
 
@@ -85,7 +85,7 @@ def test_strip_content_size_guard_drops_huge_strings():
 def test_strip_content_removes_event_attributes_too():
     """Content attributes nested under span events (the use_attributes=False
     path) are stripped as well."""
-    from base.telemetry.tracing import _strip_content_attributes
+    from base.telemetry.tracing import strip_content_attributes
 
     otlp: dict[str, Any] = {
         "resourceSpans": [
@@ -123,7 +123,7 @@ def test_strip_content_removes_event_attributes_too():
             }
         ]
     }
-    _strip_content_attributes(otlp)
+    strip_content_attributes(otlp)
     span = otlp["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
     ev_keys = {kv["key"] for kv in span["events"][0]["attributes"]}
     assert ev_keys == {"gen_ai.usage.input_tokens"}
@@ -206,15 +206,15 @@ def test_exporter_strip_opt_out_keeps_content(monkeypatch: pytest.MonkeyPatch, t
 
 
 def test_enforce_dir_cap_deletes_oldest_first(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """_enforce_dir_cap deletes oldest files until the directory fits the cap."""
-    from base.telemetry.tracing import _enforce_dir_cap
+    """enforce_dir_cap deletes oldest files until the directory fits the cap."""
+    from base.telemetry.tracing import enforce_dir_cap
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     # 4 files of 1 MB each: one rotated backup per day, 2026-01-01 .. 2026-01-04
     for day in ("2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"):
         (tmp_path / f"spans-{day}T00-00-00.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
 
-    removed = _enforce_dir_cap(max_mb=2)  # cap 2 MB -> delete 2 oldest
+    removed = enforce_dir_cap(max_mb=2)  # cap 2 MB -> delete 2 oldest
     assert removed == 2
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl"))
     assert remaining == [
@@ -225,20 +225,20 @@ def test_enforce_dir_cap_deletes_oldest_first(monkeypatch: pytest.MonkeyPatch, t
 
 def test_enforce_dir_cap_noop_when_under_cap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Under the cap nothing is deleted; non-positive cap disables entirely."""
-    from base.telemetry.tracing import _enforce_dir_cap
+    from base.telemetry.tracing import enforce_dir_cap
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl").write_bytes(b"x" * 10)
-    assert _enforce_dir_cap(max_mb=100) == 0
+    assert enforce_dir_cap(max_mb=100) == 0
     assert len(list(tmp_path.glob("spans*.jsonl"))) == 1
-    assert _enforce_dir_cap(max_mb=0) == 0
+    assert enforce_dir_cap(max_mb=0) == 0
     assert len(list(tmp_path.glob("spans*.jsonl"))) == 1
 
 
 def test_enforce_dir_cap_active_file_sorts_last(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """The ACTIVE spans.jsonl (no day stamp) sorts last — the cap prune never
     deletes the file the collector is appending to."""
-    from base.telemetry.tracing import _enforce_dir_cap
+    from base.telemetry.tracing import enforce_dir_cap
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
@@ -246,7 +246,7 @@ def test_enforce_dir_cap_active_file_sorts_last(monkeypatch: pytest.MonkeyPatch,
     active = tmp_path / "spans.jsonl"
     active.write_bytes(b"x" * (1024 * 1024))
 
-    removed = _enforce_dir_cap(max_mb=2)
+    removed = enforce_dir_cap(max_mb=2)
     assert removed == 1
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl"))
     assert remaining == ["spans-2026-01-02T03-04-05.000-size.jsonl", "spans.jsonl"], (
@@ -255,9 +255,9 @@ def test_enforce_dir_cap_active_file_sorts_last(monkeypatch: pytest.MonkeyPatch,
 
 
 def test_disk_watermark_exceeded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """_disk_watermark_exceeded compares the data-disk usage fraction against
+    """disk_watermark_exceeded compares the data-disk usage fraction against
     the watermark; >= 1.0 disables the guard."""
-    from base.telemetry.tracing import _disk_watermark_exceeded
+    from base.telemetry.tracing import disk_watermark_exceeded
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     monkeypatch.setattr(
@@ -265,10 +265,10 @@ def test_disk_watermark_exceeded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         "disk_usage",
         lambda _p: SimpleNamespace(used=50 * 4096, total=1000 * 4096, free=950 * 4096),  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _disk_watermark_exceeded(0.9) is False
-    assert _disk_watermark_exceeded(0.01) is True
-    assert _disk_watermark_exceeded(1.0) is False  # guard disabled
-    assert _disk_watermark_exceeded(2.0) is False
+    assert disk_watermark_exceeded(0.9) is False
+    assert disk_watermark_exceeded(0.01) is True
+    assert disk_watermark_exceeded(1.0) is False  # guard disabled
+    assert disk_watermark_exceeded(2.0) is False
 
 
 def test_initialize_relief_pass_runs_when_disk_over_watermark(
@@ -286,7 +286,7 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     monkeypatch.setattr(config.settings.observability, "trace_retention_days", 14)
     monkeypatch.setattr(config.settings.observability, "trace_max_dir_mb", 2048)
     # Disk OVER the watermark: recording must be skipped...
-    monkeypatch.setattr(tracing_mod, "_disk_usage", lambda: (0.99, 10 * 1024**3))
+    monkeypatch.setattr(tracing_mod, "disk_usage", lambda: (0.99, 10 * 1024**3))
     old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
     old.write_text("{}\n", encoding="utf-8")
     # Spy on the gzip and cap legs (the prune leg is exercised for real): all
@@ -303,8 +303,8 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
         cap_calls.append(max_mb)
         return 0
 
-    monkeypatch.setattr(tracing_mod, "_gzip_old_mirror", _spy_gzip)
-    monkeypatch.setattr(tracing_mod, "_enforce_dir_cap", _spy_cap)
+    monkeypatch.setattr(tracing_mod, "gzip_old_mirror", _spy_gzip)
+    monkeypatch.setattr(tracing_mod, "enforce_dir_cap", _spy_cap)
     init_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         "traceloop.sdk.Traceloop.init",
@@ -327,12 +327,12 @@ def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(config.settings.observability, "trace_strip_content", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing(machine=machine_identity(), home=Path(".ava"))
-    _wait_init_resolved()
+    wait_init_resolved()
 
     assert os.environ["TRACELOOP_TRACE_CONTENT"] == "false"
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -356,11 +356,11 @@ def test_initialize_skips_when_collector_unreachable(
         "telemetry_otlp_endpoint",
         "http://127.0.0.1:4318",
     )
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
     # This test exercises the skip contract, not the daemon retry loop (that
     # is test_collector_unreachable_retries_once_until_init_succeeds); without
     # the stub the daemon retry thread (300s sleep) leaks across tests.
-    monkeypatch.setattr(tracing_mod, "_start_collector_retry", ignore_arguments)
+    monkeypatch.setattr(tracing_mod, "start_collector_retry", ignore_arguments)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     warned: list[tuple] = []
@@ -385,7 +385,7 @@ def test_initialize_skips_when_disk_over_watermark(monkeypatch: pytest.MonkeyPat
     warning telemetry event is emitted carrying the measured numbers."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    monkeypatch.setattr(tracing_mod, "_disk_usage", lambda: (0.951, 2 * 1024**3))
+    monkeypatch.setattr(tracing_mod, "disk_usage", lambda: (0.951, 2 * 1024**3))
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     warned: list[tuple] = []
@@ -414,7 +414,7 @@ def test_enforce_dir_cap_survives_peer_prune(monkeypatch: pytest.MonkeyPatch, tm
     FileNotFoundError)."""
     from pathlib import Path
 
-    from base.telemetry.tracing import _enforce_dir_cap
+    from base.telemetry.tracing import enforce_dir_cap
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     for day in ("2026-01-01", "2026-01-02", "2026-01-03"):
@@ -430,7 +430,7 @@ def test_enforce_dir_cap_survives_peer_prune(monkeypatch: pytest.MonkeyPatch, tm
         return real_stat(self)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(Path, "stat", flaky_stat)  # pyright: ignore[reportUnknownArgumentType]
-    removed = _enforce_dir_cap(max_mb=1)  # must not raise
+    removed = enforce_dir_cap(max_mb=1)  # must not raise
     assert removed == 1
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl"))
     # the vanished file counted as 0 bytes; the sweep continued past it and

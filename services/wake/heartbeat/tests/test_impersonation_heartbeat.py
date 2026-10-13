@@ -222,7 +222,8 @@ def test_sdk_attachment_can_pause_heartbeat(
     import ava
     from agent.extensions import plugin_state_codec
     from agent.state import BaseAgentState
-    from ava import external
+    from ava import impersonation
+    from ava.impersonation import attachment as attachment_module
     from base.agents.sdk import call_policy
     from tests.fixtures.pin_agent import pin_agent
 
@@ -239,7 +240,7 @@ def test_sdk_attachment_can_pause_heartbeat(
         local_machine=machine_identity.name(),
     )
     pin_agent(None)
-    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
+    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
 
     def snapshot(
         _agent_id: int, *, database: Database
@@ -248,7 +249,7 @@ def test_sdk_attachment_can_pause_heartbeat(
         return BaseAgentState(), {}, None
 
     monkeypatch.setattr(plugin_state_codec, "load_snapshot", snapshot)
-    with external.attach(lease["id"]):
+    with impersonation.attach(lease["id"]):
         ava.self.pause_heartbeat(1800)
     assert lease["agent_id"] not in selected(pool)
     assert db_conn.execute(

@@ -123,7 +123,7 @@ _CARD_FROM = """
 # UNION (not UNION ALL) deduplicates ancestors shared by many live agents and
 # terminates even on corrupt cyclic links. Fork-source existence takes priority;
 # an absent source falls back to the triggering agent, matching the tree model.
-_LIVE_SQL = sql.SQL("""
+LIVE_SQL = sql.SQL("""
     WITH RECURSIVE selected AS MATERIALIZED (
         SELECT id FROM agents_meta WHERE status <> 'terminated'
     ), lineage AS (
@@ -186,7 +186,7 @@ def select_roster(
 ) -> AgentRoster:
     """Read live cards and their ancestor closure from the same database snapshot."""
     with conn.cursor() as cur:
-        cur.execute(_LIVE_SQL)
+        cur.execute(LIVE_SQL)
         row = cur.fetchone()
     if row is None:
         raise RuntimeError("roster aggregate did not return a row")

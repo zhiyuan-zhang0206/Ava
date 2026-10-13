@@ -19,7 +19,7 @@ def test_an_escalated_shutdown_is_in_the_report_and_the_journal(
 ) -> None:
     assert status_journal.begin("stop")
 
-    assert command._finish_stop(owns_journal=True, notes=[NOTE]) == 0
+    assert command.finish_stop(owns_journal=True, notes=[NOTE]) == 0
 
     assert f"Stop completed with an escalation: {NOTE}" in capsys.readouterr().err
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
@@ -32,7 +32,7 @@ def test_a_stop_without_an_escalation_says_nothing_extra(
 ) -> None:
     assert status_journal.begin("stop")
 
-    assert command._finish_stop(owns_journal=True, notes=[]) == 0
+    assert command.finish_stop(owns_journal=True, notes=[]) == 0
 
     assert capsys.readouterr().err == ""
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
@@ -43,7 +43,7 @@ def test_pooler_clients_at_the_stop_land_in_the_journal(home: Path) -> None:
     line = "1 client(s) still connected when the pooler stops: 10.1.2.7:5432 db=ava"
     assert status_journal.begin("stop")
 
-    assert command._finish_stop(owns_journal=True, notes=[], clients=[line]) == 0
+    assert command.finish_stop(owns_journal=True, notes=[], clients=[line]) == 0
 
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert journal["result"]["pooler_clients"] == [line]

@@ -9,11 +9,11 @@ from base.cluster.machine import MachineIdentity
 from gateway.app import app
 from gateway.mcp_server import endpoint
 from gateway.tests.extensions.test_mcp_endpoint import (
-    _create_token,
-    _tool_call,
+    _enable_endpoint as _enable_endpoint,
 )
 from gateway.tests.extensions.test_mcp_endpoint import (
-    _enable_endpoint as _enable_endpoint,
+    create_token,
+    tool_call,
 )
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -41,8 +41,8 @@ def test_older_server_rejects_guarded_tool_before_creating_anything(
 
     monkeypatch.setattr(endpoint, "build_manager", older_manager)
     with gateway_test_client(app, machine=machine_identity) as client:
-        token = _create_token(client)
-        response = _tool_call(
+        token = create_token(client)
+        response = tool_call(
             client,
             token,
             "spawn_agent_guarded_v1",

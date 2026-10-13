@@ -76,7 +76,7 @@ _alert_frame_validator = TypeAdapter(AlertRow)
 # -- ingest auth -------------------------------------------------------------
 
 
-def _ingest_authorized(request: Request) -> bool:
+def ingest_authorized(request: Request) -> bool:
     """Webhook-token header, else cluster-secret Bearer, else loopback trust.
 
     ``X-Alerts-Token`` carries the webhook token; the Grafana contact point
@@ -104,7 +104,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     is published to the SSE stream.
     """
 
-    if not _ingest_authorized(request):
+    if not ingest_authorized(request):
         raise HTTPException(status_code=401, detail="unauthorized webhook caller")
 
     inserted = updated = notified = 0

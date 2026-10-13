@@ -37,7 +37,7 @@ CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 
 # Tables the gateway group may read and append but never rewrite. The blanket
 # DML grant below includes UPDATE and DELETE, so they are revoked per table.
-_GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
+GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
 
 # The runner matrix: (privileges, tables). Privilege strings are module
 # constants spliced as SQL; table names are quoted identifiers. Each entry is a
@@ -156,7 +156,7 @@ def _grant_gateway(conn: Conn, owner: str, gateway: str) -> None:
     _grant(conn, "GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO {}", gateway)
     for table in CHECKPOINT_TABLES:
         _grant(conn, "GRANT MAINTAIN ON {} TO {}", table, gateway)
-    for table in _GATEWAY_APPEND_ONLY_TABLES:
+    for table in GATEWAY_APPEND_ONLY_TABLES:
         _grant(conn, "REVOKE UPDATE, DELETE ON {} FROM {}", table, gateway)
     default = "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public GRANT "
     _grant(conn, default + "SELECT, INSERT, UPDATE, DELETE ON TABLES TO {}", owner, gateway)

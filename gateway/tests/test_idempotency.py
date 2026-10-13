@@ -50,7 +50,7 @@ def agent_id(db_conn: psycopg.Connection) -> int:
     return int(aid)
 
 
-def _count_inbounds(conn: psycopg.Connection, agent_id: int, content: str) -> int:
+def count_inbounds(conn: psycopg.Connection, agent_id: int, content: str) -> int:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT count(*) FROM inbound_messages WHERE agent_id = %s AND content = %s",
@@ -247,7 +247,7 @@ def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
             assert error["committed"] is True
             assert error["idempotency_key"] == key
             assert error["retryable"] is False
-            assert _count_inbounds(db_conn, agent_id, body["content"]) == 1
+            assert count_inbounds(db_conn, agent_id, body["content"]) == 1
             # Another request is still served by the same app after this bug.
             healthy = observer.get(f"/api/agents/{agent_id}")
             assert healthy.status_code == 200, healthy.text
@@ -301,7 +301,7 @@ def test_large_message_response_waits_for_live_publish(
         bus: EventBus, aid: int, inbound_id: int, kind: str, source: str, text: str
     ) -> None:
         assert text == content
-        assert _count_inbounds(db_conn, agent_id, content) == 1
+        assert count_inbounds(db_conn, agent_id, content) == 1
         await real_publish(bus, aid, inbound_id, kind, source, text)
         published.append(inbound_id)
 

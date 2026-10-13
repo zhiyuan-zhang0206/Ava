@@ -12,7 +12,7 @@ from base.agents.tasks.priority import Priority
 from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.routers import tasks
-from gateway.routers.tests.test_tasks_router import _make_agent, _make_task
+from gateway.routers.tests.test_tasks_router import make_agent, make_task
 from gateway.schemas.tasks import TaskUpdateRequest
 from ops import lifecycle
 
@@ -26,14 +26,14 @@ def _count(db: psycopg.Connection, table: str) -> int:
 
 
 def test_concurrent_duplicates_commit_one_assignment(db_conn: psycopg.Connection) -> None:
-    old, new = _make_agent(db_conn), _make_agent(db_conn)
-    tid = _make_task(db_conn, owner=old)
+    old, new = make_agent(db_conn), make_agent(db_conn)
+    tid = make_task(db_conn, owner=old)
     barrier = Barrier(2)
     with TestClient(app):
 
         def patch(_index: int) -> tuple[object, int]:
             barrier.wait()
-            task, notes = tasks._patch_task_blocking(
+            task, notes = tasks.patch_task_blocking(
                 app.state.db_pool, tid, TaskUpdateRequest(owner=new), "same-operation"
             )
             return task, len(notes)
@@ -49,8 +49,8 @@ def test_concurrent_duplicates_commit_one_assignment(db_conn: psycopg.Connection
 def test_lost_response_replay_preserves_new_owner_and_reminder_window(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    old, middle, current = (_make_agent(db_conn) for _ in range(3))
-    tid = _make_task(db_conn, owner=old)
+    old, middle, current = (make_agent(db_conn) for _ in range(3))
+    tid = make_task(db_conn, owner=old)
     headers = keyed_headers("lost-response")
     real_wake = tasks.publish_inbound_wake
 
@@ -106,7 +106,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
 
 
 def test_snapshot_replays_after_task_deletion(db_conn: psycopg.Connection) -> None:
-    tid = _make_task(db_conn, owner=_make_agent(db_conn))
+    tid = make_task(db_conn, owner=make_agent(db_conn))
     headers = keyed_headers("snapshot")
     with TestClient(app) as client:
         first = client.patch(f"/api/tasks/{tid}", json={"status": "done"}, headers=headers)
@@ -118,7 +118,7 @@ def test_snapshot_replays_after_task_deletion(db_conn: psycopg.Connection) -> No
 
 
 def test_changed_body_conflict_and_omitted_null_distinction(db_conn: psycopg.Connection) -> None:
-    tid = _make_task(db_conn, owner=_make_agent(db_conn))
+    tid = make_task(db_conn, owner=make_agent(db_conn))
     headers = keyed_headers("body")
     with TestClient(app) as client:
         assert (
@@ -134,8 +134,8 @@ def test_changed_body_conflict_and_omitted_null_distinction(db_conn: psycopg.Con
 def test_producer_failure_rolls_back_effect_and_receipt(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    old, new = _make_agent(db_conn), _make_agent(db_conn)
-    tid = _make_task(db_conn, owner=old)
+    old, new = make_agent(db_conn), make_agent(db_conn)
+    tid = make_task(db_conn, owner=old)
     target = "enqueue_task_notifications" if failure == "notification" else "save_task_receipt"
     real = getattr(tasks, target)
 
@@ -166,7 +166,7 @@ def test_producer_failure_rolls_back_effect_and_receipt(
 def test_invalid_identity_has_no_effect(
     db_conn: psycopg.Connection, headers: dict[str, str]
 ) -> None:
-    tid = _make_task(db_conn, owner=_make_agent(db_conn))
+    tid = make_task(db_conn, owner=make_agent(db_conn))
     with TestClient(app) as client:
         assert (
             client.patch(f"/api/tasks/{tid}", json={"priority": "P1"}, headers=headers).status_code
@@ -178,10 +178,10 @@ def test_invalid_identity_has_no_effect(
 def test_distinct_task_paths_and_principals_are_independent(db_conn: psycopg.Connection) -> None:
     from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 
-    owner = _make_agent(db_conn)
+    owner = make_agent(db_conn)
     first, second = (
-        _make_task(db_conn, owner=owner),
-        _make_task(db_conn, owner=owner, title="second"),
+        make_task(db_conn, owner=owner),
+        make_task(db_conn, owner=owner, title="second"),
     )
     with TestClient(app) as client:
         for tid in (first, second):
@@ -195,15 +195,15 @@ def test_distinct_task_paths_and_principals_are_independent(db_conn: psycopg.Con
             key = principal_key(
                 AuthPrincipal("mcp_client", subject), "PATCH", f"/api/tasks/{first}", "raw"
             )
-            tasks._patch_task_blocking(
+            tasks.patch_task_blocking(
                 app.state.db_pool, first, TaskUpdateRequest(priority=Priority.P2), key
             )
     assert _count(db_conn, "task_patch_receipts") == 4
 
 
 def test_missing_key_cannot_change_task(db_conn: psycopg.Connection) -> None:
-    owner = _make_agent(db_conn)
-    tid = _make_task(db_conn, owner=owner)
+    owner = make_agent(db_conn)
+    tid = make_task(db_conn, owner=owner)
     with TestClient(app) as client:
         assert client.patch(f"/api/tasks/{tid}", json={"title": "changed"}).status_code == 422
     assert db_conn.execute("SELECT title FROM agent_tasks WHERE id=%s", (tid,)).fetchone() == ("t",)

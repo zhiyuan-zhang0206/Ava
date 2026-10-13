@@ -16,17 +16,18 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
-from ava import external
+from ava import impersonation
 from ava.boot import process_clients
+from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
-from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -155,9 +156,9 @@ def test_external_personal_path_uses_borrowed_identity(
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
+    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
 
-    with external.attach(lease["id"]):
+    with impersonation.attach(lease["id"]):
         personal = ava.memory.PERSONAL_PATH
 
     assert personal == tmp_path / str(owner.agent_id) / "memory"
@@ -209,8 +210,8 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
-    attachment = external.attach(lease["id"])
+    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
+    attachment = impersonation.attach(lease["id"])
     try:
         db_conn.execute(
             "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "

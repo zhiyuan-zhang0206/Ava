@@ -37,13 +37,13 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.observation.relay_supervision import RelaySupervision
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
-from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation

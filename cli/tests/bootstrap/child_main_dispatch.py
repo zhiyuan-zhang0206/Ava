@@ -152,7 +152,7 @@ def _init_and_start_settings_free() -> None:
         configured()
         calls.append("logging")
 
-    main._init_cli_logging = log
+    main.init_cli_logging = log
 
     def start(**kwargs: Any) -> int:
         assert not kwargs["command"].config.prepared

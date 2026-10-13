@@ -68,7 +68,7 @@ delta-written marker.
 
 
 @dataclass
-class _ReadSpan:
+class ReadSpan:
     """Timing and outcome of one explicit checkpoint read operation."""
 
     started_at: float = field(default_factory=time.monotonic)
@@ -245,7 +245,7 @@ def _fast_append(state: Any, groups: Sequence[list[BaseMessage]]) -> list[BaseMe
     return [*base, *flat]
 
 
-def _fold_messages(state: Any, writes: Sequence[Any]) -> Any:
+def fold_messages(state: Any, writes: Sequence[Any]) -> Any:
     """`DeltaChannel` reducer: fold stored write values into the message list.
 
     Each write is a list of message-likes (or one message-like). Append-only
@@ -263,14 +263,14 @@ def _fold_messages(state: Any, writes: Sequence[Any]) -> Any:
     return result
 
 
-def _fold_history(entry: Mapping[str, Any]) -> list[BaseMessage]:
+def fold_history(entry: Mapping[str, Any]) -> list[BaseMessage]:
     """Fold one `DeltaChannelHistory` entry into the channel value.
 
     A `DeltaChannel` gives the exact runtime semantics for free: `seed` may be
     missing, a plain list, or a `_DeltaSnapshot` (unwrapped), and an
     `Overwrite` write resets the base the same way the runtime's replay does.
     """
-    channel = DeltaChannel[Any](_fold_messages).from_checkpoint(
+    channel = DeltaChannel[Any](fold_messages).from_checkpoint(
         normalize_stored_message_ids(entry.get("seed", MISSING))
     )
     channel.replay_writes(entry["writes"])
@@ -313,7 +313,7 @@ def _apply_reconstruction(
     checkpoint: dict[str, Any],
     kind: Literal["snapshot", "walk"],
     entry: Mapping[str, Any] | None,
-    span: _ReadSpan,
+    span: ReadSpan,
 ) -> bool:
     """Replace a delta checkpoint's messages value with its plain equivalent."""
     if kind == "snapshot":
@@ -325,14 +325,14 @@ def _apply_reconstruction(
     started = time.monotonic()
     span.phase = "fold"
     try:
-        checkpoint["channel_values"]["messages"] = _fold_history(entry)
+        checkpoint["channel_values"]["messages"] = fold_history(entry)
     finally:
         span.fold_ms = (time.monotonic() - started) * 1000
     return True
 
 
 def reconstruct_delta_messages(
-    checkpointer: PostgresSaver, tuple_: CheckpointTuple, *, span: _ReadSpan | None = None
+    checkpointer: PostgresSaver, tuple_: CheckpointTuple, *, span: ReadSpan | None = None
 ) -> bool:
     """Materialize a delta-written checkpoint's `messages` value, in place.
 
@@ -340,7 +340,7 @@ def reconstruct_delta_messages(
     returns immediately for vanilla-written checkpoints and needs no saver
     call for a stored `_DeltaSnapshot` (which is unwrapped, not folded).
     """
-    span = span or _ReadSpan()
+    span = span or ReadSpan()
     checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
     normalize_checkpoint_message_ids(tuple_)
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
@@ -361,15 +361,15 @@ def reconstruct_delta_messages(
         span.phase = "snapshot"
     repaired = _apply_reconstruction(checkpoint, kind, entry, span)
     if repaired:
-        _log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]), span=span)
+        log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]), span=span)
     return repaired
 
 
 async def areconstruct_delta_messages(
-    checkpointer: AsyncPostgresSaver, tuple_: CheckpointTuple, *, span: _ReadSpan | None = None
+    checkpointer: AsyncPostgresSaver, tuple_: CheckpointTuple, *, span: ReadSpan | None = None
 ) -> bool:
     """Async twin of `reconstruct_delta_messages`."""
-    span = span or _ReadSpan()
+    span = span or ReadSpan()
     checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
     normalize_checkpoint_message_ids(tuple_)
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
@@ -390,15 +390,15 @@ async def areconstruct_delta_messages(
         span.phase = "snapshot"
     repaired = _apply_reconstruction(checkpoint, kind, entry, span)
     if repaired:
-        _log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]), span=span)
+        log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]), span=span)
     return repaired
 
 
-async def _areconstruct_in_recovery(
+async def areconstruct_in_recovery(
     saver: AsyncPostgresSaver,
     tuple_: CheckpointTuple,
     read_generation: int | None,
-    span: _ReadSpan,
+    span: ReadSpan,
     scope: RecoveryReconstructionScope | None,
 ) -> bool:
     normalize_checkpoint_message_ids(tuple_)
@@ -423,7 +423,7 @@ async def _areconstruct_in_recovery(
         if scope.key == key and scope.messages is not None and read_generation == scope.generation:
             span.phase = "cache_copy"
             checkpoint["channel_values"]["messages"] = deepcopy(scope.messages)
-            _log_reconstruction(tuple_, len(scope.messages), cache_hit=True, span=span)
+            log_reconstruction(tuple_, len(scope.messages), cache_hit=True, span=span)
             return True
         generation = scope.generation
         repaired = await areconstruct_delta_messages(saver, tuple_, span=span)
@@ -433,7 +433,7 @@ async def _areconstruct_in_recovery(
         return repaired
 
 
-def _log_reconstruction(
+def log_reconstruction(
     tuple_: CheckpointTuple | None,
     count: int | None,
     *,
@@ -443,7 +443,7 @@ def _log_reconstruction(
     failed_phase: str | None = None,
     elapsed_ms: float | None = None,
     error_type: str | None = None,
-    span: _ReadSpan,
+    span: ReadSpan,
 ) -> None:
     source_config = tuple_.config if tuple_ is not None else config or {}
     configurable: dict[str, Any] = source_config.get("configurable") or {}
@@ -496,7 +496,7 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
     orig_aget_tuple = saver.aget_tuple
 
     def get_tuple(config: Any) -> Any:
-        span = _ReadSpan()
+        span = ReadSpan()
         started = time.monotonic()
         tuple_ = None
         try:
@@ -509,7 +509,7 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
                 reconstruct_delta_messages(cast("PostgresSaver", saver), tuple_, span=span)
             return tuple_
         except Exception as exc:
-            _log_reconstruction(
+            log_reconstruction(
                 tuple_,
                 None,
                 config=config,
@@ -525,7 +525,7 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
     async def aget_tuple(
         config: Any, *, reconstruction: RecoveryReconstructionScope | None = None
     ) -> Any:
-        span = _ReadSpan()
+        span = ReadSpan()
         read_generation = reconstruction.generation if reconstruction is not None else None
         started = time.monotonic()
         tuple_ = None
@@ -536,12 +536,10 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
                 span.tuple_read_ms = (time.monotonic() - started) * 1000
             if tuple_ is not None:
                 span.phase = "repair_detection"
-                await _areconstruct_in_recovery(
-                    saver, tuple_, read_generation, span, reconstruction
-                )
+                await areconstruct_in_recovery(saver, tuple_, read_generation, span, reconstruction)
             return tuple_
         except (Exception, asyncio.CancelledError) as exc:
-            _log_reconstruction(
+            log_reconstruction(
                 tuple_,
                 None,
                 config=config,
@@ -554,12 +552,12 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
             )
             raise
 
-    _wrap_history_identity_reads(saver)
+    wrap_history_identity_reads(saver)
     saver.get_tuple = get_tuple  # type: ignore[method-assign]
     saver.aget_tuple = aget_tuple  # type: ignore[method-assign]
 
 
-def _wrap_history_identity_reads(saver: AsyncPostgresSaver) -> None:
+def wrap_history_identity_reads(saver: AsyncPostgresSaver) -> None:
     """State-history readers bypass get_tuple; normalize their raw tuples too."""
     orig_list = saver.list
     orig_alist = saver.alist

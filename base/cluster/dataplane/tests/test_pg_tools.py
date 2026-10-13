@@ -56,10 +56,10 @@ def test_pg_shm_args_macos_incompatibility_keeps_status_quo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The task's named fallback: a future macOS PG build that rejects either
-    option flips `_PG_SHM_MMAP_OK_ON_MACOS` to False — macOS then keeps its
+    option flips `PG_SHM_MMAP_OK_ON_MACOS` to False — macOS then keeps its
     status quo (no explicit settings) while Linux keeps the pin."""
     monkeypatch.setattr(pg_tools, "is_macos", lambda: True)
-    monkeypatch.setattr(pg_tools, "_PG_SHM_MMAP_OK_ON_MACOS", False)
+    monkeypatch.setattr(pg_tools, "PG_SHM_MMAP_OK_ON_MACOS", False)
     assert pg_tools.pg_shm_args() == ""
     monkeypatch.setattr(pg_tools, "is_macos", lambda: False)
     assert pg_tools.pg_shm_args() == _MMAP_ARGS
@@ -254,7 +254,7 @@ def test_stall_guard_joins_a_real_probe_before_releasing_access(
         owned.append(instance)
         return instance
 
-    monkeypatch.setattr(guard, "_PROBE_INTERVAL_S", 0.01)
+    monkeypatch.setattr(guard, "PROBE_INTERVAL_S", 0.01)
     monkeypatch.setattr(guard, "StallWatchdog", owned_watcher)
     monkeypatch.setattr(psycopg, "connect", observed_connect)
     port = conninfo_to_dict(db_url)["port"]
@@ -286,7 +286,7 @@ def test_stall_guard_reports_a_probe_that_does_not_join(
         owned.append(instance)
         return instance
 
-    monkeypatch.setattr(guard, "_PROBE_INTERVAL_S", 0.01)
+    monkeypatch.setattr(guard, "PROBE_INTERVAL_S", 0.01)
     monkeypatch.setattr(guard, "_PROBE_TIMEOUT_S", 0.01)
     monkeypatch.setattr(guard, "StallWatchdog", owned_watcher)
     monkeypatch.setattr(psycopg, "connect", blocked_connect)

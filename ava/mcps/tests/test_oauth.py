@@ -23,7 +23,7 @@ import ava.mcps._oauth as oauth_mod
 
 def test_token_storage_roundtrip(unit_home: Path) -> None:
     """Tokens and client info survive a write/read cycle at 0600."""
-    storage = oauth_mod._FileTokenStorage("exa")
+    storage = oauth_mod.FileTokenStorage("exa")
     assert storage._path == unit_home / "mcp_oauth" / "exa.json"
 
     token = OAuthToken(
@@ -49,14 +49,14 @@ def test_token_storage_roundtrip(unit_home: Path) -> None:
 
 
 def test_token_storage_empty_when_absent(unit_home: Path) -> None:
-    storage = oauth_mod._FileTokenStorage("none")
+    storage = oauth_mod.FileTokenStorage("none")
     assert asyncio.run(storage.get_tokens()) is None
     assert asyncio.run(storage.get_client_info()) is None
 
 
 def test_token_storage_file_permissions(unit_home: Path) -> None:
     """Tokens are a secret: the file must be owner-only."""
-    storage = oauth_mod._FileTokenStorage("exa")
+    storage = oauth_mod.FileTokenStorage("exa")
     token = OAuthToken(
         access_token="at",  # noqa: S106
         token_type="Bearer",  # noqa: S106
@@ -73,7 +73,7 @@ def test_token_storage_file_permissions(unit_home: Path) -> None:
 
 async def test_callback_server_captures_code() -> None:
     """A real HTTP request to the loopback redirect URI yields the code/state/iss."""
-    cb = oauth_mod._CallbackServer(port=8932)
+    cb = oauth_mod.CallbackServer(port=8932)
     task = asyncio.create_task(cb.wait_for_callback())
 
     # Give the server a moment to bind, then hit the redirect URI. (No socket
@@ -96,8 +96,8 @@ async def test_callback_server_captures_code() -> None:
 
 
 async def test_callback_server_redirect_uri() -> None:
-    assert oauth_mod._CallbackServer().redirect_uri == (
-        f"http://127.0.0.1:{oauth_mod._OAUTH_CALLBACK_PORT}/callback"
+    assert oauth_mod.CallbackServer().redirect_uri == (
+        f"http://127.0.0.1:{oauth_mod.OAUTH_CALLBACK_PORT}/callback"
     )
 
 
@@ -105,10 +105,10 @@ async def test_callback_server_redirect_uri() -> None:
 
 
 def test_normalize_issuer_strips_trailing_slash() -> None:
-    assert oauth_mod._normalize_issuer("https://accounts.google.com/") == (
+    assert oauth_mod.normalize_issuer("https://accounts.google.com/") == (
         "https://accounts.google.com"
     )
-    assert oauth_mod._normalize_issuer("https://accounts.google.com") == (
+    assert oauth_mod.normalize_issuer("https://accounts.google.com") == (
         "https://accounts.google.com"
     )
 
@@ -124,7 +124,7 @@ def test_normalized_validate_issuer_accepts_google_trailing_slash() -> None:
         authorization_endpoint=AnyHttpUrl("https://accounts.google.com/o/oauth2/v2/auth"),
         token_endpoint=AnyHttpUrl("https://oauth2.googleapis.com/token"),
     )
-    oauth_mod._normalized_validate_issuer(md, "https://accounts.google.com")  # no raise
+    oauth_mod.normalized_validate_issuer(md, "https://accounts.google.com")  # no raise
 
 
 def test_normalized_validate_issuer_still_rejects_mismatch() -> None:
@@ -138,7 +138,7 @@ def test_normalized_validate_issuer_still_rejects_mismatch() -> None:
         token_endpoint=AnyHttpUrl("https://evil.example.com/token"),
     )
     with pytest.raises(OAuthFlowError, match="issuer mismatch"):
-        oauth_mod._normalized_validate_issuer(md, "https://accounts.google.com")
+        oauth_mod.normalized_validate_issuer(md, "https://accounts.google.com")
 
 
 # ─── token-auth basic shim ─────────────────────────────────────────────────
@@ -156,9 +156,9 @@ def _make_oauth_context() -> Any:
         server_url="https://mcp.notion.com/mcp",
         client_metadata=OAuthClientMetadata(
             client_name="t",
-            redirect_uris=[AnyUrl(f"http://127.0.0.1:{oauth_mod._OAUTH_CALLBACK_PORT}/callback")],
+            redirect_uris=[AnyUrl(f"http://127.0.0.1:{oauth_mod.OAUTH_CALLBACK_PORT}/callback")],
         ),
-        storage=oauth_mod._FileTokenStorage("t"),
+        storage=oauth_mod.FileTokenStorage("t"),
         redirect_handler=None,
         callback_handler=None,
     )
@@ -199,7 +199,7 @@ def test_token_auth_basic_shim_strips_body_client_id(unit_home: Path) -> None:
     data, _ = ctx.prepare_token_auth(dict(base_data), dict(base_headers))
     assert "client_id" in data
 
-    oauth_mod._install_token_auth_basic_shim()
+    oauth_mod.install_token_auth_basic_shim()
     data, headers = ctx.prepare_token_auth(dict(base_data), dict(base_headers))
     # the client identity rides only in the Basic header (RFC 6749 §2.3.1)
     assert "client_id" not in data
@@ -216,7 +216,7 @@ def test_token_auth_basic_shim_keeps_client_secret_post_body(unit_home: Path) ->
     ctx = _make_oauth_context()
     ctx.client_info = _client_info("client_secret_post", _CLIENT_SECRET)
 
-    oauth_mod._install_token_auth_basic_shim()
+    oauth_mod.install_token_auth_basic_shim()
     data, headers = ctx.prepare_token_auth(
         {"grant_type": "authorization_code", "code": "c", "client_id": "cid"},
         {"Content-Type": "application/x-www-form-urlencoded"},
@@ -231,7 +231,7 @@ def test_token_auth_basic_shim_leaves_none_method_alone(unit_home: Path) -> None
     ctx = _make_oauth_context()
     ctx.client_info = _client_info("none", None)
 
-    oauth_mod._install_token_auth_basic_shim()
+    oauth_mod.install_token_auth_basic_shim()
     data, headers = ctx.prepare_token_auth(
         {"grant_type": "authorization_code", "code": "c", "client_id": "cid"},
         {"Content-Type": "application/x-www-form-urlencoded"},

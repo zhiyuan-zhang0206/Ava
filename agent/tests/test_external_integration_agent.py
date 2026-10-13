@@ -18,16 +18,17 @@ import base.packages.plugins.loading.registry as extensions_registry
 from agent import state as state_module
 from agent.extensions.plugin_state_codec import decode_plugin_delta, load_snapshot
 from agent.messages import NoteTag, system_note_message
-from ava import external
+from ava import impersonation
+from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
 from base.agents.impersonation import history
+from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
-from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
@@ -139,7 +140,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
+    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
     script = (
         Path(__file__).parents[2]
         / "ava_builtins/skills/platform/impersonator-guide/scripts/read_instructions.py"
@@ -150,7 +151,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     spec.loader.exec_module(reader)
     expected = "Native core and plugin rules\n\n[system] Configured skill rules"
     assert reader.read_instructions(lease["session_id"], agent_id) == expected
-    with external.attach(lease["id"]):
+    with impersonation.attach(lease["id"]):
         assert agent_id == ava.self.AGENT_ID
         assert agent_identity.require_actor() == f"agent:{agent_id}"
         assert ava.state.messages[-1].content == "Native task"
@@ -172,7 +173,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     }
     assert native_snapshot.integration__seen == {"native"}
     assert reader.read_instructions(lease["session_id"], agent_id) == expected
-    with external.attach(lease["id"]):
+    with impersonation.attach(lease["id"]):
         assert handle.read().seen == {"native", "external"}
     assert (
         leases.get(
@@ -232,9 +233,9 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
+    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
 
-    with external.attach(lease["id"]):
+    with impersonation.attach(lease["id"]):
         ava.agents.send_message(peer_id, "Implementation ready for review")
 
     outbound = db_conn.execute(
@@ -309,8 +310,8 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
-    with external.attach(lease["id"]):
+    monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
+    with impersonation.attach(lease["id"]):
         ava.agents.send_message(peer_id, "Log-backed attachment send")
     leases.release(
         database,

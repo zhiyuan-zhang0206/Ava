@@ -169,7 +169,7 @@ def test_start_does_not_reload_a_recycled_pid(
     """A foreign live PID leaves custody unresolved; start neither signals nor writes."""
     _write_pidfile(home, os.getpid())
     monkeypatch.setattr(pgb, "pgbouncer_bin", lambda: str(Path(__file__)))
-    monkeypatch.setattr(pgb, "_write_config", Mock(side_effect=AssertionError("foreign PID")))
+    monkeypatch.setattr(pgb, "write_config", Mock(side_effect=AssertionError("foreign PID")))
     with pytest.raises(RuntimeError, match="cannot verify this home's PgBouncer"):
         pgb.ensure_pgbouncer(
             pg_port=15433,

@@ -2,7 +2,7 @@
 argument sequence, and the gateway init() auto-switch onto main.
 
 Each test supplies its own MachineIdentity directly to the repository.
-These tests do not touch the network or a real remote: _run_git is recorded.
+These tests do not touch the network or a real remote: run_git is recorded.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def test_pull_main_git_sequence_and_returned_sha(
             return "deadbeef1234"
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     sha = memory_repo.pull_main(machine=machine_identity)
 
@@ -84,7 +84,7 @@ def test_init_gateway_on_stale_machine_branch_switches_to_main(
             return "machine-cloud"  # stale branch from a prior role
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     memory_repo.init(machine=machine_identity)  # must not raise
 
@@ -105,7 +105,7 @@ def test_init_agent_runner_on_wrong_branch_raises(
             return "main"  # not machine-test-host-2
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     with pytest.raises(memory_repo.MemoryBranchMismatch):
         memory_repo.init(machine=machine_identity)
@@ -127,7 +127,7 @@ def test_init_gateway_on_main_is_noop(
             return "main"
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     memory_repo.init(machine=machine_identity)
 
@@ -189,7 +189,7 @@ def test_init_gateway_creates_checkout_on_main(
         calls.append(args)
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
     # Go through the no-remote path: raise MemoryRemoteMissing so init_gateway()
     # creates a local empty repo.
     monkeypatch.setattr(
@@ -238,7 +238,7 @@ def test_init_gateway_already_initialized_on_main_is_noop(
             return "main"
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     memory_repo.init_gateway(machine=machine_identity)
 
@@ -267,7 +267,7 @@ def test_init_gateway_on_wrong_branch_auto_switches(
             return "machine-cloud"  # stale
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     memory_repo.init_gateway(machine=machine_identity)
 
@@ -291,7 +291,7 @@ def test_init_combined_unit_does_not_auto_switch_agent_runner_checkout(
             return "main"  # not machine-test-host
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     with pytest.raises(memory_repo.MemoryBranchMismatch):
         memory_repo.init(machine=machine_identity)
@@ -316,7 +316,7 @@ def test_pull_main_keep_local_is_noop(
             return "cafef00d"
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     sha = memory_repo.pull_main(machine=machine_identity)
 
@@ -345,7 +345,7 @@ def test_init_keep_local_strips_remote_when_branch_correct(
             return "origin"
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     memory_repo.init(machine=machine_identity)
 
@@ -369,7 +369,7 @@ def test_init_keep_local_fresh_repo_inits_without_remote(
         calls.append(args)
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     import subprocess as sp
 
@@ -419,7 +419,7 @@ def test_init_gateway_keep_local_strips_remote(
             return "origin"
         return ""
 
-    monkeypatch.setattr(memory_repo, "_run_git", _fake_run_git)
+    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
 
     memory_repo.init_gateway(machine=machine_identity)
 
@@ -427,7 +427,7 @@ def test_init_gateway_keep_local_strips_remote(
     assert not any(c[:1] == ("fetch",) for c in calls)
 
 
-# ── _run_git is bounded ─────────────────────────────────────────────────────
+# ── run_git is bounded ─────────────────────────────────────────────────────
 
 
 def test_run_git_is_bounded_and_kills_the_tree_on_expiry(
@@ -453,15 +453,15 @@ def test_run_git_is_bounded_and_kills_the_tree_on_expiry(
 
     monkeypatch.setattr(memory_repo, "run_bounded", _fake_run_bounded)
 
-    assert memory_repo._run_git("rev-parse", "HEAD") == "abc123"
+    assert memory_repo.run_git("rev-parse", "HEAD") == "abc123"
     assert seen[0]["argv"] == ["git", "rev-parse", "HEAD"]
-    assert seen[0]["timeout"] == memory_repo._GIT_TIMEOUT_S
+    assert seen[0]["timeout"] == memory_repo.GIT_TIMEOUT_S
     assert isinstance(seen[0]["timeout"], float)
 
 
 def test_run_git_raises_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     """`run_bounded` deliberately has no `check=`, so the raise-on-non-zero half
-    of `_run_git`'s contract lives in `_run_git` — a failed git must not read as
+    of `run_git`'s contract lives in `run_git` — a failed git must not read as
     empty output to callers that branch on it."""
 
     def _fails(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -469,7 +469,7 @@ def test_run_git_raises_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(memory_repo, "run_bounded", _fails)
     with pytest.raises(subprocess.CalledProcessError) as exc:
-        memory_repo._run_git("fetch", "origin", "main")
+        memory_repo.run_git("fetch", "origin", "main")
     assert exc.value.returncode == 1
     assert exc.value.stderr == "fatal: no remote"
 
@@ -479,8 +479,8 @@ def test_run_git_propagates_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None
     into a success — the indexer's caller logs it and retries next cycle."""
 
     def _expire(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.TimeoutExpired(list(argv), memory_repo._GIT_TIMEOUT_S)
+        raise subprocess.TimeoutExpired(list(argv), memory_repo.GIT_TIMEOUT_S)
 
     monkeypatch.setattr(memory_repo, "run_bounded", _expire)
     with pytest.raises(subprocess.TimeoutExpired):
-        memory_repo._run_git("fetch", "origin", "main")
+        memory_repo.run_git("fetch", "origin", "main")

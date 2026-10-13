@@ -63,7 +63,7 @@ from base.telemetry.metrics.plugin_metrics import (
 # not this sequence — it only breaks ties for un-pinned specs and shapes the
 # inspector listing. Every module is required: a definition module that cannot
 # be imported fails the collection rather than silently emptying its section.
-_CORE_DEFINITION_MODULES: tuple[ModuleType, ...] = (
+CORE_DEFINITION_MODULES: tuple[ModuleType, ...] = (
     panels,
     cost,
     dismissed,
@@ -99,7 +99,7 @@ def collect_core_metrics() -> list[MetricSpec]:
         InvalidMetricQuery: any template failed validation.
     """
     collected: dict[str, MetricSpec] = {}
-    for module in _CORE_DEFINITION_MODULES:
+    for module in CORE_DEFINITION_MODULES:
         for spec in cast("Any", module).core_metrics():
             if spec.name in collected:
                 raise DuplicateMetric(

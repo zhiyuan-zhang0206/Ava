@@ -61,7 +61,7 @@ def test_start_remote_skips_local_instance_and_probes(
     monkeypatch.setattr(dp, "remote_pg_reachable", _remote_postgres)
     monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
 
-    rc = start_mod._ensure_gateway_data_plane(
+    rc = start_mod.ensure_gateway_data_plane(
         database_factory=operator_database, machine=command_runtime.machine
     )
 
@@ -96,7 +96,7 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
         _remote_postgres,
     )
 
-    rc = start_mod._ensure_gateway_data_plane(
+    rc = start_mod.ensure_gateway_data_plane(
         database_factory=operator_database, machine=command_runtime.machine
     )
 

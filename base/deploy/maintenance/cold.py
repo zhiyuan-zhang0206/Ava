@@ -52,7 +52,7 @@ def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
     ):
         raise RuntimeError(f"legacy native consumer still owns agent {agent_id}")
     _require_no_unsettled_exec(conn, agent_id)
-    _require_no_consumer_process()
+    require_no_consumer_process()
 
 
 def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> None:
@@ -81,7 +81,7 @@ def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> 
         )
 
 
-def _require_no_consumer_process() -> None:
+def require_no_consumer_process() -> None:
     home = ava_home().resolve()
     for process in psutil.process_iter():
         try:

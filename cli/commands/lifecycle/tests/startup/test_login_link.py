@@ -51,7 +51,7 @@ def _configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.gateway, "browser_origin", "")
     monkeypatch.setattr(settings.services, "frontend_healthcheck_url", "http://localhost:3000")
     monkeypatch.setattr(settings.services, "app_port", None)
-    monkeypatch.setattr(login_link, "_at_terminal", lambda: True)
+    monkeypatch.setattr(login_link, "at_terminal", lambda: True)
 
 
 def _dial(monkeypatch: pytest.MonkeyPatch, response: httpx.Response | Exception) -> _Dial:
@@ -92,7 +92,7 @@ def test_prints_the_ticket_in_the_fragment_and_never_the_secret(
 def test_skips_when_output_is_not_a_terminal(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(login_link, "_at_terminal", lambda: False)
+    monkeypatch.setattr(login_link, "at_terminal", lambda: False)
     dial = _dial(monkeypatch, _reply())
     login_link.print_login_link({"gateway", "gate"})
     out = capsys.readouterr().out

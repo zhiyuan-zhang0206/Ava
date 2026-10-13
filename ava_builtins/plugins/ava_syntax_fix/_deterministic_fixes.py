@@ -78,7 +78,7 @@ def _to_triple_quote(quote_char: str) -> str:
     return quote_char * 3
 
 
-def _find_unescaped_char(line: str, char: str, start: int) -> int:
+def find_unescaped_char(line: str, char: str, start: int) -> int:
     """Index of the first unescaped `char` at/after `start` in `line`, or -1."""
     k = start
     while k < len(line):
@@ -91,7 +91,7 @@ def _find_unescaped_char(line: str, char: str, start: int) -> int:
     return -1
 
 
-def _scan_cross_line_opener(line: str) -> tuple[str, int, bool] | None:
+def scan_cross_line_opener(line: str) -> tuple[str, int, bool] | None:
     """Scan `line` for a quote that opens a string not closed on this line.
 
     Returns (quote_char, opener_pos, stuck):
@@ -106,7 +106,7 @@ def _scan_cross_line_opener(line: str) -> tuple[str, int, bool] | None:
         if line[j] == "#":
             return None
         prefix_end = j
-        while prefix_end < len(line) and line[prefix_end] in _STRING_PREFIX_CHARS:
+        while prefix_end < len(line) and line[prefix_end] in STRING_PREFIX_CHARS:
             prefix_end += 1
         if prefix_end < len(line) and line[prefix_end] in ("'", '"'):
             quote_char = line[prefix_end]
@@ -118,7 +118,7 @@ def _scan_cross_line_opener(line: str) -> tuple[str, int, bool] | None:
                     j = prefix_end + 3 + close_pos + 3
                     continue
                 return (triple, prefix_end, True)
-            close_pos = _find_unescaped_char(line, quote_char, prefix_end + 1)
+            close_pos = find_unescaped_char(line, quote_char, prefix_end + 1)
             if close_pos >= 0:
                 j = close_pos + 1
                 continue
@@ -144,7 +144,7 @@ def fix_string_newlines(code: str) -> tuple[str, int]:
     for i in range(len(lines)):
         line = lines[i]
         if in_string_info is None:
-            found = _scan_cross_line_opener(line)
+            found = scan_cross_line_opener(line)
             if found is None:
                 continue
             quote_char, opener_pos, stuck = found
@@ -156,7 +156,7 @@ def fix_string_newlines(code: str) -> tuple[str, int]:
             changes += 1
             continue
         orig_delim, triple_delim = in_string_info
-        close_pos = _find_unescaped_char(line, orig_delim, 0)
+        close_pos = find_unescaped_char(line, orig_delim, 0)
         if close_pos >= 0:
             lines[i] = line[:close_pos] + triple_delim + line[close_pos + 1 :]
             changes += 1
@@ -318,7 +318,7 @@ def fix_missing_comma(code: str) -> tuple[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def _string_advance(
+def string_advance(
     code: str, i: int, in_string: str, *, in_triple: bool
 ) -> tuple[int, str | None, bool]:
     """Advance one char inside a string literal.
@@ -337,7 +337,7 @@ def _string_advance(
     return i + 1, in_string, False
 
 
-def _scan_unbalanced_brackets(code: str) -> tuple[str, list[tuple[str, int]], int]:
+def scan_unbalanced_brackets(code: str) -> tuple[str, list[tuple[str, int]], int]:
     """Scan `code` outside string literals, dropping extra closers in place.
 
     Returns (code, stack, changes): `code` with extra closing brackets
@@ -355,7 +355,7 @@ def _scan_unbalanced_brackets(code: str) -> tuple[str, list[tuple[str, int]], in
     while i < len(code):
         ch = code[i]
         if in_string:
-            i, in_string, in_triple = _string_advance(code, i, in_string, in_triple=in_triple)
+            i, in_string, in_triple = string_advance(code, i, in_string, in_triple=in_triple)
             continue
         if ch in ('"', "'"):
             if code[i : i + 3] in ('"""', "'''"):
@@ -386,7 +386,7 @@ def fix_bracket_matching(code: str) -> tuple[str, int]:
     - Missing closing bracket: append at the end of the source.
     - Extra closing bracket: remove it.
     """
-    code, stack, changes = _scan_unbalanced_brackets(code)
+    code, stack, changes = scan_unbalanced_brackets(code)
     if not stack:
         return code, changes
     pairs = {"(": ")", "[": "]", "{": "}"}
@@ -418,7 +418,7 @@ def fix_fstring_expressions(code: str) -> tuple[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def _compiles(code: str) -> bool:
+def compiles(code: str) -> bool:
     """True when `code` is syntactically valid Python (compiles to a code object)."""
     try:
         compile(code, "<guard>", "exec")
@@ -427,7 +427,7 @@ def _compiles(code: str) -> bool:
     return True
 
 
-def _line_starts(code: str) -> list[int]:
+def line_starts(code: str) -> list[int]:
     """Absolute char offset of the start of each (1-indexed) source line."""
     starts = [0]
     for ln in code.split("\n"):
@@ -439,10 +439,10 @@ def _line_starts(code: str) -> list[int]:
 # Unterminated single/double-quoted string -> triple-quote (offset-driven)
 # ---------------------------------------------------------------------------
 
-_STRING_PREFIX_CHARS = "fFrRbBuU"
+STRING_PREFIX_CHARS = "fFrRbBuU"
 
 
-def _unterminated_error(code: str) -> tuple[int, int] | None:
+def unterminated_error(code: str) -> tuple[int, int] | None:
     """Return (lineno, offset) of an unterminated-string SyntaxError, or None."""
     try:
         compile(code, "<guard>", "exec")
@@ -457,16 +457,16 @@ def _unterminated_error(code: str) -> tuple[int, int] | None:
     return None
 
 
-def _unterminated_opener_pos(code: str, lineno: int, offset: int) -> int:
+def unterminated_opener_pos(code: str, lineno: int, offset: int) -> int:
     """Char offset of the opening quote the SyntaxError points at; any string
     prefix letters (f / r / b / u) before it are skipped."""
-    op = _line_starts(code)[lineno - 1] + (offset - 1)
-    while op < len(code) and code[op] in _STRING_PREFIX_CHARS:
+    op = line_starts(code)[lineno - 1] + (offset - 1)
+    while op < len(code) and code[op] in STRING_PREFIX_CHARS:
         op += 1
     return op
 
 
-def _first_compiling_closer(code: str, op: int, quote: str) -> str | None:
+def first_compiling_closer(code: str, op: int, quote: str) -> str | None:
     """Find the first later same-char quote whose triple conversion makes the
     whole source compile; return the fixed code, or None."""
     triple = quote * 3
@@ -478,7 +478,7 @@ def _first_compiling_closer(code: str, op: int, quote: str) -> str | None:
             continue
         if ch == quote and "\n" in code[op:i]:
             candidate = code[:op] + triple + code[op + 1 : i] + triple + code[i + 1 :]
-            if _compiles(candidate):
+            if compiles(candidate):
                 return candidate
         i += 1
     return None
@@ -503,14 +503,14 @@ def fix_unterminated_to_triple(code: str) -> tuple[str, int]:
     source compile. Preferring the nearest compiling closer keeps the string as
     small as the parse allows.
     """
-    err = _unterminated_error(code)
+    err = unterminated_error(code)
     if err is None:
         return code, 0
     lineno, offset = err
-    op = _unterminated_opener_pos(code, lineno, offset)
+    op = unterminated_opener_pos(code, lineno, offset)
     if op >= len(code) or code[op] not in ("'", '"'):
         return code, 0
-    candidate = _first_compiling_closer(code, op, code[op])
+    candidate = first_compiling_closer(code, op, code[op])
     if candidate is None:
         return code, 0
     return candidate, 1
@@ -522,7 +522,7 @@ def fix_unterminated_to_triple(code: str) -> tuple[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def _is_raw_prefixed(code: str, pos: int) -> bool:
+def is_raw_prefixed(code: str, pos: int) -> bool:
     """True when the string starting at `pos` carries a raw (r) prefix."""
     j = pos - 1
     prefix = ""
@@ -532,12 +532,12 @@ def _is_raw_prefixed(code: str, pos: int) -> bool:
     return "r" in prefix.lower()
 
 
-def _triple_quote_is_string_boundary(code: str, pos: int) -> bool:
+def triple_quote_is_string_boundary(code: str, pos: int) -> bool:
     """True when the triple-quote at `pos` abuts a concatenation / collection /
     call-argument operator, so it is a real string delimiter (the opener or
     closer of a separate literal) rather than interior content.
 
-    The triple-quote analogue of _quote_is_string_boundary, using the same
+    The triple-quote analogue of quote_is_string_boundary, using the same
     operator set. A triple-quote hugged by ``+ , ( [ {`` on the left or
     ``+ , ) ] }`` on the right delimits its own literal -- escaping it would
     merge two adjacent literals (e.g. the ``old=`` and ``new=`` arguments of a
@@ -548,7 +548,7 @@ def _triple_quote_is_string_boundary(code: str, pos: int) -> bool:
     return bool(left and left[-1] in "+,([{") or bool(right and right[0] in "+,)]}")
 
 
-def _find_triple_quotes(code: str, delim: str) -> list[int]:
+def find_triple_quotes(code: str, delim: str) -> list[int]:
     """All positions where the 3-char `delim` occurs in `code`."""
     positions: list[int] = []
     i = 0
@@ -561,7 +561,7 @@ def _find_triple_quotes(code: str, delim: str) -> list[int]:
     return positions
 
 
-def _escape_interior_triples(
+def escape_interior_triples(
     code: str, opener: int, closer: int, interior: list[int], delim: str
 ) -> str:
     """Rebuild `code` escaping every triple-quote strictly between `opener`
@@ -576,21 +576,21 @@ def _escape_interior_triples(
     return out
 
 
-def _first_compiling_escape(code: str, delim: str, positions: list[int]) -> tuple[str, int] | None:
+def first_compiling_escape(code: str, delim: str, positions: list[int]) -> tuple[str, int] | None:
     """Try opener/closer pairs in preference order; return the first escaped
     result that compiles as (fixed_code, n_escaped), or None."""
     for oi in range(len(positions)):
-        if _is_raw_prefixed(code, positions[oi]):
+        if is_raw_prefixed(code, positions[oi]):
             continue
         for ci in range(len(positions) - 1, oi, -1):
             opener, closer = positions[oi], positions[ci]
             interior = [p for p in positions if opener < p < closer]
             if not interior:
                 continue
-            if any(_triple_quote_is_string_boundary(code, p) for p in interior):
+            if any(triple_quote_is_string_boundary(code, p) for p in interior):
                 continue
-            out = _escape_interior_triples(code, opener, closer, interior, delim)
-            if _compiles(out):
+            out = escape_interior_triples(code, opener, closer, interior, delim)
+            if compiles(out):
                 return out, len(interior)
     return None
 
@@ -620,13 +620,13 @@ def fix_nested_triple_quote(code: str) -> tuple[str, int]:
     string that compiles but means something else. Those cases are left for the
     repair step, where intent can be inferred, rather than corrupted here.
     """
-    if _compiles(code):
+    if compiles(code):
         return code, 0
     for delim in ('"""', "'''"):
-        positions = _find_triple_quotes(code, delim)
+        positions = find_triple_quotes(code, delim)
         if len(positions) < 3:
             continue
-        result = _first_compiling_escape(code, delim, positions)
+        result = first_compiling_escape(code, delim, positions)
         if result is not None:
             return result
     return code, 0
@@ -637,7 +637,7 @@ def fix_nested_triple_quote(code: str) -> tuple[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def _quote_is_string_boundary(line: str, pos: int) -> bool:
+def quote_is_string_boundary(line: str, pos: int) -> bool:
     """True when the quote at `pos` abuts a concatenation / collection operator
     (so it is a real adjacent string delimiter, not a content quote)."""
     left = line[:pos].rstrip()
@@ -645,7 +645,7 @@ def _quote_is_string_boundary(line: str, pos: int) -> bool:
     return bool(left and left[-1] in "+,([{") or bool(right and right[0] in "+,)]}")
 
 
-def _syntax_error_lineno(code: str) -> int | None:
+def syntax_error_lineno(code: str) -> int | None:
     """Line number of the first SyntaxError, or None when `code` compiles."""
     try:
         compile(code, "<guard>", "exec")
@@ -654,7 +654,7 @@ def _syntax_error_lineno(code: str) -> int | None:
     return None
 
 
-def _quote_positions(line: str, quote: str) -> list[int]:
+def quote_positions(line: str, quote: str) -> list[int]:
     """Positions of unescaped `quote` chars in `line`."""
     positions: list[int] = []
     i = 0
@@ -668,7 +668,7 @@ def _quote_positions(line: str, quote: str) -> list[int]:
     return positions
 
 
-def _escape_interior_quotes(line: str, opener: int, interior: list[int], quote: str) -> str:
+def escape_interior_quotes(line: str, opener: int, interior: list[int], quote: str) -> str:
     """Rebuild `line` with every quote in `interior` escaped (\\<quote>)."""
     new_line = line[: opener + 1]
     last = opener + 1
@@ -679,7 +679,7 @@ def _escape_interior_quotes(line: str, opener: int, interior: list[int], quote: 
     return new_line
 
 
-def _first_compiling_line_escape(
+def first_compiling_line_escape(
     lines: list[str], lineno: int, line: str, quote: str, positions: list[int]
 ) -> tuple[str, int] | None:
     """Try opener/closer pairs on `line`; return the first candidate that makes
@@ -690,11 +690,11 @@ def _first_compiling_line_escape(
             interior = positions[oi + 1 : ci]
             if not interior:
                 continue
-            if any(_quote_is_string_boundary(line, p) for p in interior):
+            if any(quote_is_string_boundary(line, p) for p in interior):
                 continue
-            new_line = _escape_interior_quotes(line, opener, interior, quote)
+            new_line = escape_interior_quotes(line, opener, interior, quote)
             candidate = "\n".join([*lines[: lineno - 1], new_line, *lines[lineno:]])
-            if _compiles(candidate):
+            if compiles(candidate):
                 return candidate, len(interior)
     return None
 
@@ -712,7 +712,7 @@ def fix_escape_inner_quotes(code: str) -> tuple[str, int]:
     wrong-but-compiling string, so such candidates are rejected and the error
     is left for the repair step instead.
     """
-    lineno = _syntax_error_lineno(code)
+    lineno = syntax_error_lineno(code)
     if not lineno:
         return code, 0
     lines = code.split("\n")
@@ -720,10 +720,10 @@ def fix_escape_inner_quotes(code: str) -> tuple[str, int]:
         return code, 0
     line = lines[lineno - 1]
     for quote in ('"', "'"):
-        positions = _quote_positions(line, quote)
+        positions = quote_positions(line, quote)
         if len(positions) < 3:
             continue
-        result = _first_compiling_line_escape(lines, lineno, line, quote, positions)
+        result = first_compiling_line_escape(lines, lineno, line, quote, positions)
         if result is not None:
             return result
     return code, 0
@@ -776,12 +776,12 @@ def apply_all_deterministic_fixes(code: str) -> tuple[str, list[str]]:
     The net invariant: this never emits code that compiles worse than its input,
     and it never modifies code that already compiles.
     """
-    if _compiles(code):
+    if compiles(code):
         return code, []
 
     for name, func in _FIX_FUNCTIONS:
         fixed, n = func(code)
-        if n and n > 0 and _compiles(fixed):
+        if n and n > 0 and compiles(fixed):
             return fixed, [f"{name}({n})"]
 
     return code, []

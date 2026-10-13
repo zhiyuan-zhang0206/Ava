@@ -224,7 +224,7 @@ def inspect_snapshot(
         collection = _rows(conn, "SELECT started_at FROM agent_metric_collection", ())[0][
             "started_at"
         ]
-        snapshot = _read_snapshot(conn, agent_id, start, sampled_at, spawned_at, collection)
+        snapshot = read_snapshot(conn, agent_id, start, sampled_at, spawned_at, collection)
     # Outside the read transaction: the coverage note is a diagnostic side
     # channel (background log + event; task #3869) and never joins
     # the snapshot itself.
@@ -423,7 +423,7 @@ def _turn_evidence(
     return turn_evidence
 
 
-def _read_snapshot(
+def read_snapshot(
     conn: Connection[Any],
     agent_id: int,
     start: datetime,

@@ -298,7 +298,7 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_terminal_closure(
     with pytest.raises(client.ServiceDownError):
         client.request("list")
     stop.require_no_terminals()
-    stop._await_no_terminals(time.monotonic(), "terminals")
+    stop.await_no_terminals(time.monotonic(), "terminals")
     assert job.poll() is None, "fixture teardown, not terminal-presence probing, owns this job"
     assert admission.snapshot() == before
     assert not journal.exists()
@@ -539,7 +539,7 @@ def _launch_incident_shape_pooler(
     port = _free_port()
     role = pb.POOLER_ADMIN
     secret = "s3cr3t"  # noqa: S105 — private ephemeral fixture
-    pb._write_config(
+    pb.write_config(
         pg_port=15433,
         listen_port=port,
         db_name="ava_maintenance_test",
@@ -616,7 +616,7 @@ def test_real_start_retains_pooler_with_held_client(
         home, monkeypatch, command_machine=command_machine
     )
     old = OwnedProcess.capture(psutil.Process(pid))
-    config = (base_pooler.ini_path().read_bytes(), pb._userlist_path().read_bytes())
+    config = (base_pooler.ini_path().read_bytes(), pb.userlist_path().read_bytes())
     try:
         with psycopg.connect(
             f"postgresql://{role}:{secret}@127.0.0.1:{port}/pgbouncer", autocommit=True
@@ -643,7 +643,7 @@ def test_real_start_retains_pooler_with_held_client(
                     machine=command_machine,
                 )
             assert old.live(), "normal start must retain a pooler still draining its client"
-            assert pb._running_pid() == pid, "no replacement may be launched"
-            assert (base_pooler.ini_path().read_bytes(), pb._userlist_path().read_bytes()) == config
+            assert pb.running_pid() == pid, "no replacement may be launched"
+            assert (base_pooler.ini_path().read_bytes(), pb.userlist_path().read_bytes()) == config
     finally:
         _kill_test_poolers(pid)

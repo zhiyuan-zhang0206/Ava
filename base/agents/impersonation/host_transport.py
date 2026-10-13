@@ -48,7 +48,7 @@ _MIN_REMAINING_SECONDS = 0.05
 _REASON_MAX_CHARS = 200
 _CLIENT_INFO: dict[str, str] = {"name": "ava-impersonation-relay", "version": "1"}
 _INITIALIZE_REQUEST_ID = 1
-_TURN_REQUEST_ID = 2
+TURN_REQUEST_ID = 2
 
 
 def default_control_socket() -> Path:
@@ -111,7 +111,7 @@ def live_submit(
         _initialize(conn, deadline)
         response = _request(
             conn,
-            _TURN_REQUEST_ID,
+            TURN_REQUEST_ID,
             "turn/start",
             {"threadId": thread_id, "input": [{"type": "text", "text": message}]},
             deadline,

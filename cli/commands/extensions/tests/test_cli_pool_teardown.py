@@ -17,7 +17,7 @@ from cli.commands.extensions.materialize import (
     adopt_local_extensions,
     materialize_cluster_extensions,
 )
-from cli.commands.extensions.skill_package import _register_in_cluster
+from cli.commands.extensions.skill_package import register_in_cluster
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -138,7 +138,7 @@ def test_register_in_cluster_closes_pool(
     """Registration closes its pool even when there are no packages to register."""
     spy = _install_pool_spy(monkeypatch)
 
-    _register_in_cluster(
+    register_in_cluster(
         [],
         source="https://example.com/repo.git",
         ref="main",

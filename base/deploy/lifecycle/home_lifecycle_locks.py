@@ -35,13 +35,13 @@ def lifecycle_lock_path() -> Path:
     return base.paths.ava_home() / "deploy-state.lifecycle.lock"
 
 
-def _holder_path(path: Path) -> Path:
+def holder_path(path: Path) -> Path:
     return path.with_name(f"{path.name}.holder.json")
 
 
 def _last_holder(path: Path) -> str:
     try:
-        data = json.loads(_holder_path(path).read_text())
+        data = json.loads(holder_path(path).read_text())
         return (
             f"pid={data['pid']} purpose={data['purpose']!r} "
             f"since={data['since']} state={data['state']}"
@@ -54,7 +54,7 @@ def _fsync_parent(path: Path) -> None:
     fsync_parent(path)
 
 
-def _write_atomic(path: Path, payload: dict[str, object]) -> None:
+def write_atomic(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(
         path,
@@ -88,14 +88,14 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
                 "since": dt.datetime.now(dt.UTC).isoformat(),
             }
             try:
-                _write_atomic(_holder_path(path), {**holder, "state": "held"})
+                write_atomic(holder_path(path), {**holder, "state": "held"})
             except OSError:
                 _log.warning("[home-lifecycle-locks] could not record lock holder", exc_info=True)
             try:
                 yield
             finally:
                 try:
-                    _write_atomic(_holder_path(path), {**holder, "state": "released"})
+                    write_atomic(holder_path(path), {**holder, "state": "released"})
                 except OSError:
                     _log.warning(
                         "[home-lifecycle-locks] could not mark released lock holder", exc_info=True

@@ -36,13 +36,13 @@ from base.agents.tests.capture_inputs import (
 )
 from base.agents.tests.capture_inputs import lease as lease
 from base.agents.tests.capture_inputs import owner as owner
+from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event

@@ -31,7 +31,7 @@ def _write_machine(unit_home: Path, servers: dict[str, dict[str, str]]) -> None:
 def _two_servers(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A machine mcp.json defining two servers, isolated from builtin/plugin sources."""
     monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
-    monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
+    monkeypatch.setattr(cfg_mod, "plugin_config_paths", list)
     _write_machine(unit_home, {"fs": {"command": "a"}, "github": {"command": "b"}})
     return unit_home
 

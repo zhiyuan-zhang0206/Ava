@@ -6,7 +6,7 @@ import asyncio
 import socket
 
 
-def _find_free_port() -> int:
+def find_free_port() -> int:
     """Grabs a free localhost port — OS-assigned to avoid colliding with prod default ports."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
@@ -15,7 +15,7 @@ def _find_free_port() -> int:
     return port
 
 
-async def _http_get(port: int, path: str) -> tuple[int, bytes]:
+async def http_get(port: int, path: str) -> tuple[int, bytes]:
     """Simple HTTP 1.1 GET — avoids pulling in httpx/aiohttp test dependency."""
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     writer.write(f"GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".encode())
@@ -29,5 +29,5 @@ async def _http_get(port: int, path: str) -> tuple[int, bytes]:
     return status, body
 
 
-def _probe_url(port: int) -> str:
+def probe_url(port: int) -> str:
     return f"http://127.0.0.1:{port}/healthz"
