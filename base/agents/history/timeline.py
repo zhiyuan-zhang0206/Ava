@@ -17,7 +17,6 @@ and produced a snapshot missing the just-claimed inbound.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
 from langchain_core.messages import (
@@ -39,7 +38,6 @@ from base.agents.messages.kwargs import (
     AvaMsgType,
     NoteTag,
     kwargs_read_time,
-    message_read_time,
     read_ava_kwargs,
 )
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
@@ -51,12 +49,6 @@ __all__ = [
     "timeline_default_limit",
 ]
 
-
-# Items after the same inbound anchor are offset by a microsecond increment to
-# preserve relative order without colliding with the next real-ts anchor
-# (assuming two inbounds are at least 1 second apart, a million micro-offset
-# items fit between).
-_LG_TS_STEP_US = 1
 
 # system_note tags whose chip hides the wall-clock ts: memory and skill recall (ambient
 # context) and the one-time guidance notes (compact reminder, the SDK
@@ -144,27 +136,6 @@ def build_timeline_items(
     """
     items: list[TimelineItem] = []
     sdk_by_id = sdk_calls_by_tool_call_id(messages, start)
-    # Epoch-0 base of the synthetic ts for a message with no read time (it
-    # sorts such items before all real-ts items).
-    epoch = datetime.fromtimestamp(0, tz=UTC)
-    sub_offset = 0
-
-    def next_ts(msg: BaseMessage | None = None) -> str:
-        """The item's wall-clock ts: the message's own real read time
-        (`message_read_time`: `ava_picked_up_at` for an injected message, else
-        `ava_created_at`; never an inbound's arrival time) when present, else a
-        synthetic epoch+microsecond offset for legacy messages persisted
-        before the field existed. The offset advances only on the synthetic
-        path, so a turn's blocks that share one real ts collapse onto that ts
-        while legacy blocks still fan out by a microsecond for stable ordering."""
-        if msg is not None:
-            real = message_read_time(msg)
-            if real:
-                return real
-        nonlocal sub_offset
-        sub_offset += _LG_TS_STEP_US
-        return (epoch + timedelta(microseconds=sub_offset)).isoformat()
-
     msg_count = len(messages)
     # msg_idx is 1:1 with the position in state.messages; streaming SSE events
     # use the same `len(state.messages)` to compute item_id, keeping the two
@@ -173,9 +144,8 @@ def build_timeline_items(
     for msg_idx, msg in enumerate(messages[start:], start=start):
         if isinstance(msg, SystemMessage):
             # The agent's system prompt — built once at birth, persisted as
-            # state.messages[0], never streamed. created_at stays None: it has
-            # no inbound anchor (the fallback anchor is epoch 0, which would
-            # render as a 1970 timestamp), and it is always the first item.
+            # state.messages[0], never streamed. created_at stays None: it
+            # carries no read time, and it is always the first item.
             raw_content = message_content(msg)
             items.append(
                 _system_prompt_item(
@@ -186,9 +156,9 @@ def build_timeline_items(
         raw_content = message_content(msg)
         kwargs = read_ava_kwargs(msg)
         if kwargs.get("ava_msg_type") == AvaMsgType.INBOUND:
-            items.append(_inbound_item(msg_idx, raw_content, kwargs, next_ts))
+            items.append(_inbound_item(msg_idx, raw_content, kwargs))
         else:
-            items.extend(_message_items(msg, msg_idx, kwargs, next_ts, sdk_by_id, inputs))
+            items.extend(_message_items(msg, msg_idx, kwargs, sdk_by_id, inputs))
     _add_source_coordinates(items, messages)
     if segment_prefix:
         items = [
@@ -217,7 +187,6 @@ def _message_items(
     msg: BaseMessage,
     msg_idx: int,
     kwargs: AvaMessageKwargs,
-    next_ts: Callable[[BaseMessage | None], str],
     sdk_by_id: dict[str, Any],
     inputs: TimelineReadInputs,
 ) -> list[TimelineItem]:
@@ -225,12 +194,13 @@ def _message_items(
     raw_content = message_content(msg)
     content = raw_content if isinstance(raw_content, str) else str(raw_content)
     ava_type = kwargs.get("ava_msg_type")
+    created_at = kwargs_read_time(kwargs)
     if ava_type == AvaMsgType.ATTACH:
-        return [_attach_item(msg_idx, raw_content, next_ts(msg))]
+        return [_attach_item(msg_idx, raw_content, created_at)]
     if ava_type == AvaMsgType.EXEC_OUTPUT:
-        return [_exec_output_item(msg_idx, content, next_ts(msg), kwargs.get("ava_exec_ms"))]
+        return [_exec_output_item(msg_idx, content, created_at, kwargs.get("ava_exec_ms"))]
     if ava_type == AvaMsgType.SYSTEM_NOTE:
-        item = _system_note_item(msg_idx, content, kwargs.get("ava_note_tag"), next_ts(msg))
+        item = _system_note_item(msg_idx, content, kwargs.get("ava_note_tag"), created_at)
         if "ava_impersonation" in kwargs:
             item.impersonation = ImpersonationMetadata.model_validate(kwargs["ava_impersonation"])
         return [item]
@@ -240,7 +210,7 @@ def _message_items(
                 msg_idx,
                 "inbound_compact_summary",
                 content,
-                next_ts(msg),
+                created_at,
                 kwargs.get("ava_compact_id"),
                 inputs=inputs,
             )
@@ -251,7 +221,7 @@ def _message_items(
                 msg_idx,
                 "inbound_compact_request",
                 content,
-                next_ts(msg),
+                created_at,
                 kwargs.get("ava_compact_id"),
                 inputs=inputs,
             )
@@ -261,9 +231,9 @@ def _message_items(
         # list-of-blocks: thinking / text / tool_use each takes a slot;
         # one timeline item per block, block_idx = anthropic
         # content_block_index, aligned with streaming SSE item_id.
-        return list(_ai_message_items(msg, msg_idx, next_ts, sdk_by_id))
+        return list(_ai_message_items(msg, msg_idx, sdk_by_id))
     if isinstance(msg, HumanMessage):
-        return [_fallback_human_item(msg_idx, content, next_ts(msg))]
+        return [_fallback_human_item(msg_idx, content, created_at)]
     return []
 
 
@@ -283,7 +253,6 @@ def _inbound_item(
     msg_idx: int,
     raw_content: str | list[str | dict[str, Any]],
     kwargs: AvaMessageKwargs,
-    next_ts: Callable[[BaseMessage | None], str],
 ) -> TimelineItem:
     """Render one inbound HumanMessage.
 
@@ -303,7 +272,7 @@ def _inbound_item(
         kind="inbound_chat",
         source=kwargs.get("ava_source"),
         payload=_inbound_text(raw_content),
-        created_at=kwargs_read_time(kwargs) or next_ts(None),
+        created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
         images=images if images else None,
     )
@@ -368,7 +337,7 @@ def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[st
 
 
 def _attach_item(
-    msg_idx: int, raw_content: str | list[str | dict[str, Any]], created_at: str
+    msg_idx: int, raw_content: str | list[str | dict[str, Any]], created_at: str | None
 ) -> TimelineItem:
     """Attachment message item — caption only; thumbnails ride on ``images`` (data URIs)."""
     return TimelineItem(
@@ -383,7 +352,9 @@ def _attach_item(
     )
 
 
-def _exec_output_item(msg_idx: int, content: str, created_at: str, exec_ms: Any) -> TimelineItem:
+def _exec_output_item(
+    msg_idx: int, content: str, created_at: str | None, exec_ms: Any
+) -> TimelineItem:
     """One tool result (`code_output`) item; exec_ms drives the ran-in chip."""
     return TimelineItem(
         item_id=f"{msg_idx}.0",
@@ -396,7 +367,9 @@ def _exec_output_item(msg_idx: int, content: str, created_at: str, exec_ms: Any)
     )
 
 
-def _system_note_item(msg_idx: int, content: str, note_tag: Any, created_at: str) -> TimelineItem:
+def _system_note_item(
+    msg_idx: int, content: str, note_tag: Any, created_at: str | None
+) -> TimelineItem:
     """A framework-injected system note (one-time guidance + lifecycle).
 
     The ava_note_tag (a NoteTag) is the discriminator the frontend dispatches
@@ -420,7 +393,7 @@ def _compact_item(
     msg_idx: int,
     kind: Literal["inbound_compact_summary", "inbound_compact_request"],
     content: str,
-    created_at: str,
+    created_at: str | None,
     compact_id: str | None = None,
     *,
     inputs: TimelineReadInputs,
@@ -441,7 +414,7 @@ def _compact_item(
     )
 
 
-def _fallback_human_item(msg_idx: int, content: str, created_at: str) -> TimelineItem:
+def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> TimelineItem:
     """Catch-all for HumanMessages no explicit branch above claims.
 
     All current framework-injected HumanMessages are tagged with ava_msg_type
@@ -520,7 +493,6 @@ def _fold_addl_reasoning_into_content(
 def _ai_message_items(
     msg: AIMessage,
     msg_idx: int,
-    next_ts: Callable[[BaseMessage | None], str],
     sdk_by_id: Mapping[str, list[SdkCall]],
 ) -> list[TimelineItem]:
     """Split one AIMessage into per-block timeline items.
@@ -549,6 +521,7 @@ def _ai_message_items(
     #   the turn, not per block) and is attached to the first thinking item
     #   only; `reasoning_attached` flips after the first block claims it.
     kwargs = read_ava_kwargs(msg)
+    created_at = kwargs_read_time(kwargs)
     reasoning_ms_by_block = kwargs.get("ava_reasoning_ms_by_block")
     code_ms_by_block = kwargs.get("ava_code_ms_by_block")
     from base.lm.reasoning import extract_reasoning_tokens, to_canonical_reasoning
@@ -574,7 +547,7 @@ def _ai_message_items(
     content = _fold_addl_reasoning_into_content(content, message_addl_kwargs(msg))
     if isinstance(content, str):
         if content:
-            out.append(_chat_item(msg_idx, 0, content, next_ts(msg)))
+            out.append(_chat_item(msg_idx, 0, content, created_at))
             content_indices.add(0)
     elif isinstance(content, list):
         for pos, block in enumerate(content):
@@ -582,8 +555,7 @@ def _ai_message_items(
                 block,
                 pos,
                 msg_idx,
-                msg,
-                next_ts,
+                created_at,
                 reasoning_ms_by_block,
                 reasoning_tokens,
                 reasoning_attached=reasoning_attached,
@@ -596,12 +568,12 @@ def _ai_message_items(
         return out
 
     out.extend(
-        _tool_call_items(msg, msg_idx, content_indices, code_ms_by_block, next_ts, sdk_by_id)
+        _tool_call_items(msg, msg_idx, content_indices, code_ms_by_block, created_at, sdk_by_id)
     )
     return out
 
 
-def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str) -> TimelineItem:
+def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | None) -> TimelineItem:
     """A narrated text item (`agent_chat`) — one content block of an AIMessage."""
     return TimelineItem(
         item_id=f"{msg_idx}.{block_idx}",
@@ -617,8 +589,7 @@ def _content_block_item(
     block: str | dict[str, Any],
     pos: int,
     msg_idx: int,
-    msg: AIMessage,
-    next_ts: Callable[[BaseMessage | None], str],
+    created_at: str | None,
     reasoning_ms_by_block: Any,
     reasoning_tokens: int | None,
     *,
@@ -656,7 +627,7 @@ def _content_block_item(
             kind="agent_reasoning",
             source=None,
             payload=t,
-            created_at=next_ts(msg),
+            created_at=created_at,
             inbound_id=None,
             reasoning_ms=block_reasoning_ms,
             reasoning_tokens=None if reasoning_attached else reasoning_tokens,
@@ -666,7 +637,7 @@ def _content_block_item(
     t = typed_block.get("text")
     if not (isinstance(t, str) and t):
         return None, block_idx, reasoning_attached
-    return _chat_item(msg_idx, block_idx, t, next_ts(msg)), block_idx, reasoning_attached
+    return _chat_item(msg_idx, block_idx, t, created_at), block_idx, reasoning_attached
 
 
 def _tool_call_items(
@@ -674,7 +645,7 @@ def _tool_call_items(
     msg_idx: int,
     content_indices: set[int],
     code_ms_by_block: Any,
-    next_ts: Callable[[BaseMessage | None], str],
+    created_at: str | None,
     sdk_by_id: Mapping[str, list[SdkCall]],
 ) -> list[TimelineItem]:
     """Render each tool call as an `agent_code` item from `msg.tool_calls`,
@@ -702,7 +673,7 @@ def _tool_call_items(
                 kind="agent_code",
                 source=None,
                 payload=code,
-                created_at=next_ts(msg),
+                created_at=created_at,
                 inbound_id=None,
                 sdk_calls=sdk_by_id.get(tc.get("id") or ""),
                 code_elapsed_ms=block_code_elapsed_ms,
