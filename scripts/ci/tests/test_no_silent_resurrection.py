@@ -501,7 +501,7 @@ def test_line_classification(text: str, expected: tuple[bool, bool]) -> None:
     ],
 )
 def test_declaration_parsing(reason: str, shas: list[str], paths: list[str]) -> None:
-    assert resurrection._declared_targets(reason) == (shas, paths)
+    assert resurrection.declared_targets(reason) == (shas, paths)
 
 
 def _git_ok(*args: str) -> subprocess.CompletedProcess[str]:
@@ -755,7 +755,7 @@ def test_streamed_alive_lines_match_original_pattern_query(
     (repo / "a.txt").write_bytes(content)
     _commit(repo, "base content")
     assert _pattern_query_alive(repo, candidates, tmp_path) == expected
-    assert resurrection._alive_candidates(candidates, "main", repo) == expected
+    assert resurrection.alive_candidates(candidates, "main", repo) == expected
 
 
 def test_streamed_alive_scan_preserves_exclusions_and_reads_the_base_tree(tmp_path: Path) -> None:
@@ -774,11 +774,11 @@ def test_streamed_alive_scan_preserves_exclusions_and_reads_the_base_tree(tmp_pa
     source = set(_BLOCK_A.splitlines())
     candidates = source | excluded | set(_BLOCK_B.splitlines())
     assert _pattern_query_alive(repo, candidates, tmp_path) == source
-    assert resurrection._alive_candidates(candidates, "main", repo) == source
+    assert resurrection.alive_candidates(candidates, "main", repo) == source
 
 
 def test_streamed_alive_scan_empty_candidates_and_git_failure(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "repo")
-    assert resurrection._alive_candidates(set(), "no-such-ref", repo) == set()
+    assert resurrection.alive_candidates(set(), "no-such-ref", repo) == set()
     with pytest.raises(resurrection.GitError, match="`git grep` over no-such-ref failed:"):
-        resurrection._alive_candidates({_GENERIC_LINE.strip()}, "no-such-ref", repo)
+        resurrection.alive_candidates({_GENERIC_LINE.strip()}, "no-such-ref", repo)

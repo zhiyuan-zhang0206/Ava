@@ -71,7 +71,7 @@ def _f12_point(
     return {"smoke_ts": smoke_ts, "rows": rows, "chains": [_f12_chain_line(pid) for pid in pids]}
 
 
-def _f12_parse_window(log_text: str) -> dict[int, list[tuple[float, str]]]:
+def f12_parse_window(log_text: str) -> dict[int, list[tuple[float, str]]]:
     """Index AUTHREQ_ATTRIBUTION lines by requesting pid: pid -> [(ts, line)]."""
     lines: dict[int, list[tuple[float, str]]] = {}
     for line in log_text.splitlines():
@@ -88,7 +88,7 @@ def _f12_parse_window(log_text: str) -> dict[int, list[tuple[float, str]]]:
     return lines
 
 
-def _f12_join(
+def f12_join(
     samples: dict[str, Any], lines: dict[int, list[tuple[float, str]]]
 ) -> list[dict[str, Any]]:
     """Join probe rounds against the parsed window: first 3 requests at/after ts - 0.15s."""
@@ -126,7 +126,7 @@ def _f12_join(
     return joined
 
 
-def _f12_attribution_summary(samples: dict[str, Any]) -> dict[str, Any]:
+def f12_attribution_summary(samples: dict[str, Any]) -> dict[str, Any]:
     """Aggregate sampled rounds: per-point + total requests/unattributed/missing."""
     blank = {"requests": 0, "attributed": 0, "unattributed": 0, "missing_rounds": 0}
     by_point: dict[str, dict[str, int]] = {}
@@ -147,7 +147,7 @@ def _f12_attribution_summary(samples: dict[str, Any]) -> dict[str, Any]:
     return {"totals": totals, "by_point": by_point}
 
 
-def _f12_expect_attribution(
+def f12_expect_attribution(
     samples: dict[str, Any], expectations: list[tuple[str, list[int] | None, int]]
 ) -> list[str]:
     """Check sampled requests resolve to the expected responsible pid.
@@ -210,7 +210,7 @@ def _f12_finish(
     """Join the tccd window, save the sampling record, fail on attribution violations."""
     _f12_join_tccd(evidence, samples, name=f"{label}-tccd-window.txt")
     print(_f12_summary_text(label, samples))
-    violations = _f12_expect_attribution(samples, expectations)
+    violations = f12_expect_attribution(samples, expectations)
     if violations:
         samples["violations"] = violations
     _save(evidence, f"{label}-sampling.json", json.dumps(samples, indent=2))
@@ -243,5 +243,5 @@ def _f12_join_tccd(
         timeout=120.0,
     ).stdout
     _save(evidence, name, log_text)
-    samples["tccd"] = _f12_join(samples, _f12_parse_window(log_text))
-    samples["summary"] = _f12_attribution_summary(samples)
+    samples["tccd"] = f12_join(samples, f12_parse_window(log_text))
+    samples["summary"] = f12_attribution_summary(samples)

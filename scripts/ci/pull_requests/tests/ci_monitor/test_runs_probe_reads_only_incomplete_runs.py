@@ -16,14 +16,14 @@ import pytest
 from scripts.ci.pull_requests import commands as ci_utils
 from scripts.ci.pull_requests import owner_operations, status
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
-    _APP_CHECK,
+    APP_CHECK,
     CIStatus,
+    TrunkResponse,
     _check,
     _completed,
-    _core_rollup,
-    _gh_runner,
-    _TrunkResponse,
-    _urlopen_sequence,
+    core_rollup,
+    gh_runner,
+    urlopen_sequence,
 )
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     diag_gh as diag_gh,
@@ -57,7 +57,7 @@ def test_runs_probe_reads_only_incomplete_runs(monkeypatch: pytest.MonkeyPatch) 
         return _R()
 
     monkeypatch.setattr(status.subprocess, "run", _run)
-    assert status._runs_not_yet_reporting("abc123", None) == ["CI"]
+    assert status.runs_not_yet_reporting("abc123", None) == ["CI"]
     joined = " ".join(seen["cmd"])
     assert "head_sha=abc123" in joined
     assert 'select(.status != "completed")' in joined
@@ -71,7 +71,7 @@ def test_runs_probe_returns_none_on_bad_response(
     distinction is what keeps an unanswerable probe from reading as green."""
     response = subprocess.CompletedProcess([], returncode, stdout, "boom")
     monkeypatch.setattr(status.subprocess, "run", lambda *_a, **_k: response)
-    assert status._runs_not_yet_reporting("abc123", None) is None
+    assert status.runs_not_yet_reporting("abc123", None) is None
 
 
 @pytest.mark.parametrize(
@@ -84,7 +84,7 @@ def test_runs_probe_returns_none_on_bad_response(
     ],
 )
 def test_parse_ts(value: str | None, expected: float | None) -> None:
-    assert status._parse_ts(value) == expected
+    assert status.parse_ts(value) == expected
 
 
 @pytest.mark.parametrize(
@@ -93,9 +93,9 @@ def test_parse_ts(value: str | None, expected: float | None) -> None:
 def test_queue_cooldown_seconds(
     monkeypatch: pytest.MonkeyPatch, last: float | None, now: float, expected: int
 ) -> None:
-    monkeypatch.setattr(owner_operations, "_last_head_update", lambda *_a: last)
+    monkeypatch.setattr(owner_operations, "last_head_update", lambda *_a: last)
     monkeypatch.setattr(status.time, "time", lambda: now)
-    assert owner_operations._queue_cooldown_seconds("7", "o/r") == expected
+    assert owner_operations.queue_cooldown_seconds("7", "o/r") == expected
 
 
 @pytest.mark.parametrize(
@@ -118,7 +118,7 @@ def test_last_head_update(
     monkeypatch.setattr(
         status.subprocess, "run", lambda cmd, **_k: seen.append(cmd) or next(reply_iter)
     )
-    assert owner_operations._last_head_update("7", "o/r") == expected
+    assert owner_operations.last_head_update("7", "o/r") == expected
     assert "/issues/7/timeline" in " ".join(seen[0])
     assert "/pulls/7/commits" in " ".join(seen[1])
 
@@ -187,17 +187,17 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     poll(CIStatus.ALL_PASSED)
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
+    monkeypatch.setattr(status.subprocess, "run", gh_runner(gh_calls))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence(
+        urlopen_sequence(
             [
-                _TrunkResponse({"accepted": True}),
-                _TrunkResponse({"state": "pending"}),
-                _TrunkResponse({"state": "merged"}),
+                TrunkResponse({"accepted": True}),
+                TrunkResponse({"state": "pending"}),
+                TrunkResponse({"state": "merged"}),
             ],
             requests,
         ),
@@ -228,16 +228,16 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
     failures 2026-09-06 left no trace). The full getSubmittedPullRequest
     payload must be printed on the terminal branch."""
     poll(CIStatus.ALL_PASSED)
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(status.subprocess, "run", _gh_runner([]))
+    monkeypatch.setattr(status.subprocess, "run", gh_runner([]))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence(
+        urlopen_sequence(
             [
-                _TrunkResponse({"accepted": True}),
-                _TrunkResponse({"state": "failed", "details": {"message": "batch rejected"}}),
+                TrunkResponse({"accepted": True}),
+                TrunkResponse({"state": "failed", "details": {"message": "batch rejected"}}),
             ],
             [],
         ),
@@ -252,13 +252,13 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
 
 def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch, capsys) -> None:
     poll(CIStatus.ALL_PASSED)
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(status.subprocess, "run", _gh_runner([]))
+    monkeypatch.setattr(status.subprocess, "run", gh_runner([]))
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence(
+        urlopen_sequence(
             [
                 urllib.error.URLError("network down"),
                 urllib.error.URLError("network down"),
@@ -292,7 +292,7 @@ def test_wait_json_mutually_exclusive() -> None:
 def test_one_shot_behavior_unchanged(gh: Any, has_workflows: Any, capsys) -> None:
     """Legacy contract: without --wait, a PENDING probe prints and exits 0 —
     a one-shot query, not a poller."""
-    gh([_APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
+    gh([APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
     has_workflows(True)
     assert ci_utils.main(["1243"]) == 0
     out = capsys.readouterr()
@@ -300,7 +300,7 @@ def test_one_shot_behavior_unchanged(gh: Any, has_workflows: Any, capsys) -> Non
 
 
 def test_one_shot_not_ready_exits_one(gh: Any, has_workflows: Any, capsys) -> None:
-    gh(_core_rollup("SKIPPED"), is_draft=True, main_completed=True)
+    gh(core_rollup("SKIPPED"), is_draft=True, main_completed=True)
     has_workflows(True)
     assert ci_utils.main(["1243"]) == 1
     assert "NOT READY" in capsys.readouterr().out
@@ -329,7 +329,7 @@ def test_pending_is_not_terminal() -> None:
 def test_json_probe_carries_terminal_flag(gh: Any, has_workflows: Any, capsys) -> None:
     """The --json one-shot output includes `terminal`, so a subprocess-based
     watcher can decide without re-deriving the verdict domain."""
-    gh([_APP_CHECK, _check("backend (pytest + pyright)", "SUCCESS")])
+    gh([APP_CHECK, _check("backend (pytest + pyright)", "SUCCESS")])
     has_workflows(True)
     assert ci_utils.main(["1243", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -339,7 +339,7 @@ def test_json_probe_carries_terminal_flag(gh: Any, has_workflows: Any, capsys) -
 
 
 def test_json_probe_reports_draft_and_core_skipped(gh: Any, has_workflows: Any, capsys) -> None:
-    gh(_core_rollup("SKIPPED"), is_draft=True, main_completed=True)
+    gh(core_rollup("SKIPPED"), is_draft=True, main_completed=True)
     has_workflows(True)
     assert ci_utils.main(["1243", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
@@ -350,7 +350,7 @@ def test_json_probe_reports_draft_and_core_skipped(gh: Any, has_workflows: Any, 
 
 
 def test_json_probe_pending_is_not_terminal(gh: Any, has_workflows: Any, capsys) -> None:
-    gh([_APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
+    gh([APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
     has_workflows(True)
     assert ci_utils.main(["1243", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -506,9 +506,9 @@ def test_queue_status_prints_state_and_items(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence(
+        urlopen_sequence(
             [
-                _TrunkResponse(
+                TrunkResponse(
                     {
                         "state": "running",
                         "concurrency": 5,
@@ -552,7 +552,7 @@ def test_queue_status_empty_queue(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence([_TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []),
+        urlopen_sequence([TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []),
     )
     assert ci_utils.main(["--queue-status"]) == 0
     assert "No PRs in the queue" in capsys.readouterr().out
@@ -563,7 +563,7 @@ def test_queue_status_json_prints_raw_payload(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence([_TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []),
+        urlopen_sequence([TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []),
     )
     assert ci_utils.main(["--queue-status", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -575,7 +575,7 @@ def test_queue_status_api_error_exits_three(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence([urllib.error.URLError("network down")], []),
+        urlopen_sequence([urllib.error.URLError("network down")], []),
     )
     assert ci_utils.main(["--queue-status"]) == 3
     assert "Trunk queue status error" in capsys.readouterr().err
@@ -593,7 +593,7 @@ def test_evict_success_exits_zero(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence([_TrunkResponse({})], requests),
+        urlopen_sequence([TrunkResponse({})], requests),
     )
     assert ci_utils.main(["1877", "--evict"]) == 0
     assert "PR #1877 cancelled from the Trunk merge queue" in capsys.readouterr().err
@@ -609,7 +609,7 @@ def test_evict_not_in_queue_exits_one(monkeypatch, capsys) -> None:
     """cancelPullRequest answers 404 when the PR is not in the queue; a
     nonzero exit keeps a typo'd PR number from reading as a clean evict."""
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    responses: list[_TrunkResponse | urllib.error.URLError] = []
+    responses: list[TrunkResponse | urllib.error.URLError] = []
     responses.append(
         urllib.error.HTTPError(
             "https://api.trunk.io/v1/cancelPullRequest",
@@ -619,7 +619,7 @@ def test_evict_not_in_queue_exits_one(monkeypatch, capsys) -> None:
             None,
         )
     )
-    monkeypatch.setattr(urllib.request, "urlopen", _urlopen_sequence(responses, []))
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen_sequence(responses, []))
     assert ci_utils.main(["1877", "--evict"]) == 1
     assert "not in the Trunk merge queue" in capsys.readouterr().err
 
@@ -629,7 +629,7 @@ def test_evict_api_error_exits_four(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence([urllib.error.URLError("network down")], []),
+        urlopen_sequence([urllib.error.URLError("network down")], []),
     )
     assert ci_utils.main(["1877", "--evict"]) == 4
     assert "Trunk queue cancel error" in capsys.readouterr().err

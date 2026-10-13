@@ -327,10 +327,10 @@ def test_zombie_ignores_checks_only_the_changed_python_files(tmp_path: Path) -> 
     original = zombie._REPO_ROOT
     try:
         zombie._REPO_ROOT = tmp_path
-        assert zombie._changed_python(None) is None
-        assert zombie._changed_python(["a.py", "notes.md"]) == ["a.py"]
+        assert zombie.changed_python(None) is None
+        assert zombie.changed_python(["a.py", "notes.md"]) == ["a.py"]
         # The tier configuration the ignores are judged against is an input.
-        assert zombie._changed_python(["a.py", "pyproject.toml"]) is None
+        assert zombie.changed_python(["a.py", "pyproject.toml"]) is None
     finally:
         zombie._REPO_ROOT = original
 

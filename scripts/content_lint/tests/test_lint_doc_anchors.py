@@ -46,9 +46,9 @@ def lint(monkeypatch, tmp_path):
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "mod.py").write_text(_TARGET)
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(mod, "_DOCS_CONVENTIONS", docs)
-    monkeypatch.setattr(mod, "_DEV_SKILLS", skills)
-    monkeypatch.setattr(mod, "_BUILTIN_SKILLS", builtin)
+    monkeypatch.setattr(mod, "DOCS_CONVENTIONS", docs)
+    monkeypatch.setattr(mod, "DEV_SKILLS", skills)
+    monkeypatch.setattr(mod, "BUILTIN_SKILLS", builtin)
     return mod, docs, skills, builtin
 
 

@@ -44,7 +44,7 @@ def _gh_runner(calls: list[list[str]]):
     [("urgent", 0), ("high", 10), ("medium", 100), ("low", 200)],
 )
 def test_trunk_priority_maps_cli_names_to_submit_values(priority: str, expected: int) -> None:
-    assert owner_operations._trunk_priority(priority) == expected
+    assert owner_operations.trunk_priority(priority) == expected
 
 
 def test_queue_resolution_prefers_flag_then_environment_then_trunk_default(
@@ -52,11 +52,11 @@ def test_queue_resolution_prefers_flag_then_environment_then_trunk_default(
 ) -> None:
     monkeypatch.setenv("CI_QUEUE", "trunk")
     with pytest.raises(ValueError, match="unknown CI queue"):
-        owner_operations._resolve_queue("retired")
-    assert owner_operations._resolve_queue(None) == "trunk"
+        owner_operations.resolve_queue("retired")
+    assert owner_operations.resolve_queue(None) == "trunk"
 
     monkeypatch.delenv("CI_QUEUE")
-    assert owner_operations._resolve_queue(None) == "trunk"
+    assert owner_operations.resolve_queue(None) == "trunk"
 
 
 class _TrunkResponse:
@@ -95,7 +95,7 @@ def test_trunk_queue_submits_and_reports_merged(
 ) -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
@@ -112,7 +112,7 @@ def test_trunk_queue_submits_and_reports_merged(
     )
     monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
-    rc = owner_operations._trunk_merge_flow(
+    rc = owner_operations.trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -152,7 +152,7 @@ def test_trunk_queue_reports_failed_state(
         _urlopen_sequence([_TrunkResponse({"state": "failed", "reason": "red CI"})], requests),
     )
 
-    rc = owner_operations._watch_trunk_enqueue(
+    rc = owner_operations.watch_trunk_enqueue(
         "42",
         "zhiyuan-zhang0206/Ava",
         every=1,
@@ -175,7 +175,7 @@ def test_trunk_queue_times_out_while_pending(
         _urlopen_sequence([_TrunkResponse({"state": "testing"})], requests),
     )
 
-    rc = owner_operations._watch_trunk_enqueue(
+    rc = owner_operations.watch_trunk_enqueue(
         "42",
         "zhiyuan-zhang0206/Ava",
         every=1,
@@ -201,7 +201,7 @@ def test_trunk_queue_stops_after_consecutive_status_errors(
     )
     monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
-    rc = owner_operations._watch_trunk_enqueue(
+    rc = owner_operations.watch_trunk_enqueue(
         "42",
         "zhiyuan-zhang0206/Ava",
         every=1,
@@ -228,7 +228,7 @@ def test_trunk_submit_retries_once_after_an_http_error(
     monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        owner_operations._submit_trunk(
+        owner_operations.submit_trunk(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -251,7 +251,7 @@ def test_trunk_submit_returns_enqueue_error_after_second_http_error(
     monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        owner_operations._submit_trunk(
+        owner_operations.submit_trunk(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -274,7 +274,7 @@ def test_trunk_merge_requires_token_before_waiting(
 def test_real_trunk_queue_checks_do_not_block_all_green_predicate() -> None:
     result = status.CIResult(verdict=status.CIStatus.ALL_PASSED)
 
-    status._partition_checks(
+    status.partition_checks(
         [
             {"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS", "conclusion": ""},
             {
@@ -348,7 +348,7 @@ def test_trunk_flow_submits_without_reading_pr_labels(
 ) -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
@@ -360,7 +360,7 @@ def test_trunk_flow_submits_without_reading_pr_labels(
     )
 
     assert (
-        owner_operations._trunk_merge_flow(
+        owner_operations.trunk_merge_flow(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -399,7 +399,7 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
     submissions were retried twice and exited 4 instead of resuming watch)."""
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     responses: list[_TrunkResponse | urllib.error.URLError] = [
@@ -420,7 +420,7 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
     monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        owner_operations._trunk_merge_flow(
+        owner_operations.trunk_merge_flow(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -456,7 +456,7 @@ def test_trunk_watch_keeps_polling_through_testing_state(
     monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        owner_operations._watch_trunk_enqueue(
+        owner_operations.watch_trunk_enqueue(
             "42",
             "zhiyuan-zhang0206/Ava",
             every=1,
@@ -474,7 +474,7 @@ def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
 ) -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
@@ -487,7 +487,7 @@ def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
     monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
     assert (
-        owner_operations._trunk_merge_flow(
+        owner_operations.trunk_merge_flow(
             "42",
             "zhiyuan-zhang0206/Ava",
             "medium",
@@ -516,7 +516,7 @@ def test_trunk_submit_accepts_plain_text_ok_body(
     successful submit would be misread as an error and retried into a 409."""
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(status.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
@@ -532,7 +532,7 @@ def test_trunk_submit_accepts_plain_text_ok_body(
     )
     monkeypatch.setattr(status.time, "sleep", _no_sleep)
 
-    rc = owner_operations._trunk_merge_flow(
+    rc = owner_operations.trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -573,7 +573,7 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
         status.subprocess,
@@ -588,7 +588,7 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
         ),
     )
 
-    rc = owner_operations._trunk_merge_flow(
+    rc = owner_operations.trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -608,7 +608,7 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
         status.subprocess,
@@ -623,7 +623,7 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
         ),
     )
 
-    rc = owner_operations._trunk_merge_flow(
+    rc = owner_operations.trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -643,7 +643,7 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
         status.subprocess,
@@ -658,7 +658,7 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
         ),
     )
 
-    rc = owner_operations._trunk_merge_flow(
+    rc = owner_operations.trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -677,7 +677,7 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
         status.subprocess,
@@ -692,7 +692,7 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
         ),
     )
 
-    rc = owner_operations._trunk_merge_flow(
+    rc = owner_operations.trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",
@@ -711,7 +711,7 @@ def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(status, "check_ci", _all_green)
     monkeypatch.setattr(
         status.subprocess,
@@ -726,7 +726,7 @@ def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
         ),
     )
 
-    rc = owner_operations._trunk_merge_flow(
+    rc = owner_operations.trunk_merge_flow(
         "42",
         "zhiyuan-zhang0206/Ava",
         "medium",

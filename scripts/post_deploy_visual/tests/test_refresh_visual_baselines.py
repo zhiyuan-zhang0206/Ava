@@ -16,7 +16,7 @@ RunResult = subprocess.CompletedProcess[str]
 def _prepare_references(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, bytes]:
     monkeypatch.setattr(refresh, "_REPO_ROOT", tmp_path)
     originals: dict[str, bytes] = {}
-    for test_name, relative_path in refresh._BASELINE_PATHS_BY_TEST.items():
+    for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         contents = f"old-{test_name}".encode()
         reference = tmp_path / relative_path
         reference.parent.mkdir(parents=True, exist_ok=True)
@@ -52,7 +52,7 @@ def _candidate_failures(tmp_path: Path) -> str:
         f"FAILED tests/e2e/visual/test_visual_regression.py::{test_name} - Failed: "
         f"Generated visual baseline candidate at {tmp_path / relative_path}. "
         "Review and commit it before rerunning the test.\n"
-        for test_name, relative_path in refresh._BASELINE_PATHS_BY_TEST.items()
+        for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items()
     )
 
 
@@ -69,7 +69,7 @@ def test_check_only_returns_success_when_visual_tests_pass(
     monkeypatch.setattr(refresh, "_REPO_ROOT", tmp_path)
 
     def run(command: list[str], **options: object) -> RunResult:
-        assert command == refresh._VISUAL_TEST_COMMAND
+        assert command == refresh.VISUAL_TEST_COMMAND
         _assert_run_options(options, tmp_path)
         return _completed(command, 0, "3 passed\n")
 
@@ -134,23 +134,23 @@ def test_regenerate_replaces_all_references_after_exact_candidate_failures(
     def run(command: list[str], **options: object) -> RunResult:
         calls.append(command)
         _assert_run_options(options, tmp_path)
-        if command == refresh._VISUAL_TEST_COMMAND:
-            for test_name, relative_path in refresh._BASELINE_PATHS_BY_TEST.items():
+        if command == refresh.VISUAL_TEST_COMMAND:
+            for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
                 reference = tmp_path / relative_path
                 assert not reference.exists()
                 reference.write_bytes(f"new-{test_name}".encode())
             return _completed(command, 1, _candidate_failures(tmp_path))
-        assert command == refresh._GIT_STATUS_COMMAND
+        assert command == refresh.GIT_STATUS_COMMAND
         status = "".join(
-            f" M {relative_path}\0" for relative_path in refresh._BASELINE_PATHS_BY_TEST.values()
+            f" M {relative_path}\0" for relative_path in refresh.BASELINE_PATHS_BY_TEST.values()
         )
         return _completed(command, 0, status)
 
     _install_runner(monkeypatch, run)
 
     assert refresh.main(["--regenerate"]) == 0
-    assert calls == [refresh._VISUAL_TEST_COMMAND, refresh._GIT_STATUS_COMMAND]
-    for test_name, relative_path in refresh._BASELINE_PATHS_BY_TEST.items():
+    assert calls == [refresh.VISUAL_TEST_COMMAND, refresh.GIT_STATUS_COMMAND]
+    for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         assert (tmp_path / relative_path).read_bytes() == f"new-{test_name}".encode()
 
 
@@ -161,7 +161,7 @@ def test_regenerate_restores_references_when_candidate_generation_is_incomplete(
 
     def run(command: list[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
-        first_test, first_path = next(iter(refresh._BASELINE_PATHS_BY_TEST.items()))
+        first_test, first_path = next(iter(refresh.BASELINE_PATHS_BY_TEST.items()))
         (tmp_path / first_path).write_bytes(b"partial-candidate")
         output = (
             f"FAILED tests/e2e/visual/test_visual_regression.py::{first_test} - Failed: "
@@ -173,7 +173,7 @@ def test_regenerate_restores_references_when_candidate_generation_is_incomplete(
     _install_runner(monkeypatch, run)
 
     assert refresh.main(["--regenerate"]) == 1
-    for test_name, relative_path in refresh._BASELINE_PATHS_BY_TEST.items():
+    for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         assert (tmp_path / relative_path).read_bytes() == originals[test_name]
 
 
@@ -184,8 +184,8 @@ def test_regenerate_restores_references_when_non_png_file_changed(
 
     def run(command: list[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
-        if command == refresh._VISUAL_TEST_COMMAND:
-            for relative_path in refresh._BASELINE_PATHS_BY_TEST.values():
+        if command == refresh.VISUAL_TEST_COMMAND:
+            for relative_path in refresh.BASELINE_PATHS_BY_TEST.values():
                 (tmp_path / relative_path).write_bytes(b"new")
             return _completed(command, 1, _candidate_failures(tmp_path))
         return _completed(
@@ -198,7 +198,7 @@ def test_regenerate_restores_references_when_non_png_file_changed(
 
     assert refresh.main(["--regenerate"]) == 1
     assert "non-PNG paths changed: unexpected.txt" in capsys.readouterr().err
-    for test_name, relative_path in refresh._BASELINE_PATHS_BY_TEST.items():
+    for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         assert (tmp_path / relative_path).read_bytes() == originals[test_name]
 
 
@@ -209,8 +209,8 @@ def test_regenerate_propagates_git_status_failure_and_restores_references(
 
     def run(command: list[str], **options: object) -> RunResult:
         _assert_run_options(options, tmp_path)
-        if command == refresh._VISUAL_TEST_COMMAND:
-            for relative_path in refresh._BASELINE_PATHS_BY_TEST.values():
+        if command == refresh.VISUAL_TEST_COMMAND:
+            for relative_path in refresh.BASELINE_PATHS_BY_TEST.values():
                 (tmp_path / relative_path).write_bytes(b"new")
             return _completed(command, 1, _candidate_failures(tmp_path))
         return _completed(command, 128, "fatal: not a git repository\n")
@@ -218,5 +218,5 @@ def test_regenerate_propagates_git_status_failure_and_restores_references(
     _install_runner(monkeypatch, run)
 
     assert refresh.main(["--regenerate"]) == 128
-    for test_name, relative_path in refresh._BASELINE_PATHS_BY_TEST.items():
+    for test_name, relative_path in refresh.BASELINE_PATHS_BY_TEST.items():
         assert (tmp_path / relative_path).read_bytes() == originals[test_name]
