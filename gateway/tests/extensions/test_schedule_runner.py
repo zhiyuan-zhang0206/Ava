@@ -1,4 +1,4 @@
-"""Tests for gateway/schedules/runner.py — the schedule execution engine.
+"""Tests for services/wake/schedule_manager/engine.py — the schedule execution engine.
 
 Exercises the runner mechanics against the real test DB + a per-test $AVA_HOME:
 materialize the script, bind the schedule actor, run it, capture a crash. The
@@ -21,8 +21,8 @@ from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from gateway.schedules.runner import _script_filename
 from gateway.schedules.tests.runner_inputs import run_schedule as run
+from services.wake.schedule_manager.engine import _script_filename
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -380,7 +380,7 @@ def test_run_record_failure_does_not_break_the_run(
     # writes must not affect the schedule itself (clean exit still marks
     # completed, rc still 0). Only the schedule_runs statements fail — the
     # schedules-row writes (status/last_error) keep working.
-    import gateway.schedules.runner as sr
+    import services.wake.schedule_manager.engine as sr
 
     real_connect = sr.Database.connect
 
@@ -457,7 +457,7 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
     # the bookkeeping lost a write. The run row reads ok=true with a note;
     # the manager still relaunches (status is not 'completed'), which is the
     # same safe side as before, just without a false crash record.
-    import gateway.schedules.runner as sr
+    import services.wake.schedule_manager.engine as sr
 
     real_connect = sr.Database.connect
 
@@ -572,7 +572,7 @@ def test_stall_verdict_closes_run_row(
     database_gate: ProcessDbGate,
 ) -> None:
     # QA P2-1: a stall closes its run row as failed instead of forever in-progress.
-    import gateway.schedules.runner as sr
+    import services.wake.schedule_manager.engine as sr
 
     sid = _insert_schedule(db_conn, script="x = 1\n")
     run_id = sr._record_run_start(Database.from_settings(gate=database_gate), sid)
