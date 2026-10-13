@@ -22,11 +22,12 @@ import pytest
 
 import ava
 from ava.sdk_surface.discovery import (
-    _classify_dir_entry,
+    UndeclaredSurfaceError,
     _Constant,
     _module_attribute_annotations,
     _module_attribute_docs,
     _module_children,
+    resolve_child,
 )
 from ava.sdk_surface.help import (
     _format_docstring,
@@ -80,13 +81,18 @@ def test_help_reads_updated_source_after_reload_in_place(
     plugin_py = tmp_path / "plugin.py"
     module_name = "help_reload_fixture.sample.plugin"
     monkeypatch.setitem(sys.modules, module_name, types.ModuleType(module_name))
-    plugin_py.write_text('VALUE: str = "old"\n"""Original value documentation."""\n')
+    plugin_py.write_text(
+        '__all_for_ava__ = ["VALUE"]\nVALUE: str = "old"\n"""Original value documentation."""\n'
+    )
     mod = load_plugin_module(plugin_py, name="sample", pkg="help_reload_fixture")
     first = _render(mod)
     assert "VALUE: str" in first
     assert "Original value documentation." in first
 
-    plugin_py.write_text('VALUE: int = 42\n"""Updated integer documentation after reload."""\n')
+    plugin_py.write_text(
+        '__all_for_ava__ = ["VALUE"]\nVALUE: int = 42\n'
+        '"""Updated integer documentation after reload."""\n'
+    )
     reloaded = load_plugin_module(plugin_py, name="sample", pkg="help_reload_fixture")
     assert reloaded is mod
     assert reloaded.VALUE == 42
@@ -102,7 +108,10 @@ def test_help_recovers_after_source_becomes_available(
     plugin_py = tmp_path / "plugin.py"
     module_name = "help_source_fixture.sample.plugin"
     monkeypatch.setitem(sys.modules, module_name, types.ModuleType(module_name))
-    source = 'VALUE: str | None = "ready"\n"""Recovered source documentation."""\n'
+    source = (
+        '__all_for_ava__ = ["VALUE"]\nVALUE: str | None = "ready"\n'
+        '"""Recovered source documentation."""\n'
+    )
     plugin_py.write_text(source)
     mod = load_plugin_module(plugin_py, name="sample", pkg="help_source_fixture")
     plugin_py.unlink()
@@ -154,6 +163,8 @@ def test_module_target_renders_heading_then_docstring() -> None:
         '''
         """Module summary."""
 
+        __all_for_ava__ = ["hello"]
+
         def hello() -> str:
             """Return greeting."""
             return "hi"
@@ -169,6 +180,8 @@ def test_module_target_function_child_is_def_with_indented_docstring() -> None:
     mod = _fake_module(
         '''
         """Module summary."""
+
+        __all_for_ava__ = ["hello"]
 
         def hello() -> str:
             """Return greeting."""
@@ -186,6 +199,8 @@ def test_module_target_function_without_docstring_uses_ellipsis() -> None:
         '''
         """Module summary."""
 
+        __all_for_ava__ = ["bare"]
+
         def bare(): pass
         ''',
         name="t_func_bare",
@@ -199,6 +214,8 @@ def test_module_target_heading_only_at_top() -> None:
     mod = _fake_module(
         '''
         """Module summary."""
+
+        __all_for_ava__ = ["f1", "f2"]
 
         def f1() -> None:
             """one"""
@@ -416,6 +433,8 @@ def test_pep224_constant_child_renders_name_type_with_docstring() -> None:
         '''
         """Module summary."""
 
+        __all_for_ava__ = ["AGENT_ID"]
+
         AGENT_ID: int
         """Your agent id."""
         ''',
@@ -504,7 +523,7 @@ def test_module_children_uses_all_whitelist_when_present() -> None:
 
 def test_module_children_drops_underscore_names_in_surface() -> None:
     """The underscore guard is applied to `__all_for_ava__` itself, not only to
-    the dir() fallback: a private helper a plugin appended to the surface list
+    the module's own names: a private helper a plugin appended to the surface list
     (`install_member` never allows it, but a hand-built list could)
     must not leak into `help()`. This is the one guard, written once in
     `agent_visible_names`."""
@@ -524,25 +543,24 @@ def test_module_children_drops_underscore_names_in_surface() -> None:
     assert "_leaked" not in children
 
 
-def test_module_children_skips_underscore_when_no_all() -> None:
+def test_a_module_without_all_for_ava_is_an_error() -> None:
+    """No `dir()` guess: a container that declares no surface raises instead of rendering."""
     mod = _fake_module(
         '''
         """Module without __all_for_ava__."""
 
         def public_one() -> None: """yes"""
-        def public_two() -> None: """yes"""
-        def _internal() -> None: """no"""
         ''',
         name="t_no_all",
     )
-    children = dict(_module_children(mod))
-    assert "public_one" in children
-    assert "public_two" in children
-    assert "_internal" not in children
+    with pytest.raises(UndeclaredSurfaceError, match="declares no __all_for_ava__"):
+        _module_children(mod)
+    with pytest.raises(UndeclaredSurfaceError):
+        ava.agent_visible_names(mod)
 
 
-def test_classify_dir_entry_returns_constant_for_module_attr_string() -> None:
-    """Module-level int/str/etc. (not callable/class/module) → wrapped as _Constant."""
+def test_resolve_child_returns_constant_for_module_attr_string() -> None:
+    """Module-level int/str/etc. (not callable/class/module) -> wrapped as _Constant."""
     mod = _fake_module(
         '''
         VERSION: str = "1.0"
@@ -552,7 +570,7 @@ def test_classify_dir_entry_returns_constant_for_module_attr_string() -> None:
     )
     annotations = _module_attribute_annotations(mod)
     docs = _module_attribute_docs(mod)
-    entry = _classify_dir_entry(mod, "VERSION", annotations, docs)
+    entry = resolve_child(mod, "VERSION", annotations, docs)
     assert isinstance(entry, _Constant)
     assert entry.type_str == "str"
     assert entry.doc == "Library version."
