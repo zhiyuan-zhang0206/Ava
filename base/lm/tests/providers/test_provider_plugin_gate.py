@@ -17,7 +17,6 @@ import pytest
 from base import paths
 from base.lm import provider_api
 from base.lm.catalog import provider_contract
-from base.lm.plugin_providers import build_model_catalog
 from base.lm.provider_api import (
     DecisionModelSpec,
     DecisionProviderContribution,
@@ -25,6 +24,7 @@ from base.lm.provider_api import (
     ProviderContribution,
 )
 from base.lm.tests.providers.provider_plugin_support import provider_plugin as provider_plugin
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.gate import ContributionMismatch, check_manifest
 from base.packages.plugins.manifest import ManifestError

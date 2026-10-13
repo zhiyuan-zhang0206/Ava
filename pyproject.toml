@@ -1070,11 +1070,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "base/config/admin/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "base/config/domains/daemon/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1221,6 +1216,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/packages/extensions/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/packages/plugins/surface/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

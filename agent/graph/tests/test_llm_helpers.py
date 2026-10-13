@@ -35,8 +35,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
-from base.lm.plugin_providers import build_model_catalog
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}

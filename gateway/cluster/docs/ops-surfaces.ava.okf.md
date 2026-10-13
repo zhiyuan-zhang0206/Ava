@@ -44,7 +44,7 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | `live_count`, lifetime event estimate | Postgres metadata |
 | windowed tokens, cost, turn duration, warning/error counts | `telemetry_events` (Postgres) |
 | warning/error event totals and `alert_classes_active` / `alert_classes_dismissed` | the window's classes (below) and the active `event_dismissals` rows (Postgres) that cancel them |
-| `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
+| `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/surface/stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
 
 Every request computes its window in one pooled connection with an 8-second
 statement timeout (a timeout is a retriable 503): one scan of the window's

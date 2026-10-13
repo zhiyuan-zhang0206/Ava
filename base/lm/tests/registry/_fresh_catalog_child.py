@@ -9,9 +9,9 @@ import sys
 from dataclasses import replace
 
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import plugin_providers
 from base.lm.context_budget import resolve_context_budget
 from base.lm.registry import resolve_available_model
+from base.packages import plugin_providers
 
 
 def emit(text: object) -> None:

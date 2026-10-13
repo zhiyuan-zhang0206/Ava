@@ -20,7 +20,7 @@ from base.lm.catalog.decide.types import (
     YesNo,
 )
 from base.lm.decision.call import decide
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 _MODEL = "gpt-6-luna-decisions"
 _QUESTIONS = {

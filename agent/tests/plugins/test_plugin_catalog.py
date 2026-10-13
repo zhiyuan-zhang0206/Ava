@@ -19,8 +19,8 @@ from agent.extensions import catalog as catalog_mod
 from agent.extensions import load_extensions
 from agent.extensions.registry import declarations
 from base import paths
-from base.lm import plugin_providers
 from base.lm.catalog import ModelCatalog
+from base.packages import plugin_providers
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.gate import ContributionMismatch

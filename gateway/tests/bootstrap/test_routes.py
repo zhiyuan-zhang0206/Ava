@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.db import Database
-from base.packages.plugins import stats
+from base.packages.plugins.surface import stats
 from base.telemetry.observability import cluster_label
 from gateway.app import app
 from gateway.schemas.stats import StatsWindowHours, window_delta

@@ -1,6 +1,2 @@
-[loads]
-"plugin_providers.py" = ["ava_builtins/plugins"]
-
 [external]
 "factory.py" = "imports the module named by AVA_LLM_OVERRIDE"
-"plugin_providers.py" = "also loads operator-installed plugins from $AVA_HOME/plugins, outside the repository"

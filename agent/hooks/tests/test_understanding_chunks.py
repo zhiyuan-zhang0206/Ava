@@ -18,7 +18,7 @@ from agent.state_channels import CompactState
 from base.agents.history.hierarchy.chunks import Chunk
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 
 def _read_agent(field: str):

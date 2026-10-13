@@ -1,7 +1,7 @@
 """The model catalog: every model, binding, stop vocabulary and price a process knows.
 
 A `ModelCatalog` is an immutable value. `CatalogBuilder` is how one is made: the provider
-loader (`base/lm/plugin_providers.py`) installs each enabled plugin's `ProviderContribution`
+loader (`base/packages/plugin_providers.py`) installs each enabled plugin's `ProviderContribution`
 into a builder and takes `build()`, which validates the whole graph. Nothing is registered at
 import and nothing is mutated after `build()`; a failed installation discards the builder, so
 a retry starts from scratch. Each process composition root retains the catalog it built and passes it explicitly

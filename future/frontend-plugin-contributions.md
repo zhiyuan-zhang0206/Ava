@@ -175,7 +175,7 @@ by setting the custom properties on the root element.
 The vocabulary is the **color** custom properties of that layer, not every
 property in it: `--radius` is deliberately excluded, because the component
 geometry is tuned around it and re-valuing it is a layout change wearing a
-theme's clothes (`base/packages/plugins/ui_contributions.py:NON_THEMABLE_TOKENS`, kept
+theme's clothes (`base/packages/plugins/surface/ui_contributions.py:NON_THEMABLE_TOKENS`, kept
 honest against `globals.css` by its test).
 
 **A skin and the light/dark mode must stay orthogonal**, which is why a pack has
@@ -279,7 +279,7 @@ catalog request. This is an agent-scoped API consumer, not a new
 composer/plugin extension point.
 
 - **U1 — manifest key + validator** — **shipped**: the `contributions.ui`
-  schema lives in `base/packages/plugins/ui_contributions.py` (closed type set, closed
+  schema lives in `base/packages/plugins/surface/ui_contributions.py` (closed type set, closed
   icon vocabulary, and a theme token vocabulary locked against
   `ui/web/src/app/globals.css` by
   `base/packages/plugins/tests/test_ui_contributions.py`, so a token the console adds
@@ -363,7 +363,7 @@ composer/plugin extension point.
   **U4a — inspector widgets (shipped, task #2909)** — the one inspector
   surface a declaration cannot carry: per-agent interactive targets. A plugin
   registers `InspectWidgetSpec` at its `inspector.py` import
-  (`base/packages/plugins/inspector.py`); the gateway imports the ENABLED builtin
+  (`base/packages/plugins/surface/inspector.py`); the gateway imports the ENABLED builtin
   plugins' modules under their `PluginContext` (the plugin-metric loader's
   shape) and serves `GET /api/agents/{id}/inspect/widgets` with its payload —
   the agent's active tasks — resolved server-side. The console renders
@@ -381,7 +381,7 @@ composer/plugin extension point.
   the plugin's value row and must survive as a `plugin_stats` primary key),
   `GET /api/ui/contributions` carries them attributed, and
   `GET /api/stats/dashboard` carries the values read from `plugin_stats`
-  (`base/packages/plugins/stats.py`, one upsert-only row per `(plugin, id)`). The
+  (`base/packages/plugins/surface/stats.py`, one upsert-only row per `(plugin, id)`). The
   console joins the two halves and renders cards below the built-in grid —
   deliberately NOT windowed: a plugin value is a point in time and the window
   selector must not pretend to aggregate it.

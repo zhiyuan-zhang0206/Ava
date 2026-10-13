@@ -2210,7 +2210,7 @@
     "/api/agents/{agent_id}/inspect/widgets": {
       "get": {
         "summary": "Get Agent Inspect Widgets",
-        "description": "The agent's plugin widgets for the inspector panel — the extension\nsurface where enabled plugins embed widgets (see `base/packages/plugins/inspector.py`;\nregistration mirrors the plugin-metric system).\n\nBuilds the widget registry in process (shipped builtin plugins'\n``inspector.py`` modules imported under their plugin context, restricted\nto the plugins currently enabled), resolves the closed target vocabulary\nfor this agent — the open notice and the queue's task-ownership rule —\nand projects each widget, dropping a button whose target did not resolve\nand a widget left without buttons. Unknown agents return 404 like the\nrest of the /inspect family. Implementation in\n``gateway/inspect/_plugin_widgets.py``.",
+        "description": "The agent's plugin widgets for the inspector panel — the extension\nsurface where enabled plugins embed widgets (see `base/packages/plugins/surface/inspector.py`;\nregistration mirrors the plugin-metric system).\n\nBuilds the widget registry in process (shipped builtin plugins'\n``inspector.py`` modules imported under their plugin context, restricted\nto the plugins currently enabled), resolves the closed target vocabulary\nfor this agent — the open notice and the queue's task-ownership rule —\nand projects each widget, dropping a button whose target did not resolve\nand a widget left without buttons. Unknown agents return 404 like the\nrest of the /inspect family. Implementation in\n``gateway/inspect/_plugin_widgets.py``.",
         "operationId": "get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get",
         "parameters": [
           {
@@ -12154,7 +12154,7 @@
           "order"
         ],
         "title": "InspectWidgetResult",
-        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`base/packages/plugins/inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and the payload field the kind reads (`tasks`)\ncarries the kernel-resolved rows. A widget with an empty payload is\ndropped from the response entirely (the panel's empty-section rule)."
+        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`base/packages/plugins/surface/inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and the payload field the kind reads (`tasks`)\ncarries the kernel-resolved rows. A widget with an empty payload is\ndropped from the response entirely (the panel's empty-section rule)."
       },
       "InspectWidgetTask": {
         "properties": {

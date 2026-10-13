@@ -38,7 +38,7 @@ from typing import Any, cast
 from base import paths
 from base.host.git import host_version as host_version_module
 from base.host.git.host_version import Version, parse_version
-from base.packages.plugins.ui_contributions import validate_ui_contributions
+from base.packages.plugins.surface.ui_contributions import validate_ui_contributions
 
 MANIFEST_FILENAME = "ava-plugin.json"
 API_VERSION = 2

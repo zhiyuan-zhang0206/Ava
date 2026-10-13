@@ -114,7 +114,7 @@ registry to whatever consumes it.
 | `default_config.py` | `config` | the surface's processes (loaded with `plugin.py`), plus `ava plugins update` and the gateway / ops overlay validation, which read it alone through `base/packages/plugins/config_face.py` | the same builder (surface faces) | `ava.sdk_surface.install.install` binds it; update merges the disk image; overlay validation checks keys and types |
 | `agent_runtime.py` | hooks, `state`, `system_prompt_sections`, `context_notes` | the agent host (full `load_extensions`); a stateful exec child or external attach upgrades to it only to build the state class | same builder, both faces merged per plugin | the host daemon: checkpoint serde, `build_graph(checkpointer, extensions)`, `AvaContext.extensions` |
 | `metrics.py`, `inspector.py` | `metrics`, `inspect_widgets` | the gateway (per call), the Grafana dashboard supply (repo and installed plugins), `ava plugins inspect` | `data_registry.build_data_registry` over `load_declaration` | inspector endpoints, dashboard render |
-| `provider.py` | `providers` | every process that builds or validates a chat model | none: each declaration is installed as it is read | `base/lm/plugin_providers.py` into the process's model catalog |
+| `provider.py` | `providers` | every process that builds or validates a chat model | none: each declaration is installed as it is read | `base/packages/plugin_providers.py` into the process's model catalog |
 
 The `ava` module is a singleton that agent code reaches by attribute access, so its writes are
 concentrated in `ava/sdk_surface/install.py`: per plugin, in name order, namespaces, members, expansions,

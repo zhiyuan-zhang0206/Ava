@@ -35,7 +35,7 @@ from base.db import Database
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
-from base.packages.plugins import stats
+from base.packages.plugins.surface import stats
 from base.telemetry.observability import cluster_label
 from gateway.cluster import _roster_rows, _stats_events, roster_probe
 from gateway.cluster._health import get_health

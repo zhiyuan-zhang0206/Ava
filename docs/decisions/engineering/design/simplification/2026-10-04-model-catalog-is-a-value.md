@@ -17,7 +17,7 @@ a `PriceBook` (archive plus plugin prices), with the derived views computed from
 graph and freezes it. Nothing registers at import and nothing mutates after `build()`; a failed
 installation discards the builder.
 
-`base/lm/plugin_providers.py:model_catalog()` builds it once per process from the enabled plugins and
+`base/packages/plugin_providers.py:model_catalog()` builds it once per process from the enabled plugins and
 is the only way readers get it (`ensure_provider_plugins_loaded` and the module-level tables are
 gone). The one slot that holds it is the loader's own `_STATE`; `use_catalog` lends a different
 catalog for a block, and tests inject rows through the `add_models` / `add_bindings` / `set_prices`

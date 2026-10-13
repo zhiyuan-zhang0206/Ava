@@ -14,6 +14,7 @@ would be circular).
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +82,10 @@ class ConfigFieldMeta:
 
 
 def get_config_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:
-    """Walk every sub-model's fields and extract the metadata the frontend needs."""
+    """Walk every core sub-model's fields and extract the metadata the frontend needs.
+
+    Plugin-owned fields are not core: `base.packages.plugin_config_admin`
+    composes them on top (`panel_metadata`)."""
     values = authority.current_field_values()
     result: list[ConfigFieldMeta] = []
     for name, ref in fields().items():
@@ -126,12 +130,16 @@ def get_config_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:
                 choices=choices,
             )
         )
-    from base.config.admin.plugin_config import plugin_metadata
-
-    return result + plugin_metadata()
+    return result
 
 
-def env_override_values(*, authority: ConfigAuthority, local: bool = False) -> dict[str, Any]:
+def env_override_values(
+    *,
+    authority: ConfigAuthority,
+    local: bool = False,
+    plugin_metadata: Sequence[ConfigFieldMeta] = (),
+    plugin_values: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """field name -> current value for every field explicitly set in this unit's
     `.env` that a PUT /api/config would accept.
 
@@ -142,15 +150,16 @@ def env_override_values(*, authority: ConfigAuthority, local: bool = False) -> d
     editing a *remote* host's field. That keeps read-only fields (`db_url`) out and,
     for a remote target, the connection / identity values the first `ava start` wrote — so
     the whole set round-trips back through a PUT without rejection.
-    """
-    from base.config.admin.plugin_config import plugin_overrides
 
-    plugin_values = plugin_overrides()
+    Core only unless the caller supplies the plugin-owned `plugin_metadata` and the
+    `plugin_values` present in their images (`config_admin.panel_overrides` does).
+    """
+    extra_values = dict(plugin_values or {})
     aliases = authority.read_env_aliases()
-    set_fields = {name for name in fields() if field_alias(name) in aliases} | plugin_values.keys()
-    values = {**authority.current_field_values(), **plugin_values}
+    set_fields = {name for name in fields() if field_alias(name) in aliases} | extra_values.keys()
+    values = {**authority.current_field_values(), **extra_values}
     out: dict[str, Any] = {}
-    for meta in get_config_metadata(authority=authority):
+    for meta in [*get_config_metadata(authority=authority), *plugin_metadata]:
         if meta.name not in set_fields or not meta.writable:
             continue
         if meta.scope == "host" and not local and not meta.remote_writable:

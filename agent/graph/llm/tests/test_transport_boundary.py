@@ -17,7 +17,7 @@ from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_tim
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.errors import is_retryable_provider_error
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 
 @pytest.mark.parametrize("during_model_iteration", [False, True])

@@ -12,8 +12,8 @@ from pydantic import model_validator
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.cluster.machine import MachineIdentity
-from base.config.admin import plugin_config
 from base.config.service_read import ConfigAuthority
+from base.packages import plugin_config_admin as plugin_config
 from base.packages import plugin_config_images
 from base.packages.plugin_config_images import PluginConfigOwner
 from gateway.app import app

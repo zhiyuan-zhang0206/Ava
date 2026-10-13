@@ -1,7 +1,7 @@
 """`plugin_stats` — the runtime values behind declared statistics-panel cards.
 
 A plugin's stat cards are declared in its manifest (`contributions.ui.stats`,
-validated by `base/packages/plugins/ui_contributions.py`): identity and label only.
+validated by `base/packages/plugins/surface/ui_contributions.py`): identity and label only.
 The value is runtime data — written by the plugin's own code (an agent-process
 refresh hook, a daemon, a manual run) through `upsert()` here, keyed by
 `(plugin, id)`, and read into `GET /api/stats/dashboard`, where the console

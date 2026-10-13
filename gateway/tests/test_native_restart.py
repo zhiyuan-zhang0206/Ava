@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from gateway.tests.test_idempotency import client as client
 from gateway.tests.test_native_cancel import _headers
 from ops.lifecycle.native_restart import restart_native_work_op

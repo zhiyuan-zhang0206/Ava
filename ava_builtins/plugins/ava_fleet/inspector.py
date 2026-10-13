@@ -6,7 +6,7 @@ tasks as a section, each row jumping to the task in the
 fleet task view.
 
 The kernel resolves the rows (its ownership rule, see
-``base/packages/plugins/inspector.py``), so this module carries no ids and no
+``base/packages/plugins/surface/inspector.py``), so this module carries no ids and no
 callables. ``order=150`` sits the section directly below the built-in page
 section (page=100, shells=200): the agent's open pages first, its work queue
 next (user ruling 2026-09-18, task #3903; the order scale and the built-in
@@ -14,7 +14,7 @@ sections' keys are documented in ``docs/conventions/extensions/plugin-spec-v2.md
 """
 
 from base.packages.plugins.extensions import PluginContributions
-from base.packages.plugins.inspector import InspectWidgetSpec
+from base.packages.plugins.surface.inspector import InspectWidgetSpec
 
 WIDGETS: tuple[InspectWidgetSpec, ...] = (
     InspectWidgetSpec(

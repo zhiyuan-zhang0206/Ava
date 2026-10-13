@@ -397,7 +397,7 @@ def _load_plugin_stages(
         else:
             from base import paths
             from base.config.service_read import ConfigAuthority
-            from base.lm.plugin_providers import build_model_catalog
+            from base.packages.plugin_providers import build_model_catalog
 
             if config is None:
                 config = ConfigBoot()

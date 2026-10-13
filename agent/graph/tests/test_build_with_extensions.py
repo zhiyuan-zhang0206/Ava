@@ -17,8 +17,8 @@ from uuid import uuid4
 import pytest
 
 from base import paths
-from base.lm import plugin_providers
 from base.lm.catalog import ModelCatalog
+from base.packages import plugin_providers
 from base.packages.plugins.enable_config import write_local
 
 # Every dotted name `load_extensions` can register a plugin module under.

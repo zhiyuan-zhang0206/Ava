@@ -5,7 +5,7 @@ Not a router: ``gateway/inspect/router.py`` mounts the single endpoint
 (kept as its own module so agent_inspect stays under the per-file line budget).
 The extension surface of the inspector panel: a plugin embeds widgets for
 every agent from its own Python half (``contribute()`` in ``inspector.py`` —
-see ``base/packages/plugins/inspector.py``).
+see ``base/packages/plugins/surface/inspector.py``).
 
 The registry is built **in process** like the plugin-metric one (task #180
 PR D): the enabled builtin plugins' ``inspector.py`` declarations are admitted
@@ -39,7 +39,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.priority import Priority
 from base.packages.plugins import data_registry
-from base.packages.plugins.inspector import InspectWidgetSpec
+from base.packages.plugins.surface.inspector import InspectWidgetSpec
 from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 

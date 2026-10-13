@@ -1,4 +1,4 @@
-"""`base.packages.plugins.stats` — the value half of declared statistics-panel cards.
+"""`base.packages.plugins.surface.stats` — the value half of declared statistics-panel cards.
 
 Exercised against the session's real Postgres: the contract IS the upsert —
 last write wins on `(plugin, id)`, the status vocabulary is closed, and what a
@@ -16,7 +16,7 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.db import Database, pool
 from base.db.code_version_gate import ProcessDbGate
-from base.packages.plugins import stats
+from base.packages.plugins.surface import stats
 
 
 @pytest.fixture

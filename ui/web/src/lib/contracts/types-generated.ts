@@ -1320,7 +1320,7 @@ export interface paths {
         /**
          * Get Agent Inspect Widgets
          * @description The agent's plugin widgets for the inspector panel — the extension
-         *     surface where enabled plugins embed widgets (see `base/packages/plugins/inspector.py`;
+         *     surface where enabled plugins embed widgets (see `base/packages/plugins/surface/inspector.py`;
          *     registration mirrors the plugin-metric system).
          *
          *     Builds the widget registry in process (shipped builtin plugins'
@@ -5898,7 +5898,7 @@ export interface components {
          *     GET /api/agents/{id}/inspect/widgets.
          *
          *     The resolved twin of a registered `InspectWidgetSpec`
-         *     (`base/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
+         *     (`base/packages/plugins/surface/inspector.py`): `plugin` + `id` name the registration,
          *     `kind` selects the console renderer (a closed set; an unknown kind is
          *     skipped by the console), and the payload field the kind reads (`tasks`)
          *     carries the kernel-resolved rows. A widget with an empty payload is

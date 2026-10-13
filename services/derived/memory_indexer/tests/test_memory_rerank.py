@@ -23,7 +23,7 @@ from base.lm.catalog.decide.types import (
     DecisionRequestError,
     YesNo,
 )
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import KIND_BODY, KIND_DESC, ChunkHit
 from services.derived.memory_indexer.chunking import chunk_text

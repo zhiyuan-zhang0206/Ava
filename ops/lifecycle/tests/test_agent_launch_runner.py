@@ -13,7 +13,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from ops import lifecycle
 from ops.agents.spawn import create_agent_row
 from ops.lifecycle import launch

@@ -41,8 +41,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
 from base.native_process.turn_identity import HostedTurnResources
+from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent

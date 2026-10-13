@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
-from base.config.admin.plugin_config import (
+from base.host.env import runtime_config
+from base.packages.plugin_config_admin import (
     patch_owner,
     plugin_metadata,
     write_plugin_patch,
 )
-from base.host.env import runtime_config
 from base.packages.plugin_config_images import (
     PluginConfigChangedError,
     PluginConfigOwner,
@@ -71,7 +71,7 @@ def test_unknown_patch_field_is_a_request_rejection() -> None:
 def test_duplicate_declaration_is_not_a_request_rejection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base.config.admin import plugin_config
+    from base.packages import plugin_config_admin as plugin_config
 
     first = PluginConfigOwner("first", FleetConfig, tmp_path / "first.json")
     second = PluginConfigOwner("second", FleetConfig, tmp_path / "second.json")

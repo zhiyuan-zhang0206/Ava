@@ -24,7 +24,7 @@ from base.api_contracts.agent_contract import IndexerUnavailable
 from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 
 @pytest.fixture

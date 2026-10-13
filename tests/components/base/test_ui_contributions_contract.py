@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from base.packages.plugins import ui_contributions as ui
+from base.packages.plugins.surface import ui_contributions as ui
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 

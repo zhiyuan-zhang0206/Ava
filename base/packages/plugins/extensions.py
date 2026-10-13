@@ -23,18 +23,18 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
-from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import DecisionProviderContribution, ProviderContribution
 from base.packages.plugins.contributions import Contribution
-from base.packages.plugins.inspector import InspectWidgetSpec
+from base.packages.plugins.surface.inspector import InspectWidgetSpec
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
-# A note builder returns a langchain `HumanMessage`, or None when it has nothing to say; the type is
-# `object` here because this module is imported by processes that must stay off the LM stack (a
-# child's surface load), and `agent.graph.prompt.context_notes` checks what a builder returns.
-NoteBuilder = Callable[[AvaContext], object | None]
+# A note builder takes the run's `AvaContext` (`base.agents.context`, which sits above this module)
+# and returns a langchain `HumanMessage`, or None when it has nothing to say; both types are left
+# open here because this module is imported by processes that must stay off the LM stack (a child's
+# surface load), and `agent.graph.prompt.context_notes` checks what a builder returns.
+NoteBuilder = Callable[..., object | None]
 
 
 class SectionFn(Protocol):
@@ -151,7 +151,7 @@ class PluginContributions:
     inspect_widgets: tuple[InspectWidgetSpec, ...] = ()
     # Model providers, declared by a plugin's `provider.py`: loaded by every process that builds or
     # validates a chat model, installed into the process's model catalog by
-    # `base/lm/plugin_providers.py` (the one writer).
+    # `base/packages/plugin_providers.py` (the one writer).
     providers: tuple[ProviderContribution, ...] = ()
     # Decision-model providers (typed questions answered with probabilities, never text), declared
     # by the same `provider.py` and installed into the same catalog builder, but into parallel

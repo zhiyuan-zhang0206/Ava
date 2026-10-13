@@ -13,7 +13,7 @@ from agent.hooks import compact
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 
 @pytest.mark.parametrize("provider_cause", [False, True])

@@ -24,7 +24,7 @@ from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 

@@ -10,7 +10,6 @@ import pytest
 
 from base.config import field_names, get_field, settings
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
 from base.lm.registry import (
     DEFAULT_TUNING,
     ModelSpec,
@@ -18,6 +17,7 @@ from base.lm.registry import (
     resolve_available_model,
     resolve_setting,
 )
+from base.packages.plugin_providers import build_model_catalog
 
 
 def _validate_with(overrides: dict[str, ModelSpec]) -> None:
