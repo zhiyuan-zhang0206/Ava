@@ -26,7 +26,7 @@ from base.db.config import db_config_from_boot
 from base.native_process.code_version import CodeVersion
 from base.paths import prod_service_checkout_error
 from base.telemetry import process_name
-from gateway.schedules import runner as engine
+from services.wake.schedule_manager import engine
 
 
 def _bind_schedule_actor(

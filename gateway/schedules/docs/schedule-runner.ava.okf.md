@@ -19,7 +19,7 @@ Launched by the `schedule-manager` service ([[schedules.ava.okf.md]]) inside the
 - **Exit means terminal**: script exits cleanly with rc=0 → runner writes `status='completed'` before exiting (the resident process finished, manager will not restart); non-zero rc / uncaught exception → traceback written to `schedules.last_error` (latest crash) and, tail-truncated to 3000 chars after a `crashed: <ExceptionName>` first line, to that run's `schedule_runs.note` (one per crash; the session log is gone with the session), reported as terminal process loss; explicit start/restart is required; SIGTERM/SIGHUP active kill → nothing written, not counted as a crash
 
 The process entrypoint statically imports the SDK and supplies its database factory,
-actor binding and plugin loading to `gateway/schedules/runner.py`. It captures the
+actor binding and plugin loading to `services/wake/schedule_manager/engine.py`. It captures the
 SDK's loaded image and gives execution and lazy telemetry handles one code-version
 gate. `runpy.init_globals` supplies immutable `ScheduleInputs` to the templates;
 their execution bodies borrow the same builders without constructing or closing

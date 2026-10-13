@@ -49,7 +49,7 @@ def _delay_record_error(root: Path) -> None:
 
     import psutil
 
-    from gateway.schedules import runner as r
+    from services.wake.schedule_manager import engine as r
 
     record_error = r._record_error
 
@@ -67,7 +67,7 @@ def _delay_record_error(root: Path) -> None:
 
 
 def _delay_completion() -> None:
-    from gateway.schedules import runner as r
+    from services.wake.schedule_manager import engine as r
 
     finish = r._finish_completed
 
@@ -92,7 +92,9 @@ def run_runner(root: Path, schedule_id: int, mode: str) -> None:
         _delay_completion()
     import ava
     from base.config import settings
-    from gateway.schedules import runner  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    from services.wake.schedule_manager import (
+        engine,  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    )
     from services.wake.schedule_manager.runner import run
 
     ava.ensure_plugins_loaded = lambda **_inputs: None
@@ -102,7 +104,7 @@ def run_runner(root: Path, schedule_id: int, mode: str) -> None:
 
 def stall_exit(root: Path, blocked_write: str) -> None:
     database, _inputs = _schedule_inputs()
-    from gateway.schedules import runner as r
+    from services.wake.schedule_manager import engine as r
 
     r._FAILURE_RECORD_DEADLINE_S = 1.0
 
@@ -128,7 +130,7 @@ def completion_during_stall(root: Path) -> None:
 
     database, inputs = _schedule_inputs()
     import ava
-    from gateway.schedules import runner as r
+    from services.wake.schedule_manager import engine as r
 
     r.settings.gateway.schedule_stall_timeout_seconds = 0.04
     r._FAILURE_RECORD_DEADLINE_S = 1.0

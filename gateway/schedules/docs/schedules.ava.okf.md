@@ -23,7 +23,7 @@ A **schedule** is a resident process supervised by the `schedule-manager` servic
 - **Terminal execution**: a disappeared session with `status=completed` remains completed. Otherwise the manager records an error requiring explicit start/restart. Neither case relaunches automatically.
 - **Alerts on prolonged silence**: an enabled schedule with no live session for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event. `status='error'` remains eligible without being relaunched. The first sessionless observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the session live again clears both and rearms a later outage; completed and disabled schedules are excluded.
 
-### ScheduleRunner (`gateway/schedules/runner.py`)
+### ScheduleRunner (`services/wake/schedule_manager/engine.py`)
 - The in-session entrypoint `.venv/bin/python -m services.wake.schedule_manager.runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.ava.okf.md]].
 
 ### Built-in Cron Slot Claims (`schedules/catchup.py`)
@@ -62,4 +62,4 @@ actual process birth can lose work; this is accepted to prevent duplicate starts
 
 - `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`: the service, its two loops and the checkout guard
 - `services/wake/schedule_manager/manager.py:ScheduleManager` — reconcile logic
-- `services/wake/schedule_manager/runner.py:main()` — the process entrypoint; calls `gateway/schedules/runner.py:run()` with explicit SDK inputs
+- `services/wake/schedule_manager/runner.py:main()` — the process entrypoint; calls `services/wake/schedule_manager/engine.py:run()` with explicit SDK inputs
