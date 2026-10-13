@@ -19,6 +19,7 @@ import pytest
 from playwright.sync_api import Browser, Page
 from playwright.sync_api import Error as PlaywrightError
 
+from scripts.post_deploy_visual import check
 from scripts.post_deploy_visual.check import (
     REPO_ROOT,
     _accept_wave,
@@ -261,9 +262,10 @@ def test_host_run_requires_the_cookie_env_var(
 ) -> None:
     from scripts.post_deploy_visual.check import _run_host
 
-    monkeypatch.setattr("scripts.post_deploy_visual.check._assert_gate_origin", lambda _url: None)
+    monkeypatch.setattr(check, "_assert_gate_origin", lambda _url: None)
     monkeypatch.setattr(
-        "scripts.post_deploy_visual.check.inherited_process_env",
+        check,
+        "inherited_process_env",
         dict,
     )
     args = argparse.Namespace(

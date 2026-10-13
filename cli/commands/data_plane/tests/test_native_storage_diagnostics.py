@@ -10,6 +10,7 @@ import pytest
 import redis
 
 from base import cluster
+from base.cluster import authority
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from cli.commands.data_plane._pooler_stop import OwnedPooler
@@ -69,7 +70,8 @@ async def test_native_pooler_diagnostic_authenticates_without_config_writes(
     # The fixture pooler trusts its userlist; the probe authenticates as the
     # admin-console operator entry with the home's recorded credential.
     monkeypatch.setattr(
-        "base.cluster.authority.read_pooler_admin",
+        authority,
+        "read_pooler_admin",
         Mock(return_value=SimpleNamespace(password="fixture-admin")),  # noqa: S106 — trusted fixture pooler
     )
     before = custodian.config.read_bytes()

@@ -11,6 +11,7 @@ from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_boot as runner_boot
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
+from base.host.env import bootstrap
 from cli.commands.data_plane import bringup
 from cli.commands.lifecycle.start_generation import _write_generation
 
@@ -19,7 +20,7 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
     runner_boot: unit.UnitCapability, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(runner_home))
-    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
     assert bringup.db_delivery("runner") == {
         "AVA_DB_URL": runner_boot.dsn,
         authority.GENERATION_ENV: "0",

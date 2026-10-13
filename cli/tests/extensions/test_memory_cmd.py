@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
+from base.cluster import machine
 from cli import main as _main
 from cli import parsers as _parsers
 from cli.commands.extensions import memory as _memory
@@ -33,10 +34,8 @@ class _FakeResp:
 
 @pytest.fixture(autouse=True)
 def _gateway(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr(
-        "base.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
-    )
+    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_auth_headers", lambda: {"Authorization": "Bearer secret"})
 
 
 def _patch_post(

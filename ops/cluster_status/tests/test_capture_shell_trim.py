@@ -15,6 +15,8 @@ from collections.abc import Callable
 
 import pytest
 
+import base.sessions.backend as sessions_backend
+from ops import cluster_status
 from ops.cluster_status import capture_shell
 from ops.rpc_schemas import ShellInfo
 
@@ -33,7 +35,7 @@ class _FakeBackend:
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], _FakeBackend]:
     def _install(captured: str) -> _FakeBackend:
         backend = _FakeBackend(captured)
-        monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
+        monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: backend)
         return backend
 
     return _install
@@ -43,7 +45,8 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], _FakeBacken
 def shell_sessions(monkeypatch: pytest.MonkeyPatch) -> Callable[[ShellInfo], None]:
     def _install(shell: ShellInfo) -> None:
         monkeypatch.setattr(
-            "ops.cluster_status.agent_shell_sessions",
+            cluster_status,
+            "agent_shell_sessions",
             lambda _agent_id: [shell],  # pyright: ignore[reportUnknownArgumentType]
         )
 

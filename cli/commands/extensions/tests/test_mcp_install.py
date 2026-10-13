@@ -15,6 +15,7 @@ import pytest
 
 from ava.mcp_config import installed_mcp_dir, load_mcp_config
 from base.packages.extensions import install_registry as reg
+from cli.commands.extensions import mcp
 from cli.commands.extensions.mcp import (
     cmd_mcp_install,
     cmd_mcp_list,
@@ -74,7 +75,7 @@ def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
         py.write_text("#!/bin/sh\n", encoding="utf-8")
         py.chmod(0o755)
 
-    monkeypatch.setattr("cli.commands.extensions.mcp._uv_sync", _fake)
+    monkeypatch.setattr(mcp, "_uv_sync", _fake)
 
 
 # ─── install ─────────────────────────────────────────────────────────────

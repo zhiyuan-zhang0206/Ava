@@ -17,6 +17,7 @@ from psycopg.types.json import Jsonb
 from ava import mcp_config
 from ava.skills import composer_commands
 from base.db import create_agent
+from base.packages.extensions import install_registry
 from base.packages.plugins import mcp_enabled
 from base.paths import skills_dir
 from ops.cluster import operations as cluster
@@ -36,9 +37,7 @@ def load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = skills_dir()
     root.mkdir()
     _write_skill(root, "load-skill", "converged skill")
-    monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names", lambda: {"load-skill"}
-    )
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"load-skill"})
     command_sources = unit_home / "empty-command-sources"
     monkeypatch.setattr(composer_commands, "repo_root", lambda: command_sources)
     monkeypatch.setattr(composer_commands, "repo_plugins_dir", lambda: command_sources / "plugins")
@@ -184,7 +183,8 @@ def test_agent_skill_view_honors_per_agent_skill_narrowing(
     """A named prompt capability keeps only its corresponding skill command."""
     _write_skill(load_dir, "other-skill", "other converged skill")
     monkeypatch.setattr(
-        "base.packages.extensions.install_registry.loadable_skill_names",
+        install_registry,
+        "loadable_skill_names",
         lambda: {"load-skill", "other-skill"},
     )
     monkeypatch.setattr(

@@ -19,6 +19,7 @@ import psutil
 import psycopg
 import pytest
 
+from base import telemetry
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.native_process.ownership import capture_tree
@@ -124,7 +125,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     def emit(_stream: str, kind: str, **fields: object) -> None:
         events.append((kind, fields))
 
-    monkeypatch.setattr("base.telemetry.emit", emit)
+    monkeypatch.setattr(telemetry, "emit", emit)
     notes: list[str] = []
     try:
         assert (

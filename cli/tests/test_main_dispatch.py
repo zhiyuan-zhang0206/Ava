@@ -22,6 +22,7 @@ import pytest
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from cli import main as _main
 from cli import parsers as _parsers
+from cli import start_identity
 from cli.commands.agents import parsers as _agents
 from cli.commands.extensions.parsers import mcp as _mcp
 from cli.commands.extensions.parsers import plugins as _plugins
@@ -345,7 +346,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
         return 7
 
     _stub_dispatch(monkeypatch, "start", _fake)
-    monkeypatch.setattr("cli.start_identity.require_initialized", _ignoring_retention(lambda: None))
+    monkeypatch.setattr(start_identity, "require_initialized", _ignoring_retention(lambda: None))
     # `start` is the one verb with a pre-dispatch side effect (the settings-free
     # installed-home gate), which this test neutralizes — it asserts flag
     # forwarding, not bring-up behaviour.
@@ -390,7 +391,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     def admitted(home: Path) -> None:
         assert home == tmp_path.resolve()
 
-    monkeypatch.setattr("cli.start_identity.require_initialized", admitted)
+    monkeypatch.setattr(start_identity, "require_initialized", admitted)
     for verb in ("status", "cluster", "agents", "config", "logs"):
         env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)

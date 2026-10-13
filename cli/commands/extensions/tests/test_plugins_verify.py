@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from base import paths
+from agent import extensions
+from base import paths, telemetry
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
 from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
@@ -140,7 +141,7 @@ def test_nothing_is_emitted_while_verifying_and_the_canonical_reporter_is_unchan
     def record(*args: object, **_kwargs: object) -> None:
         emitted.append(args)
 
-    monkeypatch.setattr("base.telemetry.emit", record)
+    monkeypatch.setattr(telemetry, "emit", record)
     _plugin("old_hooks", "raise RuntimeError('boom')\n")
     _enable("old_hooks")
 
@@ -157,7 +158,7 @@ def test_a_loader_crash_is_a_tool_error_not_a_red(
     def boom(**_: object) -> None:
         raise RuntimeError("loader exploded")
 
-    monkeypatch.setattr("agent.extensions.load_extensions", boom)
+    monkeypatch.setattr(extensions, "load_extensions", boom)
 
     assert cmd_plugins_verify() == 2
 

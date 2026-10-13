@@ -17,6 +17,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base import paths
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.native_process.root_control.client import owned_process
@@ -47,7 +48,7 @@ async def test_gate_native_child_readiness_restart_and_stop(
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
     monkeypatch.setattr(settings.services, "frontend_healthcheck_url", f"http://127.0.0.1:{port}")
-    monkeypatch.setattr("base.paths.root_run_dir", lambda: short_tmp)
+    monkeypatch.setattr(paths, "root_run_dir", lambda: short_tmp)
     spec = next(spec for spec in build_services() if spec.session == "gate")
     assert spec.identity_probe is not None
     assert spec.capabilities == frozenset({"gateway"})

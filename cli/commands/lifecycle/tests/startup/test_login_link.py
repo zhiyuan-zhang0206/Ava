@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from base.config import settings
+from base.host.net import http_dial
 from cli.commands.lifecycle import login_link
 
 _SECRET = "human-secret-for-link-tests"  # noqa: S105 — test fixture
@@ -55,7 +56,7 @@ def _configured(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _dial(monkeypatch: pytest.MonkeyPatch, response: httpx.Response | Exception) -> _Dial:
     dial = _Dial(response)
-    monkeypatch.setattr("base.host.net.http_dial.post", dial)
+    monkeypatch.setattr(http_dial, "post", dial)
     return dial
 
 

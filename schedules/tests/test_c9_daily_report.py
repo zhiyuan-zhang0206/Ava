@@ -21,6 +21,7 @@ from base.config import settings
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import fire_slot_once
+from base import telemetry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "c9-daily-report-schedule.py"
@@ -91,7 +92,7 @@ def _install_fake_accounting(
     def record_emit(category: str, event_name: str, **kwargs: object) -> None:
         emitted.append({"category": category, "event_name": event_name, **kwargs})
 
-    monkeypatch.setattr("base.telemetry.emit", record_emit)
+    monkeypatch.setattr(telemetry, "emit", record_emit)
     return emitted
 
 

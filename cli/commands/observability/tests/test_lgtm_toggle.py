@@ -6,11 +6,14 @@ from typing import Any
 
 import pytest
 
+import cli.commands.lifecycle.start as lifecycle_start
+from base.deploy.lifecycle import service_selection
 from base.deploy.lifecycle.service_selection import ServiceSelection
 from base.telemetry import EventPipeline
 from cli.commands.observability import lgtm
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from services.supervision import roster
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -20,14 +23,14 @@ def _wire(
 ) -> tuple[Path, list[dict[str, object]]]:
     marker = tmp_path / "lgtm-host"
     monkeypatch.setattr(lgtm, "lgtm_host_marker", lambda: marker)
-    monkeypatch.setattr("base.deploy.lifecycle.service_selection.read_selection", lambda: selection)
+    monkeypatch.setattr(service_selection, "read_selection", lambda: selection)
     calls: list[dict[str, object]] = []
 
     def start(**kwargs: object) -> int:
         calls.append(kwargs)
         return 0
 
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", start)
+    monkeypatch.setattr(lifecycle_start, "cmd_start", start)
     return marker, calls
 
 
@@ -110,7 +113,8 @@ def test_off_only_backend_allowlist_does_not_enable_all_services(
         monkeypatch, tmp_path, ServiceSelection("only", frozenset(lgtm.BACKENDS))
     )
     monkeypatch.setattr(
-        "services.supervision.roster.build_services",
+        roster,
+        "build_services",
         lambda: tuple(
             SimpleNamespace(session=n) for n in ("gateway", "loki", "prometheus", "grafana")
         ),
@@ -148,7 +152,7 @@ def test_normal_start_refusal_is_not_reported_as_toggle_success(
     def refuse(**_kwargs: object) -> int:
         return 1
 
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", refuse)
+    monkeypatch.setattr(lifecycle_start, "cmd_start", refuse)
     assert (
         lgtm.cmd_lgtm_on(
             retained_children=[],

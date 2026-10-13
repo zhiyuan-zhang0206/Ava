@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 
+import base.agents.impersonation as agents_impersonation
 from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation.status import ImpersonationStatus
 from base.events.live import redis_listener
@@ -175,13 +176,13 @@ def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
             for i in sorted(inbox.messages)[: inbox.page_size]
         ]
 
-    monkeypatch.setattr("base.agents.impersonation.relay_get", lease)
-    monkeypatch.setattr("base.agents.impersonation.relay_inbox", rows)
+    monkeypatch.setattr(agents_impersonation, "relay_get", lease)
+    monkeypatch.setattr(agents_impersonation, "relay_inbox", rows)
 
     def beat(_db: object, *_args: object, local_machine: str) -> None:
         return None
 
-    monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
+    monkeypatch.setattr(agents_impersonation, "relay_heartbeat", beat)
 
 
 def test_command_passes_remote_to_steer(

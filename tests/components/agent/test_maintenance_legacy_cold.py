@@ -21,6 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.incarnation import exec_request_evidence
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance import cohort, pause_owner
@@ -268,19 +269,16 @@ def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
 
 def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """This box runs other agents' exec children; isolate the test's own legs."""
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
-    )
+    monkeypatch.setattr(exec_request_evidence.psutil, "process_iter", _no_process_iteration)
 
 
 def _exec_request_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     exec_dir = tmp_path / "exec"
     quarantine = tmp_path / "quarantined-exec-requests"
+    monkeypatch.setattr(exec_request_evidence, "exec_run_dir", lambda: exec_dir)
     monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: exec_dir
-    )
-    monkeypatch.setattr(
-        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        exec_request_evidence,
+        "quarantined_exec_requests_dir",
         lambda: quarantine,
     )
     return exec_dir, quarantine

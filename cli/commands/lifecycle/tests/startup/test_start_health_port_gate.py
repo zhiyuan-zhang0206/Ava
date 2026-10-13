@@ -33,6 +33,7 @@ import pytest
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
+import services.supervision.roster.spec as roster_spec
 from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
 from base.telemetry import EventPipeline
@@ -219,9 +220,7 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
         del roles
         return tuple(spec for spec in specs if spec.session not in skip)
 
-    monkeypatch.setattr(
-        "services.supervision.roster.spec.services_for_capabilities_annotated", annotated_roster
-    )
+    monkeypatch.setattr(roster_spec, "services_for_capabilities_annotated", annotated_roster)
     monkeypatch.setattr(_root_driver_commands, "start_roster", start_roster)
 
     def launch(roster: tuple[ServiceSpec, ...], *_a: object, **_kw: object) -> LaunchOutcome:

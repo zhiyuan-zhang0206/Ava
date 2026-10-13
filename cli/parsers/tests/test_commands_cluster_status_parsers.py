@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 import cli.commands.cluster.control as cluster_control
+from base.cluster import machine
+from base.host.net import http_dial
 from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
 from cli.tests._commands_helpers import _FakeResponse
 from cli.tests._commands_helpers import _gateway_role_pinned as _gateway_role_pinned
@@ -24,10 +26,11 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
 
     from cli.parsers import build_parser
 
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_auth_headers", dict)
     monkeypatch.setattr(
-        "base.host.net.http_dial.post",
+        http_dial,
+        "post",
         lambda *_a, **_kw: _FakeResponse({"name": "runner-a", "resumed": True}),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert cluster_control.cmd_cluster_resume("runner-a") == 0

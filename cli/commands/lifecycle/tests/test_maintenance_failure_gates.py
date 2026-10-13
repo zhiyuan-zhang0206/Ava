@@ -25,6 +25,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
+from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
@@ -106,8 +107,8 @@ class _StartHarness:
         self.machine = machine
         self.woken: list[int] = []
         monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-        monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
-        monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", self._record_wake)
+        monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
+        monkeypatch.setattr(agent_pause, "publish_inbound_wake", self._record_wake)
 
     def _record_wake(self, _db: object, _bus: object, agent: int, _payload: str) -> bool:
         self.woken.append(agent)

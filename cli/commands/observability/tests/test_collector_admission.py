@@ -13,6 +13,7 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
+from cli.commands.lifecycle import root_driver
 from cli.commands.observability import otel_collector as oc
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -136,7 +137,7 @@ def test_collector_preparation_never_controls_a_running_service_tree(
         pytest.fail("Preparation cannot independently reconcile a live root")
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-    monkeypatch.setattr("cli.commands.lifecycle.root_driver.root_client", no_root_control)
+    monkeypatch.setattr(root_driver, "root_client", no_root_control)
     oc.ensure_otel_collector_step(ctx)
 
 

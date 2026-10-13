@@ -11,7 +11,10 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.deploy.git import cluster_drift
+from base.host.permissions_helper import client
 from base.telemetry import EventPipeline
+from cli import python_install
 from cli.commands.converge import _frontend_env as _fe_env
 from cli.commands.converge import _steps
 from cli.commands.converge import host as converge_host
@@ -28,6 +31,7 @@ from cli.commands.converge.tests.context_inputs import home as home
 from cli.commands.converge.tests.context_inputs import pgbouncer_context as _pgbouncer_ctx
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from services.desktop import permissions_helper
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -184,7 +188,7 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     scripts.mkdir()
     files = {pointer: pointer.read_bytes()}
     modes = {path: stat.S_IMODE(path.stat().st_mode) for path in (site, scripts, pointer)}
-    monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_dir", lambda: source)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: source)
 
     def default_home(_home: Path) -> bool:
         return True
@@ -194,7 +198,7 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     def no_reinstall(*_args: object, **_kwargs: object) -> None:
         pytest.fail("host convergence cannot reinstall an editable package")
 
-    monkeypatch.setattr("cli.python_install.install", no_reinstall)
+    monkeypatch.setattr(python_install, "install", no_reinstall)
     steps = tuple(
         step
         for step in converge_host.CONVERGE_STEPS
@@ -225,7 +229,7 @@ def test_permissions_helper_step_refuses_when_this_process_cannot_sign(
     def cannot_sign() -> None:
         raise PermissionsHelperSigningUnavailableError("the login keychain is not unlocked")
 
-    monkeypatch.setattr("services.desktop.permissions_helper.converge", cannot_sign)
+    monkeypatch.setattr(permissions_helper, "converge", cannot_sign)
     with pytest.raises(PermissionsHelperSigningUnavailableError, match="keychain"):
         converge_host._ensure_permissions_helper(ctx)
 
@@ -247,7 +251,7 @@ def test_permissions_helper_step_still_aborts_on_a_real_build_defect(
     def _boom() -> None:
         raise PermissionsHelperBuildError("swiftc failed (1): syntax error")
 
-    monkeypatch.setattr("services.desktop.permissions_helper.converge", _boom)
+    monkeypatch.setattr(permissions_helper, "converge", _boom)
 
     with pytest.raises(PermissionsHelperBuildError, match="swiftc failed"):
         converge_host._ensure_permissions_helper(ctx)
@@ -292,9 +296,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     # Unconfigured converge must defer helper ancestry until identity exists.
     # Record that boundary explicitly; reaching it would be a contract failure.
     helper_calls: list[str] = []
-    monkeypatch.setattr(
-        "services.desktop.permissions_helper.converge", lambda: helper_calls.append("helper")
-    )
+    monkeypatch.setattr(permissions_helper, "converge", lambda: helper_calls.append("helper"))
     operation = None
     if maintenance_held:
         from datetime import UTC, datetime
@@ -572,7 +574,7 @@ def test_screen_capture_step_records_the_helpers_answer(
     status = ScreenCaptureStatus(
         state=ScreenCaptureState.HELPER_UNREACHABLE, diagnostic="socket did not answer"
     )
-    monkeypatch.setattr("base.host.permissions_helper.client.check_screen_capture", lambda: status)
+    monkeypatch.setattr(client, "check_screen_capture", lambda: status)
 
     converge_host._ensure_screen_capture(ctx)
 
@@ -599,7 +601,8 @@ def test_screen_capture_step_clears_a_stale_file_when_the_grant_is_back(
     screen_capture_environment(monkeypatch, tmp_path, config=ctx.config)
     write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale"))
     monkeypatch.setattr(
-        "base.host.permissions_helper.client.check_screen_capture",
+        client,
+        "check_screen_capture",
         lambda: ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE),
     )
 
@@ -638,7 +641,7 @@ def test_screen_capture_step_skips_hosts_with_no_helper(
     def boom():
         raise AssertionError("must not probe a host that cannot run a helper")
 
-    monkeypatch.setattr("base.host.permissions_helper.client.check_screen_capture", boom)
+    monkeypatch.setattr(client, "check_screen_capture", boom)
 
     converge_host._ensure_screen_capture(ctx)
     assert read_status() is None
@@ -662,7 +665,7 @@ def test_accessibility_step_records_the_helpers_answer(
     status = AccessibilityStatus(
         state=AccessibilityState.HELPER_UNREACHABLE, diagnostic="socket did not answer"
     )
-    monkeypatch.setattr("base.host.permissions_helper.client.check_accessibility", lambda: status)
+    monkeypatch.setattr(client, "check_accessibility", lambda: status)
 
     converge_host._ensure_accessibility(ctx)
 
@@ -689,7 +692,8 @@ def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
     accessibility_environment(monkeypatch, tmp_path, config=ctx.config)
     write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale"))
     monkeypatch.setattr(
-        "base.host.permissions_helper.client.check_accessibility",
+        client,
+        "check_accessibility",
         lambda: AccessibilityStatus(state=AccessibilityState.GRANTED),
     )
 
@@ -726,7 +730,7 @@ def test_accessibility_step_skips_hosts_with_no_helper(
     def boom():
         raise AssertionError("must not probe a host that cannot run a helper")
 
-    monkeypatch.setattr("base.host.permissions_helper.client.check_accessibility", boom)
+    monkeypatch.setattr(client, "check_accessibility", boom)
 
     converge_host._ensure_accessibility(ctx)
     assert read_status() is None

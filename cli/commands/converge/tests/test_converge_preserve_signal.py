@@ -18,6 +18,7 @@ import pytest
 
 from base import db, paths
 from base.packages.extensions import materialize
+from base.telemetry import converge_report
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.extensions.materialize import materialize_cluster_extensions
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
@@ -30,7 +31,7 @@ def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
     def record_emit(*args: object, **kwargs: object) -> None:
         emitted.append((*args, kwargs))
 
-    monkeypatch.setattr("base.telemetry.converge_report.emit", record_emit)
+    monkeypatch.setattr(converge_report, "emit", record_emit)
     return emitted
 
 

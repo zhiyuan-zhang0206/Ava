@@ -25,6 +25,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+import base.deploy.maintenance.admission as maintenance_admission
 import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_preflight_commands
 import cli.commands.lifecycle.start as _start_commands
@@ -34,11 +35,14 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance.state import MaintenancePhase
+from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from ops import agent_pause
+from ops.cluster_status import pause
 from tests.factories.maintenance import WHEN, maintenance_agent
 from tests.factories.maintenance import isolate as isolate
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -158,7 +162,8 @@ def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.deploy.state.host_deploy_state import HostDeployState
 
     monkeypatch.setattr(
-        "base.deploy.state.host_deploy_state.read",
+        host_deploy_state,
+        "read",
         lambda _db, *_a, **_k: HostDeployState(  # pyright: ignore[reportUnknownArgumentType]
             machine="test",
             posture="paused",
@@ -179,10 +184,11 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
     sit with its restarter killed until an operator noticed."""
 
     _paused_posture(monkeypatch)
-    monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: None)
+    monkeypatch.setattr(maintenance_admission, "snapshot", lambda: None)
     unpaused: list[bool] = []
     monkeypatch.setattr(
-        "ops.cluster_status.pause.unpause_local_cluster",
+        pause,
+        "unpause_local_cluster",
         lambda _db, _bus, *, local_machine: unpaused.append(
             local_machine is command_runtime.machine
         ),  # pyright: ignore[reportUnknownArgumentType]
@@ -214,10 +220,11 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
         acquired_at=datetime.now(UTC),
         maintenance=MaintenanceHold(phase=MaintenancePhase.STOPPED),
     )
-    monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: held)
+    monkeypatch.setattr(maintenance_admission, "snapshot", lambda: held)
     unpaused: list[bool] = []
     monkeypatch.setattr(
-        "ops.cluster_status.pause.unpause_local_cluster",
+        pause,
+        "unpause_local_cluster",
         lambda _db, _bus, *, local_machine: unpaused.append(
             local_machine is command_runtime.machine
         ),  # pyright: ignore[reportUnknownArgumentType]
@@ -244,8 +251,8 @@ def _stub_release_effects(monkeypatch: pytest.MonkeyPatch, event_bus: EventBus) 
         return event_bus
 
     monkeypatch.setattr(EventBus, "from_settings", classmethod(from_settings))
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
-    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
+    monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
+    monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
 
 
 @pytest.mark.parametrize("phase", [MaintenancePhase.PREPARING, MaintenancePhase.DRAINING])
@@ -292,7 +299,7 @@ def test_failed_restart_leaves_a_hold_another_process_took(
     from base.deploy.maintenance import admission, pause_owner
 
     _stub_release_effects(monkeypatch, event_bus)
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", lambda _db, *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(host_deploy_state, "read", lambda _db, *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     pause_owner.begin_maintenance(f"local-pause:test-machine:{os.getpid() + 1}:{uuid4()}", WHEN)
 
     _stop_commands._release_self_heal_pause(
