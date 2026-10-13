@@ -19,6 +19,3 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 [debt.private-module]
 "tests/observability/test_inspect_event_metrics.py -> inspect/_event_metrics.py" = 5
 "tests/observability/test_inspect_event_metrics.py -> inspect/_plugin_metrics.py" = 4
-
-[debt.private-name]
-"tests/test_agent_inspect.py -> inspect/router.py#_cluster_rpc" = 1

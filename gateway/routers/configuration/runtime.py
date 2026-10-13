@@ -55,7 +55,7 @@ from base.packages.plugin_config_admin import (
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from ops import host_config
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.env_audit import EnvWriteAudit, check_env_integrity
 from ops.host_config import SENSITIVE_MASK
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
@@ -142,18 +142,18 @@ async def _dispatch_config_read(
         role = []
     if "agent-runner" in role:
         try:
-            wire = await _cluster_rpc.dispatch_to_machine(
+            wire = await cluster_rpc.dispatch_to_machine(
                 db,
                 target_machine=target,
                 kind="config_read",
                 payload={},
             )
-        except _cluster_rpc.ClusterOpUnreachable:
+        except cluster_rpc.ClusterOpUnreachable:
             raise HTTPException(
                 status_code=503,
                 detail=f"machine {target!r} ops server unreachable for config read",
             ) from None
-        except _cluster_rpc.ClusterOpFailed as exc:
+        except cluster_rpc.ClusterOpFailed as exc:
             raise HTTPException(
                 status_code=503,
                 detail=f"machine {target!r} config read failed: {exc.result!r}",
@@ -195,18 +195,18 @@ async def _dispatch_config_audit_read(
         role = []
     if "agent-runner" in role:
         try:
-            wire = await _cluster_rpc.dispatch_to_machine(
+            wire = await cluster_rpc.dispatch_to_machine(
                 db,
                 target_machine=target,
                 kind="config_audit_read",
                 payload={"last": last},
             )
-        except _cluster_rpc.ClusterOpUnreachable:
+        except cluster_rpc.ClusterOpUnreachable:
             raise HTTPException(
                 status_code=503,
                 detail=f"machine {target!r} ops server unreachable for config audit read",
             ) from None
-        except _cluster_rpc.ClusterOpFailed as exc:
+        except cluster_rpc.ClusterOpFailed as exc:
             raise HTTPException(
                 status_code=503,
                 detail=f"machine {target!r} config audit read failed: {exc.result!r}",
@@ -258,7 +258,7 @@ async def _dispatch_config_write(
         role = []
     if "agent-runner" in role:
         try:
-            wire = await _cluster_rpc.dispatch_to_machine(
+            wire = await cluster_rpc.dispatch_to_machine(
                 db,
                 target_machine=target,
                 kind="config_write",
@@ -269,12 +269,12 @@ async def _dispatch_config_write(
                     "trace_id": trace_id,
                 },
             )
-        except _cluster_rpc.ClusterOpUnreachable:
+        except cluster_rpc.ClusterOpUnreachable:
             raise HTTPException(
                 status_code=503,
                 detail=f"machine {target!r} ops server unreachable for config write",
             ) from None
-        except _cluster_rpc.ClusterOpFailed as exc:
+        except cluster_rpc.ClusterOpFailed as exc:
             raise HTTPException(
                 status_code=503,
                 detail=f"machine {target!r} config write failed: {exc.result!r}",

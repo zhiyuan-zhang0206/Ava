@@ -49,5 +49,5 @@ exports = ["creation"]
 
 [debt.unresolved-patch]
 "test_resurrect_forward.py#monkeypatch.setattr forward._LIFECYCLE_DISPATCH_DEADLINE_S" = 1
-"test_resurrect_forward.py#monkeypatch.setattr forward._cluster_rpc.dispatch_to_machine" = 2
+"test_resurrect_forward.py#monkeypatch.setattr forward.cluster_rpc.dispatch_to_machine" = 2
 "test_task_assignment_races.py#monkeypatch.setattr owner" = 1

@@ -23,7 +23,7 @@ from gateway.tests.routers.test_config_api import (
     stub_browser_capability as stub_browser_capability,
 )
 from ops import env_audit as audit
-from ops.cluster import rpc as _cluster_rpc
+from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -71,7 +71,7 @@ def test_put_remote_host_field_dispatches_config_write(
         "restart_required": ["ops"],
     }
     enqueue = AsyncMock(return_value=stub_result)
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
@@ -102,7 +102,7 @@ def test_put_remote_rejects_writable_non_remote_host_field(
     field_editable gate: remote host edits require remote_writable."""
     seed_machine(REMOTE)
     dispatched = AsyncMock()
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatched)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatched)
     with TestClient(app) as client:
         resp = client.put(
             f"/api/config?machine={REMOTE}", json={"cross_machine_transfer_backend": "none"}
@@ -121,7 +121,7 @@ def test_put_remote_rejects_oss_credential_fields(
     writable flip must not loosen."""
     seed_machine(REMOTE)
     dispatched = AsyncMock()
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatched)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatched)
     with TestClient(app) as client:
         resp = client.put(
             f"/api/config?machine={REMOTE}",
@@ -139,8 +139,8 @@ def test_put_remote_rejects_oss_credential_fields(
 def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, clean_overrides: Path) -> None:
     """PUT ?machine=<known-but-offline>: config_write times out -> 503."""
     seed_machine(REMOTE)
-    enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpUnreachable("no ack"))
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
+    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
@@ -151,8 +151,8 @@ def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, clean_overrides
 def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, clean_overrides: Path) -> None:
     """PUT ?machine=<known>: the remote config_write fails (row marked failed) -> 503."""
     seed_machine(REMOTE)
-    enqueue = AsyncMock(side_effect=_cluster_rpc.ClusterOpFailed({"error": "boom"}))
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", enqueue)
+    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpFailed({"error": "boom"}))
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with TestClient(app) as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
@@ -326,7 +326,7 @@ async def test_get_config_audit_all_merges_runners_newest_first(
         return ["agent-runner"]
 
     monkeypatch.setattr(machines, "lookup_role", _roles)
-    monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
     def _runners(_db: object) -> list[tuple[str, str | None]]:
         return [("m1", None), ("m2", None)]

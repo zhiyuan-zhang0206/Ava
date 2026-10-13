@@ -16,8 +16,6 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 "_plugin_scaffold.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 
 [debt.private-name]
-"packages/refresh.py -> skills_sync.py#_Source" = 1
-"skill.py -> skills_sync.py#_Source" = 1
 "tests/test_external_skills.py -> external_skills.py#_SKILL_NAMES" = 1
 "tests/test_external_skills_adversarial.py -> external_skills.py#_SKILL_NAMES" = 1
 "tests/test_external_skills_crash_safety.py -> external_skills.py#_SKILL_NAMES" = 1
