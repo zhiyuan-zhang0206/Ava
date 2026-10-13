@@ -14,8 +14,8 @@ from base.config import settings
 from base.db.tests.fakes import patch_database
 from cli import start_identity
 from cli.commands.data_plane import cluster_instance as _ci
+from cli.commands.tests.data_plane_records import cluster_record
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from tests.factories.data_plane import cluster_record
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
