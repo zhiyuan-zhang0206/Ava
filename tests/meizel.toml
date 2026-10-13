@@ -22,8 +22,3 @@ exports = ["components", "e2e", "factories", "fixtures", "path_scoped", "scripts
 "ci/test_owned_gateway_port.py -> e2e/_ports.py" = 1
 "harness/test_e2e_truncate_retry.py -> e2e/_truncate.py" = 1
 "ui/test_visual_snapshot.py -> e2e/visual/_visual_snapshot.py" = 1
-
-[debt.private-name]
-"e2e/conftest.py -> fixtures/provisioning.py#_provisioned_db" = 1
-"e2e/conftest.py -> fixtures/provisioning.py#_provisioned_redis" = 1
-"harness/test_home_isolation.py -> e2e/conftest.py#_e2e_process_env" = 1

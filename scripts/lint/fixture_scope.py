@@ -15,7 +15,7 @@ restore anything on behalf of the tests that follow it — every test collected 
 its directory, in the same process, runs with the mutated value still installed. The
 `finally` reads as a cleanup and is one.
 
-That is not hypothetical. `tests/e2e/conftest.py:_e2e_process_env` reassigns
+That is not hypothetical. `tests/e2e/conftest.py:e2e_process_env` reassigns
 `AVA_HOME`, `AVA_GATEWAY_URL` and eight more, restores them in a `finally`, and was
 declared `scope="session"`. `tests/harness/test_home_isolation.py` — the file whose whole job
 is to notice the operator's real home leaking into the test process — sorts after
@@ -32,7 +32,7 @@ Nothing caught it, and nothing would have caught the next one. Hence this lint.
 `tests/fixtures/provisioning.py` is exempt, and it is the only exemption: the repo-root
 `conftest.py` loads it once per pytest process, so "the session" and "my directory" are
 the same blast radius. Its
-`_provisioned_db` / `_provisioned_redis` assign `AVA_DB_URL` / `AVA_REDIS_URL` and
+`provisioned_db` / `provisioned_redis` assign `AVA_DB_URL` / `AVA_REDIS_URL` and
 never put them back, which is correct — they establish the session's baseline rather
 than claim to clean up after themselves.
 
@@ -390,7 +390,7 @@ def setup_env_keys(src: str, fixture_name: str) -> tuple[frozenset[str], frozens
     unresolvable key and make the guard vacuous.
 
     Used by `tests/harness/test_home_isolation.py` to check that
-    `tests/e2e/conftest.py:_e2e_process_env`'s save/restore tuple covers every key
+    `tests/e2e/conftest.py:e2e_process_env`'s save/restore tuple covers every key
     its body actually assigns, so the tuple cannot drift behind the body. A
     non-literal key lands in `dynamic_exprs` so the caller fails loudly rather than
     silently under-reporting.

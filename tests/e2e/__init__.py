@@ -4,7 +4,7 @@
 the leak silently — no error, no warning, and the `scope="package"` keyword in
 `conftest.py` still reading correctly.
 
-`conftest.py:_e2e_process_env` reassigns a set of process-global env vars (`AVA_HOME`,
+`conftest.py:e2e_process_env` reassigns a set of process-global env vars (`AVA_HOME`,
 `AVA_GATEWAY_URL`, ...) — its `_env_keys` tuple is the list — and restores them on
 teardown. It is `scope="package"` so that
 teardown fires when pytest *leaves this directory* rather than at end-of-session —

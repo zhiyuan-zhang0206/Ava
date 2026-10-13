@@ -122,7 +122,7 @@ def _restore_metering(sdk_metering: None) -> None:
 
 
 @pytest.fixture
-def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+def stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Spawn with prompt runs `generate_label_async` in gateway BackgroundTasks, which
     calls `build_chat_model` and really hits the DeepSeek API — polluting network,
     slowing the suite, making it unstable. The Gateway owner's stub returns a fake that
@@ -135,7 +135,7 @@ def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
         class _RaiseLLM:
             async def ainvoke(self, _msgs: object) -> object:
                 raise RuntimeError(
-                    "label LLM disabled in tests — see tests/fixtures/guards.py:_stub_label_llm"
+                    "label LLM disabled in tests — see tests/fixtures/guards.py:stub_label_llm"
                 )
 
         return _RaiseLLM()
@@ -231,7 +231,7 @@ def permissions_helper_native_io(
 
 
 @pytest.fixture
-def _guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
+def guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Gateway owner's schedule guard: control paths reach the real session
     backend (`capture`) and wait for a schedule-manager service that no test
     runs (`request_sync` waits for its queued row to be consumed). Under

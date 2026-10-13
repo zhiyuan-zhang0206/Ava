@@ -80,7 +80,7 @@ def judge(monkeypatch: pytest.MonkeyPatch) -> Judge:
 
 
 @pytest.fixture(autouse=True)
-def _app_db(
+def memory_search_app_db(
     monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     machine_identity: MachineIdentity,

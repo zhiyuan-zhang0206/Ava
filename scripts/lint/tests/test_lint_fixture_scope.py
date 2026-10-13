@@ -162,7 +162,7 @@ def test_a_function_scoped_fixture_may_mutate_the_environment() -> None:
 
 _PROVISIONED_DB = (
     '@pytest.fixture(scope="session", autouse=True)\n'
-    "def _provisioned_db():\n"
+    "def provisioned_db():\n"
     "    with postgres() as url:\n"
     "        settings.data_plane.db_url = url\n"
     '        os.environ["AVA_DB_URL"] = url\n'
@@ -171,7 +171,7 @@ _PROVISIONED_DB = (
 
 
 def test_the_provisioning_plugins_session_fixtures_are_not_flagged() -> None:
-    # `tests/fixtures/provisioning.py:_provisioned_db` mutates two process globals at
+    # `tests/fixtures/provisioning.py:provisioned_db` mutates two process globals at
     # session scope and never restores them. That is correct: the repo-root conftest.py
     # loads it once per process, so "the session" and "my directory" are the same blast
     # radius, and it is establishing the session's baseline rather than claiming to

@@ -18,8 +18,8 @@ from services.entrypoints.im_bridge.tests.adapters.weixin_native import (
     native_weixin as native_weixin,
 )
 from services.entrypoints.im_bridge.types import SpawnDraft
-from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
-from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
+from tests.path_scoped.api_keys import mock_api_keys as mock_api_keys
+from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
 @pytest.mark.parametrize("lost_response", [False, True])

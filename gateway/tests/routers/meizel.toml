@@ -48,12 +48,7 @@ exports = ["test_tasks_router.py"]
 "test_tasks_router.py#monkeypatch.setattr ops.lifecycle.resurrect_if_terminated" = 1
 
 [debt.private-name]
-"config_api/test_get_explicit_self_is_host_view_not.py -> test_config_api.py#_clean_overrides" = 1
-"config_api/test_get_explicit_self_is_host_view_not.py -> test_config_api.py#_stub_browser_capability" = 1
-"memory_search/test_event_loop_isolation.py -> test_memory_search.py#_app_db" = 1
 "memory_search/test_event_loop_isolation.py -> test_memory_search.py#_search" = 1
-"memory_search/test_memory_graph.py -> test_memory_search.py#_app_db" = 1
-"memory_search/test_search_budget.py -> test_memory_search.py#_app_db" = 1
 
 [debt.third-party-patch]
 "test_memory_search.py#monkeypatch.setattr httpx.AsyncClient" = 1

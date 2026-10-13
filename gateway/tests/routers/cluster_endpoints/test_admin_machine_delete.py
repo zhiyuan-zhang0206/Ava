@@ -14,7 +14,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
-from tests.components.gateway.test_cluster_endpoints import _pin_session_names as _pin_session_names
 from tests.components.gateway.test_cluster_endpoints import (
     fake_admin_events as fake_admin_events,
 )
@@ -23,6 +22,9 @@ from tests.components.gateway.test_cluster_endpoints import (
 )
 from tests.components.gateway.test_cluster_endpoints import (
     pause_backend as pause_backend,
+)
+from tests.components.gateway.test_cluster_endpoints import (
+    pinned_session_names as pinned_session_names,
 )
 from tests.components.gateway.test_cluster_endpoints import (
     seed_agent_on_machine,

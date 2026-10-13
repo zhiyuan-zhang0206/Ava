@@ -22,7 +22,7 @@ from gateway.tests.lifecycle.creation.test_guarded_creation import client as cli
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
+from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 BODY = {"machine": "local-test", "prompt": "one goal", "prompt_source": "user"}
 

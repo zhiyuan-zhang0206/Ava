@@ -24,7 +24,7 @@ makes them silent in the run shape that gates merges: CI's backend job passes
 `--ignore=tests/e2e`, so the package most able to leak never shares a process with
 this file there, and under `-n auto` a shared process is not guaranteed for anything.
 On 2026-07-29 that combination let a real leak (`tests/e2e/conftest.py`'s
-`_e2e_process_env` declared `scope="session"`, so its env restore fired at end of
+`e2e_process_env` declared `scope="session"`, so its env restore fired at end of
 *session* rather than on leaving `tests/e2e/`) fail this file on every serial local
 run while CI stayed green — and the only reader who saw the red learned to write it
 off. Keeping it fixed takes two things that are easy to mistake for one:
@@ -53,7 +53,7 @@ def _real_home() -> Path:
 
 
 def _e2e_restore_list() -> frozenset[str]:
-    """The `_env_keys` tuple `_e2e_process_env` saves and restores, read out of the
+    """The `_env_keys` tuple `e2e_process_env` saves and restores, read out of the
     source rather than imported: importing `tests.e2e.conftest` pulls in playwright
     and the rest of the e2e stack, which the backend job has no reason to load."""
     tree = ast.parse(_E2E_CONFTEST.read_text(encoding="utf-8"))
@@ -158,7 +158,7 @@ def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None
     """Both halves of the 2026-07-29 fix, asserted together because either alone is a
     no-op.
 
-    `tests/e2e/conftest.py:_e2e_process_env` reassigns `AVA_HOME` / `AVA_GATEWAY_URL`
+    `tests/e2e/conftest.py:e2e_process_env` reassigns `AVA_HOME` / `AVA_GATEWAY_URL`
     and restores them in a `finally`. For that restore to fire when pytest *leaves*
     `tests/e2e/` rather than at end-of-session, two independent things must hold:
 
@@ -187,9 +187,9 @@ def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None
     # `_fixture_function_marker` is where pytest records the declared scope; reading it
     # IS the assertion, so the private access is deliberate rather than a shortcut
     # around a public API (pytest exposes no public reader for it).
-    scope = conftest._e2e_process_env._fixture_function_marker.scope
+    scope = conftest.e2e_process_env._fixture_function_marker.scope
     assert scope == "package", (
-        f"_e2e_process_env is {scope!r}-scoped. It reassigns AVA_HOME / "
+        f"e2e_process_env is {scope!r}-scoped. It reassigns AVA_HOME / "
         "AVA_GATEWAY_URL and restores them on teardown; at session scope that "
         "teardown fires after every other test in the process, so this file's "
         "sentinel assertions fail and the leak guard is disarmed. Keep it 'package'."
@@ -207,7 +207,7 @@ def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None
 
 
 def test_the_e2e_fixture_restores_every_env_key_it_assigns() -> None:
-    """`_env_keys` must cover every env var `_e2e_process_env` assigns during setup.
+    """`_env_keys` must cover every env var `e2e_process_env` assigns during setup.
 
     Correct scope only makes the restore fire at the right *time*; it says nothing
     about the restore being complete. `_env_keys` is a hand-written tuple sitting
@@ -225,16 +225,16 @@ def test_the_e2e_fixture_restores_every_env_key_it_assigns() -> None:
     from scripts.lint import fixture_scope as lint
 
     assigned, dynamic = lint.setup_env_keys(
-        _E2E_CONFTEST.read_text(encoding="utf-8"), "_e2e_process_env"
+        _E2E_CONFTEST.read_text(encoding="utf-8"), "e2e_process_env"
     )
     assert not dynamic, (
-        f"_e2e_process_env assigns os.environ under a computed key ({sorted(dynamic)}), so "
+        f"e2e_process_env assigns os.environ under a computed key ({sorted(dynamic)}), so "
         "the set of keys needing restoration cannot be derived and this guard would pass "
         "vacuously. Assign literal keys, or restore by snapshotting the whole environment."
     )
     restored = _e2e_restore_list()
     assert assigned <= restored, (
-        f"_e2e_process_env assigns {sorted(assigned - restored)} but does not list them in "
+        f"e2e_process_env assigns {sorted(assigned - restored)} but does not list them in "
         "`_env_keys`, so its teardown leaves them installed for every test that runs after "
         "tests/e2e/ in the same process. Add them to the tuple."
     )
@@ -243,7 +243,7 @@ def test_the_e2e_fixture_restores_every_env_key_it_assigns() -> None:
 def test_no_e2e_value_for_a_restored_key_survives_into_this_file(
     pristine_env: Mapping[str, str],
 ) -> None:
-    """Every key `_e2e_process_env` restores is back at its pre-fixture value here.
+    """Every key `e2e_process_env` restores is back at its pre-fixture value here.
 
     The partner to the two tests above, and the only one that observes the restore
     actually happening: they read the declaration (scope, `__init__.py`, key list),
@@ -268,6 +268,6 @@ def test_no_e2e_value_for_a_restored_key_survives_into_this_file(
             f"{key} is {os.environ.get(key)!r}, not the {pristine_env.get(key)!r} this "
             "session started with. Something with a scope broader than the directory it "
             "was written for assigned it and did not put it back before pytest got here "
-            "— see tests/e2e/conftest.py:_e2e_process_env for the shape, and "
+            "— see tests/e2e/conftest.py:e2e_process_env for the shape, and "
             "scripts/lint/fixture_scope.py for the lint that is supposed to prevent it."
         )

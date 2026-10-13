@@ -240,7 +240,7 @@ keeps running with the layered values. Enforced by
 1. **`scope="session"` outside `tests/fixtures/provisioning.py` may not mutate a process global**
    (`os.environ`, a `settings` field, a module global). That plugin is the one
    exemption — the repo-root conftest loads it once per process, so "the session" and "my directory" are the same blast radius,
-   but resource lifetime does not require permanent URL delivery: `_provisioned_db`
+   but resource lifetime does not require permanent URL delivery: `provisioned_db`
    owns the instance, while the requesting function restores `AVA_DB_URL`, Settings
    and the private `.env` on teardown. Deeper
    than that, narrow the scope or return the owned value. A session
@@ -255,7 +255,7 @@ keeps running with the layered values. Enforced by
    test directory here with an `__init__.py`, and that file exists for exactly this
    reason — it is load-bearing, not cruft.
 
-Both rules come from one incident: `tests/e2e/conftest.py:_e2e_process_env` layers ten
+Both rules come from one incident: `tests/e2e/conftest.py:e2e_process_env` layers ten
 env vars and was `scope="session"`, so `tests/harness/test_home_isolation.py` — which sorts
 after `tests/e2e/` and exists to notice precisely this — failed on every serial run
 while CI stayed green (the backend job passes `--ignore=tests/e2e`, and `-n auto` puts

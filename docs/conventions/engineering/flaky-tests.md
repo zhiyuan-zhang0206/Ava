@@ -97,7 +97,7 @@ patching any durable-state read that must not inherit a worker's shared home.
 a marker under worker-shared `$AVA_HOME`, a real host service such as launchd,
 cron, or Telegram, or the operator's live cluster.
 
-**Evidence.** `tests/e2e/conftest.py:_e2e_process_env` was session-scoped, so
+**Evidence.** `tests/e2e/conftest.py:e2e_process_env` was session-scoped, so
 its environment keys leaked to later tests in the same process. That made
 `tests/harness/test_home_isolation.py` fail in serial runs while parallel CI hid the
 leak. The fix narrowed scope and added

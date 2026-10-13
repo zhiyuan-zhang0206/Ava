@@ -64,9 +64,6 @@
 "test_server_shutdown.py#monkeypatch.setattr gateway.events.sse.retry_auth_failures_async" = 1
 "test_server_shutdown.py#monkeypatch.setattr gateway.http.middleware.stopping.is_stopping" = 1
 
-[debt.private-name]
-"test_auth_enforcement.py -> test_auth.py#_patch_secret" = 1
-
 [debt.unresolved-patch]
 "test_bootstrap_endpoint.py#monkeypatch.setattr type(config.settings.data_plane).is_remote" = 1
 "test_gateway_lifespan.py#monkeypatch.setattr app.state.insights_client.aclose" = 1
