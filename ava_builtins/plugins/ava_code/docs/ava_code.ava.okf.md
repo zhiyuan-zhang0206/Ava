@@ -86,7 +86,7 @@ PluginContributions(sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=
 
 ## Configuration
 
-- Project-local skills: discovered when `ava.cwd.set` at git root's `.claude/skills` (Claude Code compatible), `.agents/skills` (open Agent Skills standard) and `.ava/skills` (Ava repo local — last, so it takes priority) (`ava_builtins/plugins/ava_code/_walk.py:project_skill_roots`)
+- Project-local skills: discovered when `ava.cwd.set` at git root's `.claude/skills` (Claude Code compatible), `.agents/skills` (open Agent Skills standard) and `.ava/skills` (Ava repo local — last, so it takes priority) (`base/packages/skills/project_roots.py:project_skill_roots`)
 - Direct child-side state construction uses `AvaCodeState.cwd`'s `default_factory=default_cwd` (local SDK identity → `workspace_dir(agent_id)`, no identity → `$HOME`). This schema default is not authoritative for the host: the plugin's `after_init` hook initializes the missing graph channel from the explicit invocation context
 
 ## Notes
