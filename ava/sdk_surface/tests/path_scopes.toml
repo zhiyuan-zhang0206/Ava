@@ -3,3 +3,7 @@
 "tests.path_scoped.ava_tests" = [
     ".",
 ]
+"tests.fixtures.unit.sdk" = [
+    "test_impersonation_capture_rebinding.py",
+    "test_agent_attribution.py",
+]

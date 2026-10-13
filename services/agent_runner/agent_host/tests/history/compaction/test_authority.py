@@ -11,11 +11,11 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from base.agents.compaction.commands import accept
 from base.agents.compaction.execution import claim_attempt, pending, require_receiver
 from base.agents.compaction.models import CompactHeldError
-from base.agents.compaction.tests.helpers import source
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host.tests.history.compaction.helpers import source
 
 
 @pytest.mark.parametrize("phase", ["source", "execution"])

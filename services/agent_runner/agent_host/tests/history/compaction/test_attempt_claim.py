@@ -7,10 +7,10 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.agents.compaction.commands import accept
 from base.agents.compaction.execution import claim_attempt, pending
-from base.agents.compaction.tests.helpers import source
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host.tests.history.compaction.helpers import source
 
 
 async def test_concurrent_claim_returns_exact_one_first_provider_authority(

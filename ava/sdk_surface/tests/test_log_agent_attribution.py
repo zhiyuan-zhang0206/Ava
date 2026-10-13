@@ -89,7 +89,7 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
             name="agent_host",
             producer=producer,
             machine_reader=lambda: "machine-a",
-            image=LoadedCommit(Path(__file__).resolve().parents[4], "loaded-generation"),
+            image=LoadedCommit(Path(__file__).resolve().parents[3], "loaded-generation"),
         )
 
     configure.assert_called_once_with(extra={"agent_id": "-"})

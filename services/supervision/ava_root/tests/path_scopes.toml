@@ -12,4 +12,5 @@
     "test_ava_root_stop_window.py",
     "test_ava_root_wiring.py",
     "test_root_work_ownership.py",
+    "test_ava_root_supervisor_reaping.py",
 ]
