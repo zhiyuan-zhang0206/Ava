@@ -3,7 +3,6 @@
 "tests.path_scoped.agent_tests" = [
     "test_circuit_breaker.py",
     "test_maintenance_prior_failure.py",
-    "test_maintenance_recovery.py",
 ]
 "tests.path_scoped.ava_tests" = [
 ]
@@ -16,7 +15,6 @@
     "test_circuit_breaker.py",
     "test_circuit_breaker_audit.py",
     "test_maintenance_prior_failure.py",
-    "test_maintenance_recovery.py",
 ]
 "tests.fixtures.unit.config_authority" = [
     "test_circuit_breaker.py",
