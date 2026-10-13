@@ -54,3 +54,7 @@ exports = ["test_tasks_router.py"]
 "memory_search/test_event_loop_isolation.py -> test_memory_search.py#_search" = 1
 "memory_search/test_memory_graph.py -> test_memory_search.py#_app_db" = 1
 "memory_search/test_search_budget.py -> test_memory_search.py#_app_db" = 1
+
+[debt.third-party-patch]
+"test_memory_search.py#monkeypatch.setattr httpx.AsyncClient" = 1
+"test_page_receipts.py#monkeypatch.setattr psycopg.Connection.execute" = 2

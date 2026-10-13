@@ -39,6 +39,7 @@ _GLOBAL_FILES = frozenset(
     {
         "pyproject.toml",  # interpreter, dependencies, pytest configuration
         "meizel.toml",  # the declared top-level packages every scan and test host derives from
+        "meizel.policy.toml",  # the allowances every manifest is checked against
         "uv.lock",
         "conftest.py",  # root bootstrap: `pytest_plugins` loads for every test
         ".python-version",

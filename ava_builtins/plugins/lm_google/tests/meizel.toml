@@ -1,0 +1,5 @@
+[debt.env-patch]
+"test_implicit_cache.py#monkeypatch.setenv os.environ.GEMINI_API_KEY" = 2
+
+[debt.unresolved-patch]
+"test_implicit_cache.py#monkeypatch.setattr llm.async_client.models.generate_content" = 2

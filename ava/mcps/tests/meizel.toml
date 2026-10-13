@@ -31,3 +31,11 @@
 "daemon/test_handle_client_retry_sleeps_exponential_backoff.py -> test_daemon.py#_no_reap_stale_daemons" = 1
 "daemon/test_run_daemon_clears_stale_socket_on_startup.py -> test_daemon.py#_no_reap_stale_daemons" = 1
 "test_mcps.py -> _mcps_helpers.py#_result" = 1
+
+[debt.stdlib-patch]
+"test_mcps_remote.py#monkeypatch.setattr socket.socket" = 1
+"test_retry_classify.py#monkeypatch.setattr socket.socket" = 1
+
+[debt.third-party-patch]
+"test_daemon_reap.py#patch psutil.process_iter" = 1
+"test_request_admission.py#monkeypatch.setattr mcp.client.stdio.stdio_client" = 1

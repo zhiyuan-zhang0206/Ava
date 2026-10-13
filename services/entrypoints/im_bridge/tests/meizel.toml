@@ -1,4 +1,4 @@
-exports = ["adapters", "slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]
+exports = ["adapters"]
 
 [uses]
 "adapters" = ["slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]
@@ -14,6 +14,12 @@ exports = ["adapters", "slices.py", "task_scope.py", "test_notice_outbox.py", "t
 "test_notice_outbox.py" = ["slices.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
 "test_push_watchdog_retry.py" = ["slices.py"]
 "test_timeline_selection.py" = ["task_scope.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
+
+[debt.env-patch]
+"conftest.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_im_bridge_core.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_im_bridge_durable_cursors.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_notice_bridge.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
 
 [debt.first-party-patch]
 "conftest.py#monkeypatch.setattr services.entrypoints.im_bridge.tests.test_im_bridge_core.TEST_POOL" = 1
@@ -56,3 +62,14 @@ exports = ["adapters", "slices.py", "task_scope.py", "test_notice_outbox.py", "t
 "im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_core" = 1
 "im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_text" = 1
 "test_im_bridge_watermark.py -> test_im_bridge_core.py#_core" = 1
+
+[debt.unresolved-patch]
+"test_alert_outbound.py#monkeypatch.setattr service.store.outbound.insert_intent" = 1
+"test_notice_bridge.py#monkeypatch.setattr bridge._open_notices" = 1
+"test_notice_bridge.py#monkeypatch.setattr bridge._unaccepted_notices" = 1
+"test_notice_outbox.py#monkeypatch.setattr core.notice_bridge.poll_store.accept_notice" = 2
+"test_timeline_outbox.py#monkeypatch.setattr store.finish" = 4
+"test_timeline_outbox.py#monkeypatch.setattr store.insert_intent" = 1
+"test_timeline_selection.py#monkeypatch.setattr adapter.prepare_timeline" = 1
+"test_timeline_selection.py#monkeypatch.setattr core.outbound_store.accept" = 2
+"test_timeline_selection.py#monkeypatch.setattr core.outbound_store.lookup_replay" = 1

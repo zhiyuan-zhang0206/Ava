@@ -1,3 +1,9 @@
+[debt.env-patch]
+"test_backup_process_composition.py#patch.dict os.environ" = 2
+"test_heartbeat_im_composition.py#patch.dict os.environ" = 1
+"test_memory_derived_composition.py#patch.dict os.environ" = 1
+"test_upkeep_wake_composition.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_backup_process_composition.py#monkeypatch.setattr base.config.settings.services.pg_backup_health_port" = 1
 "test_backup_process_composition.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
@@ -31,3 +37,33 @@
 "test_upkeep_wake_composition.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
 "test_upkeep_wake_composition.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_upkeep_wake_composition.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
+
+[debt.unresolved-patch]
+"test_heartbeat_im_composition.py#monkeypatch.setattr entry.Database" = 1
+"test_heartbeat_im_composition.py#monkeypatch.setattr entry._hard_exit" = 1
+"test_heartbeat_im_composition.py#monkeypatch.setattr entry._remove_pidfile" = 1
+"test_heartbeat_im_composition.py#monkeypatch.setattr entry.asyncio" = 1
+"test_heartbeat_im_composition.py#monkeypatch.setattr entry.build_pipeline" = 1
+"test_heartbeat_im_composition.py#monkeypatch.setattr entry.init_gateway_process" = 1
+"test_heartbeat_im_composition.py#monkeypatch.setattr entry.install_graceful_shutdown" = 1
+"test_heartbeat_im_composition.py#monkeypatch.setattr entry.run" = 2
+"test_memory_derived_composition.py#monkeypatch.setattr entry.Database" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry._hard_exit" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry._is_running" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry.acquire_pidfile" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry.asyncio" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry.build_pipeline" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry.init_gateway_process" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry.install_graceful_shutdown" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry.remove_pidfile" = 1
+"test_memory_derived_composition.py#monkeypatch.setattr entry.run" = 3
+"test_pidfile.py#monkeypatch.setattr daemon.pidfile_holds_daemon" = 1
+"test_pidfile.py#monkeypatch.setattr resources.pidfiles.pidfile_holds_daemon" = 1
+"test_upkeep_wake_composition.py#monkeypatch.setattr entry.Database" = 1
+"test_upkeep_wake_composition.py#monkeypatch.setattr entry._hard_exit" = 1
+"test_upkeep_wake_composition.py#monkeypatch.setattr entry._remove_pidfile" = 1
+"test_upkeep_wake_composition.py#monkeypatch.setattr entry.asyncio" = 1
+"test_upkeep_wake_composition.py#monkeypatch.setattr entry.build_pipeline" = 1
+"test_upkeep_wake_composition.py#monkeypatch.setattr entry.init_gateway_process" = 1
+"test_upkeep_wake_composition.py#monkeypatch.setattr entry.install_graceful_shutdown" = 1
+"test_upkeep_wake_composition.py#monkeypatch.setattr entry.run" = 2

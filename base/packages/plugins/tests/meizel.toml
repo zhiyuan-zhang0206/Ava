@@ -1,5 +1,13 @@
 exports = ["test_plugin_config.py"]
 
+[debt.env-patch]
+"test_config_face.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_enable_config.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_plugin_config.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_plugins_config_runtime.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_service_config_snapshot.py#monkeypatch.delenv os.environ" = 1
+"test_service_config_snapshot.py#monkeypatch.setenv os.environ" = 2
+
 [debt.first-party-patch]
 "test_config_boot_race.py#monkeypatch.setattr base.packages.plugins.config_registration.config_from_image" = 1
 "test_config_boot_race.py#monkeypatch.setattr base.packages.plugins.config_registration.read_plugin_config" = 1
@@ -16,3 +24,6 @@ exports = ["test_plugin_config.py"]
 "test_plugins_config_runtime.py#monkeypatch.setattr base.packages.plugins.load_report.report_plugin_load_failure" = 2
 "test_plugins_config_runtime.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_plugins_config_runtime.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+
+[debt.unresolved-patch]
+"test_flags.py#monkeypatch.setattr type(settings).has_domain" = 1

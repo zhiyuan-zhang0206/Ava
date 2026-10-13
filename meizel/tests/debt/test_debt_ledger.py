@@ -147,7 +147,10 @@ def test_every_debtable_code_is_accepted(make_repo: RepoFactory, code: str, key:
         '[debt.private-name]\n"a.py -> b.py" = 1\n',
         '[debt.undeclared-edge]\n"a.py" = 1\n',
         '[debt.restricted-python]\n"a.py" = 1\n',
-        '[debt.manifest-cycle]\n"b.py -> a.py" = 2\n',
+        '[debt.manifest-cycle]\n"b.py -> a.py" = 1\n',
+        '[debt.cycle-edge]\n"b.py -> a.py" = 0\n',
+        '[debt.cycle-edge]\n"b.py" = 1\n',
+        '[debt.cycle-edge]\n"b.py -> a.py#_x" = 1\n',
     ],
 )
 def test_a_malformed_debt_table_fails_with_a_located_diagnostic(
@@ -169,9 +172,43 @@ CYCLE = {
 CYCLIC = '[uses]\n"a.py" = ["b.py"]\n"b.py" = ["a.py"]\n'
 
 
-def test_a_recorded_back_edge_lets_a_cyclic_graph_through(make_repo: RepoFactory) -> None:
-    manifest = CYCLIC + '\n[debt.manifest-cycle]\n"b.py -> a.py" = 1\n'
-    assert failures(make_repo({**CYCLE, "pkg/meizel.toml": manifest})) == set()
+def test_recorded_facts_on_a_back_edge_let_a_cyclic_graph_through(make_repo: RepoFactory) -> None:
+    manifest = CYCLIC + '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
+    root = make_repo({**CYCLE, "pkg/meizel.toml": manifest})
+    assert failures(root) == set()
+    assert any(d.code.value == "cycle-edge" for d in analysis_of(root).diagnostics)
+
+
+def test_a_new_import_on_a_recorded_back_edge_fails_with_both_counts(
+    make_repo: RepoFactory,
+) -> None:
+    manifest = CYCLIC + '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
+    source = "from pkg import a\nfrom pkg import a as again\n"
+    root = make_repo({**CYCLE, "pkg/b.py": source, "pkg/meizel.toml": manifest})
+    found = [d for d in analysis_of(root).verdict if d.code.value == "cycle-edge"]
+    assert {d.line for d in found} == {1, 2}
+    assert all("1 recorded, 2 found" in d.render() for d in found)
+    assert all("pkg is strict-to-be" in d.render() for d in found)
+
+
+def test_a_new_file_on_a_recorded_back_edge_is_a_new_violation(make_repo: RepoFactory) -> None:
+    files = {
+        "top/__init__.py": "",
+        "top/x/__init__.py": "",
+        "top/x/m.py": "from top.y import n\n",
+        "top/x/extra.py": "from top.y import n\n",
+        "top/y/__init__.py": "",
+        "top/y/n.py": "from top.x import m\n",
+        "top/x/meizel.toml": 'exports = ["m.py"]\n',
+        "top/y/meizel.toml": 'exports = ["n.py"]\n',
+        "top/meizel.toml": (
+            '[uses]\n"x" = ["y"]\n"y" = ["x"]\n\n[debt.cycle-edge]\n"x/m.py -> y/n.py" = 1\n'
+        ),
+    }
+    found = [d for d in analysis_of(make_repo(files)).verdict if d.code.value == "cycle-edge"]
+    assert [d.path for d in found] == ["top/x/extra.py"]
+    assert "does not close" not in found[0].message
+    assert "closes a cycle" in found[0].message
 
 
 def test_a_cycle_the_back_edges_do_not_cover_still_fails_and_says_so(
@@ -185,32 +222,45 @@ def test_a_cycle_the_back_edges_do_not_cover_still_fails_and_says_so(
     }
     manifest = (
         '[uses]\n"a.py" = ["b.py", "c.py"]\n"b.py" = ["a.py"]\n"c.py" = ["a.py"]\n'
-        '\n[debt.manifest-cycle]\n"b.py -> a.py" = 1\n'
+        '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
     )
     root = make_repo({**files, "pkg/meizel.toml": manifest})
-    [found] = analysis_of(root).verdict
-    assert found.code.value == "manifest-cycle"
+    [found] = [d for d in analysis_of(root).verdict if d.code.value == "manifest-cycle"]
     assert "pkg is strict-to-be" in found.render()
 
 
-def test_a_back_edge_that_no_longer_closes_a_cycle_is_paid(make_repo: RepoFactory) -> None:
+def test_facts_on_an_edge_that_no_longer_closes_a_cycle_are_paid(make_repo: RepoFactory) -> None:
     manifest = (
         '[uses]\n"a.py" = ["b.py"]\n"b.py" = ["a.py"]\n'
-        '\n[debt.manifest-cycle]\n"b.py -> a.py" = 1\n"a.py -> b.py" = 1\n'
+        '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n"a.py -> b.py" = 1\n'
     )
     root = make_repo({**CYCLE, "pkg/meizel.toml": manifest})
-    [paid] = analysis_of(root).verdict
-    assert paid.code.value == "debt-paid"
+    [paid] = [d for d in analysis_of(root).verdict if d.code.value == "debt-paid"]
     assert "a.py -> b.py" in paid.message
+    assert "closes no cycle" in paid.message
 
 
-def test_a_back_edge_that_is_no_longer_declared_is_paid(make_repo: RepoFactory) -> None:
-    manifest = '[uses]\n"a.py" = ["b.py"]\n\n[debt.manifest-cycle]\n"b.py -> a.py" = 1\n'
+def test_facts_on_an_edge_that_is_no_longer_declared_are_paid(make_repo: RepoFactory) -> None:
+    manifest = '[uses]\n"a.py" = ["b.py"]\n\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
     root = make_repo({**CYCLE, "pkg/meizel.toml": manifest})
     found = analysis_of(root).verdict
     codes = {d.code.value for d in found}
     assert "debt-paid" in codes
+    assert "undeclared-edge" in codes
     assert "no longer declared" in " ".join(d.message for d in found)
+
+
+def test_a_fact_on_a_back_edge_is_still_judged_by_the_other_rules(make_repo: RepoFactory) -> None:
+    files = {
+        **CYCLE,
+        "pkg/b.py": "from pkg.a import _hidden\n",
+        "pkg/a.py": "from pkg import b\n_hidden = 1\n",
+    }
+    manifest = CYCLIC + '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
+    root = make_repo({**files, "pkg/meizel.toml": manifest})
+    assert {(d.code.value, d.path) for d in analysis_of(root).verdict} == {
+        ("private-name", "pkg/b.py")
+    }
 
 
 def test_the_debt_of_one_directory_makes_only_that_directory_strict_to_be(

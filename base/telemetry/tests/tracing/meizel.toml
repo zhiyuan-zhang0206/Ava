@@ -20,3 +20,14 @@
 "test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.tracing.gzip_old_mirror" = 1
 "test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.tracing.logger.warning" = 2
 "test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.tracing.start_collector_retry" = 1
+
+[debt.stdlib-patch]
+"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr pathlib.Path.stat" = 1
+
+[debt.third-party-patch]
+"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr httpx.post" = 2
+"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr opentelemetry.trace.get_current_span" = 5
+"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr opentelemetry.trace.get_tracer" = 8
+"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 2
+"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr httpx.post" = 2
+"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 4

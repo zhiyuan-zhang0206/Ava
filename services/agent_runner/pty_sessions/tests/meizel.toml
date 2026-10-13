@@ -6,3 +6,17 @@
 "test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.process_groups.signal" = 2
 "test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.process_groups.wait" = 1
 "test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.reap_child" = 2
+
+[debt.stdlib-patch]
+"test_session.py#monkeypatch.setattr os.getpgid" = 1
+"test_session.py#monkeypatch.setattr os.getsid" = 1
+"test_session.py#monkeypatch.setattr os.tcgetpgrp" = 2
+
+[debt.third-party-patch]
+"test_session.py#monkeypatch.setattr psutil.Process.children" = 1
+"test_session.py#monkeypatch.setattr psutil.Process.suspend" = 1
+"test_session.py#monkeypatch.setattr psutil.pids" = 1
+"test_session.py#monkeypatch.setattr psutil.process_iter" = 1
+
+[debt.unresolved-patch]
+"test_session.py#monkeypatch.setattr session.capture_foreground" = 1

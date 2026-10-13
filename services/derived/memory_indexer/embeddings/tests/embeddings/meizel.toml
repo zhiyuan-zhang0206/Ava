@@ -1,3 +1,6 @@
+[debt.env-patch]
+"test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setenv os.environ.NO_PROXY" = 1
+
 [debt.first-party-patch]
 "test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setattr base.config.settings.services.embedding_backend" = 3
 "test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setattr base.config.settings.services.memory_embed_timeout_seconds" = 5
@@ -6,3 +9,6 @@
 "test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.gemini.EMBED_POLICY" = 1
 "test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.gemini.ENDPOINT" = 6
 "test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.gemini.post_attempt_once" = 1
+
+[debt.stdlib-patch]
+"test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setattr socket.getaddrinfo" = 1

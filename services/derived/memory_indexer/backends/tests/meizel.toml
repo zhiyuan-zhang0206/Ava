@@ -1,3 +1,6 @@
 [debt.first-party-patch]
 "test_memory_backends.py#monkeypatch.setattr base.config.settings.services.memory_search_backend" = 3
 "test_numpy_backend_backends.py#monkeypatch.setattr base.config.settings.services.memory_search_uri" = 1
+
+[debt.third-party-patch]
+"test_explicit_inputs.py#monkeypatch.setattr httpx.AsyncClient" = 1

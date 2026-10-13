@@ -3,6 +3,9 @@ exports = ["leak_guard_suite.py"]
 [external]
 "test_watch_pr.py" = "executes the watcher template the workflow embeds"
 
+[debt.env-patch]
+"test_coverage_gates.py#monkeypatch.setenv os.environ.BACKEND_COVERAGE_THRESHOLD" = 1
+
 [debt.first-party-patch]
 "test_coverage_gates.py#monkeypatch.setattr scripts.ci.coverage_gates.FLOORS" = 7
 "test_dependency_audit.py#monkeypatch.setattr scripts.ci.dependency_audit.latest_binaries" = 1
@@ -10,3 +13,10 @@ exports = ["leak_guard_suite.py"]
 "test_refresh_test_durations.py#monkeypatch.setattr scripts.ci.refresh_test_durations._DURATIONS_PATH" = 11
 "test_refresh_test_durations.py#monkeypatch.setattr scripts.ci.refresh_test_durations._run_suite" = 5
 "test_watch_pr.py#monkeypatch.setattr base.paths.workspace_dir" = 1
+
+[debt.stdlib-patch]
+"test_collection_tracebacks.py#monkeypatch.setattr faulthandler.dump_traceback" = 2
+"test_coverage_gates.py#monkeypatch.setattr sys.argv" = 1
+"test_refresh_test_durations.py#monkeypatch.setattr pathlib.Path.replace" = 1
+"test_watch_pr.py#monkeypatch.setattr atexit.register" = 1
+"test_watch_pr.py#monkeypatch.setattr time.sleep" = 1

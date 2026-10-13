@@ -26,3 +26,18 @@ exports = ["fakes.py"]
 "test_redis_listener_cancellation.py#monkeypatch.setattr base.events.live.redis_listener.aredis.Redis.from_url" = 1
 "test_redis_listener_ownership.py#monkeypatch.setattr base.events.live.redis_listener._CONSUME_ABANDON_GRACE" = 2
 "test_redis_listener_ownership.py#monkeypatch.setattr base.events.live.redis_listener.aredis.Redis.from_url" = 1
+
+[debt.stdlib-patch]
+"test_redis_client.py#monkeypatch.setattr socket.getaddrinfo" = 1
+
+[debt.third-party-patch]
+"test_redis_client.py#monkeypatch.setattr redis.Connection._connect" = 1
+"test_redis_client.py#monkeypatch.setattr redis.Redis.execute_command" = 1
+"test_redis_client.py#monkeypatch.setattr redis.asyncio.Redis.execute_command" = 2
+
+[debt.unresolved-patch]
+"fakes.py#monkeypatch.setattr module.publish_agent_updated_sync" = 1
+"fakes.py#monkeypatch.setattr module.publish_impersonation_changed_sync" = 1
+"test_event_publisher_drop.py#monkeypatch.setattr pub._publish_batch" = 1
+"test_redis_listener.py#monkeypatch.setattr listener._consume_one" = 2
+"test_redis_listener.py#monkeypatch.setattr listener._ensure_subscribed" = 2

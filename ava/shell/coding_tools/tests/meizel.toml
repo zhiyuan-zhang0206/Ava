@@ -48,3 +48,15 @@
 "test_spawn_claude_first_run.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.kill" = 1
 "test_spawn_claude_first_run.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.new" = 1
 "test_spawn_claude_first_run.py#monkeypatch.setattr ava.shell.coding_tools.claude.sessions.send" = 1
+
+[debt.stdlib-patch]
+"test_claude_canonical_owner.py#monkeypatch.setattr sys.argv" = 2
+"test_codex_canonical_owner.py#monkeypatch.setattr sys.argv" = 2
+
+[debt.unresolved-patch]
+"test_codex_canonical_owner.py#monkeypatch.setattr watch_work._owner_terminated" = 1
+"test_codex_canonical_owner.py#monkeypatch.setattr watch_work._session_crashed" = 1
+"test_codex_canonical_owner.py#monkeypatch.setattr watch_work._terminalize" = 1
+"test_codex_canonical_owner.py#monkeypatch.setattr watch_work.ava.agents.send_message" = 1
+"test_codex_canonical_owner.py#monkeypatch.setattr watch_work.ava.agents.send_system_note" = 1
+"test_codex_canonical_owner.py#monkeypatch.setattr watch_work.coding_session_owner.read" = 1

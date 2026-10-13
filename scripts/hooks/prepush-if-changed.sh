@@ -8,7 +8,7 @@
 # the shared base error;
 # not knowing is not a reason to claim an empty contribution.
 #
-#   prepush-if-changed.sh '\.py$' -- .venv/bin/python scripts/lint/patch_targets.py
+#   prepush-if-changed.sh '\.py$' -- .venv/bin/python scripts/structure/tests_location.py
 set -euo pipefail
 
 pattern="${1:?usage: prepush-if-changed.sh ERE -- command...}"

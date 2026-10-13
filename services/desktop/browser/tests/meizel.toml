@@ -2,6 +2,12 @@
 "browser_mcp_daemon" = ["test_browser_mcp_daemon.py"]
 "test_browser_mcp_daemon_tab_groups.py" = ["test_browser_mcp_daemon.py"]
 
+[debt.env-patch]
+"test_browser_macos_readiness.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_browser_session.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_browser_session.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
+"test_browser_session.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 2
+
 [debt.first-party-patch]
 "test_browser_daemon.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1
 "test_browser_daemon.py#monkeypatch.setattr base.config.settings.services.app_port" = 1
@@ -76,3 +82,10 @@
 "browser_mcp_daemon/test_parse_page_listing_tolerates_titled_and_suffix.py -> test_browser_mcp_daemon.py#_daemon" = 1
 "browser_mcp_daemon/test_selected_page_custody.py -> test_browser_mcp_daemon.py#_daemon" = 1
 "test_browser_mcp_daemon_tab_groups.py -> test_browser_mcp_daemon.py#_text_of" = 1
+
+[debt.stdlib-patch]
+"test_browser_profile.py#monkeypatch.setattr builtins.input" = 8
+"test_browser_session.py#monkeypatch.setattr time.time" = 1
+
+[debt.unresolved-patch]
+"test_browser_session.py#monkeypatch.setattr keeper.inject_once" = 3

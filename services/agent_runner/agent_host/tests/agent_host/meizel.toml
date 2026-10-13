@@ -19,3 +19,10 @@
 "test_rejected_model_config.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 4
 "test_rejected_model_config.py#monkeypatch.setattr services.agent_runner.agent_host.settlement.reconcile_inbounds_after_turn" = 1
 "test_run_turn_task_owner.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.source.finish_force_and_compact" = 2
+
+[debt.unresolved-patch]
+"test_maintenance_failures.py#monkeypatch.setattr graph.ainvoke" = 1
+"test_maintenance_failures.py#monkeypatch.setattr host._run_held_controls" = 2
+"test_maintenance_failures.py#monkeypatch.setattr pool.connection" = 1
+"test_rejected_model_config.py#monkeypatch.setattr host._runtime_for" = 1
+"test_run_turn_task_owner.py#monkeypatch.setattr host._run_turn" = 2

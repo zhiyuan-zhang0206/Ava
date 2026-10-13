@@ -14,3 +14,6 @@ exports = ["test_gate.py"]
 "test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.ConfigBoot" = 1
 "test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.Gate" = 1
 "test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.ThreadingHTTPServer" = 1
+
+[debt.stdlib-patch]
+"test_gate_daemon.py#monkeypatch.setattr sys.argv" = 1

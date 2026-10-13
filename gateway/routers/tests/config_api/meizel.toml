@@ -10,3 +10,6 @@
 "test_plugin_write_errors.py#monkeypatch.setattr base.packages.plugin_config_admin.config_owners" = 1
 "test_plugin_write_errors.py#monkeypatch.setattr base.packages.plugin_config_images.file_lock" = 1
 "test_plugin_write_errors.py#monkeypatch.setattr base.packages.plugin_config_images.write_bytes_atomic" = 1
+
+[debt.unresolved-patch]
+"test_plugin_write_errors.py#monkeypatch.setattr module.patch_owner" = 1

@@ -4,6 +4,18 @@
 "test_exec_slot.py" = ["test_exec_child.py"]
 "test_resource_admission.py" = ["test_exec_owner_entry.py"]
 
+[debt.env-patch]
+"test_context_binding.py#patch.dict os.environ" = 3
+"test_exec_child.py#monkeypatch.delenv os.environ.AVA_CONFIG_BOOT" = 1
+"test_exec_child.py#monkeypatch.delenv os.environ.AVA_CONFIG_FETCH" = 2
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_AGENT_BIRTH_CONFIG" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_AGENT_CONFIG_OVERLAY" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_CONFIG_BOOT" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_EXEC_REQUEST_FILE" = 1
+"test_exec_child.py#monkeypatch.setenv os.environ.AVA_EXEC_RESULT_FILE" = 1
+"test_exec_child.py#patch.dict os.environ" = 1
+"test_resource_admission.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_exec_child.py#monkeypatch.setattr agent.execution.child._build_state_slot" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child._init_logger" = 1
@@ -33,3 +45,6 @@
 "test_resource_admission.py -> test_exec_owner_entry.py#_context" = 1
 "test_resource_admission.py -> test_exec_owner_entry.py#_ready" = 1
 "test_resource_admission.py -> test_exec_owner_entry.py#_start" = 1
+
+[debt.unresolved-patch]
+"test_delta_read_compat_agent.py#monkeypatch.setattr saver.aget_delta_channel_history" = 1

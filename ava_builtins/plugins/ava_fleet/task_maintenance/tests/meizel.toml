@@ -1,6 +1,9 @@
 [uses]
 "test_escalation_concurrency.py" = ["test_task_maintenance_escalation.py"]
 
+[debt.env-patch]
+"test_daemon_entry.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_daemon_entry.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.ConfigBoot" = 1
 "test_daemon_entry.py#monkeypatch.setattr ava_builtins.plugins.ava_fleet.task_maintenance.daemon.Database" = 1

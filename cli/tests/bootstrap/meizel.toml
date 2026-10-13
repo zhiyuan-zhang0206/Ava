@@ -9,6 +9,34 @@ exports = ["command_inputs.py"]
 [loads]
 "_logging_entry_child.py" = ["services/agent_runner/agent_ops"]
 
+[debt.env-patch]
+"test_checkout_guard.py#monkeypatch.delenv os.environ.AVA_HOME" = 1
+"test_checkout_guard.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_checkout_guard.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.delitem os.environ" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.delitem os.environ.AVA_PROCESS_PROFILE" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.AVA_APP_PORT" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.AVA_PROCESS_PROFILE" = 1
+"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.AVA_REDIS_URL" = 1
+"test_init.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_init.py#patch.dict os.environ" = 1
+"test_python_install.py#monkeypatch.delenv os.environ" = 1
+"test_python_install.py#monkeypatch.setenv os.environ" = 1
+"test_python_install.py#monkeypatch.setenv os.environ.PIP_CONFIG_FILE" = 1
+"test_python_install.py#monkeypatch.setenv os.environ.XDG_CONFIG_HOME" = 1
+"test_start_identity.py#monkeypatch.delenv os.environ.AVA_CLUSTER_SECRET" = 1
+"test_start_identity.py#monkeypatch.delenv os.environ.AVA_DB_CAPABILITY_KEY" = 1
+"test_start_identity.py#monkeypatch.delenv os.environ.AVA_SERVICE_PATH" = 2
+"test_start_identity.py#monkeypatch.setenv os.environ.AVA_CLUSTER_SECRET" = 1
+"test_start_identity.py#monkeypatch.setenv os.environ.AVA_DB_URL" = 1
+"test_start_identity.py#monkeypatch.setenv os.environ.AVA_HOME" = 10
+"test_start_identity.py#monkeypatch.setenv os.environ.AVA_SERVICE_PATH" = 1
+"test_start_identity.py#monkeypatch.setenv os.environ.PATH" = 3
+"test_start_identity.py#monkeypatch.setenv os.environ.VIRTUAL_ENV" = 1
+"test_start_identity.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_checkout_guard.py#monkeypatch.setattr cli.init_intent.initialize_home" = 1
 "test_checkout_guard.py#monkeypatch.setattr cli.start_intent._checkout" = 3
@@ -34,3 +62,6 @@ exports = ["command_inputs.py"]
 "test_start_identity.py#monkeypatch.setattr cli.init_intent.local_addresses" = 1
 "test_start_identity.py#monkeypatch.setattr cli.start_identity.upsert_env" = 6
 "test_start_identity.py#monkeypatch.setattr cli.start_intent._checkout" = 10
+
+[debt.stdlib-patch]
+"test_start_identity.py#monkeypatch.setattr socket.getaddrinfo" = 1

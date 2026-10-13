@@ -1,3 +1,15 @@
+[debt.env-patch]
+"test_pg_tools.py#monkeypatch.delenv os.environ" = 1
+"test_pg_tools.py#monkeypatch.delenv os.environ.LANG" = 4
+"test_pg_tools.py#monkeypatch.delenv os.environ.LC_ALL" = 3
+"test_pg_tools.py#monkeypatch.setenv os.environ" = 1
+"test_pg_tools.py#monkeypatch.setenv os.environ.LANG" = 1
+"test_pg_tools.py#monkeypatch.setenv os.environ.LC_ALL" = 2
+"test_pg_tools.py#monkeypatch.setenv os.environ.LC_CTYPE" = 1
+"test_pooler_layout.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_vendored_binaries.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_walg_binary.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_direct_url.py#monkeypatch.setattr base.cluster.dataplane.direct_url.get_record" = 1
 "test_direct_url.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
@@ -54,3 +66,18 @@
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.download" = 3
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.platform.machine" = 2
 "test_walg_binary.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.platform.system" = 2
+
+[debt.stdlib-patch]
+"test_pg_runtime.py#monkeypatch.setattr platform.machine" = 1
+"test_pg_runtime.py#monkeypatch.setattr platform.system" = 1
+"test_pg_throwaway_sweep.py#monkeypatch.setattr fcntl.flock" = 1
+"test_vendored_binaries.py#monkeypatch.setattr platform.machine" = 4
+"test_vendored_binaries.py#monkeypatch.setattr platform.system" = 4
+"test_vendored_binaries.py#monkeypatch.setattr urllib.request.urlopen" = 1
+
+[debt.third-party-patch]
+"test_pg_tools.py#monkeypatch.setattr psycopg.connect" = 2
+
+[debt.unresolved-patch]
+"test_pg_runtime.py#monkeypatch.setattr type(pg_runtime.get_backend()).pg_binary_path" = 2
+"test_pgbouncer.py#monkeypatch.setattr probe_machine.host" = 1

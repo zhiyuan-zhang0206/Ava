@@ -1,3 +1,6 @@
+[debt.env-patch]
+"test_migration_authority.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_maintenance_cold.py#monkeypatch.setattr base.deploy.maintenance.cold.psutil.process_iter" = 1
 "test_migration_authority.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 5

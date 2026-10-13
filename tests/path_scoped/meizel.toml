@@ -7,6 +7,9 @@ exports = ["api_keys.py", "ava_tests.py", "cli_tests.py", "db_authority_tests.py
 "integration_tests.py" = ["api_keys.py", "gateway_tests.py"]
 "pty_jobs.py" = ["pty_shells.py"]
 
+[debt.env-patch]
+"agent_tests.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+
 [debt.first-party-patch]
 "api_keys.py#monkeypatch.setattr base.config.settings.lm" = 1
 "cli_tests.py#monkeypatch.setattr base.deploy.lifecycle.service_selection.selection_path" = 1

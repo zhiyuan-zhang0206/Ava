@@ -42,3 +42,9 @@ exports = ["consumer_helpers.py"]
 "test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_check_decay" = 1
 "test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_check_open" = 1
 "test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_model" = 1
+
+[debt.unresolved-patch]
+"test_group_consumer.py#monkeypatch.setattr policy.understanding_group_check_decay" = 5
+"test_group_consumer.py#monkeypatch.setattr policy.understanding_group_check_open" = 6
+"test_group_consumer.py#monkeypatch.setattr policy.understanding_group_model" = 2
+"test_group_consumer.py#monkeypatch.setattr policy.understanding_group_reasoning" = 1

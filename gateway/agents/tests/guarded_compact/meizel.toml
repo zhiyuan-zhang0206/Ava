@@ -1,5 +1,8 @@
 [uses]
 "test_boundary.py" = ["host"]
 
+[debt.env-patch]
+"test_sdk.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1
+
 [debt.first-party-patch]
 "test_sdk.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1

@@ -1,6 +1,11 @@
 [uses]
 "test_work_restart.py" = ["test_work.py"]
 
+[debt.env-patch]
+"test_compaction.py#patch.dict os.environ" = 1
+"test_work_restart.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+"test_work_restart.py#monkeypatch.delenv os.environ.AVA_CALLER_IDENTITY" = 2
+
 [debt.first-party-patch]
 "test_compaction.py#monkeypatch.setattr ava.sdk_surface.agent_identity.validate_external_identity" = 1
 "test_work.py#monkeypatch.setattr ava.sdk_surface.agent_identity.validate_external_identity" = 1

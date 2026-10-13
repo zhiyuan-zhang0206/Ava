@@ -13,6 +13,12 @@ exports = ["collection_guard.py", "configuration.py", "env_bootstrap.py", "gatew
 [loads]
 "path_scopes.py" = ["tests/path_scoped"]
 
+[debt.env-patch]
+"configuration.py#patch.dict os.environ" = 1
+"provisioning.py#monkeypatch.setitem os.environ.AVA_DB_URL" = 1
+"provisioning.py#monkeypatch.setitem os.environ.AVA_REDIS_URL" = 1
+"units.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "guards.py#monkeypatch.setattr base.cluster.new_home_ports" = 1
 "guards.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 1
@@ -32,3 +38,14 @@ exports = ["collection_guard.py", "configuration.py", "env_bootstrap.py", "gatew
 
 [debt.restricted-python]
 "guards.py#string patch target 'cli.commands.lifecycle.root_driver.wait_for_service_tree'" = 1
+
+[debt.stdlib-patch]
+"guards.py#monkeypatch.setattr os" = 1
+
+[debt.unresolved-patch]
+"gateway_config.py#patch.object application.state.gateway_process_input" = 1
+"guards.py#monkeypatch.setattr mod" = 1
+"guards.py#monkeypatch.setattr module" = 1
+"guards.py#monkeypatch.setattr module.settings.observability.telemetry_otlp_enabled" = 1
+"guards.py#monkeypatch.setattr module.settings.services.permissions_helper_port" = 1
+"guards.py#monkeypatch.setattr owner" = 2

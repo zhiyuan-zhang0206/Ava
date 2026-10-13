@@ -1,3 +1,8 @@
+[debt.env-patch]
+"test_redis_bridge_roster.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_spec_roster.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_spec_roster.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+
 [debt.first-party-patch]
 "test_redis_bridge_roster.py#monkeypatch.setattr base.cluster.dataplane.redis_bridge.sys.platform" = 2
 "test_redis_bridge_roster.py#monkeypatch.setattr services.supervision.roster.redis_bridge_endpoint" = 1
@@ -14,3 +19,6 @@
 "test_spec_roster.py#monkeypatch.setattr services.supervision.roster.spec.browser_incapability" = 1
 "test_spec_roster.py#monkeypatch.setattr services.supervision.roster.spec.gateway_observability_home" = 4
 "test_spec_roster.py#monkeypatch.setattr services.supervision.roster.spec.settings.services.browser_enabled" = 2
+
+[debt.third-party-patch]
+"test_roster_probes.py#monkeypatch.setattr psutil.process_iter" = 1

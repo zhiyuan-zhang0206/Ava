@@ -1,6 +1,6 @@
-"""A synthetic repository for the placement and patch-target tests.
+"""A synthetic repository for the placement and import-fact tests.
 
-Three units (`cli` > `ava` > `base` by an import-linter layers contract) and a handful of
+Three packages (`cli`, `ava`, `base`) and a handful of
 modules with public and private names. `services/` is absent on purpose: a repository
 without it is legal, and `services.<x>` units only appear when a test adds one.
 """
@@ -10,13 +10,8 @@ from __future__ import annotations
 import pathlib
 
 PYPROJECT = """\
-[tool.importlinter]
-root_packages = ["base", "ava", "cli"]
-
-[[tool.importlinter.contracts]]
-name = "Layers"
-type = "layers"
-layers = ["cli", "ava", "base"]
+[project]
+name = "sample"
 """
 
 SOURCES = {

@@ -17,3 +17,6 @@
 "test_ops_route_non_json_values_degrade_to.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon._dispatch" = 4
 "test_ops_route_non_json_values_degrade_to.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon._dispatch_sync" = 1
 "test_ops_route_non_json_values_degrade_to.py#monkeypatch.setattr services.agent_runner.agent_ops.daemon.lifecycle.launch_agent_op" = 2
+
+[debt.unresolved-patch]
+"test_an_unrelated_op_still_dispatches_while_a.py#monkeypatch.setattr op_executor.shutdown" = 1

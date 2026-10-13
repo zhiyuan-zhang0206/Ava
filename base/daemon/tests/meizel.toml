@@ -4,6 +4,10 @@ exports = ["fakes.py", "health_support.py"]
 "test_health.py" = ["_health_helpers.py", "health_support.py"]
 "test_health_probe.py" = ["_health_helpers.py", "health_support.py"]
 
+[debt.env-patch]
+"test_endpoints.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_endpoints_golden.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "fakes.py#monkeypatch.setattr base.daemon.endpoints.ServiceEndpoints.from_settings" = 1
 "test_endpoints.py#monkeypatch.setattr base.config.settings.services.labeler_health_port" = 3
@@ -18,3 +22,6 @@ exports = ["fakes.py", "health_support.py"]
 "test_health_probe.py#monkeypatch.setattr base.daemon.health.urllib.request.urlopen" = 1
 "test_health_probe.py#monkeypatch.setattr base.native_process.loaded_commit.capture_commit" = 3
 "test_round_loop.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
+
+[debt.stdlib-patch]
+"test_health_probe.py#monkeypatch.setattr urllib.request.urlopen" = 2

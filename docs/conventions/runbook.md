@@ -905,12 +905,10 @@ create), and one that a per-file verdict cannot see:
   a deleted path matches. A rename counts as deleting the old path; an unknown
   range fails explicitly. `types-codegen-fresh` alone skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
-- `lint-patch-targets-full` runs the patch-target lint over every test file
-  when the branch touches any `.py` path, deleted ones included
-  (`scripts/hooks/prepush-if-changed.sh`; a push with no Python cannot move a test's
-  home). A test's home follows what its subject's package imports, so a
-  production import change can move the home of a test the commit-time
-  `lint-patch-targets` never receives; CI's structure job scans everything too.
+- `meizel-check-full` runs the whole `python -m meizel check` when the branch touches any `.py` or
+  `meizel.toml` path, deleted ones included (`scripts/hooks/prepush-if-changed.sh`). The commit-time
+  `meizel-check-changed` judges only the staged files and every manifest, so the effect of a manifest
+  edit on files that did not change, and what is stale, are found here; CI runs the whole check too.
 - `lint-tests-location-full` runs the tests-location check over every tracked
   top-level test at every push, unwrapped (paths only, under 0.1 s, so there is nothing
   to skip). A deleted or renamed test is never passed to the commit-time

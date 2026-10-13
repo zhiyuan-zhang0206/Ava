@@ -1,22 +1,25 @@
-exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "locality.py", "patch_points.py", "patch_report.py", "patch_targets.py", "placement.py", "tests"]
+exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "locality.py", "placement.py", "tests"]
 
 [uses]
 "cochange.py" = ["imports"]
-"imports" = ["locality.py", "placement.py", "placement_evidence.py", "tests"]
-"locality.py" = ["baseline_shards.py", "imports"]
-"patch_points.py" = ["imports", "placement.py"]
-"patch_report.py" = ["patch_targets.py"]
-"patch_targets.py" = ["imports", "locality.py", "patch_points.py", "placement.py", "placement_evidence.py"]
+"imports" = ["placement.py", "placement_evidence.py", "tests"]
+"locality.py" = ["baseline_shards.py"]
 "placement.py" = ["imports", "placement_evidence.py", "service_units.py"]
 "placement_evidence.py" = ["imports", "placement.py"]
-"tests" = ["baseline_shards.py", "cochange.py", "imports", "locality.py", "patch_points.py", "patch_report.py", "patch_targets.py", "placement.py", "placement_evidence.py", "service_units.py", "tests_location.py", "tests_location_allowed.py", "tests_location_suggest.py"]
+"tests" = ["baseline_shards.py", "cochange.py", "imports", "locality.py", "placement.py", "placement_evidence.py", "service_units.py", "tests_location.py", "tests_location_allowed.py", "tests_location_suggest.py"]
 "tests_location.py" = ["placement.py", "placement_evidence.py", "tests_location_allowed.py", "tests_location_suggest.py"]
 "tests_location_suggest.py" = ["placement.py", "placement_evidence.py", "tests_location.py"]
 
-[debt.manifest-cycle]
-"imports -> tests" = 1
-"locality.py -> imports" = 1
-"placement.py -> imports" = 1
-"placement_evidence.py -> imports" = 1
-"placement_evidence.py -> placement.py" = 1
-"tests_location_suggest.py -> tests_location.py" = 1
+[debt.cycle-edge]
+"imports/tests/test_cache.py -> tests/patch_repo.py" = 1
+"imports/tests/test_dependency_regressions.py -> tests/patch_repo.py" = 1
+"imports/tests/test_facts.py -> tests/patch_repo.py" = 1
+"imports/tests/test_file_loaders.py -> tests/patch_repo.py" = 1
+"imports/tests/test_mock_objects.py -> tests/patch_repo.py" = 1
+"placement.py -> imports/cache.py" = 2
+"placement.py -> imports/executed.py" = 2
+"placement.py -> imports/facts.py" = 6
+"placement_evidence.py -> imports/executed.py" = 4
+"placement_evidence.py -> imports/facts.py" = 5
+"placement_evidence.py -> placement.py" = 6
+"tests_location_suggest.py -> tests_location.py" = 2

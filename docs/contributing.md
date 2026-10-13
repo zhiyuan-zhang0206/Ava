@@ -67,9 +67,18 @@ violations pass, anything new fails, and the debt may only shrink
 - When a change pays debt down, run `python -m meizel debt prune` in the same
   change so the baseline drops with the fix. `python -m meizel debt` shows what
   is left.
-- CI warns when the recorded total grows against the base
-  (`debt diff --on-growth=warn`). It does not fail yet; growth without a
-  discussed reason is still not accepted.
+- CI fails when the recorded total grows against the base (`debt diff --on-growth=fail`).
+  The one waiver is decided by path, not by a reader: a change that edits meizel's own rule code
+  (Python under `meizel/` outside tests) reports growth as a warning, because widening a rule
+  grows the baselines.
+- Patching is debt of every kind: `first-party-patch`, `stdlib-patch`, `third-party-patch`,
+  `env-patch` and `unresolved-patch` (a target the imports do not resolve). Do not add one;
+  pass the dependency in as an explicit parameter
+  ([patching](../meizel/docs/checker/patching.ava.okf.md)). When a symbol is renamed, `debt carry
+  --rename-target OLD=NEW` moves its entries.
+- `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
+  `[loads]` sites, default-argument injections). Do not edit it unless the task names the entry;
+  CI prints every change to it ([the policy file](../meizel/docs/checker/policy.ava.okf.md)).
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes

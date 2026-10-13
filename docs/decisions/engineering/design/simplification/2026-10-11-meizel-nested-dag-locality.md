@@ -279,8 +279,9 @@ a declared edge would go:
 - edge violations (`undeclared-edge`, `not-exported`, `private-module`,
   `private-name`) belong to the lowest common directory of the fact edge;
 - file violations (`restricted-python`) belong to the directory of the file;
-- a cycle is recorded as the declared edges allowed to close it: the local graph
-  without them must be acyclic.
+- a cycle is recorded as the facts on the declared edges that close it
+  (`cycle-edge`, counted per source and target file); the local graph without
+  those edges must be acyclic.
 
 Entries are keyed by code, source, target or name, with a count and no line
 number, so moving code does not rewrite the baseline. Tables are sorted and one
@@ -348,3 +349,63 @@ number, so the existing patches enter the baselines of their directories and the
 rule fails every new one. Widening a rule is the one case in which a baseline
 legitimately grows at the moment the rule is introduced; the gate's `debt diff`
 step reports that growth like any other.
+
+## Addendum (2026-10-13): cycle debt is counted per fact
+
+The first form of cycle debt recorded the declared edges that were allowed to
+close a cycle. That is a projected edge, so every new import between the two
+children rode on the existing record, which is the opposite of strict-to-be.
+Cycle debt is now recorded like every other: as facts. `cycle-edge` entries are
+keyed by source and target file with a count, and the edges they project onto are
+the back-edges, so a new file or another import line on a back-edge fails, and
+the recorded facts can only shrink. The declared graph without the back-edges must
+still be acyclic (`manifest-cycle`), and an edge that closes no cycle any more, or
+is no longer declared, makes its entries `debt-paid`. The totals reported by
+`debt` rise, since a back-edge used by many files now carries many entries; that
+is the true size of the debt.
+
+## Addendum (2026-10-14): narrowed endpoints
+
+The declaration `a -> b` joins two children of a directory, and the rule judges a
+fact by the lowest common directory of its ends. Some invariants are narrower
+than that: the kernel may be used by one service and by no other. A child-level
+edge cannot say it, and without a way to say it a second tool has to keep
+guarding it (import-linter's `services` / `agent` contract).
+
+An endpoint of an edge in `[uses]` may now be any tracked path below the
+directory, relative to it: `"services/agent_runner/agent_host" = ["agent/process_boot.py"]`.
+A fact is covered when its source lies under a declared source and its target
+under that pair's target; a plain child name means the child itself, so
+existing manifests are unchanged. The graph on which cycles are checked is the
+projection onto direct children, so the model, the acyclicity at every level and
+the declared-edge-per-directory review stay as they were. A narrowed pair that no
+fact matches is stale like any other, and `sync --declare` never widens one: a
+fact from a source the narrowing does not authorise stays an error for a person
+to judge. This is the same idea as visibility in Bazel, applied in the directory
+where the two sides meet.
+
+## Addendum (2026-10-14): hard-coded allowances
+
+Rules that rely on reviewers noticing are not rules. Everything a rule lets pass
+by someone's say-so is now either in the baselines, which only shrink and which
+CI refuses to grow, or in one file.
+
+- **One list.** `meizel.policy.toml` holds every allowance: the `[external]` sites
+  with their reason, the `[loads]` sites with their directories, and a closed,
+  empty `[default-arguments]`. A manifest that uses one of these forms at a site
+  the file does not list is an error (`unlisted-allowance`); the reason written in
+  the manifest no longer counts. The initial content is today's sites. A change to
+  the file is listed by `policy diff` in the CI log and check summary; it informs,
+  it does not block.
+- **Patching is debt of every kind.** The earlier boundary (patching the standard
+  library, a third-party package or the environment, and targets that do not
+  resolve, were not reported) is withdrawn. `stdlib-patch`, `third-party-patch`,
+  `env-patch` (`monkeypatch.setenv/delenv`, `os.environ`) and `unresolved-patch`
+  join `first-party-patch`, each recordable and shrink-only. An unresolved target
+  is not a way around the rule: only what is already in the baseline passes.
+- **Growth fails.** CI runs `debt diff` with `--on-growth=fail`. The one waiver is
+  decided by path, not by a reader: a change that edits meizel's rule code (Python
+  files under `meizel/` outside tests) reports growth as a warning, because
+  widening a rule legitimately grows the baselines.
+- **Default-argument injection** stays closed. If it is ever opened, the allowed
+  values go into `[default-arguments]` and the tool checks them.

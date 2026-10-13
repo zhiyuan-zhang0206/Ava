@@ -8,6 +8,15 @@
 "test_tracing_lifecycle.py" = ["otlp"]
 "tracing" = ["otlp", "test_tracing.py"]
 
+[debt.env-patch]
+"test_observability.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 3
+"test_observability.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_telemetry_otlp_gate.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 3
+"test_telemetry_otlp_gate.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 2
+"test_tracing.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 2
+"test_tracing.py#monkeypatch.setenv os.environ.TRACELOOP_TRACE_CONTENT" = 1
+"test_tracing_lifecycle.py#monkeypatch.setenv os.environ.TRACELOOP_TRACE_CONTENT" = 1
+
 [debt.first-party-patch]
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.emit" = 2
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.emit_prepared" = 7
@@ -51,3 +60,16 @@
 "tracing/test_strip_content_removes_llm_content_keeps_metadata.py -> test_tracing.py#_collector_up" = 1
 "tracing/test_strip_content_removes_llm_content_keeps_metadata.py -> test_tracing.py#_production_process_by_default" = 1
 "tracing/test_strip_content_removes_llm_content_keeps_metadata.py -> test_tracing.py#_reset_init_flag" = 1
+
+[debt.stdlib-patch]
+"test_emitter_lifecycle.py#monkeypatch.setattr threading.Thread" = 1
+
+[debt.third-party-patch]
+"test_tracing.py#monkeypatch.setattr httpx.post" = 1
+"test_tracing.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 11
+"test_tracing_lifecycle.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 1
+
+[debt.unresolved-patch]
+"test_telemetry_otlp_gate.py#monkeypatch.setattr machine.name" = 1
+"test_telemetry_otlp_gate.py#monkeypatch.setattr machine.role" = 1
+"test_tracing_lifecycle.py#monkeypatch.setattr machine.name" = 1

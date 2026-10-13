@@ -65,7 +65,6 @@ PREPUSH = {
 PREPUSH_LOCAL_ONLY = {
     "lint-prepush-branch-diff",
     "lint-prepush-artifact-freshness",
-    "lint-patch-targets-full",
     "lint-tests-location-full",
 }
 LOCAL_ONLY = {"check-git-hooks-install"}
