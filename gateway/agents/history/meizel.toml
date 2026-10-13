@@ -3,6 +3,5 @@ exports = ["configuration.py", "conversation.py", "read_inputs.py", "timeline.py
 [uses]
 "configuration.py" = ["read_inputs.py"]
 "conversation.py" = ["timeline.py"]
-"tests" = ["timeline.py"]
 "timeline.py" = ["read_inputs.py"]
 "understanding.py" = ["read_inputs.py"]

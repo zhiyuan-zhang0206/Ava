@@ -12,10 +12,10 @@ from fastapi.testclient import TestClient
 
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
-from gateway.agents.tests.creation.test_guarded_creation import HEADERS
-from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
 from gateway.routers import guide
+from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS
+from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 
 
 def test_draft_spawns_ava_guide_agent(

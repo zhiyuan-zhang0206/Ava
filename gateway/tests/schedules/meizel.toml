@@ -1,0 +1,5 @@
+[debt.first-party-patch]
+"test_receipt_boundaries.py#monkeypatch.setattr gateway.schedules.receipts.finish" = 1
+"test_receipt_boundaries.py#monkeypatch.setattr gateway.schedules.session_control.enqueue_in_transaction" = 1
+"test_update_delivery.py#monkeypatch.setattr gateway.schedules.session_control.enqueue_in_transaction" = 1
+"test_update_delivery.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 1

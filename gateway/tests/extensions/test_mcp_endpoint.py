@@ -31,103 +31,19 @@ from base.api_contracts.mcp_tool_contract import project_message
 from base.host.net.auth import bearer_header
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
+from gateway.tests.mcp_calls import (
+    ACCEPT,
+    create_token,
+    initialize,
+    post_message,
+    sse_messages,
+    tool_call,
+    tool_result,
+)
+from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
 from tests.fixtures.gateway_config import create_mcp_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
-ACCEPT = "application/json, text/event-stream"
-
-
-@pytest.fixture(autouse=True)
-def _enable_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.gateway, "mcp_endpoint_enabled", True)
-
-
-def _sse_messages(body: str) -> list[dict[str, Any]]:
-    """Every JSON-RPC message out of an SSE response body, in order.
-
-    Lines split on "\n" only - never str.splitlines(): that also breaks on
-    U+0085 / U+2028 / U+2029, which are legal unescaped inside a JSON
-    string (the /mcp writer emits them raw), and a split there truncates
-    the JSON literal being decoded.
-    """
-    out: list[dict[str, Any]] = []
-    for event in body.replace("\r\n", "\n").split("\n\n"):
-        data = [line[5:].strip() for line in event.split("\n") if line.startswith("data:")]
-        if data:
-            out.append(json.loads("\n".join(data)))
-    return out
-
-
-def create_token(client: TestClient, *, name: str = "test", scope: str = "write") -> str:
-    response = create_mcp_client(client, name, scope)
-    assert response.status_code == 200, response.text
-    return str(response.json()["token"])
-
-
-def _post(client: TestClient, token: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
-    headers = {
-        "Accept": ACCEPT,
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-    }
-    resp = client.post("/mcp", json=payload, headers=headers)
-    assert resp.status_code == 200, f"history={resp.history!r} body={resp.text}"
-    return _sse_messages(resp.text)
-
-
-def initialize(client: TestClient, token: str) -> list[dict[str, Any]]:
-    return _post(
-        client,
-        token,
-        {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-03-26",
-                "capabilities": {},
-                "clientInfo": {"name": "test", "version": "0"},
-            },
-        },
-    )
-
-
-def tool_call(
-    client: TestClient,
-    token: str,
-    name: str,
-    args: dict[str, Any],
-    req_id: int = 1,
-) -> dict[str, Any]:
-    messages = _post(
-        client,
-        token,
-        {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": args},
-        },
-    )
-    assert len(messages) == 1
-    return messages[0]
-
-
-def tool_result(message: dict[str, Any]) -> Any:
-    """The tool's return value out of a tools/call response.
-
-    MCPServer wraps dict/list return values as `structuredContent.result`
-    (the wire shape for dict/list tool signatures); an error result carries the
-    message in the first text block.
-    """
-    if message["result"].get("isError"):
-        return message["result"]["content"][0]["text"]
-    structured: dict[str, Any] = message["result"]["structuredContent"]
-    # A list return value is wrapped as {"result": [...]} (structuredContent
-    # must be a JSON object); dict returns pass through unwrapped.
-    if list(structured) == ["result"]:
-        return structured["result"]
-    return structured
 
 
 def _audit_hits(tool: str, client_name: str) -> list[dict[str, Any]]:
@@ -170,7 +86,7 @@ def test_initialize_negotiates_and_lists_guarded_creation_tool() -> None:
         token = create_token(client)
         init = initialize(client, token)
         assert init[0]["result"]["protocolVersion"]
-        messages = _post(client, token, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        messages = post_message(client, token, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     tools = {t["name"]: t for t in messages[0]["result"]["tools"]}
     assert set(tools) == {
         "list_agents",
@@ -558,7 +474,7 @@ def test_client_token_works_when_cluster_auth_is_enabled(
         )
         assert created.status_code == 200, created.text
 
-        messages = _post(
+        messages = post_message(
             client,
             created.json()["token"],
             {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
@@ -646,11 +562,11 @@ def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
 
 
 @pytest.mark.parametrize("ch", ("\u0085", "\u2028", "\u2029"), ids=("U+0085", "U+2028", "U+2029"))
-def test_sse_messages_keeps_unicode_line_separators(ch: str) -> None:
+def testsse_messages_keeps_unicode_line_separators(ch: str) -> None:
     """One frame, one data line; the payload decodes unchanged."""
     message = {"jsonrpc": "2.0", "id": 1, "result": {"label": f"a{ch}b"}}
     body = "event: message\r\ndata: " + json.dumps(message, ensure_ascii=False) + "\r\n\r\n"
-    assert _sse_messages(body) == [message]
+    assert sse_messages(body) == [message]
 
 
 def test_creation_key_replays_identity_conflicts_and_scopes_to_client() -> None:

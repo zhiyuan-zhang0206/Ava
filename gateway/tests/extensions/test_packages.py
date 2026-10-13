@@ -14,10 +14,10 @@ from fastapi.testclient import TestClient
 
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
-from gateway.agents.tests.creation.test_guarded_creation import HEADERS
-from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
 from gateway.extensions import packages
+from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS
+from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 
 DRAFT_PATH = "/api/keyed/v1/packages/draft"
 

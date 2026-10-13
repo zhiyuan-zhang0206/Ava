@@ -15,6 +15,6 @@ tags: []
 - **ui_contributions** (`gateway/extensions/ui_contributions.py`, `/api/ui/contributions`) — the merged, plugin-attributed `contributions.ui` declaration set of the cluster's ENABLED plugins (theme token packs, nav entries, and statistics-panel cards today; agent-inspect sections as that slice lands). Read straight from each plugin's `ava-plugin.json` — no plugin code is imported to answer it [[docs/plugins/package-manifest.ava.okf.md]]
 - **plugin_ui** (`gateway/extensions/plugin_ui.py`, `/api/plugin-ui/<plugin>/…`) — the sibling mount of `pages`: static files from an ENABLED plugin's own `ui/` directory, for the sandboxed iframe the console embeds. `pages`' segment validation plus a resolved-path containment check
 
-Reverse-proxy contracts live in `gateway/routers/tests/proxies/`: Grafana and
+Reverse-proxy contracts live in `gateway/tests/routers/proxies/`: Grafana and
 agent page servers preserve authenticated forwarding, streaming, error responses
 and path-traversal rejection.

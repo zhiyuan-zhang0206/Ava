@@ -10,4 +10,4 @@ exports = ["creation.py", "eval_guard.py", "forward.py", "history", "inbound_pro
 "router.py" = ["creation.py", "schemas.py"]
 "state.py" = ["eval_guard.py", "inbound_provenance.py", "schemas.py", "system_note.py"]
 "task_assignment" = ["creation.py"]
-"tests" = ["creation.py", "forward.py", "inbound_provenance.py", "launch_retry.py", "lifecycle.py", "router.py", "state.py", "task_assignment"]
+"tests" = ["lifecycle.py", "state.py"]

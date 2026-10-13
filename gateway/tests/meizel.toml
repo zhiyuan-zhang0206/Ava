@@ -3,11 +3,13 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 [uses]
 "agents" = ["test_agents_endpoints.py"]
 "bootstrap" = ["agents", "events"]
-"events" = ["test_idempotency.py", "test_sse.py"]
+"events" = ["test_idempotency.py"]
+"extensions" = ["lifecycle", "mcp_calls.py"]
+"history" = ["agents"]
+"lifecycle" = ["mcp_calls.py", "test_agents_endpoints.py", "test_idempotency.py"]
 "observability" = ["agents"]
-"receipts" = ["events"]
-"test_native_cancel.py" = ["test_idempotency.py"]
-"test_native_restart.py" = ["test_idempotency.py", "test_native_cancel.py"]
+"receipts" = ["events", "routers"]
+"routers" = ["agents"]
 "upload_delivery" = ["events"]
 
 [debt.env-patch]
@@ -17,6 +19,7 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 "test_understanding_build_endpoints.py#patch.dict os.environ" = 2
 
 [debt.first-party-patch]
+"mcp_calls.py#monkeypatch.setattr base.config.settings.gateway.mcp_endpoint_enabled" = 1
 "test_agent_inspect.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 7
 "test_agents_endpoints.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 1
 "test_agents_endpoints.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
@@ -34,21 +37,12 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 "test_idempotency.py#monkeypatch.setattr base.lm.factory.model_supports_vision" = 2
 "test_idempotency.py#monkeypatch.setattr ops.lifecycle.publish_inbound_arrived" = 1
 "test_idempotency.py#monkeypatch.setattr ops.lifecycle.resurrect_if_terminated" = 2
-"test_memory_pool.py#monkeypatch.setattr gateway.routers.memory.gateway_memory_dir" = 2
-"test_memory_refresh.py#monkeypatch.setattr base.deploy.git.memory_repo.pull_main" = 2
-"test_native_cancel.py#monkeypatch.setattr gateway.agents.lifecycle.accept_native_cancel" = 1
-"test_native_cancel.py#monkeypatch.setattr gateway.agents.lifecycle.observe_native_work" = 1
-"test_native_restart.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 2
-"test_sse.py#monkeypatch.setattr gateway.events.sse.time" = 1
-"test_sse.py#monkeypatch.setattr gateway.events.system.event_stream" = 1
 "test_status_cluster.py#monkeypatch.setattr base.config.settings.gateway.status_probe_timeout_seconds" = 2
 "test_status_cluster.py#monkeypatch.setattr gateway.app.StatusCache" = 1
 "test_status_cluster.py#monkeypatch.setattr gateway.cluster.roster_probe.dispatch_status_probe" = 1
 "test_status_cluster.py#monkeypatch.setattr gateway.cluster.status.cluster_is_paused" = 1
 "test_status_cluster.py#monkeypatch.setattr gateway.cluster.status.prod_source_head_sha" = 1
 "test_status_cluster.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_url" = 8
-"test_terminate_forward.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 1
-"test_terminate_forward.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 7
 "test_understanding_build_endpoints.py#monkeypatch.setattr base.agents.history.hierarchy.build.quote" = 1
 "test_understanding_build_endpoints.py#monkeypatch.setattr base.config.ConfigBoot.get_field" = 1
 "test_understanding_build_endpoints.py#monkeypatch.setattr gateway.agents.history.understanding.build_model" = 1
@@ -57,13 +51,3 @@ exports = ["agents", "extensions", "test_agents_endpoints.py", "test_idempotency
 "test_understanding_build_endpoints.py#monkeypatch.setattr gateway.agents.history.understanding.load_checkpoint_history_full" = 2
 "test_understanding_build_endpoints.py#monkeypatch.setattr gateway.app.app.state.config_authority.runtime.agent.understanding_enabled" = 1
 "test_understanding_build_endpoints.py#monkeypatch.setattr gateway.app.app.state.understanding_policy" = 1
-
-[debt.private-name]
-"test_native_restart.py -> test_native_cancel.py#_headers" = 1
-
-[debt.stdlib-patch]
-"test_memory_refresh.py#monkeypatch.setattr asyncio.to_thread" = 1
-
-[debt.third-party-patch]
-"test_sse.py#monkeypatch.setattr redis.asyncio.client.PubSub.get_message" = 1
-"test_sse.py#monkeypatch.setattr redis.asyncio.client.PubSub.subscribe" = 1
