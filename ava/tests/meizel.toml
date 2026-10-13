@@ -26,9 +26,6 @@
 "test_validation_ava.py#monkeypatch.setattr ava.DB.transaction" = 1
 "test_validation_ava.py#monkeypatch.setattr ava.sdk_surface.agent_identity.assert_self_action" = 1
 "test_validation_ava.py#monkeypatch.setattr ava.ui.page_host" = 3
-"test_validation_ava.py#monkeypatch.setattr ava.web._fetch_one" = 1
-"test_validation_ava.py#monkeypatch.setattr ava.web._search_one" = 1
-"test_validation_ava.py#monkeypatch.setattr ava.web.run_batch" = 2
 "test_validation_ava.py#monkeypatch.setattr base.telemetry.audit_events.record_audit" = 1
 
 [debt.stdlib-patch]
