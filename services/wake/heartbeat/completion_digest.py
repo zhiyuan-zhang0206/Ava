@@ -31,7 +31,7 @@ from base.daemon.schedules.completion_notices import (
 )
 from base.db import Database
 from base.events.live.bus import EventBus
-from ops.agents.delivery import deliver_chat_inbound
+from ops.lifecycle.delivery import deliver_chat_inbound
 
 FLUSH_INTERVAL_S = 60.0
 _SOURCE = "system:completion-digest"

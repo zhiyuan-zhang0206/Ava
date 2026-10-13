@@ -57,7 +57,7 @@ from gateway.agents.schemas import (
 from gateway.agents.system_note import _system_note_blocking as _system_note_blocking
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
-from ops.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
+from ops.lifecycle.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
 
 router = APIRouter()
