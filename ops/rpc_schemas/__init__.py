@@ -26,18 +26,6 @@ from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
 from ops.rpc_schemas.content import UserContent
-from ops.rpc_schemas.launch_retry import (
-    LaunchReconciled as LaunchReconciled,
-)
-from ops.rpc_schemas.launch_retry import (
-    LaunchReconcileRequest as LaunchReconcileRequest,
-)
-from ops.rpc_schemas.launch_retry import (
-    RetryLaunchAccepted as RetryLaunchAccepted,
-)
-from ops.rpc_schemas.launch_retry import (
-    RetryLaunchRequest as RetryLaunchRequest,
-)
 from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
 from ops.rpc_schemas.messages import ContentBlock as ContentBlock
 from ops.rpc_schemas.messages import ImageUrlContentBlock as ImageUrlContentBlock

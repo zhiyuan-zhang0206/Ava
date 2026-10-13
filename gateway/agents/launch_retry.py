@@ -4,6 +4,11 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
 
+from base.api_contracts.launch_retry import (
+    LaunchReconcileRequest,
+    RetryLaunchAccepted,
+    RetryLaunchRequest,
+)
 from base.log import logger
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
@@ -14,11 +19,6 @@ from gateway.http.auth.request_principal import (
 )
 from ops.agents.launch_retry import RetryLaunchConflictError, accept_retry_launch
 from ops.cluster import rpc
-from ops.rpc_schemas.launch_retry import (
-    LaunchReconcileRequest,
-    RetryLaunchAccepted,
-    RetryLaunchRequest,
-)
 
 router = APIRouter()
 
