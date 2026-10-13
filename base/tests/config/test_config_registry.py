@@ -84,7 +84,7 @@ def test_every_field_resolves_a_valid_capability(authority: ConfigAuthority) -> 
     domain default; `_build_registry` fail-fasts on a bad value at import, so this
     guards the public metadata surface the frontend groups on."""
     from base.config import get_config_metadata
-    from base.host.env.config_registry import _ALLOWED_CAPABILITIES
+    from base.config.config_registry import _ALLOWED_CAPABILITIES
 
     assert frozenset({"gateway", "agent-runner", "common"}) == _ALLOWED_CAPABILITIES
     bad = [
@@ -134,7 +134,7 @@ def test_build_registry_rejects_bad_capability(monkeypatch: pytest.MonkeyPatch) 
     domain default), so the whole process fails fast rather than silently
     mis-grouping — the same seal `scope` has. Pin the raise directly (the
     all-fields-valid test above only proves the current tree is clean)."""
-    from base.host.env import config_registry
+    from base.config import config_registry
 
     # The registry builds lazily on first use and memoizes; patch the module
     # (not the config re-export) and clear the cache so the typo is exercised.

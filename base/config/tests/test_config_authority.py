@@ -11,8 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 from base.config import Settings
+from base.config.config_registry import field_alias
 from base.config.service_read import ConfigAuthority
-from base.host.env.config_registry import field_alias
 
 
 def _complete(*, db_user: str = "ava", machine_host: str = "") -> Settings:

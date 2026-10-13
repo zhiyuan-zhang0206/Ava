@@ -42,9 +42,9 @@ def _home_gateway_base() -> str | None:
     """This process's home gateway identity: the home `.env` aliases
     (`AVA_GATEWAY_URL`, recorded by `ava init`). None when the home carries no
     identity yet (before `ava init`)."""
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     for key in _GATEWAY_URL_KEYS:
         gateway_url = aliases.get(key, "").strip()
         if gateway_url:
@@ -103,13 +103,13 @@ def _auth_headers() -> dict[str, str]:
     secret (environment, then `.env`); else, on a remote unit, its installed
     capability's API token, only while this process runs the admitted runtime.
     """
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
     from base.host.net.auth import bearer_header, delivered_token
 
     bearer = delivered_token() or os.environ.get("AVA_CLUSTER_SECRET")
     if bearer is None:
-        bearer = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
-    home = runtime_config.env_file_path().parent
+        bearer = dotenv_file.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
+    home = dotenv_file.env_file_path().parent
     if not bearer and (home / "db-authority" / "unit.json").exists():
         from base.host.db_authority.unit import consume_unit
 
@@ -192,7 +192,7 @@ def _field_extra(field_info: Any) -> dict[str, Any]:
 
 def _local_fields() -> dict[str, _LocalConfigField]:
     """Build local-edit metadata from the registry, never from Settings values."""
-    from base.host.env.config_registry import FIELD_INFOS, field_alias, field_editor_type
+    from base.config.config_registry import FIELD_INFOS, field_alias, field_editor_type
 
     fields: dict[str, _LocalConfigField] = {}
     for name, info in FIELD_INFOS.items():
@@ -272,9 +272,9 @@ def _reject_local_machine(machine: str | None, verb: str) -> int | None:
 
 
 def _local_get(key: str | None) -> int:
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     fields = _local_fields()
     if key is not None:
         try:
@@ -540,7 +540,7 @@ def _edit_local_config(
 ) -> int:
     """Validate and persist one local `.env` patch without booting Settings."""
     from base.config.admin.candidate import validate_env_patch_for_write
-    from base.host.env import runtime_config
+    from base.config.runtime_config import write_fields
 
     try:
         writes, removals, changed = _build_local_patch(pairs, unset_keys)
@@ -555,7 +555,7 @@ def _edit_local_config(
         return 1
 
     try:
-        runtime_config.write_fields(
+        write_fields(
             writes,
             removals,
             expected_digest=candidate.expected_digest,

@@ -4,7 +4,7 @@
 flat field registry + current values for GET /api/config; the write path's
 "keep existing value" sentinel lives here too. Split out of
 `base/config/__init__.py` for the design's line budget (R2 convergence point
-A re-split): the registry is built in `base/host/env/config_registry.py`, Settings and
+A re-split): the registry is built in `base/config/config_registry.py`, Settings and
 its boot consumers stay in `__init__.py`.
 
 Imports of the config package are function-level (this module is imported by
@@ -21,14 +21,14 @@ from typing import Any
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
-from base.config.service_read import ConfigAuthority, domain_model_classes
-from base.host.env.config_registry import (
+from base.config.config_registry import (
     Capability,
     field_alias,
     field_editor_type,
     fields,
     schema_extra,
 )
+from base.config.service_read import ConfigAuthority, domain_model_classes
 
 # Stand-in a sensitive field carries in `raw_overrides` instead of its cleartext
 # value: the panel/CLI round-trips it unchanged on a full-replace PUT, and the

@@ -24,7 +24,8 @@ from base.api_contracts.config import (
     ConfigWriteResult,
 )
 from base.cluster.machine import MachineIdentity
-from base.host.env import runtime_config
+from base.config import runtime_config
+from base.host.env import dotenv_file
 from cli.commands.management import config as cfg
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -131,7 +132,7 @@ def test_set_list_field_writes_bare_env_and_round_trips(
         )
     )
     monkeypatch.setattr(cfg, "_get_config", lambda _machine: view)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
 
     def _persist(body: dict[str, Any], _machine: str | None) -> ConfigWriteResult:
         runtime_config.write_fields(body, set())
@@ -143,7 +144,7 @@ def test_set_list_field_writes_bare_env_and_round_trips(
 
     assert rc == 0
     assert (tmp_path / ".env").read_text() == "AVA_IM_DISABLED_ADAPTERS=weixin,feishu\n"
-    written = runtime_config.read_env_aliases()["AVA_IM_DISABLED_ADAPTERS"]
+    written = dotenv_file.read_env_aliases()["AVA_IM_DISABLED_ADAPTERS"]
     parsed = ServiceSettings.model_validate({"AVA_IM_DISABLED_ADAPTERS": written})
     assert parsed.im_disabled_adapters == ["weixin", "feishu"]
 
@@ -534,7 +535,7 @@ def test_local_set_applies_valid_patch(
     rc = cfg.cmd_config_set(["ops_concurrency=7"], machine=None, local=True)
 
     assert rc == 0
-    assert runtime_config.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "7"
+    assert dotenv_file.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "7"
     assert "restart to apply" in capsys.readouterr().out
 
 
@@ -553,12 +554,12 @@ def test_the_offsite_keys_are_official_local_config(local_env_home: Path) -> Non
     rc = cfg.cmd_config_set([f"{key}={value}" for key, value in keys.items()], None, local=True)
 
     assert rc == 0
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert {key: aliases[key] for key in keys} == keys
     assert "OTHER" in aliases
 
     assert cfg.cmd_config_unset(list(keys), None, local=True) == 0
-    assert not set(keys) & set(runtime_config.read_env_aliases())
+    assert not set(keys) & set(dotenv_file.read_env_aliases())
 
 
 def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
@@ -568,12 +569,12 @@ def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
     config_file = local_env_home / "walg.json"
 
     assert cfg.cmd_config_set([f"AVA_WALG_CONFIG_FILE={config_file}"], None, local=True) == 0
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert aliases["AVA_WALG_CONFIG_FILE"] == str(config_file)
     assert "OTHER" in aliases
 
     assert cfg.cmd_config_unset(["AVA_WALG_CONFIG_FILE"], None, local=True) == 0
-    assert "AVA_WALG_CONFIG_FILE" not in runtime_config.read_env_aliases()
+    assert "AVA_WALG_CONFIG_FILE" not in dotenv_file.read_env_aliases()
 
 
 def test_local_set_can_pin_the_hosted_runner_health_port(
@@ -589,7 +590,7 @@ def test_local_set_can_pin_the_hosted_runner_health_port(
     rc = cfg.cmd_config_set(["AVA_AGENT_HOST_HEALTH_PORT=18133"], machine=None, local=True)
 
     assert rc == 0
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert aliases["AVA_AGENT_HOST_HEALTH_PORT"] == "18133"
     assert "OTHER" in aliases  # unrelated lines survive the patch
 
@@ -600,7 +601,7 @@ def test_local_unset_removes_key(local_env_home: Path) -> None:
     rc = cfg.cmd_config_unset(["AVA_OPS_CONCURRENCY"], machine=None, local=True)
 
     assert rc == 0
-    assert "AVA_OPS_CONCURRENCY" not in runtime_config.read_env_aliases()
+    assert "AVA_OPS_CONCURRENCY" not in dotenv_file.read_env_aliases()
 
 
 def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
@@ -632,9 +633,9 @@ def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
     assert result.returncode == 0, result.stderr
     # The patch lands (values are stored quoted; compare through the alias
     # view like the sibling valid-env test).
-    assert runtime_config.read_env_aliases()["AVA_EXEC_NODE_TIMEOUT_SECONDS"] == "2000.0"
+    assert dotenv_file.read_env_aliases()["AVA_EXEC_NODE_TIMEOUT_SECONDS"] == "2000.0"
     # Unrelated incident lines survive the repair write.
-    assert runtime_config.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "7"
+    assert dotenv_file.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "7"
     assert (local_env_home / ".env").read_bytes() != before
 
 
@@ -674,7 +675,7 @@ def test_config_audit_local_reads_newest_first_and_filters(
     """No --machine: reads this unit's own JSONL; --key keeps one alias's records."""
     from ops.env_audit import record_env_write
 
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     env_path = tmp_path / ".env"
     env_path.write_text("AVA_MODEL=m\n")
     record_env_write(

@@ -157,9 +157,9 @@ def _serve_flag(env_key: str) -> bool:
     raw = os.environ.get(env_key)
     if raw is not None and raw.strip():
         return raw.strip().lower() in _TRUTHY
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
-    raw = runtime_config.read_env_aliases().get(env_key)
+    raw = dotenv_file.read_env_aliases().get(env_key)
     if raw is not None and raw.strip():
         return raw.strip().lower() in _TRUTHY
     return False

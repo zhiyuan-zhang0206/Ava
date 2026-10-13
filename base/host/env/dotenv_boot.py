@@ -510,7 +510,7 @@ def _enforce_cluster_env_authority(home: Path) -> EnvBootResult:
     # Gateway profile: drop agent-runner capability keys. They pull agent
     # modules, plugin registrations and API keys into the gateway (+11MB
     # resident) and, by env forwarding, its daemon sessions; /api/bootstrap reads
-    # the .env FILE (base.host.env.runtime_config.read_env_aliases), so it is unaffected.
+    # the .env FILE (base.host.env.dotenv_file.read_env_aliases), so it is unaffected.
     if _is_gateway_process():
         for key in agent_runner_cluster_aliases():
             os.environ.pop(key, None)

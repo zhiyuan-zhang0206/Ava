@@ -16,12 +16,12 @@ Layout: the sub-models live in `base/config/domains/` (grouped by owner:
 `agent`, `daemon`, `services`, `channels`, `storage`, `observability`, plus the
 single-module domains) and the write path (edit policy, candidate validation, panel
 metadata) in `base/config/admin/`. Grouping is by folder only: the registry stays
-the flat `DOMAIN_MODELS` / `model_classes()` in `base/host/env/config_registry.py`, and a
+the flat `DOMAIN_MODELS` / `model_classes()` in `base/config/config_registry.py`, and a
 component's own config slice belongs in that component's package, not here.
 
 Precedence: env var > Field default. `$AVA_HOME/.env` is the single source of
 truth — the config panel and `ava config set` write edits straight into it
-(`set_key` / `unset_key` by alias; see `base/host/env/runtime_config.py`), and
+(`set_key` / `unset_key` by alias; see `base/config/runtime_config.py`), and
 pydantic-settings reads it at startup. There is no separate override layer: a
 value lives in exactly one place.
 
@@ -129,6 +129,21 @@ from base.config._lite import (
 from base.config._lite import (
     set_field as set_field,
 )
+from base.config.config_registry import (
+    DOMAIN_ATTRS as DOMAIN_ATTRS,
+)
+from base.config.config_registry import (
+    DOMAIN_MODELS as DOMAIN_MODELS,
+)
+from base.config.config_registry import (
+    Capability as Capability,
+)
+from base.config.config_registry import (
+    Lifecycle as Lifecycle,
+)
+from base.config.config_registry import (
+    schema_extra as schema_extra,
+)
 from base.config.profiles import (
     AVA_PROCESS_PROFILE_ENV as AVA_PROCESS_PROFILE_ENV,
 )
@@ -157,21 +172,6 @@ from base.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_DOMAINS,
     PER_AGENT_FIELDS,
-)
-from base.host.env.config_registry import (
-    DOMAIN_ATTRS as DOMAIN_ATTRS,
-)
-from base.host.env.config_registry import (
-    DOMAIN_MODELS as DOMAIN_MODELS,
-)
-from base.host.env.config_registry import (
-    Capability as Capability,
-)
-from base.host.env.config_registry import (
-    Lifecycle as Lifecycle,
-)
-from base.host.env.config_registry import (
-    schema_extra as schema_extra,
 )
 from base.host.env.dotenv_boot import (
     load_ava_env as load_ava_env,
@@ -377,7 +377,7 @@ def __getattr__(name: str) -> Any:
     if name.startswith("__"):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     if name in ("_FIELDS", "FIELD_INFOS"):
-        from base.host.env.config_registry import field_infos, fields
+        from base.config.config_registry import field_infos, fields
 
         return fields() if name == "_FIELDS" else field_infos()
     if name in ("CONFIG_UNCHANGED_SENTINEL", "ConfigFieldMeta"):

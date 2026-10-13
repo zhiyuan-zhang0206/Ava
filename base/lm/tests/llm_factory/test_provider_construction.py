@@ -18,7 +18,7 @@ from langchain_anthropic import ChatAnthropic
 from pydantic import SecretStr
 
 from base.config import get_field, settings
-from base.host.env import runtime_config
+from base.host.env import dotenv_file
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import (
@@ -543,7 +543,7 @@ class TestProviderConstruction:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.setattr(
-            runtime_config,
+            dotenv_file,
             "read_env_aliases",
             lambda: {"DEEPSEEK_API_KEY": "sk-file-value"},
         )
@@ -568,7 +568,7 @@ class TestProviderConstruction:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env-value")
         monkeypatch.setattr(
-            runtime_config,
+            dotenv_file,
             "read_env_aliases",
             lambda: {"DEEPSEEK_API_KEY": "sk-file-value"},
         )
@@ -591,7 +591,7 @@ class TestProviderConstruction:
         """Neither channel carries the key → the fail-fast RuntimeError holds."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-        monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+        monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
             build_chat_model(

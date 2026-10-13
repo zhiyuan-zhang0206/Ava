@@ -96,7 +96,7 @@ E_MODULES: dict[str, tuple[str, str, bool]] = {
         "which agent am I (process-global agent id and actor)",
         False,
     ),
-    "base.host.env.runtime_config": ("env-resolution", "resolves ava_home and env aliases", False),
+    "base.host.env.dotenv_file": ("env-resolution", "resolves ava_home and env aliases", False),
     "base.host.env.dotenv_boot": (
         "env-resolution",
         ".env anchoring and boot-time env resolution",

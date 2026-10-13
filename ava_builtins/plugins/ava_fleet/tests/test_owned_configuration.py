@@ -8,7 +8,7 @@ import pytest
 
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig, contribute
 from ava_builtins.plugins.ava_fleet.services import services
-from base.host.env import bootstrap, runtime_config
+from base.host.env import bootstrap, dotenv_file
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, SERVICE_PLUGIN_CONFIG_ENV
 from base.packages.plugins.config_registration import (
     disk_image_path,
@@ -23,7 +23,7 @@ from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftEr
 
 @pytest.fixture(autouse=True)
 def preserve_env_file() -> Generator[None]:
-    env = runtime_config.env_file_path()
+    env = dotenv_file.env_file_path()
     previous = env.read_bytes() if env.exists() else None
     try:
         yield

@@ -6,7 +6,7 @@ converge, e.g. a boot-retry storm, must not manufacture `old == new` records). A
 differing byte still takes the full write path, so normalization of quoted or
 oddly-spaced lines is preserved.
 
-Lives in `base` (stdlib-only, no settings import) so lifecycle commands and
+Lives in `base` (no settings import) so lifecycle commands and
 first-start identity preparation share one implementation. `env_line_key` reads a line's key with the
 same grammar the settings parser uses (`export KEY=v` sets `KEY`; #2981).
 """
@@ -19,6 +19,8 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
+
+from dotenv import dotenv_values
 
 from base.host.private_storage import ensure_private_file, write_private_bytes
 from base.native_process.os_platform import file_lock
@@ -146,6 +148,37 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
     except (OSError, RuntimeError):
         _log.warning("snapshot_env: could not back up %s", path, exc_info=True)
         return None
+
+
+def unit_home() -> Path:
+    """$AVA_HOME directory, created if missing.
+
+    Routed through `base.paths.home.resolve_ava_home()`: callers run before
+    `load_ava_env` pins `AVA_HOME` into the environment (the Settings-lite
+    maintenance commands defer it — see `base.host.env.bootstrap._serve_flag`)."""
+    from base.paths.home import resolve_ava_home
+
+    root = resolve_ava_home()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def env_file_path() -> Path:
+    """This unit's `.env` — the single config source of truth."""
+    return unit_home() / ".env"
+
+
+def read_env_aliases() -> dict[str, str]:
+    """Raw `{ALIAS: value}` currently set in this unit's `.env` file.
+
+    Reads the FILE (not `os.environ`), so a value written since process start is
+    reflected — the gateway can serve a freshly-edited value without restarting
+    itself. Absent file -> `{}`. A bare key with no value is dropped.
+    """
+    path = env_file_path()
+    if not path.exists():
+        return {}
+    return {k: v for k, v in dotenv_values(path).items() if v is not None}
 
 
 class EnvAudit(Protocol):

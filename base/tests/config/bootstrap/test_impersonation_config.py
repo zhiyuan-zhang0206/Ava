@@ -25,7 +25,7 @@ def test_delivery_policy_is_configurable_and_bootstrapped(
     name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from base import config
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
     alias = f"AVA_{name.upper()}"
     info = cast(FieldInfo, FIELD_INFOS[name])
@@ -37,7 +37,7 @@ def test_delivery_policy_is_configurable_and_bootstrapped(
     assert not extra["restart_required"]
     monkeypatch.setenv(alias, "17")
     assert getattr(AgentRuntimeSettings(), name) == 17
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     (tmp_path / ".env").write_text(
         f"{alias}=17\nAVA_DB_URL=postgresql://ava@localhost:5433/ava\n"
         "AVA_RUNNER_DB_PASSWORD=test-only\n"

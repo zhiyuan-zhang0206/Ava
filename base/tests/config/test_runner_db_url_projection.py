@@ -18,7 +18,7 @@ from base import log
 from base.cluster import derive
 from base.config import Settings
 from base.config.service_read import ConfigAuthority
-from base.host.env import bootstrap, runtime_config
+from base.host.env import bootstrap, dotenv_file
 
 _OWNER_URL = "postgresql://ava:owner-password@127.0.0.1:5433/ava"
 _RUNNER_URL = "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
@@ -27,7 +27,7 @@ _RUNNER_URL = "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
 def test_projects_owner_url_to_runner_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bootstrap, "config_source_is_local", Mock(return_value=True))
     monkeypatch.setattr(
-        runtime_config,
+        dotenv_file,
         "read_env_aliases",
         Mock(return_value={"AVA_DB_URL": _OWNER_URL, "AVA_RUNNER_DB_PASSWORD": "runner-password"}),
     )
@@ -38,7 +38,7 @@ def test_projects_owner_url_to_runner_identity(monkeypatch: pytest.MonkeyPatch) 
 def test_missing_runner_password_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bootstrap, "config_source_is_local", Mock(return_value=True))
     monkeypatch.setattr(
-        runtime_config,
+        dotenv_file,
         "read_env_aliases",
         Mock(return_value={"AVA_DB_URL": _OWNER_URL}),
     )
@@ -57,7 +57,7 @@ def test_gateway_url_and_password_come_from_one_snapshot(
             "AVA_RUNNER_DB_PASSWORD": "new-runner",
         }
     )
-    monkeypatch.setattr(runtime_config, "read_env_aliases", snapshot)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", snapshot)
     assert derive.runner_db_url_projection() == (
         "postgresql://ava_runner:new-runner@db-new:6000/new-database"
     )
@@ -67,7 +67,7 @@ def test_gateway_url_and_password_come_from_one_snapshot(
 def test_missing_snapshot_url_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bootstrap, "config_source_is_local", Mock(return_value=True))
     monkeypatch.setattr(
-        runtime_config,
+        dotenv_file,
         "read_env_aliases",
         Mock(return_value={"AVA_RUNNER_DB_PASSWORD": "new-runner"}),
     )
@@ -80,7 +80,7 @@ def test_pure_runner_never_projects_a_login(monkeypatch: pytest.MonkeyPatch) -> 
     login to pass through: the projection refuses without reading anything."""
     monkeypatch.setattr(bootstrap, "config_source_is_local", Mock(return_value=False))
     snapshot = Mock(side_effect=AssertionError("must not read local credentials"))
-    monkeypatch.setattr(runtime_config, "read_env_aliases", snapshot)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", snapshot)
     with pytest.raises(RuntimeError, match="installed unit capability"):
         derive.runner_db_url_projection()
     snapshot.assert_not_called()

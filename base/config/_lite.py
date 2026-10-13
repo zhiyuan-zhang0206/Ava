@@ -17,6 +17,7 @@ from pathlib import Path
 from threading import RLock, get_ident
 from typing import Any, cast
 
+from base.config.config_registry import DOMAIN_ATTRS
 from base.config.profiles import (
     AVA_PROCESS_PROFILE_ENV,
     PROCESS_PROFILES,
@@ -36,7 +37,6 @@ from base.host.env.config_lite_table import (
     LITE_FIELDS,
     REQUIRED_FIELDS,
 )
-from base.host.env.config_registry import DOMAIN_ATTRS
 from base.host.env.dotenv_boot import (
     PLACEHOLDER_DB_URL,
     EnvBootResult,

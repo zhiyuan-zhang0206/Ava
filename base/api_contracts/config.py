@@ -15,10 +15,10 @@ from pydantic import (
 )
 
 # The config-panel capability sections — same Literal the config metadata resolves
-# (`base.host.env.config_registry.Capability`), reused so the schema field and the metadata
+# (`base.config.config_registry.Capability`), reused so the schema field and the metadata
 # it is built from are one type, not two structurally-equal aliases. The registry is
 # settings-free, so thin clients can validate gateway responses during repair.
-from base.host.env.config_registry import Capability
+from base.config.config_registry import Capability
 
 
 class ConfigFieldView(BaseModel):

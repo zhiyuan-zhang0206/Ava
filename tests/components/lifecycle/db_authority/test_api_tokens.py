@@ -313,11 +313,11 @@ def test_a_machine_token_cannot_choose_the_human_secret(
 ) -> None:
     """A runner token authenticates the administrator, but it must not turn a
     generation-bound admission into a human bearer of its choosing."""
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
     store = tmp_path / "config-store"
     store.mkdir()
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
     with gateway_test_client(config_app(), machine=machine_identity) as client:
@@ -338,11 +338,11 @@ def test_a_machine_token_cannot_open_the_mcp_endpoint(
 ) -> None:
     """Switching `/mcp` on decides whether MCP client tokens, which outlive
     every generation, authenticate at all: no config write may choose it."""
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
     store = tmp_path / "config-store"
     store.mkdir()
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
     with gateway_test_client(config_app(), machine=machine_identity) as client:

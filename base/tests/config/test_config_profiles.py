@@ -384,8 +384,8 @@ def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.Mon
     fail-fast, lost in the main rebuild and restored by #2227)."""
     from pydantic import Field
 
+    from base.config import config_registry
     from base.config.base import EnvSettings
-    from base.host.env import config_registry
 
     class Bad(EnvSettings):
         synthetic_knob: int = Field(
@@ -417,8 +417,8 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind(
     the value fixes; this check makes the drift class impossible)."""
     from pydantic import Field
 
+    from base.config import config_registry
     from base.config.base import EnvSettings
-    from base.host.env import config_registry
 
     class WrongKind(EnvSettings):
         synthetic_knob: int = Field(
@@ -448,8 +448,8 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     from typing import Any, cast
 
     from base.config import _FIELDS
+    from base.config.config_registry import _ALLOWED_RESTART_REQUIRED, _RESTART_REQUIRED_PROFILE
     from base.config.profiles import PROCESS_PROFILES
-    from base.host.env.config_registry import _ALLOWED_RESTART_REQUIRED, _RESTART_REQUIRED_PROFILE
 
     def _extra(ref: object) -> dict[str, Any]:
         info = getattr(ref, "info", ref)
