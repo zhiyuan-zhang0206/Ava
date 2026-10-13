@@ -14,6 +14,7 @@ from agent import impersonation, impersonation_process
 from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
 from agent.tests.impersonation.test_impersonation import relays as relays
 from base.agents.context import AvaContext
+from base.agents.impersonation import terminal_notices
 from base.agents.observation.relay_supervision import RelayChild
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -200,7 +201,7 @@ async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_no
     db.connect.return_value.__enter__.return_value = conn
     monkeypatch.setattr(impersonation, "_terminate_relay", Mock())
     send = Mock(return_value=error)
-    monkeypatch.setattr("base.agents.impersonation.terminal_notices.send_ended_notice", send)
+    monkeypatch.setattr(terminal_notices, "send_ended_notice", send)
     # Every later pass finds no child left to announce for: there is no retry.
     for _ in range(3):
         await impersonation.supervise_relay(
