@@ -325,7 +325,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     backend.upsert(str(watched.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
 
-    daemon._reconcile(
+    daemon.reconcile(
         backend, FakeProvider(), Liveness(liveness_timeout()), machine=machine_identity
     )
     meta = store_backend.all_meta()
@@ -361,7 +361,7 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
 
     switched = FakeProvider(fingerprint="other:provider")
     switched_backend = store_backend.reopen("other:provider")
-    daemon._reconcile(
+    daemon.reconcile(
         switched_backend, switched, Liveness(liveness_timeout()), machine=machine_identity
     )
     # The row was re-embedded with the new fingerprint.
@@ -628,7 +628,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
     liveness = Liveness(0.4)
     started = time.monotonic()
     assert (
-        daemon._reconcile(store_backend, FakeProvider(), liveness, machine=machine_identity) is True
+        daemon.reconcile(store_backend, FakeProvider(), liveness, machine=machine_identity) is True
     )
     elapsed = time.monotonic() - started
 

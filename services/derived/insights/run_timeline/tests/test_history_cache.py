@@ -101,7 +101,7 @@ def test_one_page_of_agents_stays_cached_and_the_oldest_is_evicted(
 ) -> None:
     store = FakeStore(monkeypatch)
     cache = HistoryViewCache(timeline_inputs=_TIMELINE_INPUTS)
-    cap = history._MAX_ENTRIES
+    cap = history.MAX_ENTRIES
     for agent_id in range(cap):
         cache.get(DB, agent_id)
     for agent_id in range(cap):

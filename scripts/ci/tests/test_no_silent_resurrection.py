@@ -485,7 +485,7 @@ def test_unknown_revision_is_a_usage_error(
     ],
 )
 def test_line_classification(text: str, expected: tuple[bool, bool]) -> None:
-    assert resurrection._classify(text) == expected
+    assert resurrection.classify(text) == expected
 
 
 @pytest.mark.parametrize(

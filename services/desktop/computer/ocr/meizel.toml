@@ -1,5 +1,2 @@
 [uses]
 "tests" = ["__init__.py"]
-
-[debt.private-name]
-"tests/test_computer_ocr.py -> __init__.py#_SOURCE" = 1

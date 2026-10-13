@@ -40,5 +40,3 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "agents/tests/test_log_sink.py -> telemetry/process_logging.py#_event_sink" = 1
 "host/env/tests/test_registry.py -> config/__init__.py#_FIELDS" = 1
 "tests/config/test_config_profiles.py -> config/__init__.py#_FIELDS" = 1
-"tests/config/test_home_resolution.py -> host/env/bootstrap.py#_snapshot_path" = 1
-"tests/impersonation/test_impersonation_closure.py -> deploy/maintenance/cohort.py#_classify" = 1

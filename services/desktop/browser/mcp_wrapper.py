@@ -45,7 +45,7 @@ def _retryable_rejection(exc: Exception) -> bool:
     return isinstance(exc, RuntimeError) and _UPSTREAM_DOWN_MSG in str(exc)
 
 
-class _Link(SocketLink):
+class Link(SocketLink):
     def __init__(
         self,
         reader: asyncio.StreamReader,
@@ -82,7 +82,7 @@ class _ReconnectingLink(ReconnectingLink):
     ) -> None:
         super().__init__(
             _connector(socket_path),
-            lambda reader, writer: _Link(reader, writer, timeout_reader=timeout_reader),
+            lambda reader, writer: Link(reader, writer, timeout_reader=timeout_reader),
             max_attempts=max_retries + 1,
             base_delay=base_delay,
             retryable_rejection=_retryable_rejection,

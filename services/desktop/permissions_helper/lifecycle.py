@@ -46,7 +46,7 @@ from services.desktop.permissions_helper.launchd_job import (
 
 _CERT_CN = "Ava Permissions Helper Code Signing"
 _SERVICE_DIR = Path(__file__).resolve().parent
-_SOURCE = _SERVICE_DIR / "helper" / "main.swift"
+SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
 # The AppleEvents entitlement: what lets tccd build an attribution chain for
 # helper-spawned `osascript`/AE children; without it the request dies as
@@ -300,7 +300,7 @@ def pinned_designated_requirement() -> str:
 def _source_content_hash() -> str:
     """Hash every input that determines the built helper bundle."""
     digest = hashlib.sha256()
-    digest.update(_SOURCE.read_bytes())
+    digest.update(SOURCE.read_bytes())
     digest.update(_INFO_PLIST.read_bytes())
     digest.update(_ENTITLEMENTS.read_bytes())
     for path in sorted(p for p in _LOCALES.rglob("*") if p.is_file()):
@@ -557,7 +557,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
 
     build_dir.mkdir(parents=True, exist_ok=True)
     binary = build_dir / "AvaPermissionsHelper"
-    _run(["swiftc", "-O", str(_SOURCE), "-o", str(binary)])
+    _run(["swiftc", "-O", str(SOURCE), "-o", str(binary)])
 
     if replacing:
         require_retired_helper(exe)  # proved again right before the old artifact goes

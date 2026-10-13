@@ -54,7 +54,7 @@ async def test_click_text_measures_scale_and_tracks_pointer(
     fh.png_size = (1920, 1080)  # the truth: 1x
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
@@ -222,7 +222,7 @@ async def test_audit_emitted_on_success(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(screen_mod, "snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     await _call(d, "click", {"x": 100, "y": 200, "task_id": 42})
     assert len(audit_log) == 2  # pyright: ignore[reportUnknownArgumentType]
@@ -268,7 +268,7 @@ async def test_concurrent_calls_are_safe(
     both audited. Execution is synchronous and wrapped in the machine-wide
     action lock — the lock is the guard for future async points inside a call
     (e.g. Phase 2's queue), and the sync body already prevents interleaving."""
-    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _a: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(screen_mod, "snapshot_path", lambda _a: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     t1 = asyncio.create_task(_call(d, "click", {"x": 1, "y": 2}))
     t2 = asyncio.create_task(_call(d, "snapshot"))
@@ -413,7 +413,7 @@ async def test_run_raises_stream_limit_for_large_snapshots(
         server_options.update(kwargs)
         raise RuntimeError("server options captured")
 
-    monkeypatch.setattr(daemon_mod, "_socket_in_use", socket_not_in_use)
+    monkeypatch.setattr(daemon_mod, "socket_in_use", socket_not_in_use)
     monkeypatch.setattr(daemon_mod.asyncio, "start_unix_server", capture_server_options)
 
     try:
@@ -429,7 +429,7 @@ async def test_socket_in_use_false_when_nobody_listens() -> None:
     """A stale (or absent) socket is not "in use" — the daemon may unlink it."""
     d, sock, cleanup = short_sock_dir()
     try:
-        assert await daemon_mod._socket_in_use(sock) is False
+        assert await daemon_mod.socket_in_use(sock) is False
     finally:
         cleanup(d)
 
@@ -440,7 +440,7 @@ async def test_socket_in_use_true_when_listener_present() -> None:
     d, sock, cleanup = short_sock_dir()
     server = await asyncio.start_unix_server(lambda _r, w: w.close(), path=str(sock))
     try:
-        assert await daemon_mod._socket_in_use(sock) is True
+        assert await daemon_mod.socket_in_use(sock) is True
     finally:
         server.close()
         await server.wait_closed()
@@ -525,7 +525,7 @@ async def test_snapshot_audit_carries_png_path(
     replay needs it (Phase 3, task #1101)."""
     monkeypatch.setattr(
         screen_mod,
-        "_snapshot_path",
+        "snapshot_path",
         lambda _agent_id: "/tmp/snap-trace.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)

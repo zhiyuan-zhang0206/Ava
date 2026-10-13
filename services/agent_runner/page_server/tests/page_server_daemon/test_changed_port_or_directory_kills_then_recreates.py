@@ -23,8 +23,8 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.page_server.tests.page_shell import PageShellBackend
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
     HOST,
-    _reconcile,
     insert_page_row,
+    reconcile,
 )
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
     backend as backend,
@@ -63,7 +63,7 @@ def test_changed_port_or_directory_kills_then_recreates_the_page_session(
     insert_page_row(db_conn, agent_id, "changed", 12007, old_dir)
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
     old_session = managed[(agent_id, "changed")].session_name
     db_conn.execute(
         "UPDATE agent_pages SET port = %s, serve_dir = %s, session_name = NULL, "
@@ -71,7 +71,7 @@ def test_changed_port_or_directory_kills_then_recreates_the_page_session(
         (12008, str(new_dir), agent_id, "changed"),
     )
     db_conn.commit()
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
     assert backend.killed == [old_session]
     assert managed[(agent_id, "changed")].session_name != old_session
     assert len(backend.new_calls) == 2
@@ -110,7 +110,7 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
     monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    _reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed)
 
     assert set(managed) == {(agent_id, "adopted")}
     assert backend.new_calls == []
@@ -162,7 +162,7 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
     monkeypatch.setattr(psd, "kill_pid", killed.append)
     monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    _reconcile(sync_pool, {})
+    reconcile(sync_pool, {})
 
     assert killed == [5011]
 

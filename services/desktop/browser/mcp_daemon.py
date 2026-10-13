@@ -559,7 +559,7 @@ async def _upstream_watchdog(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> No
         await await_stop_or_timeout(stop, _UPSTREAM_WATCHDOG_INTERVAL_S)
 
 
-async def _socket_in_use(path: Path) -> bool:
+async def socket_in_use(path: Path) -> bool:
     """True when a live process is already listening on ``path``.
 
     A successful connect proves an occupant; ``FileNotFoundError`` /
@@ -594,7 +594,7 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
     # disconnected and the first process became an orphan (audit round 2, P1).
     # Probe before unlink: a live listener means an instance is already
     # serving; refuse to start instead of stealing.
-    if await _socket_in_use(sock):
+    if await socket_in_use(sock):
         logger.error(
             "[browser-mcp] socket {} is already served by a live daemon — "
             "refusing to start a second instance",

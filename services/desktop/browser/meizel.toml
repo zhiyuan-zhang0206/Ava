@@ -20,6 +20,4 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_handle_client" = 1
 "tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_no_page_result" = 1
 "tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_selected_id" = 1
-"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_socket_in_use" = 2
 "tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_text_of" = 1
-"tests/test_browser_mcp_daemon_stop.py -> mcp_daemon.py#_socket_in_use" = 1

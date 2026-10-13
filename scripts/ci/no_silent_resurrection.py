@@ -192,7 +192,7 @@ def _exception_handler_header(text: str) -> bool:
     )
 
 
-def _classify(text: str) -> tuple[bool, bool]:
+def classify(text: str) -> tuple[bool, bool]:
     """Return (strong, distinctive) for one normalized added line."""
     if not MIN_STRONG_LENGTH <= len(text) <= MAX_STRONG_LENGTH:
         return False, False
@@ -254,7 +254,7 @@ def _added_runs(merge_base: str, head: str, cwd: Path) -> list[Run]:
         if marker == "+":
             text = raw[1:].strip()
             if path is not None:
-                strong, distinctive = _classify(text)
+                strong, distinctive = classify(text)
                 run.append(Line(number, text, strong, distinctive))
             number += 1
         elif marker == " ":

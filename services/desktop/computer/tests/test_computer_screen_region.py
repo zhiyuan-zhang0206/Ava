@@ -53,7 +53,7 @@ def test_capture_preserves_origin_and_measures_retina_scale(
     def capture_path(_agent_id: int) -> Path:
         return path
 
-    monkeypatch.setattr(screen, "_snapshot_path", capture_path)
+    monkeypatch.setattr(screen, "snapshot_path", capture_path)
     assert screen.capture_region(helper, 7, CaptureRegion(-350, -50, 200, 100)) == (
         path,
         2,
@@ -83,7 +83,7 @@ def test_unexpected_clipping_is_an_error(
     def capture_path(_agent_id: int) -> Path:
         return tmp_path / "capture.png"
 
-    monkeypatch.setattr(screen, "_snapshot_path", capture_path)
+    monkeypatch.setattr(screen, "snapshot_path", capture_path)
     helper.png = (400, 170)
     with pytest.raises(ComputerUseError, match="dimensions"):
         screen.capture_region(helper, 7, CaptureRegion(0, 0, 200, 100))

@@ -227,7 +227,7 @@ def test_replacement_guard_names_a_live_process_running_the_artifact(
     reason="native Swift filesystem intent contract",
 )
 def test_helper_stop_intent_survives_new_reader_and_refuses_corruption(tmp_path: Path) -> None:
-    source = lifecycle._SOURCE.read_text()
+    source = lifecycle.SOURCE.read_text()
     implementation = source.split("enum StopOwner", 1)[1].split("func helperRunDir", 1)[0]
     program = tmp_path / "intent.swift"
     program.write_text(
@@ -571,7 +571,7 @@ def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> 
         script = home / "child.sh"
         script.write_text('touch "$1"\nwhile [ ! -e "$2" ]; do sleep 0.01; done\n')
         source = (
-            lifecycle._SOURCE.read_text()
+            lifecycle.SOURCE.read_text()
             .replace("    reportResponsiblePID()\n", "")
             .replace("    registerPermissions()\n", "")
             .replace(_REGION_GRANT_GUARD, "")

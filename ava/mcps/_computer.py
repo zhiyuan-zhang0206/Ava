@@ -20,7 +20,7 @@ from base.host.net.resilience import Policy, aretry
 
 # Snapshot results stay small (PNG metadata), but keep the same generous line
 # cap as the browser direct-dial so a future inline-image tier fits.
-_LINE_LIMIT = 64 * 1024 * 1024
+LINE_LIMIT = 64 * 1024 * 1024
 
 # The computer-mcp service is a supervised daemon that should already be up; a
 # fresh agent may still race it on a cold cluster start, so retry the connect
@@ -130,7 +130,7 @@ async def dial_computer_mcp(
     )
 
     async def once() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
+        return await asyncio.open_unix_connection(path=sock, limit=LINE_LIMIT)
 
     last: OSError | None = None
     try:

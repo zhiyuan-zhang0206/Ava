@@ -93,7 +93,7 @@ def _assert_run_lifecycle(
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         return startup.append("pidfile")
 
-    monkeypatch.setattr(daemon, "_write_pidfile", write_pidfile_for_entry)
+    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
 
     def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
         return cleanup.append("pidfile")
@@ -116,7 +116,7 @@ def _assert_run_lifecycle(
 
     monkeypatch.setattr(daemon, "labeler_endpoint", endpoint_for_entry)
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
-    monkeypatch.setattr(daemon, "_dispatch_loop", fake_dispatch)
+    monkeypatch.setattr(daemon, "dispatch_loop", fake_dispatch)
 
     if error is None:
         asyncio.run(

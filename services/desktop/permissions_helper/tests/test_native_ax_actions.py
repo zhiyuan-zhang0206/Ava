@@ -27,7 +27,7 @@ def section(source: str, start: str, end: str) -> str:
     sys.platform != "darwin" or shutil.which("swift") is None, reason="needs Swift on macOS"
 )
 def test_native_ax_actions_window_identity_selection_and_reported_actions(tmp_path: Path) -> None:
-    source = lifecycle._SOURCE.read_text()
+    source = lifecycle.SOURCE.read_text()
     actual = "\n".join(
         [
             section(source, "func numericDouble(", "// Accessibility grant gate."),

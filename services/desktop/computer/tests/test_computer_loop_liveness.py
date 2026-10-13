@@ -130,7 +130,7 @@ async def test_run_arms_loop_watchdog(monkeypatch: pytest.MonkeyPatch, database:
     async def _fake_server(*_args: Any, **_kwargs: Any) -> FakeServer:
         return FakeServer()
 
-    monkeypatch.setattr(daemon_mod, "_socket_in_use", _not_in_use)
+    monkeypatch.setattr(daemon_mod, "socket_in_use", _not_in_use)
     monkeypatch.setattr(daemon_mod.asyncio, "start_unix_server", _fake_server)
     monkeypatch.setattr(daemon_mod, "LoopWatchdog", FakeWatchdog)
     monkeypatch.setattr(daemon_mod.asyncio, "Event", StopEvent)

@@ -6,6 +6,3 @@ exports = ["daemon.py", "shells.py"]
 "shells.py" = ["owner_notice.py"]
 "sweep.py" = ["cadence.py", "lifecycle_fences.py", "owner_notice.py"]
 "tests" = ["cadence.py", "daemon.py", "lifecycle_fences.py", "remote.py", "shells.py", "sweep.py"]
-
-[debt.private-name]
-"tests/test_loops.py -> daemon.py#_run_loops" = 3

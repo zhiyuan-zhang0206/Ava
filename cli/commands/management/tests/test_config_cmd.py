@@ -432,12 +432,12 @@ def test_gateway_base_reads_local_env_without_settings(
     local_env_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # delitem/setitem, not delenv/setenv: the lint bans env mutation on
-    # Settings aliases (the singleton never re-reads env), but `_gateway_base`
+    # Settings aliases (the singleton never re-reads env), but `gateway_base`
     # is the settings-free repair path — it reads the RAW env/.env by design.
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
     (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://gateway.test:8000\n")
 
-    assert cfg._gateway_base() == "http://gateway.test:8000"
+    assert cfg.gateway_base() == "http://gateway.test:8000"
 
 
 def test_gateway_base_reads_the_homes_env_not_a_gateway_url_file(
@@ -449,7 +449,7 @@ def test_gateway_base_reads_the_homes_env_not_a_gateway_url_file(
     (local_env_home / "gateway_url").write_text("http://legacy-file.test:8000\n")
     (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://own-cluster.test:8000\n")
 
-    assert cfg._gateway_base() == "http://own-cluster.test:8000"
+    assert cfg.gateway_base() == "http://own-cluster.test:8000"
 
 
 def test_gateway_base_refuses_a_home_with_no_gateway_identity(
@@ -461,7 +461,7 @@ def test_gateway_base_refuses_a_home_with_no_gateway_identity(
     (local_env_home / ".env").write_text("OTHER=kept\n")
 
     with pytest.raises(cfg.ConfigError, match="no gateway identity"):
-        cfg._gateway_base()
+        cfg.gateway_base()
 
 
 def test_put_config_refuses_a_home_with_no_identity_even_with_env_override(

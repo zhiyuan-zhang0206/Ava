@@ -2,7 +2,3 @@ exports = ["daemon.py", "tests"]
 
 [uses]
 "tests" = ["daemon.py"]
-
-[debt.private-name]
-"tests/test_gate.py -> daemon.py#_PROBE_TIMEOUT_S" = 1
-"tests/test_gate.py -> daemon.py#_gateway_base" = 3

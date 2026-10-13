@@ -94,7 +94,7 @@ class BackupState:
         self.detail = detail
 
 
-def _write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
+def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
     if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.backup.scheduler.daemon"):
         _log.info(
             "[pg-backup] daemon already running (pidfile=%s), exiting",
@@ -247,7 +247,7 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path) -> None
         )
         sys.exit(1)
 
-    _write_pidfile(config, runtime=runtime)
+    write_pidfile(config, runtime=runtime)
     state = BackupState()
     endpoint = _endpoint(config, runtime=runtime)
     health = await start_health_server(

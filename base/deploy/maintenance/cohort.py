@@ -87,7 +87,7 @@ def prepare(
                 if row.retired_intent():
                     require_cold_end(conn, row.agent_id)
         applied = applied_capture(conn, hold, host_owner, holder, acquired_at)
-        captured = _classify([RuntimeRow(*row) for row in rows], hold, host_owner, applied)
+        captured = classify([RuntimeRow(*row) for row in rows], hold, host_owner, applied)
         cold = _cold_agents([RuntimeRow(*row) for row in rows], host_owner, host_absent=host_absent)
         settled = _settle_orphan_claims(conn, captured, cold)
         refuse_inflight_lifecycle(conn, captured, cold, holder=holder, acquired_at=acquired_at)
@@ -233,7 +233,7 @@ def _emit_orphan_settlements(consumed: list[OrphanClaim]) -> None:
         )
 
 
-def _classify(
+def classify(
     rows: list[RuntimeRow],
     hold: MaintenanceHold,
     owner: UUID | None,
