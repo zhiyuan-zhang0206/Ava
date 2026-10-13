@@ -42,11 +42,11 @@ from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
-from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from base.telemetry.emitter import build_pipeline
+from base.telemetry.process_logging import init_gateway_process
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
 

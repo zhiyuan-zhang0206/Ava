@@ -5,7 +5,7 @@ opens no sink discards every record it writes through loguru. On the start
 path some warnings exist only there: a skipped pgvector pre-create, untracked
 migration files that will not be applied. `ava start`, `ava restart`
 and `ava lgtm on|off` (every in-process `cmd_start`)
-open the sinks `base.log.process.init_cli_process` gives: stderr, the unit's
+open the sinks `base.telemetry.process_logging.init_cli_process` gives: stderr, the unit's
 `logs/cli-<verb>.log` and the event pipeline, without a `service_started`
 row. Other verbs print to the caller's terminal and open none.
 """
@@ -118,7 +118,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
 ) -> None:
     """Opening the sinks builds Settings; a runner whose gateway is unreachable
     fails there with the same message the command itself would print."""
-    import base.log.process
+    import base.telemetry.process_logging
     from base.host.env.bootstrap import BootstrapFetchError
 
     def unreachable(
@@ -127,7 +127,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
         raise BootstrapFetchError(f"could not fetch cluster config ({name})")
 
     dispatched: list[str] = []
-    monkeypatch.setattr(base.log.process, "init_cli_process", unreachable)
+    monkeypatch.setattr(base.telemetry.process_logging, "init_cli_process", unreachable)
     monkeypatch.setattr(
         parsers, "build_parser", _ignoring_retention(lambda: _dispatching(dispatched))
     )
@@ -187,7 +187,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
 ) -> None:
     from unittest.mock import MagicMock
 
-    import base.log.process
+    import base.telemetry.process_logging
     from base import telemetry
 
     pipeline = MagicMock(spec=telemetry.EventPipeline)
@@ -223,7 +223,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     parser.set_defaults(func=dispatch)
     monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
     monkeypatch.setattr(telemetry, "build_pipeline", build)
-    monkeypatch.setattr(base.log.process, "init_cli_process", initialize)
+    monkeypatch.setattr(base.telemetry.process_logging, "init_cli_process", initialize)
     assert _main.main(["restart"]) == 0
     assert len(factories) == 1
     assert inputs == [pipeline, pipeline]

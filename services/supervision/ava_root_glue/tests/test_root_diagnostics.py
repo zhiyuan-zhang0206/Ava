@@ -54,7 +54,7 @@ def _no_op(**_kwargs: object) -> None:
 @pytest.fixture
 def events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
-    monkeypatch.setattr("base.log.process.init_gateway_process", _no_op)
+    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", _no_op)
     monkeypatch.setattr("base.telemetry.sync", _no_op)
     monkeypatch.setattr("base.log.logger", _EventLog(records))
     return records
@@ -302,7 +302,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
         assert producer() is clients.event_pipeline()
         seen.append(image)
 
-    monkeypatch.setattr("base.log.process.init_gateway_process", initialize)
+    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
@@ -336,7 +336,7 @@ async def test_logging_startup_error_stops_its_constructed_writer(
         clients.event_pipeline()
         raise error
 
-    monkeypatch.setattr("base.log.process.init_gateway_process", initialize)
+    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),

@@ -2,7 +2,8 @@
 
 Importing this module preserves caller logging without constructing process
 resources or importing telemetry. Executable roots use
-``base.log.process`` for concrete, typed startup and event-pipeline binding.
+``base.log.process`` for process-level sink startup and
+``base.telemetry.process_logging`` for the typed event-pipeline binding.
 """
 
 from loguru import logger as logger

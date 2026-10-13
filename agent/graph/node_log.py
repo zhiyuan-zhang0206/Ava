@@ -13,7 +13,7 @@ Two responsibilities merged in the same wrapper:
    `agent/turn/runloop.py`'s ERROR crash line + Error events instead). The `exception:X` path
    uses `logger.opt(exception=True).info` in the except block to emit while the
    active exception is still in sys.exc_info() → events.payload automatically
-   carries traceback / exception_type / exception_value (`base.log.process._event_sink`
+   carries traceback / exception_type / exception_value (`base.telemetry.process_logging._event_sink`
    PR #60 chain); the traceback keeps the exception queryable at INFO.
 
 2. **Frontend timeline sync**: on **enter**, render a TimelineSnapshot from the
