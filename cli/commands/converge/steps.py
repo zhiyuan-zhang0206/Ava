@@ -23,7 +23,7 @@ def _ensure_symlink(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-def _ensure_ava_on_path(ctx: ConvergeCtx) -> None:
+def ensure_ava_on_path(ctx: ConvergeCtx) -> None:
     """The host's bare `ava` -> this checkout's `.venv/bin/ava`.
 
     A plain symlink: the host runs one cluster, so the CLI needs no routing. Which
@@ -35,21 +35,21 @@ def _ensure_ava_on_path(ctx: ConvergeCtx) -> None:
     _ensure_symlink(Path.home() / ".local" / "bin" / "ava", ctx.repo / ".venv" / "bin" / "ava")
 
 
-_PATH_BEGIN = "# >>> ava path >>>"
-_PATH_END = "# <<< ava path <<<"
+PATH_BEGIN = "# >>> ava path >>>"
+PATH_END = "# <<< ava path <<<"
 
 
-def _shell_rc_path() -> Path:
+def shell_rc_path() -> Path:
     return Path.home() / (".zshrc" if os.environ.get("SHELL", "").endswith("zsh") else ".bashrc")
 
 
-def _ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     local_bin = Path.home() / ".local" / "bin"
-    rc = _shell_rc_path()
+    rc = shell_rc_path()
     line = f'case ":$PATH:" in *":{local_bin}:"*) ;; *) export PATH="{local_bin}:$PATH" ;; esac'
-    block = f"{_PATH_BEGIN}\n{line}\n{_PATH_END}"
+    block = f"{PATH_BEGIN}\n{line}\n{PATH_END}"
     existing = rc.read_text() if rc.exists() else ""
-    pattern = re.compile(re.escape(_PATH_BEGIN) + r".*?" + re.escape(_PATH_END), re.DOTALL)
+    pattern = re.compile(re.escape(PATH_BEGIN) + r".*?" + re.escape(PATH_END), re.DOTALL)
     if pattern.search(existing):
         new = pattern.sub(block, existing)
     else:
@@ -59,7 +59,7 @@ def _ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         rc.write_text(new)
 
 
-def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
+def ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
     for sub in ("configs", "secrets"):
         (ctx.ava_home / sub).mkdir(parents=True, exist_ok=True)
     for sub in ("logs", "workspaces", "memory"):
@@ -69,7 +69,7 @@ def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
     ensure_private_file(marker)
 
 
-def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:
+def ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:
     """Prepare the selected PostgreSQL 17 runtime and its pgvector extension."""
     if ctx.read_config().view.data_plane.is_remote:
         return

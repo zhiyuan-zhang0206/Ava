@@ -15,9 +15,9 @@ from base.deploy.git import memory_repo
 from base.host import proc
 from base.packages.plugins.enable_config import write_local
 from base.telemetry import EventPipeline
-from cli.commands.converge import host as converge_host
 from cli.commands.extensions import memory
 from cli.commands.extensions._plugin_scaffold import run_plugin_scaffolds
+from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database

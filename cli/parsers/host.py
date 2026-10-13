@@ -90,7 +90,7 @@ def _h_status(args: argparse.Namespace) -> int:
 
 
 def _h_converge(args: argparse.Namespace) -> int:
-    from cli.commands.converge.host import cmd_converge
+    from cli.commands.lifecycle.converge_host import cmd_converge
 
     return cmd_converge(
         database_factory=args.database_factory, producer=args.producer, command=args.runtime
@@ -363,7 +363,8 @@ def _h_lgtm(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
-    from cli.commands.observability.lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
+    from cli.commands.lifecycle.lgtm_toggle import cmd_lgtm_off, cmd_lgtm_on
+    from cli.commands.observability.lgtm import cmd_lgtm_status
 
     if args.lgtm_cmd == "on":
         return cmd_lgtm_on(

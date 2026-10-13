@@ -27,7 +27,7 @@ def darwin_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
     """These existing lifecycle cases exercise the Darwin implementation."""
     monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(lgtm_native, "_verify_loki", _skip_binary_verification)
+    monkeypatch.setattr(lgtm_native, "verify_loki", _skip_binary_verification)
 
 
 @pytest.fixture(autouse=True)

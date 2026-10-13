@@ -171,7 +171,7 @@ def test_borrowed_cli_context_keeps_the_original_operator_factory(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    from cli.commands.converge.tests.context_inputs import converge_context
+    from cli.commands.lifecycle.tests.converge_host.context_inputs import converge_context
 
     seen: list[ProcessDbGate] = []
 

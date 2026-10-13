@@ -88,7 +88,7 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
         "lgtm_grafana_listen_host",
         "0.0.0.0",  # noqa: S104 — asserted config default, not a bind
     )
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -105,7 +105,7 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     assert "preinstall_disabled = true" in grafana_ini
 
     monkeypatch.setattr(config.settings.observability, "lgtm_grafana_listen_host", "10.0.0.5")
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -179,7 +179,7 @@ def test_native_provisioning_renders_remote_observatory_urls(
         "postgresql://grafana_ro@10.0.0.72:5433/ava_main",
     )
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -226,7 +226,7 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
     )
     command_runtime.machine.set(host="10.0.0.10")
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -256,7 +256,7 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -273,7 +273,7 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     assert user_edit != datasources.read_text(encoding="utf-8")
     datasources.write_text(user_edit, encoding="utf-8")
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -301,7 +301,7 @@ def test_native_provisioning_removes_stale_rendered_files(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -316,7 +316,7 @@ def test_native_provisioning_removes_stale_rendered_files(
     hashes["datasources/old.yml"] = hashlib.sha256(b"stale").hexdigest()
     hashes_path.write_text(json.dumps(hashes), encoding="utf-8")
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -392,7 +392,7 @@ def test_native_converge_renders_grafana_password_only_when_configured(
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
     # Non-secret fixture; production reads the credential from settings.alerts.grafana_admin_password.
     monkeypatch.setattr(
         config.settings.alerts,
@@ -429,7 +429,7 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
     monkeypatch.setattr(config.settings.alerts, "grafana_admin_password", None)
 
     lgtm_native.ensure_lgtm_native(
@@ -459,7 +459,7 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
     repo = Path(__file__).resolve().parents[4]
     home = tmp_path / "home"
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
     monkeypatch.setattr(config.settings.telegram, "telegram_bot_token", "fake-bot-token-for-test")
     monkeypatch.setattr(config.settings.telegram, "telegram_owner_id", 42)
 
@@ -516,7 +516,7 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
     monkeypatch.setattr(config.settings.observability, "telemetry_tempo_query_url", query_url)
     monkeypatch.setattr(config.settings.observability, "telemetry_tempo_endpoint", intake_endpoint)
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         Path(__file__).resolve().parents[4],
         tmp_path / "native",
         tmp_path,
@@ -586,7 +586,7 @@ def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(
         config.settings.observability, "telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         Path(__file__).resolve().parents[4],
         tmp_path / "native",
         tmp_path,
@@ -634,7 +634,7 @@ def test_native_config_warns_only_when_read_urls_stay_loopback_after_widening(
         config.settings.observability, "telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         Path(__file__).resolve().parents[4],
         tmp_path / "native",
         tmp_path,

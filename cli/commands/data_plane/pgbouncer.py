@@ -200,7 +200,7 @@ def _write_config(
     return changed
 
 
-def _pid_is_our_pooler(pid: int) -> bool:
+def pid_is_our_pooler(pid: int) -> bool:
     """Whether `pid` is really THIS home's pooler, and not a stranger that
     inherited the number.
 
@@ -255,7 +255,7 @@ def _running_pid() -> int | None:
 
     Stop uses this for stale-pidfile cleanup before capturing native custody.
     A pidfile that no longer names our pooler — process gone,
-    or the number since recycled onto someone else (`_pid_is_our_pooler`) — reads
+    or the number since recycled onto someone else (`pid_is_our_pooler`) — reads
     as None and is removed, so the next bring-up starts from a clean slate instead
     of re-deciding against the same dead number. A live stranger is reported: that
     line is the one that makes a cross-home pidfile visible before it costs an
@@ -268,7 +268,7 @@ def _running_pid() -> int | None:
         pid = int(pidfile.read_text().strip())
     except (ValueError, OSError):
         return None
-    if _pid_is_our_pooler(pid):
+    if pid_is_our_pooler(pid):
         return pid
     if process_alive(pid):
         print(

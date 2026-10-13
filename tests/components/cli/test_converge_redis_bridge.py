@@ -15,9 +15,9 @@ from base.cluster.machine.boot import machine_from_boot
 from base.cluster.ports import new_home_ports
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
-from cli.commands.converge import host as converge_host
 from cli.commands.converge import redis_bridge as bridge
 from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.redis_bridge import relay
@@ -122,7 +122,7 @@ def test_converge_retires_the_standalone_launchd_job_and_installed_copy(
     loaded = True
     calls: list[tuple[str, ...]] = []
 
-    def _launchctl(*args: str) -> object:
+    def launchctl(*args: str) -> object:
         nonlocal loaded
         calls.append(args)
         if args[0] == "bootout":
@@ -130,8 +130,8 @@ def test_converge_retires_the_standalone_launchd_job_and_installed_copy(
         return type("Result", (), {"returncode": 0 if loaded else 1, "stderr": ""})()
 
     monkeypatch.setattr(bridge.sys, "platform", "darwin")
-    monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
-    monkeypatch.setattr(bridge, "_launchctl", _launchctl)
+    monkeypatch.setattr(bridge, "launchd_plist_path", lambda: plist)
+    monkeypatch.setattr(bridge, "launchctl", launchctl)
     ctx = ConvergeCtx(
         repo=tmp_path / "repo",
         ava_home=home,
@@ -161,9 +161,9 @@ def test_retire_preserves_artifacts_when_launchd_job_does_not_exit(
     plist.parent.mkdir(parents=True)
     plist.write_text("live plist")
 
-    monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
-    monkeypatch.setattr(bridge, "_job_loaded", lambda: True)
-    monkeypatch.setattr(bridge, "_bootout_and_wait", lambda: False)
+    monkeypatch.setattr(bridge, "launchd_plist_path", lambda: plist)
+    monkeypatch.setattr(bridge, "job_loaded", lambda: True)
+    monkeypatch.setattr(bridge, "bootout_and_wait", lambda: False)
 
     with pytest.raises(RuntimeError, match="remained loaded"):
         bridge._retire_launchd_bridge(home)

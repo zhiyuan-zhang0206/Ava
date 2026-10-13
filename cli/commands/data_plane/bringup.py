@@ -636,7 +636,7 @@ def stop_cluster_instance(
     # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
     # are disconnected before Postgres goes down.
     pgbouncer.stop_pgbouncer()
-    from cli.commands.lifecycle.service_stop import (
+    from cli.commands.data_plane.stop_waits import (
         PROCESS_CLEANUP_WAIT_S,
         PROCESS_KILL_WAIT_S,
         report_postgres_stop_escalation,
