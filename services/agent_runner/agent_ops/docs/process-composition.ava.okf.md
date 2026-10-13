@@ -31,7 +31,7 @@ without a private module import, forwarding wrapper or helper re-export.
 
 - **Boot self-registration** (`boot.register_boot`): once the health server is up, the daemon calls `base.cluster.machines.register_self` with its explicit machine name, capabilities, description and home; `unit_dial_url` receives that owner's capabilities and host reader value for its own unit — clearing any `stopped_at` latch and restamping `up_since_at`. The `machine_units` row is a liveness record, so the process whose liveness it stands for is the one that writes it; `ava start` alone could not, because a host also comes back via an OS autostart, a watchdog respawn, or a rollout's restart leg. Deliberately **non-fatal** (unlike `assert_schema_current`): a stale row is not incorrect dispatch, and exiting would hand the watchdog a respawn loop that takes the host dark for the gateway. `unit_dial_url` is shared with `ava start`, so the two writers cannot advertise different addresses for one unit.
 
-`_main` builds its authority from this same boot's eager runtime. A restricted
+`serve_ops_daemon` builds its authority from this same boot's eager runtime. A restricted
 profile retains that runtime while `complete_read_model()` supplies the full
 validated read model at the original authority-construction point. Fresh file
 reads remain pinned to the original `.env` path, and secret refusal and field
@@ -43,7 +43,7 @@ reads the same boot again for every health callback. Endpoint/pidfile operations
 require that boot and the explicit runtime directory. Their public definitions
 live in `boot.py`, with no forwarding aliases left on the daemon.
 
-`_main` passes its factory and image through each request and worker binding.
+`serve_ops_daemon` passes its factory and image through each request and worker binding.
 Pool construction, schema admission, pidfile and health timing remain in the
 existing order. The health payload uses the entry image. The synchronous status
 arm passes it through `ops.cluster.operations.cluster_status_op` into

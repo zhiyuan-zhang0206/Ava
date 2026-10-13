@@ -160,7 +160,7 @@ if {ops!r}:
     async def ops_run(*, database, image, local_machine, config):
         await run()
     daemon.init_gateway_process = lambda **kwargs: None
-    daemon._main = ops_run
+    daemon.serve_ops_daemon = ops_run
     daemon.main()
 else:
     try:

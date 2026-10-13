@@ -365,7 +365,7 @@ async def test_ops_route_semaphore_caps_concurrency(
 
 
 def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> None:
-    """A crash escaping `_main` still reaches the log with its traceback and still
+    """A crash escaping `serve_ops_daemon` still reaches the log with its traceback and still
     leaves a non-zero code for the supervisor.
 
     Driven in a subprocess because `main` ends in shared `hard_exit` and never
