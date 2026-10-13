@@ -14,7 +14,7 @@
 ]
 "tests.fixtures.unit.generation" = ["."]
 "base.paths.tests.homes" = ["."]
-"tests.fixtures.log_capture" = [
+"base.log.tests.log_records" = [
     "test_plugin_scaffold.py",
 ]
 "tests.fixtures.unit.sdk" = [
