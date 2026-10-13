@@ -4,6 +4,5 @@
     "test_resources.py",
 ]
 "tests.fixtures.unit.sdk" = [
-    "test_resource_admission.py",
-    "test_resources.py"
+    "test_resources.py",
 ]

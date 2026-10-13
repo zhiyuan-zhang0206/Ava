@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).resolve().parents[3]
 
 
 _CHILD = Path(__file__).with_name("_logging_entry_child.py")
