@@ -138,6 +138,7 @@ jobs:
       frontend: ${{ steps.decide.outputs.frontend }}
       backend: ${{ steps.decide.outputs.backend }}
       durations_key: ${{ steps.durations.outputs.key }}
+      skip_e2e: ${{ steps.e2e.outputs.skip }}
       selector: ${{ steps.selector.outcome }}
       mode: ${{ steps.selector.outputs.mode }}
       decision: ${{ steps.selector.outputs.decision }}
@@ -248,6 +249,29 @@ jobs:
           with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
               output.write("\n".join(lines) + "\n")
           PY
+
+      # The e2e jobs are the integration net for product behavior; a change that only edits
+      # unit tests inside packages cannot change it. The rule is fixed in scripts/ci/e2e_scope.py
+      # (enforced SELECTED subset, every changed path a package-internal test .py, never on a
+      # Trunk queue branch); an empty output (a selector failure, a non-PR event) keeps e2e.
+      - name: Decide whether e2e can be skipped
+        id: e2e
+        if: ${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+          MODE: ${{ steps.selector.outputs.mode }}
+          DECISION: ${{ steps.selector.outputs.decision }}
+        run: |
+          SCOPE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ava-e2e-scope.XXXXXX")"
+          trap 'rm -rf "$SCOPE_TMP"' EXIT
+          git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > "$SCOPE_TMP/changed.txt"
+          python3 scripts/ci/e2e_scope.py \
+            --changed-files "$SCOPE_TMP/changed.txt" \
+            --event pull_request \
+            --head-ref "$HEAD_REF" \
+            --mode "$MODE" \
+            --decision "$DECISION" | tee -a "$GITHUB_OUTPUT"
 
   repo-language:
     # The no-CJK gate must fire on EVERY PR, including docs-only and
@@ -2043,8 +2067,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [classify]
-    # e2e is the integration net: it runs whenever EITHER side changed.
-    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    # e2e is the integration net: it runs whenever EITHER side changed, except for a change that
+    # only edits package unit tests (`skip_e2e`, scripts/ci/e2e_scope.py).
+    if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -2165,7 +2190,7 @@ jobs:
     needs: [classify]
     # Focused host acceptance scenarios alongside the complete e2e shards:
     # message flow, self-restart and self-terminate through the real daemon.
-    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -2277,7 +2302,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [classify]
-    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    if: ${{ (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -2379,7 +2404,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     needs: [classify, e2e-shard, e2e-hosted, e2e-env-guard]
-    if: ${{ !cancelled() && needs.classify.result == 'success' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') }}
+    if: ${{ !cancelled() && needs.classify.result == 'success' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') && needs.classify.outputs.skip_e2e != 'true' }}
     steps:
       - name: Verify shard results
         run: |
