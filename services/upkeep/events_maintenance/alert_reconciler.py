@@ -30,7 +30,7 @@ from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.events.live.bus import EventBus
 from base.telemetry.alerts import AlertKey, parse_ts
-from gateway.alerts.publish import publish_alert_rows
+from ops.alerts import publish_alert_rows
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 
 _log = logging.getLogger(__name__)

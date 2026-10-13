@@ -13,19 +13,16 @@ Alert is fully separate from Notice — nothing here touches agent_notices.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # Label parsing helpers live in base/telemetry/alerts/__init__.py — the ingest core.
 from base.telemetry.alerts import parse_alertname, parse_severity
+from ops.alerts import AlertRow
 
 __all__ = [
     "AlertIngestResult",
-    "AlertRow",
-    "AlertSeverity",
-    "AlertStatus",
     "AlertWebhookAlert",
     "AlertWebhookPayload",
     "AlertsListMeta",
@@ -34,9 +31,6 @@ __all__ = [
     "parse_severity",
 ]
 
-# Store vocabulary (user design 2026-08-12): three severities, two statuses.
-AlertSeverity = Literal["critical", "warning", "error"]
-AlertStatus = Literal["unresolved", "resolved"]
 # The webhook vocabulary Alertmanager sends (mapped to store vocabulary on ingest).
 WebhookStatus = Literal["firing", "resolved"]
 
@@ -100,27 +94,6 @@ class AlertIngestResult(BaseModel):
     inserted: int
     updated: int
     notified: int
-
-
-class AlertRow(BaseModel):
-    """One alerts row as the UI sees it (list + SSE frames)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    id: int
-    status: AlertStatus
-    severity: AlertSeverity
-    alertname: str
-    labels: dict[str, str]
-    annotations: dict[str, str]
-    starts_at: datetime
-    ends_at: datetime | None
-    fingerprint: str
-    generator_url: str
-    source: str
-    notified_at: datetime | None
-    created_at: datetime
-    updated_at: datetime
 
 
 class AlertsListMeta(BaseModel):
