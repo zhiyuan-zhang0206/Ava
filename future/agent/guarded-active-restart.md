@@ -10,7 +10,7 @@ This is an execution-recoverable domain command, not an Ops response cache.
 `gateway.agents.lifecycle.post_agent_restart` forwards an unkeyed request.
 `gateway.agents.forward.enqueue_lifecycle` starts a new Ops dispatch on every
 HTTP call; `ops.cluster.rpc` mints a new lifecycle UUID key for each dispatch.
-`ops.lifecycle._restart_blocking` updates the overlay and inserts another
+`ops.lifecycle.restart_blocking` updates the overlay and inserts another
 restart command. A lost HTTP response followed by a repeat can restart the
 successor and restore the old overlay.
 

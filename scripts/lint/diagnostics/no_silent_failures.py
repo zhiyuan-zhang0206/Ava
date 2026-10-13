@@ -239,11 +239,11 @@ def _default_files() -> list[str]:
         rel
         for root in roots
         for path in root.rglob("*.py")
-        if not _is_test_file(rel := path.relative_to(_REPO_ROOT).as_posix())
+        if not is_test_file(rel := path.relative_to(_REPO_ROOT).as_posix())
     )
 
 
-def _is_test_file(rel: str) -> bool:
+def is_test_file(rel: str) -> bool:
     name = rel.rsplit("/", 1)[-1]
     return lint_common.is_test_path(rel) or name.startswith("test_") or name == "conftest.py"
 
@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-        files = [f for f in targets if not _is_test_file(f)]
+        files = [f for f in targets if not is_test_file(f)]
     else:
         scope = lint_common.changed_scope(only, _REPO_ROOT)
         files = _default_files() if scope is None else [f for f in _default_files() if f in scope]

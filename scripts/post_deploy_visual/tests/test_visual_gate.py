@@ -9,7 +9,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser
 
-from scripts.post_deploy_visual.check import _expected_capture_names
+from scripts.post_deploy_visual.check import expected_capture_names
 from tests.e2e.visual.test_preview_visual_gate import (
     _crop_results,
     _mint_goldens,
@@ -23,7 +23,7 @@ class _FakeBrowser:
 
 def _write_captures(captures: Path, names: set[str] | None = None) -> None:
     captures.mkdir(parents=True)
-    for name in names if names is not None else _expected_capture_names():
+    for name in names if names is not None else expected_capture_names():
         (captures / name).write_bytes(b"png")
 
 
@@ -35,7 +35,7 @@ def test_mint_goldens_copies_all_captures_and_writes_provenance(tmp_path: Path) 
     _mint_goldens(cast(Browser, _FakeBrowser()), [], captures, golden_root=golden_root)
 
     golden_dir = golden_root / "captures"
-    expected = {name.replace("-current-", "-golden-") for name in _expected_capture_names()}
+    expected = {name.replace("-current-", "-golden-") for name in expected_capture_names()}
     assert {path.name for path in golden_dir.rglob("*-golden-[12].png")} == expected
     meta = json.loads((golden_root / "meta.json").read_text())
     assert meta["browser_engine"] == "playwright-chromium 147.0.0.0-fake"
@@ -56,7 +56,7 @@ def test_mint_goldens_refuses_a_structurally_broken_run(tmp_path: Path) -> None:
 
 def test_mint_goldens_refuses_an_incomplete_capture_set(tmp_path: Path) -> None:
     captures = tmp_path / "captures"
-    _write_captures(captures, {next(iter(_expected_capture_names()))})
+    _write_captures(captures, {next(iter(expected_capture_names()))})
 
     with pytest.raises(AssertionError, match="incomplete capture set"):
         _mint_goldens(

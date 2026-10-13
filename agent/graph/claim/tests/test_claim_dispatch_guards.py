@@ -6,8 +6,8 @@ from langchain_core.messages import SystemMessage
 from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import claim_node
 from agent.graph.claim import node
+from agent.graph.claim.node import claim_node
 from agent.state import AgentState
 from agent.tests.claim.claim_support import (
     await_inbound_visible,

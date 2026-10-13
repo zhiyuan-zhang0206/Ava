@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import shlex
 
-from base.events.caller_identity import CallerIdentity
+from base.api_contracts.caller_identity import CallerIdentity
 
 
 def external_caller() -> CallerIdentity | None:

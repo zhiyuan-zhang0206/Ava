@@ -22,12 +22,12 @@ from playwright.sync_api import Error as PlaywrightError
 from scripts.post_deploy_visual import check
 from scripts.post_deploy_visual.check import (
     REPO_ROOT,
-    _accept_wave,
-    _assert_gate_origin,
     _cookie_file,
-    _expected_capture_names,
-    _session_precheck,
-    _validate_demo_target,
+    accept_wave,
+    assert_gate_origin,
+    expected_capture_names,
+    session_precheck,
+    validate_demo_target,
 )
 from scripts.post_deploy_visual.policy import (
     STRUCTURAL_SPECS,
@@ -168,7 +168,7 @@ def test_unexpected_pixel_surfaces_exclude_missing_baselines() -> None:
 
 
 def test_pixel_capture_names_lock_the_static_crop_set() -> None:
-    names = _expected_capture_names()
+    names = expected_capture_names()
     assert len(names) == 44
     crops = {"-".join(name.split("-")[:2]) for name in names}
     assert crops == {
@@ -202,7 +202,7 @@ def test_base_url_pointing_at_the_gateway_is_refused(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: FakeResponse())
     with pytest.raises(ValueError, match="gate origin"):
-        _assert_gate_origin("http://gateway-only.example:8000")
+        assert_gate_origin("http://gateway-only.example:8000")
 
 
 def test_base_url_serving_the_gate_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,15 +210,15 @@ def test_base_url_serving_the_gate_is_accepted(monkeypatch: pytest.MonkeyPatch) 
         raise ValueError("the SPA wall is HTML, not JSON")
 
     monkeypatch.setattr("urllib.request.urlopen", not_json)
-    _assert_gate_origin("http://gate.example:3000")
+    assert_gate_origin("http://gate.example:3000")
 
 
 def test_health_url_defaults_to_base_url_api_health() -> None:
-    from scripts.post_deploy_visual.check import _parser
+    from scripts.post_deploy_visual.check import parser
 
-    args = _parser().parse_args(["--base-url", "http://gate.example:3000"])
+    args = parser().parse_args(["--base-url", "http://gate.example:3000"])
     assert args.health_url is None
-    args = _parser().parse_args(
+    args = parser().parse_args(
         [
             "--base-url",
             "http://gate.example:3000",
@@ -230,12 +230,12 @@ def test_health_url_defaults_to_base_url_api_health() -> None:
 
 
 def test_demo_target_is_confined_to_the_loopback_preview_port_range() -> None:
-    assert _validate_demo_target("http://127.0.0.1:3001") is None
-    assert _validate_demo_target("http://localhost:3100") is None
+    assert validate_demo_target("http://127.0.0.1:3001") is None
+    assert validate_demo_target("http://localhost:3100") is None
     with pytest.raises(ValueError, match="demo target"):
-        _validate_demo_target("https://production.example:3001")
+        validate_demo_target("https://production.example:3001")
     with pytest.raises(ValueError, match="demo target"):
-        _validate_demo_target("http://127.0.0.1:8080")
+        validate_demo_target("http://127.0.0.1:8080")
 
 
 def test_cookie_file_requires_a_regular_0600_file(tmp_path: Path) -> None:
@@ -260,9 +260,9 @@ def test_ignore_registry_requires_version_one(tmp_path: Path) -> None:
 def test_host_run_requires_the_cookie_env_var(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from scripts.post_deploy_visual.check import _run_host
+    from scripts.post_deploy_visual.check import run_host
 
-    monkeypatch.setattr(check, "_assert_gate_origin", lambda _url: None)
+    monkeypatch.setattr(check, "assert_gate_origin", lambda _url: None)
     monkeypatch.setattr(
         check,
         "inherited_process_env",
@@ -274,7 +274,7 @@ def test_host_run_requires_the_cookie_env_var(
         base_url="http://gate.example:3000",
     )
     with pytest.raises(ValueError, match="AVA_VISUAL_GATE_COOKIE_FILE"):
-        _run_host(args)
+        run_host(args)
 
 
 def test_accept_wave_requires_complete_captures_and_resets_counter(tmp_path: Path) -> None:
@@ -282,14 +282,14 @@ def test_accept_wave_requires_complete_captures_and_resets_counter(tmp_path: Pat
     captures = wave / "captures"
     captures.mkdir(parents=True)
     (wave / "probes.json").write_text(json.dumps({"structural_failures": [], "matrix": [{}] * 20}))
-    for name in _expected_capture_names():
+    for name in expected_capture_names():
         (captures / name).write_bytes(name.encode())
     (tmp_path / "state.json").write_text(
         json.dumps({"unexpected_wave_counts": {"home-composer": 1}})
     )
     args = argparse.Namespace(output_root=tmp_path, accept_wave="abc123", accepted_by="qa")
 
-    assert _accept_wave(args) == 0
+    assert accept_wave(args) == 0
 
     golden = tmp_path / "golden" / "abc123" / "captures"
     assert len(list(golden.rglob("*-golden-[12].png"))) == 44
@@ -308,7 +308,7 @@ def test_accept_wave_rejects_incomplete_matrix(tmp_path: Path) -> None:
     args = argparse.Namespace(output_root=tmp_path, accept_wave="abc123", accepted_by="qa")
 
     with pytest.raises(RuntimeError, match="44 required captures"):
-        _accept_wave(args)
+        accept_wave(args)
 
 
 def test_budget_hard_exits_after_a_short_grace_when_the_unwind_hangs() -> None:
@@ -436,7 +436,7 @@ def test_session_precheck_probes_the_gateway_with_the_raw_cookie(
         return _AuthPayloadResponse({"authenticated": True})
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    _session_precheck("http://gateway.example:8000/", cookie_file)
+    session_precheck("http://gateway.example:8000/", cookie_file)
 
     assert seen["url"] == "http://gateway.example:8000/api/auth/check"
     assert seen["cookie"] == "ava_session=abc123"
@@ -452,7 +452,7 @@ def test_session_precheck_rejects_a_dead_session(
     )
 
     with pytest.raises(RuntimeError, match="session cookie"):
-        _session_precheck("http://gateway.example:8000", cookie_file)
+        session_precheck("http://gateway.example:8000", cookie_file)
 
 
 def test_session_precheck_rejects_an_unauthorized_probe(
@@ -466,7 +466,7 @@ def test_session_precheck_rejects_an_unauthorized_probe(
 
     monkeypatch.setattr("urllib.request.urlopen", unauthorized)
     with pytest.raises(RuntimeError, match="session cookie"):
-        _session_precheck("http://gateway.example:8000", cookie_file)
+        session_precheck("http://gateway.example:8000", cookie_file)
 
 
 def test_session_precheck_warns_and_continues_on_network_trouble(
@@ -480,7 +480,7 @@ def test_session_precheck_warns_and_continues_on_network_trouble(
         raise OSError("connection refused")
 
     monkeypatch.setattr("urllib.request.urlopen", unreachable)
-    _session_precheck("http://gateway.example:8000", cookie_file)
+    session_precheck("http://gateway.example:8000", cookie_file)
 
     assert "warning" in capsys.readouterr().err
 
@@ -502,7 +502,7 @@ def test_session_precheck_warns_and_continues_on_a_non_json_answer(
             return b"<html>the SPA wall</html>"
 
     monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: HtmlResponse())
-    _session_precheck("http://gateway.example:8000", cookie_file)
+    session_precheck("http://gateway.example:8000", cookie_file)
 
     assert "warning" in capsys.readouterr().err
 
@@ -520,7 +520,7 @@ def test_login_redirect_watch_raises_the_session_detail_immediately() -> None:
             raise AssertionError("the redirect must fail before any wait")
 
     with pytest.raises(RuntimeError, match="session cookie"):
-        matrix_module._observe_login_redirect(
+        matrix_module.observe_login_redirect(
             cast(Page, RedirectedPage()), ready_selector="#main-content"
         )
 
@@ -538,7 +538,7 @@ def test_login_redirect_watch_exits_early_when_the_ready_selector_is_visible() -
             raise AssertionError("a ready page must not sleep")
 
     assert (
-        matrix_module._observe_login_redirect(cast(Page, ReadyPage()), ready_selector="#main")
+        matrix_module.observe_login_redirect(cast(Page, ReadyPage()), ready_selector="#main")
         is None
     )
 
@@ -561,7 +561,7 @@ def test_login_redirect_watch_is_bounded_and_silent_at_the_deadline(
             return None
 
     assert (
-        matrix_module._observe_login_redirect(cast(Page, QuietPage()), ready_selector="#main")
+        matrix_module.observe_login_redirect(cast(Page, QuietPage()), ready_selector="#main")
         is None
     )
 
@@ -586,5 +586,5 @@ def test_login_redirect_watch_tolerates_a_page_mid_navigation() -> None:
             return None
 
     page = FlakyPage()
-    assert matrix_module._observe_login_redirect(cast(Page, page), ready_selector="#main") is None
+    assert matrix_module.observe_login_redirect(cast(Page, page), ready_selector="#main") is None
     assert page.calls == 2

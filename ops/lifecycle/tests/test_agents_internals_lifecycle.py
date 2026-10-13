@@ -306,7 +306,7 @@ class TestResurrectAgent:
 
         def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_execute(self, query, *args, **kwargs)
-            if query == wake._RESURRECTION_ROW:
+            if query == wake.RESURRECTION_ROW:
                 status_select_cursors.add(id(self))
             return result
 

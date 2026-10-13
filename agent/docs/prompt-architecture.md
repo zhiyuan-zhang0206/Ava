@@ -122,16 +122,21 @@ Capabilities rather than standing as its own section.
   can explicitly disable only that latter instruction for rollback. The
   delegation check still makes consultation mandatory as its first step and
   drops that step when this section renders nothing.
-- **Initial human response** — `agent/graph/prompt/conversation.py:user_reply_section`,
+- **Core communication policy** — `agent/graph/prompt/conversation.py:user_reply_section`,
   always present: answer directly, or give a substantive reply in the same dialog
   before investigating or calling tools. `off` and `silent` do not suppress it.
-  Automated wakes and peer messages do not require courtesy replies.
+  Ordinary assistant text follows the user's requested language, including standing
+  preferences in injected memory. Each message is self-contained, substantive
+  communication with the user. Execution updates default to milestones meaningful
+  to the user; routine operations stay in tool feedback or working notes.
+  Automated wakes and peer messages do not require courtesy replies or closing summaries.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `AVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
-  while it works — `oriented` interleaves brief progress updates in its text content,
-  `concise` speaks at milestones only, `silent` works quietly and reports once at the
-  end, `off` omits the section from the system prompt entirely. General-agent behavior
+  while it works — `oriented` selects live pairing with substantive checkpoints,
+  `concise` keeps progress updates to one or two sentences, `silent` works quietly
+  and reports once for human-requested work, `off` omits only the optional style
+  section. The core language and milestone policy remains active. General-agent behavior
   (see the section below for the deliberate restraint vs Codex).
 - **`ava_memory` behavior** — `ava_builtins/plugins/ava_memory/plugin.py:memory_discipline_section()`
   (declared in the plugin's `contribute()`; the old `agent/graph/prompt/system_prompt.py:_memory_behavior_section`
@@ -325,14 +330,34 @@ Review every section with these questions:
 
 ## Communication style (implemented, config-selected)
 
-An unconditional initial-response rule lives in `conversation.user_reply_section`: a
+An unconditional communication policy lives in `conversation.user_reply_section`: a
 human request gets a direct answer or a short reply before investigation/tools.
 It owns ordinary assistant-text reply routing, including text alongside tool calls,
 and applies to unfinished human requests resumed from handoff records. Once enough
 evidence is available, answer instead of investigating unstated response requirements.
-It applies with every communication style. Automated wakes and peer messages
-do not require courtesy replies. The optional style text is owned by the same
-`agent/graph/prompt/conversation.py` module.
+It applies with every communication style. Ordinary assistant text follows the
+current human language request, then standing user preferences from injected
+memory or project instructions, otherwise the latest human message. English
+prompts, code, logs and peer messages do not reset that preference; code,
+identifiers, quotations and artifacts retain their required language.
+
+Each ordinary text message is substantive communication with the user and must
+be independently useful, without watching tools execute
+or reconstructing internal steps. State what changed, why it matters to the
+user and any needed action or unresolved limitation.
+
+Default execution text requires a milestone with new information that changes what the
+user knows, decides or can do: a usable result, material
+direction change, actionable blocker or handoff. Routine calls, retries, file
+reads, bookkeeping and unchanged status stay in tool feedback or working notes.
+There is no fixed cadence. Updates stand alone instead of introducing a tool
+call. Direct answers, necessary questions, the substantive opening reply and
+complete final deliverables remain valid; a brief-update policy does not limit
+requested explanations or necessary evidence. Automated wakes and peer messages
+require neither courtesy replies nor automatic closing summaries. The optional
+style text is owned by the same `agent/graph/prompt/conversation.py` module.
+An explicitly selected live-pairing style can add more frequent substantive
+updates, but every message must remain self-contained and useful to the user.
 
 A lightweight conversation section lives in the **Ava core** prompt
 (`_communication_style_section`) — it is general-agent behavior, not
@@ -340,18 +365,19 @@ coding-specific. It is selected by an enum, `settings.agent.agent_communication_
 env `AVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented` /
 `concise` / `silent`. These select subsequent narration volume; `off` omits only
 that optional section. Reply routing and the initial-response rule are always
-present, owned by `conversation.user_reply_section`.
+present alongside language and milestone rules, owned by
+`conversation.user_reply_section`.
 
-Intent: Ava already emits assistant text content alongside the `execute_code`
-tool call, so it is naturally suited to interleave short "here's what I'm doing"
-updates instead of working silently and only speaking at the end. `oriented`
-encourages that — state the first step before a long exploration, surface
-findings and direction changes as they happen, flag blockers. The other two
-styles exist because that is a preference, not a universal: `concise` limits
-speech to milestones (start / direction change / blocker / done), and `silent`
-asks for no narration after the initial human response and one complete standalone report at the end
-(blockers and user-only questions still interrupt immediately). Bench runs
-`silent`; a supervised fleet agent runs `oriented`.
+Intent: assistant text alongside `execute_code` is ordinary conversation output,
+not an internal work log. `oriented` selects live pairing and adds substantive
+findings or checkpoints with their significance and remaining uncertainty.
+Existing per-agent overlays can select it for particular agents while the fleet
+default stays milestone-driven. `concise` keeps milestone updates to one or two
+sentences. `silent` asks for no narration after the initial human response and
+one complete standalone report for human-requested work; actionable blockers and
+user-only questions still interrupt immediately. These styles cannot enable
+routine per-action narration, assume the user watches in real time or
+disable the user's language preference.
 
 Deliberately **not** as prescriptive as Codex. We do **not** want:
 
@@ -359,9 +385,20 @@ Deliberately **not** as prescriptive as Codex. We do **not** want:
 - banning specific opener phrasings ("Done —", "Got it", "Great question");
 - mandatory acknowledge-the-request-then-restate ceremony before every action.
 
-That level of micromanagement is unnecessary and brittle. A few sentences of
-intent ("keep the user oriented with brief updates at meaningful moments; don't
-narrate every thought") is enough; trust the model for the rest.
+The milestone policy serves the user, without a clock-driven reporting cadence.
+Peer communication remains separate: Fleet owns directed delivery through
+`ava.agents.send_message`. `ava.agents.get_last_message` is a fallback read of
+the latest output when an agent forgets to send a peer message; it does not
+define the audience of ordinary assistant text or prove completion or freshness.
+
+Validation combines full-prompt contract tests across all four styles, with
+optional output-shape guidance enabled and disabled, and behavior review on
+representative tasks. Review whether a standing non-English preference survives
+English source/tool content, each message independently serves the user,
+routine retries stay quiet, real results or blockers
+are reported, automated wakes avoid empty closing remarks, and requested detailed
+answers retain their evidence. Contract tests prove injection and compatible
+instructions; model adherence needs actual model runs.
 
 ## Gap inventory vs Claude Code + Codex
 

@@ -166,7 +166,7 @@ def census(paths: list[Path]) -> list[str]:
     """One `file:line: scope: reason` line per violating call in the given files."""
     found: list[str] = []
     for path in sorted(paths):
-        rel = lint_common._rel_or_abs(path, _REPO_ROOT)
+        rel = lint_common.rel_or_abs(path, _REPO_ROOT)
         if rel in _EXEMPT_FILES or lint_common.is_test_path(rel):
             continue
         text = lint_common.read_utf8_text(path)

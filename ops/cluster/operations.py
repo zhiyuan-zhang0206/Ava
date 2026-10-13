@@ -82,7 +82,7 @@ def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
     return ShellKillResult(mode=mode, interrupted=interrupted, name=name)
 
 
-def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list[str] | None]:
+def agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list[str] | None]:
     """The persisted cwd and effective skill-index narrowing for one agent.
 
     The daemon's shared pool keeps this read on the agent's machine.  ``cwd`` is
@@ -167,7 +167,7 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     from ava.skills.composer_commands import discover_commands
     from base.packages.plugins.mcp_enabled import read_enabled
 
-    cwd, wanted = _agent_skill_view_inputs(pool, agent_id)
+    cwd, wanted = agent_skill_view_inputs(pool, agent_id)
     with skill_sources.scoped(lambda: _project_skill_roots(cwd)):
         commands = _narrow_commands(discover_commands(), wanted)
     merged_mcp = load_mcp_config(include_disabled=True)

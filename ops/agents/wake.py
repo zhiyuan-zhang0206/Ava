@@ -45,7 +45,7 @@ _RESURRECTION_TARGET: LiteralString = (
     + ")"
 )
 # The locked row the gate judges, with this life's unowned termination receipt.
-_RESURRECTION_ROW: LiteralString = (
+RESURRECTION_ROW: LiteralString = (
     "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason,"  # noqa: S608 -- constant SQL fragment
     "runtime_kind,runtime_generation,runtime_owner,pid,incarnation_resources,"
     + UNOWNED_TERMINATION_ID
@@ -184,7 +184,7 @@ def _prepare_resurrect_attempt(
                 f"agent {agent_id} task assignment is no longer current"
             )
         latched_machine = _lock_active_home_machine(cur, agent_id)
-        cur.execute(_RESURRECTION_ROW, (agent_id,))
+        cur.execute(RESURRECTION_ROW, (agent_id,))
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")

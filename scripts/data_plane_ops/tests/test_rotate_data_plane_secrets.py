@@ -131,7 +131,7 @@ def test_admin_scope_changes_the_redis_default_user_only(monkeypatch: pytest.Mon
     def _working_redis_admin_password(_state: rotate.RotationState) -> str:
         return _OLD_REDIS_ADMIN
 
-    monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
+    monkeypatch.setattr(rotate, "working_redis_admin_password", _working_redis_admin_password)
     monkeypatch.setattr(rotate.redis, "Redis", _Redis)
 
     rotate.apply_admin(state)
@@ -153,7 +153,7 @@ def test_runner_scope_rotates_the_acl_user_of_the_redis_url(
     def _ensure_cluster_redis_acl(user: str, **kwargs: object) -> None:
         acl_calls.append((user, kwargs))
 
-    monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
+    monkeypatch.setattr(rotate, "working_redis_admin_password", _working_redis_admin_password)
     monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
 
     rotate.apply_admin(state)  # runner scope: no requirepass effect
@@ -208,7 +208,7 @@ def test_preflight_and_verify_probe_the_state_host_as_the_url_user(
         probes.append((host, username, password))
         return True
 
-    monkeypatch.setattr(rotate, "_redis_probe", _redis_probe)
+    monkeypatch.setattr(rotate, "redis_probe", _redis_probe)
 
     assert rotate.preflight(state) is True
     rotate.verify(state)

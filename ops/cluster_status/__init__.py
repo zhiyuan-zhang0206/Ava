@@ -131,12 +131,12 @@ def check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
     return process_alive(pid), pid
 
 
-def _count_agent_shells(sessions: list[SessionInfo]) -> int:
+def count_agent_shells(sessions: list[SessionInfo]) -> int:
     """Count agent shell + watcher sessions from the session list."""
     return sum(1 for s in sessions if re.search(r"-agent-(\d+)-shell-", s.name))
 
 
-def _count_local_agents(conn: Any, *, local_machine: str) -> int:
+def count_local_agents(conn: Any, *, local_machine: str) -> int:
     """Count this machine's retained agent identities through the snapshot connection."""
     row = conn.execute(
         "SELECT count(*) FROM agents_meta WHERE machine=%s AND status<>'terminated'",
@@ -175,7 +175,7 @@ def _group_agent_sessions(
 _CLUSTER_SESSION_PREFIX = f"{base.cluster.session_name('')}"  # "ava-"
 
 # A bare agent main-process session (`ava-agent-<id>`). Agent processes are
-# pid records, not sessions — `_collect_sessions` filters them out so the
+# pid records, not sessions — `collect_sessions` filters them out so the
 # session count / agent groups stay session-shaped (a P1 regression in #2330
 # put them back in and ghosted 26 of 38 agent_groups).
 _AGENT_PROCESS_RE = re.compile(
@@ -192,7 +192,7 @@ def agent_shell_sessions(agent_id: int) -> list[ShellInfo]:
     """This host's live persistent-shell sessions for one agent, newest id last.
 
     Reuses the same session enumeration as the cluster status snapshot
-    (`_collect_sessions`, already filtered to this cluster's prefix), keeping
+    (`collect_sessions`, already filtered to this cluster's prefix), keeping
     only `…-agent-<agent_id>-shell-<sid>[-<name>]` sessions — the agent's
     explicitly created shells and its watchers. The agent's own process session
     has no `-shell-` segment and is excluded.
@@ -202,7 +202,7 @@ def agent_shell_sessions(agent_id: int) -> list[ShellInfo]:
     dispatch `shell_probe` / `shell_capture` ops to the agent's own machine
     otherwise — a remote runner's shells never appear in a local probe.
     """
-    sessions, *_ = _collect_sessions()
+    sessions, *_ = collect_sessions()
     shells: list[ShellInfo] = []
     for s in sessions:
         m = AGENT_SHELL_RE.search(s.name)
@@ -360,7 +360,7 @@ def _shell_session_name(agent_id: int, shell: ShellInfo) -> str:
     )
 
 
-def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
+def collect_sessions() -> tuple[list[SessionInfo], int, int]:
     """Enumerate this host's live sessions from the session backends, and return
     (sessions, shell_count, total).
 
@@ -405,10 +405,10 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
             uptime = int((now - created).total_seconds()) if created else 0
             rows[name] = SessionInfo(name=name, created_at=created, uptime_seconds=uptime)
     sessions = sorted(rows.values(), key=lambda s: s.name)
-    return sessions, _count_agent_shells(sessions), len(sessions)
+    return sessions, count_agent_shells(sessions), len(sessions)
 
 
-def _read_deploy_snapshot(
+def read_deploy_snapshot(
     db: Database, pool: Any | None, *, local_machine: MachineIdentity
 ) -> tuple[
     base.deploy.state.host_deploy_state.HostDeployState | None,
@@ -425,7 +425,7 @@ def _read_deploy_snapshot(
         with connection as conn:
             state = base.deploy.state.host_deploy_state.read(db, local_machine.name(), conn=conn)
             agent_count = (
-                _count_local_agents(conn, local_machine=local_machine.name())
+                count_local_agents(conn, local_machine=local_machine.name())
                 if ("agent-runner" in local_machine.role())
                 else 0
             )
@@ -449,7 +449,7 @@ def _read_deploy_snapshot(
         )
 
 
-def _read_resource_sample() -> ResourceSample | None:
+def read_resource_sample() -> ResourceSample | None:
     """One live resource sample, degraded to None on any psutil failure."""
     try:
         from base.host.resource_sample import resource_sample
@@ -517,7 +517,7 @@ def status_snapshot(
         else None
     )
     supervisor_alive = _supervisor_online()
-    sessions, shell_count, session_total = _collect_sessions()
+    sessions, shell_count, session_total = collect_sessions()
     # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays
     # an open dict list so the frontend-facing status schema (and its generated TS
     # types) is unchanged — serialize the models to JSON dicts at the boundary.
@@ -526,8 +526,8 @@ def status_snapshot(
     # parallel with the central-DB reads so snapshot latency pays the slower
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
-        resource_future = executor.submit(_read_resource_sample)
-        state, agent_count, schema_status = _read_deploy_snapshot(
+        resource_future = executor.submit(read_resource_sample)
+        state, agent_count, schema_status = read_deploy_snapshot(
             db, pool, local_machine=local_machine
         )
         resource = resource_future.result()

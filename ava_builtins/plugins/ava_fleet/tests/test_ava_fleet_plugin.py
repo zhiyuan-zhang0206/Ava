@@ -94,16 +94,19 @@ def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     assert "duplicate task-log writes" in prompt
 
 
-def test_enabled_fleet_preserves_workflow_choice(_load_activity_plugin: None):
-    """Installing Fleet exposes capabilities without imposing a work strategy."""
+def test_enabled_fleet_preserves_parallel_work_policy(
+    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+):
+    """Fleet preserves core parallel guidance without requiring task tracking."""
+    monkeypatch.setattr(settings.agent, "prompt_delegation_check_enabled", True)
     prompt = build_system_prompt(
         fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
     )
     assert "Workflow selection belongs to `ava-workflow`" in prompt
-    assert (
-        "enabling Fleet does not require delegation, a registry task, or a management tree"
-        in prompt
-    )
+    assert "enabling Fleet does not require a registry task or a management tree" in prompt
+    assert prompt.count("Proactively parallelize independent work.") == 1
+    assert "Fork when your existing context is valuable to the task" in prompt
+    assert "otherwise spawn fresh or reuse a suitable, available agent." in prompt
     assert "Before using Fleet coordination or task tracking" in prompt
     assert "accepted assignments determine reporting" in prompt
     assert "With no delegator, deliver directly" in prompt
@@ -113,6 +116,8 @@ def test_enabled_fleet_preserves_workflow_choice(_load_activity_plugin: None):
         "delegation is the expected pattern",
         "When the task registry is available and a noticed signal",
         "Progress and conclusions go to your manager",
+        "enabling Fleet does not require delegation",
+        "parallelizable work does not require delegation",
     ):
         assert instruction not in prompt
 

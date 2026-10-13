@@ -46,6 +46,7 @@ from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
 from base.api_contracts.agent_contract import AvaAgentError
+from base.api_contracts.caller_identity import CallerIdentity
 from base.api_contracts.mcp_tool_contract import (
     project_message,
     server_instructions,
@@ -54,7 +55,6 @@ from base.api_contracts.mcp_tool_contract import (
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
-from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit

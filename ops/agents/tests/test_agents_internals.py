@@ -36,7 +36,7 @@ def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str, i
         return cur.fetchone()
 
 
-def _inbound_count(db: psycopg.Connection, agent_id: int) -> int:
+def inbound_count(db: psycopg.Connection, agent_id: int) -> int:
     with db.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,))
         row = cur.fetchone()
@@ -44,7 +44,7 @@ def _inbound_count(db: psycopg.Connection, agent_id: int) -> int:
     return row[0]
 
 
-def _spawn_agent(
+def spawn_agent(
     *,
     spawner: str = "user",
     fork_from: int | None = None,
@@ -83,7 +83,7 @@ def _spawn_agent(
     return agent_id
 
 
-def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str | None]]:
+def inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str | None]]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT content, kind, source FROM inbound_messages "
@@ -109,7 +109,7 @@ class TestSpawnAgent:
         agents + agents_meta row and does **not** insert inbound (asymmetric with
         resurrect — spawn creates from nothing, so no notification needed)."""
 
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -119,7 +119,7 @@ class TestSpawnAgent:
         # agents row: status='idling', spawner='user' (default), pid not yet filled
         assert _agents_row(db_conn, new_id) == (new_id, "user", "idling", None)
         # spawn should not insert inbound
-        assert _inbound_count(db_conn, new_id) == 0
+        assert inbound_count(db_conn, new_id) == 0
 
     def test_spawner_recorded(
         self,
@@ -133,13 +133,13 @@ class TestSpawnAgent:
         machine_identity: MachineIdentity,
     ) -> None:
         """The birth-time lineage string is stamped into both metadata fields."""
-        parent_id = _spawn_agent(
+        parent_id = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )  # spawner='user' default
-        child_id = _spawn_agent(
+        child_id = spawn_agent(
             spawner=f"agent:{parent_id}",
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -166,7 +166,7 @@ class TestSpawnAgent:
     ) -> None:
         """A spawner-assigned label is stored with label_user_set=TRUE so the
         labeler's CAS (WHERE label IS NULL AND NOT label_user_set) skips it."""
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             label="auth worker",
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -179,7 +179,7 @@ class TestSpawnAgent:
         assert row == ("auth worker", True)
 
         # Default (no label) stays NULL + not-set so the labeler can fill it.
-        plain_id = _spawn_agent(
+        plain_id = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -200,13 +200,13 @@ class TestSpawnAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """_spawn_agent(config={...}) persists to agents_meta.config_overlay AND
+        """spawn_agent(config={...}) persists to agents_meta.config_overlay AND
         passes config_overlay= to _launch_agent_process. Both sides must work for
         the per-agent model override to actually take effect at boot.
         """
         from base.config import settings
 
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             spawner="user",
             config={"llm_model": "gpt-5.6-sol"},
             config_authority=config_authority,
@@ -251,7 +251,7 @@ class TestSpawnAgent:
             },
         )
         monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
-        default_model_agent = _spawn_agent(
+        default_model_agent = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -262,14 +262,14 @@ class TestSpawnAgent:
             "UPDATE agents_meta SET birth_config = '{}' WHERE id = %s", (default_model_agent,)
         )
         db_conn.commit()
-        text_only_agent = _spawn_agent(
+        text_only_agent = spawn_agent(
             config={"llm_model": "deepseek-flash"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        withdrawn_vision_agent = _spawn_agent(
+        withdrawn_vision_agent = spawn_agent(
             config={"llm_model": model},
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -317,13 +317,13 @@ class TestSpawnAgent:
         """`llm_model` is birth-frozen: an agent born under a vision-capable default keeps
         it after the cluster default flips to a text-only model, as the host resolves it
         (overlay over birth stamp over the live default)."""
-        born_vision = _spawn_agent(
+        born_vision = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        born_text = _spawn_agent(
+        born_text = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -356,7 +356,7 @@ class TestSpawnAgent:
         assert text is not None and text.supports_vision is False
 
 
-def _insert_checkpoint(
+def insert_checkpoint(
     db: psycopg.Connection,
     agent_id: int,
     ckpt_id: str,
@@ -388,7 +388,7 @@ def _insert_checkpoint(
     db.commit()
 
 
-def _checkpoint_ids(db: psycopg.Connection, agent_id: int) -> list[str]:
+def checkpoint_ids(db: psycopg.Connection, agent_id: int) -> list[str]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s ORDER BY checkpoint_id",
@@ -397,7 +397,7 @@ def _checkpoint_ids(db: psycopg.Connection, agent_id: int) -> list[str]:
         return [r[0] for r in cur.fetchall()]
 
 
-def _insert_blob(
+def insert_blob(
     db: psycopg.Connection, agent_id: int, channel: str, version: str, blob: bytes
 ) -> None:
     with db.cursor() as cur:
@@ -409,7 +409,7 @@ def _insert_blob(
     db.commit()
 
 
-def _blob_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, bytes]]:
+def blob_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, bytes]]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT channel, version, blob FROM checkpoint_blobs WHERE thread_id = %s "
@@ -433,7 +433,7 @@ class TestSpawnerValidation:
         machine_identity: MachineIdentity,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
-            _spawn_agent(
+            spawn_agent(
                 spawner="agent:None",
                 config_authority=config_authority,
                 model_catalog=model_catalog,
@@ -451,7 +451,7 @@ class TestSpawnerValidation:
         machine_identity: MachineIdentity,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
-            _spawn_agent(
+            spawn_agent(
                 spawner="agent:",
                 config_authority=config_authority,
                 model_catalog=model_catalog,
@@ -469,7 +469,7 @@ class TestSpawnerValidation:
         machine_identity: MachineIdentity,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
-            _spawn_agent(
+            spawn_agent(
                 spawner="agent:abc",
                 config_authority=config_authority,
                 model_catalog=model_catalog,
@@ -487,7 +487,7 @@ class TestSpawnerValidation:
         machine_identity: MachineIdentity,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
-            _spawn_agent(
+            spawn_agent(
                 spawner="agent:0",
                 config_authority=config_authority,
                 model_catalog=model_catalog,
@@ -507,7 +507,7 @@ class TestSpawnerValidation:
         machine_identity: MachineIdentity,
     ) -> None:
         # spawner="agent:42" is valid — must not raise
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             spawner="agent:42",
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -529,7 +529,7 @@ class TestSpawnerValidation:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             spawner="user",
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -551,7 +551,7 @@ class TestSpawnerValidation:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        new_id = _spawn_agent(
+        new_id = spawn_agent(
             spawner="claude-code",
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -572,7 +572,7 @@ class TestSpawnerValidation:
         machine_identity: MachineIdentity,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
-            _spawn_agent(
+            spawn_agent(
                 spawner="agent:-1",
                 config_authority=config_authority,
                 model_catalog=model_catalog,

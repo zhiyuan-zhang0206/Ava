@@ -8,11 +8,11 @@ import time
 
 from scripts.ci.pull_requests import status
 from scripts.ci.pull_requests.status import (
-    _LIMBO_AGE_SECONDS,
+    LIMBO_AGE_SECONDS,
     MAX_CONSECUTIVE_ERRORS,
     CIResult,
     CIStatus,
-    _pending_reason,
+    pending_reason,
 )
 
 
@@ -56,7 +56,7 @@ def query_once(pr: str, repo: str, *, as_json: bool) -> int:
     )
 
 
-def _deadline_hit(
+def deadline_hit(
     deadline: float | None, pr: str, timeout: int, what: str = "CI still pending"
 ) -> bool:
     """True once `deadline` passes — the --timeout bound for --wait use (which
@@ -69,7 +69,7 @@ def _deadline_hit(
     return False
 
 
-def _report_limbo(result: CIResult, reported: tuple[int, ...] | None) -> tuple[int, ...] | None:
+def report_limbo(result: CIResult, reported: tuple[int, ...] | None) -> tuple[int, ...] | None:
     """Name GitHub-limbo runs loudly on first sight (and on any change).
     Never silent (task #3275): this is the state that used to eat a --wait budget invisibly.
     Returns the new reported-state key so a repeat poll does not spam the same notice.
@@ -82,7 +82,7 @@ def _report_limbo(result: CIResult, reported: tuple[int, ...] | None) -> tuple[i
     stuck = ", ".join(f"{r['name']} (#{r['id']}, {r['age_s'] // 60}m)" for r in result.limbo)
     print(
         f"[ci] GitHub limbo: {len(result.limbo)} run(s) for this head are queued with zero "
-        f"jobs and no progress for >= {int(_LIMBO_AGE_SECONDS // 60)} minutes — they may "
+        f"jobs and no progress for >= {int(LIMBO_AGE_SECONDS // 60)} minutes — they may "
         f"never complete without scheduler recovery (task #3275): {stuck}",
         file=sys.stderr,
         flush=True,
@@ -150,8 +150,8 @@ def wait_for_verdict(
 
         if verdict is CIStatus.PENDING:
             consecutive_errors = 0
-            limbo_reported = _report_limbo(result, limbo_reported)
-            if _deadline_hit(deadline, pr, timeout, what=_pending_reason(result)):
+            limbo_reported = report_limbo(result, limbo_reported)
+            if deadline_hit(deadline, pr, timeout, what=pending_reason(result)):
                 _limbo_timeout_note(pr, result)
                 return 1
             time.sleep(every)
@@ -166,7 +166,7 @@ def wait_for_verdict(
                 print("[ci] no checks yet — waiting", file=sys.stderr, flush=True)
                 no_checks_reported = True
             consecutive_errors = 0
-            if _deadline_hit(deadline, pr, timeout):
+            if deadline_hit(deadline, pr, timeout):
                 return 1
             time.sleep(every)
             continue
@@ -187,7 +187,7 @@ def wait_for_verdict(
                     flush=True,
                 )
                 return 3
-            if _deadline_hit(deadline, pr, timeout):
+            if deadline_hit(deadline, pr, timeout):
                 return 1
             time.sleep(every)
             continue

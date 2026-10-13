@@ -221,12 +221,12 @@ def drain(
         if remaining <= 0:
             raise TimeoutError(
                 "drain timed out without force; hold retained for agents "
-                f"{pending}\n{_stall_report(db, hold, pending, local_machine=local_machine)}"
+                f"{pending}\n{stall_report(db, hold, pending, local_machine=local_machine)}"
             )
         time.sleep(min(0.2, remaining))
 
 
-def _stall_report(
+def stall_report(
     db: Database, hold: MaintenanceHold, pending: list[int], *, local_machine: MachineIdentity
 ) -> str:
     """One line per unfinished agent: delivery state, row fences and host view.

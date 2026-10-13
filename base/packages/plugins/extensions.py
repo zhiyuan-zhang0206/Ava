@@ -23,12 +23,12 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
+from base.api_contracts.metric_spec import MetricSpec
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import DecisionProviderContribution, ProviderContribution
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.surface.inspector import InspectWidgetSpec
-from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 # A note builder takes the run's `AvaContext` (`base.agents.context`, which sits above this module)
 # and returns a langchain `HumanMessage`, or None when it has nothing to say; both types are left
