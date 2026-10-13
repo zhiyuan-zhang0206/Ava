@@ -26,7 +26,7 @@ There is no single-call form — one question is a one-element list:
 [answer] = ava.understand([{"prompt": "summarize this", "paths": ["notes.md"]}])
 ```
 
-Targets run with a default ceiling of 12; pass a positive `max_concurrent=N` to choose another in-flight limit. The shared DeepSeek cap queues excess provider calls, and terminal typed provider failures surface as `UnderstandError`. Same batch shape as [[web.ava.okf.md]]'s `search` / `fetch`.
+Targets run with a default ceiling of 12; pass a positive `max_concurrent=N` to choose another in-flight limit. The shared DeepSeek cap queues excess provider calls, and terminal typed provider failures surface as `UnderstandError`. Same batch shape as [[ava/docs/web.ava.okf.md]]'s `search` / `fetch`.
 
 ## Constraints & Errors
 - `TypeError` — `targets` is not a list, or an element is not a dict.
@@ -40,8 +40,11 @@ Unknown model-invocation errors retain their original exception and traceback
 after one attempt; error wording alone never grants provider retry authority.
 
 ## Key Dependencies
-- [[files.ava.okf.md]] — `paths` uses the same path resolution (workspace-relative)
+- [[ava/docs/files.ava.okf.md]] — `paths` uses the same path resolution (workspace-relative)
 - [[base/lm/docs/lm/lm.ava.okf.md]] — underlying chat model factory (text/media models come from settings)
 
 ## Notes
 Text and media models come from `settings.lm.understand_text_model` (default `deepseek-flash`) / `settings.lm.understand_media_model` (default Gemini 3.5 Flash) respectively. The media model's provider is picked by its prefix through the same model factory every LLM path uses (`base/lm/factory.py`), and `AVA_UNDERSTAND_MEDIA_BASE_URL` can point the Gemini endpoint at a self-hosted relay. The media wire format is Gemini-specific, so the path currently supports Gemini models only — a non-Gemini media model fails fast with a clear error; the abstraction (factory routing / endpoint override / quality knobs) is in place for a second media provider to plug in with its own part conversion. Media goes inline; exceeding inline limits will raise `UnderstandError`.
+
+## Structure
+`ava/understand/__init__.py` is the namespace function: it validates through `plans.normalize` (no ambient reads), builds this process's `UnderstandDeps` in `wiring.py` (the only place that reads the configured models and knobs, the model catalog, the provider factory, the bound agent's workspace and the clock) and calls `answer.run`. `answer.py` holds the provider calls, the media rules and the saved output; everything it touches arrives in the deps, so tests hand it a fake factory and the values they want instead of patching settings.
