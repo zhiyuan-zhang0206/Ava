@@ -20,7 +20,7 @@ def state_file(agent_id: int) -> str:
     return str(scratch_root("budget") / f"{agent_id}.json")
 
 
-def _prepare_code(role: str, agent_id: int) -> str:
+def prepare_code(role: str, agent_id: int) -> str:
     root = str(scratch_root("budget"))
     code = (
         "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
@@ -61,7 +61,7 @@ def _prepare_code(role: str, agent_id: int) -> str:
     return code
 
 
-def _pause_code(owner: int, agent_id: int) -> str:
+def pause_code(owner: int, agent_id: int) -> str:
     path = state_file(agent_id)
     return (
         "import json\nimport ava\nfrom pathlib import Path\nfrom uuid import uuid4\n"
@@ -116,9 +116,9 @@ def build(model: str, *, agent_id: int | None) -> RecordingModel:
     return RecordingModel(
         agent_id=agent_id,
         script=(
-            exec_call(1, _prepare_code(role, agent_id)),
+            exec_call(1, prepare_code(role, agent_id)),
             say("Partial result saved; waiting."),
-            exec_call(2, _pause_code(owner, agent_id)),
+            exec_call(2, pause_code(owner, agent_id)),
             say("Paused with a handoff; goal remains incomplete."),
             exec_call(3, _recover_code(role, agent_id)),
             say("Still paused."),

@@ -45,21 +45,21 @@ from tests._containers import _free_port, _wait_port, postgres
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
-_SECRET = "pgbouncerwiretestsecret"  # noqa: S105 — test fixture, not a real credential
+SECRET = "pgbouncerwiretestsecret"  # noqa: S105 — test fixture, not a real credential
 
 
-def _pgbouncer_available() -> bool:
+def pgbouncer_available() -> bool:
     binary = pgbouncer_bin()
     return Path(binary).exists() or shutil.which(binary) is not None
 
 
 pytestmark = pytest.mark.skipif(
-    not _pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
+    not pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
 )
 
 
 @contextlib.contextmanager
-def _pgbouncer_in_front(
+def pgbouncer_in_front(
     pg_url: str,
     listen_addr: str = "127.0.0.1",
     pool_size: int = 2,
@@ -93,9 +93,9 @@ def _pgbouncer_in_front(
 
     # Give the cluster role a scram verifier so client scram against the userlist works
     # (pg default password_encryption = scram-sha-256). ALTER ROLE ... PASSWORD is DDL
-    # and cannot bind params; _SECRET is a fixed alnum test constant, so inline it.
+    # and cannot bind params; SECRET is a fixed alnum test constant, so inline it.
     with psycopg.connect(pg_url, autocommit=True) as conn:
-        conn.execute(f"ALTER ROLE {role} PASSWORD '{_SECRET}'")
+        conn.execute(f"ALTER ROLE {role} PASSWORD '{SECRET}'")
         if read_only_default:
             conn.execute(
                 sql.SQL("ALTER DATABASE {} SET default_transaction_read_only = on").format(
@@ -109,7 +109,7 @@ def _pgbouncer_in_front(
     listen_port = _free_port()
     userlist = tmp / "userlist.txt"
     # Mirrors _render_ini: the admin console belongs to the pooler admin alone.
-    userlist.write_text(f'"{role}" "{_SECRET}"\n"{POOLER_ADMIN}" "{_SECRET}"\n')
+    userlist.write_text(f'"{role}" "{SECRET}"\n"{POOLER_ADMIN}" "{SECRET}"\n')
     ini = tmp / "pgbouncer.ini"
     ini.write_text(
         "\n".join(
@@ -153,7 +153,7 @@ def _pgbouncer_in_front(
     )
     try:
         _wait_port(listen_port, host=listen_addr)
-        pooled = f"postgresql://{role}:{_SECRET}@{listen_addr}:{listen_port}/{dbname}"
+        pooled = f"postgresql://{role}:{SECRET}@{listen_addr}:{listen_port}/{dbname}"
         # pgbouncer -d races the listener; wait for a real authenticated answer.
         deadline = time.monotonic() + 15
         while True:
@@ -173,10 +173,10 @@ def _pgbouncer_in_front(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _admin_console_url(pooled: str) -> str:
-    """The admin console of a `_pgbouncer_in_front` pooler, dialed as the
+def admin_console_url(pooled: str) -> str:
+    """The admin console of a `pgbouncer_in_front` pooler, dialed as the
     pooler admin — its only `admin_users` entry (the pooled role is refused)."""
-    return make_conninfo(pooled, user=POOLER_ADMIN, password=_SECRET, dbname="pgbouncer")
+    return make_conninfo(pooled, user=POOLER_ADMIN, password=SECRET, dbname="pgbouncer")
 
 
 def test_scram_client_auth_and_pooled_select(
@@ -184,7 +184,7 @@ def test_scram_client_auth_and_pooled_select(
 ) -> None:
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
         psycopg.connect(pooled, prepare_threshold=None) as conn,
     ):
         row = conn.execute("SELECT 1").fetchone()
@@ -196,9 +196,9 @@ def test_wrong_secret_is_rejected(
 ) -> None:
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
     ):
-        bad = pooled.replace(_SECRET, "not-the-secret")
+        bad = pooled.replace(SECRET, "not-the-secret")
         with pytest.raises(psycopg.OperationalError):
             psycopg.connect(bad, prepare_threshold=None, connect_timeout=5)
 
@@ -213,7 +213,7 @@ def test_transaction_pooling_never_prepare(
     preparing the same `_pg3_0` name on one backend collide)."""
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
         psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as conn,
     ):
         for i in range(50):
@@ -235,7 +235,7 @@ def _read_only_default_pooler(pg_url: str, pool_size: int = 2) -> Generator[str]
     explicit declaration gets a write through. The probe proves the condition is
     live, so a passing write is the declaration's doing.
     """
-    with _pgbouncer_in_front(pg_url, pool_size=pool_size, read_only_default=True) as pooled:
+    with pgbouncer_in_front(pg_url, pool_size=pool_size, read_only_default=True) as pooled:
         with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as probe:
             row = probe.execute("SHOW default_transaction_read_only").fetchone()
             assert row is not None and str(row[0]) == "on"
@@ -445,7 +445,7 @@ def test_pooler_isolates_one_clients_read_only_posture_from_another(
     """
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url, pool_size=1) as pooled,
+        pgbouncer_in_front(pg_url, pool_size=1) as pooled,
         psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as poisoner,
         psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as other,
     ):
@@ -475,7 +475,7 @@ def test_connect_query_bounds_pooled_backends_at_birth(
     startup parameter dropped by the pooler, no explicit SET) would see 0."""
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
         psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as conn,
     ):
         # No options=, no SET — the backend's connect_query is the only source.
@@ -496,7 +496,7 @@ def test_base_connect_applies_statement_timeout_on_pooled_dial(
 
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
     ):
         dp = config.settings.data_plane
         # The one-URL design: AVA_DB_URL carries the pooled listener URL; dialing
@@ -526,7 +526,7 @@ def test_base_pool_applies_statement_timeout_on_pooled_dial(
 
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
     ):
         dp = config.settings.data_plane
         monkeypatch.setattr(dp, "db_url", pooled)
@@ -554,7 +554,7 @@ def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer(
 
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
         PostgresSaver.from_conn_string(pooled) as saver,
     ):
         saver.setup()
@@ -584,11 +584,11 @@ def test_admin_probe_reaches_the_bound_address_only(
         pytest.skip("127.0.0.2 needs an lo0 alias on macOS")
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url, listen_addr="127.0.0.2") as pooled,
+        pgbouncer_in_front(pg_url, listen_addr="127.0.0.2") as pooled,
     ):
         listen_port = int(str(conninfo_to_dict(pooled)["port"]))
-        assert admin_reachable(listen_port, _SECRET, host="127.0.0.2") is True
-        assert admin_reachable(listen_port, _SECRET, host="127.0.0.1") is False
+        assert admin_reachable(listen_port, SECRET, host="127.0.0.2") is True
+        assert admin_reachable(listen_port, SECRET, host="127.0.0.1") is False
 
 
 # ── Pooled session-GUC pollution (2026-09-02 P0) ────────────────────────────
@@ -643,7 +643,7 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
 
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url, pool_size=1) as pooled,
+        pgbouncer_in_front(pg_url, pool_size=1) as pooled,
     ):
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         pool = base_db.pool(min_size=1, max_size=1, gate=database_gate)
@@ -684,7 +684,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
 
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url, pool_size=1) as pooled,
+        pgbouncer_in_front(pg_url, pool_size=1) as pooled,
     ):
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
 
@@ -743,7 +743,7 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
 
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
     ):
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         owner = ProcessDbGate(version=lambda: 4321, process=process_name())
@@ -759,7 +759,7 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
                 with Database.from_settings(gate=owner).connect() as conn:
                     assert owner.min_read_due() is False  # the dial did read it
                     assert _statement_timeout(conn) == "1min"
-                    with psycopg.connect(_admin_console_url(pooled), autocommit=True) as console:
+                    with psycopg.connect(admin_console_url(pooled), autocommit=True) as console:
                         cursor = console.execute("SHOW CLIENTS")
                         columns = [column.name for column in cursor.description or ()]
                         names = {

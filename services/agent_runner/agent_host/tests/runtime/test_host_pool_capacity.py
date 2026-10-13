@@ -24,14 +24,14 @@ from base.db.code_version_gate import ProcessDbGate
 from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
 from tests._containers import postgres
 from tests.components.cli.test_pgbouncer_wire import (
-    _admin_console_url,
-    _pgbouncer_available,
-    _pgbouncer_in_front,
+    admin_console_url,
+    pgbouncer_available,
+    pgbouncer_in_front,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 pytestmark = pytest.mark.skipif(
-    not _pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
+    not pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
 )
 
 _BACKENDS = 2
@@ -157,7 +157,7 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
     """
     with (
         postgres(machine_name=machine_identity.name) as direct,
-        _pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
+        pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
     ):
         # The host pools dial the cluster's access URL, which is this pooler.
         monkeypatch.setattr(settings.data_plane, "db_url", pooled)
@@ -165,7 +165,7 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
             build_shared_pool(Database.from_settings(gate=database_gate)) as workload,
             build_control_pool(Database.from_settings(gate=database_gate)) as control,
             await psycopg.AsyncConnection[DictRow].connect(
-                _admin_console_url(pooled), autocommit=True, row_factory=dict_row
+                admin_console_url(pooled), autocommit=True, row_factory=dict_row
             ) as admin,
         ):
             await _borrow_every_lease_then_release(
@@ -325,7 +325,7 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
     started = time.monotonic()
     with (
         postgres(machine_name=machine_identity.name) as direct,
-        _pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
+        pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
     ):
         # The host pools dial the cluster's access URL, which is this pooler.
         monkeypatch.setattr(settings.data_plane, "db_url", pooled)
@@ -338,7 +338,7 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
             )
             admin = await stack.enter_async_context(
                 await psycopg.AsyncConnection[DictRow].connect(
-                    _admin_console_url(pooled), autocommit=True, row_factory=dict_row
+                    admin_console_url(pooled), autocommit=True, row_factory=dict_row
                 )
             )
             workloads = [

@@ -20,7 +20,7 @@ from tests import _os_jobs
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
     # No crontab on the fake host — this fixture isolates the launchd half.
-    monkeypatch.setattr(_os_jobs, "_crontab_jobs", set)
+    monkeypatch.setattr(_os_jobs, "crontab_jobs", set)
     return tmp_path
 
 
@@ -71,4 +71,4 @@ def test_only_ava_marked_crontab_lines_are_inventoried(monkeypatch: pytest.Monke
         return types.SimpleNamespace(returncode=0, stdout=f"{theirs}\n{mine}\n", stderr="")
 
     monkeypatch.setattr(_os_jobs.subprocess, "run", _run)
-    assert _os_jobs._crontab_jobs() == {f"crontab:{mine}"}
+    assert _os_jobs.crontab_jobs() == {f"crontab:{mine}"}
