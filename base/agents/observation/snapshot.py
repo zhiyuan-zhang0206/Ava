@@ -14,7 +14,6 @@ from uuid import UUID
 import psycopg
 from pydantic import BaseModel, Field
 
-from base.agents import AgentStatus, LivenessState
 from base.agents.observation.evidence import (
     AgentAvailability,
     AgentObservation,
@@ -22,6 +21,7 @@ from base.agents.observation.evidence import (
     observation,
 )
 from base.agents.tasks.priority import Priority
+from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog

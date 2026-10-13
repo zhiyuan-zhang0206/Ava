@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import psycopg
 
-from base.agents import ForkCheckpointNotFound
+from base.api_contracts.agent_contract import ForkCheckpointNotFound
 
 
 def copy_checkpoint_chain(

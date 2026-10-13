@@ -10,8 +10,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from base.agents import AgentLaunchFailed, AvaAgentError
 from base.agents.inbox.chat_delivery import ChatInboundCommittedError
+from base.api_contracts.agent_contract import AgentLaunchFailed, AvaAgentError
 from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.http.middleware.error_envelope import error_response
 

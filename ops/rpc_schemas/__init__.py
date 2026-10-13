@@ -13,14 +13,10 @@ from pydantic import (
     model_validator,
 )
 
-from base.agents import (
-    RestartResult,
-    ResurrectResult,
-    ShellKillMode,
-)
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
+from base.api_contracts.agent_contract import RestartResult, ResurrectResult, ShellKillMode
 from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 from base.events.caller_identity import CallerIdentity, is_caller_source
 

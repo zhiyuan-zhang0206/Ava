@@ -14,7 +14,7 @@ from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database, create_agent

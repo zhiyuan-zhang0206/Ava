@@ -14,7 +14,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.agents import ShellKillMode
+from base.api_contracts.agent_contract import ShellKillMode
 from base.clock.tests.fakes import fix_zone
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent

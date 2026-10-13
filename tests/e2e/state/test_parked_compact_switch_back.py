@@ -58,7 +58,7 @@ import psycopg
 import pytest
 from playwright.sync_api import Page, expect
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from base.db import Database
 from tests.components.base.poll_until import poll_until

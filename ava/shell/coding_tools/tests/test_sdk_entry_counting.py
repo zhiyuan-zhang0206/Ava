@@ -11,11 +11,11 @@ import pytest
 import ava
 from ava.sdk_surface import install, metering
 from ava.shell.coding_tools._common import owner_terminated
-from base.agents import AgentStatus
 from base.agents.context import AvaContext
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_telemetry
 from base.agents.sdk.tally import SdkCallTally
+from base.api_contracts.agent_contract import AgentStatus
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkMember
 
 

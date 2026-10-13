@@ -27,7 +27,7 @@ from typing import NamedTuple
 
 from loguru import logger
 
-from base.agents import IndexerUnavailable
+from base.api_contracts.agent_contract import IndexerUnavailable
 from base.api_contracts.memory_search import MemorySearchPurpose
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import TRUE, DecisionError, YesNo

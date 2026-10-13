@@ -48,7 +48,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents import ShellKillMode
+from base.api_contracts.agent_contract import ShellKillMode
 from base.clock import Clock
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress

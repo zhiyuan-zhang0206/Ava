@@ -6,8 +6,8 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from base.agents import ResurrectResult
 from base.agents.messages.inbound import InboundKind
+from base.api_contracts.agent_contract import ResurrectResult
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -52,7 +52,7 @@ class TestResurrectIfTerminatedPlacement:
         """A tripped recovery breaker (consecutive permanent provider
         rejections) refuses the automatic resurrect before any home contact,
         exactly like an active wake suppression (task #3617)."""
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _db, _aid: True)
@@ -82,7 +82,7 @@ class TestResurrectIfTerminatedPlacement:
     ) -> None:
         """Local-homed resurrect dispatches to ops server first; falls back
         to in-process when the ops server is unreachable."""
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: next(statuses))
@@ -163,7 +163,7 @@ class TestResurrectIfTerminatedPlacement:
         machine_identity: MachineIdentity,
     ) -> None:
         captured: dict[str, object] = {}
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: next(statuses))
@@ -214,7 +214,7 @@ class TestResurrectIfTerminatedPlacement:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
         from ops.cluster.rpc import ClusterOpUnreachable
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
@@ -247,7 +247,7 @@ class TestResurrectIfTerminatedPlacement:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
         from ops.cluster.rpc import ClusterOpFailed
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
@@ -280,7 +280,7 @@ class TestResurrectIfTerminatedPlacement:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        from base.agents import AgentStatus, ResurrectRefused
+        from base.api_contracts.agent_contract import AgentStatus, ResurrectRefused
         from ops.cluster.rpc import ClusterOpFailed
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
@@ -313,7 +313,7 @@ class TestResurrectIfTerminatedPlacement:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.RUNNING)
 
@@ -355,7 +355,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(
@@ -388,7 +388,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         """No row -> None -> the normal path runs; stale-work adjudication stays
         with the home runner's final CAS. This drives the real read (the id
         does not exist), not a stubbed one."""
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: next(statuses))
@@ -440,7 +440,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         """A failed trigger read must not be swallowed into a skip (review
         note A): the error surfaces to the caller, mirroring how a failed
         suppression / breaker read above fails loudly."""
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
 
@@ -562,8 +562,8 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
     machine_identity: MachineIdentity,
 ) -> None:
     """A successful spawn is a durable recovery, not only an in-memory result."""
-    from base.agents import AgentStatus
     from base.agents.inbox.insert import insert_inbound_message
+    from base.api_contracts.agent_contract import AgentStatus
     from base.db import create_agent
 
     agent_id = create_agent(db_conn)

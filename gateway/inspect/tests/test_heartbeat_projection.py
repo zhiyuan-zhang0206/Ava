@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from base.agents.contract import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from gateway.inspect import _live
 

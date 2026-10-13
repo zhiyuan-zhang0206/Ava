@@ -47,7 +47,7 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
     transaction. The durable terminate inbound inserted by the fence is the
     captured: dict[str, object] = {}
     correctness mechanism; the cancel only accelerates a wedged turn."""
-    from base.agents import AgentStatus
+    from base.api_contracts.agent_contract import AgentStatus
 
     captured: dict[str, object] = {}
 

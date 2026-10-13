@@ -14,7 +14,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
-from base.agents import ShellSessionKillTiming
+from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
@@ -445,7 +445,7 @@ class TestKillAllShellSessions:
         """The agent dies between the status read and the locked enqueue: the
         request is not queued onto a dead row no apply will read — its sessions
         are killed at once instead."""
-        from base.agents import AgentStatus
+        from base.api_contracts.agent_contract import AgentStatus
         from ops import lifecycle
 
         def _stale_read(_db: object, _aid: int) -> AgentStatus:

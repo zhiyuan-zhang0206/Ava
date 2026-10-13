@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from ava.agents import ShellSessionsKill as SdkShellSessionsKill
-from base.agents import ShellSessionKillTiming
+from base.api_contracts.agent_contract import ShellSessionKillTiming
 from ops.rpc_schemas.terminate import ShellSessionsKill as RpcShellSessionsKill
 
 

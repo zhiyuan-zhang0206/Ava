@@ -6,8 +6,8 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
-from base.agents import ForkSourceEmpty
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.api_contracts.agent_contract import ForkSourceEmpty
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority

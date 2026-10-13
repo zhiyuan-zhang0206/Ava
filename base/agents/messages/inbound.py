@@ -33,7 +33,7 @@ class InboundKind(StrEnum):
     to literals. The claim node's `match item.kind:` uses `case InboundKind.CHAT:`
     so pyright statically exhaustively checks (when a new kind is added but
     dispatch isn't synced, pyright reports "unmatched"). Same pattern as
-    `base.agents.AgentStatus(StrEnum)`.
+    `base.api_contracts.agent_contract.AgentStatus(StrEnum)`.
     """
 
     CHAT = "chat"

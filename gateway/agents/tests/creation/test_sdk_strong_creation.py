@@ -14,7 +14,7 @@ import ava
 import ava.agents
 from ava.gateway_client import spawn, transport
 from ava.sdk_surface import agent_identity
-from base.agents import GatewayUnavailable
+from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.agents import router as agent_router

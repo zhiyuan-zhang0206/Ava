@@ -14,7 +14,7 @@ from psycopg import Error as DatabaseError
 from psycopg.errors import QueryCanceled
 from psycopg_pool import ConnectionPool, PoolTimeout
 
-from base.agents import AgentNotFound
+from base.api_contracts.agent_contract import AgentNotFound
 from base.config import settings
 from base.db import Database
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors

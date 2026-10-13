@@ -8,8 +8,8 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents import AgentLaunchFailed
 from base.agents.tasks.creation import create_task_in_transaction, ensure_parent_exists
+from base.api_contracts.agent_contract import AgentLaunchFailed
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.config.service_read import ConfigAuthority
 from base.db import Database

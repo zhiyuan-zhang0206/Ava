@@ -18,8 +18,8 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.agents import AgentNotFound
 from base.agents.upload_delivery.paths import upload_url
+from base.api_contracts.agent_contract import AgentNotFound
 from base.db import agent_exists
 from base.db.transaction import write_transaction
 from base.host.private_storage import create_private_bytes

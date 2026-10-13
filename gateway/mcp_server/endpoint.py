@@ -40,12 +40,12 @@ from mcp.server.mcpserver import Context
 from pydantic import Field
 from starlette.responses import JSONResponse
 
-from base.agents import AvaAgentError
 from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
 from base.agents.inbox.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
+from base.api_contracts.agent_contract import AvaAgentError
 from base.api_contracts.mcp_tool_contract import (
     project_message,
     server_instructions,
@@ -437,7 +437,7 @@ def _register_spawn_tools(
         except AvaAgentError as exc:
             # Business errors are AvaAgentError instances — surface their
             # message as a tool error, not a protocol error.
-            from base.agents import AgentLaunchFailed
+            from base.api_contracts.agent_contract import AgentLaunchFailed
 
             if isinstance(exc, AgentLaunchFailed):
                 raise ToolError(

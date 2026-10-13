@@ -24,7 +24,7 @@ import ava
 import ava.agents
 import ava.self
 from ava.agents import AgentRow
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 
 
 def test_spawn_has_machine_arg() -> None:

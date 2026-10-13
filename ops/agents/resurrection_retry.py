@@ -5,8 +5,13 @@ from uuid import UUID
 import psycopg
 from pydantic import ValidationError
 
-from base.agents import AgentNotFound, MachinePaused, ResurrectError, ResurrectRefused
 from base.agents.incarnation.resources import ResourceBirth, ResourceShapeError, decode_resources
+from base.api_contracts.agent_contract import (
+    AgentNotFound,
+    MachinePaused,
+    ResurrectError,
+    ResurrectRefused,
+)
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.cluster.rpc import ClusterOpFailed

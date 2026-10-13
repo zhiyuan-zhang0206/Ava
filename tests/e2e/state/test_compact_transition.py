@@ -12,7 +12,7 @@ import httpx
 import pytest
 from playwright.sync_api import Request
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e._settings import pin_expand_runs_all

@@ -11,7 +11,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-from base.agents import AgentStatus, ResurrectError, ResurrectRefused
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.incarnation.resources import (
     IncarnationResources,
@@ -19,6 +18,7 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.agents.messages.inbound import InboundKind
+from base.api_contracts.agent_contract import AgentStatus, ResurrectError, ResurrectRefused
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database

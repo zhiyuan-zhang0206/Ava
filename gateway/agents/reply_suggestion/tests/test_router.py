@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from base.agents import AgentNotFound
+from base.api_contracts.agent_contract import AgentNotFound
 from base.lm.catalog import ModelCatalog
 from gateway.agents.reply_suggestion.router import router, run_until_disconnect
 from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
