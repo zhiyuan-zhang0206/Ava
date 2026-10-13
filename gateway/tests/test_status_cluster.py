@@ -16,6 +16,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+import gateway.app as gateway_app
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from gateway.app import app
@@ -56,7 +57,7 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     def paused(_db: Database, *, machine_name: Callable[[], str]) -> bool:
         return flag.exists()
 
-    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", paused)
+    monkeypatch.setattr(status_router, "cluster_is_paused", paused)
     return flag
 
 
@@ -311,7 +312,7 @@ class TestClusterPanel:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _ = fake_flag, stub_machine_identity
-        monkeypatch.setattr("gateway.app.StatusCache", lambda: StatusCache(ttl_s=0.0))
+        monkeypatch.setattr(gateway_app, "StatusCache", lambda: StatusCache(ttl_s=0.0))
         _insert_machine(db_conn, "runner-test", _OPS_URL, "agent-runner")
         stub_remote_probe["runner-test"] = (True, False)
 

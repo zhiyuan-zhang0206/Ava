@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import PoolTimeout
 
+import gateway.app as gateway_app
 from base.cluster.machine import MachineIdentity
 from base.paths import ava_home
 from gateway.app import app
@@ -121,6 +122,6 @@ def test_control_plane_bypasses_an_unreadable_admission_journal(
     async def unexpected_read(_request: object) -> bool:
         raise AssertionError("control-plane request read the business admission journal")
 
-    monkeypatch.setattr("gateway.app._cluster_is_paused", unexpected_read)
+    monkeypatch.setattr(gateway_app, "_cluster_is_paused", unexpected_read)
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200

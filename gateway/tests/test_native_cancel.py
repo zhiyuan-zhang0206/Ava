@@ -14,6 +14,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from gateway.agents import lifecycle
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.settlement import close_hosted_turn
@@ -227,8 +228,8 @@ def test_native_paths_reject_invalid_agent_before_owner_lookup(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("invalid path reached SQL or command acceptance")
 
-    monkeypatch.setattr("gateway.agents.lifecycle.observe_native_work", forbidden)
-    monkeypatch.setattr("gateway.agents.lifecycle.accept_native_cancel", forbidden)
+    monkeypatch.setattr(lifecycle, "observe_native_work", forbidden)
+    monkeypatch.setattr(lifecycle, "accept_native_cancel", forbidden)
     target = NativeWorkTarget(
         work_id=uuid4(),
         agent_id=1,

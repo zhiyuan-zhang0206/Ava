@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from base import config
+from base import config, paths
 from base.cluster.authority.api import AcceptanceCache
 from base.config.service_read import ConfigAuthority
 from base.host.env import bootstrap
@@ -55,7 +55,7 @@ def runner_token(
     home = (tmp_path / "gateway-home").resolve()
     home.mkdir(mode=0o700)
     token = seed_write_generation(home).api.runner
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
     monkeypatch.setitem(os.environ, "AVA_API_TOKEN", token)
     return token
 

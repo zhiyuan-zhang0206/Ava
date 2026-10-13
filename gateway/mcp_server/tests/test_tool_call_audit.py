@@ -16,6 +16,7 @@ import pytest
 from base import telemetry
 from base.db import Database
 from base.events.caller_identity import CallerIdentity
+from base.telemetry import audit_events
 from gateway.mcp_server.endpoint import _record_tool_call
 
 
@@ -49,7 +50,7 @@ async def test_a_failed_audit_write_does_not_fail_the_tool_call(
     def refuse(_db: object, _event: object) -> None:
         raise RuntimeError("database down")
 
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone", refuse)
+    monkeypatch.setattr(audit_events, "record_audit_standalone", refuse)
 
     def emit(_category: str, name: str, **kwargs: Any) -> None:
         if name == "audit_write_failed":
