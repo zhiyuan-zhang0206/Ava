@@ -38,6 +38,7 @@ fails, and root teardown preserves its primary and secondary errors.
 |---|---|---|
 | `brew-pin` | macOS | Bounded successful Homebrew installed/pinned queries; missing approved pins are DOWN, failed queries are unavailable. No package changes. |
 | `venv` | POSIX | This executing checkout's dependency metadata and isolated `-I -B` imports of Ava, Pydantic, Psycopg, and FastAPI. Each command has a 5-second bound; no inherited PYTHONPATH or VIRTUAL_ENV. Missing uv is unavailable. |
+| `maintenance-hold` | Every root | The home's pause-owner journal. UP with no hold or one younger than `AVA_MAINTENANCE_HOLD_ALERT_AFTER_S` (default 30 minutes); DOWN beyond it, including an unreadable journal aged from its modification time. One `maintenance_hold_overdue` event per hold, rearmed by the first UP sample. Reads only: no release, no restart. |
 | `permissions-helper` | Every macOS root | Connected Unix peer and ping PID must match the live native parent of root, with birth/lineage rechecked after reply; failures retain launchd classification. One `permissions_helper_unhealthy` event per episode; no helper bootout, bootstrap, or upgrade. |
 | `redis-acl` | gateway with local data plane | Runtime-credential authenticated PING. No ACL writes or instance start. |
 | `pgbouncer` | gateway with local enabled pooler | Admin-console authentication and required public listener. It does not mistake a failed Postgres query for a dead pooler. No ensure or restart. |

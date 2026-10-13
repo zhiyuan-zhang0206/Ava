@@ -47,6 +47,9 @@ SIGNALS: dict[str, Signal] = {
     "ava-ops-schedule-convergence-abandoned": Signal(
         "schedule_convergence_abandoned", "ava-ops-slow", "0m", "warning"
     ),
+    "ava-ops-maintenance-hold-overdue": Signal(
+        "maintenance_hold_overdue", "ava-ops-slow", "0m", "warning"
+    ),
     "ava-ops-agent-continuation-lost": Signal("agent_continuation_lost", "ava-ops", "0m", "error"),
     # machine liveness (was the 180s / 600s transition clock on machine_probe)
     "ava-ops-machine-offline-warning": Signal("machine_probe_failed", "ava-ops", "3m", "warning"),
