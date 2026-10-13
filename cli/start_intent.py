@@ -153,7 +153,7 @@ def _start_once(
         with file_lock(home / "start-intent.lock", timeout_s=30):
             require_initialized(home)
             _enter_home(home)
-            from base.log.process import init_cli_process
+            from base.telemetry.process_logging import init_cli_process
             from cli.main import _init_cli_logging
 
             def initialize(name: str) -> None:

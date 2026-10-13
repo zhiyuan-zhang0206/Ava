@@ -75,11 +75,11 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.log import logger
-from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home, chrome_mcp_socket
 from base.telemetry import build_pipeline
+from base.telemetry.process_logging import init_gateway_process
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.gateway_session import GatewaySession, stop_on_signals
 from services.desktop.browser.mcp_upstream import (

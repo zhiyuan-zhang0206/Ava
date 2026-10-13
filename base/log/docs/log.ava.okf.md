@@ -10,14 +10,14 @@ tags:
 
 # Logging
 
-`base.log` supplies the lightweight shared logger without importing telemetry
-or changing caller sinks. Fresh executable roots explicitly call
+`base.log` supplies the lightweight shared logger without importing telemetry or changing sinks. Fresh roots call
 `prepare_process_logging()` before configuration. The CLI console script and
 both `python -m` paths use `cli.main.entry`; embedded `main()` retains caller
 logging. The exec-child executable branch prepares before SDK/configuration,
 while direct calls to its `main()` retain the enclosing process sinks.
-`base.log.process` owns concrete startup and typed event-pipeline binding;
-executable roots import it when they actually initialize logging.
+`base.log.process` owns the process-level sinks and their idempotency guard;
+`base.telemetry.process_logging` owns the event-pipeline binding and the gateway/CLI
+entry points.
 
 The lightweight entry declares only its own `prepare_process_logging`
 operation. The compatible `base.log.logger` access borrows Loguru's unchanged
@@ -35,9 +35,9 @@ Every log line is also an **event** in the unified event stream (event-system de
 ## Core Responsibilities
 
 ### Three process entry points
-- `init_subprocess_logger(agent_id)` — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes `agent-{N}.log`.
-- `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Every root supplies its immutable loaded image, machine reader and owned pipeline producer; logging does not capture Git or discover a database factory. The image is any object with a `sha` (`LoadedImage`); production passes `base/native_process/loaded_commit.py`'s `LoadedCommit`.
-- `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`): gateway's sinks, no `service_started` row.
+- `init_subprocess_logger(agent_id)` (`base.log.process`) — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes `agent-{N}.log`.
+- `init_gateway_process(name)` (`base.telemetry.process_logging`) — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Every root supplies its immutable loaded image, machine reader and owned pipeline producer; logging does not capture Git or discover a database factory. The image is any object with a `sha` (`LoadedImage`); production passes `base/native_process/loaded_commit.py`'s `LoadedCommit`.
+- `init_cli_process(name)` (`base.telemetry.process_logging`) — CLI verbs that bring a unit up (`cli-<verb>`): gateway's sinks, no `service_started` row.
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 
 `add_event_sink(producer=..., machine_reader=...)` binds the root's actual writer at the existing eager logging startup point. The loguru adapter captures that same producer, while ordinary direct events share its concrete process binding. Startup rejects replacing another live writer; it never substitutes an unrelated database factory. Quiet SDK attachments retain their lazy factory without opening logging or a thread.

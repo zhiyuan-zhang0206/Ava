@@ -40,7 +40,6 @@ from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit as _hard_exit
-from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
@@ -50,6 +49,7 @@ from base.sessions.protocol import SessionBackend
 from base.sessions.pty import client as pty_client
 from base.sessions.record import SessionRecord
 from base.telemetry import build_pipeline
+from base.telemetry.process_logging import init_gateway_process
 from services.agent_runner.page_server import resources
 from services.agent_runner.page_server.config import PageServerConfig
 

@@ -211,7 +211,7 @@ class RootHealthRounds:
         if self._tasks is None:
             raise RuntimeError("root health rounds require the participant task group")
         from base.log import logger
-        from base.log.process import init_gateway_process
+        from base.telemetry.process_logging import init_gateway_process
 
         try:
             init_gateway_process(

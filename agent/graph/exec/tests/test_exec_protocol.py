@@ -157,7 +157,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
     serialization cost in the durable event stream."""
     from base import telemetry
     from base.log import logger
-    from base.log.process import add_event_sink
+    from base.telemetry.process_logging import add_event_sink
 
     events_before = len(_exec_envelope_events())
     pipeline = telemetry.build_pipeline(

@@ -43,11 +43,11 @@ from base.host.env.agent_slices import ModelOverrides
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
-from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from base.telemetry import build_pipeline
+from base.telemetry.process_logging import init_gateway_process
 from services.derived.labeler.config import LabelerConfig
 from services.derived.labeler.labeler import generate_label_async
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile

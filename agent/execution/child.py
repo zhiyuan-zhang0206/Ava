@@ -241,7 +241,7 @@ def _init_logger(
 
     init_subprocess_logger(agent_id=agent_id)
     try:
-        from base.log.process import add_event_sink
+        from base.telemetry.process_logging import add_event_sink
 
         add_event_sink(
             process="agent-exec",

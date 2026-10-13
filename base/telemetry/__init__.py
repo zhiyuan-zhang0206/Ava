@@ -6,11 +6,12 @@ The door re-exports the emitter's API (`base/telemetry/emitter.py`), the single
 entry point for every event in every process. The other members are imported
 directly: `otlp/` (the OTLP export backend and its doc nodes), `tracing` and
 `trace_mirror` (span recording and the sidecar mirror's disk guards), `metrics/`
-(metric registries, aggregates, Grafana dashboard supply), `loki_index_labels`
+(metric registries, aggregates), `loki_index_labels`
 (Loki selectors), `observability`,
 `lgtm_local` and `station_endpoint` (observability identity and endpoints),
-`alerts` and `alerts_copy` (alert ingest and its IM copy), and `audit_events`
-(the audit side of the event stream).
+`alerts` and `alerts_copy` (alert ingest and its IM copy), `audit_events`
+(the audit side of the event stream), and `process_logging` (the loguru adapter into
+the event pipeline and the gateway/CLI logging entry points).
 
 This init intentionally pulls nothing beyond the emitter's own chain (events
 contract + observability) and the docstring-only otlp subpackage init. Mirror

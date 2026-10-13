@@ -24,7 +24,7 @@ from base.agents.impersonation._store import lock_lease
 from base.agents.impersonation.history import append, export_handoff
 from base.telemetry import Event, event_id, event_line, event_line_digest
 from base.telemetry.audit_events import audit_event_uid, record_audit
-from base.telemetry.serialization import event_payload
+from base.telemetry.delivery.serialization import event_payload
 
 # Cap on one lease's entries; reaching it fails capture rather than dropping a
 # tail (about 1280 times the measured 78-event session maximum).

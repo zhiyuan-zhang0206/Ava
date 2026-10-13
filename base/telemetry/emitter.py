@@ -53,8 +53,8 @@ from base.telemetry.delivery.receipts import (
     Event,
     Level,
 )
+from base.telemetry.delivery.serialization import event_line, event_line_digest, event_payload
 from base.telemetry.observability import cluster_label
-from base.telemetry.serialization import event_line, event_line_digest, event_payload
 
 __all__ = [
     "Category",
@@ -238,7 +238,7 @@ _jsonl_failures = 0
 
 # Loguru extra key marking the emitter's own diagnostics. Records carrying it
 # are filtered OUT of the emitter adapter's sink (see
-# `base.log.process.add_event_sink`) so they reach stderr / JSONL file sinks only
+# `base.telemetry.process_logging.add_event_sink`) so they reach stderr / JSONL file sinks only
 # and never re-enter this pipeline — a mirror-down process would otherwise loop
 # failure → warning → emit → failure forever.
 _NO_EMITTER = "_no_emitter"
