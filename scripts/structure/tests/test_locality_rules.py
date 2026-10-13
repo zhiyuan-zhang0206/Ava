@@ -298,7 +298,7 @@ def test_an_attribute_of_a_module_level_class_is_not_matched_by_case_folding(
 ) -> None:
     """`Registry` (capital R) must not resolve as a module just because a
     case-folding filesystem (macOS) would make `Registry.py` and the real
-    `registry.py` collide — `_exists_exact` checks the directory listing, not
+    `registry.py` collide — `exists_exact` checks the directory listing, not
     just `Path.is_file()`, so this must hold on macOS and Linux alike."""
     _write(tmp_path, "base/pkg/__init__.py", "x = 1\n")
     _write(tmp_path, "base/pkg/registry.py", "class Registry: pass\n")
@@ -330,18 +330,18 @@ def test_exists_exact_listing_is_refreshed_when_the_directory_changes(
     directory = tmp_path / "base"
     directory.mkdir()
     (directory / "old.py").write_text("x = 1\n", encoding="utf-8")
-    assert locality._exists_exact(directory / "old.py", directory=False)  # fills the cache
+    assert locality.exists_exact(directory / "old.py", directory=False)  # fills the cache
     tick = directory.stat().st_mtime_ns
 
     (directory / "fresh.py").write_text("x = 1\n", encoding="utf-8")
     os.utime(directory, ns=(tick, tick))  # same tick: the cached listing is stale
-    assert not locality._exists_exact(directory / "fresh.py", directory=False)
+    assert not locality.exists_exact(directory / "fresh.py", directory=False)
     locality.reset_caches()
-    assert locality._exists_exact(directory / "fresh.py", directory=False)
+    assert locality.exists_exact(directory / "fresh.py", directory=False)
 
     (directory / "later.py").write_text("x = 1\n", encoding="utf-8")
     os.utime(directory, ns=(tick + 10**9, tick + 10**9))  # a later tick
-    assert locality._exists_exact(directory / "later.py", directory=False)
+    assert locality.exists_exact(directory / "later.py", directory=False)
 
 
 # --- measure: test *directories* are exempt, test-prefixed files are not ----

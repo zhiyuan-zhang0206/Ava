@@ -18,11 +18,11 @@ _REPO = Path(__file__).resolve().parents[3]
 
 def test_procedural_scan_roots_follow_relocated_conventions() -> None:
     expected = _REPO / "docs" / "conventions"
-    assert expected == lint_doc_anchors._DOCS_CONVENTIONS
-    assert expected == lint_doc_symbols._DOCS_CONVENTIONS
+    assert expected == lint_doc_anchors.DOCS_CONVENTIONS
+    assert expected == lint_doc_symbols.DOCS_CONVENTIONS
     assert (
         _REPO / "services" / "supervision" / "roster" / "docs" / "service-roster.md"
-        == lint_doc_roster._SERVICE_ROSTER
+        == lint_doc_roster.SERVICE_ROSTER
     )
 
 

@@ -25,7 +25,7 @@ def _hard_exit(repo_root: str) -> None:
     from scripts.post_deploy_visual import check as module
 
     module.HARD_EXIT_DELAY_SECONDS = 1
-    signal.signal(signal.SIGALRM, module._budget_expired)
+    signal.signal(signal.SIGALRM, module.budget_expired)
     signal.alarm(1)
     try:
         time.sleep(3600)
@@ -35,7 +35,7 @@ def _hard_exit(repo_root: str) -> None:
 
 def _reap_tree(repo_root: str, pidfile: str) -> None:
     sys.path.insert(0, repo_root)
-    from scripts.post_deploy_visual.check import _kill_descendants
+    from scripts.post_deploy_visual.check import kill_descendants
 
     driver = subprocess.Popen(  # noqa: S603 - fixed interpreter running this file
         [sys.executable, __file__, "driver", pidfile]
@@ -44,7 +44,7 @@ def _reap_tree(repo_root: str, pidfile: str) -> None:
     while not Path(pidfile).exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert Path(pidfile).exists(), "grandchild never reported its pid"
-    _kill_descendants()
+    kill_descendants()
     driver.wait(timeout=5)
 
 

@@ -58,7 +58,7 @@ if __name__ == "__main__":
 from services.supervision.roster import build_services
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_SERVICE_ROSTER = _REPO_ROOT / "services" / "supervision" / "roster" / "docs" / "service-roster.md"
+SERVICE_ROSTER = _REPO_ROOT / "services" / "supervision" / "roster" / "docs" / "service-roster.md"
 
 _SENTINEL = "<!-- lint:roster-table -->"
 
@@ -110,13 +110,13 @@ def check() -> int:
     """Compare the parsed roster against build_services(); return 0/1 exit code."""
     registered = {spec.session for spec in build_services()}
 
-    text = _SERVICE_ROSTER.read_text(encoding="utf-8")
+    text = SERVICE_ROSTER.read_text(encoding="utf-8")
     try:
         parsed = parse_roster(text)
     except RosterSentinelMissingError:
         print(
             f"roster lint failed: sentinel {_SENTINEL!r} not found in "
-            f"{_SERVICE_ROSTER.name} — place it on its own line "
+            f"{SERVICE_ROSTER.name} — place it on its own line "
             f"immediately above the roster table.",
             file=sys.stderr,
         )
@@ -160,9 +160,9 @@ _HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
 # healthchecks overview — 2026-08-30 split); the modules it lists live
 # directly in `services/supervision/healthchecks/`.
 _HEALTHCHECK_DIR = _REPO_ROOT / "services" / "supervision" / "healthchecks"
-_HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "docs" / "check-roster" / "check-roster.ava.okf.md"
+HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "docs" / "check-roster" / "check-roster.ava.okf.md"
 
-_DIAGNOSTIC_PROBES = (
+DIAGNOSTIC_PROBES = (
     _REPO_ROOT / "services" / "supervision" / "ava_root_glue" / "diagnostic_probes.py"
 )
 
@@ -174,7 +174,7 @@ def diagnostic_healthchecks() -> set[str]:
     checking documentation must not probe a host or load gateway-only clients.
     """
     names: set[str] = set()
-    tree = ast.parse(_DIAGNOSTIC_PROBES.read_text(encoding="utf-8"))
+    tree = ast.parse(DIAGNOSTIC_PROBES.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom) or node.module is None:
             continue
@@ -233,12 +233,12 @@ def check_healthcheck_roster() -> int:
     """Assert set equality between the roster table, the module directory, and
     the ServiceSpec + diagnostic registrations; return 0/1 exit code."""
     try:
-        text = _HEALTHCHECK_ROSTER.read_text(encoding="utf-8")
+        text = HEALTHCHECK_ROSTER.read_text(encoding="utf-8")
         parsed = parse_healthcheck_roster(text)
     except RosterSentinelMissingError:
         print(
             f"healthcheck roster lint failed: sentinel {_HEALTHCHECK_SENTINEL!r} not found "
-            f"in {_HEALTHCHECK_ROSTER.name} — place it on its own line immediately above "
+            f"in {HEALTHCHECK_ROSTER.name} — place it on its own line immediately above "
             f"the roster table.",
             file=sys.stderr,
         )

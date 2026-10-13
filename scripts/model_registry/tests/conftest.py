@@ -14,7 +14,7 @@ from scripts.model_registry import check_model_updates
 @pytest.fixture
 def bare_tracker(monkeypatch: pytest.MonkeyPatch) -> Any:
     """The tracker script module with its provider-reply DoH cache emptied for the test."""
-    monkeypatch.setattr(check_model_updates, "_doh_cache", {})
+    monkeypatch.setattr(check_model_updates, "doh_cache", {})
     return check_model_updates
 
 

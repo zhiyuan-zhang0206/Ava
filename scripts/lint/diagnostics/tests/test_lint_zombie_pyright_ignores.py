@@ -154,7 +154,7 @@ def test_check_rejects_invalid_rule(capsys: pytest.CaptureFixture[str]) -> None:
 )
 def test_stateful_modes_are_retired(arguments: list[str]) -> None:
     with pytest.raises(SystemExit):
-        gate._build_parser().parse_args(arguments)
+        gate.build_parser().parse_args(arguments)
 
 
 def test_docstring_lookalike_is_not_scanned() -> None:
@@ -211,7 +211,7 @@ def test_verify_out_of_repo_file_runs_cleanly(
     of dying on the repo-relative prefix computation."""
     outside = tmp_path / "elsewhere.py"
     outside.write_text("value = 1\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
+    monkeypatch.setattr(gate, "pyright_errors", _no_pyright_errors)
     assert gate.main(["--verify", str(outside)]) == 0
     assert "elsewhere.py" in capsys.readouterr().out
 
@@ -223,7 +223,7 @@ def test_verify_non_utf8_file_is_skipped(tmp_path: Path, monkeypatch: pytest.Mon
     bad = tmp_path / "agent" / "bad.py"
     bad.parent.mkdir()
     bad.write_bytes(b"\xff\xfe\x00bad")
-    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
+    monkeypatch.setattr(gate, "pyright_errors", _no_pyright_errors)
     assert gate.main(["--verify", str(bad)]) == 0
 
 
@@ -236,7 +236,7 @@ def test_verify_dangling_symlink_is_skipped(
     link = tmp_path / "agent" / "dangling.py"
     link.parent.mkdir()
     link.symlink_to(tmp_path / "agent" / "missing.py")
-    monkeypatch.setattr(gate, "_pyright_errors", _no_pyright_errors)
+    monkeypatch.setattr(gate, "pyright_errors", _no_pyright_errors)
     assert gate.main(["--verify", str(link)]) == 0
 
 
@@ -268,7 +268,7 @@ def test_verify_multiline_call_rejects_load_bearing_rule_at_call_line(
             errors.add((1, "reportUnknownArgumentType"))
         return frozenset(errors)
 
-    monkeypatch.setattr(gate, "_pyright_errors", fake_pyright_errors)
+    monkeypatch.setattr(gate, "pyright_errors", fake_pyright_errors)
 
     verification = gate.verify_file(path, candidates)
     gate.strip_file(path, verification.certified)
@@ -299,7 +299,7 @@ def test_verify_single_line_still_rejects_load_bearing_rule(
             return frozenset()
         return frozenset({(1, "reportUnknownArgumentType")})
 
-    monkeypatch.setattr(gate, "_pyright_errors", fake_pyright_errors)
+    monkeypatch.setattr(gate, "pyright_errors", fake_pyright_errors)
 
     verification = gate.verify_file(path, frozenset({candidate}))
 
@@ -322,7 +322,7 @@ def test_verify_multiline_call_strips_all_warning_rules(
     def no_pyright_errors(_path: Path) -> frozenset[tuple[int, str]]:
         return frozenset()
 
-    monkeypatch.setattr(gate, "_pyright_errors", no_pyright_errors)
+    monkeypatch.setattr(gate, "pyright_errors", no_pyright_errors)
 
     verification = gate.verify_file(path, candidates)
     gate.strip_file(path, verification.certified)

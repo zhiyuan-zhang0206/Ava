@@ -23,7 +23,7 @@ from urllib.parse import quote
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
+TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
 # P2 ruling (2026-09-02): the branch-protection admission gate is the three
 # suite aggregators. Amended 2026-09-13 (task #3207): the docs-only gate
 # "doc lints (pre-commit family)" joined the admission set once the docs-only
@@ -204,7 +204,7 @@ def _audit(repo: str, branch: str) -> list[str]:
     if not branch:
         raise ValueError("--branch must not be empty")
 
-    trunk_text = _TRUNK_FILE.read_text()
+    trunk_text = TRUNK_FILE.read_text()
     declaration_findings = trunk_gate_findings(trunk_text)
     if declaration_findings:
         return declaration_findings

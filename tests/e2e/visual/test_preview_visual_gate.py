@@ -22,7 +22,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser
 
-from scripts.post_deploy_visual.check import _expected_capture_names
+from scripts.post_deploy_visual.check import expected_capture_names
 from scripts.post_deploy_visual.matrix import golden_capture_path, load_ignore_registry, run_matrix
 from tests.e2e._ports import FRONTEND_URL
 
@@ -81,7 +81,7 @@ def _mint_goldens(
         f"broken run: {structural}"
     )
     present = {path.name for path in captures.glob("*-current-[12].png")}
-    missing = sorted(_expected_capture_names() - present)
+    missing = sorted(expected_capture_names() - present)
     assert not missing, f"preview visual gate: incomplete capture set, missing {missing}"
     captures_dir = golden_root / "captures"
     captures_dir.mkdir(parents=True, exist_ok=True)

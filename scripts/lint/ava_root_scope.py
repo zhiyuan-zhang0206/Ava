@@ -148,7 +148,7 @@ _COMPILED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 Violation = tuple[int, str, str]  # (lineno, symbol, line_stripped)
 
 
-def _iter_files(targets: list[Path]) -> list[Path]:
+def iter_files(targets: list[Path]) -> list[Path]:
     """Expand targets into files; directories are walked recursively."""
     files: list[Path] = []
     for target in targets:
@@ -246,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     targets = [Path(arg).resolve() for arg in argv] if argv else [_REPO_ROOT / _DEFAULT_TARGET]
     total = 0
-    for path in _iter_files(targets):
+    for path in iter_files(targets):
         if lint_common.is_repo_test_file(path, _REPO_ROOT):
             continue
         for lineno, symbol, content in scan_file(path):
