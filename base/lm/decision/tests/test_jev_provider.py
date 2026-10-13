@@ -19,7 +19,7 @@ from base.lm.catalog.decide.types import (
     YesNo,
 )
 from base.lm.decision.call import decide
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 _MODEL = "jev-1.13.0"
 _QUESTIONS = {

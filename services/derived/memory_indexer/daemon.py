@@ -42,10 +42,10 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.deploy.maintenance import admission
 from base.host.exit_codes import hard_exit as _hard_exit
-from base.lm.plugin_providers import build_model_catalog
 from base.log import prepare_process_logging
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.packages.plugin_providers import build_model_catalog
 from base.paths import ava_home, gateway_memory_dir
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.pipeline_build import build_pipeline

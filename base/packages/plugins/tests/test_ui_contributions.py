@@ -13,8 +13,8 @@ from typing import Any, cast
 import pytest
 
 from base.packages.plugins import manifest as pm
-from base.packages.plugins import ui_contributions as ui
 from base.packages.plugins.manifest import ManifestError
+from base.packages.plugins.surface import ui_contributions as ui
 
 
 def _ui(**contributions: object) -> dict[str, object]:

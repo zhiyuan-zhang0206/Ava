@@ -32,7 +32,7 @@ import ava_builtins.plugins as shipped_plugins
 from base.db import Database
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
-from base.packages.plugins.inspector import DuplicateInspectWidget, InspectWidgetSpec
+from base.packages.plugins.surface.inspector import DuplicateInspectWidget, InspectWidgetSpec
 from gateway.inspect import _plugin_widgets
 from gateway.inspect.router import router
 
@@ -292,7 +292,7 @@ def _widget_source(widget_id: str) -> str:
     """An `inspector.py` body declaring one taskList widget."""
     return (
         "from base.packages.plugins.extensions import PluginContributions\n"
-        "from base.packages.plugins.inspector import InspectWidgetSpec\n"
+        "from base.packages.plugins.surface.inspector import InspectWidgetSpec\n"
         f"_W = InspectWidgetSpec(id={widget_id!r}, kind='taskList', order=50)\n"
         "WIDGETS = (_W,)\n"
         "def contribute():\n"

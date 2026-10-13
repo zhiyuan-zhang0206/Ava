@@ -29,7 +29,7 @@ from ava.sdk_surface.settings import agent_setting
 from base import telemetry
 from base.config import settings
 from base.db import Database
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from base.telemetry.otlp.tests.external_flush import paused_otlp_record as paused_otlp_record
 from tests.factories.external_attachment import HANDSHAKE_BOUND_S as _HANDSHAKE_BOUND_S
 from tests.factories.external_attachment import ExampleMessagesPlugin, ExamplePlugin, ExampleState

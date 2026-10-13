@@ -76,7 +76,7 @@ from base.config.service_read import ConfigAuthority
 from base.events.live.bus import EventBus
 from base.host.net.auth import cookie_name
 from base.host.system.cron import register_os_cron
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from gateway.agents import launch_retry as agents_launch_retry_router
 from gateway.agents import lifecycle as agents_lifecycle_router
 from gateway.agents import notices as notices_router

@@ -24,7 +24,7 @@ from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
 from base.host.env import runtime_config as rt
 from base.host.net.auth import bearer_header
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_face import plugin_bootstrap_config
 from gateway.app import app
 from tests.components.agent.test_maintenance import WHEN

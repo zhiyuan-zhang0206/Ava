@@ -98,9 +98,9 @@ from base.db.code_version_gate import ProcessDbGate  # noqa: E402
 from base.deploy.maintenance import admission  # noqa: E402
 from base.lm.catalog import ModelCatalog  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
-from base.lm.plugin_providers import build_model_catalog  # noqa: E402
 from base.native_process.code_version import CodeVersion  # noqa: E402
 from base.native_process.loaded_commit import LoadedCommit  # noqa: E402
+from base.packages.plugin_providers import build_model_catalog  # noqa: E402
 from base.telemetry import process_name  # noqa: E402
 
 _DOCKERENV = Path("/.dockerenv")

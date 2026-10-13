@@ -10,9 +10,9 @@ plugins: `base/lm/docs/model-providers-as-plugins.md`.
                 `BuildContext`, `ProviderContribution`).
 - `catalog`   — `ModelCatalog`, the immutable value of models, bindings, stop
                 vocabularies and prices, and the `CatalogBuilder` that makes one.
-- `plugin_providers` — the base-layer loader importing every enabled
-                plugin's `provider.py` once per process into the process's
-                catalog (`model_catalog()`).
+- the loader that imports every enabled plugin's `provider.py` into the process's
+                catalog is `base/packages/plugin_providers.py` (`build_model_catalog()`):
+                `lm` is below the plugin machinery and never imports it.
 - `pricing`   — per-model rate table + `tally_tokens` / `cost_usd`.
 - `billing`   — one trace-safe `ava.billing.*` span per completed provider call.
 - `reasoning` — `to_canonical_reasoning`: fold each provider's reasoning block

@@ -26,7 +26,7 @@ from base.packages.plugins.data_registry import (
     load_declaration,
 )
 from base.packages.plugins.extensions import PluginContributions
-from base.packages.plugins.inspector import InspectWidgetSpec
+from base.packages.plugins.surface.inspector import InspectWidgetSpec
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 

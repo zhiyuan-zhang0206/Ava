@@ -732,7 +732,7 @@ def test_empty_or_failed_related_run_stays_failed(
         ("services/entrypoints/gate/static/login.html", "src/lib/transport/gate-login.test.ts"),
         ("tests/fixtures/events/chat/chat_delta.json", "src/lib/contracts/event-fixtures.test.ts"),
         (
-            "base/packages/plugins/ui_contributions.py",
+            "base/packages/plugins/surface/ui_contributions.py",
             "src/components/plugins/plugin-nav-icon.test.ts",
         ),
         ("ui/app/app-ui/locales/en.js", "src/app/app-ui-locale.test.ts"),

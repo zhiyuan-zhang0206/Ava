@@ -36,8 +36,8 @@ from ava import mcps
 from ava.sdk_surface import agent_identity, sdk_disable
 from base.config import FIELD_INFOS, settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import build_model_catalog
 from base.packages.extensions import install_registry
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import skills_dir
 from base.telemetry import audit_events

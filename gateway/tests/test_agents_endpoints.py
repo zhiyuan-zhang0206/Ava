@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from gateway.app import app
 from gateway.http.middleware.cors import cors_allowed_origins
 from tests.fixtures.gateway_config import spawn_via_http

@@ -376,7 +376,7 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
 @router.get("/api/agents/{agent_id}/inspect/widgets")
 async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[InspectWidgetResult]:
     """The agent's plugin widgets for the inspector panel — the extension
-    surface where enabled plugins embed widgets (see `base/packages/plugins/inspector.py`;
+    surface where enabled plugins embed widgets (see `base/packages/plugins/surface/inspector.py`;
     registration mirrors the plugin-metric system).
 
     Builds the widget registry in process (shipped builtin plugins'

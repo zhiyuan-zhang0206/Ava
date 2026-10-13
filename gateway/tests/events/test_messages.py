@@ -411,7 +411,7 @@ class TestMultimodalMessage:
         from dataclasses import replace
         from pathlib import Path
 
-        from base.lm.plugin_providers import build_model_catalog
+        from base.packages.plugin_providers import build_model_catalog
 
         model = "deepseek-vision-fixture"
         base = build_model_catalog().models["deepseek-flash"]

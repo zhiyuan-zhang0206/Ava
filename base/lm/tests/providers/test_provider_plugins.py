@@ -3,7 +3,7 @@
 A fixture plugin directory is written into the session's tmp AVA_HOME
 (tests/fixtures/env_bootstrap.py redirects AVA_HOME), so these tests exercise the real
 discovery path (base/plugins_config.discover_plugins) and the real loader
-(base/lm/plugin_providers). The provider-plugin tests run against an explicit catalog built after writing fixture declarations.
+(base/packages/plugin_providers). The provider-plugin tests run against an explicit catalog built after writing fixture declarations.
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ from base.lm.factory import (
     provider_key_of_model,
     validate_model_config,
 )
-from base.lm.plugin_providers import build_model_catalog
 from base.lm.provider_api import PriceRates, ProviderBinding, ProviderContribution
 from base.lm.registry import ModelSpec, ModelTuning
 from base.lm.tests.providers.provider_plugin_support import provider_plugin as provider_plugin
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins import enable_config
 from tests.fixtures.model_catalog import AddBindings
 

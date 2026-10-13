@@ -3,7 +3,7 @@
 
 `check_sources` loads the enabled provider plugins in-process first, so
 "already registered" and same-series supersession answer for the roster Ava
-actually runs (see `base/lm/plugin_providers.py`).
+actually runs (see `base/packages/plugin_providers.py`).
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from urllib3.poolmanager import PoolManager
 
 from base.host.env.runtime_config import read_env_aliases
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
-from base.lm.plugin_providers import build_model_catalog
 from base.lm.registry import ModelSpec
+from base.packages.plugin_providers import build_model_catalog
 from base.paths import ava_home
 
 _USER_AGENT = "Ava model-update tracker"

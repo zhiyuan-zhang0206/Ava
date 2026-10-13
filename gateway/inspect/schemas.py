@@ -373,7 +373,7 @@ class InspectWidgetResult(BaseModel):
     GET /api/agents/{id}/inspect/widgets.
 
     The resolved twin of a registered `InspectWidgetSpec`
-    (`base/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
+    (`base/packages/plugins/surface/inspector.py`): `plugin` + `id` name the registration,
     `kind` selects the console renderer (a closed set; an unknown kind is
     skipped by the console), and the payload field the kind reads (`tasks`)
     carries the kernel-resolved rows. A widget with an empty payload is

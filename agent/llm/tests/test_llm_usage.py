@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage
 
 from agent.llm.usage import log_llm_usage
 from base import config
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 
 @pytest.fixture(scope="module", autouse=True)

@@ -30,7 +30,7 @@ from types import ModuleType
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.gate import check_manifest
-from base.packages.plugins.inspector import DuplicateInspectWidget
+from base.packages.plugins.surface.inspector import DuplicateInspectWidget
 from base.telemetry.metrics.plugin_metrics import DuplicateMetric, validate_spec_sql
 
 # The manifest key each data face owns (key == attribution surface id): a face is gated only on its
