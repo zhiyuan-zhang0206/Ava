@@ -15,7 +15,7 @@ from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
 
-__all__ = ["prune", "record"]
+__all__ = ["prune", "record", "write_baseline"]
 
 
 def _within(path: str, targets: list[str]) -> bool:
@@ -33,9 +33,9 @@ def _copy(table: DebtTable) -> DebtTable:
     return {code: dict(rows) for code, rows in table.items()}
 
 
-def _write(analysis: Analysis, owner: str, table: DebtTable) -> str | None:
+def write_baseline(root: Path, owner: str, table: DebtTable) -> str | None:
     """Rewrite the `[debt]` tables of `owner`'s manifest; the path written, or None if unchanged."""
-    path = analysis.universe.root / manifest_path(owner)
+    path = root / manifest_path(owner)
     before = path.read_text(encoding="utf-8") if path.exists() else ""
     after = set_debt(before, table)
     if after == before:
@@ -89,7 +89,7 @@ def record(
     written: list[str] = []
     created: list[str] = []
     for owner, table in sorted(tables.items()):
-        if path := _write(analysis, owner, table):
+        if path := write_baseline(root, owner, table):
             written.append(path)
             if owner not in analysis.manifests:
                 created.append(path)
@@ -123,7 +123,7 @@ def prune(root: Path, jobs: int | None = None) -> list[str]:
                     key: min(n, len(found.get((owner, code, key), ()))) for key, n in rows.items()
                 }
             table[code] = {key: n for key, n in kept.items() if n > 0}
-        if _write(analysis, owner, table):
+        if write_baseline(root, owner, table):
             lines.append(
                 f"{manifest_path(owner)}: {total(manifest.debt)} recorded debts lowered to {total(table)}"
             )
