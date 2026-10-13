@@ -40,7 +40,11 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     child processes (`base/host/tests/test_proc.py`), whose sessions are built for
     the case; a lifecycle test that wants the refusal patches this back.
     """
-    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: None)
+    # Imported here, not at module level: this is a session plugin, and the visibility test
+    # needs it to load without pulling base in (`tests/fixtures/unit/tests/test_visibility.py`).
+    from base.host import proc
+
+    monkeypatch.setattr(proc, "hosting_exec_domain", lambda: None)
 
 
 @pytest.fixture(autouse=True)
@@ -242,8 +246,10 @@ def _guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _noop_capture(schedule_id: int, lines: int) -> None:
         return None
 
-    monkeypatch.setattr("gateway.schedules.session_control.wait_consumed", _noop_wait)
-    monkeypatch.setattr("gateway.schedules.session_control.capture", _noop_capture)
+    from gateway.schedules import session_control
+
+    monkeypatch.setattr(session_control, "wait_consumed", _noop_wait)
+    monkeypatch.setattr(session_control, "capture", _noop_capture)
 
 
 @pytest.fixture
@@ -289,7 +295,9 @@ def homes_get_their_own_ports(
 
     The patch covers this process only: a subprocess that births a home would take
     the real table (no test does)."""
-    monkeypatch.setattr("base.cluster.new_home_ports", lambda: dict(session_ports))
+    from base import cluster
+
+    monkeypatch.setattr(cluster, "new_home_ports", lambda: dict(session_ports))
 
 
 # ── Exec guard: no test replaces the pytest process image ──

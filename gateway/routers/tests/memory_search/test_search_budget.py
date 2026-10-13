@@ -76,6 +76,9 @@ class _Pool:
         monkeypatch.setattr(memory_router, "gateway_memory_dir", partial(_memory_root, root))
         _patch_provider(monkeypatch, _StubProvider)
         monkeypatch.setattr(settings.services, "memory_rerank_candidates", _CANDIDATES)
+        # The handler reads its gate from `app.state`, which only the gateway lifespan fills; a
+        # fresh one per test (a semaphore binds to the loop of its first contended acquire).
+        monkeypatch.setattr(app.state, "memory_search_gate", asyncio.Semaphore(2), raising=False)
 
 
 @pytest.fixture
