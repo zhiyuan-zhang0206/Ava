@@ -86,7 +86,7 @@ class FakeDecide:
 class FakeChat:
     """A chat model double: records the messages and answers with `reply`."""
 
-    def __init__(self, reply: str = "Yes, go ahead.") -> None:
+    def __init__(self, reply: str = '["Yes, go ahead.", "Wait, explain the plan first."]') -> None:
         self.reply = reply
         self.error: Exception | None = None
         self.built: list[str] = []

@@ -7375,14 +7375,14 @@ export interface components {
         };
         /**
          * ReplySuggestionResponse
-         * @description A drafted reply, or the reason there is none.
+         * @description Drafted replies, or the reason there are none.
          *
-         *     `suggestion` is set exactly when `reason` is None. Every non-error outcome is a 200: a
+         *     `suggestions` is nonempty exactly when `reason` is None. Every non-error outcome is a 200: a
          *     missing suggestion is an ordinary result, never a failure of the request.
          */
         ReplySuggestionResponse: {
-            /** Suggestion */
-            suggestion?: string | null;
+            /** Suggestions */
+            suggestions: string[];
             /** Reason */
             reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_awaiting_reply" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
         };

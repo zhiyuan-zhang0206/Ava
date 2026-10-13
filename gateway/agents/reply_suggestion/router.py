@@ -27,4 +27,8 @@ async def post_reply_suggestion(agent_id: int, request: Request) -> ReplySuggest
     service: ReplySuggestionService = request.app.state.reply_suggestions
     result = await run_until_disconnect(service.suggest(agent_id), request.is_disconnected)
     # A disconnected client never reads this body.
-    return result if result is not None else ReplySuggestionResponse(reason="client_disconnected")
+    return (
+        result
+        if result is not None
+        else ReplySuggestionResponse(suggestions=[], reason="client_disconnected")
+    )

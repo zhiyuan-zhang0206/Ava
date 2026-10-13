@@ -37,28 +37,28 @@ def client_for(service: StubService) -> TestClient:
 
 
 def test_the_route_returns_the_services_suggestion() -> None:
-    service = StubService(ReplySuggestionResponse(suggestion="Yes, go ahead."))
+    service = StubService(ReplySuggestionResponse(suggestions=["Yes, go ahead.", "Not yet."]))
 
     response = client_for(service).post("/api/agents/7/reply-suggestion")
 
     assert response.status_code == 200
-    assert response.json() == {"suggestion": "Yes, go ahead.", "reason": None}
+    assert response.json() == {"suggestions": ["Yes, go ahead.", "Not yet."], "reason": None}
     assert service.agent_ids == [7]
 
 
 def test_the_route_reports_why_there_is_no_suggestion_as_a_200() -> None:
-    service = StubService(ReplySuggestionResponse(reason="not_awaiting_reply"))
+    service = StubService(ReplySuggestionResponse(suggestions=[], reason="not_awaiting_reply"))
 
     response = client_for(service).post("/api/agents/7/reply-suggestion")
 
     assert response.status_code == 200
-    assert response.json() == {"suggestion": None, "reason": "not_awaiting_reply"}
+    assert response.json() == {"suggestions": [], "reason": "not_awaiting_reply"}
 
 
 def test_a_non_integer_agent_id_is_rejected() -> None:
-    response = client_for(StubService(ReplySuggestionResponse())).post(
-        "/api/agents/abc/reply-suggestion"
-    )
+    response = client_for(
+        StubService(ReplySuggestionResponse(suggestions=[], reason="disabled"))
+    ).post("/api/agents/abc/reply-suggestion")
 
     assert response.status_code == 422
 

@@ -15271,16 +15271,15 @@
       },
       "ReplySuggestionResponse": {
         "properties": {
-          "suggestion": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Suggestion"
+          "suggestions": {
+            "items": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Suggestions"
           },
           "reason": {
             "anyOf": [
@@ -15305,8 +15304,11 @@
           }
         },
         "type": "object",
+        "required": [
+          "suggestions"
+        ],
         "title": "ReplySuggestionResponse",
-        "description": "A drafted reply, or the reason there is none.\n\n`suggestion` is set exactly when `reason` is None. Every non-error outcome is a 200: a\nmissing suggestion is an ordinary result, never a failure of the request."
+        "description": "Drafted replies, or the reason there are none.\n\n`suggestions` is nonempty exactly when `reason` is None. Every non-error outcome is a 200: a\nmissing suggestion is an ordinary result, never a failure of the request."
       },
       "ResolveNoticeIn": {
         "properties": {

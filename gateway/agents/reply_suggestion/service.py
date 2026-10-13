@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from pydantic import ValidationError
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
@@ -28,7 +29,12 @@ from base.lm.errors import ErrorClass, classify_error, normalize_provider_transp
 from base.lm.usage import log_usage_from_message
 from base.log import logger
 from gateway.agents.reply_suggestion.excerpt import ConversationExcerpt, build_excerpt
-from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse, SuggestionReason
+from gateway.agents.reply_suggestion.schemas import (
+    MAX_REPLY_SUGGESTIONS,
+    DraftReplies,
+    ReplySuggestionResponse,
+    SuggestionReason,
+)
 
 GATE_USAGE_KIND = "reply_suggestion_gate"
 DRAFT_USAGE_KIND = "reply_suggestion"
@@ -37,8 +43,6 @@ DRAFT_USAGE_KIND = "reply_suggestion"
 # arrived within these is not worth showing.
 GATE_TIMEOUT_S = 15.0
 DRAFT_TIMEOUT_S = 20.0
-# A longer draft is not a "short reply" any more; it is rejected, never silently cut.
-MAX_SUGGESTION_CHARS = 500
 # Completed results kept for repeated requests (several tabs, a re-focused page).
 CACHE_ENTRIES = 512
 
@@ -62,13 +66,17 @@ GATE_QUESTION = YesNo(
 DRAFT_INSTRUCTION = (
     "You draft the reply a user is about to send to an AI agent. The excerpt holds the user's "
     "latest message and what the agent said last.\n"
-    "Write the one reply the user is most likely to send next, in the user's own voice: an "
-    "answer, a decision, a confirmation or an instruction.\n"
+    "Offer distinct possible replies in the user's own voice: answers, decisions, "
+    "confirmations or instructions. The user chooses a candidate; do not choose for them.\n"
     "Rules:\n"
-    "- Output only the reply text, with no quotes, labels or explanation.\n"
+    f"- Output only a JSON array of 1 to {MAX_REPLY_SUGGESTIONS} reply strings, with no "
+    "Markdown fences, labels or explanation. Prefer 2 or 3 useful alternatives.\n"
     "- Write in the language the user writes in.\n"
-    "- Keep it short: one or two sentences at most.\n"
-    "- If the agent offered options, pick the most plausible one.\n"
+    "- Keep each reply short: one or two sentences at most.\n"
+    "- If the agent offered A/B/C or other explicit options, offer a reply for each "
+    "option in its original order, up to the array limit. Preserve their meanings.\n"
+    "- For a confirmation, include both agreement and refusal or a request to adjust.\n"
+    "- Do not invent information only the user would know; offer clarification if needed.\n"
     "- Do not ask the user's questions back to the agent."
 )
 
@@ -235,17 +243,19 @@ class ReplySuggestionService:
             for_agent_id=agent_id,
             catalog=self._catalog,
         )
-        text = extract_text(response).strip()
-        if not text or len(text) > MAX_SUGGESTION_CHARS:
+        text = extract_text(response)
+        try:
+            suggestions = DraftReplies.model_validate_json(text).root
+        except ValidationError:
             logger.warning(
-                "reply suggestion draft for agent {agent_id} rejected: {chars} characters",
+                "reply suggestion draft for agent {agent_id} rejected: invalid candidates ({chars} characters)",
                 event="reply_suggestion_draft_rejected",
                 agent_id=agent_id,
                 chars=len(text),
             )
             return _none("invalid_generation")
-        return ReplySuggestionResponse(suggestion=text)
+        return ReplySuggestionResponse(suggestions=suggestions)
 
 
 def _none(reason: SuggestionReason) -> ReplySuggestionResponse:
-    return ReplySuggestionResponse(reason=reason)
+    return ReplySuggestionResponse(suggestions=[], reason=reason)

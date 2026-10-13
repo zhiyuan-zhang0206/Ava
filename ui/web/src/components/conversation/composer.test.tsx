@@ -111,12 +111,12 @@ describe("Composer placeholder", () => {
   it("explains that messaging a terminated agent resurrects it", () => {
     const { rerender } = render(<Composer {...baseProps} mode="idle" />);
     expect(screen.getByTestId("composer-input").getAttribute("placeholder")).toBe(
-      "send a message",
+      "Send a message",
     );
 
     rerender(<Composer {...baseProps} mode="idle" agentTerminated />);
     expect(screen.getByTestId("composer-input").getAttribute("placeholder")).toBe(
-      "send a message to resurrect this agent",
+      "Send a message to resurrect this agent",
     );
   });
 });
@@ -129,15 +129,113 @@ describe("Composer reply suggestion", () => {
     return screen.getByTestId("composer-input") as HTMLTextAreaElement;
   }
 
+  it("browses numbered candidates in the placeholder and sends only the accepted text", async () => {
+    const onSend = vi.fn(() => Promise.resolve(true));
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={["Use A.", "Use B.", "Use C."]} />);
+
+    expect(input().placeholder).toBe("[1/3] Use A.");
+    fireEvent.keyDown(input(), { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[2/3] Use B.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[3/3] Use C.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[3/3] Use C.");
+    expect(input().value).toBe("");
+
+    fireEvent.keyDown(input(), { key: "ArrowRight" });
+    await waitFor(() => expect(input().value).toBe("Use C."));
+    expect(input().selectionStart).toBe("Use C.".length);
+    expect(input().selectionEnd).toBe("Use C.".length);
+    fireEvent.keyDown(input(), { key: "Enter" });
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Use C.", [], expect.any(String)));
+    await waitFor(() => expect(input().value).toBe(""));
+    expect(input().placeholder).toBe("Send a message");
+    expect(fireEvent.keyDown(input(), { key: "ArrowRight" })).toBe(true);
+    expect(input().value).toBe("");
+  });
+
+  it("restores the selected candidate when an accepted or edited draft is cleared", async () => {
+    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    fireEvent.keyDown(input(), { key: "ArrowRight" });
+    await waitFor(() => expect(input().value).toBe("Use B."));
+
+    fireEvent.change(input(), { target: { value: "Use B, with changes." } });
+    fireEvent.change(input(), { target: { value: "" } });
+
+    expect(input().placeholder).toBe("[2/3] Use B.");
+    fireEvent.keyDown(input(), { key: "ArrowUp" });
+    expect(input().placeholder).toBe("[1/3] Use A.");
+  });
+
+  it("keeps the selected candidate after a failed send and shows new candidates after success", async () => {
+    const onSend = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const options = ["Use A.", "Use B."];
+    const { rerender } = render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={options} />);
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    fireEvent.keyDown(input(), { key: "ArrowRight" });
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(input().readOnly).toBe(false));
+    expect(input().value).toBe("Use B.");
+    fireEvent.change(input(), { target: { value: "" } });
+    expect(input().placeholder).toBe("[2/2] Use B.");
+
+    fireEvent.keyDown(input(), { key: "ArrowRight" });
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await waitFor(() => expect(input().value).toBe(""));
+    expect(input().placeholder).toBe("Send a message");
+
+    rerender(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={["Continue.", "Stop here."]} />);
+    expect(input().placeholder).toBe("[1/2] Continue.");
+  });
+
+  it("resets to the first candidate for a new response or another agent", () => {
+    const options = ["Use A.", "Use B."];
+    const { rerender } = render(<Composer {...baseProps} mode="idle" agentId={7} suggestions={options} />);
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    expect(input().placeholder).toBe("[2/2] Use B.");
+
+    rerender(<Composer {...baseProps} mode="idle" agentId={8} suggestions={options} />);
+    expect(input().placeholder).toBe("[1/2] Use A.");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    rerender(<Composer {...baseProps} mode="idle" agentId={8} suggestions={["Explain X.", "Explain Y."]} />);
+    expect(input().placeholder).toBe("[1/2] Explain X.");
+  });
+
+  it.each(["ArrowUp", "ArrowDown", "ArrowRight"])("leaves %s to the input method during composition", (key) => {
+    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B."]} />);
+    expect(fireEvent.keyDown(input(), { key, isComposing: true })).toBe(true);
+    expect(input().placeholder).toBe("[1/2] Use A.");
+    expect(input().value).toBe("");
+  });
+
+  it.each(["ArrowUp", "ArrowDown"])("leaves modified %s and nonempty drafts alone", (key) => {
+    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B."]} />);
+    for (const modifier of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
+      expect(fireEvent.keyDown(input(), { key, ...modifier })).toBe(true);
+      expect(input().placeholder).toBe("[1/2] Use A.");
+    }
+    fireEvent.change(input(), { target: { value: "My reply" } });
+    expect(fireEvent.keyDown(input(), { key })).toBe(true);
+    expect(input().value).toBe("My reply");
+    expect(input().placeholder).toBe("Send a message");
+  });
+
   it("shows the suggestion as the placeholder of the empty input", () => {
-    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
 
     expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
     expect(input().value).toBe("");
   });
 
   it("ArrowRight accepts it: the input holds the text and the caret is at the end", async () => {
-    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
 
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
 
@@ -153,7 +251,7 @@ describe("Composer reply suggestion", () => {
 
   it("an accepted suggestion is an ordinary draft: Enter sends it", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestion={SUGGESTION} />);
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={[SUGGESTION]} />);
 
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     await waitFor(() => {
@@ -167,17 +265,17 @@ describe("Composer reply suggestion", () => {
   });
 
   it("typing hides it, and emptying the input brings it back", () => {
-    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
 
     fireEvent.change(input(), { target: { value: "n" } });
-    expect(input().getAttribute("placeholder")).toBe("send a message");
+    expect(input().getAttribute("placeholder")).toBe("Send a message");
 
     fireEvent.change(input(), { target: { value: "" } });
     expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
   });
 
   it("ArrowRight in a non-empty input moves the caret as usual", () => {
-    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     fireEvent.change(input(), { target: { value: "draft" } });
 
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
@@ -192,7 +290,7 @@ describe("Composer reply suggestion", () => {
     ["Alt", { altKey: true }],
     ["Meta", { metaKey: true }],
   ])("%s+ArrowRight does not accept it", (_name, modifier) => {
-    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
 
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight", ...modifier });
 
@@ -201,7 +299,7 @@ describe("Composer reply suggestion", () => {
   });
 
   it("ArrowRight during IME composition is left to the input method", () => {
-    render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
 
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight", isComposing: true });
 
@@ -219,15 +317,15 @@ describe("Composer reply suggestion", () => {
   });
 
   it("a suggestion that goes away restores the normal placeholder", () => {
-    const { rerender } = render(<Composer {...baseProps} mode="idle" suggestion={SUGGESTION} />);
+    const { rerender } = render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
 
-    rerender(<Composer {...baseProps} mode="idle" suggestion={null} />);
+    rerender(<Composer {...baseProps} mode="idle" suggestions={null} />);
 
-    expect(input().getAttribute("placeholder")).toBe("send a message");
+    expect(input().getAttribute("placeholder")).toBe("Send a message");
   });
 
   it("works while the agent is busy: the user may queue a reply", async () => {
-    render(<Composer {...baseProps} mode="busy" suggestion={SUGGESTION} />);
+    render(<Composer {...baseProps} mode="busy" suggestions={[SUGGESTION]} />);
 
     fireEvent.keyDown(input(), { key: "ArrowRight" });
 
