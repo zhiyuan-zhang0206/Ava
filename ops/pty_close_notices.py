@@ -204,7 +204,7 @@ def _one_per_key(notices: Sequence[ClosureNotice]) -> list[ClosureNotice]:
     return unique
 
 
-def _content(notice: ClosureNotice) -> str:
+def content(notice: ClosureNotice) -> str:
     text = (
         f"Shell session {notice.name!r} (id {notice.session_id}, agent {notice.agent_id}) "
         f"was closed by {notice.reason} on {notice.machine}, "
@@ -232,7 +232,7 @@ def _claim_key(notice: ClosureNotice) -> str:
     return f"closure-notice:{notice.machine}:{notice.dedup_key()}"
 
 
-def _claim_all(cur: psycopg.Cursor, batch: Sequence[ClosureNotice]) -> set[str]:
+def claim_all(cur: psycopg.Cursor, batch: Sequence[ClosureNotice]) -> set[str]:
     """Claim every notice's idempotency key in one statement; the keys this attempt owns.
 
     The whole batch goes in as one multi-row `ON CONFLICT (key) DO NOTHING
@@ -285,7 +285,7 @@ def _write_batch(
     dropped: list[tuple[ClosureNotice, str | None]] = []
     with conn.cursor() as cur:
         cur.execute("SET TRANSACTION READ WRITE")
-        owned = _claim_all(cur, notices)
+        owned = claim_all(cur, notices)
         statuses = _owner_statuses(cur, notices)
         for notice in notices:
             if _claim_key(notice) not in owned:
@@ -295,7 +295,7 @@ def _write_batch(
                 inbound_id, _event = insert_inbound_message_in_transaction(
                     cur,
                     notice.agent_id,
-                    _content(notice),
+                    content(notice),
                     source="system",
                     payload={"closure": notice.as_dict()},
                     provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
