@@ -35,6 +35,8 @@ from typing import cast
 
 import pytest
 
+from cli.commands.data_plane import bringup
+
 # Intentional import-time isolation: pin settings-lite before any project import
 # can construct config from an inherited environment.
 os.environ["AVA_CONFIG_FETCH"] = (
@@ -608,8 +610,8 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     # neither delivery is under test, so keep them independent of this host's
     # home (a scratch dir with no installed unit capability, which
     # api_delivery would otherwise refuse).
-    monkeypatch.setattr("cli.commands.data_plane.bringup.db_delivery", delivery)
-    monkeypatch.setattr("cli.commands.data_plane.bringup.api_delivery", token_delivery)
+    monkeypatch.setattr(bringup, "db_delivery", delivery)
+    monkeypatch.setattr(bringup, "api_delivery", token_delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
     profile = root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"

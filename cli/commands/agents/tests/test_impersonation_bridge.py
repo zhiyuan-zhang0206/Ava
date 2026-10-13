@@ -17,6 +17,7 @@ from uuid import UUID
 
 import pytest
 
+import base.agents.impersonation as agents_impersonation
 from base.agents.impersonation.status import ImpersonationStatus
 from base.cluster.machine import MachineIdentity
 from base.db import Database
@@ -695,7 +696,7 @@ def test_write_heartbeat_stops_at_a_terminal_lease(
     from base.agents import impersonation as leases
 
     beat = Mock()
-    monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
+    monkeypatch.setattr(agents_impersonation, "relay_heartbeat", beat)
     assert (
         relay._write_heartbeat(
             database, LEASE_ID, "relay-token", local_machine=machine_identity.name()

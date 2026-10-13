@@ -17,6 +17,9 @@ from ava.agents import AgentStatus as S
 from base.config import settings
 from base.cluster.machine import MachineIdentity
 from base.native_process.loaded_commit import LoadedCommit
+from schedules import entry
+from base import db
+from base import telemetry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "debt-sweep-daily-schedule.py"
@@ -67,12 +70,12 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     monkeypatch.setattr(module.ava.agents, "resurrect", forbidden)
     monkeypatch.setattr(module.ava.agents, "send_message", forbidden)
     monkeypatch.setattr(module.ava, "loaded_code_image", forbidden)
-    monkeypatch.setattr("schedules.entry.Database", forbidden)
+    monkeypatch.setattr(entry, "Database", forbidden)
     monkeypatch.setattr(module, "fire_slot_once", forbidden)
     monkeypatch.setattr(module, "ava_home", forbidden)
-    monkeypatch.setattr("base.db.connect", forbidden)
-    monkeypatch.setattr("base.db.pool", forbidden)
-    monkeypatch.setattr("base.telemetry.emit", forbidden)
+    monkeypatch.setattr(db, "connect", forbidden)
+    monkeypatch.setattr(db, "pool", forbidden)
+    monkeypatch.setattr(telemetry, "emit", forbidden)
 
     module.main(["--once", "--dry-run", "--repo", str(REPO_ROOT)])
 
@@ -192,7 +195,7 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     monkeypatch.setattr(module, "_run_mechanical_scan", fake_scan)
     monkeypatch.setattr(module, "ensure_worker", ensure_worker)
     monkeypatch.setattr(module, "init_gateway_process", init_gateway_process)
-    monkeypatch.setattr("base.telemetry.emit", record_emit)
+    monkeypatch.setattr(telemetry, "emit", record_emit)
 
     module._fire(
         datetime(2026, 9, 21, 22, 30, tzinfo=UTC),

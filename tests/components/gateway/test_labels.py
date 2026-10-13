@@ -24,7 +24,9 @@ from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
+from base.lm import usage
 from base.lm.catalog import ModelCatalog
+from gateway.agents import router
 from gateway.app import app
 from services.derived.labeler.labeler import _normalize as _normalize_to
 from services.derived.labeler.labeler import generate_label_async
@@ -172,7 +174,7 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
         "build_chat_model",
         lambda _model, **_kwargs: _ResponseLLM(),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("base.lm.usage.log_usage_from_message", _emit)
+    monkeypatch.setattr(usage, "log_usage_from_message", _emit)
 
     assert (
         await generate_label_async(
@@ -625,7 +627,7 @@ class TestPatchThread:
         def refuse(_conn: object, _event: object) -> None:
             raise RuntimeError("audit write failed")
 
-        monkeypatch.setattr("gateway.agents.router.record_audit", refuse)
+        monkeypatch.setattr(router, "record_audit", refuse)
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": "never set"})
         assert resp.status_code == 500

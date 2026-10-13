@@ -16,7 +16,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import resurrect_agent
 from ops.agents.wake import ResurrectTriggerStaleError
-from ops.lifecycle import force_mark_terminated
+from ops.lifecycle import force_mark_terminated, termination
 from ops.lifecycle.tests.resurrection_setup import (
     agents_row,
     hosted_agent,
@@ -51,7 +51,7 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", noop)
+        monkeypatch.setattr(termination, "publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'work', 8765)",
@@ -135,7 +135,7 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", noop)
+        monkeypatch.setattr(termination, "publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -464,7 +464,7 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", noop)
+        monkeypatch.setattr(termination, "publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()

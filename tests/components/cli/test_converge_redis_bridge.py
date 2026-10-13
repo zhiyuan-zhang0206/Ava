@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.dataplane import redis_bridge
 from base.cluster.dataplane.redis_bridge import RedisBridgeEndpoint
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.ports import new_home_ports
@@ -259,7 +260,7 @@ def test_probe_reports_unconfigured_when_registry_record_is_missing(
         return None
 
     command_runtime.machine.set(host="10.64.0.7")
-    monkeypatch.setattr("base.cluster.dataplane.redis_bridge.get_record", _missing_record)
+    monkeypatch.setattr(redis_bridge, "get_record", _missing_record)
 
     status = bridge.probe_redis_bridge(
         tmp_path, machine=command_runtime.machine, config=command_runtime.config

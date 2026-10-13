@@ -14,8 +14,12 @@ from typing import Any
 
 import pytest
 
+import base.agents.impersonation.host_transport as impersonation_host_transport
+import cli.commands.agents.control as agents_control
+import cli.commands.agents.timeline as agents_timeline
 from base.agents import impersonation as control
 from base.agents.context.clients import DatabaseFactory
+from base.agents.impersonation import history
 from base.agents.impersonation import sessions as sessions
 from cli.commands.agents import impersonation as cli
 from cli.database.runtime import CommandRuntime
@@ -48,7 +52,7 @@ def test_timeline_command_dispatches_to_the_timeline_reader(
         calls.append((agent_id, limit, before))
         return 0
 
-    monkeypatch.setattr("cli.commands.agents.timeline.cmd_agents_timeline", timeline)
+    monkeypatch.setattr(agents_timeline, "cmd_agents_timeline", timeline)
     args = build_parser().parse_args(
         ["agents", "timeline", "405", "--limit", "100", "--before", "12.0"]
     )
@@ -73,7 +77,8 @@ def test_request_uses_external_identity_without_delivering_a_credential(
         }
 
     monkeypatch.setattr(
-        "base.agents.impersonation.host_transport.default_control_endpoint",
+        impersonation_host_transport,
+        "default_control_endpoint",
         lambda: "unix:///tmp/codex.sock",
     )
     monkeypatch.setattr(sessions, "request", request)
@@ -327,7 +332,7 @@ def test_release_preserves_summary(
         _private_id,
     )
     monkeypatch.setattr(control, "release", release)
-    monkeypatch.setattr("base.agents.impersonation.history.public_session", _public_session)
+    monkeypatch.setattr(history, "public_session", _public_session)
     assert (
         cli.cmd_impersonate(
             _args(
@@ -452,7 +457,7 @@ def test_send_delivers_as_the_borrowed_agent(
 
     monkeypatch.setattr(sessions, "private_id", _private_id)
     monkeypatch.setattr(control, "require_active", require_active)
-    monkeypatch.setattr("cli.commands.agents.control.send_agent_message", deliver)
+    monkeypatch.setattr(agents_control, "send_agent_message", deliver)
     args = _args(
         "send",
         "0",

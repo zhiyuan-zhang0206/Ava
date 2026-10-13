@@ -26,6 +26,7 @@ from typing import Literal
 import pytest
 import yaml
 
+import cli.database as cli_database
 import cli.main as _main
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
@@ -37,7 +38,8 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.paths import ava_home
 from base.telemetry import EventPipeline
-from cli import parsers
+from cli import parsers, preflight, start_identity, start_intent
+from cli.commands.lifecycle import stop
 from cli.database import OperatorDatabaseFactory, operator_database_factory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 from cli.parsers import build_parser
@@ -164,9 +166,9 @@ def test_main_reuses_only_the_explicit_caller_child_owner(monkeypatch: pytest.Mo
         owners.append(retained_children)
         return 0
 
-    monkeypatch.setattr("cli.start_intent.run_start", dispatched)
-    monkeypatch.setattr("cli.start_identity.require_initialized", _ignoring_retention(lambda: None))
-    monkeypatch.setattr("cli.commands.lifecycle.stop.cmd_stop", stopped)
+    monkeypatch.setattr(start_intent, "run_start", dispatched)
+    monkeypatch.setattr(start_identity, "require_initialized", _ignoring_retention(lambda: None))
+    monkeypatch.setattr(stop, "cmd_stop", stopped)
     shared: list[subprocess.Popen[bytes]] = []
     assert _main.main(["start"], retained_children=shared) == 0
     assert _main.main(["stop", "--yes"], retained_children=shared) == 0
@@ -369,7 +371,7 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
     monkeypatch.setattr(Database, "from_settings", construct)
     monkeypatch.setattr(telemetry, "build_pipeline", build)
     monkeypatch.setattr(parsers, "parse_args", _parsed_args(args))
-    monkeypatch.setattr("cli.preflight.require_own_checkout", _admitted_checkout)
+    monkeypatch.setattr(preflight, "require_own_checkout", _admitted_checkout)
     assert _main.main(["status"]) == result
     if name == "dashboard":
         destination = tmp_path / "lgtm/native/config/provisioning/dashboards/ava-ops-main.json"
@@ -399,7 +401,7 @@ def test_quiet_command_does_not_construct_pipeline(
 
     args = argparse.Namespace(func=quiet)
     monkeypatch.setattr(parsers, "parse_args", _parsed_args(args))
-    monkeypatch.setattr("cli.preflight.require_own_checkout", _admitted_checkout)
+    monkeypatch.setattr(preflight, "require_own_checkout", _admitted_checkout)
     assert _main.main(["status"]) == 0
 
 
@@ -458,7 +460,7 @@ def test_command_close_preserves_original_writer_error_and_primary(
 
     args = argparse.Namespace(func=dispatch)
     monkeypatch.setattr(parsers, "parse_args", _parsed_args(args))
-    monkeypatch.setattr("cli.preflight.require_own_checkout", _admitted_checkout)
+    monkeypatch.setattr(preflight, "require_own_checkout", _admitted_checkout)
     with pytest.raises(ValueError if body_fails else RuntimeError) as caught:
         _main.main(["status"])
     assert caught.value is (primary if body_fails else cleanup)
@@ -488,7 +490,7 @@ def test_status_handler_body_forwards_the_parsed_namespace(
         assert callable(local_host)
         return operator_database
 
-    monkeypatch.setattr("cli.database.operator_database_factory", database_owner)
+    monkeypatch.setattr(cli_database, "operator_database_factory", database_owner)
     monkeypatch.setattr(_status_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _main.main(["status"]) == 0

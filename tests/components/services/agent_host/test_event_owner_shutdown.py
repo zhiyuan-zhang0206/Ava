@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import services.agent_runner.agent_host.host as agent_host_host
+from agent import process_boot
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
 from base.db import Database
@@ -69,7 +71,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
         db=Database.from_settings(gate=database_gate),
     )
     release = AsyncMock()
-    monkeypatch.setattr("services.agent_runner.agent_host.host.release_hosted_owner", release)
+    monkeypatch.setattr(agent_host_host, "release_hosted_owner", release)
     try:
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError) as writer_observed:
@@ -194,8 +196,8 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     monkeypatch.setattr(daemon, "load_installation", load_plugins)
     monkeypatch.setattr(daemon, "process_clients", process_clients)
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
-    monkeypatch.setattr("agent.process_boot.init_process_scope", initialize_process_scope)
-    monkeypatch.setattr("agent.process_boot.land_cluster_extensions", no_op)
+    monkeypatch.setattr(process_boot, "init_process_scope", initialize_process_scope)
+    monkeypatch.setattr(process_boot, "land_cluster_extensions", no_op)
     machine = MachineIdentity(
         name=lambda: "test-box",
         role=lambda: frozenset({"agent-runner"}),

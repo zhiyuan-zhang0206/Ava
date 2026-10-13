@@ -12,6 +12,8 @@ import pytest
 from base.cluster.machine import MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
+from base.host.converge import accessibility, screen_capture
+from base.host.system import probes
 from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
 from cli.database.runtime import CommandRuntime
@@ -128,7 +130,7 @@ def capable_helper_context(
     ava_home.mkdir()
     (ava_home / ".env").write_text("")
     monkeypatch.setattr(converge_host.sys, "platform", "darwin")
-    monkeypatch.setattr("base.host.system.probes.permissions_helper_incapability", lambda: None)
+    monkeypatch.setattr(probes, "permissions_helper_incapability", lambda: None)
     ctx = converge_context(
         tmp_path, ava_home, operator_database=operator_database, producer=producer
     )
@@ -144,11 +146,9 @@ def screen_capture_environment(
     enabled: bool = True,
     incapability: str | None = None,
 ) -> None:
-    monkeypatch.setattr("base.host.converge.screen_capture.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(screen_capture, "ava_home", lambda: tmp_path)
     config.set_field("permissions_helper_enabled", enabled)
-    monkeypatch.setattr(
-        "base.host.system.probes.permissions_helper_incapability", lambda: incapability
-    )
+    monkeypatch.setattr(probes, "permissions_helper_incapability", lambda: incapability)
 
 
 def accessibility_environment(
@@ -159,11 +159,9 @@ def accessibility_environment(
     enabled: bool = True,
     incapability: str | None = None,
 ) -> None:
-    monkeypatch.setattr("base.host.converge.accessibility.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(accessibility, "ava_home", lambda: tmp_path)
     config.set_field("permissions_helper_enabled", enabled)
-    monkeypatch.setattr(
-        "base.host.system.probes.permissions_helper_incapability", lambda: incapability
-    )
+    monkeypatch.setattr(probes, "permissions_helper_incapability", lambda: incapability)
 
 
 @pytest.fixture

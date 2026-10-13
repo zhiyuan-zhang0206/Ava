@@ -10,6 +10,7 @@ import pytest
 from base import db
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
+from base.telemetry import station_endpoint
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import _render_real_template
 from cli.database.runtime import CommandRuntime
@@ -83,7 +84,7 @@ def test_runner_does_not_discover_station(
     def fail_discovery(_db: object, base: str) -> None:
         pytest.fail("pure runners must use their published gateway relay")
 
-    monkeypatch.setattr("base.telemetry.station_endpoint.resolve_station_target", fail_discovery)
+    monkeypatch.setattr(station_endpoint, "resolve_station_target", fail_discovery)
     cfg = _render_real_template(
         monkeypatch,
         frozenset({"agent-runner"}),

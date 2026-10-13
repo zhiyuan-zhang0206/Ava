@@ -17,6 +17,7 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
+from base import config
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -83,7 +84,8 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
-        "base.config.settings.observability.lgtm_grafana_listen_host",
+        config.settings.observability,
+        "lgtm_grafana_listen_host",
         "0.0.0.0",  # noqa: S104 — asserted config default, not a bind
     )
     lgtm_native._render_configs(
@@ -102,7 +104,7 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     # a normal SIGTERM past the unit's shutdown deadline (SendSIGKILL=no).
     assert "preinstall_disabled = true" in grafana_ini
 
-    monkeypatch.setattr("base.config.settings.observability.lgtm_grafana_listen_host", "10.0.0.5")
+    monkeypatch.setattr(config.settings.observability, "lgtm_grafana_listen_host", "10.0.0.5")
     lgtm_native._render_configs(
         repo,
         native_dir,
@@ -166,12 +168,14 @@ def test_native_provisioning_renders_remote_observatory_urls(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
-        "base.config.settings.observability.observability_url",
+        config.settings.observability,
+        "observability_url",
         "http://10.0.0.46",
     )
     command_runtime.machine.set(host="10.0.0.10")
     monkeypatch.setattr(
-        "base.config.settings.data_plane.db_url",
+        config.settings.data_plane,
+        "db_url",
         "postgresql://grafana_ro@10.0.0.72:5433/ava_main",
     )
 
@@ -216,7 +220,8 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
-        "base.config.settings.observability.observability_url",
+        config.settings.observability,
+        "observability_url",
         "",
     )
     command_runtime.machine.set(host="10.0.0.10")
@@ -334,11 +339,13 @@ def test_native_provisioning_pg_stays_on_data_plane_when_db_url_is_loopback(
     render warns instead of silently pointing at the observatory (CTO
     review of 3b523ab14; #3606's PG never follows the observatory)."""
     monkeypatch.setattr(
-        "base.config.settings.observability.observability_url",
+        config.settings.observability,
+        "observability_url",
         "http://10.0.0.46",
     )
     monkeypatch.setattr(
-        "base.config.settings.data_plane.db_url",
+        config.settings.data_plane,
+        "db_url",
         "postgresql:///ava_main?host=/tmp/ava-pg-ava-test&port=5433",
     )
     loki, prometheus, pg = observatory_urls._observability_datasource_urls(
@@ -359,7 +366,8 @@ def test_observability_url_validation_warns_and_falls_back(
     """A malformed AVA_OBSERVABILITY_URL is warned about and falls back to the
     loopback endpoints instead of silently rendering broken URLs (QA P3)."""
     monkeypatch.setattr(
-        "base.config.settings.observability.observability_url",
+        config.settings.observability,
+        "observability_url",
         "10.0.0.1:1234",  # no scheme — malformed
     )
     loki, prometheus, pg = observatory_urls._observability_datasource_urls(
@@ -387,7 +395,8 @@ def test_native_converge_renders_grafana_password_only_when_configured(
     monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
     # Non-secret fixture; production reads the credential from settings.alerts.grafana_admin_password.
     monkeypatch.setattr(
-        "base.config.settings.alerts.grafana_admin_password",
+        config.settings.alerts,
+        "grafana_admin_password",
         SecretStr("fake-key-for-test"),
     )
 
@@ -421,7 +430,7 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
     agents_dir.mkdir()
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr("base.config.settings.alerts.grafana_admin_password", None)
+    monkeypatch.setattr(config.settings.alerts, "grafana_admin_password", None)
 
     lgtm_native.ensure_lgtm_native(
         repo,
@@ -451,10 +460,8 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
     home = tmp_path / "home"
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr(
-        "base.config.settings.telegram.telegram_bot_token", "fake-bot-token-for-test"
-    )
-    monkeypatch.setattr("base.config.settings.telegram.telegram_owner_id", 42)
+    monkeypatch.setattr(config.settings.telegram, "telegram_bot_token", "fake-bot-token-for-test")
+    monkeypatch.setattr(config.settings.telegram, "telegram_owner_id", 42)
 
     lgtm_native.ensure_lgtm_native(
         repo,
@@ -473,7 +480,7 @@ def test_native_converge_renders_the_telegram_contact_env_only_with_a_bot(
     run_script = (home / "lgtm/native/grafana/run.sh").read_text(encoding="utf-8")
     assert f'. "{env_file}"' in run_script
     # A bot that is later removed takes its credential file with it.
-    monkeypatch.setattr("base.config.settings.telegram.telegram_bot_token", "")
+    monkeypatch.setattr(config.settings.telegram, "telegram_bot_token", "")
     lgtm_native.ensure_lgtm_native(
         repo,
         home,
@@ -506,10 +513,8 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    monkeypatch.setattr("base.config.settings.observability.telemetry_tempo_query_url", query_url)
-    monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint", intake_endpoint
-    )
+    monkeypatch.setattr(config.settings.observability, "telemetry_tempo_query_url", query_url)
+    monkeypatch.setattr(config.settings.observability, "telemetry_tempo_endpoint", intake_endpoint)
 
     lgtm_native._render_configs(
         Path(__file__).resolve().parents[4],
@@ -559,26 +564,26 @@ def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", listen_host)
+    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", listen_host)
     monkeypatch.setattr(
-        "base.config.settings.observability.lgtm_grafana_listen_host", grafana_listen_host
+        config.settings.observability, "lgtm_grafana_listen_host", grafana_listen_host
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        config.settings.observability, "telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        config.settings.observability, "telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
+        config.settings.observability, "telemetry_grafana_url", "http://127.0.0.1:3003"
     )
     # Pin the tempo topology to loopback so its pre-existing warning cannot
     # pollute this test's stderr assertions.
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+        config.settings.observability, "telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        config.settings.observability, "telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
     lgtm_native._render_configs(
@@ -611,26 +616,22 @@ def test_native_config_warns_only_when_read_urls_stay_loopback_after_widening(
 ) -> None:
     """When the read URLs follow the widened listen host, the mismatch warning
     stays silent (the external-migration form)."""
-    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "10.0.0.5")
+    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "10.0.0.5")
+    monkeypatch.setattr(config.settings.observability, "lgtm_grafana_listen_host", _WILDCARD_LISTEN)
+    monkeypatch.setattr(config.settings.observability, "telemetry_loki_url", "http://10.0.0.5:3100")
     monkeypatch.setattr(
-        "base.config.settings.observability.lgtm_grafana_listen_host", _WILDCARD_LISTEN
+        config.settings.observability, "telemetry_prometheus_url", "http://10.0.0.5:9090"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_loki_url", "http://10.0.0.5:3100"
-    )
-    monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.5:9090"
-    )
-    monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
+        config.settings.observability, "telemetry_grafana_url", "http://127.0.0.1:3003"
     )
     # Pin the tempo topology to loopback so its pre-existing warning cannot
     # pollute this test's stderr assertion.
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+        config.settings.observability, "telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        config.settings.observability, "telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
     lgtm_native._render_configs(

@@ -24,6 +24,7 @@ from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths.home import resolve_ava_home
 from cli.commands.extensions._refresh_rules import effective_interval_seconds, is_due
+from cli.commands.extensions.packages import refresh
 from cli.commands.extensions.packages.refresh import _Pass, parse_duration, run_refresh
 
 
@@ -454,7 +455,7 @@ def test_refresh_records_error_and_backs_off_when_offline(
     assert (reg.load().channels["core"].last_result or "").startswith("error")
 
     # the job retries only after the backoff: same run parameters, not due now
-    monkeypatch.setattr("cli.commands.extensions.packages.refresh.os_jobs_enabled", _allow_os_jobs)
+    monkeypatch.setattr(refresh, "os_jobs_enabled", _allow_os_jobs)
     report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
     assert report.ran and report.items == ()
     assert report.counts.get("skipped_not_due") == 2
@@ -509,7 +510,7 @@ def test_from_job_gates(
     report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
     assert not report.ran and "OS jobs disabled" in (report.skip_reason or "")
 
-    monkeypatch.setattr("cli.commands.extensions.packages.refresh.os_jobs_enabled", _allow_os_jobs)
+    monkeypatch.setattr(refresh, "os_jobs_enabled", _allow_os_jobs)
     monkeypatch.setattr(refresh_config.view.packages, "refresh_enabled", False)
     report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
     assert not report.ran and "refresh disabled" in (report.skip_reason or "")
@@ -680,7 +681,7 @@ def test_manual_refresh_does_not_construct_job_configuration(
     def unexpected_owner() -> None:
         pytest.fail("manual refresh constructed the from-job configuration owner")
 
-    monkeypatch.setattr("cli.commands.extensions.packages.refresh.ConfigBoot", unexpected_owner)
+    monkeypatch.setattr(refresh, "ConfigBoot", unexpected_owner)
     report = run_refresh(config=refresh_config, repo=core_repo, check_only=True)
     assert report.ran
 
@@ -732,7 +733,7 @@ def test_network_operations_read_live_timeout_from_same_owner(
         timeouts.append(timeout)
         return subprocess.CompletedProcess(["git"], 0, "a" * 40 + "\trefs/heads/main\n", "")
 
-    monkeypatch.setattr("cli.commands.extensions.packages.refresh.run_bounded", bounded)
+    monkeypatch.setattr(refresh, "run_bounded", bounded)
     assert pass_._ls_remote("https://example.invalid/core", "main") == ("a" * 40, None)
     refresh_config.set_field("refresh_network_timeout_seconds", 7.0)
     assert pass_._fetch_core("https://example.invalid/core", "main") is None

@@ -16,6 +16,9 @@ import cli.commands.probe as _probe_commands
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.deploy.lifecycle.start_serving import RootBirth
+from cli import start_runtime
+from cli.commands.data_plane import bringup
+from cli.commands.lifecycle import start
 from cli.database.runtime import CommandRuntime
 from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
@@ -41,7 +44,7 @@ def restart_command_environment(
     def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
         return serving_root.runtime
 
-    monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)
+    monkeypatch.setattr(start_runtime.StartRuntime, "identity", fixture_runtime)
 
     def _fake_collect(*, config: ConfigBoot) -> tuple[dict[str, str], list]:
         assert config is command_runtime.config
@@ -59,17 +62,16 @@ def restart_command_environment(
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
     # the dev host's pg/redis.
-    monkeypatch.setattr(
-        "cli.commands.lifecycle.start.cmd_status", ignore_retained_children(lambda: 0)
-    )
+    monkeypatch.setattr(start, "cmd_status", ignore_retained_children(lambda: 0))
     from cli.commands.lifecycle import start as _start_mod
 
     monkeypatch.setattr(
         _start_mod, "_ensure_gateway_data_plane", ignore_retained_children(lambda: 0)
     )
-    monkeypatch.setattr("cli.commands.data_plane.bringup.prepare_gateway_schema", lambda: None)
+    monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda: None)
     monkeypatch.setattr(
-        "cli.commands.data_plane.bringup.complete_gateway_data_plane",
+        bringup,
+        "complete_gateway_data_plane",
         lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     from cli.commands.lifecycle.root_driver import LaunchOutcome
@@ -131,7 +133,7 @@ def root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: None)
-    monkeypatch.setattr("cli.commands.lifecycle.stop.force_close_terminals", lambda: None)
+    monkeypatch.setattr(_stop_commands, "force_close_terminals", lambda: None)
 
 
 def ignore_retained_children[T](callback: Callable[[], T]) -> Callable[..., T]:

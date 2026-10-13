@@ -22,6 +22,7 @@ from base.config import ConfigBoot, settings
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup as _dp
 from cli.commands.data_plane import cluster_instance as _ci
+from cli.commands.data_plane import pgbouncer
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -398,7 +399,7 @@ def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
     )
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "admin-pw")
     monkeypatch.setattr(_ci.owned_postgres, "stop", lambda _data, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands.data_plane.pgbouncer.stop_pgbouncer", lambda: None)
+    monkeypatch.setattr(pgbouncer, "stop_pgbouncer", lambda: None)
     monkeypatch.setattr(_ci, "redis_cli_bin", lambda: "redis-cli")
     shutdowns: list[tuple[list[str], str]] = []
 

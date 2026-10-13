@@ -5,6 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.cluster import machine
+from base.host.net import http_dial
 from cli.commands.agents import control as agents_control
 
 
@@ -27,9 +29,9 @@ def post(monkeypatch: pytest.MonkeyPatch) -> Mock:
     response.status_code = 200
     response.json.return_value = {"status": "enqueued"}
     call = Mock(return_value=response)
-    monkeypatch.setattr("base.host.net.http_dial.post", call)
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://localhost")
-    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr(http_dial, "post", call)
+    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://localhost")
+    monkeypatch.setattr(machine, "gateway_auth_headers", dict)
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     return call
 

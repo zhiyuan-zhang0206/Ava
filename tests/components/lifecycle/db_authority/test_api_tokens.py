@@ -34,6 +34,7 @@ from base.cluster.machine import (
 )
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
+from base.host.env import bootstrap
 from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
 from cli.commands.data_plane import bringup
 from gateway.http.auth import request_principal
@@ -573,7 +574,7 @@ def test_launch_delivers_each_service_its_class_token(
     gateway: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tokens = _tokens(gateway).api
-    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: True)
     assert bringup.api_delivery("gateway") == {api.API_TOKEN_ENV: tokens.gateway}
     assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: tokens.runner}
 
@@ -581,7 +582,7 @@ def test_launch_delivers_each_service_its_class_token(
 def test_a_pure_runner_launch_delivers_its_capability_token(
     gateway: Path, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
     assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: _tokens(gateway).api.runner}
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
         bringup.api_delivery("gateway")

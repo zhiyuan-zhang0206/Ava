@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster import machine
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 
@@ -156,7 +157,7 @@ def _hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     on a renamed field. Resolve it to an unreachable stub by default: tests that
     assert on the response mock httpx on top; the rest take the graceful
     'unreachable' path deterministically, matching CI where no gateway is up."""
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
 
 
 def _spec(service: str):
@@ -193,7 +194,7 @@ class _FakeResponse:
 
 def _patch_gateway_http(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub gateway URL/headers resolution so the HTTP helpers don't hit settings."""
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(machine, "gateway_api_base", lambda: "http://gw:8000")
 
 
 def _assert_named_commands_parse(text: str) -> None:

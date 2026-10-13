@@ -10,10 +10,12 @@ from unittest.mock import patch
 
 import pytest
 
+import cli.commands.lifecycle.start as lifecycle_start
 import cli.main as cli_main
 from base import cluster
 from base.paths.home import resolve_ava_home
 from cli import start_identity, start_intent, unit_join
+from cli.commands.lifecycle import root_driver
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 from cli.parsers import build_parser
@@ -57,8 +59,8 @@ def start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any
     monkeypatch.setattr(start_intent, "_checkout", lambda: checkout)
     monkeypatch.setattr(cluster, "port_free", _every_port_free)
     monkeypatch.setattr(cli_main, "_init_cli_logging", _no_logging)
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
-    monkeypatch.setattr("cli.commands.lifecycle.root_driver.complete_boot_start", lambda: None)
+    monkeypatch.setattr(lifecycle_start, "cmd_start", runtime)
+    monkeypatch.setattr(root_driver, "complete_boot_start", lambda: None)
     return calls
 
 

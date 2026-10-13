@@ -8,6 +8,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base import paths
 from base.agents.context.clients import DatabaseFactory
 from base.db.tests.fakes import patch_database
 from base.deploy.lifecycle import service_selection
@@ -35,7 +36,7 @@ def probe_home(
 ) -> Path:
     """Keep the real DB/count/journal paths; intercept only external side effects."""
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(service_selection, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
     monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: None)

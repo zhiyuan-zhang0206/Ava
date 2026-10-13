@@ -14,11 +14,14 @@ import cli.commands.converge.host as converge_host
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.probe as _probe_commands
+import services.supervision.roster.spec as roster_spec
+from base import cluster
 from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.telemetry import EventPipeline
+from cli import start_runtime
 from cli.commands.lifecycle import start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.database.runtime import CommandRuntime
@@ -56,7 +59,8 @@ def _roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None],
         for name, reason in rows
     )
     monkeypatch.setattr(
-        "services.supervision.roster.spec.services_for_capabilities_annotated",
+        roster_spec,
+        "services_for_capabilities_annotated",
         _ignoring_args(lambda: specs),
     )
 
@@ -83,7 +87,7 @@ def _hermetic_start(
     def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
         return serving_root.runtime
 
-    monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)
+    monkeypatch.setattr(start_runtime.StartRuntime, "identity", fixture_runtime)
     from base.deploy.lifecycle import service_selection
     from cli.commands.data_plane import bringup
     from cli.commands.extensions import materialize
@@ -174,9 +178,7 @@ def test_live_repeat_start_never_runs_mutating_preparation(
 
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: True))
     monkeypatch.setattr(start, "_prepare_cold_start", no_prepare)
-    monkeypatch.setattr(
-        "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
-    )
+    monkeypatch.setattr(cluster, "assert_checkpoint_schema_current", _ignoring_args(lambda: None))
     assert (
         _start_commands.cmd_start(
             retained_children=[],
@@ -198,9 +200,7 @@ def test_start_marks_serving_for_live_and_cold_admission(
     command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: live))
-    monkeypatch.setattr(
-        "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
-    )
+    monkeypatch.setattr(cluster, "assert_checkpoint_schema_current", _ignoring_args(lambda: None))
     assert (
         _start_commands.cmd_start(
             retained_children=[],
@@ -286,7 +286,8 @@ def test_failed_launch_never_becomes_serving(
     command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(
-        "cli.commands.lifecycle.root_driver.complete_boot_start",
+        _root_driver_commands,
+        "complete_boot_start",
         lambda: pytest.fail("not ready for boot handoff"),
     )
 
