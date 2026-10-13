@@ -103,13 +103,13 @@ async def test_agent_host_progress_publish_failure_is_warning_with_traceback(
 
     patch_async_redis(monkeypatch, BrokenRedis)
 
-    with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
+    with caplog.at_level(logging.DEBUG, logger=host_daemon.host_log.name):
         published = await host_daemon._publish_turn_progress_heartbeat(
             EventBus.from_settings(), "runner-a", set(), TurnProgress()
         )
 
     assert published is False
-    records = [record for record in caplog.records if record.name == host_daemon._log.name]
+    records = [record for record in caplog.records if record.name == host_daemon.host_log.name]
     assert len(records) == 1
     assert records[0].levelno == logging.WARNING
     assert records[0].exc_info is not None
@@ -149,7 +149,7 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
     patch_async_redis(monkeypatch, HungRedis)
     monkeypatch.setattr(host_daemon, "_TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.01, raising=False)
     monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
-    with caplog.at_level(logging.WARNING, logger=host_daemon._log.name):
+    with caplog.at_level(logging.WARNING, logger=host_daemon.host_log.name):
         task = asyncio.create_task(
             host_daemon._beat_forever(
                 cast(host_daemon.Liveness, FakeLiveness()),
@@ -170,7 +170,7 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
     # Canonical order after #1856: liveness first, then DB renewal, then the
     # best-effort Redis snapshot. A hung progress SET must not stop either.
     assert calls == ["beat", "renew", "set", "set_cancelled"] * 3
-    warnings = [record for record in caplog.records if record.name == host_daemon._log.name]
+    warnings = [record for record in caplog.records if record.name == host_daemon.host_log.name]
     assert len(warnings) == 2
     assert all("turn-progress heartbeat publish exceeded" in record.message for record in warnings)
 
@@ -253,7 +253,7 @@ async def test_progress_publish_propagates_cancellation_without_failure_warning(
                 cancelled.set()
 
     patch_async_redis(monkeypatch, HungRedis)
-    with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
+    with caplog.at_level(logging.DEBUG, logger=host_daemon.host_log.name):
         task = asyncio.create_task(
             host_daemon._publish_turn_progress_heartbeat(
                 EventBus.from_settings(), "runner-a", set(), TurnProgress()
@@ -267,7 +267,7 @@ async def test_progress_publish_propagates_cancellation_without_failure_warning(
                 await task
 
     assert cancelled.is_set()
-    assert not [record for record in caplog.records if record.name == host_daemon._log.name]
+    assert not [record for record in caplog.records if record.name == host_daemon.host_log.name]
 
 
 async def _read_resp_command(reader: asyncio.StreamReader) -> list[bytes]:
@@ -322,7 +322,7 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
     patch_async_redis(monkeypatch, lambda: client)
     monkeypatch.setattr(host_daemon, "_TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.1, raising=False)
     try:
-        with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
+        with caplog.at_level(logging.DEBUG, logger=host_daemon.host_log.name):
             async with asyncio.timeout(2.0):
                 await host_daemon._publish_turn_progress_heartbeat(
                     EventBus.from_settings(), "runner-a", set(), TurnProgress()
@@ -334,7 +334,7 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
                 )
                 assert writes == [[b"SET", b"host_turn_progress:runner-a", b"{}", b"EX", b"60"]] * 2
                 assert not client.connection_pool._in_use_connections
-        records = [record for record in caplog.records if record.name == host_daemon._log.name]
+        records = [record for record in caplog.records if record.name == host_daemon.host_log.name]
         assert len(records) == 1  # The second response was accepted, not swallowed as a failure.
         assert "turn-progress heartbeat publish exceeded" in records[0].message
     finally:

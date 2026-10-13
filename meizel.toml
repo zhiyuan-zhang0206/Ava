@@ -524,7 +524,6 @@ frontend = ["ui"]
 "tests/components/services/agent_host/test_event_owner_shutdown.py -> services/agent_runner/agent_host/daemon.py#_is_running" = 1
 "tests/components/services/agent_host/test_event_owner_shutdown.py -> services/agent_runner/agent_host/daemon.py#_open_host_pools" = 1
 "tests/components/services/test_ava_root_custody_contract.py -> services/desktop/permissions_helper/lifecycle.py#_SOURCE" = 1
-"tests/components/services/test_gate_root.py -> services/entrypoints/gate/tests/test_gate.py#_request" = 1
 "tests/harness/test_helperproc.py -> services/agent_runner/agent_host/daemon.py#_beat_forever" = 1
 "tests/harness/test_helperproc.py -> services/agent_runner/agent_host/daemon.py#_require_helper_parent_chain" = 1
 "tests/integration/child_schedule_runner.py -> services/wake/schedule_manager/engine.py#_run" = 1

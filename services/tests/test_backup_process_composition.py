@@ -164,7 +164,7 @@ async def test_scheduler_health_uses_entry_image_and_preserves_loop_failure(
     monkeypatch.setattr(daemon, "_remove_pidfile", remove)
     monkeypatch.setattr(daemon, "start_health_server", start)
     monkeypatch.setattr(daemon, "stop_health_server", stop)
-    monkeypatch.setattr(daemon, "_backup_loop", AsyncMock(side_effect=failure))
+    monkeypatch.setattr(daemon, "backup_loop", AsyncMock(side_effect=failure))
 
     with pytest.raises(RuntimeError) as raised:
         await daemon.run(config=config, image=image, runtime=Path("run"))

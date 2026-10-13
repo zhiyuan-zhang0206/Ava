@@ -76,7 +76,7 @@ def chrome_args(binary: str, port: int, profile: Path) -> list[str]:
     ]
 
 
-def _launch(binary: str, args: list[str]) -> None:
+def exec_chrome(binary: str, args: list[str]) -> None:
     """Replace this process with Chrome so the session owns its native PID."""
     try:
         os.execvp(binary, args)  # noqa: S606 — intentional exec of the resolved Chrome binary
@@ -138,7 +138,7 @@ def main() -> None:
     os.dup2(log_fd, 1)
     os.dup2(log_fd, 2)
     os.close(log_fd)
-    _launch(binary, chrome_args(binary, cdp_port, profile))
+    exec_chrome(binary, chrome_args(binary, cdp_port, profile))
 
 
 if __name__ == "__main__":

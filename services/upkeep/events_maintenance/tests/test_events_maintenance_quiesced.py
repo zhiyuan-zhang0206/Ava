@@ -44,7 +44,7 @@ def _rollup(
 
 
 _LOOPS: dict[str, tuple[_Loop, str]] = {
-    "rollup": (_rollup, "_run_maintenance"),
+    "rollup": (_rollup, "run_maintenance"),
     "resolution": (daemon.resolution_loop, "_run_resolution"),
 }
 

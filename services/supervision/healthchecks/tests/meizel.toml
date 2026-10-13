@@ -6,7 +6,7 @@
 "test_prod_venv.py#monkeypatch.setenv os.environ.VIRTUAL_ENV" = 1
 
 [debt.first-party-patch]
-"test_healthcheck_browser_mcp.py#monkeypatch.setattr services.supervision.healthchecks.browser_mcp._probe" = 3
+"test_healthcheck_browser_mcp.py#monkeypatch.setattr services.supervision.healthchecks.browser_mcp.browser_mcp_probe" = 3
 "test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.canary_async" = 1
 "test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.read_json" = 1
 "test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.websockets.connect" = 1
@@ -30,7 +30,7 @@
 "test_healthcheck_maintenance_hold.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
 "test_healthcheck_maintenance_hold.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
 "test_healthcheck_maintenance_hold.py#monkeypatch.setattr base.log.logger" = 1
-"test_healthcheck_mcp_daemon.py#monkeypatch.setattr services.supervision.healthchecks.mcp_daemon._probe" = 3
+"test_healthcheck_mcp_daemon.py#monkeypatch.setattr services.supervision.healthchecks.mcp_daemon.mcp_daemon_probe" = 3
 "test_healthcheck_memory_search.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.get_provider" = 1
 "test_healthcheck_memory_search.py#monkeypatch.setattr services.supervision.healthchecks.memory_search.post_search" = 4
 "test_healthcheck_otel_collector.py#monkeypatch.setattr base.cluster.port_preflight.strict_listeners_on" = 1

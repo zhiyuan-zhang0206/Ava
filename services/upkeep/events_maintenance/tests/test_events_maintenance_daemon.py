@@ -7,7 +7,7 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
     DB error does not become a tight hot-loop against Postgres;
   - the hourly pass ALWAYS runs the rollup + blob vacuum.
 
-All driven directly (no DB): `_run_maintenance` / `maintenance_with_liveness` are
+All driven directly (no DB): `run_maintenance` / `maintenance_with_liveness` are
 monkeypatched, so these are pure asyncio-loop tests.
 """
 
@@ -44,13 +44,13 @@ from services.upkeep.events_maintenance.tests.slices import (
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
-# The pool is never touched — `_run_maintenance` / `maintenance_with_liveness` are faked.
+# The pool is never touched — `run_maintenance` / `maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
 
 
 class _FakePool:
     """A pool whose `connection()` returns a working no-op context manager — the
-    maintenance-pass tests fake every slice, but `_run_maintenance` opens a
+    maintenance-pass tests fake every slice, but `run_maintenance` opens a
     `with pool.connection()` wrapper around each one."""
 
     class _Cursor:
@@ -147,7 +147,7 @@ async def test_failed_rollup_still_waits_before_retry(
         slept.append(total_s)
         raise asyncio.CancelledError  # break the otherwise-infinite loop after one sleep
 
-    monkeypatch.setattr(daemon, "_run_maintenance", boom)
+    monkeypatch.setattr(daemon, "run_maintenance", boom)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", fake_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=5.0)
@@ -237,7 +237,7 @@ def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
 def _instrument_maintenance_slices(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, _CallRecorder]:
-    """Replace every slice `_run_maintenance` can invoke with a recorder. The
+    """Replace every slice `run_maintenance` can invoke with a recorder. The
     fake results are the shapes the pass's logging branches read (empty/zero so
     nothing logs)."""
     rec = {
@@ -278,7 +278,7 @@ def test_maintenance_pass_runs_unconditional_slices(
 
     monkeypatch.setattr(progress, "beat", counting_beat)
 
-    daemon._run_maintenance(
+    daemon.run_maintenance(
         cast(ConnectionPool, _FakePool()),
         progress,
         events_maintenance_config(process_config),
@@ -330,7 +330,7 @@ def test_maintenance_pass_does_not_rebuild_missed_observations(
     _instrument_maintenance_slices(monkeypatch)
 
     for _ in range(2):
-        daemon._run_maintenance(
+        daemon.run_maintenance(
             cast(ConnectionPool, _ConnPool(db_conn)),
             LoopProgress("dispatch", timeout_s=60.0),
             events_maintenance_config(process_config),

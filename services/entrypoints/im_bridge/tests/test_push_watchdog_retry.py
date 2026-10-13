@@ -57,7 +57,7 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _sleep(_seconds: float) -> None:
         return None
 
-    monkeypatch.setattr(push_watchdog, "_sleep", _sleep)
+    monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _sleep)
 
 
 async def test_first_failure_logs_warning_and_a_healed_retry_stays_clean(

@@ -28,6 +28,3 @@
 "test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.backup.backup_dir" = 1
 "test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.run_drill" = 1
 "test_restore_drill.py#monkeypatch.setattr services.backup.restore_drill.shutil.disk_usage" = 1
-
-[debt.private-name]
-"backup/test_run_with_progress_without_a_sink_defers.py -> test_backup.py#_dt" = 1

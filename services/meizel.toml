@@ -11,7 +11,6 @@ exports = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfi
 "wake" = ["pidfile.py"]
 
 [debt.private-name]
-"tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_backup_loop" = 1
 "tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_hard_exit" = 1
 "tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_is_running" = 1
 "tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_remove_pidfile" = 2

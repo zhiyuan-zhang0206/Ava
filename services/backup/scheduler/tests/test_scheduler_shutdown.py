@@ -172,9 +172,9 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
 
     async def loop(_state: object, *, config: ConfigBoot) -> None:
         if restore_mode:
-            await daemon._run_due_local_dump_restore(datetime.now().astimezone(), config=config)
+            await daemon.run_due_local_dump_restore(datetime.now().astimezone(), config=config)
         else:
-            await daemon._backup_loop(state, config=config)
+            await daemon.backup_loop(state, config=config)
 
     def write_pidfile(_config: ConfigBoot, *, runtime: Path) -> None:
         assert runtime.name == "run"
@@ -203,7 +203,7 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
         ),
     ):
         if restore_mode:
-            with patch.object(daemon, "_backup_loop", loop):
+            with patch.object(daemon, "backup_loop", loop):
                 _run_daemon()
         else:
             _run_daemon()

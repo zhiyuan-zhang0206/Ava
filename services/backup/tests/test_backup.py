@@ -45,7 +45,7 @@ def bdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _dt(year: int, month: int, day: int, hour: int, minute: int) -> datetime:
+def cluster_instant(year: int, month: int, day: int, hour: int, minute: int) -> datetime:
     """A cluster wall-clock instant — the clock is_due() reads."""
     return datetime(year, month, day, hour, minute, tzinfo=ZoneInfo(_CLUSTER_TZ))
 
@@ -93,7 +93,7 @@ def await_backup_lock_holder(ready: Path, proc: subprocess.Popen[bytes]) -> None
 
 def test_not_due_before_backup_hour(bdir: Path) -> None:
     assert not backup.is_due(
-        _dt(2026, 6, 10, settings.services.backup_hour - 1, 59),
+        cluster_instant(2026, 6, 10, settings.services.backup_hour - 1, 59),
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
@@ -101,7 +101,7 @@ def test_not_due_before_backup_hour(bdir: Path) -> None:
 
 def test_due_at_hour_with_no_dumps(bdir: Path) -> None:
     assert backup.is_due(
-        _dt(2026, 6, 10, settings.services.backup_hour, 0),
+        cluster_instant(2026, 6, 10, settings.services.backup_hour, 0),
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
@@ -110,7 +110,7 @@ def test_due_at_hour_with_no_dumps(bdir: Path) -> None:
 def test_not_due_again_after_todays_dump(bdir: Path) -> None:
     _touch(bdir, "ava-20260610T100001Z.dump")
     assert not backup.is_due(
-        _dt(2026, 6, 10, 9, 0),
+        cluster_instant(2026, 6, 10, 9, 0),
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
@@ -119,7 +119,7 @@ def test_not_due_again_after_todays_dump(bdir: Path) -> None:
 def test_due_again_the_next_day(bdir: Path) -> None:
     _touch(bdir, "ava-20260609T100001Z.dump")
     assert backup.is_due(
-        _dt(2026, 6, 10, settings.services.backup_hour, 0),
+        cluster_instant(2026, 6, 10, settings.services.backup_hour, 0),
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
@@ -129,7 +129,7 @@ def test_catchup_after_downtime(bdir: Path) -> None:
     """Host down at 03:00 -> the first tick later that day is still due."""
     _touch(bdir, "ava-20260609T100001Z.dump")
     assert backup.is_due(
-        _dt(2026, 6, 10, 14, 30),
+        cluster_instant(2026, 6, 10, 14, 30),
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
@@ -139,12 +139,12 @@ def test_due_hour_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) ->
     """The due hour resolves from ``services.backup_hour`` at call time."""
     monkeypatch.setattr(settings.services, "backup_hour", 2)
     assert not backup.is_due(
-        _dt(2026, 6, 10, 1, 59),
+        cluster_instant(2026, 6, 10, 1, 59),
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
     assert backup.is_due(
-        _dt(2026, 6, 10, 2, 0),
+        cluster_instant(2026, 6, 10, 2, 0),
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
@@ -267,7 +267,7 @@ def test_run_backup_can_defer_offsite_publish(
     monkeypatch.setattr(offsite, "publish", published.append)
 
     artifact = backup.run_backup(
-        _dt(2026, 6, 10, 3, 0),
+        cluster_instant(2026, 6, 10, 3, 0),
         db_url="dbname=ava",
         publish=False,
         db=database,
@@ -305,8 +305,13 @@ def test_publish_offsite_module_entry_publishes_the_named_artifact(
 
     monkeypatch.setattr(offsite, "publish", _record)
 
-    assert backup._main(["--publish-offsite", str(artifact)]) == 0
-    assert backup._main(["--publish-offsite", str(artifact), "--offsite-root", "scratch/x"]) == 0
+    assert backup.run_offsite_publisher(["--publish-offsite", str(artifact)]) == 0
+    assert (
+        backup.run_offsite_publisher(
+            ["--publish-offsite", str(artifact), "--offsite-root", "scratch/x"]
+        )
+        == 0
+    )
 
     assert published == [(artifact, names.REMOTE_ROOT), (artifact, "scratch/x")]
 
@@ -319,7 +324,7 @@ def test_publish_offsite_entry_rejects_a_malformed_root(
     artifact.write_bytes(b"encrypted")
 
     with pytest.raises(SystemExit) as raised:
-        backup._main(["--publish-offsite", str(artifact), "--offsite-root", root])
+        backup.run_offsite_publisher(["--publish-offsite", str(artifact), "--offsite-root", root])
 
     assert raised.value.code == 2
     assert "--offsite-root" in capsys.readouterr().err
@@ -407,7 +412,7 @@ def test_run_backup_repairs_storage_permissions(
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
     target = backup.run_backup(
-        _dt(2026, 6, 10, 3, 0),
+        cluster_instant(2026, 6, 10, 3, 0),
         db_url="dbname=ava",
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
@@ -452,7 +457,7 @@ def test_foreign_files_ignored(bdir: Path) -> None:
         ),
     ]
     assert backup.is_due(
-        _dt(2026, 6, 10, 9, 0),
+        cluster_instant(2026, 6, 10, 9, 0),
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
@@ -494,7 +499,7 @@ def test_run_backup_failure_leaves_no_plaintext(
     monkeypatch.setattr(backup.subprocess, "run", fail)
     with pytest.raises(RuntimeError, match="pg_dump exited 1"):
         backup.run_backup(
-            _dt(2026, 8, 2, 3, 0),
+            cluster_instant(2026, 8, 2, 3, 0),
             db_url="dbname=whatever",
             db=database,
             is_remote_reader=lambda: settings.data_plane.is_remote,
@@ -518,7 +523,7 @@ def test_run_backup_real_dump_and_prune(
 
     disable_offsite(monkeypatch)
     path = backup.run_backup(
-        _dt(2026, 6, 10, 3, 0),
+        cluster_instant(2026, 6, 10, 3, 0),
         db_url=settings.data_plane.db_url,
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
@@ -605,7 +610,7 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
     password = "backup-password"  # noqa: S105 — test credential
     path = backup.run_backup(
-        _dt(2026, 8, 8, 3, 0),
+        cluster_instant(2026, 8, 8, 3, 0),
         db_url=f"postgresql://backup:{password}@db.example:5432/whatever",
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
@@ -651,7 +656,7 @@ def test_run_backup_keeps_database_password_out_of_argv(
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
     password = "password-not-in-argv"  # noqa: S105 — assertion sentinel, not a credential
     backup.run_backup(
-        _dt(2026, 8, 8, 3, 0),
+        cluster_instant(2026, 8, 8, 3, 0),
         db_url=f"postgresql://ava:{password}@127.0.0.1:5433/ava",
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
@@ -691,7 +696,7 @@ def test_encrypted_artifact_decrypts_to_original_dump(
     monkeypatch.setattr(backup.subprocess, "run", _fake_pg_dump)
     disable_offsite(monkeypatch)
     artifact = backup.run_backup(
-        _dt(2026, 8, 8, 3, 0),
+        cluster_instant(2026, 8, 8, 3, 0),
         db_url="dbname=whatever",
         db=database,
         is_remote_reader=lambda: settings.data_plane.is_remote,
@@ -772,7 +777,7 @@ def test_run_backup_forwards_requested_timeout(
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
 
     backup.run_backup(
-        _dt(2026, 8, 8, 3, 0),
+        cluster_instant(2026, 8, 8, 3, 0),
         db_url="dbname=whatever",
         timeout_s=123.0,
         db=database,

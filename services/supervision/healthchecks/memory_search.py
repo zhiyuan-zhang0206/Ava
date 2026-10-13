@@ -33,7 +33,7 @@ def post_search(
         return DaemonProbe.down(f"POST /search failed ({type(exc).__name__}: {exc})")
 
 
-def _probe() -> DaemonProbe:
+def memory_search_probe() -> DaemonProbe:
     """Alive when the service answers a real search with a hits payload."""
     config = ConfigBoot()
     config.read_process_environment()

@@ -25,7 +25,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.tests.fakes import fake_database
 from services.derived.memory_indexer.backends.pgvector import (
-    _TABLE,
+    EMBEDDINGS_TABLE,
     PGVectorBackend,
     prepare_table,
     validate_schema,
@@ -78,7 +78,7 @@ def _table_dim(db_conn: psycopg.Connection) -> int | None:
         cur.execute(
             "SELECT atttypmod FROM pg_attribute "
             "WHERE attrelid = to_regclass(%s) AND attname = 'vector'",
-            (_TABLE,),
+            (EMBEDDINGS_TABLE,),
         )
         row = cur.fetchone()
     return None if row is None else row[0]

@@ -15,7 +15,7 @@ from base.paths import ava_home, insights_pidfile, insights_socket
 _TIMEOUT_S = 3.0
 
 
-def _probe() -> DaemonProbe:
+def insights_probe() -> DaemonProbe:
     import httpx
 
     try:

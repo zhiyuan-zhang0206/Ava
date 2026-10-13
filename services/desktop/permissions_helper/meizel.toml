@@ -59,7 +59,6 @@ exports = ["launchd_job.py", "lifecycle.py"]
 "tests/test_permissions_helper.py -> lifecycle.py#_LOCALES" = 1
 "tests/test_permissions_helper.py -> lifecycle.py#_SOURCE" = 1
 "tests/test_permissions_helper.py -> lifecycle.py#_agents_dir" = 1
-"tests/test_permissions_helper.py -> lifecycle.py#_domain" = 2
 "tests/test_permissions_helper.py -> lifecycle.py#_is_loaded" = 1
 "tests/test_permissions_helper.py -> lifecycle.py#_keychain_path" = 1
 "tests/test_permissions_helper.py -> lifecycle.py#_label" = 1

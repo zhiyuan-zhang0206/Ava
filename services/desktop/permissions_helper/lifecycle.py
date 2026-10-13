@@ -615,7 +615,7 @@ def _plist_path() -> Path:
     return helper_job_plist_path()
 
 
-def _domain() -> str:
+def launchd_domain() -> str:
     return helper_job_domain()
 
 
@@ -692,7 +692,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         base.paths.root_run_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
         clear_helper_stop_intent(base.paths.ava_home())
         path.write_bytes(new_bytes)
-        _run(["launchctl", "bootstrap", _domain(), str(path)])
+        _run(["launchctl", "bootstrap", launchd_domain(), str(path)])
     if not _helper_answers_ping():
         raise PermissionsHelperBuildError(
             "permissions helper is unresponsive; custody is unknown. Diagnose the native job "

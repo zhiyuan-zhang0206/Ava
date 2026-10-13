@@ -49,11 +49,11 @@ exports = ["adapters"]
 "test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.start_health_server" = 2
 "test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.stop_health_server" = 2
 "test_im_bridge_daemon.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.timeline_outbound_loop" = 2
-"test_im_bridge_notify.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog._sleep" = 1
+"test_im_bridge_notify.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog.push_watchdog_sleep" = 1
 "test_im_bridge_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 2
 "test_im_bridge_quiesced.py#monkeypatch.setattr services.entrypoints.im_bridge.daemon.asyncio.sleep" = 2
 "test_notice_outbox.py#monkeypatch.setattr services.entrypoints.im_bridge.outbound.store.IMOutboxStore.insert_intent" = 2
-"test_push_watchdog_retry.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog._sleep" = 1
+"test_push_watchdog_retry.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog.push_watchdog_sleep" = 1
 "test_timeline_outbox.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
 "test_timeline_selection.py#monkeypatch.setattr services.entrypoints.im_bridge.core.IMBridgeCore._apply_selection" = 2
 

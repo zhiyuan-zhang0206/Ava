@@ -553,7 +553,7 @@ def _dump_and_encrypt(
             key_file.unlink(missing_ok=True)
 
 
-def _main(argv: list[str] | None = None) -> int:
+def run_offsite_publisher(argv: list[str] | None = None) -> int:
     """Run the detached, best-effort off-site backup publisher."""
     # Standalone runs leave the module's INFO records to lastResort (WARNING+
     # only): without this the store-verified publish ACK never appears, so a
@@ -594,4 +594,4 @@ def _main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(_main())
+    raise SystemExit(run_offsite_publisher())
