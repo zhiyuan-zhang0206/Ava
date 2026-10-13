@@ -198,7 +198,7 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
     ``fq`` is the dotted path under ``ava`` (``files.read``, ``shell.sessions.new``,
     ``understand``) — the key space the metric reports. Recurses into sub-namespaces
     (modules / SimpleNamespace); targets routines; skips classes, constants, and
-    dynamic namespaces without an ``__all_for_ava__``.
+    dynamic namespaces served by ``__getattr__``.
     """
     targets: list[tuple[Any, str, str]] = []
     seen: set[int] = set()
@@ -210,8 +210,7 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
         # agent_visible_names is the single source of truth for the agent
         # surface (help / SDK-expand / doc-lint share it). It reads
         # __all_for_ava__ statically so a dynamic proxy surface is never
-        # force-evaluated; falls back to a module's own public routines
-        # (ava.mcps) or a SimpleNamespace's public vars.
+        # force-evaluated, and raises for a container that declares none.
         for name in agent_visible_names(container):
             # getattr_static, never getattr: a dynamically-served member (e.g.
             # ava.self.MACHINE_SPEC, computed via module __getattr__) must not be
