@@ -9,7 +9,7 @@ failure. Every sink in `base/log/process.py` and `base/log/sinks.py` goes throug
 scripts/lint/diagnostics/logger_add_diagnose.py, which guards this repo-wide).
 
 These tests exercise the actual production sink constructor —
-`base.log.sinks._add_file_sink`, the file sink every `init_*` entry point in
+`base.log.sinks.add_file_sink`, the file sink every `init_*` entry point in
 `base/log/process.py` installs identically — rather than reimplementing sink
 construction, so a regression in the real code path is what fails this test.
 """
@@ -23,7 +23,7 @@ import psycopg
 import pytest
 from loguru import logger
 
-from base.log.sinks import _add_file_sink, add_sink
+from base.log.sinks import add_file_sink, add_sink
 
 # Not a real credential — a fixture value chosen to be unmistakable in a diff/log.
 _SENTINEL = "SENTINEL-PASSWORD"
@@ -38,7 +38,7 @@ def _file_sink(tmp_path: Path) -> Iterator[Path]:
     singleton (pytest's own, other fixtures') are left alone.
     """
     log_path = tmp_path / "test.log"
-    sink_id = _add_file_sink(log_path)
+    sink_id = add_file_sink(log_path)
     try:
         yield log_path
     finally:

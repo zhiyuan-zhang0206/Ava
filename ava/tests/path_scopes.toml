@@ -10,7 +10,7 @@
 "tests.path_scoped.integration_tests" = [
     "test_core.py",
 ]
-"tests.fixtures.unit.homes" = ["."]
+"base.paths.tests.homes" = ["."]
 "tests.fixtures.model_catalog" = [
     "test_attachment_transport.py",
     "test_core.py",

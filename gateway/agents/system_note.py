@@ -18,7 +18,7 @@ from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 
 
-def _system_note_blocking(
+def system_note_blocking(
     db: Database,
     bus: EventBus,
     pool: ConnectionPool,

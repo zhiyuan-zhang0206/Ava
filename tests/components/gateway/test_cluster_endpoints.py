@@ -585,7 +585,7 @@ class TestClusterEndpoints:
 # ─── machines pause / resume (Task #1283) ────────────────────────────────────
 
 
-def _seed_away_machine(
+def seed_away_machine(
     db_conn: psycopg.Connection, *, name: str = "away", local_row: bool = True
 ) -> None:
     """Machines rows for the pause tests, isolated from other tests' rows: the
@@ -608,7 +608,7 @@ def _seed_away_machine(
     db_conn.commit()
 
 
-def _seed_agent_on_machine(
+def seed_agent_on_machine(
     db_conn: psycopg.Connection,
     machine: str,
     *,
@@ -638,7 +638,7 @@ def _seed_agent_on_machine(
     return aid
 
 
-def _seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
+def seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
     """The drain-owner agent row the pause endpoint reassigns tasks to (the
     FK target `agent_tasks.owner -> agents(id)`)."""
     with db_conn.cursor() as cur:
@@ -649,7 +649,7 @@ def _seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
     db_conn.commit()
 
 
-def _seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -> int:
+def seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -> int:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks (title, description, status, owner, created_by) "

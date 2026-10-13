@@ -24,10 +24,10 @@ from base.sessions.page_session import is_page_label
 _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 
 
-_MAX_TTL_SECONDS = 86_400  # 24h — user-facing sessions only; watchers exempt (see _validate_ttl)
+_MAX_TTL_SECONDS = 86_400  # 24h — user-facing sessions only; watchers exempt (see validate_ttl)
 
 
-def _validate_ttl(ttl: float, *, system: bool = False) -> float:
+def validate_ttl(ttl: float, *, system: bool = False) -> float:
     """Validate a TTL. The 24h cap protects user calls only.
 
     `system=True` marks a system-side session (a watcher spawn): its ttl is
@@ -47,7 +47,7 @@ def _validate_ttl(ttl: float, *, system: bool = False) -> float:
     return ttl
 
 
-def _renewal_update(cur: Any, agent_id: int, session_id: int, ttl: float) -> datetime | None:
+def renewal_update(cur: Any, agent_id: int, session_id: int, ttl: float) -> datetime | None:
     """The guarded deadline write; None when the row is no longer unexpired.
 
     The guard compares against ``clock_timestamp()`` — the statement time,
@@ -203,7 +203,7 @@ class ShellSessions:
         # write point (ruling 2026-09-01: sessions live at most 24h) — except
         # system-side callers (watcher spawns), whose ttl IS the watcher's true
         # target deadline and is exempt (ruling 2026-09-14, task #3411).
-        ttl = _validate_ttl(ttl, system=system)
+        ttl = validate_ttl(ttl, system=system)
         session_id = self._next_session_index_from_db()
         full = f"{self._shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
         # Pass the session allowlist to the backend. On POSIX the shell's base env is
@@ -377,7 +377,7 @@ class ShellSessions:
         try:
             with self._database.connect() as conn, conn.cursor() as cur:
                 cur.execute("SET TRANSACTION READ WRITE")
-                updated = _renewal_update(cur, agent_id, session_id, ttl)
+                updated = renewal_update(cur, agent_id, session_id, ttl)
                 if updated is not None:
                     new_expires = updated
                     cur.execute(
@@ -518,7 +518,7 @@ def renew(id: int, *, ttl: float) -> datetime:
     Returns:
         The new expiry time."""
     id = coerce_typed(id, "id", int)
-    ttl = _validate_ttl(coerce_typed(ttl, "ttl", (int, float)))
+    ttl = validate_ttl(coerce_typed(ttl, "ttl", (int, float)))
     return _handle().renew(id, ttl)
 
 

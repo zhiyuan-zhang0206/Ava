@@ -104,7 +104,7 @@ def _caller(
     )
 
 
-def _make_recorder(
+def make_recorder(
     original: Callable[..., Any],
     fq: str,
     sampling: SamplingPolicyOwner,
@@ -164,7 +164,7 @@ def _make_recorder(
 _MCP_CALL_FUNNEL = "call_raw"
 
 
-def _make_mcp_recorder(
+def make_mcp_recorder(
     original: Callable[..., Any],
     sampling: SamplingPolicyOwner,
     producer: Callable[[], Any] | None = None,
@@ -192,7 +192,7 @@ def _make_mcp_recorder(
     return _recorder(recorder, sampling)
 
 
-def _instrument_targets() -> list[tuple[Any, str, str]]:
+def instrument_targets() -> list[tuple[Any, str, str]]:
     """Walk the ``ava`` namespace tree → ``(parent, attr, fq)`` for every public callable.
 
     ``fq`` is the dotted path under ``ava`` (``files.read``, ``shell.sessions.new``,
@@ -244,7 +244,7 @@ def install(
     Returns the restore ledger: the ``(parent, attr)`` pairs this call actually wrapped,
     in wrap order. The installation carries it; ``uninstall(ledger)`` restores from it.
     """
-    targets = _instrument_targets()
+    targets = instrument_targets()
     funnel_mod = getattr(getattr(ava_module(), "mcps", None), "call_funnel", None)
     funnel = None if funnel_mod is None else getattr(funnel_mod, _MCP_CALL_FUNNEL, None)
     for parent, attr, _fq in targets:
@@ -255,11 +255,11 @@ def install(
         current = getattr(parent, attr, None)
         if current is None or is_recorder(current):
             continue
-        setattr(parent, attr, _make_recorder(current, fq, sampling, producer))
+        setattr(parent, attr, make_recorder(current, fq, sampling, producer))
         wrapped.append((parent, attr))
 
     if funnel_mod is not None and callable(funnel) and not is_recorder(funnel):
-        setattr(funnel_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel, sampling, producer))
+        setattr(funnel_mod, _MCP_CALL_FUNNEL, make_mcp_recorder(funnel, sampling, producer))
         wrapped.append((funnel_mod, _MCP_CALL_FUNNEL))
     return tuple(wrapped)
 

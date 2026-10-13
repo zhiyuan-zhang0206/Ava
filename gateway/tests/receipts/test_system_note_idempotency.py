@@ -11,7 +11,7 @@ from base.api_contracts.idempotency import keyed_headers
 from base.db import Database, fetch_one, pool
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from gateway.agents.system_note import _system_note_blocking
+from gateway.agents.system_note import system_note_blocking
 from gateway.app import app
 from tests.fixtures.gateway_config import spawn_via_http
 
@@ -65,7 +65,7 @@ def test_concurrent_retries_return_one_inbound(
     ):
 
         def send() -> int:
-            return _system_note_blocking(
+            return system_note_blocking(
                 database,
                 event_bus,
                 note_pool,
@@ -106,13 +106,13 @@ def test_replay_survives_reassignment_and_checks_content(
     db_conn.commit()
     with pool(max_size=1, gate=database_gate) as note_pool:
         args = (database, event_bus, note_pool, agent, "note", "system", "task", task)
-        first = _system_note_blocking(*args, client_message_id="assignment-note")
+        first = system_note_blocking(*args, client_message_id="assignment-note")
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agent_tasks SET owner = %s WHERE id = %s", (later_owner, task))
         db_conn.commit()
-        assert _system_note_blocking(*args, client_message_id="assignment-note") == first
+        assert system_note_blocking(*args, client_message_id="assignment-note") == first
         with pytest.raises(HTTPException) as caught:
-            _system_note_blocking(
+            system_note_blocking(
                 database,
                 event_bus,
                 note_pool,

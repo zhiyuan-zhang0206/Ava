@@ -18,7 +18,7 @@ def client(monkeypatch: pytest.MonkeyPatch, mock_client: MagicMock) -> MagicMock
     def no_delay(*_args: object) -> int:
         return 0
 
-    monkeypatch.setattr(transport, "_retry_delay_seconds", no_delay)
+    monkeypatch.setattr(transport, "retry_delay_seconds", no_delay)
     return client
 
 

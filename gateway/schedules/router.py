@@ -158,7 +158,7 @@ def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sq
     return assignments
 
 
-def _update_blocking(
+def update_blocking(
     pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any], key: str | None = None
 ) -> tuple[tuple[Any, ...], bool]:
     """Sync partial-update (syntax check + UPDATE + version snapshot) — via to_thread."""
@@ -296,7 +296,7 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
         raise HTTPException(status_code=400, detail="no fields to update")
 
     row, needs_sync = await asyncio.to_thread(
-        _update_blocking,
+        update_blocking,
         request.app.state.db_pool,
         schedule_id,
         fields,

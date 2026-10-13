@@ -28,7 +28,7 @@ import pytest
 from base.sessions.pty import client, protocol
 from base.sessions.pty.paths import fallback_dir, service_socket_path
 
-_REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[2]
 
 _READY_TIMEOUT_S = 20.0
 _STOP_TIMEOUT_S = 30.0
@@ -54,7 +54,7 @@ class PtyServiceProcess:
         with self.log.open("ab") as log:
             self.process = subprocess.Popen(
                 [sys.executable, "-m", "services.agent_runner.pty_sessions.daemon"],
-                cwd=_REPO,
+                cwd=REPO,
                 env=env,
                 stdout=log,
                 stderr=log,

@@ -54,7 +54,7 @@ from gateway.agents.schemas import (
     TokenUsageResponse,
     TraceCheckpointMessagesResponse,
 )
-from gateway.agents.system_note import _system_note_blocking as _system_note_blocking
+from gateway.agents.system_note import system_note_blocking as system_note_blocking
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.lifecycle.delivery import deliver_chat_inbound, reconcile_chat_delivery
@@ -348,7 +348,7 @@ async def post_agent_system_note(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     inbound_id = await asyncio.to_thread(
-        _system_note_blocking,
+        system_note_blocking,
         request.app.state.db,
         request.app.state.bus,
         request.app.state.db_pool,

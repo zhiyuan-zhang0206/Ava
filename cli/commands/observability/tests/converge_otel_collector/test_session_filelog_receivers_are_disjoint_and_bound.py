@@ -588,7 +588,7 @@ def test_stream_download_writes_all_chunks(
     monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     dest = tmp_path / "t.tar.gz"
 
-    artifact._stream_download("https://example.invalid/t.tar.gz", dest)
+    artifact.stream_download("https://example.invalid/t.tar.gz", dest)
 
     assert dest.read_bytes() == payload * 4
     out = capsys.readouterr().out
@@ -609,7 +609,7 @@ def test_stream_download_honors_socket_timeout(
 
     monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     with pytest.raises(TimeoutError):
-        artifact._stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
+        artifact.stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
     assert seen["timeout"] == artifact.DOWNLOAD_SOCKET_TIMEOUT_S
 
 
