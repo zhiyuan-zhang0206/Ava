@@ -8,18 +8,15 @@ its failure never fails the fetch.
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
 from collections.abc import Callable, Coroutine, Iterator, Mapping
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
 import ava
-from ava import web
 from ava.sdk_surface import process_context
-from ava.tests.web._web_helpers import FakeResp
+from ava.web import ops
 from base.config import settings
 from base.lm.catalog.decide.types import Decision, DecisionRequestError, Question
 from base.lm.decision import call as decide_call
@@ -44,17 +41,17 @@ def exec_update() -> Iterator[dict[str, Any]]:
 
 @pytest.fixture
 def events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Order of the fetch's steps; `_answer` is replaced so no summary model is built."""
-    seen: list[str] = []
+    """Order of the fetch's steps; the answer step is a fake, so no summary model is built."""
+    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
+    return []
 
+
+def _summarizer(events: list[str]) -> Callable[..., str]:
     def answer(prompt: str, **kwargs: Any) -> str:
-        seen.append("summary")
+        events.append("summary")
         return "SUMMARY"
 
-    monkeypatch.setattr(web, "_answer", answer)
-    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-    monkeypatch.setattr(settings.web, "jina_api_key", None)
-    return seen
+    return answer
 
 
 def _fake_decide(
@@ -75,10 +72,13 @@ def _fake_decide(
     return decide
 
 
-def _fetch() -> list[str]:
-    payload = json.dumps({"code": 200, "data": {"title": "", "url": _URL, "content": _PAGE}})
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload.encode())):
-        return ava.web.fetch([(_URL, "summarize")])
+def _fetch(ask: Callable[..., str]) -> str:
+    """One fetch of the page with a fake reader and the given answer step."""
+
+    def read(url: str, max_chars: int) -> tuple[str, str, str, bool]:
+        return "", _URL, _PAGE, False
+
+    return ops.fetch_one(_URL, "summarize", 50_000, None, read=read, ask=ask)
 
 
 def test_a_suspicious_page_adds_a_finding_and_leaves_the_answer_alone(
@@ -86,7 +86,7 @@ def test_a_suspicious_page_adds_a_finding_and_leaves_the_answer_alone(
 ) -> None:
     monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=0.97))
 
-    assert _fetch() == ["SUMMARY"]
+    assert _fetch(_summarizer(events)) == "SUMMARY"
 
     [finding] = exec_update["security_findings"]
     assert finding.source == f"web.fetch ({_URL})"
@@ -116,12 +116,10 @@ def test_the_raw_page_is_judged_while_it_is_summarized(
         decision = Decision(top="false", probabilities={"true": 0.01, "false": 0.99})
         return dict.fromkeys(questions, decision)
 
-    monkeypatch.setattr(web, "_answer", answer)
     monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-    monkeypatch.setattr(settings.web, "jina_api_key", None)
     monkeypatch.setattr(decide_call, "decide", decide)
 
-    assert _fetch() == ["SUMMARY"]
+    assert _fetch(answer) == "SUMMARY"
 
     assert seen == {
         "judgement_started_during_summary": True,
@@ -137,11 +135,10 @@ def test_a_finding_is_kept_when_the_summary_fails(
     def failing_answer(prompt: str, **kwargs: Any) -> str:
         raise ava.web.FetchError("summary model down")
 
-    monkeypatch.setattr(web, "_answer", failing_answer)
     monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=0.97))
 
     with pytest.raises(ava.web.FetchError):
-        _fetch()
+        _fetch(failing_answer)
 
     assert len(exec_update["security_findings"]) == 1
 
@@ -151,7 +148,7 @@ def test_a_failing_decision_model_does_not_fail_the_fetch(
 ) -> None:
     monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=None))
 
-    assert _fetch() == ["SUMMARY"]
+    assert _fetch(_summarizer(events)) == "SUMMARY"
     assert exec_update.get("security_findings", []) == []
 
 
@@ -161,5 +158,5 @@ def test_a_disabled_check_leaves_the_fetch_exactly_as_before(
     monkeypatch.setattr(settings.web, "web_fetch_injection_check_enabled", False)
     monkeypatch.setattr(decide_call, "decide", _fake_decide(events, probability=0.99))
 
-    assert _fetch() == ["SUMMARY"]
+    assert _fetch(_summarizer(events)) == "SUMMARY"
     assert events == ["summary"]

@@ -16,6 +16,7 @@ import json
 import threading
 import time
 import urllib.error
+import urllib.request
 from typing import Any
 from unittest.mock import patch
 
@@ -24,7 +25,6 @@ from langchain_core.exceptions import ModelRateLimitError
 from pydantic import SecretStr
 
 import ava
-from ava import web
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.tests.web._web_helpers import FakeResp
 from ava.web import FetchError, WebError
@@ -158,7 +158,7 @@ def test_fetch_reads_page_then_calls_llm_with_web_model(
         url="https://peps.python.org/pep-0758/",
         content="Author: Pablo...\n\nAbstract\n--------\nexcept* without parens.",
     )
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         results = ava.web.fetch(
             [("https://peps.python.org/pep-0758/", "what does this PEP propose?")]
         )
@@ -179,7 +179,7 @@ def test_fetch_tells_llm_when_content_truncated(
     answer can reflect incompleteness instead of silently dropping it."""
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="x" * 100_000)
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")], max_chars=1000)
     material = mock_llm["input"]
     assert "cut off" in material
@@ -192,7 +192,7 @@ def test_fetch_no_truncation_note_when_under_limit(
 ) -> None:
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="short")
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")])
     assert "cut off" not in mock_llm["input"]
 
@@ -205,7 +205,7 @@ def test_fetch_wraps_llm_error(monkeypatch: pytest.MonkeyPatch, mock_llm: dict[s
     mock_llm["error"] = error
     payload = _make_jina_response(content="ok")
     with (
-        patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)),
+        patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)),
         pytest.raises(FetchError, match="rate limit") as raised,
     ):
         ava.web.fetch([("https://example.com", "summarize")])
@@ -228,7 +228,7 @@ def test_fetch_unknown_model_error_preserves_identity_without_retry(
     mock_llm["error"] = error
     payload = _make_jina_response(content="ok")
     with (
-        patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)),
+        patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)),
         pytest.raises(type(error)) as raised,
     ):
         ava.web.fetch([("https://example.com", "summarize")])
@@ -247,7 +247,7 @@ def test_fetch_uses_jina_api_key_when_set(
         captured["headers"] = dict(req.headers)
         return FakeResp(_make_jina_response(content="ok"))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
+    with patch.object(urllib.request, "urlopen", side_effect=_capture):
         ava.web.fetch([("https://example.com", "summarize")])
     # urllib capitalizes header names
     assert captured["headers"].get("Authorization") == "Bearer jina-secret"
@@ -264,7 +264,7 @@ def test_fetch_anonymous_no_auth_header(
         captured["headers"] = dict(req.headers)
         return FakeResp(_make_jina_response(content="ok"))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
+    with patch.object(urllib.request, "urlopen", side_effect=_capture):
         ava.web.fetch([("https://example.com", "summarize")])
     assert "Authorization" not in captured["headers"]
 
@@ -282,7 +282,7 @@ def test_fetch_sends_custom_user_agent(
         captured["headers"] = dict(req.headers)
         return FakeResp(_make_jina_response(content="ok"))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
+    with patch.object(urllib.request, "urlopen", side_effect=_capture):
         ava.web.fetch([("https://example.com", "summarize")])
     ua = captured["headers"].get("User-agent", "")
     assert "ava-sdk" in ua
@@ -299,7 +299,7 @@ def test_fetch_url_encodes_target(
         captured["url"] = req.full_url
         return FakeResp(_make_jina_response(content="ok"))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
+    with patch.object(urllib.request, "urlopen", side_effect=_capture):
         ava.web.fetch([("https://example.com/search?q=hello world", "summarize")])
     # spaces should become %20, other URL structure (scheme / :/ / ?&=) preserved
     assert captured["url"].startswith(settings.web.web_jina_reader_base + "https://example.com/")
@@ -320,7 +320,7 @@ def test_fetch_hits_configured_reader_base(
         captured["url"] = req.full_url
         return FakeResp(_make_jina_response(content="ok"))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_capture):
+    with patch.object(urllib.request, "urlopen", side_effect=_capture):
         ava.web.fetch([("https://example.com", "summarize")])
     assert captured["url"].startswith("https://reader.relay.example/https://example.com")
 
@@ -332,7 +332,7 @@ def test_fetch_jina_business_error_raises(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = json.dumps({"code": 422, "message": "Unable to fetch: 404 Not Found"}).encode()
     with (
-        patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)),
+        patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)),
         pytest.raises(FetchError, match="Jina Reader fetch failed"),
     ):
         ava.web.fetch([("https://example.com/nonexistent", "summarize")])
@@ -349,7 +349,7 @@ def test_fetch_http_error_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         fp=io.BytesIO(b"rate limit exceeded"),
     )
     with (
-        patch.object(web.urllib.request, "urlopen", side_effect=http_err),
+        patch.object(urllib.request, "urlopen", side_effect=http_err),
         pytest.raises(FetchError, match="Jina Reader HTTP 429"),
     ):
         ava.web.fetch([("https://example.com", "summarize")])
@@ -359,7 +359,7 @@ def test_fetch_network_error_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     url_err = urllib.error.URLError("nodename nor servname provided")
     with (
-        patch.object(web.urllib.request, "urlopen", side_effect=url_err),
+        patch.object(urllib.request, "urlopen", side_effect=url_err),
         pytest.raises(FetchError, match="Jina Reader connection failed"),
     ):
         ava.web.fetch([("https://example.com", "summarize")])
@@ -369,7 +369,7 @@ def test_fetch_malformed_json_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     with (
         patch.object(
-            web.urllib.request,
+            urllib.request,
             "urlopen",
             return_value=FakeResp(b"not json"),
         ),
@@ -394,7 +394,7 @@ def test_fetch_raises_on_cloudflare_wall(
         "to protect against malicious bots.",
     )
     with (
-        patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)),
+        patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)),
         pytest.raises(FetchError, match="bot-challenge or login wall"),
     ):
         ava.web.fetch([("https://cobusgreyling.medium.com/some-article", "summarize")])
@@ -412,7 +412,7 @@ def test_fetch_login_gated_site_names_skill(
         content="\u8bf7\u60a8\u767b\u5f55\u540e\u67e5\u770b\u66f4\u591a\u4e13\u4e1a\u4f18\u8d28\u5185\u5bb9\u3002",
     )
     with (
-        patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)),
+        patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)),
         pytest.raises(FetchError, match="bot-challenge or login wall"),
     ):
         ava.web.fetch([("https://zhuanlan.zhihu.com/p/123", "summarize")])
@@ -427,7 +427,7 @@ def test_fetch_long_article_mentioning_marker_not_flagged(
     monkeypatch.setattr(settings.web, "jina_api_key", SecretStr("k"))
     body = "An article about how Cloudflare shows 'Just a moment...' pages.\n" + ("x" * 5_000)
     payload = _make_jina_response(title="On bot challenges", content=body)
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         results = ava.web.fetch([("https://example.com/blog", "summarize")])
     assert results == ["FAKE ANSWER"]
     assert "Just a moment" in mock_llm["input"]
@@ -459,7 +459,7 @@ def test_fetch_batch_returns_results_in_input_order(
                 return FakeResp(payload)
         return FakeResp(_make_jina_response(content="unknown"))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_side_effect):
+    with patch.object(urllib.request, "urlopen", side_effect=_side_effect):
         results = ava.web.fetch(
             [
                 ("https://a.com", "summarize a"),
@@ -486,7 +486,7 @@ def test_fetch_batch_runs_concurrently(
         barrier.wait()
         return FakeResp(_make_jina_response(content="ok"))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_slow_fetch):
+    with patch.object(urllib.request, "urlopen", side_effect=_slow_fetch):
         t0 = time.monotonic()
         results = ava.web.fetch(
             [
@@ -557,7 +557,7 @@ def test_fetch_max_concurrent_caps_inflight(
             inflight -= 1
         return FakeResp(_make_jina_response(content="ok"))
 
-    with patch.object(web.urllib.request, "urlopen", side_effect=_tracking_fetch):
+    with patch.object(urllib.request, "urlopen", side_effect=_tracking_fetch):
         results = ava.web.fetch(
             [
                 ("https://a.com", "p1"),
@@ -585,7 +585,7 @@ def test_fetch_uses_configured_model_and_reasoning(
     monkeypatch.setattr(settings.web, "web_fetch_reasoning", "high")
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="ok")
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")])
     assert mock_llm["model"] == "deepseek-v4-pro"
     assert mock_llm["reasoning_effort"] == "high"
@@ -598,7 +598,7 @@ def test_fetch_default_model_is_flash(
     independent of the agent's main model."""
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="ok")
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")])
     assert mock_llm["model"] == "deepseek-flash"
     assert mock_llm["reasoning_effort"] == "none"
@@ -611,7 +611,7 @@ def test_fetch_effort_overrides_settings_reasoning(
     reasoning_effort is 'high', not settings.web.web_fetch_reasoning."""
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="ok")
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")], effort="high")
     assert mock_llm["reasoning_effort"] == "high"
 
@@ -624,11 +624,11 @@ def test_fetch_effort_none_keeps_settings_reasoning(
     monkeypatch.setattr(settings.web, "web_fetch_reasoning", "high")
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="ok")
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")])
     assert mock_llm["reasoning_effort"] == "high"
 
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")], effort="low")
     assert mock_llm["reasoning_effort"] == "low"
 
@@ -641,7 +641,7 @@ def test_fetch_effort_accepts_enum_member(
 
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="ok")
-    with patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)):
+    with patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)):
         ava.web.fetch([("https://example.com", "summarize")], effort=ReasoningEffort.MAX)
     assert mock_llm["reasoning_effort"] == "max"
 
@@ -680,7 +680,7 @@ def test_fetch_llm_build_error_wraps_as_fetcherror(
     monkeypatch.setattr(factory, "build_chat_model", _failing_build)
     payload = _make_jina_response(content="ok")
     with (
-        patch.object(web.urllib.request, "urlopen", return_value=FakeResp(payload)),
+        patch.object(urllib.request, "urlopen", return_value=FakeResp(payload)),
         pytest.raises(FetchError, match="DEEPSEEK_API_KEY"),
     ):
         ava.web.fetch([("https://example.com", "summarize")])

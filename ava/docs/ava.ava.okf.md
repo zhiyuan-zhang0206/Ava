@@ -28,4 +28,4 @@ Overview of the Ava subsystem.
 - [[ava/docs/ui.ava.okf.md|Ui]]
 - [[understand.ava.okf.md|Understand]]
 - [[ava/watcher/docs/watcher.ava.okf.md|Watcher]]
-- [[web.ava.okf.md|Web]]
+- [[ava/web/docs/web.ava.okf.md|Web]]
