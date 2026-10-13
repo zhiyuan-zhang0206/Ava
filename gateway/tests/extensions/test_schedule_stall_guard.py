@@ -22,7 +22,7 @@ def _watch_stalls(
     monkeypatch: pytest.MonkeyPatch, *, patch_sleep: bool = False, database_gate: ProcessDbGate
 ) -> Generator[list[str], None, None]:
     """Record real guard verdicts without exiting the test process."""
-    import gateway.schedules.runner as sr
+    import services.wake.schedule_manager.engine as sr
 
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.1)
     fired: list[str] = []
@@ -66,7 +66,7 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     the design, not a stall, so the guard must stay quiet."""
     import time
 
-    import gateway.schedules.runner as sr
+    import services.wake.schedule_manager.engine as sr
 
     monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.05)
     fired: list[str] = []
