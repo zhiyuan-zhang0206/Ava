@@ -48,7 +48,6 @@ import pytest
 from _pytest.reports import TestReport
 from langgraph.checkpoint.postgres import PostgresSaver
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
-from psycopg import sql
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
@@ -60,7 +59,15 @@ from tests.e2e._credentials import (
     mint_credentials,
 )
 from tests.e2e._credentials import gateway_client_credentials as gateway_client_credentials
-from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_SOCKET, GATEWAY_URL
+from tests.e2e._db import apply_e2e_seq_offset
+from tests.e2e._ports import (
+    FRONTEND_PORT,
+    FRONTEND_RESERVATION,
+    FRONTEND_URL,
+    GATEWAY_PORT,
+    GATEWAY_SOCKET,
+    GATEWAY_URL,
+)
 from tests.e2e._truncate import truncate_with_deadlock_retry
 from tests.e2e.fixture_environment import E2EEnv
 from tests.e2e.process_support import (
@@ -158,21 +165,6 @@ def _gc_orphan_e2e() -> None:
                 shutil.rmtree(d)
 
 
-def _apply_e2e_seq_offset() -> None:
-    """Offset agents_id_seq by PID so concurrent e2e workers spawn non-colliding
-    session names (`ava-agent-<id>` shares a global namespace). PID <
-    65536, ×1000 leaves ample room. Applied once per e2e package — there is exactly
-    one, so once per run: `truncated_db` truncates without RESTART IDENTITY, so the
-    sequence is never reset and this base persists (ids stay monotonic +
-    per-worker-disjoint for the whole run)."""
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            sql.SQL("ALTER SEQUENCE agents_id_seq RESTART {}").format(
-                sql.Literal(os.getpid() * 1000)
-            )
-        )
-
-
 @pytest.fixture(scope="package")
 def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[None]:
     """Layer e2e-specific process config on the suite's session Postgres +
@@ -229,7 +221,7 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
     )
     os.environ["AVA_DB_URL"] = provisioned_db
     os.environ["AVA_REDIS_URL"] = provisioned_redis
-    _apply_e2e_seq_offset()
+    apply_e2e_seq_offset()
 
     settings.data_plane.events_channel = f"ava:events:e2e:{_E2E_SUFFIX}"
     os.environ["AVA_EVENTS_CHANNEL"] = settings.data_plane.events_channel
@@ -436,6 +428,8 @@ def frontend_proc() -> Iterator[None]:
     if result.returncode != 0:
         raise RuntimeError(f"npm run build failed (exit {result.returncode}); see {build_log}")
 
+    # The port has been held since import, through the build above; hand it to Next now.
+    FRONTEND_RESERVATION.release()
     try:
         with managed_proc(
             ["npm", "run", "start", "--", "-p", str(FRONTEND_PORT)],
@@ -592,7 +586,7 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
     """Before each test, clear all business tables in e2e DB (FK order)."""
     with psycopg.connect(settings.data_plane.db_url) as conn:
         # TRUNCATE without RESTART IDENTITY: ids grow monotonically from the
-        # session-level `_apply_e2e_seq_offset` PID base and are never reused
+        # session-level `apply_e2e_seq_offset` PID base and are never reused
         # across tests (the same no-reuse contract as the non-e2e suite — see
         # docs/decisions/engineering/tooling/2026-06-30-monotonic-test-ids.md). Leaving the sequence untouched also
         # preserves the per-worker PID offset without re-applying it, so
