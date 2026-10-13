@@ -8,8 +8,8 @@ description: "Selects a working strategy for complex or unclear tasks. Use when 
 Workflow is the lightweight entry point for choosing a working strategy. The
 human supplies intent and preferences; agents discover facts in the world and
 choose how to pursue and verify the result. Loading this skill does not require
-an interview, a plan document, goal supervision, or delegation. Direct execution
-with a suitable check is a valid workflow.
+an interview, a plan document, or goal supervision. Direct execution with a
+suitable check fits short or dependent work; parallelize independent work.
 
 ## Choose a Working Strategy
 
@@ -74,10 +74,10 @@ current evidence; do not perform capability research for every ordinary task.
 
 ## Delegation decisions
 
-Delegate when the task has a clear scope, a useful independent execution context,
-and results you can verify. Keep simple local steps with the current agent; weigh
-supervision and integration cost against the benefit of another worker. Choose
-tools by demonstrated capability for the task, not fixed file-count thresholds.
+Proactively parallelize independent work. Fork when your existing context is
+valuable to the task; otherwise spawn fresh or reuse a suitable, available agent.
+Keep short or dependent steps with the current agent. Choose tools by demonstrated
+capability for the task, not fixed file-count thresholds.
 For Ava's external-worker launch, supervision, resume, or takeover mechanics,
 load the external-agents guide in Ava Guide.
 
@@ -108,7 +108,7 @@ task registry, label convention, or specific SDK is required.
 
 Calibration, alignment, planning, and evaluation can stand alone, interleave,
 and feed back into one another. Execute settled slices while investigating
-others when safe; delegation is optional. Reassess the remaining work at useful
+others when safe; reassess independent work for parallel execution at useful
 checkpoints. Changes within the agreed scope need no ceremonial reapproval;
 changes to outcome, authority, or authorized spending need the relevant decision.
 

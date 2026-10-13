@@ -378,8 +378,9 @@ class AgentPromptSettings(EnvSettings):
         description=(
             "Inject a 'Before you act \u2014 check' section: does a skill already "
             "cover this, is someone else already responsible, do they have better "
-            "tools, would delegation improve the result, which collaboration method "
-            "fits? Route non-trivial work through ava-workflow when available. "
+            "tools, and proactively parallelize independent work. Fork for valuable "
+            "existing context; otherwise spawn fresh or reuse a suitable available agent. "
+            "Route non-trivial work through ava-workflow when available. "
             "The skill-index step is dropped when this agent renders "
             "no Capabilities section. Unset resolves the per-model default (shared "
             "floor: on)."

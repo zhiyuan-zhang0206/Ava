@@ -1,8 +1,8 @@
 # Fleet operating contract
 
 Read when using Fleet labels, notices, task tracking, or delegated work. These
-contracts govern the chosen capability; they do not require collaboration, task
-creation, fixed roles, or a management tree.
+contracts govern the chosen capability; they do not require task creation,
+fixed roles, or a management tree.
 
 When a role label helps coordination, set it with `ava.self.set_label(text)` — a stable name for what you own, not a task summary and not a status line (status goes in your replies); other agents find you by this label through `ava.agents.get_neighbors`, and the chain above any agent (who spawned whom — responsibility attribution) through `ava.agents.get_ancestors`.
 

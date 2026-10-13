@@ -306,9 +306,7 @@ def test_empty_index_omits_the_match_first_instruction(monkeypatch: pytest.Monke
 def test_delegation_check_makes_consulting_the_index_mandatory(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The check is the prompt's one mandatory-flagged process, so the
-    obligation to consult the index lives there — and it names both the section
-    and the call that opens a skill."""
+    """The capability check names both the index and the skill-loading call."""
     monkeypatch.setattr(settings.agent, "prompt_delegation_check_enabled", True)
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
@@ -325,7 +323,7 @@ def test_delegation_check_makes_consulting_the_index_mandatory(
         "Is someone else already responsible?"
     )
     assert "1. Does a skill already cover this?" in text
-    assert "steps 2-3 named no better agent" in text
+    assert "4. Proactively parallelize independent work." in text
 
 
 def test_delegation_check_routes_nontrivial_work_without_forcing_methods(
@@ -344,13 +342,13 @@ def test_delegation_check_routes_nontrivial_work_without_forcing_methods(
     assert "load ava-workflow when available" in text
     assert "non-trivial, ambiguous, consequential, sustained, or parallel" in text
     assert "does not mandate an interview" in text
-    assert "goal supervision, a plan document, or delegation" in text
+    assert "goal supervision, or a plan document" in text
     assert "1% chance" not in text
     assert "Keep it yourself only" not in text
-    assert "parallelizable work does not require delegation" in text
-    assert "orchestration script" in text
-    assert "Does a skill already cover this?" in text
-    assert "ava.help(ava.skills.<name>)" in text
+    assert "Proactively parallelize independent work." in text
+    assert "Fork when your existing context is valuable to the task" in text
+    assert "otherwise spawn fresh or reuse a suitable, available agent." in text
+    assert "parallelizable work does not require delegation" not in text
 
 
 def test_delegation_check_drops_the_index_step_when_there_is_no_index(
@@ -360,7 +358,7 @@ def test_delegation_check_drops_the_index_step_when_there_is_no_index(
     MCP servers (AVA_SDK_DISABLE=skills, an empty inject list, a cluster with
     nothing converged). Ordering that agent to read `# Capabilities` points it at
     a section that is not in its prompt — so the step is dropped and the rest
-    renumbered, back-reference included."""
+    renumbered."""
     monkeypatch.setattr(settings.agent, "prompt_delegation_check_enabled", True)
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
     monkeypatch.setattr(mcps, "servers", list)
@@ -373,9 +371,8 @@ def test_delegation_check_drops_the_index_step_when_there_is_no_index(
     )
     assert "# Capabilities" not in text
     assert "1. Is someone else already responsible?" in text
-    assert "steps 1-2 named no better agent" in text
-    assert "4. Can the work be parallelized?" in text
-    assert "5." not in text
+    assert "3. Proactively parallelize independent work." in text
+    assert "4." not in text
 
 
 def test_building_the_prompt_records_no_skill_attribution(
