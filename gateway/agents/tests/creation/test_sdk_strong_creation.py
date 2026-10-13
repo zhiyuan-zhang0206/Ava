@@ -17,12 +17,12 @@ from ava.sdk_surface import agent_identity
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from gateway.agents import router as agent_router
 from gateway.agents.tests.creation.test_guarded_creation import PATH, SECRET
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.retry_waits import retry_waits as retry_waits
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
