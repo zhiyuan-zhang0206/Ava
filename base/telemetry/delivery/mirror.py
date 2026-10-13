@@ -77,14 +77,14 @@ def append_jsonl(events: list[Event]) -> None:
         with path.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
     except Exception as exc:  # report, never raise
-        global _jsonl_failures  # noqa: PLW0603 — module-level counter
-        _jsonl_failures += 1
-        if _jsonl_failures == 1 or _jsonl_failures % 50 == 0:
+        global jsonl_failures  # noqa: PLW0603 — module-level counter
+        jsonl_failures += 1
+        if jsonl_failures == 1 or jsonl_failures % 50 == 0:
             report_no_pipeline(
                 "[event-emitter] JSONL mirror write failed ({n} consecutive) — "
                 "the mirror is the durable local copy; a sustained failure "
                 "means batches are not landing in it: {err}",
-                n=_jsonl_failures,
+                n=jsonl_failures,
                 err=repr(exc),
             )
     else:
@@ -103,4 +103,4 @@ def append_jsonl(events: list[Event]) -> None:
 # sustained failure loud without flooding: the first failure and every 50th
 # after it are reported. (The PG write — the other former failure source — was
 # retired with the LGTM cutover, task #1197.)
-_jsonl_failures = 0
+jsonl_failures = 0

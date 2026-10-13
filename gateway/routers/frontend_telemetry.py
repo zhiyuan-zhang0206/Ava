@@ -44,13 +44,13 @@ _log = logging.getLogger(__name__)
 # Backstop rate limit: events per session per minute (sliding window). The
 # client caps itself at 100/min; this is defense in depth, not the primary
 # throttle.
-_MAX_EVENTS_PER_MINUTE = 120
+MAX_EVENTS_PER_MINUTE = 120
 # Sessions tracked at once; past this the oldest-touched session is evicted
 # (a fresh window — a restarting tab just gets a fresh budget).
 _MAX_SESSIONS = 512
 # Batch byte cap: 200 events x ~400 B worst case is ~80 KB; 64 KB sits
 # comfortably above the honest ceiling.
-_MAX_BODY_BYTES = 65_536
+MAX_BODY_BYTES = 65_536
 
 
 class SessionRateLimiter:
@@ -72,7 +72,7 @@ class SessionRateLimiter:
             self._windows[session_id] = win
         while win and now - win[0] > 60:
             win.popleft()
-        if len(win) >= _MAX_EVENTS_PER_MINUTE:
+        if len(win) >= MAX_EVENTS_PER_MINUTE:
             return True
         win.append(now)
         return False
@@ -108,7 +108,7 @@ async def ingest(request: Request) -> Response:
     rate limit drops part of the batch.
     """
     raw = await request.body()
-    if len(raw) > _MAX_BODY_BYTES:
+    if len(raw) > MAX_BODY_BYTES:
         return error_response(
             request,
             code="telemetry_batch_too_large",

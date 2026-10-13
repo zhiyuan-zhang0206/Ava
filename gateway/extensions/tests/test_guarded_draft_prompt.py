@@ -20,7 +20,7 @@ def test_original_package_prompt_survives_template_change(
     first = client.post(path, json=body, headers=HEADERS)
     assert first.status_code == 200, first.text
     original = db_conn.execute("SELECT content FROM inbound_messages").fetchone()
-    monkeypatch.setitem(packages._KIND_BRIEF, "skill", "a changed template")
+    monkeypatch.setitem(packages.KIND_BRIEF, "skill", "a changed template")
     replay = client.post(path, json=body, headers=HEADERS)
     assert replay.status_code == 200 and replay.json() == first.json()
     assert db_conn.execute("SELECT content FROM inbound_messages").fetchall() == [original]

@@ -683,7 +683,7 @@ def _fake_transcript(_agent_id: int, *, database: Database) -> list[dict[str, st
     return []
 
 
-def _build_minimal_record(
+def build_minimal_record(
     collect_mod: Any, monkeypatch: pytest.MonkeyPatch, events: list[tuple], *, database: Database
 ) -> dict[str, Any]:
     """build_record with every other input reduced to its empty case, so the
@@ -716,7 +716,7 @@ def test_build_record_surfaces_plugins_activated_skipped(
         ),
     ]
 
-    rec = _build_minimal_record(collect_mod, monkeypatch, events, database=database)
+    rec = build_minimal_record(collect_mod, monkeypatch, events, database=database)
 
     assert rec["plugins_activated_skipped"] == 1
     assert rec["plugins_activated"] == {"ava_code/hooks/before_exec": 1}
@@ -738,7 +738,7 @@ def test_build_record_well_formed_rows_report_zero_skipped(
         ),
     ]
 
-    rec = _build_minimal_record(collect_mod, monkeypatch, events, database=database)
+    rec = build_minimal_record(collect_mod, monkeypatch, events, database=database)
 
     assert rec["plugins_activated_skipped"] == 0
     assert rec["plugins_activated"] == {"ava_code/hooks/before_exec": 1}

@@ -226,7 +226,7 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
     net trio (task #1935): each gauge is registered, dispositioned, and
     wired into the dashboard JSON with the same name."""
 
-    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION, strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
     for field, name in (
@@ -235,8 +235,8 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
         ("dismissed_warnings", "core_dismissed_warning"),
         ("dismissed_errors", "core_dismissed_error"),
     ):
-        assert _METRIC_DISPOSITION[("resolution_status", field)] == "gauge"
-        assert specs[name].query == f"ava_resolution_status_{_strip_unit_suffix(field)}_ratio"
+        assert METRIC_DISPOSITION[("resolution_status", field)] == "gauge"
+        assert specs[name].query == f"ava_resolution_status_{strip_unit_suffix(field)}_ratio"
         assert specs[name].query_type == "promql"
         assert specs[name].panel == "stat"
 
@@ -249,11 +249,11 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
     appends — the dashboard must query that exact name, and the growth-rate
     panel derives from it (``deriv(...[1h]) * 86400``, agents per day)."""
 
-    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION, strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
-    assert _METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
-    gauge = f"ava_agent_registry_{_strip_unit_suffix('max_id')}_ratio"
+    assert METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
+    gauge = f"ava_agent_registry_{strip_unit_suffix('max_id')}_ratio"
     # The gauge is per gateway process (a new series per restart), so the
     # panels collapse it with max() — the visible curve is the registry
     # high-water mark, not N overlapping per-lifetime series.
@@ -266,30 +266,30 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
 
 def _pr_flow_daily_query(field: str, unit: str) -> str:
     """The by-day read-back query of one export-job gauge field."""
-    from base.telemetry.otlp.telemetry_otlp import _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import strip_unit_suffix
 
-    name = f"ava_pr_flow_daily_{_strip_unit_suffix(field)}_{unit}"
+    name = f"ava_pr_flow_daily_{strip_unit_suffix(field)}_{unit}"
     return f"max by (day) (last_over_time({name}[26h]))"
 
 
 def _assert_pr_flow_payload_fields_are_gauges() -> None:
     """Every payload field behind the panels is absolute state, never a count
     to accrue across re-emissions."""
-    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
+    from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 
     for field in (
         "ready_to_merge_median_seconds",
         "ready_to_merge_p90_seconds",
         "flake_new_quarantines",
     ):
-        assert _METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge"
-    assert _METRIC_DISPOSITION[("pr_flow_run", "queue_depth")] == "gauge"
+        assert METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge"
+    assert METRIC_DISPOSITION[("pr_flow_run", "queue_depth")] == "gauge"
 
 
 def _assert_pr_flow_specs_match_the_export_job(
     specs: dict[str, MetricSpec],
 ) -> tuple[MetricSpec, MetricSpec, MetricSpec]:
-    from base.telemetry.otlp.telemetry_otlp import _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import strip_unit_suffix
 
     latency = specs["core_pr_flow_ready_to_merge"]
     assert latency.query_type == "promql"
@@ -304,7 +304,7 @@ def _assert_pr_flow_specs_match_the_export_job(
     queue = specs["core_pr_flow_queue_depth"]
     assert queue.query_type == "promql"
     assert queue.panel == "timeseries"
-    assert queue.query == f"ava_pr_flow_run_{_strip_unit_suffix('queue_depth')}_ratio"
+    assert queue.query == f"ava_pr_flow_run_{strip_unit_suffix('queue_depth')}_ratio"
 
     flakes = specs["core_pr_flow_flakes"]
     assert flakes.query == _pr_flow_daily_query("flake_new_quarantines", "ratio")

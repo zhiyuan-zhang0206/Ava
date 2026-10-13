@@ -131,8 +131,8 @@ def ensure_partitions(conn: psycopg.Connection[Any]) -> None:
 _lock = threading.Lock()
 _pool: Any = None
 _disabled = False
-_failures = 0
-_retry_at = 0.0
+failures = 0
+retry_at = 0.0
 _ensured_month: tuple[int, int] | None = None
 
 
@@ -148,7 +148,7 @@ def store_events(db: Database, events: Sequence[Event]) -> None:
 
     Never raises: the drain thread must survive a database that does not answer.
     """
-    global _failures  # noqa: PLW0603
+    global failures  # noqa: PLW0603
     records = [
         stored_row(event_row(event))
         for event in events
@@ -157,14 +157,14 @@ def store_events(db: Database, events: Sequence[Event]) -> None:
     if not records:
         return
     with _lock:
-        if _disabled or time.monotonic() < _retry_at:
+        if _disabled or time.monotonic() < retry_at:
             return
         try:
             _write(db, records)
         except Exception as exc:
             _failed(exc, len(records))
         else:
-            _failures = 0
+            failures = 0
 
 
 def _write(db: Database, records: list[dict[str, Any]]) -> None:
@@ -183,7 +183,7 @@ def _write(db: Database, records: list[dict[str, Any]]) -> None:
 
 
 def _failed(exc: Exception, rows: int) -> None:
-    global _disabled, _failures, _retry_at  # noqa: PLW0603
+    global _disabled, failures, retry_at  # noqa: PLW0603
     from base.db.connections import NoDatabaseAuthorityError, PlaceholderDbUrlError
 
     if isinstance(exc, (NoDatabaseAuthorityError, PlaceholderDbUrlError)):
@@ -193,14 +193,14 @@ def _failed(exc: Exception, rows: int) -> None:
             "telemetry_events through the JSONL replay"
         )
         return
-    _failures += 1
-    _retry_at = time.monotonic() + min(_BACKOFF_FIRST_S * 2 ** (_failures - 1), _BACKOFF_MAX_S)
-    if _failures == 1 or _failures % _REPORT_EVERY == 0:
+    failures += 1
+    retry_at = time.monotonic() + min(_BACKOFF_FIRST_S * 2 ** (failures - 1), _BACKOFF_MAX_S)
+    if failures == 1 or failures % _REPORT_EVERY == 0:
         report_no_pipeline(
             "[telemetry-events] {rows} event(s) did not land in telemetry_events "
             "({n} consecutive failure(s)): {err}; the JSONL mirror holds them for replay",
             rows=rows,
-            n=_failures,
+            n=failures,
             err=repr(exc),
             level="error",
         )
@@ -210,7 +210,7 @@ def _failed(exc: Exception, rows: int) -> None:
             level="error",
             attributes={
                 "rows": rows,
-                "consecutive_failures": _failures,
+                "consecutive_failures": failures,
                 "error_class": type(exc).__name__,
                 "error": str(exc)[:500],
             },
@@ -228,11 +228,11 @@ def close_store() -> None:
 
 def reset_store() -> None:
     """Return the sink to its initial state, enabled (tests)."""
-    global _disabled, _failures, _retry_at, _ensured_month  # noqa: PLW0603
+    global _disabled, failures, retry_at, _ensured_month  # noqa: PLW0603
     close_store()
     _disabled = False
-    _failures = 0
-    _retry_at = 0.0
+    failures = 0
+    retry_at = 0.0
     _ensured_month = None
 
 

@@ -137,7 +137,7 @@ _JITTER_SPAN_S = 5.0
 # Two attempts (one retry) still ride out a transient blip (the 2026-08-07
 # indexer-500 class, task #960) without stacking the default 3; on a
 # persistent outage the caller decides how long it is worth.
-_MEMORY_SEARCH_MAX_RETRIES = 2
+MEMORY_SEARCH_MAX_RETRIES = 2
 # Per-attempt HTTP timeout must stay ABOVE the gateway's own search deadline:
 # the server's wire 503 is the informative failure (IndexerUnavailable), and a
 # client ReadTimeout that beats it converts the error into a generic
@@ -146,7 +146,7 @@ _MEMORY_SEARCH_MAX_RETRIES = 2
 _MEMORY_SEARCH_TIMEOUT_MARGIN_S = 3.0
 
 
-def _memory_search_timeout(context: AvaContext | None = None) -> TransportTimeout:
+def memory_search_timeout(context: AvaContext | None = None) -> TransportTimeout:
     """Per-attempt HTTP timeout for one memory search: the gateway's own
     search deadline plus the margin, so the server's deadline fires first."""
     import httpx

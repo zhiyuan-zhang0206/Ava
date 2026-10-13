@@ -45,7 +45,7 @@ def _rollup(
 
 _LOOPS: dict[str, tuple[_Loop, str]] = {
     "rollup": (_rollup, "_run_maintenance"),
-    "resolution": (daemon._resolution_loop, "_run_resolution"),
+    "resolution": (daemon.resolution_loop, "_run_resolution"),
 }
 
 
@@ -85,7 +85,7 @@ async def test_a_quiesced_unit_runs_no_pass(
 
     # Cancel inside an admitted pass or the first quiesced sleep, rather than
     # racing a fixed delay against worker-thread completion.
-    monkeypatch.setattr(daemon, "_maintenance_with_liveness", held_pass)
+    monkeypatch.setattr(daemon, "maintenance_with_liveness", held_pass)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", short_sleep)
     async with asyncio.TaskGroup() as tasks:
         task = tasks.create_task(

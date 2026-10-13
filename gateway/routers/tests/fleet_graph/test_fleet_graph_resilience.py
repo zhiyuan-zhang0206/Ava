@@ -85,7 +85,7 @@ def test_success_writes_only_the_short_poll_cache(
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200
-    key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
+    key = fg.cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
     assert [(write[0], write[2]) for write in redis.writes] == [(key, 60)]
 
 
@@ -125,7 +125,7 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     body = resp.json()
     assert body["telemetry_stale"] is True
     assert body["snapshot_at"] is not None
-    key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
+    key = fg.cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
     assert {write[0] for write in redis.writes} == {key}
     assert emitted[0][0] == "telemetry_read_stale"
     assert emitted[0][1]["source"] == "postgres"
@@ -155,7 +155,7 @@ def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(
 
     import gateway.routers.fleet_graph as fg
 
-    key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
+    key = fg.cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
     redis.values[f"fleet_graph:last_good:{key}"] = leftover.model_dump_json()
     patch_sync_redis(monkeypatch, _RedisFactory(redis))
 

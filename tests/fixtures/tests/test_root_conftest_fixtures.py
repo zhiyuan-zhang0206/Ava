@@ -11,10 +11,11 @@ from types import ModuleType
 
 import pytest
 
-from tests.fixtures import guards, provisioning
+from tests.fixtures import env_bootstrap, guards, provisioning
 
 ROOT_CONFTEST = Path(__file__).resolve().parents[3] / "conftest.py"
 PLUGINS: dict[str, ModuleType] = {
+    "tests.fixtures.env_bootstrap": env_bootstrap,
     "tests.fixtures.provisioning": provisioning,
     "tests.fixtures.guards": guards,
 }

@@ -360,7 +360,7 @@ def test_default_schema_check_never_setup_after_concurrent_repair(
     def setup_must_not_run(_self: PostgresSaver) -> None:
         raise AssertionError("a successful read-only recheck must return before setup")
 
-    monkeypatch.setattr(provision, "_checkpoint_schema_versions", checkpoint_versions)
+    monkeypatch.setattr(provision, "checkpoint_schema_versions", checkpoint_versions)
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
 
     provision.ensure_checkpoint_schema("ava_repaired", base_admin_url=_admin_url())

@@ -48,7 +48,7 @@ _log = logging.getLogger(__name__)
 # fan-out, so one offline host doesn't stall the whole matrix on the default
 # deadline. A host that already carries reachability failures gets the roster's
 # fast-fail budget instead (_dial_inventory_read, task #4127).
-_AGGREGATE_READ_TIMEOUT_S = 15.0
+AGGREGATE_READ_TIMEOUT_S = 15.0
 
 
 def _assert_inventory_target(pool: ConnectionPool, target: str) -> None:
@@ -147,7 +147,7 @@ async def _dial_inventory_read(db: Database, target: str) -> InventoryReadResult
     blackholed host's dial burns the full budget across the cluster RPC retry chain
     and drags the aggregate tail to tens of seconds (task #4127).
     """
-    budget = _AGGREGATE_READ_TIMEOUT_S
+    budget = AGGREGATE_READ_TIMEOUT_S
     try:
         async with asyncio.timeout(budget):
             return await _dispatch_inventory_read(db, target, timeout_s=budget, retries=1)

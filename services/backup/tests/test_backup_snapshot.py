@@ -23,7 +23,7 @@ def test_interrupted_snapshot_dump_leaves_no_plaintext(
     def composition(_db: Database, _db_url: str | None = None) -> str:
         return "test"
 
-    monkeypatch.setattr(backup, "_db_size_breakdown", composition)
+    monkeypatch.setattr(backup, "db_size_breakdown", composition)
     writer = (
         "import sys,time\n"
         "open(sys.argv[sys.argv.index('--file')+1],'wb').write(b'PLAINTEXT')\n"
@@ -42,7 +42,7 @@ def test_interrupted_snapshot_dump_leaves_no_plaintext(
         if "0s" in line or line.endswith("MiB written"):
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(backup, "_PROGRESS_INTERVAL_S", 0.2)
+    monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
     with pytest.raises(KeyboardInterrupt):
         backup.run_backup(
             db_url="dbname=ava",
@@ -104,7 +104,7 @@ def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
     def composition(_db: Database, _db_url: str | None = None) -> str:
         return "test"
 
-    monkeypatch.setattr(backup, "_db_size_breakdown", composition)
+    monkeypatch.setattr(backup, "db_size_breakdown", composition)
     script = tmp_path / "pg_dump"
     script.write_text(
         f"#!{sys.executable}\nimport sys\n"

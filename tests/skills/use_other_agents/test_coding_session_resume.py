@@ -81,14 +81,14 @@ def test_codex_session_id_is_read_from_the_status_card(
 ) -> None:
     shell = _FakeShell(screen=_STATUS_CARD).install(monkeypatch)
 
-    assert codex._read_session_id(7) == _SESSION
+    assert codex.read_session_id(7) == _SESSION
     assert shell.sent == ["/status"]
 
 
 def test_a_parked_status_gets_one_enter(monkeypatch: pytest.MonkeyPatch, _no_sleep: None) -> None:
     shell = _FakeShell(screen="› /status", screen_after_enter=_STATUS_CARD).install(monkeypatch)
 
-    assert codex._read_session_id(7, timeout=0.02) == _SESSION
+    assert codex.read_session_id(7, timeout=0.02) == _SESSION
     assert shell.keys == ["Enter"]
 
 
@@ -96,14 +96,14 @@ def test_no_session_id_fails_the_launch(monkeypatch: pytest.MonkeyPatch, _no_sle
     _FakeShell(screen="› /status").install(monkeypatch)
 
     with pytest.raises(RuntimeError, match="could not read the Codex session id"):
-        codex._read_session_id(7, timeout=0.02)
+        codex.read_session_id(7, timeout=0.02)
 
 
 # --- Codex: --resume reopens exactly the recorded session ----------------------
 
 
-def _request(workspace: Path, resume: str | None) -> codex._LaunchRequest:
-    return codex._LaunchRequest(
+def _request(workspace: Path, resume: str | None) -> codex.LaunchRequest:
+    return codex.LaunchRequest(
         workspace=workspace,
         tasks_file=workspace / "tasks.md",
         work_file=workspace / "work.md",
@@ -134,17 +134,17 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
     def _opened(_sid: int) -> str:
         return opened
 
-    monkeypatch.setattr(codex, "_wait_for_ready", _nothing)
-    monkeypatch.setattr(codex, "_read_session_id", _opened)
-    monkeypatch.setattr(codex, "_verify_submitted", _nothing)
+    monkeypatch.setattr(codex, "wait_for_ready", _nothing)
+    monkeypatch.setattr(codex, "read_session_id", _opened)
+    monkeypatch.setattr(codex, "verify_submitted", _nothing)
 
     request = _request(workspace, _SESSION)
     if opened != _SESSION:
         with pytest.raises(RuntimeError, match=f"not the requested {_SESSION}"):
-            codex._start_codex(7, owner.key, owner, "g", 41, request)
+            codex.start_codex(7, owner.key, owner, "g", 41, request)
         assert len(sent) == 1  # the TUI line only: nothing reaches the wrong session
         return
-    assert codex._start_codex(7, owner.key, owner, "g", 41, request) == (None, _SESSION)
+    assert codex.start_codex(7, owner.key, owner, "g", 41, request) == (None, _SESSION)
     assert f"exec codex resume {_SESSION} --dangerously-bypass" in sent[0]
     assert sent[1].startswith("This session was interrupted")
     assert "continue from where you stopped" in sent[1]
@@ -154,8 +154,8 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
 
 
 def test_claude_pins_or_reopens_the_session_id(tmp_path: Path) -> None:
-    fresh = claude._claude_command(tmp_path, claude_session=_SESSION)
-    resumed = claude._claude_command(tmp_path, claude_session=_SESSION, resume=True)
+    fresh = claude.claude_command(tmp_path, claude_session=_SESSION)
+    resumed = claude.claude_command(tmp_path, claude_session=_SESSION, resume=True)
 
     assert fresh.endswith(f"--dangerously-skip-permissions --session-id {_SESSION} || exit $?")
     assert resumed.endswith(f"--dangerously-skip-permissions --resume {_SESSION} || exit $?")
@@ -174,8 +174,8 @@ def test_claude_launch_names_its_session(
     def _no_first_run() -> None:
         return None
 
-    monkeypatch.setattr(claude, "_preset_claude_first_run", _no_first_run)
-    monkeypatch.setattr(claude, "_run_supervised_launch", _supervised)
+    monkeypatch.setattr(claude, "preset_claude_first_run", _no_first_run)
+    monkeypatch.setattr(claude, "run_supervised_launch", _supervised)
 
     claude.launch(
         tmp_path, tmp_path / "t.md", tmp_path / "w.md", 60, skill_dir=_SKILL_DIR, resume=resume
@@ -200,13 +200,13 @@ def test_a_resumed_transcript_needs_one_more_bootstrap_to_count(
     transcript.parent.mkdir(parents=True)
     transcript.write_text('{"text": "You will take over Ava agent 41"}\n', encoding="utf-8")
 
-    baseline = _claude_checks._bootstrap_count(_SESSION)
+    baseline = _claude_checks.bootstrap_count(_SESSION)
     assert baseline == 1
-    assert _claude_checks._bootstrap_count(_OTHER) == 0
+    assert _claude_checks.bootstrap_count(_OTHER) == 0
 
     with transcript.open("a", encoding="utf-8") as stream:
         stream.write('{"text": "You will take over Ava agent 41 again"}\n')
-    assert _claude_checks._bootstrap_count(_SESSION) > baseline
+    assert _claude_checks.bootstrap_count(_SESSION) > baseline
 
 
 _RESUMED_PANEL = (
@@ -223,9 +223,9 @@ def test_a_resumed_panel_is_ready_without_the_welcome_banner() -> None:
     """A resumed session opens on its history; a shell prompt is never ready."""
     shell = "host:cl-b user$ exec claude --dangerously-skip-permissions --resume x\n"
 
-    assert not _claude_checks._claude_ui_ready(_RESUMED_PANEL)
-    assert _claude_checks._claude_ui_ready(_RESUMED_PANEL, resumed=True)
-    assert not _claude_checks._claude_ui_ready(shell, resumed=True)
+    assert not _claude_checks.claude_ui_ready(_RESUMED_PANEL)
+    assert _claude_checks.claude_ui_ready(_RESUMED_PANEL, resumed=True)
+    assert not _claude_checks.claude_ui_ready(shell, resumed=True)
 
 
 @pytest.mark.parametrize("pasted", [False, True])
@@ -236,10 +236,10 @@ def test_a_pasted_bootstrap_is_followed_by_the_operators_own_words(
     sent = _FakeShell().install(monkeypatch).sent
     message = "take over Ava agent 41. " * (80 if pasted else 1)
 
-    _claude_checks._send_bootstrap(7, message)
+    _claude_checks.send_bootstrap(7, message)
 
     if pasted:
-        assert sent == [f"\x1b[200~{message}\x1b[201~{_claude_checks._OWN_WORDS}"]
+        assert sent == [f"\x1b[200~{message}\x1b[201~{_claude_checks.OWN_WORDS}"]
     else:
         assert sent == [message]
 

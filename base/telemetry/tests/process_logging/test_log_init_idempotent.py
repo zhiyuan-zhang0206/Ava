@@ -255,7 +255,7 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
     (home / "run" / "bootstrap-snapshot.json").write_text(
         json.dumps(
             {
-                "v": bootstrap._SNAPSHOT_VERSION,
+                "v": bootstrap.SNAPSHOT_VERSION,
                 "base_url": gateway,
                 "written_at": time.time() - 10_000,
                 "values": {

@@ -70,9 +70,9 @@ def replace_script(pool: Any, schedule_id: int, script: str, expected_sha256: st
     # First-generation bootstrap must use the already installed versioned writer.
     # Calling a newly introduced public owner would require deploying it first.
     # This narrow coupling is covered on 44d and current source; no SQL is copied.
-    from gateway.schedules.router import _fetch_full_blocking, _update_blocking
+    from gateway.schedules.router import _update_blocking, fetch_full_blocking
 
-    previous = _fetch_full_blocking(pool, schedule_id)
+    previous = fetch_full_blocking(pool, schedule_id)
     actual = script_sha256(previous[9])
     prepared = script_sha256(script)
     if actual == prepared:

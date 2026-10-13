@@ -171,10 +171,10 @@ def _event_sink(
 
 # Level-graded sampling for bare INFO `log` records (task #1637).
 _LOG_INFO_SAMPLE_EVERY = 10
-_log_info_sample_counter = itertools.count()
+log_info_sample_counter = itertools.count()
 
 
-def _event_pipeline_filter(record: loguru.Record) -> bool:
+def event_pipeline_filter(record: loguru.Record) -> bool:
     """Which loguru records may enter the unified event pipeline.
 
     Three families are dropped or thinned (they still reach the stderr /
@@ -205,7 +205,7 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
         return False
     level = getattr(record.get("level"), "name", "")  # missing level -> "" (unsampled)
     if level == "INFO" and (extra.get("event") or "log") == "log":
-        return next(_log_info_sample_counter) % _LOG_INFO_SAMPLE_EVERY == 0
+        return next(log_info_sample_counter) % _LOG_INFO_SAMPLE_EVERY == 0
     return True
 
 
@@ -250,7 +250,7 @@ def add_event_sink(
         level="INFO",
         enqueue=False,
         catch=True,
-        filter=_event_pipeline_filter,
+        filter=event_pipeline_filter,
     )
     return _event_sink_id
 

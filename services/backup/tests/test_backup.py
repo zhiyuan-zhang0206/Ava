@@ -56,7 +56,7 @@ def _touch(directory: Path, name: str) -> Path:
     return p
 
 
-def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
+def disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip the off-site leg in tests that only exercise the local pipeline."""
 
     def _skip(_artifact: Path, **_kwargs: object) -> None:
@@ -65,9 +65,7 @@ def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(offsite, "publish", _skip)
 
 
-def _spawn_backup_lock_holder(
-    ava_home: Path, ready: Path, hold_s: float
-) -> subprocess.Popen[bytes]:
+def spawn_backup_lock_holder(ava_home: Path, ready: Path, hold_s: float) -> subprocess.Popen[bytes]:
     """A separate interpreter that takes `backup_lock`, signals, and holds it."""
     env = dict(os.environ)
     env["AVA_HOME"] = str(ava_home)
@@ -85,7 +83,7 @@ def _spawn_backup_lock_holder(
     )
 
 
-def _await_backup_lock_holder(ready: Path, proc: subprocess.Popen[bytes]) -> None:
+def await_backup_lock_holder(ready: Path, proc: subprocess.Popen[bytes]) -> None:
     deadline = time.monotonic() + 30
     while not ready.exists():
         assert proc.poll() is None, "the holder exited before taking the backup lock"
@@ -340,7 +338,7 @@ def test_db_size_breakdown_real_db(db_conn: Any, database: Database) -> None:
     with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
         cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
-        line = backup._db_size_breakdown(database, url)
+        line = backup.db_size_breakdown(database, url)
     finally:
         with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
             cur.execute(
@@ -378,14 +376,14 @@ def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch, database: Dat
         return _FakeConn()
 
     monkeypatch.setattr(Database, "connect", _fake_connect)
-    line = backup._db_size_breakdown(database)
+    line = backup.db_size_breakdown(database)
     assert line == "db=4044MiB checkpoint=1335MiB rest=2708MiB"
 
     def _boom(_self: Database, **_: object) -> object:
         raise psycopg.OperationalError("db down")
 
     monkeypatch.setattr(Database, "connect", _boom)
-    assert backup._db_size_breakdown(database) == "unavailable"
+    assert backup.db_size_breakdown(database) == "unavailable"
 
 
 def test_run_backup_repairs_storage_permissions(
@@ -427,11 +425,11 @@ def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
     """DST-fold dumps order by their UTC instants, preserving both repeated wall times."""
     pdt = _touch(bdir, "ava-20261101T083000Z.dump")  # 01:30 PDT
     pst = _touch(bdir, "ava-20261101T093000Z.dump")  # 01:30 PST, one hour later
-    assert [p for _ts, p in backup._managed_dumps(bdir)] == [pdt, pst]
+    assert [p for _ts, p in backup.managed_dumps(bdir)] == [pdt, pst]
 
     for i in range(2, settings.services.backup_keep + 1):
         _touch(bdir, f"ava-202611{i:02d}T090000Z.dump")
-    assert backup._prune(bdir, keep_reader=lambda: settings.services.backup_keep) == [
+    assert backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep) == [
         pdt
     ]  # the earlier half of the fold, deterministically
     assert pst.exists()
@@ -458,7 +456,7 @@ def test_foreign_files_ignored(bdir: Path) -> None:
         clock_factory=Clock.from_settings,
         hour_reader=lambda: settings.services.backup_hour,
     )
-    assert backup._prune(bdir, keep_reader=lambda: settings.services.backup_keep) == []
+    assert backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep) == []
     assert all(p.exists() for p in foreign)
 
 
@@ -466,7 +464,7 @@ def test_prune_keeps_newest(bdir: Path) -> None:
     names = [f"ava-202606{i:02d}T100000Z.dump" for i in range(1, 11)]  # 10 days, oldest first
     for name in names:
         _touch(bdir, name)
-    removed = backup._prune(bdir, keep_reader=lambda: settings.services.backup_keep)
+    removed = backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep)
     keep = settings.services.backup_keep
     assert [p.name for p in removed] == names[: len(names) - keep]
     assert sorted(p.name for p in bdir.glob("*.dump")) == names[len(names) - keep :]
@@ -477,9 +475,9 @@ def test_prune_keep_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(settings.services, "backup_keep", 3)
     for day in range(1, 6):
         _touch(bdir, f"ava-2026060{day}T100000Z.dump")
-    removed = backup._prune(bdir, keep_reader=lambda: settings.services.backup_keep)
+    removed = backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep)
     assert len(removed) == 2
-    assert len(backup._managed_dumps(bdir)) == 3
+    assert len(backup.managed_dumps(bdir)) == 3
 
 
 def test_run_backup_failure_leaves_no_plaintext(
@@ -518,7 +516,7 @@ def test_run_backup_real_dump_and_prune(
     for i in range(1, settings.services.backup_keep + 1):
         _touch(bdir, f"test-2026060{i}T100000Z.dump")
 
-    _disable_offsite(monkeypatch)
+    disable_offsite(monkeypatch)
     path = backup.run_backup(
         _dt(2026, 6, 10, 3, 0),
         db_url=settings.data_plane.db_url,
@@ -535,7 +533,7 @@ def test_run_backup_real_dump_and_prune(
     assert path.stat().st_size > 0
     assert not list(bdir.glob("*.partial"))
     # backup_keep pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
-    assert len(backup._managed_dumps(bdir)) == settings.services.backup_keep
+    assert len(backup.managed_dumps(bdir)) == settings.services.backup_keep
     assert not (bdir / "test-20260601T100000Z.dump").exists()
     # The fresh dump is restorable input: decrypt, then list its TOC directly.
     restored = bdir / "listed.dump"
@@ -627,7 +625,7 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
     envs = cast(list[dict[str, str]], captured["envs"])
     pg_dump_cmd = _assert_pg_dump_keeps_checkpoints_and_hides_password(cmds, envs, password)
     _assert_dump_compresses_in_dump_then_encrypts(cmds, pg_dump_cmd)
-    assert captured["timeout"] == backup._DUMP_TIMEOUT_S
+    assert captured["timeout"] == backup.DUMP_TIMEOUT_S
 
 
 def test_run_backup_keeps_database_password_out_of_argv(
@@ -691,7 +689,7 @@ def test_encrypted_artifact_decrypts_to_original_dump(
         return real_run(cmd, **kwargs)  # type: ignore[arg-type, return-value]
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_pg_dump)
-    _disable_offsite(monkeypatch)
+    disable_offsite(monkeypatch)
     artifact = backup.run_backup(
         _dt(2026, 8, 8, 3, 0),
         db_url="dbname=whatever",

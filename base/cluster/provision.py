@@ -354,7 +354,7 @@ def assert_checkpoint_dependency_pinned(tracked_migrations: Collection[str]) -> 
     _expected_checkpoint_schema_versions()
 
 
-def _checkpoint_schema_versions(
+def checkpoint_schema_versions(
     db_url: str, *, expected_data_dir: Path | None = None
 ) -> frozenset[int] | None:
     """Return the complete applied set, or ``None`` when no schema exists."""
@@ -378,7 +378,7 @@ def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | N
     runtime/new-schema compatibility guarantee.
     """
     expected = _expected_checkpoint_schema_versions()
-    actual = _checkpoint_schema_versions(db_url, expected_data_dir=expected_data_dir)
+    actual = checkpoint_schema_versions(db_url, expected_data_dir=expected_data_dir)
     if actual != expected:
         found: frozenset[int] = frozenset() if actual is None else actual
         raise CheckpointSchemaMismatchError(
@@ -426,7 +426,7 @@ def ensure_checkpoint_schema(
     # throughout setup; PostgresSaver must not open an unchecked second dial.
     owner_dsn = owner_conninfo(base_admin_url, database=identity, owner=identity)
     expected = _expected_checkpoint_schema_versions()
-    actual = _checkpoint_schema_versions(owner_dsn, expected_data_dir=expected_data_dir)
+    actual = checkpoint_schema_versions(owner_dsn, expected_data_dir=expected_data_dir)
     if actual == expected:
         return
     may_setup = database_created or resume_partial

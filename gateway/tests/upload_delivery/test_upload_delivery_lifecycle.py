@@ -308,13 +308,13 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     import time
 
     from base.config import settings
-    from gateway.tests.events.test_notices_endpoint import _seed_agent
+    from gateway.tests.events.test_notices_endpoint import seed_agent
     from gateway.tests.upload_delivery.test_upload_delivery_recovery import SECRET
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
     unit = source.current_unit(local_machine=machine_identity.name())
-    agent = _seed_agent(db_conn)
+    agent = seed_agent(db_conn)
     db_conn.execute(
         "INSERT INTO machines(name,gateway_url) VALUES (%s,'http://runner:7001') "
         "ON CONFLICT(name) DO UPDATE SET gateway_url=excluded.gateway_url",

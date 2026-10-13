@@ -21,9 +21,9 @@ from base.lm.catalog import ModelCatalog
 from base.lm.pricing import (
     CostQuote,
     Rates,
-    _parse_catalog,
     cost_usd,
     model_vendor,
+    parse_catalog,
     quote,
     rates_at,
 )
@@ -58,19 +58,19 @@ def _plugin_rates(model: str, at: datetime, *, model_catalog: ModelCatalog) -> R
 @pytest.fixture
 def deepseek_archive_catalog() -> pricing.PriceBook:
     """Route explicit DeepSeek history checks through the archived periods."""
-    return pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {})
+    return pricing.PriceBook(parse_catalog(_pricing_catalog_raw()), {})
 
 
 @pytest.fixture
 def gemini_archive_catalog() -> pricing.PriceBook:
     """Route explicit Gemini period/tier history checks through the archive."""
-    return pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {})
+    return pricing.PriceBook(parse_catalog(_pricing_catalog_raw()), {})
 
 
 @pytest.fixture
 def glm_archive_catalog() -> pricing.PriceBook:
     """Route explicit GLM period/tier history checks through the archive."""
-    return pricing.PriceBook(_parse_catalog(_pricing_catalog_raw()), {})
+    return pricing.PriceBook(parse_catalog(_pricing_catalog_raw()), {})
 
 
 def test_pricing_catalog_schema_v2_vendor_lock() -> None:
@@ -225,7 +225,7 @@ def test_parse_catalog_v2_rejects_missing_or_empty_vendor(vendor: str | None) ->
         entry["vendor"] = vendor
 
     with pytest.raises(RuntimeError, match=r"gemini-embedding-2"):
-        _parse_catalog(raw)
+        parse_catalog(raw)
 
 
 def test_parse_catalog_v1_allows_missing_vendor() -> None:
@@ -235,7 +235,7 @@ def test_parse_catalog_v1_allows_missing_vendor() -> None:
     for entry in models.values():
         entry.pop("vendor", None)
 
-    catalog = _parse_catalog(raw)
+    catalog = parse_catalog(raw)
 
     assert catalog["gemini-embedding-2"].vendor is None
 
@@ -246,7 +246,7 @@ def test_parse_catalog_rejects_empty_models_mapping() -> None:
     raw["models"] = {}
 
     with pytest.raises(RuntimeError, match="models must be a non-empty mapping"):
-        _parse_catalog(raw)
+        parse_catalog(raw)
 
 
 def test_parse_catalog_rejects_unknown_schema_version() -> None:
@@ -254,7 +254,7 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
     raw["schema_version"] = 3
 
     with pytest.raises(RuntimeError, match="unsupported pricing catalog schema"):
-        _parse_catalog(raw)
+        parse_catalog(raw)
 
 
 @pytest.mark.parametrize(
@@ -488,7 +488,7 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier(
     }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
+    archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
     for model in model_ids:
         selected = archive_book.rates_at(model, outside_daily_override, input_tokens=0)
@@ -516,7 +516,7 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier(
     }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
+    archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
     for model in model_ids:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
@@ -545,7 +545,7 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier(
     }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
+    archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
     for model in model_ids:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
@@ -572,7 +572,7 @@ def test_openai_plugin_prices_equal_archive_current_base_tier(
     }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
+    archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
     for model in model_ids:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
@@ -599,7 +599,7 @@ def test_qwen_plugin_prices_equal_archive_current_base_tier(
     }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
+    archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
     for model in model_ids:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
@@ -627,7 +627,7 @@ def test_glm_plugin_prices_equal_archive_current_base_tier(
     }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
+    archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
     for model in model_ids:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)
@@ -647,7 +647,7 @@ def test_kimi_plugin_prices_equal_archive_current_base_tier(
     plugin_rates = _plugin_rates(model, current_instant, model_catalog=model_catalog)
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
+    archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
     selected = archive_book.rates_at(model, current_instant, input_tokens=0)
     assert selected is not None
@@ -673,7 +673,7 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier(
     }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
-    archive_book = pricing.PriceBook(_parse_catalog(archive_raw), {})
+    archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
     for model in model_ids:
         selected = archive_book.rates_at(model, current_instant, input_tokens=0)

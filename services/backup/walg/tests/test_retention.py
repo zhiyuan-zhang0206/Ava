@@ -36,7 +36,7 @@ FULL_3 = "base_0000000100000004000000B6"
 FULL_4 = "base_0000000100000006000000C0"
 
 DRY_RUN = fixture_text("retention-dry-run.log")
-PLANNED = parse_marked(WalgOutput(stdout="", stderr=DRY_RUN), retention._DRY_RUN_COUNT)
+PLANNED = parse_marked(WalgOutput(stdout="", stderr=DRY_RUN), retention.DRY_RUN_COUNT)
 
 
 def _confirm_log() -> str:
@@ -77,7 +77,7 @@ def test_the_real_dry_run_lists_the_expiring_backups_and_wal() -> None:
 
 
 def test_the_listing_is_read_from_either_stream() -> None:
-    on_stdout = parse_marked(WalgOutput(stdout=DRY_RUN, stderr=""), retention._DRY_RUN_COUNT)
+    on_stdout = parse_marked(WalgOutput(stdout=DRY_RUN, stderr=""), retention.DRY_RUN_COUNT)
 
     assert on_stdout == PLANNED
 
@@ -86,26 +86,26 @@ def test_a_listing_whose_count_disagrees_with_wal_gs_own_is_refused() -> None:
     tampered = re.sub(r"count=\d+", "count=999", DRY_RUN)
 
     with pytest.raises(RetentionAbortedError, match="count differs or is missing"):
-        parse_marked(WalgOutput(stdout="", stderr=tampered), retention._DRY_RUN_COUNT)
+        parse_marked(WalgOutput(stdout="", stderr=tampered), retention.DRY_RUN_COUNT)
 
 
 def test_a_listing_without_a_count_line_is_refused() -> None:
     without_count = "\n".join(line for line in DRY_RUN.splitlines() if "Dry run:" not in line)
 
     with pytest.raises(RetentionAbortedError):
-        parse_marked(WalgOutput(stdout="", stderr=without_count), retention._DRY_RUN_COUNT)
+        parse_marked(WalgOutput(stdout="", stderr=without_count), retention.DRY_RUN_COUNT)
 
 
 def test_an_object_on_another_storage_is_refused() -> None:
     other = "INFO: Object marked for deletion: wal_005/0000000100000000000000FF.lz4 storage=cold\n"
 
     with pytest.raises(RetentionAbortedError, match="storage 'cold'"):
-        parse_marked(WalgOutput(stdout="", stderr=other), retention._DRY_RUN_COUNT)
+        parse_marked(WalgOutput(stdout="", stderr=other), retention.DRY_RUN_COUNT)
 
 
 def test_no_marked_objects_is_an_empty_plan() -> None:
     assert (
-        parse_marked(WalgOutput(stdout="", stderr="INFO: Start delete\n"), retention._DRY_RUN_COUNT)
+        parse_marked(WalgOutput(stdout="", stderr="INFO: Start delete\n"), retention.DRY_RUN_COUNT)
         == []
     )
 

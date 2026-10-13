@@ -341,7 +341,7 @@ class DaemonProbe:
 PROBE_TIMEOUT_S = 5.0
 
 
-def _recorded_pid(pidfile: Path) -> int | None:
+def recorded_pid(pidfile: Path) -> int | None:
     """This unit's recorded pid, or None when no readable pidfile exists."""
     try:
         return int(pidfile.read_text().strip())
@@ -535,7 +535,7 @@ def _probe_daemon(
     ``_health_payload``'s narrow catches are for the failures with a *useful*
     detail string. They are not the safety net: ``urlopen``/``read`` also raise
     ``http.client.HTTPException`` (a malformed status line or a truncated body —
-    neither an ``OSError``), and ``_recorded_pid`` can hit an ``OSError`` this
+    neither an ``OSError``), and ``recorded_pid`` can hit an ``OSError`` this
     frame does not wrap. ``probe_daemon`` is the wrapper that guarantees a
     verdict regardless.
     """
@@ -555,7 +555,7 @@ def _probe_daemon(
             f"identity mismatch on {url}: home={got_home!r} != {expected_home!r} — "
             "another unit's daemon holds this port"
         )
-    recorded = _recorded_pid(pidfile)
+    recorded = recorded_pid(pidfile)
     if recorded is None:
         return DaemonProbe.down(
             f"{url} answers but no pidfile at {pidfile} — not this unit's daemon"

@@ -22,13 +22,13 @@ from ava.sdk_surface import ava_module, process_context
 
 from .const import is_documented_const
 from .discovery import (
-    _children,
     _Constant,
-    _is_container,
-    _is_element,
-    _is_namespace,
-    _is_skill_object,
     agent_visible_names,
+    children,
+    is_container,
+    is_element,
+    is_namespace,
+    is_skill_object,
 )
 
 
@@ -154,15 +154,15 @@ def _print_target(target: Any, render: _Render = _DEFAULT_RENDER) -> None:
 
 def _target_body(target: Any, fqn: str, render: _Render = _DEFAULT_RENDER) -> str:
     """Render the body under the heading for a help() target."""
-    if _is_container(target):
+    if is_container(target):
         # A top-level module target (the root `ava`, heading depth 1) shows its
         # own docstring; a nested submodule target (ava.X, depth >= 2) drops it
         # — its description is already shown where its parent lists it.
         # Skill proxies/namespaces always show their own doc (which carries
         # the path + full body), regardless of depth.
-        include_doc = (_heading_depth(fqn) == 1) or _is_skill_object(target)
+        include_doc = (_heading_depth(fqn) == 1) or is_skill_object(target)
         return _format_module_stub(target, include_own_doc=include_doc, render=render)
-    if _is_element(target):
+    if is_element(target):
         # The FQN tail is the `def name` identifier — if target is a
         # plugin-wrapped function, its `__name__` may still be the wrapper's
         # internal symbol (e.g. `_wrapped_read`); directly splitting the FQN
@@ -195,9 +195,9 @@ def _resolve_fqn(target: Any) -> str:
 
     if target is _ava:
         return "ava"
-    if _is_container(target):
+    if is_container(target):
         return _container_fqn(target)
-    if _is_element(target):
+    if is_element(target):
         return _element_fqn(target)
     if is_documented_const(target):
         return _resolve_const_name(target)
@@ -241,7 +241,7 @@ def _search_ava_for_binding(target: Any) -> str | None:
 
     for mod_name in agent_visible_names(_ava):
         mod = getattr(_ava, mod_name, None)
-        if not _is_namespace(mod):
+        if not is_namespace(mod):
             continue
         binding = _find_agent_visible_binding(mod, mod_name, target)
         if binding is not None:
@@ -284,7 +284,7 @@ def _format_module_stub(
     pieces: list[str] = []
     doc = inspect.getdoc(mod)
     if doc and include_own_doc:
-        if _is_skill_object(mod):
+        if is_skill_object(mod):
             pieces.append(doc)
         else:
             pieces.append(_format_docstring(doc, indent=""))
@@ -294,7 +294,7 @@ def _format_module_stub(
 
 
 def _skill_aware_children(mod: Any, render: _Render = _DEFAULT_RENDER) -> list[tuple[str, Any]]:
-    """`_children(mod)`, with a skills container's walk kept index-safe.
+    """`children(mod)`, with a skills container's walk kept index-safe.
 
     Listing the children of `ava.skills` (or of a skill namespace node) resolves
     every node underneath it through the same accessor a deliberate
@@ -307,7 +307,7 @@ def _skill_aware_children(mod: Any, render: _Render = _DEFAULT_RENDER) -> list[t
     The module is looked up through `globals()` rather than the bound name:
     `AVA_SDK_DISABLE=skills` deletes that global, and help() must keep rendering
     every other namespace on a cluster that runs without the skills surface."""
-    return _children(mod, hidden_members=render.hidden_members)
+    return children(mod, hidden_members=render.hidden_members)
 
 
 def _format_child(name: str, child: Any, render: _Render = _DEFAULT_RENDER) -> str:
@@ -324,11 +324,11 @@ def _format_child(name: str, child: Any, render: _Render = _DEFAULT_RENDER) -> s
 def _child_formatter(child: Any) -> Callable[[str, Any], str] | None:
     """Pick the stub formatter for a child entry by its kind, or None for
     an unrenderable value (falls back to a comment line)."""
-    if _is_skill_object(child):
+    if is_skill_object(child):
         return _format_skill_child
     if inspect.isroutine(child):
         return _format_function_stub
-    if _is_namespace(child):
+    if is_namespace(child):
         return _format_submodule_ref
     if is_documented_const(child):
         return _format_documented_const_stub
@@ -468,7 +468,7 @@ def _format_class_members(cls: type, render: _Render = _DEFAULT_RENDER) -> list[
     """Indented member entries of a class, honoring compact mode: field
     annotations (_Constant children) stay, methods and nested classes drop."""
     parts: list[str] = []
-    for child_name, child in _children(cls):
+    for child_name, child in children(cls):
         if render.compact_classes and not isinstance(child, _Constant):
             continue
         parts.append(_indent(_format_child(child_name, child, render), "    "))

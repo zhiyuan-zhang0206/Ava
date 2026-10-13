@@ -89,7 +89,7 @@ def memory_index_note(ctx: AvaContext) -> HumanMessage | None:
 
 # Agent-visible framing for the per-agent memory index — location and mechanics
 # only; the write discipline is the system-prompt section.
-_PER_AGENT_FRAMING = (
+PER_AGENT_FRAMING = (
     "Your personal memory index. Where a compact summary records what happened "
     "in one conversation round, this persists across compactions and sessions.\n\n"
     "Below is `memory/MEMORY.md` in your workspace, your index of entry files. "
@@ -175,7 +175,7 @@ def per_agent_memory_note(ctx: AvaContext) -> HumanMessage | None:
         bool(suffix),
     )
     return system_note_message(
-        content=f"{_PER_AGENT_FRAMING}\n\n{body}{suffix}",
+        content=f"{PER_AGENT_FRAMING}\n\n{body}{suffix}",
         tag=NoteTag.AGENT_MEMORY,
         created_at=datetime.now(UTC),
     )

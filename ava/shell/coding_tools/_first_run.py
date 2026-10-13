@@ -1,6 +1,6 @@
 """Claude Code first-run presets — an unattended spawn must never park on a dialog.
 
-The Claude launcher runs ``_preset_claude_first_run`` before any session starts.
+The Claude launcher runs ``preset_claude_first_run`` before any session starts.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 def _preset_json_file(path: Path, updates: dict[str, object], *, label: str) -> None:
-    """Back up, merge ``updates`` into a JSON file, atomically; see _preset_claude_first_run.
+    """Back up, merge ``updates`` into a JSON file, atomically; see preset_claude_first_run.
 
     Existing keys are preserved verbatim; a satisfied update makes the call a
     no-op; an unparsable file is backed up and raises (fail fast - overlaying
@@ -91,7 +91,7 @@ def _write_json_atomic(path: Path, data: dict[str, object]) -> None:
         raise
 
 
-def _preset_claude_first_run(home: Path | None = None) -> None:
+def preset_claude_first_run(home: Path | None = None) -> None:
     """Preset Claude Code's first-run dialogs so an unattended spawn never parks on one.
 
     Two dialogs break a non-interactive spawn on a fresh HOME: the

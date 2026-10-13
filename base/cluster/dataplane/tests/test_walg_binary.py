@@ -34,7 +34,7 @@ def pinned(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
     monkeypatch.setattr(walg_binary.platform, "system", lambda: "Linux")
     monkeypatch.setattr(walg_binary.platform, "machine", lambda: "x86_64")
     monkeypatch.setitem(
-        walg_binary._WALG_ARTIFACTS,
+        walg_binary.WALG_ARTIFACTS,
         "linux-x86_64",
         ("wal-g-fake", hashlib.sha256(_FAKE_WALG).hexdigest()),
     )
@@ -44,12 +44,12 @@ def pinned(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
         fetched.append(url)
         return _FAKE_WALG
 
-    monkeypatch.setattr(walg_binary, "_download", download)
+    monkeypatch.setattr(walg_binary, "download", download)
     return fetched
 
 
 def test_only_linux_x86_64_is_pinned() -> None:
-    assert set(walg_binary._WALG_ARTIFACTS) == {"linux-x86_64"}
+    assert set(walg_binary.WALG_ARTIFACTS) == {"linux-x86_64"}
 
 
 @pytest.mark.parametrize(("system", "machine"), [("Darwin", "arm64"), ("Linux", "aarch64")])
@@ -90,7 +90,7 @@ def test_install_is_idempotent(pinned: list[str]) -> None:
 def test_checksum_mismatch_installs_nothing(
     pinned: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(walg_binary, "_download", _serving(_FAKE_WALG + b"tampered"))
+    monkeypatch.setattr(walg_binary, "download", _serving(_FAKE_WALG + b"tampered"))
 
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
         walg_binary.ensure_walg_binary()
@@ -104,11 +104,11 @@ def test_wrong_version_never_displaces_the_installed_binary(
     walg_binary.ensure_walg_binary()
     stale = b'#!/bin/sh\necho "wal-g version v0.0.1"\n'
     monkeypatch.setitem(
-        walg_binary._WALG_ARTIFACTS,
+        walg_binary.WALG_ARTIFACTS,
         "linux-x86_64",
         ("wal-g-fake", hashlib.sha256(stale).hexdigest()),
     )
-    monkeypatch.setattr(walg_binary, "_download", _serving(stale))
+    monkeypatch.setattr(walg_binary, "download", _serving(stale))
 
     with pytest.raises(RuntimeError, match=r"does not report v3\.0\.9"):
         walg_binary.ensure_walg_binary()

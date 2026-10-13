@@ -121,8 +121,8 @@ async def test_batch_retries_acl_transition_without_real_waiting(
     def _max_jitter(delay_cap: float) -> float:
         return delay_cap
 
-    monkeypatch.setattr(redis_client, "_sleep_async", _record_sleep)
-    monkeypatch.setattr(redis_client, "_auth_retry_jitter", _max_jitter)
+    monkeypatch.setattr(redis_client, "sleep_async", _record_sleep)
+    monkeypatch.setattr(redis_client, "auth_retry_jitter", _max_jitter)
 
     await _pub(redis)._publish_batch(["event"])
 

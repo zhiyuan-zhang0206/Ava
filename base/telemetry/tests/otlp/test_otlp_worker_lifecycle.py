@@ -188,7 +188,7 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(
         return True
 
     monkeypatch.setattr(backend, "_endpoint_reachable", reachable)
-    monkeypatch.setattr(telemetry_otlp, "_build_providers", build)
+    monkeypatch.setattr(telemetry_otlp, "build_providers", build)
     try:
         assert backend._ensure() is False
         assert cleaning.wait(5)
@@ -439,7 +439,7 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(
         raise RuntimeError("failure after real log processor and metric reader creation")
 
     monkeypatch.setattr(backend, "_endpoint_reachable", reachable)
-    monkeypatch.setattr(telemetry_otlp_metrics, "_metrics_resource", resource)
+    monkeypatch.setattr(telemetry_otlp_metrics, "metrics_resource", resource)
     assert backend._ensure() is False
     worker = backend._worker
     assert worker is not None
@@ -471,7 +471,7 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(
         raise RuntimeError("SDK cannot close the half-built resource")
 
     monkeypatch.setattr(backend, "_endpoint_reachable", reachable)
-    monkeypatch.setattr(telemetry_otlp, "_build_providers", build)
+    monkeypatch.setattr(telemetry_otlp, "build_providers", build)
     monkeypatch.setattr(logs, "shutdown", close)
     assert backend._ensure() is False
     worker = backend._worker

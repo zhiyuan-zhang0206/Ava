@@ -20,7 +20,7 @@ from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import pin_agent
 
 
-def _seed_agent(db: psycopg.Connection) -> int:
+def seed_agent(db: psycopg.Connection) -> int:
     """Insert an agents + agents_meta row (log() / set_label() write against an
     existing meta row; the real spawn path always creates it first)."""
     with db.cursor() as cur:
@@ -100,7 +100,7 @@ def _assert_second_notice_supersedes_first(nid: Any, nid2: Any) -> None:
 def test_notify_inserts_fyi_and_snapshot_counts_unread(
     sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     # require_response defaults False -> these are FYI notices.
     nid = ava.ui.notify(
@@ -137,7 +137,7 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
 def test_notify_require_response_rides_awaiting_worklist(
     sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     ava.ui.notify(  # type: ignore[attr-defined]
         "Send the release email?",
@@ -196,7 +196,7 @@ def test_notify_records_task_id_and_rides_snapshot(
 ):
     """notify(task=...) writes the task link, and a require_response notice carries
     it out on the snapshot's notices_awaiting_response."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     tid = _seed_task(db_conn, agent_id)
     pin_agent(agent_id)
     ava.ui.notify(
@@ -217,7 +217,7 @@ def test_notify_records_task_id_and_rides_snapshot(
 def test_notify_without_task_leaves_task_id_null(
     sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     ava.ui.notify("fyi, no task", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     db_conn.rollback()
@@ -227,7 +227,7 @@ def test_notify_without_task_leaves_task_id_null(
 def test_notify_nonexistent_task_raises(
     sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="task 999999 does not exist"):
         ava.ui.notify("names a ghost task", task=999999, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
@@ -236,7 +236,7 @@ def test_notify_nonexistent_task_raises(
 def test_edit_notice_partial_update(
     sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     nid = ava.ui.notify(
         "draft title", content="old body", priority="P2", idempotency_key=str(uuid4())
@@ -295,7 +295,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
         notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
     )
 
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     ava.ui.notify(  # type: ignore[attr-defined]
         "decision needed",
@@ -332,7 +332,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
 def test_edit_notice_validation_and_guards(
     sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     ava.ui.notify("fyi notice", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
 
@@ -353,7 +353,7 @@ def test_edit_notice_validation_and_guards(
 def test_dismiss_notice_withdraws(
     sdk_via_inprocess_gateway: None, _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     nid = ava.ui.notify("stale fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     ava.ui.dismiss_notice()  # type: ignore[attr-defined]
@@ -405,7 +405,7 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
 
     monkeypatch.setattr(ops_mod, "publish_notice_resolved", _fake_publish)
 
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     ava.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert resolved == []  # the first post resolves nothing

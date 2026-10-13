@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.tests.events.test_notices_endpoint import _insert_notice
+from gateway.tests.events.test_notices_endpoint import insert_notice
 from services.entrypoints.im_bridge.adapters.tests.weixin_native import (
     NativeWeixin,
     message,
@@ -29,8 +29,8 @@ async def test_notice_owner_commits_original_target_once_with_or_without_respons
     db_conn: psycopg.Connection,
     lost_response: bool,
 ) -> None:
-    notice = _insert_notice(db_conn, native_weixin.agent_id, "original", require_response=True)
-    later = _insert_notice(db_conn, native_weixin.agent_id, "later", require_response=True)
+    notice = insert_notice(db_conn, native_weixin.agent_id, "original", require_response=True)
+    later = insert_notice(db_conn, native_weixin.agent_id, "later", require_response=True)
     bridge = native_weixin.core.notice_bridge
     account = await native_weixin.adapter.outbound_account_id()
     bridge._arm_reply_mode("peer-1", str(native_weixin.agent_id), str(notice), account_id=account)

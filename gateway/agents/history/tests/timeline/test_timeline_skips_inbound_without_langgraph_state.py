@@ -16,7 +16,7 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.history.tests.test_timeline import _items
 from gateway.agents.history.tests.test_timeline import test_client as test_client
-from gateway.agents.history.timeline import _window_before
+from gateway.agents.history.timeline import window_before
 from gateway.app import app
 
 _TIMELINE_INPUTS = TimelineReadInputs(
@@ -105,7 +105,7 @@ def test_aimessage_blocks_share_one_real_ava_created_at() -> None:
 
 
 class TestTimelineWindowing:
-    """tail_window / _window_before pure-function contract — the slicing
+    """tail_window / window_before pure-function contract — the slicing
     behind GET /timeline pagination + the agent-published snapshot trim
     (no DB)."""
 
@@ -120,17 +120,17 @@ class TestTimelineWindowing:
         assert has_more is True
 
     def test_window_before_returns_items_immediately_older(self) -> None:
-        window, has_more = _window_before(_items("1.0", "2.0", "3.0", "4.0", "5.0"), "4.0", 2)
+        window, has_more = window_before(_items("1.0", "2.0", "3.0", "4.0", "5.0"), "4.0", 2)
         assert [i.item_id for i in window] == ["2.0", "3.0"]
         assert has_more is True  # 1.0 still older than the window
 
     def test_window_before_reaching_start_has_no_more(self) -> None:
-        window, has_more = _window_before(_items("1.0", "2.0", "3.0"), "3.0", 5)
+        window, has_more = window_before(_items("1.0", "2.0", "3.0"), "3.0", 5)
         assert [i.item_id for i in window] == ["1.0", "2.0"]
         assert has_more is False
 
     def test_window_before_unknown_cursor_returns_empty(self) -> None:
-        window, has_more = _window_before(_items("1.0", "2.0"), "9.9", 5)
+        window, has_more = window_before(_items("1.0", "2.0"), "9.9", 5)
         assert window == []
         assert has_more is False
 

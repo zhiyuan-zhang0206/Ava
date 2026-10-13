@@ -56,7 +56,7 @@ def _split_ref(ref: str) -> tuple[str, str]:
     return module_name, attribute
 
 
-def _resolve_ref(ref: str) -> Probe:
+def resolve_ref(ref: str) -> Probe:
     """Import the module a reference names and return its attribute.
 
     Resolution failures surface as `ProbeError`; the runner treats an
@@ -126,7 +126,7 @@ class ProbeRegistry:
             ref = entry.ref
             if ref is None:
                 raise ProbeError(f"probe entry for unit {unit_id!r} carries neither probe nor ref")
-            entry.probe = _resolve_ref(ref)
+            entry.probe = resolve_ref(ref)
         return entry.probe
 
     def _reject_duplicate(self, unit_id: str) -> None:

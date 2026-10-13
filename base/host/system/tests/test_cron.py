@@ -53,10 +53,10 @@ def test_register_macos_never_reloads_its_own_launchd_job(
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", label)
-    monkeypatch.setattr(cron, "_launchd_plist_content", _desired_plist)
+    monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
     calls = _record_launchctl(monkeypatch)
 
-    assert cron._register_macos(300) == 0
+    assert cron.register_macos(300) == 0
     assert plist.read_text() == "<old-plist/>"
     assert calls == []
 
@@ -69,11 +69,11 @@ def test_register_macos_still_reloads_from_another_launchd_job(
     plist = _plant_plist(fake_home, "com.ava.health-probe")
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "com.ava.autostart")
-    monkeypatch.setattr(cron, "_launchd_plist_content", _desired_plist)
+    monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
     monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
     calls = _record_launchctl(monkeypatch)
 
-    assert cron._register_macos(300) == 0
+    assert cron.register_macos(300) == 0
     assert plist.read_text() == "<desired-plist/>"
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
 
@@ -94,7 +94,7 @@ def test_register_linux_aborts_when_crontab_read_fails(
         raise AssertionError(f"must not reach a crontab write: {cmd}")
 
     monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-    assert cron._register_linux(300) == 1
+    assert cron.register_linux(300) == 1
     assert "avoid clobbering" in capsys.readouterr().err
 
 
@@ -114,7 +114,7 @@ def test_register_linux_treats_no_crontab_as_empty(monkeypatch: pytest.MonkeyPat
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-    assert cron._register_linux(300) == 0
+    assert cron.register_linux(300) == 0
     assert "health-probe" in writes["input"]
 
 
@@ -196,7 +196,7 @@ def test_register_linux_stamps_the_fixed_marker(monkeypatch: pytest.MonkeyPatch)
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, "", writes)
 
-    assert cron._register_linux(300) == 0
+    assert cron.register_linux(300) == 0
     (line,) = writes["input"].splitlines()
     assert line.endswith("cluster health-probe # ava-health-probe")
     assert "--auto-rollback" not in line
@@ -212,7 +212,7 @@ def test_register_linux_keeps_unrelated_lines_and_reports_success(
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, f"0 3 * * * backup\n{other_job}\n", writes)
 
-    assert cron._register_linux(300) == 0
+    assert cron.register_linux(300) == 0
     assert capsys.readouterr() == (
         "  . crontab entry added (every 5 min)\n",
         "",
@@ -257,7 +257,7 @@ def test_register_linux_failure_messages_and_rc(
         write_error=write_error,
     )
 
-    assert cron._register_linux(300) == 1
+    assert cron.register_linux(300) == 1
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == (expected_out, expected_err)
     assert ("input" in writes) == (read_rc == 0)
@@ -268,7 +268,7 @@ def test_register_linux_missing_crontab_message_and_rc(
 ) -> None:
     monkeypatch.setattr(cron.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert cron._register_linux(300) == 0
+    assert cron.register_linux(300) == 0
     assert capsys.readouterr() == (
         "  ! health probe cron: crontab not installed on this host (skipping); cluster runs without a health-probe cron\n",
         "",
@@ -282,7 +282,7 @@ def test_unregister_linux_removes_only_the_probe_line(
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, f"{probe}\n0 3 * * * backup\n", writes)
 
-    assert cron._unregister_linux() == 0
+    assert cron.unregister_linux() == 0
     assert probe not in writes["input"]
     assert "0 3 * * * backup" in writes["input"]
 
@@ -296,7 +296,7 @@ def test_unregister_linux_ignores_the_watchdog_probe_lines(
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, f"{probe_line}\n", writes)
 
-    assert cron._unregister_linux() == 0
+    assert cron.unregister_linux() == 0
     assert writes == {}  # nothing matched, so the crontab was never rewritten
 
 
@@ -327,7 +327,7 @@ def test_unregister_linux_messages_and_success_gated_removal(
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, existing, writes, read_rc=read_rc, write_rc=write_rc)
 
-    assert cron._unregister_linux() == 0
+    assert cron.unregister_linux() == 0
     assert capsys.readouterr() == (expected_out, "")
     assert ("input" in writes) == should_write
 
@@ -353,7 +353,7 @@ def test_unregister_macos_removes_only_the_probe_plist(
 
     monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert cron._unregister_macos() == 0
+    assert cron.unregister_macos() == 0
     assert not probe.exists()
     assert autostart.exists()
     assert booted == [f"gui/{os.getuid()}/com.ava.health-probe"]
@@ -371,7 +371,7 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         return 0
 
     monkeypatch.setattr(cron, "is_macos", lambda: True)
-    monkeypatch.setattr(cron, "_register_macos", register)
+    monkeypatch.setattr(cron, "register_macos", register)
     return calls
 
 
@@ -428,7 +428,7 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
-    monkeypatch.setattr(cron, "_launchd_plist_content", _desired_plist)
+    monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
 
     def _is_current(candidate: str) -> bool:
         return candidate == label
@@ -436,7 +436,7 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
     monkeypatch.setattr(cron, "descends_from_launchd_job", _is_current)
     calls = _record_launchctl(monkeypatch)
 
-    assert cron._register_macos(300) == 0
+    assert cron.register_macos(300) == 0
     assert plist.read_text() == "<old-plist/>"
     assert calls == []
 
@@ -449,10 +449,10 @@ def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
     plist = _plant_plist(fake_home, "com.ava.health-probe")
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
-    monkeypatch.setattr(cron, "_launchd_plist_content", _desired_plist)
+    monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
     monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
     calls = _record_launchctl(monkeypatch)
 
-    assert cron._register_macos(300) == 0
+    assert cron.register_macos(300) == 0
     assert plist.read_text() == "<desired-plist/>"
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]

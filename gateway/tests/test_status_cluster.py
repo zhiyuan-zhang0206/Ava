@@ -181,7 +181,7 @@ class TestClusterPanel:
         _ = stub_machine_identity
         fake_flag.write_text("")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(
+            panel = status_router.get_cluster_status(
                 database,
                 cur,
                 IdentityMismatchLog(),
@@ -362,7 +362,7 @@ class TestClusterPanel:
 
 
 class TestProbeAgentRunner:
-    """_probe_agent_runner maps transport and reached-host outcomes distinctly."""
+    """probe_agent_runner maps transport and reached-host outcomes distinctly."""
 
     @pytest.mark.asyncio
     async def test_timeout_budget_comes_from_settings(
@@ -392,7 +392,7 @@ class TestProbeAgentRunner:
             }
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
-        r = await status_router._probe_agent_runner(
+        r = await status_router.probe_agent_runner(
             IdentityMismatchLog(),
             "runner-a",
             ["agent-runner"],
@@ -420,7 +420,7 @@ class TestProbeAgentRunner:
             raise AssertionError("missing roster URL must not trigger a DB re-lookup")
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", must_not_dispatch)
-        row = await status_router._probe_agent_runner(
+        row = await status_router.probe_agent_runner(
             IdentityMismatchLog(),
             "runner-a",
             ["agent-runner"],
@@ -457,7 +457,7 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", blackhole)
         row = await asyncio.wait_for(
-            status_router._probe_agent_runner(
+            status_router.probe_agent_runner(
                 IdentityMismatchLog(),
                 "runner-a",
                 ["agent-runner"],
@@ -481,7 +481,7 @@ class TestProbeAgentRunner:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
         stopped = datetime(2026, 5, 25, tzinfo=UTC)
-        r = await status_router._probe_agent_runner(
+        r = await status_router.probe_agent_runner(
             IdentityMismatchLog(),
             "runner-a",
             ["agent-runner"],
@@ -510,7 +510,7 @@ class TestProbeAgentRunner:
             }
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
-        r = await status_router._probe_agent_runner(
+        r = await status_router.probe_agent_runner(
             IdentityMismatchLog(),
             "runner-a",
             ["agent-runner"],
@@ -539,7 +539,7 @@ class TestProbeAgentRunner:
             }
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
-        r = await status_router._probe_agent_runner(
+        r = await status_router.probe_agent_runner(
             IdentityMismatchLog(),
             "runner-a",
             ["agent-runner"],
@@ -565,7 +565,7 @@ class TestProbeAgentRunner:
             return {"machine_name": "runner-a", "paused": True}
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_url", fake_enqueue)
-        r = await status_router._probe_agent_runner(
+        r = await status_router.probe_agent_runner(
             IdentityMismatchLog(),
             "runner-a",
             ["agent-runner"],
@@ -596,7 +596,7 @@ class TestPanelCarriesNoFrozenPin:
 
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(
+            panel = status_router.get_cluster_status(
                 database,
                 cur,
                 IdentityMismatchLog(),

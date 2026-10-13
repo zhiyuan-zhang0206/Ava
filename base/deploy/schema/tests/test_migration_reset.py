@@ -11,14 +11,14 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.deploy.schema import migration_layout
 from base.deploy.schema.migrations import (
-    _BASELINE_NAME,
+    BASELINE_NAME,
     apply_pending_migrations,
 )
 from base.deploy.schema.tests.migration_support import (
-    _SYN,
+    SYN,
     SYN_ORPHAN,
-    _init_repo,
     db_url,
+    init_repo,
 )
 from base.deploy.schema.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
@@ -37,7 +37,7 @@ def test_apply_pending_squashes_orphaned_applied_names(
     applies what is pending; a second apply is a no-op."""
     _ = db_conn  # fixture reseeds the baseline
     orphan = "20260815T000001_synthetic-orphan"
-    _init_repo(tmp_path)  # migrations/ = tmp_path, git-tracked anchor applies
+    init_repo(tmp_path)  # migrations/ = tmp_path, git-tracked anchor applies
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
@@ -46,7 +46,7 @@ def test_apply_pending_squashes_orphaned_applied_names(
             assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
-            assert cur.fetchall() == [(_BASELINE_NAME,)]
+            assert cur.fetchall() == [(BASELINE_NAME,)]
     finally:
         with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
@@ -63,17 +63,17 @@ def test_apply_pending_squash_then_apply_pending(
     in the same run."""
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
-    (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_squash_t (id int);")
-    _init_repo(tmp_path)
+    (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_squash_t (id int);")
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
         with psycopg.connect(db_url()) as fresh:
-            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [_SYN]
+            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [SYN]
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
-            assert cur.fetchall() == [(_BASELINE_NAME,), (_SYN,)]
+            assert cur.fetchall() == [(BASELINE_NAME,), (SYN,)]
             cur.execute("SELECT to_regclass('syn_squash_t')")
             row = cur.fetchone()
             assert row is not None and row[0] is not None
@@ -93,23 +93,23 @@ def test_squash_does_not_touch_baseline_or_pending(
     that is BOTH applied and present as a file is not touched (its row stays,
     nothing to squash)."""
     _ = db_conn
-    (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_keep_t (id int);")
-    _init_repo(tmp_path)
+    (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_keep_t (id int);")
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
-        c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_SYN,))
+        c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (SYN,))
     try:
         with psycopg.connect(db_url()) as fresh:
             assert (
                 apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
-            )  # _SYN applied; nothing pending
+            )  # SYN applied; nothing pending
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
-            assert cur.fetchall() == [(_BASELINE_NAME,), (_SYN,)]
+            assert cur.fetchall() == [(BASELINE_NAME,), (SYN,)]
     finally:
         with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DROP TABLE IF EXISTS syn_keep_t")
-            c.execute("DELETE FROM schema_migrations WHERE name = %s", (_SYN,))
+            c.execute("DELETE FROM schema_migrations WHERE name = %s", (SYN,))
 
 
 def test_squash_authority_checked_even_without_pending(
@@ -122,7 +122,7 @@ def test_squash_authority_checked_even_without_pending(
     trigger the squash path (no pending files) must still be refused."""
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
@@ -164,7 +164,7 @@ def test_squash_logs_the_converged_names(
     operator can audit what the reset folded away."""
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
@@ -188,11 +188,11 @@ def test_squash_refuses_partial_pre_reset_history(
     """P1 guard: a DB holding only PART of the pre-v0.1.0 history must be
     refused, never silently converged — deleting its tracking rows would
     certify a schema that never ran the missing migrations."""
-    from base.deploy.schema.migrations import _V010_PRE_RESET_SET, MigrationHistoryGap
+    from base.deploy.schema.migrations import V010_PRE_RESET_SET, MigrationHistoryGap
 
-    assert len(_V010_PRE_RESET_SET) == 59, "frozen set drifted"
-    partial = sorted(_V010_PRE_RESET_SET)[:24]  # the 8/1-cluster shape
-    _init_repo(tmp_path)
+    assert len(V010_PRE_RESET_SET) == 59, "frozen set drifted"
+    partial = sorted(V010_PRE_RESET_SET)[:24]  # the 8/1-cluster shape
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         for name in partial:
@@ -223,10 +223,10 @@ def test_squash_converges_full_pre_reset_history(
     """A DB that ran the COMPLETE pre-reset history converges cleanly: the
     baseline carries the net effect of all 59, so deleting their tracking rows
     is safe and leaves applied == required."""
-    from base.deploy.schema.migrations import _V010_PRE_RESET_SET
+    from base.deploy.schema.migrations import V010_PRE_RESET_SET
 
-    all_names = sorted(_V010_PRE_RESET_SET)
-    _init_repo(tmp_path)
+    all_names = sorted(V010_PRE_RESET_SET)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         for name in all_names:
@@ -236,7 +236,7 @@ def test_squash_converges_full_pre_reset_history(
             assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
-            assert cur.fetchall() == [(_BASELINE_NAME,)]
+            assert cur.fetchall() == [(BASELINE_NAME,)]
     finally:
         with psycopg.connect(db_url(), autocommit=True) as c:
             for name in all_names:
@@ -253,7 +253,7 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
     ignores it (it is not part of the squashed history), and convergence still
     deletes it like any other orphan — the frozen set only gates the 59."""
     _ = db_conn
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (SYN_ORPHAN,))
@@ -262,7 +262,7 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
             assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
-            assert cur.fetchall() == [(_BASELINE_NAME,)]
+            assert cur.fetchall() == [(BASELINE_NAME,)]
     finally:
         with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (SYN_ORPHAN,))
@@ -274,13 +274,13 @@ def test_current_reset_refuses_missing_history_without_mutation(
     applied_count: int,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.deploy.schema.migration_history import _PRE_RESET_SET
+    from base.deploy.schema.migration_history import PRE_RESET_SET
     from base.deploy.schema.migrations import MigrationHistoryGap, applied_migration_names
-    from base.deploy.schema.tests.migration_support import _set_table_to
+    from base.deploy.schema.tests.migration_support import set_table_to
 
-    assert len(_PRE_RESET_SET) == 101
-    before = {_BASELINE_NAME, *sorted(_PRE_RESET_SET)[:applied_count]}
-    _set_table_to(db_conn, "set", before)
+    assert len(PRE_RESET_SET) == 101
+    before = {BASELINE_NAME, *sorted(PRE_RESET_SET)[:applied_count]}
+    set_table_to(db_conn, "set", before)
     with psycopg.connect(db_url()) as conn:
         with pytest.raises(MigrationHistoryGap, match="2026-09-23"):
             apply_pending_migrations(conn, machine_name=machine_identity.name)
@@ -291,26 +291,24 @@ def test_current_reset_converges_complete_history(
     db_conn: psycopg.Connection,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
+    from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
     from base.deploy.schema.migrations import (
         applied_migration_names,
         check_schema_version,
         required_migration_set,
     )
     from base.deploy.schema.tests.migration_support import (
-        _schema_sql_stamped_migration_names,
-        _set_table_to,
+        schema_sql_stamped_migration_names,
+        set_table_to,
     )
 
     # Concurrent upstream deltas remain executable and are already represented
     # in this test DB's schema. Preserve their stamps when modeling the reset.
-    predecessor = set(_PRE_RESET_SET) | (
-        set(_schema_sql_stamped_migration_names()) - {_RESET_ANCHOR}
-    )
-    _set_table_to(db_conn, "set", predecessor)
+    predecessor = set(PRE_RESET_SET) | (set(schema_sql_stamped_migration_names()) - {RESET_ANCHOR})
+    set_table_to(db_conn, "set", predecessor)
     with psycopg.connect(db_url()) as conn:
         applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
-        assert _RESET_ANCHOR in applied
+        assert RESET_ANCHOR in applied
         check_schema_version(conn)
         expected = required_migration_set()
         assert applied_migration_names(conn) == expected
@@ -324,9 +322,9 @@ def test_integer_history_is_refused_without_conversion(
     machine_identity: MachineIdentity,
 ) -> None:
     from base.deploy.schema.migrations import MigrationLayoutError, check_schema_version
-    from base.deploy.schema.tests.migration_support import _set_table_to
+    from base.deploy.schema.tests.migration_support import set_table_to
 
-    _set_table_to(db_conn, "legacy", range(1, 82))
+    set_table_to(db_conn, "legacy", range(1, 82))
     with psycopg.connect(db_url()) as conn:
         with pytest.raises(MigrationLayoutError, match="matching release"):
             apply_pending_migrations(
@@ -344,30 +342,30 @@ def test_reset_anchor_and_history_deletion_roll_back_together(
     machine_identity: MachineIdentity,
 ) -> None:
     from base.deploy.schema import migrations
-    from base.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
-    from base.deploy.schema.tests.migration_support import _set_table_to
+    from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
+    from base.deploy.schema.tests.migration_support import set_table_to
 
-    (tmp_path / f"{_RESET_ANCHOR}.sql").write_text("SELECT 1;")
-    _init_repo(tmp_path)
+    (tmp_path / f"{RESET_ANCHOR}.sql").write_text("SELECT 1;")
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
-    predecessor = {_BASELINE_NAME, *_PRE_RESET_SET}
-    _set_table_to(db_conn, "set", predecessor)
-    original = migrations._squash_history
+    predecessor = {BASELINE_NAME, *PRE_RESET_SET}
+    set_table_to(db_conn, "set", predecessor)
+    original = migrations.squash_history
 
     def interrupted(conn: psycopg.Connection, names: set[str]) -> None:
         original(conn, names)
         raise RuntimeError("interrupted after history deletion")
 
-    monkeypatch.setattr(migrations, "_squash_history", interrupted)
+    monkeypatch.setattr(migrations, "squash_history", interrupted)
     # Autocommit removes any incidental outer transaction: the reset itself
     # must own its atomicity even when no caller transaction can rescue it.
     with psycopg.connect(db_url(), autocommit=True) as conn:
         with pytest.raises(RuntimeError, match="interrupted"):
             migrations.apply_pending_migrations(conn, machine_name=machine_identity.name)
         assert migrations.applied_migration_names(conn) == predecessor
-        monkeypatch.setattr(migrations, "_squash_history", original)
+        monkeypatch.setattr(migrations, "squash_history", original)
         assert migrations.apply_pending_migrations(conn, machine_name=machine_identity.name) == [
-            _RESET_ANCHOR
+            RESET_ANCHOR
         ]
         migrations.check_schema_version(conn)
 
@@ -379,21 +377,21 @@ def test_failed_reset_anchor_preserves_history_for_retry(
     machine_identity: MachineIdentity,
 ) -> None:
     from base.deploy.schema import migrations
-    from base.deploy.schema.migration_history import _PRE_RESET_SET, _RESET_ANCHOR
-    from base.deploy.schema.tests.migration_support import _set_table_to
+    from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
+    from base.deploy.schema.tests.migration_support import set_table_to
 
-    anchor = tmp_path / f"{_RESET_ANCHOR}.sql"
+    anchor = tmp_path / f"{RESET_ANCHOR}.sql"
     anchor.write_text("SELECT 1 / 0;")
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
-    predecessor = {_BASELINE_NAME, *_PRE_RESET_SET}
-    _set_table_to(db_conn, "set", predecessor)
+    predecessor = {BASELINE_NAME, *PRE_RESET_SET}
+    set_table_to(db_conn, "set", predecessor)
     with psycopg.connect(db_url(), autocommit=True) as conn:
         with pytest.raises(migrations.MigrationFailed, match="division by zero"):
             migrations.apply_pending_migrations(conn, machine_name=machine_identity.name)
         assert migrations.applied_migration_names(conn) == predecessor
         anchor.write_text("SELECT 1;")
         assert migrations.apply_pending_migrations(conn, machine_name=machine_identity.name) == [
-            _RESET_ANCHOR
+            RESET_ANCHOR
         ]
         migrations.check_schema_version(conn)

@@ -1,6 +1,6 @@
 """Checkpoint-compatible plugin delta codec for external SDK attachments.
 
-The agent layer owns it; `ava.external.attach` reaches this module by name.
+The agent layer owns it; `ava.impersonation.attach` reaches this module by name.
 
 The existing serializer preserves reducer inputs exactly, including partial
 mappings, sets, nested models and message objects. The JSON envelope fits the
@@ -21,6 +21,7 @@ from psycopg.rows import DictRow, dict_row
 from pydantic.fields import FieldInfo
 
 from agent import state as agent_state
+from agent.state import plugin_state_schema
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.db import Database
 from base.packages.plugins.loading import registry as extensions_registry
@@ -83,7 +84,7 @@ def load_snapshot(
     """Read native state and pinned config; never create or update a checkpoint."""
     # What the plugins this attachment loaded declare; the checkpoint decode's allowlist is the state
     # classes of the faces it loaded (`loaded_state_classes`).
-    registry = extensions_registry.build_registry(validate_state=agent_state.plugin_state_schema)
+    registry = extensions_registry.build_registry(validate_state=plugin_state_schema)
     state_cls = agent_state.build_agent_state(registry)
     with database.connect(autocommit=True) as conn:
         conn.row_factory = cast(Any, dict_row)

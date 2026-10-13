@@ -140,7 +140,7 @@ Never run a background renewer. Stop acting immediately when the lease ends.
 
 ## Using the Python SDK under the lease
 
-Use direct Python as the normal SDK path: `ava.external.attach` binds the borrowed
+Use direct Python as the normal SDK path: `ava.impersonation.attach` binds the borrowed
 execution context without a CLI prefix. First run the bundled instruction-reader
 script; then call `ava.*` from short Python invocations under the same lease. Close each
 attachment before releasing control.

@@ -41,7 +41,7 @@ from base.telemetry.delivery.state import (
     resolve_machine,
 )
 from base.telemetry.emitter import (
-    _TELEMETRY_KINDS,
+    TELEMETRY_KINDS,
     capture_trace_ids,
     category_for_kind,
     emit,
@@ -52,24 +52,23 @@ from base.telemetry.emitter import (
     stop,
     sync,
 )
-from base.telemetry.pipeline_build import _drain_on_exit, _write_batch, build_pipeline
+from base.telemetry.pipeline_build import build_pipeline, drain_on_exit, write_batch
 
 __all__ = [
     "NO_EMITTER",
-    "_TELEMETRY_KINDS",
+    "TELEMETRY_KINDS",
     "Category",
     "DrainPhase",
     "DrainResult",
     "DrainStatus",
     "Event",
     "EventPipeline",
-    "_drain_on_exit",
-    "_write_batch",
     "ambient_agent_id",
     "append_jsonl",
     "build_pipeline",
     "capture_trace_ids",
     "category_for_kind",
+    "drain_on_exit",
     "emit",
     "emit_prepared",
     "event_id",
@@ -89,4 +88,5 @@ __all__ = [
     "resolve_machine",
     "stop",
     "sync",
+    "write_batch",
 ]

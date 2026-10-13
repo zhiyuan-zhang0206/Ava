@@ -3,7 +3,7 @@ receiver (task #4320).
 
 Under the SDK default (`shutdown_on_exit=True`) each provider registers its own
 atexit shutdown at bring-up — mid-life, so later than
-`base.telemetry._drain_on_exit` (registered at import) — and atexit runs
+`base.telemetry.drain_on_exit` (registered at import) — and atexit runs
 LIFO: the provider shut down FIRST, and a record emitted inside the drain
 thread's final batch window was flushed by the exit drain into a shut-down
 processor (`force_flush` returns False) and stayed mirror-only (task #4314

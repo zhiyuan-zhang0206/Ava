@@ -7,9 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-import ava
-import ava.sdk_surface.agent_identity
 from ava import agents, gateway_client
+from ava.sdk_surface import agent_identity
 
 
 class TestAgentsEntries:
@@ -18,7 +17,7 @@ class TestAgentsEntries:
     ) -> None:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 1)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "agent:1")
+        monkeypatch.setattr(agent_identity, "require_actor", lambda: "agent:1")
 
         agents.spawn(prompt=("hello",), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
         assert seen["prompt"] == "hello"
@@ -153,7 +152,7 @@ def test_core_spawn_forwards_caller_key(monkeypatch: pytest.MonkeyPatch) -> None
         return 42
 
     monkeypatch.setattr(gateway_client, "spawn", capture)
-    monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", lambda: "agent:1")
+    monkeypatch.setattr(agent_identity, "require_actor", lambda: "agent:1")
     assert agents.spawn(prompt="goal", idempotency_key="intent") == 42
     assert "require_idempotency" not in seen
     assert seen["idempotency_key"] == "intent"
@@ -175,6 +174,6 @@ def test_core_spawn_invalid_strong_admission_before_actor_or_http(
     def unexpected() -> str:
         raise AssertionError("invalid strong admission must precede actor lookup")
 
-    monkeypatch.setattr(ava.sdk_surface.agent_identity, "require_actor", unexpected)
+    monkeypatch.setattr(agent_identity, "require_actor", unexpected)
     with pytest.raises((TypeError, ValueError)):
         agents.spawn(**kwargs)

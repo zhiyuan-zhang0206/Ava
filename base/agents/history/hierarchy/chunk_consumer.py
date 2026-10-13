@@ -111,7 +111,7 @@ class Outcome:
     error: str | None = None
 
 
-def _load_segments(
+def load_segments(
     db: Database, agent_id: int, boundary_id: str | None
 ) -> tuple[FullHistory, int | None]:
     """The stitched history and, for a closing chunk, the index of its segment."""
@@ -156,7 +156,7 @@ class ModelCache:
             return self._models[key]
 
 
-def _describe(
+def describe(
     models: ModelCache,
     model: str,
     overrides: ModelOverrides,
@@ -244,7 +244,7 @@ async def _undescribed_part(
     return slice_chunk(located, *gaps[0]), gaps[1:]
 
 
-async def _run_job(
+async def run_job(
     pool: AsyncConnectionPool,
     db: Database,
     job: ChunkJob,
@@ -267,7 +267,7 @@ async def _run_job(
     )
     try:
         history, closing_segment = await asyncio.to_thread(
-            _load_segments, db, job.agent_id, job.boundary_checkpoint_id
+            load_segments, db, job.agent_id, job.boundary_checkpoint_id
         )
     except CheckpointReadError as exc:
         return Outcome("failed", f"checkpoint read failed: {exc}")
@@ -304,7 +304,7 @@ async def _run_job(
     try:
         result = await run_blocking(
             executor,
-            _describe,
+            describe,
             models,
             model,
             overrides,
@@ -365,7 +365,7 @@ class Replay:
     agent_id: int
 
 
-class _Consumer:
+class Consumer:
     """One runner's consumer: claims every due job, runs each in its own task.
 
     A job is in flight from claim to the end of its upper-level checks. Each job owns a
@@ -443,7 +443,7 @@ class _Consumer:
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="understanding")
         try:
             try:
-                outcome = await _run_job(
+                outcome = await run_job(
                     self.pool, self.db, job, self.tools, self.models, executor, inputs=self.inputs
                 )
             except asyncio.CancelledError:
@@ -610,7 +610,7 @@ async def replay_jobs(
     inputs: UnderstandingReadInputs,
 ) -> None:
     """Describe every enqueued job of one agent, its segments in parallel (the replay tool)."""
-    await _Consumer(
+    await Consumer(
         pool, db, tools, Replay(agent_id), catalog=catalog, llm_override=llm_override, inputs=inputs
     ).run_until_idle()
 
@@ -633,6 +633,6 @@ async def understanding_loop_forever(
     if not inputs.enabled():
         logger.info("[agent-host] understanding consumer idle — AVA_UNDERSTANDING_ENABLED is off")
         return
-    await _Consumer(
+    await Consumer(
         pool, db, tools, catalog=catalog, llm_override=llm_override, inputs=inputs
     ).run_forever()

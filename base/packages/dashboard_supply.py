@@ -50,7 +50,7 @@ class PluginSpecs:
     failed: list[str]
 
 
-_REPO_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
+REPO_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
 
 
 def _specs_of(faces: list[data_registry.DeclaredFace | None], names: list[str]) -> PluginSpecs:
@@ -88,7 +88,7 @@ def _repo_faces(
     return faces, names
 
 
-def load_repo_plugin_specs(plugins_dir: Path = _REPO_PLUGINS_DIR) -> PluginSpecs:
+def load_repo_plugin_specs(plugins_dir: Path = REPO_PLUGINS_DIR) -> PluginSpecs:
     """Load every shipped plugin's ``metrics.py`` declaration (`plugins_dir`: the checkout's plugin root).
 
     Mirrors the inspector's loader (task #180 PR D): import, fail soft with a
@@ -207,7 +207,7 @@ def _unpacked_plugin(name: str, archive: bytes) -> Generator[Path]:
 
 
 def collect_plugin_specs(
-    conn: psycopg.Connection | None = None, plugins_dir: Path = _REPO_PLUGINS_DIR
+    conn: psycopg.Connection | None = None, plugins_dir: Path = REPO_PLUGINS_DIR
 ) -> PluginSpecs:
     """The dual supplier: repo plugins (checkout) plus enabled installed
     plugins (registry rows + blobs), deduplicated by plugin name — a name

@@ -73,9 +73,11 @@ One row per contract in `pyproject.toml`, under the name it has there.
 
 Edges the contracts do not see or do not cover. They are listed, not exempted.
 
-- `ava.external` (`ava/external/__init__.py`) reaches the agent kernel's plugin-state codec and
-  `plugin_state_schema` by name (`importlib`), because it runs in bare scripts that have not
-  imported `agent`.
+- `ava.impersonation.attach` (`ava/impersonation/attachment.py`) reaches the agent kernel's
+  plugin-state codec and `plugin_state_schema` by name (`importlib`), because it runs in bare
+  scripts that have not imported `agent`. This is the one dynamic reference from `ava` to `agent`;
+  it is declared as `[loads]` in `ava/impersonation/meizel.toml` and stays a debt until the plugin
+  system review gives the codec to the plugin system.
 
 ## Checking
 

@@ -116,7 +116,7 @@ class _Clock:
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     fake = _Clock()
-    monkeypatch.setattr(health_mod, "_monotonic", fake)
+    monkeypatch.setattr(health_mod, "monotonic", fake)
     return fake
 
 

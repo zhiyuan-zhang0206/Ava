@@ -25,7 +25,7 @@ def _ok() -> types.SimpleNamespace:
 
 
 def test_launchd_plist_runs_rotate_then_retention_daily() -> None:
-    content = job._launchd_plist_content()
+    content = job.launchd_plist_content()
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
@@ -53,10 +53,10 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
 
-    assert job._register_macos() == 0
-    plist = job._launchd_plist_path()
+    assert job.register_macos() == 0
+    plist = job.launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
-    assert job._register_macos() == 0
+    assert job.register_macos() == 0
 
     assert plist.read_text(encoding="utf-8") == first
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootstrap"]
@@ -65,7 +65,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
 def test_macos_unregister_removes_only_its_own_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    target = job._launchd_plist_path()
+    target = job.launchd_plist_path()
     target.parent.mkdir(parents=True)
     target.write_text("<target-plist/>", encoding="utf-8")
     other = target.parent / "com.ava.packages-refresh.plist"
@@ -78,7 +78,7 @@ def test_macos_unregister_removes_only_its_own_job(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
 
-    assert job._unregister_macos() == 0
+    assert job.unregister_macos() == 0
 
     assert not target.exists()
     assert other.read_bytes() == b"<other-plist/>"
@@ -107,7 +107,7 @@ def test_linux_registration_replaces_only_its_own_lines(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
 
-    assert job._register_linux() == 0
+    assert job.register_linux() == 0
     assert other in written["body"]
     assert f"{other}\n\n" in written["body"]
     assert old not in written["body"]
@@ -126,7 +126,7 @@ def test_linux_crontab_failures_and_empty_table(
         return "/usr/bin/crontab"
 
     monkeypatch.setattr(cron.shutil, "which", missing)
-    assert job._register_linux() == 1
+    assert job.register_linux() == 1
     assert capsys.readouterr().err == (
         "  * logs maintenance: crontab not installed; daily rotation and "
         "retention cannot be registered\n"
@@ -147,7 +147,7 @@ def test_linux_crontab_failures_and_empty_table(
         return _ok()
 
     monkeypatch.setattr(cron.subprocess, "run", run)
-    assert job._register_linux() == 1
+    assert job.register_linux() == 1
     assert writes == []
     assert capsys.readouterr().err == (
         "  * crontab -l failed (permission denied); "
@@ -155,7 +155,7 @@ def test_linux_crontab_failures_and_empty_table(
     )
 
     read.stderr = "no crontab for user"
-    assert job._register_linux() == 0
+    assert job.register_linux() == 0
     assert (
         len(writes),
         writes[0].startswith("40 4 * * * "),
@@ -166,17 +166,17 @@ def test_linux_crontab_failures_and_empty_table(
     read.returncode = 0
     read.stdout = writes[0]
     assert (
-        job._unregister_linux(),
+        job.unregister_linux(),
         writes[-1],
-        job._unregister_linux(),
+        job.unregister_linux(),
         len(writes),
     ) == (0, "\n", 0, 2)
 
     read.stdout = writes[0]
     write_failure = True
-    assert job._register_linux() == 1
+    assert job.register_linux() == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
-    assert job._unregister_linux() == 1
+    assert job.unregister_linux() == 1
     assert len(writes) == 2
 
 
@@ -195,15 +195,15 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
     monkeypatch.setattr(job.logger, "error", record_error)
-    assert job._register_macos() == 1
+    assert job.register_macos() == 1
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
     assert errors == [
         ("launchctl bootstrap failed for {}: {}", "com.ava.logs-maintenance", "denied")
     ]
 
-    plist = job._launchd_plist_path()
+    plist = job.launchd_plist_path()
     assert plist.exists()
-    assert job._unregister_macos() == 0
-    assert job._unregister_macos() == 0
+    assert job.unregister_macos() == 0
+    assert job.unregister_macos() == 0
     assert not plist.exists()
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]

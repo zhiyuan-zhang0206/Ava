@@ -80,7 +80,7 @@ __all__ = [
 # of truth; this set is its category projection (kept as a module-level name
 # because tests/lint import it). Adding an event = one registry entry; this
 # view updates automatically.
-_TELEMETRY_KINDS = frozenset(name for name, spec in EVENTS.items() if spec.category == "telemetry")
+TELEMETRY_KINDS = frozenset(name for name, spec in EVENTS.items() if spec.category == "telemetry")
 
 
 def category_for_kind(event_name: str) -> Category:

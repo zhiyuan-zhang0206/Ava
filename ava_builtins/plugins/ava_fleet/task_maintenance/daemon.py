@@ -119,7 +119,7 @@ _REMINDER_SQL = """
 """
 
 
-def _advance_reminder_counters(cur: psycopg.Cursor, task_id: int) -> None:
+def advance_reminder_counters(cur: psycopg.Cursor, task_id: int) -> None:
     """Advance cadence in the transaction containing the reminder inbound."""
     cur.execute(
         "UPDATE agent_tasks SET last_reminded_at = now(), reminder_count = reminder_count + 1 "
@@ -181,7 +181,7 @@ def _run_reminders(
             )
             task_ids = [task_id for task_id, *_ in tasks]
             for task_id in task_ids:
-                _advance_reminder_counters(cur, task_id)
+                advance_reminder_counters(cur, task_id)
             queued.append((owner, inbound_id, content, task_ids))
     for owner, inbound_id, content, task_ids in queued:
         announce_reminder(db, bus, owner, inbound_id, content)

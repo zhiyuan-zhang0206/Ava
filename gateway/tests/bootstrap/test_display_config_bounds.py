@@ -11,7 +11,7 @@ from base.config.domains.display import DisplaySettings
 from base.config.domains.tests.test_display_config import DISPLAY_RANGES
 from base.host.env import dotenv_file
 from gateway.app import app
-from gateway.tests.events.test_notices_endpoint import _seed_agent
+from gateway.tests.events.test_notices_endpoint import seed_agent
 
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)
@@ -55,7 +55,7 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
         {"notices_open_default_limit": open_limit, "notices_resolved_default_page": resolved_limit}
     )
     monkeypatch.setattr(settings, "display", configured)
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
             """INSERT INTO agent_notices

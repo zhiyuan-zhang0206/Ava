@@ -24,7 +24,7 @@ Identity model (2026-07-19 timestamp-id + re-baseline cutover):
   apply every migration file whose name is not yet in the set, in name
   (≈ chronological) order; an out-of-order merge is handled by definition — each
   name is tracked independently, so there is no contiguity to violate.
-- The **baseline** (`_BASELINE_NAME`) is a squashed snapshot: `db/schema.sql`
+- The **baseline** (`BASELINE_NAME`) is a squashed snapshot: `db/schema.sql`
   is the current full schema and stamps this one sentinel row on a fresh DB
   instead of replaying history. `required_migration_set()` always includes it,
   so a DB missing the baseline is "not provisioned".
@@ -83,19 +83,19 @@ from base.deploy.schema.migration_errors import MigrationFailed as MigrationFail
 from base.deploy.schema.migration_errors import MigrationHistoryGap as MigrationHistoryGap
 from base.deploy.schema.migration_errors import MigrationLayoutError as MigrationLayoutError
 from base.deploy.schema.migration_errors import SchemaVersionMismatch as SchemaVersionMismatch
-from base.deploy.schema.migration_history import _RESET_ANCHOR, assert_reset_history
-from base.deploy.schema.migration_history import _V010_PRE_RESET_SET as _V010_PRE_RESET_SET
-from base.deploy.schema.migration_layout import _BASELINE_NAME as _BASELINE_NAME
-from base.deploy.schema.migration_layout import _FILENAME_RE as _FILENAME_RE
-from base.deploy.schema.migration_layout import _STEM_RE as _STEM_RE
-from base.deploy.schema.migration_layout import _assert_unique as _assert_unique
-from base.deploy.schema.migration_layout import _git_probe as _git_probe
-from base.deploy.schema.migration_layout import _list_migration_files as _list_migration_files
-from base.deploy.schema.migration_layout import _migration_stem as _migration_stem
-from base.deploy.schema.migration_layout import (
-    _tracked_migration_paths as _tracked_migration_paths,
-)
+from base.deploy.schema.migration_history import RESET_ANCHOR, assert_reset_history
+from base.deploy.schema.migration_history import V010_PRE_RESET_SET as V010_PRE_RESET_SET
+from base.deploy.schema.migration_layout import BASELINE_NAME as BASELINE_NAME
+from base.deploy.schema.migration_layout import FILENAME_RE as FILENAME_RE
+from base.deploy.schema.migration_layout import STEM_RE as STEM_RE
+from base.deploy.schema.migration_layout import assert_unique as assert_unique
+from base.deploy.schema.migration_layout import git_probe as git_probe
+from base.deploy.schema.migration_layout import list_migration_files as list_migration_files
+from base.deploy.schema.migration_layout import migration_stem as migration_stem
 from base.deploy.schema.migration_layout import required_migration_set as required_migration_set
+from base.deploy.schema.migration_layout import (
+    tracked_migration_paths as tracked_migration_paths,
+)
 from base.deploy.schema.migration_layout import (
     unreadable_migration_files as unreadable_migration_files,
 )
@@ -112,8 +112,8 @@ from base.log import logger
 from base.paths.home import home_checkout_error, resolve_ava_home
 
 # Fixed key for the Postgres advisory lock that serializes the whole apply loop
-# (see `_schema_mutation_lock`). Arbitrary but stable cluster-wide; ASCII "AVMI".
-_MIGRATION_LOCK_KEY = 0x41564D49
+# (see `schema_mutation_lock`). Arbitrary but stable cluster-wide; ASCII "AVMI".
+MIGRATION_LOCK_KEY = 0x41564D49
 
 
 def _schema_migrations_shape(conn: psycopg.Connection) -> str:
@@ -231,7 +231,7 @@ def assert_schema_current(db_url: str) -> None:
 
 
 @contextlib.contextmanager
-def _schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
+def schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
     """Hold a Postgres advisory lock for a whole schema-mutation loop.
 
     Serializes *every* path that mutates the schema — a manual / watchdog
@@ -249,12 +249,12 @@ def _schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
     same conn; released explicitly on exit, and by the connection closing otherwise.
     Reentrant per session, so the writer's own statements never self-conflict."""
     with conn.cursor() as cur:
-        cur.execute("SELECT pg_advisory_lock(%s)", (_MIGRATION_LOCK_KEY,))
+        cur.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK_KEY,))
     try:
         yield
     finally:
         with conn.cursor() as cur:
-            cur.execute("SELECT pg_advisory_unlock(%s)", (_MIGRATION_LOCK_KEY,))
+            cur.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK_KEY,))
 
 
 def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
@@ -312,7 +312,7 @@ def _assert_migration_authority(
     )
 
 
-def _squash_history(conn: psycopg.Connection, names: set[str]) -> None:
+def squash_history(conn: psycopg.Connection, names: set[str]) -> None:
     """Delete folded tracking rows inside the caller's mutation transaction."""
     logger.info(
         "[migration] squashing {n} applied name(s) into the baseline: {names}",
@@ -329,13 +329,13 @@ def apply_pending_migrations(
     """Apply every git-tracked migration file whose name is not yet in the DB's
     applied set, in name (≈ chronological) order; return the list of names
     actually applied. Untracked files in migrations/ are warned about and
-    skipped (see `_list_migration_files`).
+    skipped (see `list_migration_files`).
 
     Each migration runs in one transaction (`conn.transaction()`);
     body SQL and the INSERT are in the same transaction; failure rolls back
     together -> schema state does not advance.
 
-    The whole loop runs under `_schema_mutation_lock(conn)` (a Postgres advisory
+    The whole loop runs under `schema_mutation_lock(conn)` (a Postgres advisory
     lock on this connection) so concurrent mutators serialize on the schema rather
     than the loser failing on the schema_migrations primary key.
 
@@ -354,10 +354,10 @@ def apply_pending_migrations(
         MigrationLayoutError: layout broken.
         MigrationAuthorityMismatch: this checkout does not own the cluster.
     """
-    with _schema_mutation_lock(conn):
-        files = _list_migration_files()
+    with schema_mutation_lock(conn):
+        files = list_migration_files()
         applied = _applied_migration_set(conn)
-        required = {_BASELINE_NAME} | {name for name, _ in files}
+        required = {BASELINE_NAME} | {name for name, _ in files}
 
         # Frozen inventories certify that every folded schema effect ran before
         # deleting its tracking rows. The current anchor distinguishes a fresh
@@ -374,10 +374,10 @@ def apply_pending_migrations(
         if pending or squash:
             _assert_migration_authority(conn, machine_name=machine_name)
 
-        resetting = _RESET_ANCHOR in required - applied
+        resetting = RESET_ANCHOR in required - applied
         if squash and not resetting:
             with conn.transaction():
-                _squash_history(conn, squash)
+                squash_history(conn, squash)
 
         applied_now: list[str] = []
         for name, path in pending:
@@ -403,11 +403,11 @@ def apply_pending_migrations(
                         "INSERT INTO schema_migrations (name) VALUES (%s)",
                         (name,),
                     )
-                    if name == _RESET_ANCHOR and squash:
+                    if name == RESET_ANCHOR and squash:
                         # The anchor and deletion must commit together. A crash
                         # cannot leave baseline-only tracking that the new guard
                         # would correctly refuse as an incomplete old restore.
-                        _squash_history(conn, squash)
+                        squash_history(conn, squash)
             except psycopg.Error as exc:
                 raise MigrationFailed(f"apply migration {name} failed: {exc}") from exc
             logger.info("[migration] {name} applied", name=name)

@@ -13,7 +13,7 @@ from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
-from gateway.tests.events.test_notices_endpoint import _insert_notice, _pending_rows, _seed_agent
+from gateway.tests.events.test_notices_endpoint import insert_notice, pending_rows, seed_agent
 
 # --- POST .../notices/{id}/resolve : read -----------------------------------
 
@@ -21,8 +21,8 @@ from gateway.tests.events.test_notices_endpoint import _insert_notice, _pending_
 def test_read_with_reply_marks_and_delivers_inbound(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "migration done", content="14k rows")  # FYI
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "migration done", content="14k rows")  # FYI
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -44,7 +44,7 @@ def test_read_with_reply_marks_and_delivers_inbound(
 
     # one self-describing chat inbound, carrying the title and the reply —
     # a notice-system event, not user speech: system-sourced, no User envelope
-    rows = _pending_rows(db_conn, a)
+    rows = pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]
     assert kind == "chat"
@@ -64,8 +64,8 @@ def test_read_with_reply_marks_and_delivers_inbound(
 
 
 def test_read_without_reply_marks_no_inbound(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "fyi")
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "fyi")
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -79,15 +79,15 @@ def test_read_without_reply_marks_no_inbound(db_conn: psycopg.Connection) -> Non
         row = cur.fetchone()
     assert row is not None and row[0] is not None and row[1] == "read"
     # read with no reply delivers nothing
-    assert _pending_rows(db_conn, a) == []
+    assert pending_rows(db_conn, a) == []
 
 
 def test_read_twice_second_is_silent_201(db_conn: psycopg.Connection) -> None:
     """Mark read on an already-read FYI notice silently succeeds (user ruling
     2026-08-28): the second read is a 201 no-op — no error, no new inbound,
     the row keeps its original resolution."""
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "fyi")
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "fyi")
     with TestClient(app) as client:
         first = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -108,7 +108,7 @@ def test_read_twice_second_is_silent_201(db_conn: psycopg.Connection) -> None:
         row = cur.fetchone()
     assert row is not None and row[0] is not None and row[1] == "read" and row[2] is None
     # bare reads deliver nothing, the second one included
-    assert _pending_rows(db_conn, a) == []
+    assert pending_rows(db_conn, a) == []
 
 
 def test_read_with_reply_on_already_resolved_delivers_note(
@@ -117,8 +117,8 @@ def test_read_with_reply_on_already_resolved_delivers_note(
     """A note attached to a read on an already-resolved notice still reaches
     the agent (the close itself is a no-op) — user input is never silently
     dropped, matching the normal read-with-note path."""
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "migration done")
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "migration done")
     with TestClient(app) as client:
         first = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -133,7 +133,7 @@ def test_read_with_reply_on_already_resolved_delivers_note(
     assert first.status_code == 201
     assert second.status_code == 201
     # exactly one inbound — from the note, system:notice-reply, carrying title + note
-    rows = _pending_rows(db_conn, a)
+    rows = pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]
     assert kind == "chat"
@@ -152,8 +152,8 @@ def test_read_on_require_response_is_409(
 ) -> None:
     """read applies to an FYI; on a needs-response notice it is a kind mismatch
     -> 409 (use answer/dismiss)."""
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "needs answer", require_response=True)
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "needs answer", require_response=True)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -169,14 +169,14 @@ def test_read_on_require_response_is_409(
     )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
-    assert _pending_rows(db_conn, a) == []
+    assert pending_rows(db_conn, a) == []
 
 
 # --- resolve: not-open / cross-agent / double-resolve -----------------------
 
 
 def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
+    a = seed_agent(db_conn)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/999999/resolve",
@@ -184,12 +184,12 @@ def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 409
-    assert _pending_rows(db_conn, a) == []
+    assert pending_rows(db_conn, a) == []
 
 
 def test_resolve_twice_second_is_409_and_delivers_once(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "q?", require_response=True)
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "q?", require_response=True)
     with TestClient(app) as client:
         first = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -203,15 +203,15 @@ def test_resolve_twice_second_is_409_and_delivers_once(db_conn: psycopg.Connecti
         )
     assert first.status_code == 201
     assert second.status_code == 409
-    assert len(_pending_rows(db_conn, a)) == 1  # only the first answer delivered
+    assert len(pending_rows(db_conn, a)) == 1  # only the first answer delivered
 
 
 def test_resolve_cross_agent_path_409(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
-    b = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "for a", require_response=True)
+    a = seed_agent(db_conn)
+    b = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "for a", require_response=True)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{b}/notices/{nid}/resolve",
@@ -239,10 +239,10 @@ def test_open_default_limit_comes_from_display_config(
     from base.config import settings
 
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 2)
-    a = _seed_agent(db_conn)
-    _insert_notice(db_conn, a, "older")
-    _insert_notice(db_conn, a, "newer")
-    _insert_notice(db_conn, a, "newest")
+    a = seed_agent(db_conn)
+    insert_notice(db_conn, a, "older")
+    insert_notice(db_conn, a, "newer")
+    insert_notice(db_conn, a, "newest")
 
     with TestClient(app) as client:
         data = client.get("/api/notices/open").json()
@@ -258,10 +258,10 @@ def test_feed_defaults_come_from_display_config(
 
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 1)
     monkeypatch.setattr(settings.display, "notices_resolved_default_page", 1)
-    a = _seed_agent(db_conn)
-    _insert_notice(db_conn, a, "open older")
-    _insert_notice(db_conn, a, "open newer")
-    _insert_notice(
+    a = seed_agent(db_conn)
+    insert_notice(db_conn, a, "open older")
+    insert_notice(db_conn, a, "open newer")
+    insert_notice(
         db_conn,
         a,
         "resolved r0",
@@ -270,7 +270,7 @@ def test_feed_defaults_come_from_display_config(
         resolution="answered",
         reply="x",
     )
-    _insert_notice(
+    insert_notice(
         db_conn,
         a,
         "resolved r1",
@@ -297,7 +297,7 @@ def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) ->
     each illegal combo straight into the table and asserts the constraint itself
     fires -- if a guard were dropped, this is what still catches the bad write.
     """
-    a = _seed_agent(db_conn)
+    a = seed_agent(db_conn)
     ts = "2026-06-15T01:00:00Z"
 
     def _raw_insert(
@@ -363,11 +363,11 @@ def test_live_returns_new_open_notices_oldest_first(
 ) -> None:
     """The IM bridge polls with the max id it has seen; /live returns every
     open notice newer than that, both kinds, oldest-first."""
-    a1 = _seed_agent(db_conn)
-    a2 = _seed_agent(db_conn)
-    n1 = _insert_notice(db_conn, a1, "FYI one", require_response=False)
-    n2 = _insert_notice(db_conn, a2, "Decision", require_response=True)
-    n3 = _insert_notice(db_conn, a1, "FYI two", require_response=False)
+    a1 = seed_agent(db_conn)
+    a2 = seed_agent(db_conn)
+    n1 = insert_notice(db_conn, a1, "FYI one", require_response=False)
+    n2 = insert_notice(db_conn, a2, "Decision", require_response=True)
+    n3 = insert_notice(db_conn, a1, "FYI two", require_response=False)
 
     with TestClient(app) as client:
         # full poll from 0
@@ -388,9 +388,9 @@ def test_live_returns_new_open_notices_oldest_first(
 def test_live_excludes_resolved(db_conn: psycopg.Connection) -> None:
     """A resolved notice stops appearing in /live — the bridge cursor simply
     never sees it again (idempotent, no tombstone needed)."""
-    a1 = _seed_agent(db_conn)
-    n1 = _insert_notice(db_conn, a1, "Gone", require_response=False)
-    _insert_notice(
+    a1 = seed_agent(db_conn)
+    n1 = insert_notice(db_conn, a1, "Gone", require_response=False)
+    insert_notice(
         db_conn,
         a1,
         "Stay",
@@ -410,9 +410,9 @@ def test_open_feed_include_awaiting_returns_both_kinds(
 ) -> None:
     """include_awaiting=1 turns /api/notices/open into the full queue view:
     FYI and require_response notices together (Task #941)."""
-    a1 = _seed_agent(db_conn)
-    _insert_notice(db_conn, a1, "FYI one", require_response=False)
-    _insert_notice(db_conn, a1, "Decision", require_response=True)
+    a1 = seed_agent(db_conn)
+    insert_notice(db_conn, a1, "FYI one", require_response=False)
+    insert_notice(db_conn, a1, "Decision", require_response=True)
 
     with TestClient(app) as client:
         # default: FYI only
@@ -422,7 +422,7 @@ def test_open_feed_include_awaiting_returns_both_kinds(
         both = client.get("/api/notices/open", params={"include_awaiting": True}).json()
         assert {it["title"] for it in both} == {"FYI one", "Decision"}
         # resolved stays excluded
-        _insert_notice(
+        insert_notice(
             db_conn,
             a1,
             "Gone",
@@ -436,8 +436,8 @@ def test_open_feed_include_awaiting_returns_both_kinds(
 
 def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
     """No newer notices → empty list."""
-    a1 = _seed_agent(db_conn)
-    n1 = _insert_notice(db_conn, a1, "Only", require_response=False)
+    a1 = seed_agent(db_conn)
+    n1 = insert_notice(db_conn, a1, "Only", require_response=False)
 
     with TestClient(app) as client:
         r = client.get("/api/notices/live", params={"after": n1})
@@ -460,7 +460,7 @@ def test_supersede_publishes_global_notice_id(
     """
     from ops import lifecycle as ops_lifecycle
 
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     # Skew the per-agent LOCAL sequence clear of the GLOBAL one (a resolved
     # notice carrying a high local_id) so the next open notice's LOCAL id
     # differs from its GLOBAL primary key — the test then proves which one each
@@ -484,7 +484,7 @@ def test_supersede_publishes_global_notice_id(
             (agent_id, local_skew),
         )
     db_conn.commit()
-    open_id = _insert_notice(db_conn, agent_id, "open notice")
+    open_id = insert_notice(db_conn, agent_id, "open notice")
     with db_conn.cursor() as cur:
         cur.execute("SELECT local_id FROM agent_notices WHERE id = %s", (open_id,))
         row = cur.fetchone()
@@ -519,7 +519,7 @@ def test_supersede_publishes_global_notice_id(
 
 def test_post_notice_sets_default_expire_at(db_conn: psycopg.Connection) -> None:
     """POST without expire_at sets default expire_at based on daemon setting."""
-    aid = _seed_agent(db_conn)
+    aid = seed_agent(db_conn)
     before = datetime.now(UTC)
     with TestClient(app) as client:
         resp = client.post(
@@ -545,7 +545,7 @@ def test_post_notice_sets_default_expire_at(db_conn: psycopg.Connection) -> None
 
 def test_post_notice_with_explicit_expire_at(db_conn: psycopg.Connection) -> None:
     """POST with explicit expire_at stores the requested timestamp."""
-    aid = _seed_agent(db_conn)
+    aid = seed_agent(db_conn)
     target = datetime.now(UTC) + timedelta(hours=2)
     with TestClient(app) as client:
         resp = client.post(
@@ -568,7 +568,7 @@ def test_post_notice_with_explicit_expire_at(db_conn: psycopg.Connection) -> Non
 
 def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Connection) -> None:
     """POST with explicit expire_at exceeding the configured limit is clamped."""
-    aid = _seed_agent(db_conn)
+    aid = seed_agent(db_conn)
     now = datetime.now(UTC)
     target = now + timedelta(days=10)
     with TestClient(app) as client:
@@ -593,7 +593,7 @@ def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Conn
 
 def test_post_notice_past_expire_at_is_422(db_conn: psycopg.Connection) -> None:
     """POST with expire_at in the past returns 422."""
-    aid = _seed_agent(db_conn)
+    aid = seed_agent(db_conn)
     past = datetime.now(UTC) - timedelta(minutes=10)
     with TestClient(app) as client:
         resp = client.post(

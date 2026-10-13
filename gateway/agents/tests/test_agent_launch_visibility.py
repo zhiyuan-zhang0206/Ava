@@ -17,7 +17,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
 from gateway.app import app
-from gateway.tests.test_agents_endpoints import _inbound_rows
+from gateway.tests.test_agents_endpoints import inbound_rows
 from tests.fixtures.gateway_config import spawn_via_http
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -59,7 +59,7 @@ def test_failed_plain_launch_persists_prompt_and_advertises_guarded_recovery(
         body = failed.json()
         agent_id = body["agent_id"]
         _assert_failed_birth_visible(client, body, agent_id)
-        assert _inbound_rows(db_conn, agent_id) == [("Do the task", "chat", "user")]
+        assert inbound_rows(db_conn, agent_id) == [("Do the task", "chat", "user")]
 
 
 def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
@@ -85,7 +85,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
         body = failed.json()
         assert body["agent_id"] > 0
         assert body["state"] == {"status": "unknown", "availability": None}
-        assert _inbound_rows(db_conn, body["agent_id"]) == [("Keep me", "chat", "user")]
+        assert inbound_rows(db_conn, body["agent_id"]) == [("Keep me", "chat", "user")]
 
 
 def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
@@ -115,7 +115,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
         )
     assert failed.status_code == 502
     agent_id = failed.json()["agent_id"]
-    assert _inbound_rows(db_conn, agent_id) == [
+    assert inbound_rows(db_conn, agent_id) == [
         ("", "fork", f"agent:{source}"),
         ("Continue here", "chat", "user"),
     ]
@@ -150,7 +150,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
             (agent_id,),
         )
         assert cur.fetchone() == (None,)
-    assert _inbound_rows(db_conn, agent_id) == [("Stay", "chat", "user")]
+    assert inbound_rows(db_conn, agent_id) == [("Stay", "chat", "user")]
 
 
 def test_first_prompt_insert_failure_rolls_back_agent_row(

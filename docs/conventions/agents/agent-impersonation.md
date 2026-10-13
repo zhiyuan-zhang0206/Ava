@@ -95,7 +95,7 @@ The exec form runs local Python in a short attachment. Direct Python uses:
 ```python
 import ava
 
-with ava.external.attach(0, agent_id=405):
+with ava.impersonation.attach(0, agent_id=405):
     ava.agents.send_message(406, "Please review the login change")
 ```
 
