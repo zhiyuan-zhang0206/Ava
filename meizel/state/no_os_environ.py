@@ -60,7 +60,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from meizel import lint_common
+from meizel import allowances, lint_common
 from meizel.roles import packages
 
 __all__ = ["main"]
@@ -78,98 +78,24 @@ _SCAN_DIRS = (
     *packages("tooling"),
 )
 
+# Everything below is listed in meizel.policy.toml under [no-os-environ], each entry with its reason.
+_POLICY = allowances.load(_REPO_ROOT)
+
 # Provider API-key env vars are read from os.environ at build time
-# (base/lm/provider_api.require_key) once the provider is a plugin — the
-# Settings field is retired from that provider's key path (task #2505). In
-# tests, monkeypatch.setenv on these is a REAL seam (require_key reads env
-# live), not a Settings-singleton no-op. Grow this set as each provider
-# migrates to plugin mode; each key must match a ProviderBinding.key_env.
-_PROVIDER_KEY_ENV_VARS = frozenset(
-    {
-        "ANTHROPIC_API_KEY",  # ava_builtins/plugins/lm_anthropic
-        "DEEPSEEK_API_KEY",  # ava_builtins/plugins/lm_deepseek
-        "GEMINI_API_KEY",  # ava_builtins/plugins/lm_google
-        "OPENAI_API_KEY",  # ava_builtins/plugins/lm_openai
-        "DASHSCOPE_API_KEY",  # ava_builtins/plugins/lm_alibaba
-        "GLM_API_KEY",  # ava_builtins/plugins/lm_zhipu
-        "MIMO_API_KEY",  # ava_builtins/plugins/lm_xiaomi
-        "MOONSHOT_API_KEY",  # ava_builtins/plugins/lm_moonshot
-        "TYPESAFE_API_KEY",  # ava_builtins/plugins/lm_typesafe
-    }
-)
+# (base/lm/provider_api.require_key) once the provider is a plugin — the Settings field is retired
+# from that provider's key path (task #2505). In tests, monkeypatch.setenv on these is a REAL seam
+# (require_key reads env live), not a Settings-singleton no-op. Each key must match a
+# ProviderBinding.key_env.
+_PROVIDER_KEY_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "provider-key-vars"))
 
-# Vars read from the live environment BY DESIGN (not via the Settings singleton,
-# which holds the environment as it stood when it was built). The exec-child
-# OTLP deferral knobs are read on the child arm path in
-# base/telemetry/otlp/telemetry_otlp_defer.py, where
-# constructing Settings would import the config chain the deferral exists to
-# avoid (task #3816 M4b) — so in tests, monkeypatch.setenv on them is a REAL
-# seam, the same class as the provider keys above. Every entry must have its
-# reader file in _ALLOWED_FILES.
-_LIVE_READ_ENV_VARS = frozenset(
-    {
-        "AVA_TELEMETRY_OTLP_CHILD_DEFER",  # base/telemetry/otlp/telemetry_otlp_defer.py
-        "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S",  # base/telemetry/otlp/telemetry_otlp_defer.py
-    }
-)
+# Vars read from the live environment BY DESIGN (not via the Settings singleton, which holds the
+# environment as it stood when it was built): in tests, monkeypatch.setenv on them is a REAL seam,
+# the same class as the provider keys above. Every entry must have its reader file in _ALLOWED_FILES.
+_LIVE_READ_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "live-read-vars"))
 
-# File-level exemption — must demonstrate "cannot go through Settings":
-# bootstrap ordering / dynamic env enumeration. When adding a new entry,
-# include a one-line inline comment explaining why.
-_ALLOWED_FILES = frozenset(
-    {
-        "cli/main.py",  # CLI bootstrap sets config/profile/log routing before importing Settings or command modules.
-        "cli/commands/cluster/home.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
-        "cli/start_intent.py",  # Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports.
-        "cli/tests/bootstrap/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
-        "tests/components/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
-        "base/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
-        "base/config/domains/storage/data_plane.py",  # self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
-        "base/host/env/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import
-        "base/paths/home.py",  # resolve_ava_home reads AVA_HOME: the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged
-        "cli/commands/management/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first
-        "base/host/env/bootstrap.py",  # fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing base.config here is the import cycle this module exists to break
-        "base/agents/messages/external_caller.py",  # per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection
-        "services/agent_runner/page_server/daemon.py",  # spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as base/sessions/env_forwarding
-        "base/host/net/auth.py",  # delivered_token reads the per-launch AVA_API_TOKEN the root launcher (or the boot pass) sets for this process — a write generation's machine credential handoff, never persisted config; it is read during the Settings import (bootstrap fetch), same class as PAGE_SERVER_TOKEN
-        "services/agent_runner/page_server/server.py",  # reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it
-        "meizel/state/no_os_environ.py",  # this script itself has "os.environ" in strings
-        "scripts/model_registry/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
-        "scripts/lint/fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
-        "meizel/state/ambient_state/scan.py",  # same reason: it MATCHES the strings "os.environ" / "os.getenv" against a module's AST to find an import-time read; it never reads the environment
-        "base/sessions/env_forwarding.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded
-        "ava_builtins/skills/integrations/telegram-send-file/scripts/send_file.py",  # the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path; same class as the child-env handoff entries
-        "base/host/env/registry.py",  # child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding
-        "base/telemetry/tracing.py",  # sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Ava's own config surface is the AVA_TRACE_STRIP_CONTENT settings field, which drives this env translation
-        "base/host/git/gitenv.py",  # git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Ava runtime config
-        "base/native_process/child_env.py",  # centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state
-        "scripts/ci/migration_smoke.py",  # builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Ava runtime config
-        "scripts/lint/code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.
-        "scripts/ci/coverage_gates.py",  # BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser
-        "scripts/ci/pull_requests/owner_operations.py",  # TRUNK_API_TOKEN and CI_QUEUE are explicit owner-operation inputs, separate from deployment Settings
-        "scripts/ci/pull_requests/commands.py",  # TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration
-        "base/native_process/os_platform.py",  # launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity
-        "base/host/system/probes.py",  # display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not ava runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators
-        "ava/watcher/spawn.py",  # build_boot() bootstrap code uses os.environ.get in a string literal for the child process bootstrap
-        "ava/boot.py",  # launched_context() / has_launched_identity() read os.environ["AVA_AGENT_ID"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent
-        "cli/commands/agents/impersonation.py",  # AVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity
-        "base/agents/impersonation/host_transport.py",  # CODEX_HOME is provider routing context, not cluster configuration; the shared transport preserves the CLI socket resolution contract
-        "base/native_process/ownership.py",  # process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config
-        "base/telemetry/observability.py",  # endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit
-        "base/telemetry/otlp/telemetry_otlp_defer.py",  # the exec-child OTLP deferral knobs (AVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as base/telemetry/observability.py
-        "services/desktop/computer/mcp_wrapper.py",  # _agent_id() reads the ambient AVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed
-        "agent/process_boot.py",  # boot sets os.environ["AVA_AGENT_ID"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)
-        "agent/loop.py",  # run() pops the per-agent config-overlay / birth-config env vars ($AVA_AGENT_CONFIG_OVERLAY / $AVA_AGENT_BIRTH_CONFIG) before spawning children; argv is world-readable via ps (issue #974) and the payloads are per-agent launch secrets, not Settings fields
-        "agent/execution/child.py",  # the exec child reads its per-launch protocol env (AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop
-        "agent/execution/owner_child.py",  # the gated exec child validates the same one-shot AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE handoff against its signed owner context before delegating to agent.execution.child; these dynamic per-launch paths are not Settings config
-        "agent/graph/exec/_child_boundary.py",  # build_child_env copies the LIVE parent env and layers the exec protocol vars on top — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env
-        "base/lm/provider_api.py",  # plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries
-        "scripts/host_ops/guard_editable_venv.py",  # dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import
-        "base/config/_lite.py",  # the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same "cannot depend on Settings by construction" class as base/config/__init__.py
-        "base/config/_full.py",  # the eager builder reads AVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py
-        "scripts/codegen/gen_config_lite_table.py",  # regeneration must run in exactly the states that need it (broken .env, unreachable gateway): it forces AVA_CONFIG_FETCH=skip in the process env BEFORE importing the registry, which Settings cannot mediate by construction
-    }
-)
+# File-level exemption — must demonstrate "cannot go through Settings": bootstrap ordering /
+# dynamic env enumeration. A new entry is a policy change with a one-line reason.
+_ALLOWED_FILES = frozenset(_POLICY.reasons("no-os-environ", "files"))
 
 # Test files — pytest fixtures mocking env is a legitimate use
 _TEST_PATTERNS = (

@@ -1,84 +1,29 @@
-"""`meizel.policy.toml`: the one place that lists every allowance the rules cannot grant themselves.
+"""`meizel.policy.toml` in the checker: validation against the manifests, rendering and `policy diff`.
 
-Some forms are allowed only where a person decided so: a file that loads code at run time
-(`[loads]`), a file that runs code from outside the repository (`[external]`), and, should they
-ever be allowed, default-argument injections. A manifest may use these forms only for the sites
-listed here; the free-text reason in a manifest no longer counts. The file sits at the repository
-root, and a change to it is reported by `policy diff` so a reviewer sees it at once.
-
-```toml
-[external]
-"app/runner.py" = "executes the schedule script the user wrote"
-
-[loads]
-"app/loader.py" = ["ava_builtins"]
-
-[default-arguments]
-```
+The format and its reader live in `meizel.allowances`, shared with the lints whose allowances the
+file also holds. Here: a manifest may use a dynamic-load or external-code form only for the sites
+the policy lists (the free-text reason in a manifest no longer counts), and a change to the file is
+reported by `policy diff` so a reviewer sees every widening at once.
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
-import tomllib
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+from meizel.allowances import POLICY, Policy, parse
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.graph.universe import Universe
 
 __all__ = ["POLICY", "Policy", "changes", "check", "load_policy", "policy_at", "render_policy"]
 
-POLICY = "meizel.policy.toml"
-_TABLES = ("external", "loads", "default-arguments")
-
-
-@dataclass(slots=True)
-class Policy:
-    external: dict[str, str] = field(default_factory=dict[str, str])
-    loads: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
-    default_arguments: tuple[str, ...] = ()
-    lines: list[str] = field(default_factory=list[str])
-
-
-def _problem(line: int, message: str) -> Diagnostic:
-    return Diagnostic(POLICY, line, Code.POLICY_SYNTAX, message)
-
 
 def parse_policy(text: str) -> tuple[Policy, list[Diagnostic]]:
-    policy = Policy(lines=text.splitlines())
-    problems: list[Diagnostic] = []
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as error:
-        return policy, [_problem(1, f"invalid TOML: {error}")]
-    for name in document:
-        if name not in _TABLES:
-            problems.append(
-                _problem(1, f"unknown table {name!r}; the tables are {', '.join(_TABLES)}")
-            )
-    external = document.get("external", {})
-    loads = document.get("loads", {})
-    defaults = document.get("default-arguments", {})
-    if not (isinstance(external, dict) and isinstance(loads, dict) and isinstance(defaults, dict)):
-        return policy, [*problems, _problem(1, "every table must be a table")]
-    for path, reason in cast("dict[str, object]", external).items():
-        if isinstance(reason, str) and reason.strip():
-            policy.external[path] = reason.strip()
-        else:
-            problems.append(_problem(1, f"[external] {path!r} needs a non-empty reason string"))
-    for path, targets in cast("dict[str, object]", loads).items():
-        if isinstance(targets, list) and all(
-            isinstance(t, str) for t in cast("list[object]", targets)
-        ):
-            policy.loads[path] = tuple(cast("list[str]", targets))
-        else:
-            problems.append(_problem(1, f"[loads] {path!r} must be a list of directories"))
-    policy.default_arguments = tuple(defaults)
-    return policy, problems
+    policy, problems = parse(text)
+    return policy, [Diagnostic(POLICY, 1, Code.POLICY_SYNTAX, message) for message in problems]
 
 
 def load_policy(universe: Universe) -> tuple[Policy, list[Diagnostic]]:
@@ -162,22 +107,23 @@ def changes(old: Policy, new: Policy) -> list[str]:
     """A line per entry added, removed or changed between two policies."""
     lines: list[str] = []
 
-    def show(value: object) -> str:
-        return (
-            "[" + ", ".join(cast("tuple[str, ...]", value)) + "]"
-            if isinstance(value, tuple)
-            else str(value)
-        )
+    def text(value: object) -> str:
+        if isinstance(value, tuple):
+            return "[" + ", ".join(cast("tuple[str, ...]", value)) + "]"
+        return str(value)
+
+    def show(key: str, value: object) -> str:
+        return f"{key} = {text(value)}" if text(value) else key
 
     def table(name: str, before: dict[str, object], after: dict[str, object]) -> None:
         lines.extend(
-            f"+ [{name}] {k} = {show(after[k])}" for k in sorted(after.keys() - before.keys())
+            f"+ [{name}] {show(k, after[k])}" for k in sorted(after.keys() - before.keys())
         )
         lines.extend(
-            f"- [{name}] {k} = {show(before[k])}" for k in sorted(before.keys() - after.keys())
+            f"- [{name}] {show(k, before[k])}" for k in sorted(before.keys() - after.keys())
         )
         lines.extend(
-            f"~ [{name}] {k}: {show(before[k])} -> {show(after[k])}"
+            f"~ [{name}] {k}: {text(before[k])} -> {text(after[k])}"
             for k in sorted(before.keys() & after.keys())
             if before[k] != after[k]
         )
@@ -189,4 +135,16 @@ def changes(old: Policy, new: Policy) -> list[str]:
         dict.fromkeys(old.default_arguments, ""),
         dict.fromkeys(new.default_arguments, ""),
     )
+    for rule, section in sorted(old.listed.keys() | new.listed.keys()):
+        table(
+            f"{rule}.{section}",
+            dict(old.listed.get((rule, section), {})),
+            dict(new.listed.get((rule, section), {})),
+        )
+    for rule, section in sorted(old.named.keys() | new.named.keys()):
+        table(
+            f"{rule}.{section}",
+            dict.fromkeys(old.named.get((rule, section), ()), ""),
+            dict.fromkeys(new.named.get((rule, section), ()), ""),
+        )
     return lines

@@ -12,7 +12,7 @@ Pydantic do runtime `get_type_hints()` / `inspect.signature` introspection
 that would `NameError` on a TYPE_CHECKING-only import.
 
 Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
-`_TYPE_CHECKING_ALLOWED` (`meizel/language/type_checking.py`) with a reason. This rule is lint-enforced by
+`[type-checking.files]` in `meizel.policy.toml` with a reason. This rule is lint-enforced by
 `scripts/lint/code_structure.py`.
 
 ## Per-file line budget: 800 lines
@@ -91,7 +91,7 @@ by the existing SDK surface metadata and Installation; do not introduce another 
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`base/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that
-  genuinely cannot goes in that decision's `allowed` map with a one-line
+  genuinely cannot is listed under `[single-owner.<decision>]` in `meizel.policy.toml` with a one-line
   reason — an allowed module that stops bypassing (or disappears) fails as
   stale, so the map cannot rot into a permission wall. Add a new single-owner
   decision only once its owner exists: an entry in `DECISIONS` with its owning
@@ -141,7 +141,7 @@ forbidden. Rule 9 of `scripts/lint/code_structure.py`
 (`meizel/state/ambient_state/`) enforces both: new sites fail, today's are
 frozen in the `ambient_state` baseline section as `path::rule:name -> site count`
 (exact, shrink-only), and the only things let through are the closed, reasoned lists
-in `meizel/state/ambient_state/allowlist.py` — write-only facades, framework wiring
+in the `[ambient-state]` tables of `meizel.policy.toml` — write-only facades, framework wiring
 (`FastAPI()`, routers, argparse/Typer, `StateGraph`, locks), pure constants
 (`re.compile`, `TypeVar`, `timedelta`, `Path`) and memoized pure functions. There is
 no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts

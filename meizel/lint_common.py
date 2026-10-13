@@ -124,6 +124,7 @@ ONLY_FLAG = "--only"
 
 LINT_TOOLING = (
     "meizel/",
+    "meizel.policy.toml",
     "scripts/lint/",
     "scripts/structure/",
     "scripts/content_lint/",

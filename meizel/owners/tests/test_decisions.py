@@ -128,7 +128,7 @@ def test_allowlist_entry_is_stale_once_the_module_stops_bypassing(
     lineno, message = errors[0]
     assert lineno == 1
     assert "stale fake-decision allowlist entry" in message
-    assert "remove it from DECISIONS" in message
+    assert "remove it from [single-owner.<decision>] in meizel.policy.toml" in message
 
 
 def test_allowlist_entry_is_not_stale_while_it_still_bypasses(

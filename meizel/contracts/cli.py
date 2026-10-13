@@ -14,7 +14,7 @@ from meizel.contracts.bootstrap import bootstrap
 from meizel.contracts.debt_carry import carry as carry_debt
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
-from meizel.contracts.debt_report import changed_under, diff, summarize
+from meizel.contracts.debt_report import changed_outside, changed_under, diff, summarize
 from meizel.contracts.declare import declare
 from meizel.contracts.explain import explain
 from meizel.contracts.ledger import debts_in
@@ -184,22 +184,43 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
         nargs="+",
         default=[],
         metavar="pathspec",
-        help="treat growth as a warning when the change touches these git pathspecs (the rules)",
+        help="a waiver needs the change to touch these git pathspecs (the rule code)",
+    )
+    growth.add_argument(
+        "--waive-only-within",
+        nargs="+",
+        default=[],
+        metavar="pathspec",
+        help="a waiver needs every changed file to match these git pathspecs (a pure rule change)",
     )
 
 
-def _run_diff(root: Path, ref: str, on_growth: str, waive_if_changed: list[str]) -> int:
+def _waiver(root: Path, ref: str, touches: list[str], within: list[str]) -> tuple[bool, str]:
+    """Whether the change is a pure rule change, and the sentence that says why not or why."""
+    if not (touches or within):
+        return False, ""
+    rules = changed_under(root, ref, touches) if touches else []
+    if touches and not rules:
+        return False, ""
+    outside = changed_outside(root, ref, within) if within else []
+    if outside:
+        shown = ", ".join(outside[:3]) + (" ..." if len(outside) > 3 else "")
+        return False, f"not waived: the change also edits files outside the rules ({shown})"
+    return True, f"this change edits only the rules ({', '.join(rules[:3])})"
+
+
+def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) -> int:
     lines, grew = diff(root, ref)
     print("\n".join(lines))
     if not grew:
         print(f"meizel: no growth against {ref}")
         return 0
-    rules = changed_under(root, ref, waive_if_changed) if waive_if_changed else []
-    if rules and on_growth == "fail":
-        print(
-            f"meizel: growth is reported, not failed: this change edits the rules ({', '.join(rules[:3])})"
-        )
+    waived, why = _waiver(root, ref, args.waive_if_changed, args.waive_only_within)
+    if waived and on_growth == "fail":
+        print(f"meizel: growth is reported, not failed: {why}")
         on_growth = "warn"
+    elif why:
+        print(f"meizel: growth {why}")
     warning = "" if on_growth == "fail" else " warning:"
     print(f"meizel:{warning} recorded debt grew against {ref}", file=sys.stderr)
     return 1 if on_growth == "fail" else 0
@@ -237,7 +258,7 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
             print(line)
         return 0
     if mode == "diff":
-        return _run_diff(root, args.against, args.on_growth, args.waive_if_changed)
+        return _run_diff(root, args.against, args.on_growth, args)
     if mode == "carry":
         lines = carry_debt(root, args.base, args.rename_target, args.move_symbol)
         for line in lines:

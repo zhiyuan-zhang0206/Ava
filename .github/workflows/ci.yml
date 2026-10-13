@@ -717,13 +717,16 @@ jobs:
 
       - name: Recorded locality debt against the base (fails on growth)
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
-        # Strict-to-be debt may only shrink. The one waiver is decided by path: a change that edits
-        # meizel's rule code (Python under meizel/ outside tests) may grow the baselines, because
-        # widening a rule does. The tool applies it (--waive-if-changed); nobody judges it by eye.
+        # Strict-to-be debt may only shrink. The one waiver is decided by path: a pure rule change
+        # (meizel's rule code, plus the baselines and the allowance policy it moves, and nothing
+        # else) may grow the baselines, because widening a rule does. A change that also edits
+        # product code or tests is not waived, so a rule change gets its own PR. The tool applies
+        # it (--waive-if-changed and --waive-only-within, both must hold); nobody judges it by eye.
         run: |
           env -u VIRTUAL_ENV uv run python -m meizel debt diff \
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
-            --waive-if-changed ':(glob)meizel/**/*.py' ':(exclude,glob)meizel/**/tests/**'
+            --waive-if-changed ':(glob)meizel/**/*.py' ':(exclude,glob)meizel/**/tests/**' \
+            --waive-only-within ':(glob)meizel/**' ':(glob)**/meizel.toml' meizel.policy.toml
 
       - name: Allowance policy changes (informational)
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}

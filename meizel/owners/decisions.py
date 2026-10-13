@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from meizel import allowances
+
 __all__ = [
     "DECISIONS",
     "Decision",
@@ -21,6 +23,8 @@ __all__ = [
 ]
 
 Sites = dict[str, list[int]]
+
+_POLICY = allowances.load(Path(__file__).resolve().parents[2])
 
 
 @dataclass
@@ -112,7 +116,8 @@ class Decision:
     owners: frozenset[str]
     find: Callable[[ast.Module, tuple[str, ...]], list[int]]
     fix: str
-    # path -> one-line reason the site genuinely cannot go through the owner.
+    # path -> one-line reason the site genuinely cannot go through the owner; the entries are
+    # listed in meizel.policy.toml under [single-owner.<decision>].
     allowed: dict[str, str] = field(default_factory=dict[str, str])
 
 
@@ -126,36 +131,7 @@ DECISIONS: dict[str, Decision] = {
             "the transport posture (prepare_threshold=None, keepalives, statement ceiling "
             "or unbounded, sslmode, pooled-session scrub)"
         ),
-        allowed={
-            "base/cluster/dataplane/pg_admin.py": (
-                "the OS-user administrator's peer-socket authority (roles, grants, schema "
-                "DDL, owner sessions) behind its own postmaster custody check; the FC-10 "
-                "cutover scripts dial through it, so its transport stays as rehearsed until "
-                "the cutover lands"
-            ),
-            "base/host/db_authority/unit.py": (
-                "probes an installed unit capability's own runner login at the served "
-                "endpoint, the credential under test"
-            ),
-            "cli/commands/data_plane/cluster_instance.py": (
-                "proves the running postmaster demands a password by dialing a role "
-                "that cannot exist, with no credential"
-            ),
-            # base.db.connections resolves a home (base.host.env.dotenv_boot) and imports
-            # settings at load; the modules below run where neither may happen.
-            "base/cluster/dataplane/pg_tools.py": (
-                "provisions the throwaway Postgres it just started; run config-free by "
-                "scripts/ci/migration_smoke.py"
-            ),
-            "base/cluster/dataplane/pg_stall_watchdog.py": (
-                "probes the throwaway Postgres base/cluster/dataplane/pg_tools.py started, under the same "
-                "home-free constraint"
-            ),
-            "base/cluster/dataplane/pg_foreground.py": (
-                "readiness probe of the foreground throwaway postmaster base/cluster/dataplane/pg_tools.py "
-                "started, under the same home-free constraint"
-            ),
-        },
+        allowed=_POLICY.reasons("single-owner", "postgres-dial"),
     ),
 }
 
@@ -182,7 +158,7 @@ def allowlist_errors(
     ]
 
 
-_UNLIST = "remove it from DECISIONS in meizel/owners/decisions.py"
+_UNLIST = f"remove it from [single-owner.<decision>] in {allowances.POLICY}"
 
 
 def missing_allowlist_errors(repo_root: Path) -> list[str]:
