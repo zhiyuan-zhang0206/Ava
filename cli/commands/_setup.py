@@ -7,7 +7,7 @@ no identity input.
 Capabilities (serve_gateway / serve_agent_runner / serve_observability_station)
 are independent booleans, each the settings bool of its `AVA_MACHINE_SERVE_*` key
 (unset = off); the string setup fields (machine_name / description / memory_remote /
-gateway_url) are resolved by `_SetupField` below, gated by which capabilities this
+gateway_url) are resolved by `SetupField` below, gated by which capabilities this
 host carries.
 """
 
@@ -21,7 +21,7 @@ from base.config import ConfigBoot
 
 
 class SetupValues(TypedDict):
-    """The resolved host setup fields `_collect_setup_values` returns and
+    """The resolved host setup fields `collect_setup_values` returns and
     `_register_machine_or_die` / `ava start` consume. `machine_role` (the derived
     comma-string of this host's capabilities), `machine_name`, and `gateway_url`
     are guaranteed once the returned `missing` list is empty — a required field
@@ -38,7 +38,7 @@ class SetupValues(TypedDict):
 
 
 @dataclass(frozen=True)
-class _SetupField:
+class SetupField:
     """Metadata for a single setup field — used by the collector and error message.
 
     Attributes:
@@ -94,19 +94,19 @@ _CAPABILITIES: tuple[_Capability, ...] = (
 )
 
 
-_SETUP_FIELDS: tuple[_SetupField, ...] = (
-    _SetupField(
+_SETUP_FIELDS: tuple[SetupField, ...] = (
+    SetupField(
         name="machine_name",
         env_var="AVA_MACHINE_NAME",
         hint="<name>, e.g. host-a / host-b",
     ),
-    _SetupField(
+    SetupField(
         name="machine_description",
         env_var="AVA_MACHINE_DESCRIPTION",
         hint='<free text>, e.g. "voice IO + browser + always-on"',
         optional=True,
     ),
-    _SetupField(
+    SetupField(
         name="memory_remote",
         env_var="AVA_MEMORY_REMOTE",
         hint="<git-url>, e.g. git@github.com:you/AvaMemory.git (empty = local init, no remote)",
@@ -116,7 +116,7 @@ _SETUP_FIELDS: tuple[_SetupField, ...] = (
     # On the gateway, this is the URL advertised to the cluster (register_self).
     # On an agent-runner, this is the gateway it reaches for self-heal updates
     # and cluster status (the gateway dials the agent-runner the other way).
-    _SetupField(
+    SetupField(
         name="gateway_url",
         env_var="AVA_GATEWAY_URL",
         hint="<url>, e.g. http://<gateway-host>:8800 (gateway: this host's own URL; agent-runner: the gateway it reaches)",
@@ -131,7 +131,7 @@ def _resolve_capability(cap: _Capability, config: ConfigBoot) -> bool:
     return bool(env_val)
 
 
-def _resolve_setup_field(field: _SetupField, config: ConfigBoot) -> str | None:
+def resolve_setup_field(field: SetupField, config: ConfigBoot) -> str | None:
     """The field's settings value, or None when it is empty.
 
     The field's validator gates the value; an invalid one raises immediately.
@@ -144,9 +144,9 @@ def _resolve_setup_field(field: _SetupField, config: ConfigBoot) -> str | None:
     return value
 
 
-def _collect_setup_values(
+def collect_setup_values(
     *, config: ConfigBoot
-) -> tuple[SetupValues, list[_SetupField | _Capability]]:
+) -> tuple[SetupValues, list[SetupField | _Capability]]:
     """Resolve all fields. Returns (resolved dict, list of missing required items).
 
     Phase 1: resolve the serve-capabilities first — they gate which other
@@ -170,11 +170,11 @@ def _collect_setup_values(
     # resolved `machine_role`. A field applies when any of its `roles` is a
     # capability this host carries.
     resolved: dict[str, str] = {"machine_role": ",".join(sorted(caps))}
-    missing: list[_SetupField | _Capability] = []
+    missing: list[SetupField | _Capability] = []
     for field in _SETUP_FIELDS:
         if not (caps & set(field.roles)):
             continue
-        value = _resolve_setup_field(field, config)
+        value = resolve_setup_field(field, config)
         if value is None:
             if not field.optional:
                 missing.append(field)
@@ -185,7 +185,7 @@ def _collect_setup_values(
     return cast(SetupValues, resolved), missing
 
 
-def _missing_setup_message(missing: list[_SetupField | _Capability]) -> str:
+def missing_setup_message(missing: list[SetupField | _Capability]) -> str:
     """Why a start cannot proceed: the identity this home recorded lacks required fields.
 
     `ava init` records them once and refuses an initialized home, so the repair is

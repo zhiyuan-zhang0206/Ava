@@ -48,7 +48,7 @@ _FLAGS = (
 )
 
 
-def _config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str], str | None]:
+def config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str], str | None]:
     if args.config_file is None:
         return {}, None
     from base.host.env.config_lite_table import FIELD_ALIASES
@@ -79,12 +79,12 @@ def _validate_remote_inputs(values: dict[str, str], roles: frozenset[str]) -> No
     if "gateway" not in roles:
         raise ValueError("remote data-plane configuration belongs to a gateway unit")
     endpoints = _remote_endpoints(values)
-    local = _local_addresses(values.get("AVA_MACHINE_HOST", ""))
+    local = local_addresses(values.get("AVA_MACHINE_HOST", ""))
     for endpoint in endpoints:
         _require_foreign_endpoint(endpoint, local)
 
 
-def _local_addresses(machine_host: str) -> set[str]:
+def local_addresses(machine_host: str) -> set[str]:
     import socket
 
     import psutil
@@ -157,9 +157,9 @@ def _inputs(args: argparse.Namespace, home: Path) -> IdentityInput:
     except ValueError as exc:
         raise ValueError(f"{exc}{_first_time_examples()}") from exc
     values: dict[str, str] = dict(stored)
-    config, digest = _config_values(args, home)
+    config, digest = config_values(args, home)
     values.update(config)
-    values["AVA_SERVICE_PATH"] = _service_path(values, home)
+    values["AVA_SERVICE_PATH"] = service_path(values, home)
     _apply_identity_options(args, stored, values)
     if config.get("AVA_DB_URL"):
         _validate_remote_inputs(values, roles)
@@ -175,7 +175,7 @@ def _inputs(args: argparse.Namespace, home: Path) -> IdentityInput:
     return IdentityInput(home, start_intent._checkout(), roles, values, digest)
 
 
-def _service_path(values: dict[str, str], home: Path) -> str:
+def service_path(values: dict[str, str], home: Path) -> str:
     from base.sessions.env_forwarding import admit_service_path
 
     if "AVA_SERVICE_PATH" in values:

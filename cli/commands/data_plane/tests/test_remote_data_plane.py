@@ -99,7 +99,7 @@ def test_stop_remote_warns_about_orphaned_local_instance(
     # The remote-managed home carries no local Redis admin password, so the
     # leftover Redis is detected by its listener, never by an authenticated PING.
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
-    monkeypatch.setattr(dp, "_local_listener", lambda port: port == 18012)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(dp, "local_listener", lambda port: port == 18012)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = dp.stop_cluster_instance(producer=operator_pipeline)
 

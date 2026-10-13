@@ -31,7 +31,7 @@ from services.supervision.roster.service_spec import ServiceSpec
 from services.supervision.roster.spec import services_for_capabilities_annotated
 
 
-def _root_tree_units() -> dict[str, dict[str, object]]:
+def root_tree_units() -> dict[str, dict[str, object]]:
     """Read one root snapshot; an unreachable root claims no running services."""
     from cli.commands.lifecycle import root_driver
 
@@ -76,7 +76,7 @@ def cmd_status(
     services_to_show = _status_roster(roles, machine=machine)
     name_w = max((len(session_name(spec.session)) for spec, _reason in services_to_show), default=7)
     # The root is the only service owner. Do not infer liveness from old records.
-    root_units = _root_tree_units()
+    root_units = root_tree_units()
     header = f"{'service'.ljust(name_w)}  root  probe"
     print(header)
     print("-" * len(header))
@@ -141,13 +141,13 @@ def cmd_status(
 
     # The code this home runs: the source checkout, at its current HEAD.
     print()
-    print(_source_identity_line(Path(repo)))
+    print(source_identity_line(Path(repo)))
 
-    _print_gateway_cluster_status()
+    print_gateway_cluster_status()
     return 0
 
 
-def _source_identity_line(repo: Path) -> str:
+def source_identity_line(repo: Path) -> str:
     """The checkout this home executes; an unreadable HEAD prints as unreadable."""
     from base.deploy.git.cluster_drift import checkout_head_sha
 
@@ -176,7 +176,7 @@ def _print_host_resources() -> None:
     )
 
 
-def _print_gateway_cluster_status() -> None:
+def print_gateway_cluster_status() -> None:
     """Fetch + print the gateway's own cluster-status snapshot.
 
     GET `/api/cluster/status` — this is the thin-client view (what the gateway

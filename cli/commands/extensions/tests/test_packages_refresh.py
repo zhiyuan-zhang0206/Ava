@@ -25,7 +25,7 @@ from base.packages.extensions import install_registry as reg
 from base.paths.home import resolve_ava_home
 from cli.commands.extensions._refresh_rules import effective_interval_seconds, is_due
 from cli.commands.extensions.packages import refresh
-from cli.commands.extensions.packages.refresh import _Pass, parse_duration, run_refresh
+from cli.commands.extensions.packages.refresh import Pass, parse_duration, run_refresh
 
 
 @pytest.fixture
@@ -350,7 +350,7 @@ def test_git_channel_copy_edit_converges_to_incoming(
     notes: list[str] = []
     sink = logger.add(lambda m: notes.append(str(m)), level="INFO", format="{message}")
     try:
-        gate = _Pass(
+        gate = Pass(
             config=refresh_config,
             check_only=False,
             only=None,
@@ -690,7 +690,7 @@ def test_pass_reads_live_quota_from_supplied_owner(
     refresh_config: ConfigBoot, core_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     refresh_config.set_field("refresh_max_applies", 1)
-    pass_ = _Pass(
+    pass_ = Pass(
         config=refresh_config,
         check_only=False,
         only=None,
@@ -717,7 +717,7 @@ def test_network_operations_read_live_timeout_from_same_owner(
     refresh_config: ConfigBoot, core_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     refresh_config.set_field("refresh_network_timeout_seconds", 6.0)
-    pass_ = _Pass(
+    pass_ = Pass(
         config=refresh_config,
         check_only=False,
         only=None,

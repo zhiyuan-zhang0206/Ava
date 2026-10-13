@@ -53,7 +53,7 @@ AGENT_LEASE_TTL_S = 600.0
 CORPSE_REAP_GRACE_S = 900.0
 
 # How long a pure agent-runner's start preflight keeps re-dialing the gateway
-# before it declines (`cli.commands._repo._probe_gateway_or_die`, run by
+# before it declines (`cli.commands._repo.probe_gateway_or_die`, run by
 # `ava start`): whether a *single* refused dial is enough to declare the gateway
 # down.
 #

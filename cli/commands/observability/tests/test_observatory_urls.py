@@ -180,7 +180,7 @@ def test_webhook_uses_local_bind_or_reachable_gateway(
     monkeypatch.setattr(settings.gateway, "gateway_url", gateway_url)
     monkeypatch.setattr(settings.gateway, "gateway_port", port)
     command_runtime.machine.set(host="10.0.0.10")
-    assert observatory_urls._alerts_webhook_url(machine=command_runtime.machine) == expected
+    assert observatory_urls.alerts_webhook_url(machine=command_runtime.machine) == expected
 
 
 def test_webhook_rejects_url_credentials_without_reporting_them(
@@ -194,7 +194,7 @@ def test_webhook_rejects_url_credentials_without_reporting_them(
         settings.gateway, "gateway_url", "https://user:synthetic-secret@gateway.test"
     )
     with pytest.raises(ValueError, match="credential-free") as error:
-        observatory_urls._alerts_webhook_url(machine=command_runtime.machine)
+        observatory_urls.alerts_webhook_url(machine=command_runtime.machine)
     captured = capsys.readouterr()
     assert "synthetic-secret" not in str(error.value) + captured.out + captured.err
 

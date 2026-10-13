@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-_FAMILY_DAYS_NAMES = frozenset(
+FAMILY_DAYS_NAMES = frozenset(
     {"agent", "shell", "gateway", "ops", "watchdog", "snapshot", "other", "default"}
 )
 
@@ -38,7 +38,7 @@ def _family_days(value: str) -> dict[str, int]:
             raise argparse.ArgumentTypeError(
                 "family days must use FAMILY=DAYS pairs separated by commas"
             )
-        if family not in _FAMILY_DAYS_NAMES:
+        if family not in FAMILY_DAYS_NAMES:
             raise argparse.ArgumentTypeError(
                 "family must be agent, shell, gateway, ops, watchdog, snapshot, other, or default"
             )
@@ -70,7 +70,7 @@ def _h_logs_rotate(args: argparse.Namespace) -> int:
     )
 
 
-def _add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     logs_p = sub.add_parser("logs", help="manage local log files")
     logs_sub = logs_p.add_subparsers(dest="logs_cmd", required=True)
     retention_p = logs_sub.add_parser(

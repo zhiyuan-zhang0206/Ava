@@ -21,7 +21,7 @@ from base.deploy.lifecycle.start_serving import RootBirth
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup
-from cli.commands.lifecycle.stop import _force_stop
+from cli.commands.lifecycle.stop import force_stop
 from cli.commands.lifecycle.tests.identity.restart_inputs import (
     ignore_retained_children as _ignoring_retention,
 )
@@ -44,7 +44,7 @@ from services.desktop.browser import orphan
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-_real_reap_cluster_chrome = _stop_commands._reap_cluster_chrome
+_real_reap_cluster_chrome = _stop_commands.reap_cluster_chrome
 
 
 # ─── restart ─────────────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ def test_cmd_restart_succeeds_non_interactively(
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_stop_commands, "_do_stop", MagicMock(return_value=0))
+    monkeypatch.setattr(_stop_commands, "do_stop", MagicMock(return_value=0))
 
     def _apply_migrations(
         *, database_factory: DatabaseFactory, machine_name: Callable[[], str]
@@ -99,7 +99,7 @@ def test_cmd_restart_calls_stop_then_start(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """cmd_restart invokes stop (require_confirmation=False) then _cmd_start_body in order."""
+    """cmd_restart invokes stop (require_confirmation=False) then cmd_start_body in order."""
 
     order: list[str] = []
 
@@ -150,8 +150,8 @@ def test_cmd_restart_calls_stop_then_start(
         order.append("start")
         return 0
 
-    monkeypatch.setattr(_stop_commands, "_do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", fake_cmd_start_body)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_commands, "do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_start_commands, "cmd_start_body", fake_cmd_start_body)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
@@ -188,13 +188,13 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
         del _db
         return 0
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_commands, "do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     def start_result(
         operation: object,
@@ -206,7 +206,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
         assert kwargs["producer"] is operator_pipeline
         return 0
 
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", start_result)
+    monkeypatch.setattr(_start_commands, "cmd_start_body", start_result)
 
     finished: list[int] = []
     monkeypatch.setattr(
@@ -260,10 +260,10 @@ def test_cmd_restart_short_circuits_on_stop_failure(
 
     start_called: list[bool] = []
 
-    monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_commands, "do_stop", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_commands,
-        "_cmd_start_body",
+        "cmd_start_body",
         lambda _operation, _database_factory, _machine, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
     rc = _stop_commands.cmd_restart(
@@ -298,13 +298,13 @@ def test_cmd_restart_aborts_when_preflight_fails(
 
     monkeypatch.setattr(
         _repo_commands,
-        "_preflight_probes",
+        "preflight_probes",
         preflight,  # pyright: ignore[reportUnknownArgumentType]
     )  # simulate failure  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_commands, "do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_commands,
-        "_cmd_start_body",
+        "cmd_start_body",
         lambda _operation, _database_factory, _machine, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
 
@@ -312,7 +312,7 @@ def test_cmd_restart_aborts_when_preflight_fails(
         assert database_factory is operator_database
         assert machine is command_runtime.machine
 
-    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", release_pause)
+    monkeypatch.setattr(_stop_commands, "release_self_heal_pause", release_pause)
 
     rc = _stop_commands.cmd_restart(
         retained_children=[],
@@ -352,12 +352,12 @@ def test_cmd_restart_aborts_when_start_readiness_fails(
         del _db
         return 0
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_start_readiness_preflight_commands, "preflight_start_readiness", _gate)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_commands, "do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_commands,
-        "_cmd_start_body",
+        "cmd_start_body",
         lambda _operation, _database_factory, _machine, **_kw: start_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
 
@@ -365,7 +365,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(
         assert database_factory is operator_database
         assert machine is command_runtime.machine
 
-    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", release_pause)
+    monkeypatch.setattr(_stop_commands, "release_self_heal_pause", release_pause)
 
     rc = _stop_commands.cmd_restart(
         retained_children=[],
@@ -472,7 +472,7 @@ def test_stop_revokes_serving_before_stopping_root(
         _ignoring_retention(lambda: 0),
     )
     assert (
-        _force_stop(
+        force_stop(
             tmp_path,
             require_confirmation=False,
             producer=operator_pipeline,
@@ -502,7 +502,7 @@ def test_do_stop_keep_infra_skips_infra_teardown(
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert (
-        _force_stop(
+        force_stop(
             tmp_path,
             require_confirmation=False,
             keep_infra=True,
@@ -528,14 +528,14 @@ def test_do_stop_keeps_browser_by_default(
         "stop_root_service_tree",
         lambda **kw: calls.append(kw),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
-    monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: reaps.append(1))
+    monkeypatch.setattr(_stop_commands, "reap_cluster_chrome", lambda: reaps.append(1))
     monkeypatch.setattr(
         bringup,
         "stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
     assert (
-        _force_stop(
+        force_stop(
             tmp_path,
             require_confirmation=False,
             producer=operator_pipeline,
@@ -576,7 +576,7 @@ def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
         _ignoring_retention(lambda: 0),
     )
     assert (
-        _force_stop(
+        force_stop(
             tmp_path,
             require_confirmation=False,
             preserve_sessions=frozenset({SERVICE_UNIT}),
@@ -602,14 +602,14 @@ def test_do_stop_stop_browser_kills_it(
         events.append("root+terminal-service" if SERVICE_UNIT in kwargs["preserve"] else "root")  # pyright: ignore[reportOperatorIssue]
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_root)
-    monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: events.append("browser"))
+    monkeypatch.setattr(_stop_commands, "reap_cluster_chrome", lambda: events.append("browser"))
     monkeypatch.setattr(
         bringup,
         "stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert (
-        _force_stop(
+        force_stop(
             tmp_path,
             require_confirmation=False,
             keep_browser=False,
@@ -651,7 +651,7 @@ def test_cmd_stop_stop_browser_flag_threads_through(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`cmd_stop(stop_browser=...)` maps to `_do_stop(keep_browser=not stop_browser)`."""
+    """`cmd_stop(stop_browser=...)` maps to `do_stop(keep_browser=not stop_browser)`."""
     from cli.commands.lifecycle import stop as _stop_mod
 
     seen: dict[str, object] = {}
@@ -660,7 +660,7 @@ def test_cmd_stop_stop_browser_flag_threads_through(
         seen["keep_browser"] = keep_browser
         return 0
 
-    monkeypatch.setattr(_stop_mod, "_do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_mod, "do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_stop_mod, "_repo_root", lambda: tmp_path)
 
     _stop_mod.cmd_stop(

@@ -23,7 +23,7 @@ def _h_pty_resume(args: argparse.Namespace) -> int:
     return cmd_pty_resume(generation=args.generation)
 
 
-def _add_pty_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_pty_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     pty_p = sub.add_parser(
         "pty",
         help="[host] freeze, inspect, or resume host-wide allocation of new PTY sessions",

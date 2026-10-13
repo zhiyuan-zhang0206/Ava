@@ -33,7 +33,7 @@ def test_pg_hba_body_of_a_single_box_is_loopback_only(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
     command_runtime.machine.set(host="localhost")
-    body = _ci._pg_hba_body(machine=command_runtime.machine)
+    body = _ci.pg_hba_body(machine=command_runtime.machine)
     assert "trust" not in body
     assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
 
@@ -43,7 +43,7 @@ def test_pg_ident_maps_only_the_os_user_to_the_monitoring_role() -> None:
     as `ava_monitor`; it is the file's only mapping."""
     import getpass
 
-    assert _ci._pg_ident_body() == f"ava_monitor {getpass.getuser()} ava_monitor\n"
+    assert _ci.pg_ident_body() == f"ava_monitor {getpass.getuser()} ava_monitor\n"
 
 
 def test_pg_hba_body_adds_the_declared_reach_as_scram_lines(
@@ -52,7 +52,7 @@ def test_pg_hba_body_adds_the_declared_reach_as_scram_lines(
     """A declared reachable host and the trusted CIDRs join as SCRAM lines."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     command_runtime.machine.set(host="10.0.0.5")
-    body = _ci._pg_hba_body(machine=command_runtime.machine)
+    body = _ci.pg_hba_body(machine=command_runtime.machine)
     assert body.splitlines() == [
         _admin_peer_line(),
         *_ALWAYS_AUTH_LOOPBACK,

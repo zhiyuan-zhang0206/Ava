@@ -39,7 +39,7 @@ def _h_backup_walg_status(_args: argparse.Namespace) -> int:
     return cmd_walg_status()
 
 
-def _add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     backup = sub.add_parser("backup", help="WAL-G physical backup commands")
     backup_sub = backup.add_subparsers(dest="backup_cmd", required=True)
     walg = backup_sub.add_parser(

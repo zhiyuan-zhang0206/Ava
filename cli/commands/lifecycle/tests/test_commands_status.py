@@ -279,7 +279,7 @@ def test_status_shows_the_gate_entry_row(
     from cli.commands.probe import ServiceProbe
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr(status_module, "_root_tree_units", lambda: {"gate": {"state": "running"}})
+    monkeypatch.setattr(status_module, "root_tree_units", lambda: {"gate": {"state": "running"}})
     monkeypatch.setattr(
         probe_module,
         "probe_service",
@@ -705,9 +705,9 @@ def test_status_prints_a_live_host_reading(
     from cli.commands.lifecycle import status as status_mod
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(status_mod, "_source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
+    monkeypatch.setattr(status_mod, "print_gateway_cluster_status", lambda: None)
 
     def _print_plane(*, database_factory: DatabaseFactory) -> None:
         assert database_factory is operator_database
@@ -741,9 +741,9 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     from cli.commands.lifecycle import status as status_mod
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(status_mod, "_source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "source_identity_line", lambda _repo: "release: test")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_drift, "prod_source_branch_drift", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
+    monkeypatch.setattr(status_mod, "print_gateway_cluster_status", lambda: None)
 
     def _print_plane(*, database_factory: DatabaseFactory) -> None:
         assert database_factory is operator_database
