@@ -22,6 +22,12 @@ from agent.extensions.plugin_state_codec import (
     decode_plugin_delta,
     encode_plugin_delta,
 )
+from agent.tests.impersonation.external_attachment import (
+    ExampleMessagesPlugin,
+    ExamplePlugin,
+    ExampleState,
+)
+from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
 from ava import boot, gateway_client, impersonation
 from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import agent_identity, process_context
@@ -33,8 +39,6 @@ from base.db import Database
 from base.packages.plugin_providers import build_model_catalog
 from base.telemetry.otlp.tests.external_flush import HANDSHAKE_BOUND_S as _HANDSHAKE_BOUND_S
 from base.telemetry.otlp.tests.external_flush import paused_otlp_record as paused_otlp_record
-from tests.factories.external_attachment import ExampleMessagesPlugin, ExamplePlugin, ExampleState
-from tests.factories.external_attachment import attached_runtime as attached_runtime
 
 
 def _skip_local_capture(event: telemetry.Event, **_kwargs: Any) -> telemetry.Event:

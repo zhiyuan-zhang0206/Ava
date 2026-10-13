@@ -5,6 +5,7 @@ exports = ["claim"]
 "history" = ["claim"]
 "impersonation" = ["_fakes.py"]
 "state_slot" = ["test_state_slot.py"]
+"test_external.py" = ["impersonation"]
 
 [external]
 "test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"

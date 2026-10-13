@@ -9,8 +9,10 @@ from typing import Any
 import pytest
 
 import ava
-from tests.factories.external_attachment import attached_mcp_runtime as attached_mcp_runtime
-from tests.factories.external_attachment import attached_runtime as attached_runtime
+from agent.tests.impersonation.external_attachment import (
+    attached_mcp_runtime as attached_mcp_runtime,
+)
+from agent.tests.impersonation.external_attachment import attached_runtime as attached_runtime
 
 
 def test_expired_lease_cannot_dispatch_through_ava_mcps(
