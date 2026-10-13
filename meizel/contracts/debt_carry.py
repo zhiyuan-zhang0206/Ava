@@ -1,4 +1,4 @@
-"""`debt carry`: recorded debt follows a file that git sees as renamed.
+"""`debt carry`: recorded debt follows a file that git sees as renamed, and a symbol moved by hand.
 
 A baseline names files, so moving a file leaves its entries behind (paid, but not removed) and the
 violations at the new place unrecorded. Carrying relocates the entries; it never adds one, never
@@ -13,6 +13,13 @@ from pathlib import Path
 from meizel.contracts.debt import DebtTable, file_key, total
 from meizel.contracts.debt_edit import write_baseline
 from meizel.contracts.debt_report import read_baselines
+from meizel.contracts.debt_symbol import (
+    SymbolMove,
+    defines,
+    parse_symbol_moves,
+    symbol_debt,
+)
+from meizel.contracts.manifest import load_manifests
 from meizel.contracts.rule import project
 from meizel.graph.model import Code, Fact, FactKind, MeizelError
 from meizel.graph.universe import MANIFEST, Universe, load_universe, parent_of
@@ -163,18 +170,99 @@ def _plan(
     return tables, lines
 
 
-def carry(
-    root: Path, base: str | None = None, rename_targets: list[str] | None = None
+def _source_at(root: Path, base: str, path: str) -> bytes:
+    return _git(root, "show", f"{base}:{path}").encode()
+
+
+def _check_move(root: Path, base: str, universe: Universe, move: SymbolMove) -> tuple[bytes, bytes]:
+    """The old file at the base and the new file now, after checking that this is a move."""
+    if move.new not in universe.files:
+        raise MeizelError(
+            f"{move.new} is not a file of the repository (missing, or ignored by git)"
+        )
+    before, after = _source_at(root, base, move.old), (root / move.new).read_bytes()
+    here = root / move.old
+    if here.exists() and defines(move.old, here.read_bytes(), move.name):
+        raise MeizelError(f"{move.old} still defines {move.name}: that is a copy, not a move")
+    for path, source, where in (
+        (move.old, before, f"{move.old} at {base}"),
+        (move.new, after, move.new),
+    ):
+        if not defines(path, source, move.name):
+            raise MeizelError(f"{where} defines no top-level function or class {move.name}")
+    return before, after
+
+
+def _swap(
+    tables: dict[str, DebtTable],
+    move: SymbolMove,
+    before: dict[tuple[Code, str, str], int],
+    after: dict[tuple[Code, str, str], int],
+    renames: list[tuple[str, str]],
 ) -> list[str]:
-    """Move entries to where their renamed files, or renamed patch targets, now are.
+    """Rekey, one for one, the entries the symbol had in the old file to its new file.
+
+    At most what the symbol cost before, what it costs now and what is recorded moves, so a
+    violation the symbol gained on the way stays unrecorded.
+    """
+    lines: list[str] = []
+    for (code, owner, recorded), count in sorted(before.items()):
+        key = (_retargeted(recorded, renames) if code in _PATCH_CODES else None) or recorded
+        landing = _relocated(owner, code, key, {move.old: move.new}, {move.old})
+        if landing is None:
+            continue
+        rows = tables.get(owner, {}).get(code, {})
+        amount = min(count, after.get((code, *landing), 0), rows.get(key, 0))
+        if amount == 0:
+            continue
+        rows[key] -= amount
+        if not rows[key]:
+            del rows[key]
+        row = tables.setdefault(landing[0], {}).setdefault(code, {})
+        row[landing[1]] = row.get(landing[1], 0) + amount
+        lines.append(f"{code} {_join(owner, key)} => {_join(*landing)} ({amount}, {move.name})")
+    return lines
+
+
+def _move_symbols(
+    root: Path,
+    base: str,
+    universe: Universe,
+    tables: dict[str, DebtTable],
+    moves: list[SymbolMove],
+    renames: list[tuple[str, str]],
+) -> list[str]:
+    manifests, _ = load_manifests(universe)
+    lines: list[str] = []
+    for move in moves:
+        old_source, new_source = _check_move(root, base, universe, move)
+        before = symbol_debt(universe, manifests, move.old, old_source, move.name)
+        after = symbol_debt(universe, manifests, move.new, new_source, move.name)
+        lines.extend(_swap(tables, move, before, after, renames))
+    return lines
+
+
+def carry(
+    root: Path,
+    base: str | None = None,
+    rename_targets: list[str] | None = None,
+    move_symbols: list[str] | None = None,
+) -> list[str]:
+    """Move entries to where their renamed files, renamed patch targets or moved symbols now are.
 
     Returns a line per entry moved. `rename_targets` (`OLD=NEW`) rewrites the target of a patch
     entry in the same source file, one for one: a symbol that was renamed, not a file.
+    `move_symbols` (`OLD_FILE::NAME=NEW_FILE`) rekeys the entries of a function or class that
+    moved from one file to another, which git cannot see as a rename.
     """
-    moved = renames_since(root, base or default_base(root))
+    base = base or default_base(root)
+    moved = renames_since(root, base)
     universe = load_universe(root)
     baselines = read_baselines(universe)
-    tables, lines = _plan(baselines, moved, universe, parse_renames(rename_targets or []))
+    renames = parse_renames(rename_targets or [])
+    symbols = parse_symbol_moves(move_symbols or [])
+    tables, lines = _plan(baselines, moved, universe, renames)
+    lines.extend(_move_symbols(root, base, universe, tables, symbols, renames))
     before = sum(total(t) for t in baselines.values())
     after = sum(total(t) for t in tables.values())
     if after != before:
