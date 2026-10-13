@@ -1,6 +1,7 @@
-exports = ["stdlib_logging.py"]
+exports = ["log_records.py", "stdlib_logging.py"]
 
 [uses]
+"conftest.py" = ["log_records.py"]
 "test_stdlib_logging_isolation.py" = ["stdlib_logging.py"]
 
 [debt.stdlib-patch]

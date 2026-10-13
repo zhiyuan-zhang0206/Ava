@@ -17,7 +17,7 @@
 "tests.fixtures.unit.config_authority" = [
     "test_interrupt.py",
 ]
-"tests.fixtures.log_capture" = [
+"base.log.tests.log_records" = [
     "test_build_with_extensions.py",
     "test_interrupt.py",
     "test_llm_helpers.py",
