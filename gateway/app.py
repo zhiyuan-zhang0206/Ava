@@ -67,7 +67,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
-from base.agents import AvaAgentError
+from base.api_contracts.agent_contract import AvaAgentError
 from base.cluster.authority.api import AcceptanceCache
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimiter

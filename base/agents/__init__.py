@@ -1,74 +1,7 @@
-"""Shared agent contract — statuses, exception hierarchy, and the wire error protocol.
+"""Agent-owned domain packages.
 
-The contract implementation moved to `base/agents/contract.py` (task #4570
-R3, from the former root-module layout); this package also hosts `history/`.
-This package door re-exports the old module API, so every existing
-`base.agents.<name>` caller keeps resolving.
-
-Internal details (the `EXCEPTION_BY_REASON` registry and the exception classes'
-own state) live in `base/agents/contract.py`; code that patches them must
-patch them on that module — a patch on a package attribute here is not seen by
-the implementation's own reads.
+The shared agent contract (statuses, the exception hierarchy and the wire error
+protocol) lives in `base/api_contracts/agent_contract.py`: it is a leaf that the
+gateway wire and `cluster` both depend on, so it sits below this package. This
+door re-exports nothing; import the member module you need.
 """
-
-from base.agents.contract import (
-    EXCEPTION_BY_REASON,
-    AgentLaunchFailed,
-    AgentNotFound,
-    AgentStatus,
-    AvaAgentError,
-    ChannelNotConfigured,
-    CrossMachineGatewayUnavailable,
-    ErrorReason,
-    ForkCheckpointNotFound,
-    ForkConfigChangeNotAllowed,
-    ForkError,
-    ForkSourceEmpty,
-    GatewayUnavailable,
-    IndexerUnavailable,
-    InvalidModelConfig,
-    LivenessState,
-    MachineNotRegistered,
-    MachinePaused,
-    RestartResult,
-    ResurrectAlreadyAlive,
-    ResurrectError,
-    ResurrectRefused,
-    ResurrectResult,
-    ShellKillMode,
-    ShellSessionKillTiming,
-    SpawnTargetNotAgentRunner,
-    TerminateResult,
-    TerminationSource,
-)
-
-__all__ = [
-    "EXCEPTION_BY_REASON",
-    "AgentLaunchFailed",
-    "AgentNotFound",
-    "AgentStatus",
-    "AvaAgentError",
-    "ChannelNotConfigured",
-    "CrossMachineGatewayUnavailable",
-    "ErrorReason",
-    "ForkCheckpointNotFound",
-    "ForkConfigChangeNotAllowed",
-    "ForkError",
-    "ForkSourceEmpty",
-    "GatewayUnavailable",
-    "IndexerUnavailable",
-    "InvalidModelConfig",
-    "LivenessState",
-    "MachineNotRegistered",
-    "MachinePaused",
-    "RestartResult",
-    "ResurrectAlreadyAlive",
-    "ResurrectError",
-    "ResurrectRefused",
-    "ResurrectResult",
-    "ShellKillMode",
-    "ShellSessionKillTiming",
-    "SpawnTargetNotAgentRunner",
-    "TerminateResult",
-    "TerminationSource",
-]

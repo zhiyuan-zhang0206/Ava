@@ -9,6 +9,7 @@ from typing import Any, cast
 import jsonschema
 import pytest
 
+from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper import client
@@ -73,7 +74,8 @@ def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) ->
 
     monkeypatch.setattr(client, "connect", connect)
     monkeypatch.setattr(
-        "base.agents.impersonation.manifest.emit_recorded_central_event",
+        manifest,
+        "emit_recorded_central_event",
         record,
     )
     daemon = ComputerMcpDaemon(

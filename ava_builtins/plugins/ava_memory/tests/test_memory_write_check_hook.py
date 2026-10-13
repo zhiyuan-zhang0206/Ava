@@ -22,9 +22,9 @@ from agent.messages import NoteTag, read_ava_kwargs
 from agent.state import build_agent_state
 from ava import gateway_client
 from ava.gateway_client import MemorySearchResult
-from base.agents import GatewayUnavailable, IndexerUnavailable
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry

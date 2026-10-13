@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import ava
-from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
+from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.log import logger
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus

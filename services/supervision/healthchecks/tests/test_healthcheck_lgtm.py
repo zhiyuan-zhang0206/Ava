@@ -13,9 +13,11 @@ from typing import Any, cast
 
 import pytest
 
+from base import paths
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.daemon.health import DaemonProbe
+from base.native_process.root_control import client
 from services.supervision.healthchecks import lgtm as hc
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -232,7 +234,7 @@ def test_is_lgtm_host_accepts_station_capability(
     # (from base.paths import ava_home) AND the fresh lookup inside
     # home_is_observability_station — patch both.
     monkeypatch.setattr(hc, "ava_home", lambda: home)
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
 
     # No marker, no capability -> not the station.
     assert hc.is_lgtm_host(machine=machine_identity) is False
@@ -275,7 +277,7 @@ def test_backend_health_needs_no_native_owner(monkeypatch: pytest.MonkeyPatch) -
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("backend protocol health must not inspect native ownership")
 
-    monkeypatch.setattr("base.native_process.root_control.client.owned_process", forbidden)
+    monkeypatch.setattr(client, "owned_process", forbidden)
 
     def ready(_name: str) -> DaemonProbe:
         return DaemonProbe.up("ready")

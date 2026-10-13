@@ -18,11 +18,11 @@ from pydantic import (
     model_validator,
 )
 
-from base.agents import AgentStatus
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.kwargs import NoteTag
 from base.agents.observation.snapshot import AgentSnapshot
 from base.agents.tasks.priority import Priority
+from base.api_contracts.agent_contract import AgentStatus
 from ops.rpc_schemas.content import UserContent
 
 

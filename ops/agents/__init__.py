@@ -19,7 +19,7 @@ admission binds the next turn to the host owner and a new generation.
 
 from __future__ import annotations
 
-from base.agents import AgentNotFound, AgentStatus
+from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.db import Database
 from ops.agents.spawn import (
     _SPAWNER_AGENT_RE as _SPAWNER_AGENT_RE,

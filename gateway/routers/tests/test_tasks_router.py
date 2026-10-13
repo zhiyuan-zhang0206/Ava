@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.routers.tasks import get_tasks

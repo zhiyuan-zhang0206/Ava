@@ -19,10 +19,10 @@ from langchain_core.messages import HumanMessage
 
 from ava import gateway_client
 from ava_builtins.plugins.ava_memory import inherit
-from base.agents import GatewayUnavailable
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.api_contracts.agent_contract import GatewayUnavailable
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings

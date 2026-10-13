@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.agents import TerminateResult
 from base.agents.messages.inbound import WakeTriggerKind
+from base.api_contracts.agent_contract import TerminateResult
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -181,7 +181,7 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
 ) -> None:
     """A resurrection refusal is a durable verdict, returned in the wire form
     the caller classifies (`ResurrectRefused: <reason>`), not a dispatch crash."""
-    from base.agents import ResurrectRefused
+    from base.api_contracts.agent_contract import ResurrectRefused
 
     dispatch_pool: ConnectionPool = _stub_pool()
 
@@ -232,7 +232,7 @@ async def test_dispatch_wire_error_carries_reason(
     so the gateway's _raise_proxied_wire_error_from_payload can re-emit."""
     dispatch_pool: ConnectionPool = _stub_pool()
 
-    from base.agents import AgentNotFound
+    from base.api_contracts.agent_contract import AgentNotFound
 
     async def _raises(
         _db: object,

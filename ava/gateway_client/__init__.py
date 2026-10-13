@@ -8,7 +8,7 @@ gateway route use `transport` directly.
 The agent process's `ava.agents.*` no longer directly connects to the DB —
 three gateway ops (spawn / send_message / get_last_message)
 all go through this module calling gateway HTTP routes. See the
-"error-wire protocol" section at the top of `base/agents/contract.py`.
+"error-wire protocol" section at the top of `base/api_contracts/agent_contract.py`.
 
 Design trade-offs:
 - **Synchronous httpx.Client**: agent code is sync; introducing async
@@ -81,8 +81,8 @@ from ava.gateway_client.transport import (
 from ava.gateway_client.transport import (
     patch as patch,
 )
-from base.agents import GatewayUnavailable as GatewayUnavailable
 from base.agents.context import AvaContext
+from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
 from base.api_contracts.memory_search import MemorySearchPurpose
 from base.log import logger
 

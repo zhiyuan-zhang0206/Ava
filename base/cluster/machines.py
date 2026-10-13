@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 
 import psycopg
 
-from base.agents import MachineNotRegistered
+from base.api_contracts.agent_contract import MachineNotRegistered
 from base.cluster.machine import (
     GatewayApiBaseMissing,
     MachineRoles,

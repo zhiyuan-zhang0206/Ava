@@ -15,7 +15,7 @@ import ava as _ava
 import base.paths
 from ava import gateway_client as _client
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-from base.agents import IndexerUnavailable as IndexerUnavailable
+from base.api_contracts.agent_contract import IndexerUnavailable as IndexerUnavailable
 from base.paths import ava_home as _ava_home
 
 __all_for_ava__ = ["PATH", "PERSONAL_PATH", "MemoryMatch", "search"]

@@ -10,7 +10,7 @@ import pytest
 
 from ava.gateway_client import send_message
 from ava.gateway_client.transport import use_client
-from base.agents import GatewayUnavailable
+from base.api_contracts.agent_contract import GatewayUnavailable
 
 
 @pytest.fixture()

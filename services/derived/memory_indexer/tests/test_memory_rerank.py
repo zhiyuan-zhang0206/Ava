@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from base.agents import IndexerUnavailable
+from base.api_contracts.agent_contract import IndexerUnavailable
 from base.api_contracts.memory_search import MemorySearchPurpose
 from base.config import settings
 from base.lm.catalog import ModelCatalog

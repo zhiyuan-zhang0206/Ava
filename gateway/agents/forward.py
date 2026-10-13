@@ -20,13 +20,13 @@ from loguru import logger
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
-from base.agents import (
+from base.agents.observation.evidence import AvailabilityReason
+from base.api_contracts.agent_contract import (
     EXCEPTION_BY_REASON,
     AgentNotFound,
     CrossMachineGatewayUnavailable,
     ErrorReason,
 )
-from base.agents.observation.evidence import AvailabilityReason
 from base.db import Database
 from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, OpFailure, SpawnedAgent

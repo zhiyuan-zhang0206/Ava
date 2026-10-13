@@ -27,7 +27,9 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from ops import cluster_status
 from ops.lifecycle.termination import _force_terminate_transaction
+from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
@@ -351,7 +353,7 @@ def _record_kills(
             raise RuntimeError("failed to kill shell session(s) [4]")
         return [4]
 
-    monkeypatch.setattr("ops.cluster_status.kill_agent_shells", _kill)
+    monkeypatch.setattr(cluster_status, "kill_agent_shells", _kill)
     return calls
 
 
@@ -505,7 +507,7 @@ def _record_force_sweeps(monkeypatch: pytest.MonkeyPatch, command: int) -> list[
         calls.append((agent_id, None if row is None else row[0]))
         return []
 
-    monkeypatch.setattr("ops.cluster_status.kill_agent_shells", _kill)
+    monkeypatch.setattr(cluster_status, "kill_agent_shells", _kill)
     return calls
 
 
@@ -523,9 +525,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     """A step still draining past a force's kill may create a shell; the live
     host attempts older sessions again after recording its quiescent
     observation (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md)."""
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.runtime.validate_model_config", _any_model
-    )
+    monkeypatch.setattr(runtime, "validate_model_config", _any_model)
     agent_id = agent_row(db_conn)
     host = AgentHost(
         policy=configured_policy(),

@@ -11,7 +11,7 @@ from pydantic import (
     ConfigDict,
 )
 
-from base.agents import AgentStatus, LivenessState
+from base.api_contracts.agent_contract import AgentStatus, LivenessState
 
 
 class FleetGraphNode(BaseModel):

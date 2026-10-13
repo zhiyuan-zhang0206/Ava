@@ -11,15 +11,15 @@ from uuid import UUID
 from fastapi import Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
-from base.agents import (
+from base.agents.labels import spawn_prompt_with_label
+from base.agents.observation import snapshot as snapshot_module
+from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
+from base.api_contracts.agent_contract import (
     AgentLaunchFailed,
     AgentNotFound,
     ForkConfigChangeNotAllowed,
     SpawnTargetNotAgentRunner,
 )
-from base.agents.labels import spawn_prompt_with_label
-from base.agents.observation import snapshot as snapshot_module
-from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -270,7 +270,7 @@ def spawn_preflight_blocking(
     is ``(requested, resolved)`` when a withdrawn ``llm_model`` was rewritten,
     else None.
     """
-    from base.agents import MachinePaused
+    from base.api_contracts.agent_contract import MachinePaused
     from base.cluster.machines import is_paused, lookup_role
 
     # Capability is read from the cluster registry — the same source the forward

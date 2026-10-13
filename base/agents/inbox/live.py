@@ -3,8 +3,8 @@
 from collections.abc import Collection
 from datetime import UTC, datetime
 
-from base.agents.contract import AgentStatus
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from base.events.live.bus import EventBus
 

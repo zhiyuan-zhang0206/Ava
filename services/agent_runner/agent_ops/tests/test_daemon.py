@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.agents import ShellKillMode
+from base.api_contracts.agent_contract import ShellKillMode
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database

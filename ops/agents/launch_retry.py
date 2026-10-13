@@ -5,7 +5,7 @@ from uuid import uuid4
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.agents import AgentNotFound
+from base.api_contracts.agent_contract import AgentNotFound
 from base.api_contracts.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
 from base.db.transaction import write_transaction
 

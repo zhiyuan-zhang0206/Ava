@@ -17,7 +17,7 @@ import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
 from ava.sdk_surface.installation import Installation
-from base.agents import ShellSessionKillTiming
+from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate

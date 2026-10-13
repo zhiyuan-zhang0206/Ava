@@ -18,7 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from base import config
-from base.agents import AgentNotFound, AvaAgentError, ErrorReason
+from base.api_contracts.agent_contract import AgentNotFound, AvaAgentError, ErrorReason
 from base.cluster.authority.api import AcceptanceCache
 from gateway.app import (
     _cluster_auth_middleware,

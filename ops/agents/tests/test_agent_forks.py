@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 import base.db
-from base.agents import ForkCheckpointNotFound
+from base.api_contracts.agent_contract import ForkCheckpointNotFound
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate

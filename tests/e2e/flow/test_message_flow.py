@@ -26,7 +26,7 @@ import psycopg
 import pytest
 from playwright.sync_api import ConsoleMessage, Page
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from tests.components.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status

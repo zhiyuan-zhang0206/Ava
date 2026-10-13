@@ -23,6 +23,7 @@ from typing import Any, NamedTuple
 
 import pytest
 
+import base.paths as base_paths
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperError, UserAbortError
 
@@ -461,7 +462,7 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
     monkeypatch.setattr(lifecycle, "_ENTITLEMENTS", entitlements)
     monkeypatch.setattr(lifecycle, "_LOCALES", locales)
-    monkeypatch.setattr("base.paths.permissions_helper_app_dir", lambda: build)
+    monkeypatch.setattr(base_paths, "permissions_helper_app_dir", lambda: build)
     return app
 
 

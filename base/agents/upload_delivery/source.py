@@ -7,7 +7,6 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.agents import AgentNotFound
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery import storage
@@ -29,6 +28,7 @@ from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_FILES,
     agent_upload_dir,
 )
+from base.api_contracts.agent_contract import AgentNotFound
 from base.cluster.authority.unit import UnitIdentity
 from base.db.transaction import write_transaction
 

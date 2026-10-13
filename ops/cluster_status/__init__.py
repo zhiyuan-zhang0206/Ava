@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 import base.cluster
 import base.deploy.state.host_deploy_state
-from base.agents import ShellKillMode
+from base.api_contracts.agent_contract import ShellKillMode
 from base.api_contracts.status import PausedReason, SchemaMismatchStatus
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity

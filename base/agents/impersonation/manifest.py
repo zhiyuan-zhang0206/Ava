@@ -17,7 +17,6 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from base.agents.contract import SdkCaptureAdmission
 from base.agents.impersonation._store import lock_lease
 from base.agents.impersonation.event_log import (
     CENTRAL_SOURCE,
@@ -27,6 +26,7 @@ from base.agents.impersonation.event_log import (
 )
 from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, is_log_native
 from base.agents.messages.delivery.retry import retryable_database_error
+from base.api_contracts.agent_contract import SdkCaptureAdmission
 from base.db import Database
 from base.log import logger
 from base.telemetry import Event

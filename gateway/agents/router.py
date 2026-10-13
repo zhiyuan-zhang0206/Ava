@@ -21,13 +21,11 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents import (
-    AgentNotFound,
-)
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.labels import publish_label_updated
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
+from base.api_contracts.agent_contract import AgentNotFound
 from base.db.transaction import write_transaction
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents.creation import create_and_launch_agent, scoped_creation_key

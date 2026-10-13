@@ -18,6 +18,7 @@ from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host import invocation
 from services.agent_runner.agent_host.tests.native_cancel.helpers import managed_work
 from services.agent_runner.agent_host.tests.native_cancel.test_continuation import _install_faults
 from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries import (
@@ -184,9 +185,7 @@ async def test_original_completion_survives_apply_or_observation_response_loss(
                 raise psycopg.OperationalError("test lost original lifecycle response")
             return await apply_hosted_lifecycle(pool, token, **kwargs)
 
-        monkeypatch.setattr(
-            "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle", interrupted_apply
-        )
+        monkeypatch.setattr(invocation, "apply_hosted_lifecycle", interrupted_apply)
         running = asyncio.create_task(host._invoke_until_done(initial.agent_id, ctx))
         try:
             await asyncio.wait_for(entered.wait(), 5)

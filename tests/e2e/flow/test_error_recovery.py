@@ -25,7 +25,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from tests.e2e._db import wait_for_status
 from tests.e2e.fakes.scenarios.error_recovery import ERROR_MSG, RECOVERY_REPLY
 from tests.e2e.fixture_environment import E2EEnv

@@ -458,7 +458,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "gateway/routers/tasks.py",
         "gateway/agents/router.py",
         "base/agents/model/birth_config.py",
-        "base/agents/contract.py",
+        "base/api_contracts/agent_contract.py",
         "base/api_contracts/contracts.py",
         "base/agents/tasks/priority.py",
         "base/agents/tasks/status.py",

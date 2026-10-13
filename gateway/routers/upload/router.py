@@ -20,7 +20,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from base.agents import AgentNotFound
 from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_BYTES,
     MAX_AGENT_UPLOAD_FILES,
@@ -30,6 +29,7 @@ from base.agents.upload_delivery.paths import (
     resolve_upload_path,
     sanitize_upload_name,
 )
+from base.api_contracts.agent_contract import AgentNotFound
 from base.db import agent_exists
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,

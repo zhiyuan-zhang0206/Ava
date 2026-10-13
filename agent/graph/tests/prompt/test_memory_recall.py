@@ -18,9 +18,9 @@ import agent.graph.recall.memory_recall as recall
 from agent.messages import inbound_message
 from ava.gateway_client import MemorySearchResult
 from base import config
-from base.agents import IndexerUnavailable
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
+from base.api_contracts.agent_contract import IndexerUnavailable
 from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices

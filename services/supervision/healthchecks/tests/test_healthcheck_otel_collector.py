@@ -10,12 +10,14 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster import port_preflight
 from base.cluster.machine import (
     MachineIdentity,
     MachineRoleInvalid,
     MachineRoleMissing,
     MachineRoles,
 )
+from base.native_process.root_control import client
 from services.supervision.healthchecks import otel_collector as hc
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -36,8 +38,8 @@ def test_collector_health_uses_otlp_without_native_inspection(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("collector protocol health must not inspect listeners")
 
-    monkeypatch.setattr("base.cluster.port_preflight.strict_listeners_on", forbidden)
-    monkeypatch.setattr("base.native_process.root_control.client.owned_process", forbidden)
+    monkeypatch.setattr(port_preflight, "strict_listeners_on", forbidden)
+    monkeypatch.setattr(client, "owned_process", forbidden)
     monkeypatch.setattr(hc, "_is_alive", lambda: ready)
     assert hc.probe_collector().alive is ready
 

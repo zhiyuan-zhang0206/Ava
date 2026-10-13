@@ -10,7 +10,7 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.agents import AgentStatus
+from base.api_contracts.agent_contract import AgentStatus
 from base.db.transaction import write_transaction
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,

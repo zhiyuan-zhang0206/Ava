@@ -11,7 +11,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.agents import MachineNotRegistered
+from base.api_contracts.agent_contract import MachineNotRegistered
 from base.cluster import machines
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.tests.machines.setup import MachineSetup

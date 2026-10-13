@@ -32,6 +32,7 @@ from base.native_process.turn_identity import HostedTurnResources
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _force_terminate_transaction
+from services.agent_runner.agent_host import dispatcher
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.health_routes import cancel_turn_route
 from services.agent_runner.agent_host.host import AgentHost
@@ -284,7 +285,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
     host, errors = _observed_host(
         aops_pool, graph, monkeypatch, model_catalog=model_catalog, database_gate=database_gate
     )
-    monkeypatch.setattr("services.agent_runner.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
     # Cancellation really ends exec work (it kills the child), so how long the
     # pump stays unsettled after the cancel races the unwind bound. Hold the
     # pump's settlement open instead, so the pending window is deterministic.

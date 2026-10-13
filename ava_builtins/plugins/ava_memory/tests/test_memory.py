@@ -226,7 +226,7 @@ def test_indexer_unavailable_is_wire_encoded() -> None:
     """After PR-1, IndexerUnavailable travels over the wire protocol (AvaAgentError
     subclass) — gateway side 503 + reason='indexer_unavailable', SDK reverse-looksup
     to reconstruct."""
-    from base.agents import AvaAgentError
+    from base.api_contracts.agent_contract import AvaAgentError
 
     assert issubclass(ava.memory.IndexerUnavailable, AvaAgentError)
 
@@ -235,7 +235,7 @@ def test_indexer_unavailable_importable_but_not_in_all() -> None:
     """exception class is not in __all_for_ava__ (the rendered SDK surface only exposes
     the call surface), but remains reachable — agent still catches with
     `ava.memory.IndexerUnavailable`."""
-    from base.agents import IndexerUnavailable
+    from base.api_contracts.agent_contract import IndexerUnavailable
 
     assert "IndexerUnavailable" not in ava.memory.__all_for_ava__
     assert ava.memory.IndexerUnavailable is IndexerUnavailable

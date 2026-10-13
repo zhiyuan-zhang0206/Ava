@@ -25,8 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ava import gateway_client
-from base.agents import GatewayUnavailable, IndexerUnavailable
 from base.agents.context import AvaContext
+from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
