@@ -1,5 +1,2 @@
-[loads]
-"config_face.py" = ["ava_builtins/plugins"]
-
 [external]
-"config_face.py" = "also loads operator-installed plugins from $AVA_HOME/plugins, outside the repository"
+"config_face.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
