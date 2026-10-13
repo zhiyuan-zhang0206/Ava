@@ -60,13 +60,13 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 from gateway.agents import creation as _agents_creation
-from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.lifecycle import terminate_agent_with_open_tasks
 from gateway.agents.schemas import AgentRow
 from gateway.http.auth.request_principal import AuthPrincipal, PrincipalScopeError, principal_key
 from gateway.http.middleware.error_envelope import error_response
 from gateway.mcp_server import clients
 from ops.agents import get_agent_status
+from ops.agents.delivery import deliver_chat_inbound
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 
 # Provenance of everything this surface creates. `spawner` groups the agents

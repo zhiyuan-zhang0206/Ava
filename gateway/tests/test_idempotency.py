@@ -197,8 +197,8 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
 
 
 def _inject_delivery_failure(patch: pytest.MonkeyPatch, step: str) -> None:
-    from gateway.agents import delivery
     from ops import lifecycle
+    from ops.agents import delivery
     from ops.cluster import rpc
 
     async def fail_async(*_args: object, **_kwargs: object) -> None:

@@ -21,7 +21,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
-from gateway.agents.delivery import deliver_chat_inbound
+from ops.agents.delivery import deliver_chat_inbound
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -107,7 +107,7 @@ async def test_unknown_badge_error_exposes_committed_delivery(
     def _boom_badge(_bus: object, _agent_id: int) -> None:
         raise RuntimeError("lifecycle hint failed")
 
-    monkeypatch.setattr("gateway.agents.delivery.publish_agent_updated_sync", _boom_badge)
+    monkeypatch.setattr("ops.agents.delivery.publish_agent_updated_sync", _boom_badge)
     with _sync_pool() as pool, pytest.raises(RuntimeError, match="lifecycle hint failed"):
         await deliver_chat_inbound(
             pool,
@@ -157,7 +157,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
 ) -> None:
     """The durable chat id is the evidence the home runner re-checks before
     reviving; delivery must not fall back to an unguarded resurrect."""
-    from gateway.agents import delivery
+    from ops.agents import delivery
 
     tid = _seed_idling_agent(db_conn)
     calls: list[tuple[int, int | None, str | None]] = []
@@ -206,7 +206,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     machine_identity: MachineIdentity,
 ) -> None:
     """A same-key retry reuses one chat and cannot create two resurrection effects."""
-    from gateway.agents import delivery
+    from ops.agents import delivery
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -345,7 +345,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     The exact-trigger/fence SQL itself has real-DB coverage in
     test_agents_internals; this test concentrates on the delivery fan-in.
     """
-    from gateway.agents import delivery
+    from ops.agents import delivery
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -455,7 +455,7 @@ async def test_badge_publish_happens_after_commit(
         finally:
             probe.close()
 
-    monkeypatch.setattr("gateway.agents.delivery.publish_agent_updated_sync", _spy_publish)
+    monkeypatch.setattr("ops.agents.delivery.publish_agent_updated_sync", _spy_publish)
 
     def _prepare(conn: psycopg.Connection) -> None:
         # A write inside the delivery txn, no inbound content (so the txn commits
@@ -491,7 +491,7 @@ async def test_cancelled_caller_stops_live_publish_and_reconciles_same_receipt(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    from gateway.agents import delivery
+    from ops.agents import delivery
 
     tid = _seed_idling_agent(db_conn)
     entered = asyncio.Event()
