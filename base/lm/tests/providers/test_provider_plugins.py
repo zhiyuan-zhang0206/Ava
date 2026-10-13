@@ -20,8 +20,9 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
 from base import paths
+from base.host.env import runtime_config
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import pricing, provider_api
+from base.lm import factory, pricing, provider_api
 from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.lm.compat import stop
 from base.lm.factory import (
@@ -434,7 +435,7 @@ def test_bound_build_preserves_fallback_identity_and_effort(
         requested.append(model)
         return "testctx-model"
 
-    monkeypatch.setattr("base.lm.factory.resolve_available_model", resolve)
+    monkeypatch.setattr(factory, "resolve_available_model", resolve)
     client, selected = build_chat_model_bound(
         "unavailable-other-provider",
         media_resolution="high",
@@ -461,12 +462,13 @@ def test_plugin_model_validation_and_key_check(
     provider_plugin()
     catalog = build_model_catalog()
 
-    monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
     with pytest.raises(ValueError, match="TESTP_API_KEY"):
         validate_model_config(model="testp-1", catalog=catalog, llm_override="")
 
     monkeypatch.setattr(
-        "base.host.env.runtime_config.read_env_aliases",
+        runtime_config,
+        "read_env_aliases",
         lambda: {"TESTP_API_KEY": "sk-test"},
     )
     assert validate_model_config(model="testp-1", catalog=catalog, llm_override="") == "testp-1"

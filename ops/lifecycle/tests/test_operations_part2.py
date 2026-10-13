@@ -19,6 +19,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from base.events.live.bus import EventBus
+from base.lm import factory
 from base.packages.plugin_providers import build_model_catalog
 from ops import lifecycle
 from ops.rpc_schemas import (
@@ -102,7 +103,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
         assert _k["config"] == {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
         raise RuntimeError("bad model config")
 
-    monkeypatch.setattr("base.lm.factory.validate_model_config", _boom_validate)
+    monkeypatch.setattr(factory, "validate_model_config", _boom_validate)
     reclaimed: list[tuple[int, str]] = []
 
     def _fake_reclaim(

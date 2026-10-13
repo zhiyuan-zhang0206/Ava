@@ -23,6 +23,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -629,7 +630,7 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
     def roles(_db: object, _target: str) -> list[str]:
         return ["agent-runner"]
 
-    monkeypatch.setattr("base.cluster.machines.lookup_role", roles)
+    monkeypatch.setattr(machines, "lookup_role", roles)
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", dispatch)
     monkeypatch.setattr(config_router.runtime_config, "write_fields", _write_fields)
 

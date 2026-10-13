@@ -23,6 +23,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.telemetry import audit_events
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
@@ -105,7 +106,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
     async def refuse(_pool: object, _event: object) -> None:
         raise RuntimeError("audit write failed")
 
-    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone_async", refuse)
+    monkeypatch.setattr(audit_events, "record_audit_standalone_async", refuse)
 
     def emit(_category: str, name: str, **kwargs: Any) -> None:
         if name == "audit_write_failed":
