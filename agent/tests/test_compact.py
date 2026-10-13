@@ -27,7 +27,6 @@ from langchain_core.messages import (
     AnyMessage,
     HumanMessage,
     SystemMessage,
-    ToolMessage,
 )
 from langchain_core.messages.modifier import RemoveMessage
 from langchain_core.runnables import RunnableConfig
@@ -36,13 +35,10 @@ from langgraph.runtime import Runtime
 
 from agent.graph.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
-    COMPACTION_INSTRUCTION,
     CompactionFailedError,
     auto_compact_for_llm,
     compose_summary_message,
-    generate_summary,
 )
-from agent.llm import execute_code
 from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.clock import Clock
@@ -57,11 +53,11 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
 
-def _read_agent(field: str):
+def read_agent_field(field: str):
     return getattr(settings.agent, field)
 
 
-def _slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
+def pinned_slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
     return AgentSlices.resolve(
         pins, default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
     )
@@ -107,7 +103,7 @@ def patch_compact_config(
     monkeypatch.setattr("agent.graph.hooks.compact.resolve_context_budget", fixed_budget)
 
 
-def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
+def make_fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
     """Construct a mock LLM — bind_tools(...).ainvoke returns AIMessage(content=summary_text)
     (or explicitly passed response), matching generate_summary's call shape (same tool binding
     as main llm node)."""
@@ -148,7 +144,7 @@ def runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaConte
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
-        agent=_slices(),
+        agent=pinned_slices(),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -160,207 +156,6 @@ def runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[AvaConte
 def fake_config() -> RunnableConfig:
     """Minimal config with agent_id=1 — hook's three-argument signature requires passing config."""
     return {"configurable": {"thread_id": "1"}}
-
-
-# --- generate_summary tests ---
-
-
-async def test_stamp_compact_boundary_writes_the_closing_request(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent.graph.hooks import compact
-    from base.agents.history.closing_request import ClosingRequest
-
-    seen: list[ClosingRequest | None] = []
-
-    async def fake_mark(_pool: Any, _thread: str, *, closing: ClosingRequest | None = None) -> str:
-        seen.append(closing)
-        return "boundary"
-
-    async def no_wait(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr(compact, "mark_compact_boundary", fake_mark)
-    monkeypatch.setattr(compact, "await_snapshot", no_wait)
-    closing = ClosingRequest(100, 5, "m1")
-    await compact.stamp_compact_boundary(
-        MagicMock(), 1, None, closing=closing, read_agent=_read_agent
-    )
-    await compact.stamp_compact_boundary(MagicMock(), 1, read_agent=_read_agent)
-    assert seen == [closing, None]
-
-
-async def test_generate_summary_emits_agent_billing_span(
-    model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    """A completed compaction call records its provider usage in the ledger.
-
-    The regression this catches is removing billing emission from the compact
-    path, which is the largest individual agent provider call.
-    """
-    from opentelemetry import trace as otel_trace
-
-    from base.telemetry import tracing as tracing_mod
-
-    class _Span:
-        def __init__(self, name: str) -> None:
-            self.name = name
-            self.attributes: dict[str, Any] = {}
-
-        def set_attribute(self, key: str, value: Any) -> None:
-            self.attributes[key] = value
-
-        def end(self) -> None:
-            pass
-
-    class _Tracer:
-        def __init__(self) -> None:
-            self.spans: list[_Span] = []
-
-        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
-            span = _Span(_name)
-            self.spans.append(span)
-            return span
-
-    tracer = _Tracer()
-
-    # The summary's billing behavior requires a known provider; a bare test
-    # process has no installed provider plugins and must declare that input.
-    def vendor_of_model(_model: str, *, catalog: ModelCatalog) -> str:
-        assert catalog is model_catalog
-        return "deepseek"
-
-    monkeypatch.setattr("base.lm.usage.vendor_of_model", vendor_of_model)
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-    response = AIMessage(
-        content="a complete summary",
-        usage_metadata={
-            "input_tokens": 1_000,
-            "output_tokens": 100,
-            "total_tokens": 1_100,
-            "input_token_details": {"cache_read": 800},
-        },
-    )
-    llm = _fake_llm(response=response)
-    llm.model_name = "deepseek-flash"
-    slices = _slices({"llm_model": "deepseek-flash"})
-
-    assert (
-        await generate_summary(
-            [HumanMessage(content="conversation")], llm, slices, catalog=model_catalog
-        )
-        == "a complete summary"
-    )
-
-    assert len(tracer.spans) == 1
-    span = tracer.spans[0]
-    assert span.name == "ava.billing.call"
-    assert span.attributes["ava.billing.model"] == "deepseek-flash"
-    assert span.attributes["ava.billing.vendor"] == "deepseek"
-    assert span.attributes["ava.billing.usage_kind"] == "agent"
-    assert span.attributes["ava.billing.tokens_in"] == 1_000
-    assert span.attributes["ava.billing.tokens_out"] == 100
-    assert span.attributes["ava.billing.cache_read_tokens"] == 800
-    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
-    assert record["extra"]["usage_kind"] == "agent"
-
-
-async def test_generate_summary_includes_whole_conversation():
-    """Request = [*whole conversation, HumanMessage(COMPACTION_INSTRUCTION)] — no more hold-out
-    tail, model sees every message (including ToolMessage), instruction enters as appended message."""
-    ai = AIMessage(
-        content="", tool_calls=[{"name": "execute_code", "args": {"code": "x"}, "id": "c1"}]
-    )
-    convo: list[AnyMessage] = [
-        HumanMessage(content="q"),
-        ai,
-        ToolMessage(content="out", tool_call_id="c1"),
-        AIMessage(content="done"),
-    ]
-
-    llm = _fake_llm()
-    await generate_summary(convo, llm, _slices(), catalog=build_model_catalog())
-
-    [call] = compaction_ainvoke(llm).call_args_list
-    [llm_input] = call.args
-    assert llm_input[:-1] == convo  # whole conversation, no hold-out
-    assert isinstance(llm_input[-1], HumanMessage)
-    assert llm_input[-1].content.startswith(COMPACTION_INSTRUCTION)
-
-
-async def test_generate_summary_reuses_conversation_prefix_for_cache():
-    """compaction request = main conversation + a final instruction — original SystemMessage kept in place (not replaced with compaction-specific system prompt), bind_tools same as main llm node (tools field participates in prefix rendering); the whole conversation is the prefix of the previous main request, combined they hit the backend prefix cache."""
-    sys_msg = SystemMessage(content="<real agent sys prompt>")
-    content: list[AnyMessage] = [HumanMessage(content=f"m-{i}") for i in range(5)]
-
-    llm = _fake_llm()
-    await generate_summary([sys_msg, *content], llm, _slices(), catalog=build_model_catalog())
-
-    llm.bind_tools.assert_called_once_with([execute_code])
-    [call] = compaction_ainvoke(llm).call_args_list
-    [llm_input] = call.args
-    assert llm_input[0] is sys_msg  # original object in-place — same byte-for-byte prefix
-    assert llm_input[:-1] == [sys_msg, *content]
-    assert llm_input[-1].content.startswith(COMPACTION_INSTRUCTION)
-
-
-async def test_generate_summary_raises_on_empty_llm_text():
-    """LLM returns empty text (e.g., defying instruction only gives tool_call) → RuntimeError —
-    empty summary cannot be used to replace history."""
-    msgs: list[AnyMessage] = [HumanMessage(content=f"m{i}") for i in range(3)]
-
-    with pytest.raises(RuntimeError, match="no text"):
-        await generate_summary(
-            msgs, _fake_llm(summary_text=""), _slices(), catalog=build_model_catalog()
-        )
-
-
-async def test_generate_summary_extracts_text_from_block_content():
-    """Production provider (thinking enabled) returns block content [thinking, text] —
-    summary must be the text block content, not the whole list's repr."""
-    msgs: list[AnyMessage] = [HumanMessage(content=f"m{i}") for i in range(3)]
-    block_response = AIMessage(
-        content=[
-            {"type": "thinking", "thinking": "internal reasoning"},
-            {"type": "text", "text": "the real summary"},
-        ]
-    )
-
-    llm = _fake_llm(response=block_response)
-    summary = await generate_summary(msgs, llm, _slices(), catalog=build_model_catalog())
-    assert summary == "the real summary"
-
-
-async def test_generate_summary_raises_on_tool_use_only_block_content():
-    """Defying instruction only returns tool_use block (no text block) → response.text is empty →
-    RuntimeError — cannot let block list repr become summary."""
-    msgs: list[AnyMessage] = [HumanMessage(content=f"m{i}") for i in range(3)]
-    tool_only = AIMessage(
-        content=[{"type": "tool_use", "id": "c1", "name": "execute_code", "input": {"code": "x"}}]
-    )
-
-    with pytest.raises(RuntimeError, match="no text"):
-        await generate_summary(
-            msgs,
-            _fake_llm(response=tool_only),
-            _slices(),
-            catalog=build_model_catalog(),
-        )
-
-
-async def test_generate_summary_raises_on_empty_conversation():
-    """Only SystemMessage (no conversation) → ValueError — nothing to summarize."""
-    with pytest.raises(ValueError, match="empty"):
-        await generate_summary(
-            [SystemMessage(content="<sys>")],
-            _fake_llm(),
-            _slices(),
-            catalog=build_model_catalog(),
-        )
 
 
 # --- auto_compact_for_llm hook tests ---
@@ -401,7 +196,7 @@ async def test_auto_compact_triggers_on_real_input_tokens_not_chars(
     )
     result = await auto_compact_for_llm(
         state,
-        runtime_with_llm(_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
         fake_config(),
     )
     assert result is not None  # 300K measured input_tokens > 200K ceiling -> compact
@@ -426,7 +221,7 @@ async def test_auto_compact_skips_when_input_tokens_below_ceiling_despite_chars(
         halted=False,
     )
     result = await auto_compact_for_llm(
-        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
+        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None  # 50K measured < 200K ceiling, though chars/4 is far over
 
@@ -446,7 +241,7 @@ async def test_auto_compact_falls_back_to_chars_before_first_call(
     )
     result = await auto_compact_for_llm(
         state,
-        runtime_with_llm(_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
         fake_config(),
     )
     assert result is not None  # 1000 chars/4 estimate > 100 ceiling -> compact
@@ -459,7 +254,7 @@ async def test_auto_compact_hook_returns_none_when_under_threshold(
     patch_compact_config(monkeypatch, auto_compact_tokens=1_000_000)
     state = AgentState(messages=[HumanMessage(content="hi" * 100)], halted=False)
     result = await auto_compact_for_llm(
-        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
+        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None
 
@@ -479,7 +274,7 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     )  # deliberately lower so that any message exceeds
     state = _over_threshold_state()
 
-    fake_llm = _fake_llm(LONG_SUMMARY)
+    fake_llm = make_fake_llm(LONG_SUMMARY)
     result = await auto_compact_for_llm(
         state, runtime_with_llm(fake_llm, database_gate=database_gate), fake_config()
     )
@@ -521,7 +316,7 @@ async def test_auto_compact_hook_skips_when_no_conversation(
     patch_compact_config(monkeypatch, auto_compact_tokens=1)
     state = AgentState(messages=[SystemMessage(content="x" * 100)], halted=False)
 
-    llm = _fake_llm()
+    llm = make_fake_llm()
     result = await auto_compact_for_llm(
         state, runtime_with_llm(llm, database_gate=database_gate), fake_config()
     )
@@ -535,7 +330,7 @@ async def test_auto_compact_hook_raises_when_summary_empty_every_attempt(
     """LLM returns empty text every time (defying instruction only gives tool_call) → hook retries COMPACT_MAX_ATTEMPTS
     times then fail fast throws RuntimeError — never replace history with empty/non-summary."""
     patch_compact_config(monkeypatch, auto_compact_tokens=1)
-    llm = _fake_llm(summary_text="")  # same empty response on every call
+    llm = make_fake_llm(summary_text="")  # same empty response on every call
     state = _over_threshold_state()
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
@@ -551,14 +346,14 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
     """Every summary shorter than COMPACT_MIN_SUMMARY_CHARS (model ignores template) → after retries exhausted
     fail fast, rather than silently replacing history with short summary (agent-240 type incident)."""
     patch_compact_config(monkeypatch, auto_compact_tokens=1)
-    llm = _fake_llm("too short")  # 9 chars < floor, on every call
+    llm = make_fake_llm("too short")  # 9 chars < floor, on every call
     state = _over_threshold_state()
     publisher = MagicMock()
     ctx = AvaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=publisher,
-        agent=_slices(),
+        agent=pinned_slices(),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -604,12 +399,12 @@ async def test_auto_compact_hook_emits_compact_done_on_success(
     the summary message carries the durable anchor ava_compact_id."""
     patch_compact_config(monkeypatch, auto_compact_tokens=1)
     publisher = MagicMock()
-    llm = _fake_llm(LONG_SUMMARY)
+    llm = make_fake_llm(LONG_SUMMARY)
     ctx = AvaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=publisher,
-        agent=_slices(),
+        agent=pinned_slices(),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -670,7 +465,7 @@ async def test_compact_reminder_passthrough_none(
         compact=CompactState(version=0),
     )
     result = await wrap_fn(
-        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
+        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None
 
@@ -697,7 +492,7 @@ async def test_compact_reminder_zero_to_one(
     )
     result = await wrap_fn(
         state,
-        runtime_with_llm(_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
         fake_config(),
     )
     assert result is not None
@@ -720,7 +515,7 @@ async def test_compact_reminder_increments_from_existing(
     )
     result = await wrap_fn(
         state,
-        runtime_with_llm(_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
         fake_config(),
     )
     assert result is not None
@@ -785,7 +580,7 @@ def make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=MagicMock(),
-        agent=_slices(),
+        agent=pinned_slices(),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),

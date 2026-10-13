@@ -13,10 +13,7 @@ exports = ["claim"]
 "compact/test_compact_reminder_fires_in_band.py -> claim/test_inbound_ownership.py#_admit" = 2
 "compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_ava_compact_loaded" = 1
 "compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_config" = 1
-"compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_fake_llm" = 1
 "state_slot/test_exec_node_preserves_state_update_on_lifecycle.py -> test_state_slot.py#_reset_state_slot" = 1
 
 [debt.restricted-python]
 "test_compact.py#string patch target 'agent.graph.hooks.compact.resolve_context_budget'" = 1
-"test_compact.py#string patch target 'base.config.settings.observability.trace_enabled'" = 1
-"test_compact.py#string patch target 'base.lm.usage.vendor_of_model'" = 1

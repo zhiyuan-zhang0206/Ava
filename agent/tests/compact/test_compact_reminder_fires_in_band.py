@@ -24,11 +24,11 @@ from agent.tests.test_compact import (
     COMPACT_SECTIONS,
     LONG_SUMMARY,
     _config,
-    _fake_llm,
     compact_tail,
     compaction_ainvoke,
     fake_config,
     insert_compact_summary,
+    make_fake_llm,
     make_runtime,
     patch_compact_config,
     reminder_state,
@@ -63,7 +63,7 @@ async def test_compact_reminder_fires_in_band(
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     result = await wrap_fn(
         reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
-        runtime_with_llm(_fake_llm(), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate),
         fake_config(),
     )
 
@@ -88,7 +88,7 @@ async def test_compact_reminder_silent_below_threshold(
     )
     result = await wrap_fn(
         reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
-        runtime_with_llm(_fake_llm(), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate),
         fake_config(),
     )
     assert result is None
@@ -102,7 +102,7 @@ async def test_compact_reminder_yields_to_force_above_ceiling(
     patch_compact_config(monkeypatch, compact_reminder_tokens=0, auto_compact_tokens=1)
     result = await wrap_fn(
         reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
-        runtime_with_llm(_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
         fake_config(),
     )
 
@@ -117,7 +117,7 @@ async def test_compact_reminder_once_per_window(
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, version=0, shown=True, seen=0)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
-        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
+        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None
 
@@ -132,7 +132,7 @@ async def test_compact_reminder_rearms_after_compaction(
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, version=1, shown=True, seen=0)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
-        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
+        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
     )
 
     assert result is not None
@@ -156,7 +156,7 @@ async def test_compact_reminder_defers_to_agent_reply(
     ]
     state = reminder_state(state_cls, messages=msgs)  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
-        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
+        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None
 
@@ -170,7 +170,7 @@ async def test_compact_reminder_silent_when_no_conversation(
     patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, messages=[SystemMessage(content="x" * 100_000)])  # pyright: ignore[reportUnknownArgumentType]
     result = await wrap_fn(
-        state, runtime_with_llm(_fake_llm(), database_gate=database_gate), fake_config()
+        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
     )
     assert result is None
 
@@ -205,7 +205,7 @@ async def test_compact_contract_reaches_request_without_resident_self(
     )
     assert "## ava.self\n" not in system_prompt
     head = SystemMessage(content=system_prompt)
-    llm = _fake_llm()
+    llm = make_fake_llm()
     await generate_summary(
         [head, HumanMessage(content="Keep my work")],
         llm,
