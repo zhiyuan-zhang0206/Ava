@@ -49,7 +49,7 @@ from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit, p
 
 _log = logging.getLogger("services.derived.memory_indexer.backends.pgvector")
 
-_TABLE = "memory_embeddings"
+EMBEDDINGS_TABLE = "memory_embeddings"
 _RAW_SEARCH_LIMIT = 200
 """Raw chunk rows scanned per query; aggregation then reduces to top-k paths
 (a few hundred chunk rows cover any realistic k)."""
@@ -154,7 +154,7 @@ def _dim_of(client: psycopg.Connection) -> int | None:
     row = client.execute(
         "SELECT atttypmod FROM pg_attribute "
         "WHERE attrelid = to_regclass(%s) AND attname = 'vector'",
-        (_TABLE,),
+        (EMBEDDINGS_TABLE,),
     ).fetchone()
     if row is None or row[0] is None:
         return None
@@ -178,7 +178,7 @@ def _columns_of(client: psycopg.Connection) -> set[str]:
     rows = client.execute(
         "SELECT attname FROM pg_attribute "
         "WHERE attrelid = to_regclass(%s) AND attnum > 0 AND NOT attisdropped",
-        (_TABLE,),
+        (EMBEDDINGS_TABLE,),
     ).fetchall()
     return {r[0] for r in rows}
 
@@ -211,7 +211,7 @@ def validate_schema(client: psycopg.Connection, dim: int) -> None:
     problem = _schema_problem(client, dim)
     if problem is not None:
         raise RuntimeError(
-            f"pgvector table {_TABLE!r} {problem}; runtime connections never create or "
+            f"pgvector table {EMBEDDINGS_TABLE!r} {problem}; runtime connections never create or "
             "rebuild it. Run `ava start` on the gateway: it prepares the table for the "
             "configured embedding dimension."
         )
@@ -228,7 +228,7 @@ def prepare_table(client: psycopg.Connection, dim: int) -> None:
     owns that failure and names the fix.
     """
     if client.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'").fetchone() is None:
-        _log.warning("[pgvector] extension absent; %s not prepared", _TABLE)
+        _log.warning("[pgvector] extension absent; %s not prepared", EMBEDDINGS_TABLE)
         return
     problem = _schema_problem(client, dim)
     if problem is None:
@@ -237,7 +237,7 @@ def prepare_table(client: psycopg.Connection, dim: int) -> None:
         _log.warning(
             "[pgvector] table %s %s — dropping + recreating; the indexer daemon "
             "cold-start reconcile will rebuild the index",
-            _TABLE,
+            EMBEDDINGS_TABLE,
             problem,
         )
         client.execute("DROP TABLE memory_embeddings")

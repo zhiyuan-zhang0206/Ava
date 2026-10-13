@@ -99,10 +99,6 @@ exports = ["test_start_readiness_gate.py"]
 "test_start_readiness_preflight.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1
 "test_start_unready_signal.py#monkeypatch.setattr base.telemetry.emit" = 1
 
-[debt.private-name]
-"test_commands_start.py -> test_start_readiness_gate.py#_hermetic_start" = 1
-"test_start_health_port_gate.py -> test_start_readiness_gate.py#_hermetic_start" = 1
-
 [debt.stdlib-patch]
 "test_commands_start.py#monkeypatch.setattr subprocess.run" = 1
 "test_commands_start.py#monkeypatch.setattr sys.stdin.isatty" = 1

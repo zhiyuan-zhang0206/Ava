@@ -399,12 +399,12 @@ def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.Mon
         "DOMAIN_MODELS",
         (("synthetic", "Synthetic", Bad, "agent-runner"),),
     )
-    config_registry._build_registry.cache_clear()
+    config_registry.build_registry.cache_clear()
     try:
         with pytest.raises(RuntimeError, match="restart_required='gatewat'"):
-            config_registry._build_registry()
+            config_registry.build_registry()
     finally:
-        config_registry._build_registry.cache_clear()
+        config_registry.build_registry.cache_clear()
 
 
 def test_build_registry_rejects_restart_required_for_unconsuming_kind(
@@ -432,12 +432,12 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind(
         "DOMAIN_MODELS",
         (("telegram", "Telegram", WrongKind, "gateway"),),
     )
-    config_registry._build_registry.cache_clear()
+    config_registry.build_registry.cache_clear()
     try:
         with pytest.raises(RuntimeError, match=r"restart_required='agent'.*process profile"):
-            config_registry._build_registry()
+            config_registry.build_registry()
     finally:
-        config_registry._build_registry.cache_clear()
+        config_registry.build_registry.cache_clear()
 
 
 def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:

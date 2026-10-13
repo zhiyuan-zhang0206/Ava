@@ -12,7 +12,7 @@ upgrade becomes executable only after the approved "expand" change lands. The
 places that pin 17 (each needs its 18 counterpart, and the vendored tree is
 expanded — a new tree beside the old, never an in-place swap):
 
-- `base/cluster/dataplane/runtime_binaries.py` — `_PG_VERSION`, the zonky
+- `base/cluster/dataplane/runtime_binaries.py` — `PG_VERSION`, the zonky
   artifact pins, and the pgvector artifact pins;
 - `base/cluster/dataplane/pg_runtime.py` — the installed-runtime acceptance
   (`_require_pg17`) must admit 18 while 17 still runs;

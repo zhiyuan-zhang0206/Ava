@@ -17,7 +17,6 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "mcp_daemon.py -> page_lifecycle.py#_text_of" = 1
 "tests/browser_mcp_daemon/test_handle_client_renew_page_wire_roundtrip.py -> mcp_daemon.py#_handle_client" = 1
 "tests/browser_mcp_daemon/test_parse_page_listing_tolerates_titled_and_suffix.py -> mcp_daemon.py#_text_of" = 1
-"tests/test_browser_daemon.py -> daemon.py#_launch" = 1
 "tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_handle_client" = 1
 "tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_no_page_result" = 1
 "tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_selected_id" = 1

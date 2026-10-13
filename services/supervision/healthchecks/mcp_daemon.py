@@ -11,7 +11,7 @@ _log = logging.getLogger("services.supervision.healthchecks.mcp_daemon")
 _TIMEOUT_S = 5.0
 
 
-def _probe() -> bool:
+def mcp_daemon_probe() -> bool:
     """True when the daemon answers a lock-free ping over its socket."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_TIMEOUT_S)
@@ -38,7 +38,7 @@ def _is_alive() -> bool:
     the watchdog can act on.
     """
     try:
-        return _probe()
+        return mcp_daemon_probe()
     except (OSError, json.JSONDecodeError):
         return False
     except Exception:

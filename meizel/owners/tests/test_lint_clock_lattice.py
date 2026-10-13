@@ -97,7 +97,7 @@ def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> No
         scan_tmp,
         "ava/mcps/_oauth.py",
         """
-        _OAUTH_FLOW_TIMEOUT_S = 600.0
+        OAUTH_FLOW_TIMEOUT_S = 600.0
         """,
     )
     assert errs == []
@@ -190,13 +190,13 @@ def test_directory_with_non_utf8_member_is_skipped(
 
 
 def test_real_allowlists_are_current() -> None:
-    assert _lint._stale_allowlist_entries() == []
+    assert _lint.stale_allowlist_entries() == []
 
 
 def test_exemption_for_a_deleted_file_is_stale(scan_tmp, monkeypatch) -> None:
     monkeypatch.setattr(_lint, "_FAMILY_MODULES", ())
     monkeypatch.setattr(_lint, "_INDEPENDENT_CLOCKS", {("base/gone.py", "_REAP_S"): "why"})
-    errs = _lint._stale_allowlist_entries()
+    errs = _lint.stale_allowlist_entries()
     assert len(errs) == 1
     assert "base/gone.py" in errs[0] and "_REAP_S" in errs[0]
 
@@ -207,7 +207,7 @@ def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> Non
     monkeypatch.setattr(
         _lint, "_INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
     )
-    errs = _lint._stale_allowlist_entries()
+    errs = _lint.stale_allowlist_entries()
     assert len(errs) == 1
     assert "no module-level _TERMINATE_GRACE_S" in errs[0]
 
@@ -219,7 +219,7 @@ def test_live_exemption_and_family_module_are_current(scan_tmp, monkeypatch) -> 
     monkeypatch.setattr(
         _lint, "_INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
     )
-    assert _lint._stale_allowlist_entries() == []
+    assert _lint.stale_allowlist_entries() == []
 
 
 def test_full_scan_fails_on_a_stale_family_module(

@@ -133,7 +133,7 @@ def test_native_pidfd_errno_remains_an_authority_failure(
         return -1
 
     api = SimpleNamespace(pidfd_open=refused, pidfd_send_signal=refused)
-    monkeypatch.setattr(pidfd, "_api", lambda: api)
+    monkeypatch.setattr(pidfd, "pidfd_libc", lambda: api)
     with pytest.raises(error) as failure:
         if operation == "open":
             pidfd.open_process(41)
@@ -149,7 +149,7 @@ def test_missing_libc_pidfd_support_refuses(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(pidfd, "sys", SimpleNamespace(platform="linux"))
     monkeypatch.setattr(ctypes, "CDLL", library)
     with pytest.raises(RuntimeError, match="requires libc pidfd support"):
-        pidfd._api.__wrapped__()
+        pidfd.pidfd_libc.__wrapped__()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="actual libc pidfd custody")

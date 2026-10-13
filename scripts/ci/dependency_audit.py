@@ -178,8 +178,8 @@ def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
 # (display name, file, regex with one group for the pinned version). A constant that is
 # renamed or moved makes `pinned_version` raise, so a stale entry cannot silently drop a row.
 PINS: tuple[tuple[str, str, str], ...] = (
-    ("zonky Postgres", "base/cluster/dataplane/runtime_binaries.py", r'^_PG_VERSION = "([^"]+)"'),
-    ("pgvector", "base/cluster/dataplane/runtime_binaries.py", r'^_PGVECTOR_VERSION = "([^"]+)"'),
+    ("zonky Postgres", "base/cluster/dataplane/runtime_binaries.py", r'^PG_VERSION = "([^"]+)"'),
+    ("pgvector", "base/cluster/dataplane/runtime_binaries.py", r'^PGVECTOR_VERSION = "([^"]+)"'),
     ("wal-g", "base/cluster/dataplane/walg_binary.py", r'^WALG_VERSION = "([^"]+)"'),
     (
         "otelcol-contrib",

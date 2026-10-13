@@ -16,9 +16,9 @@ from services.upkeep.events_maintenance import daemon, resolution
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 from services.upkeep.events_maintenance.tests.test_events_maintenance_resolution import (
     Pool,
-    _record,
     capture_events,
     event_class,
+    record_maintenance_event,
 )
 
 
@@ -48,7 +48,7 @@ def _history(connection: psycopg.Connection[Any]) -> datetime:
     connection.execute("TRUNCATE event_dismissals")
     connection.commit()
     for slot in range(4):
-        _record(connection, event_name="steady", minutes_ago=slot * 360 + 1)
+        record_maintenance_event(connection, event_name="steady", minutes_ago=slot * 360 + 1)
     return datetime.now(UTC)
 
 

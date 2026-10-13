@@ -2,11 +2,11 @@
 
 Two cluster-wide passes, gateway-owned:
 
-- `_run_reminders` finds in-progress tasks past their remind_interval_seconds and delivers one
+- `run_reminders` finds in-progress tasks past their remind_interval_seconds and delivers one
   chat digest per owner through a direct inbound insert. Terminated owners keep
   their inbox row without being revived. Each overdue window gets at most one
   reminder per backoff period; the counters advance only after delivery succeeds.
-- `_run_escalate` notifies the parent task's owner when reminder_count reaches the
+- `run_escalate` notifies the parent task's owner when reminder_count reaches the
   escalation threshold.
 
 Delivery is normally exercised against a stubbed `deliver_message`; the
@@ -26,7 +26,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
-from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate
+from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import run_escalate
 from base import telemetry
 from base.config import settings
 from base.db import Database
@@ -200,7 +200,7 @@ class TestEscalate:
             for owner in (first_owner, second_owner)
         ]
 
-        assert _run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3) == 1
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == delegator
@@ -246,7 +246,7 @@ class TestEscalate:
             updated_s_ago=7200,
             reminder_count=3,
         )
-        assert _run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3) == 1
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == parent_owner
@@ -271,7 +271,7 @@ class TestEscalate:
             updated_s_ago=7200,
             reminder_count=2,
         )
-        assert _run_escalate(pool, database, event_bus, 3) == 0
+        assert run_escalate(pool, database, event_bus, 3) == 0
         assert deliver == []
 
     def test_above_threshold_escalates_once_per_window(
@@ -295,7 +295,7 @@ class TestEscalate:
             updated_s_ago=7200,
             reminder_count=5,
         )
-        assert _run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3) == 1
         assert len(deliver) == 1
 
     def test_no_parent_no_escalation(
@@ -314,7 +314,7 @@ class TestEscalate:
             updated_s_ago=7200,
             reminder_count=3,
         )
-        assert _run_escalate(pool, database, event_bus, 3) == 0
+        assert run_escalate(pool, database, event_bus, 3) == 0
         assert deliver == []
 
     def test_user_task_escalates_to_human_queue(
@@ -342,7 +342,7 @@ class TestEscalate:
             reminder_count=3,
             priority="P1",
         )
-        assert _run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3) == 1
         assert deliver == []  # a notice, not a reminder message
         notices = _open_notices(db_conn, owner)
         assert len(notices) == 1
@@ -391,7 +391,7 @@ class TestEscalate:
             priority="P1",
         )
         _seed_notice(db_conn, owner)
-        assert _run_escalate(pool, database, event_bus, 3) == 0
+        assert run_escalate(pool, database, event_bus, 3) == 0
         notices = _open_notices(db_conn, owner)
         assert len(notices) == 1
         assert notices[0][0] == "pre-existing"
@@ -419,7 +419,7 @@ class TestEscalate:
             reminder_count=5,  # already past escalate_n=3
             priority="P1",
         )
-        assert _run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3) == 1
         assert deliver == []
         notices = _open_notices(db_conn, owner)
         assert len(notices) == 1
@@ -447,9 +447,9 @@ class TestEscalate:
             reminder_count=3,
             priority="P2",
         )
-        assert _run_escalate(pool, database, event_bus, 3) == 1  # first sweep posts
+        assert run_escalate(pool, database, event_bus, 3) == 1  # first sweep posts
         assert (
-            _run_escalate(pool, database, event_bus, 3) == 0
+            run_escalate(pool, database, event_bus, 3) == 0
         )  # second sweep: escalation notice still open → skip
         assert len(_open_notices(db_conn, owner)) == 1
 

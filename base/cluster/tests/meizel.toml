@@ -42,9 +42,6 @@
 "test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.require_listener" = 1
 "test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.subprocess.Popen" = 2
 
-[debt.private-name]
-"test_machines.py -> machines/setup.py#_db" = 1
-
 [debt.third-party-patch]
 "test_cluster_provision.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.setup" = 1
 "test_cluster_provision.py#monkeypatch.setattr psycopg.connect" = 2

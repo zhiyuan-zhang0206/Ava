@@ -27,9 +27,6 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 "provisioning.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "provisioning.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
 
-[debt.private-name]
-"provisioning.py -> env_bootstrap.py#_TEST_AVA_HOME" = 1
-
 [debt.restricted-python]
 "guards.py#string patch target 'cli.commands.lifecycle.root_driver.wait_for_service_tree'" = 1
 

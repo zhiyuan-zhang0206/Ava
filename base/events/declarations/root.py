@@ -361,14 +361,14 @@ EVENTS: dict[str, EventSpec] = {
         "the scheduled daily logical dump failed; it is not attempted again before the next backup hour",
         payload=BackupDumpFailed,
         tier="anomaly",
-        site="services/backup/scheduler/daemon.py:_backup_loop (positional emit)",
+        site="services/backup/scheduler/daemon.py:backup_loop (positional emit)",
     ),
     "recovery_drill_failed": telemetry_event(
         "recovery_drill_failed",
         "scheduled logical restore drill failed",
         payload=RecoveryDrillFailed,
         tier="anomaly",
-        site=("services/backup/scheduler/daemon.py:_run_due_local_dump_restore (positional emit)"),
+        site=("services/backup/scheduler/daemon.py:run_due_local_dump_restore (positional emit)"),
     ),
     "health_probe_failing": telemetry_event(
         "health_probe_failing",
@@ -414,6 +414,6 @@ EVENTS: dict[str, EventSpec] = {
         "agent(s) defers until an operator settles the command",
         payload=LifecyclePointerStuck,
         tier="anomaly",
-        site="services/upkeep/ttl_reaper/lifecycle_fences.py:_scan_stuck_lifecycle_pointers_blocking telemetry.emit",
+        site="services/upkeep/ttl_reaper/lifecycle_fences.py:scan_stuck_lifecycle_pointers_blocking telemetry.emit",
     ),
 }

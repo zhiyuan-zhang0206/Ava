@@ -329,7 +329,7 @@ def test_emit_snapshot_skips_the_pipeline_in_dry_run(monkeypatch: pytest.MonkeyP
         emitted.append(snapshot)
 
     writer = object()
-    monkeypatch.setattr(pr_flow, "_emit_events", emit)
+    monkeypatch.setattr(pr_flow, "emit_events", emit)
 
     snapshot: dict[str, Any] = {"days": {}, "run": {}}
     pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer)

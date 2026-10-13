@@ -23,7 +23,7 @@ The auth mode for remote (`url`) MCP servers that require OAuth rather than stat
 One in-flight flow per server, guarded by a per-server `asyncio.Lock` in the daemon's shared state (`_Scope.oauth_locks`, built once by `run_daemon`): concurrent connections for the same server wait on the lock and proceed with the cached client once tokens land; a failed flow releases the lock and surfaces the error.
 
 ## Timeouts
-An OAuth connect envelope is 600 s (`_OAUTH_FLOW_TIMEOUT_S`) — the user has to click through a browser — versus the normal `sandbox.mcp_connect_timeout_seconds` for stdio/static-auth. An in-flight authorization must not be cut off by the request path's own timeout.
+An OAuth connect envelope is 600 s (`OAUTH_FLOW_TIMEOUT_S`) — the user has to click through a browser — versus the normal `sandbox.mcp_connect_timeout_seconds` for stdio/static-auth. An in-flight authorization must not be cut off by the request path's own timeout.
 
 ## Google issuer normalization shim
 Google's protected-resource metadata advertises `https://accounts.google.com` while its AS metadata declares issuer `https://accounts.google.com/`; the SDK's strict string compare rejects that as a mismatch. `_install_issuer_normalization()` monkeypatches the SDK's `validate_metadata_issuer` (both modules that bind it) with a trailing-slash-stripping compare (RFC 3986 §6.2.1) — idempotent, applied when an OAuth client is built, and a real mismatch still raises.

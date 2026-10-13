@@ -51,13 +51,13 @@ def _observe(service: str) -> DaemonProbe:
     if service in sockets:
         return ping(sockets[service]())
     if service == "insights":
-        from services.supervision.healthchecks.insights import _probe as insights_probe
+        from services.supervision.healthchecks.insights import insights_probe as insights_probe
 
         return probe_protocol(insights_probe)
     if service == "memory-search":
-        from services.supervision.healthchecks.memory_search import _probe
+        from services.supervision.healthchecks.memory_search import memory_search_probe
 
-        return probe_protocol(_probe)
+        return probe_protocol(memory_search_probe)
     raise ValueError(f"unsupported protocol probe: {service}")
 
 

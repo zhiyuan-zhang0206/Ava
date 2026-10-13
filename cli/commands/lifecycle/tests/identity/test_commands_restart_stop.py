@@ -38,7 +38,7 @@ from cli.tests._commands_helpers import (
     _git_aware,
     _patch_gateway_http,
 )
-from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
+from cli.tests._commands_helpers import hermetic_gateway_base as hermetic_gateway_base
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.desktop.browser import orphan
 from tests.path_scoped.cli_tests import operator_database as operator_database

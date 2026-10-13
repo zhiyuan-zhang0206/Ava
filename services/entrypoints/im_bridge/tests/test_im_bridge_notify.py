@@ -28,7 +28,7 @@ from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
 def retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """Record the retry backoff instead of sleeping it out.
 
-    The seam is `push_watchdog._sleep` (tests/README.md: patch the module-local
+    The seam is `push_watchdog.push_watchdog_sleep` (tests/README.md: patch the module-local
     seam, not `asyncio.sleep`), so no test pays real wall-clock time."""
 
     recorded: list[float] = []
@@ -36,7 +36,7 @@ def retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     async def _record(seconds: float) -> None:
         recorded.append(seconds)
 
-    monkeypatch.setattr(push_watchdog, "_sleep", _record)
+    monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _record)
     return recorded
 
 

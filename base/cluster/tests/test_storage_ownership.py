@@ -181,7 +181,7 @@ def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
 ) -> None:
     pending = _pg_receipt(pg_data, state="pending")
     with pytest.raises(FileNotFoundError):
-        pg._spawn(
+        pg.spawn_postgres(
             pg_data,
             pending,
             [str(pg_data / "missing-postgres")],
@@ -196,7 +196,7 @@ def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
 
     monkeypatch.setattr(pg.subprocess, "Popen", interrupted)
     with pytest.raises(KeyboardInterrupt):
-        pg._spawn(pg_data, pending, ["postgres"], {}, retained_children=retained_children)
+        pg.spawn_postgres(pg_data, pending, ["postgres"], {}, retained_children=retained_children)
     receipt = pg._read(pg_data)
     assert receipt is not None and receipt.state == "pending"
 
@@ -218,7 +218,7 @@ def test_real_cancellation_after_pg_spawn_retains_native_receipt(
     monkeypatch.setattr(pg.subprocess, "Popen", spawn)
     try:
         with pytest.raises(KeyboardInterrupt, match="admission interrupted"):
-            pg._spawn(
+            pg.spawn_postgres(
                 pg_data,
                 _pg_receipt(pg_data, state="pending"),
                 [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -312,7 +312,7 @@ def test_failed_birth_capture_keeps_the_callers_spawned_handle(
     )
     try:
         with pytest.raises(PermissionError, match="birth unavailable"):
-            pg._spawn(
+            pg.spawn_postgres(
                 pg_data,
                 _pg_receipt(pg_data, state="pending"),
                 [sys.executable, "-c", "import time; time.sleep(30)"],

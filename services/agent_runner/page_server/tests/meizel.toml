@@ -49,7 +49,6 @@
 "test_page_server_quiesced.py#monkeypatch.setattr services.agent_runner.page_server.daemon.reconcile_once" = 1
 
 [debt.private-name]
-"page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py -> test_page_server_daemon.py#_identity" = 1
 "page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py -> test_page_server_daemon.py#_reconcile" = 1
 
 [debt.unresolved-patch]

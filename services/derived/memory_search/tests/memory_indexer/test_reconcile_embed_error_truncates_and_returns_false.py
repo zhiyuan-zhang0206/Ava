@@ -21,11 +21,11 @@ from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.tests.fake_provider import DIM, FINGERPRINT, FakeProvider
 from services.derived.memory_search.tests.store_backend import StoreBackend
 from services.derived.memory_search.tests.test_memory_indexer import (
-    _watched_root as _watched_root,
-)
-from services.derived.memory_search.tests.test_memory_indexer import (
     liveness_timeout,
     long_note,
+)
+from services.derived.memory_search.tests.test_memory_indexer import (
+    memory_watched_root as memory_watched_root,
 )
 from services.derived.memory_search.tests.test_memory_indexer import (
     store_backend as store_backend,

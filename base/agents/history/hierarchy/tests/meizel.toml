@@ -7,13 +7,13 @@ exports = ["consumer_helpers.py"]
 
 [debt.first-party-patch]
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.POLL_SECONDS" = 1
-"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer._settle" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.agent_model_target" = 2
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.build_generation_llm" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.describe" = 6
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.load_segments" = 4
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.run_group_checks" = 2
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.run_job" = 1
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.settle_chunk_job" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunk_consumer.telemetry.emit" = 12
 "test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunks.INSERT_CALL_SQL" = 1
 "test_chunk_consumer.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 2

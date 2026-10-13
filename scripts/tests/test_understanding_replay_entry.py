@@ -27,7 +27,7 @@ def test_report_uses_one_captured_gated_database(
     monkeypatch.setattr(code_version, "first_parent_count", count)
     monkeypatch.setattr(replay, "process_name", lambda: "preview")
     monkeypatch.setattr(replay.Database, "from_settings", create)
-    monkeypatch.setattr(replay, "_report", report)
+    monkeypatch.setattr(replay, "print_replay_report", report)
     replay.main()
     capture.assert_called_once_with()
     create.assert_called_once()

@@ -52,7 +52,7 @@ async def test_late_failure_is_reported_without_reviving_the_loop(
         assert release.wait(5.0), "test did not release its worker"
         raise failure
 
-    with caplog.at_level(logging.ERROR, logger=daemon._log.name):
+    with caplog.at_level(logging.ERROR, logger=daemon.events_maintenance_log.name):
         try:
             async with asyncio.TaskGroup() as tasks:
                 with pytest.raises(daemon.WedgedPassError):
@@ -122,7 +122,7 @@ def _mock_service(
     monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    monkeypatch.setattr(daemon, "_run_maintenance", work)
+    monkeypatch.setattr(daemon, "run_maintenance", work)
     monkeypatch.setattr(daemon, "resolution_loop", sibling)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", sibling)
     monkeypatch.setattr(daemon.Database, "pool", pool)

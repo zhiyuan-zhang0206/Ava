@@ -26,10 +26,10 @@ from services.agent_runner.page_server.tests.test_page_server_daemon import (
     insert_page_row,
 )
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
-    _identity as _identity,
+    backend as backend,
 )
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
-    backend as backend,
+    page_server_identity as page_server_identity,
 )
 from services.agent_runner.page_server.tests.test_page_server_daemon import (
     sync_pool as sync_pool,

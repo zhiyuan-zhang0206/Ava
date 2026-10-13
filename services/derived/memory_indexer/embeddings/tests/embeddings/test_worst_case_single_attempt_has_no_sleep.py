@@ -19,11 +19,11 @@ from services.derived.memory_indexer.embeddings import factory, gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.gemini import DIM, GeminiEmbeddingProvider
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
-    _dummy_gemini_key as _dummy_gemini_key,
-)
-from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
     _provider,
     embedding_server,
+)
+from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
+    dummy_gemini_key as dummy_gemini_key,
 )
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
     pytestmark as pytestmark,

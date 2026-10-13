@@ -19,7 +19,7 @@
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 3
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.ownership.stable_create_time" = 1
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.ownership.sys" = 5
-"test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd._api" = 1
+"test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd.pidfd_libc" = 1
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd.sys" = 1
 
 [debt.stdlib-patch]

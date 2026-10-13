@@ -17,7 +17,7 @@ against the path it was added with, while every path here is **version-stamped**
     ~/.local/share/uv/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12
     ~/.ava/runtime/pg/17.11.0/bin/postgres
 
-A `uv python` bump (or a `_PG_VERSION` bump) therefore does not invalidate the
+A `uv python` bump (or a `PG_VERSION` bump) therefore does not invalidate the
 rule so much as *orphan* it: the rule still names the old path, the process now
 runs from a new one, and ALF has never heard of the new one. Loopback is never
 filtered, so the gateway keeps answering `127.0.0.1` perfectly while every

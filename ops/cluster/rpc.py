@@ -96,7 +96,7 @@ _NON_IDEMPOTENT_KINDS = frozenset(
 _BUSINESS_ID_KEYS = {"spawn-launch": "agent_id"}
 
 # Module-level alias so tests can pin the retry sleep without patching asyncio.
-_sleep = asyncio.sleep
+rpc_sleep = asyncio.sleep
 
 
 def _retry_delay_s(attempt: int) -> float:
@@ -408,7 +408,7 @@ async def dispatch_to_url(
                     delay,
                     exc.cause,
                 )
-                await _sleep(delay)
+                await rpc_sleep(delay)
     # Retries exhausted — loud failure for a load-bearing op. status_probe
     # reachability failures stay DEBUG (an offline host at panel cadence is
     # steady-state; the roster's own per-machine backoff widens the gap), every

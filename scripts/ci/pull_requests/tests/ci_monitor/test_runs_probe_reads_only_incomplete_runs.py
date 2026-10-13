@@ -19,10 +19,10 @@ from scripts.ci.pull_requests.tests.test_ci_monitor import (
     APP_CHECK,
     CIStatus,
     TrunkResponse,
-    _check,
-    _completed,
+    completed_process_stub,
     core_rollup,
     gh_runner,
+    status_check_rollup_entry,
     urlopen_sequence,
 )
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
@@ -102,12 +102,21 @@ def test_queue_cooldown_seconds(
     ("replies", "expected"),
     [
         (
-            [_completed('"2026-08-24T22:36:05Z"'), _completed('"2026-08-24T22:35:00Z"')],
+            [
+                completed_process_stub('"2026-08-24T22:36:05Z"'),
+                completed_process_stub('"2026-08-24T22:35:00Z"'),
+            ],
             1787610965.0,
         ),
-        ([_completed(returncode=1), _completed('"2026-08-24T22:36:05Z"')], 1787610965.0),
-        ([_completed(returncode=1), _completed(returncode=1)], None),
-        ([_completed("null"), _completed("null")], None),
+        (
+            [
+                completed_process_stub(returncode=1),
+                completed_process_stub('"2026-08-24T22:36:05Z"'),
+            ],
+            1787610965.0,
+        ),
+        ([completed_process_stub(returncode=1), completed_process_stub(returncode=1)], None),
+        ([completed_process_stub("null"), completed_process_stub("null")], None),
     ],
 )
 def test_last_head_update(
@@ -292,7 +301,7 @@ def test_wait_json_mutually_exclusive() -> None:
 def test_one_shot_behavior_unchanged(gh: Any, has_workflows: Any, capsys) -> None:
     """Legacy contract: without --wait, a PENDING probe prints and exits 0 —
     a one-shot query, not a poller."""
-    gh([APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
+    gh([APP_CHECK, status_check_rollup_entry("backend", "", status="IN_PROGRESS")])
     has_workflows(True)
     assert ci_utils.main(["1243"]) == 0
     out = capsys.readouterr()
@@ -329,7 +338,7 @@ def test_pending_is_not_terminal() -> None:
 def test_json_probe_carries_terminal_flag(gh: Any, has_workflows: Any, capsys) -> None:
     """The --json one-shot output includes `terminal`, so a subprocess-based
     watcher can decide without re-deriving the verdict domain."""
-    gh([APP_CHECK, _check("backend (pytest + pyright)", "SUCCESS")])
+    gh([APP_CHECK, status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS")])
     has_workflows(True)
     assert ci_utils.main(["1243", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -350,7 +359,7 @@ def test_json_probe_reports_draft_and_core_skipped(gh: Any, has_workflows: Any, 
 
 
 def test_json_probe_pending_is_not_terminal(gh: Any, has_workflows: Any, capsys) -> None:
-    gh([APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
+    gh([APP_CHECK, status_check_rollup_entry("backend", "", status="IN_PROGRESS")])
     has_workflows(True)
     assert ci_utils.main(["1243", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)

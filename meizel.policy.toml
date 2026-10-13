@@ -220,7 +220,7 @@ pure-chain-callees = [
 "ava/__init__.py::ambient-instance:extend" = "a namespace of functions built once and never rebound or filled afterwards"
 "ava_builtins/plugins/ava_memory/sdk.py::hidden-cache:_documented_pool" = "wraps one home's pool path in a documented constant"
 "base/config/admin/candidate.py::hidden-cache:_candidate_validation_model" = "builds a validation subclass of a given Settings class"
-"base/config/config_registry.py::hidden-singleton:_build_registry" = "the static config registry derived from the Settings classes"
+"base/config/config_registry.py::hidden-singleton:build_registry" = "the static config registry derived from the Settings classes"
 "base/config/config_registry.py::hidden-singleton:field_infos" = "a static view of the config registry"
 "base/config/service_read.py::hidden-singleton:domain_model_classes" = "the static table of Settings domain classes"
 "base/host/env/registry.py::hidden-singleton:agent_runner_cluster_aliases" = "a static view of the env registry"
@@ -231,7 +231,7 @@ pure-chain-callees = [
 "base/host/env/registry.py::hidden-singleton:launch_input_keys" = "a static view of the env registry"
 "base/host/env/registry.py::hidden-singleton:session_forward_keys" = "a static view of the env registry"
 "base/native_process/group_closure.py::hidden-singleton:_proc_listpids" = "a ctypes loader of one OS entry point: code, not state"
-"base/native_process/pidfd.py::hidden-singleton:_api" = "a ctypes loader of the pidfd syscalls: code, not state"
+"base/native_process/pidfd.py::hidden-singleton:pidfd_libc" = "a ctypes loader of the pidfd syscalls: code, not state"
 
 # clock-lattice (meizel/owners/clock_lattice): where lattice vocabulary may be defined, and the
 # constants that use it without being part of the lattice (`path::NAME`).

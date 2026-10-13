@@ -17,19 +17,19 @@
 "test_resource_admission.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"test_exec_child.py#monkeypatch.setattr agent.execution.child._build_state_slot" = 1
-"test_exec_child.py#monkeypatch.setattr agent.execution.child._init_logger" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
+"test_exec_child.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
+"test_exec_child.py#monkeypatch.setattr agent.execution.child.init_logger" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.run_code" = 1
 "test_exec_child.py#monkeypatch.setattr agent.execution.child.time.perf_counter" = 1
 "test_exec_child.py#monkeypatch.setattr agent.graph.exec.protocol.read_request" = 1
 "test_exec_child.py#monkeypatch.setattr agent.graph.exec.protocol.write_result" = 2
-"test_exec_child.py#monkeypatch.setattr agent.process_boot._apply_per_agent_eval_isolation" = 1
-"test_exec_child.py#monkeypatch.setattr agent.process_boot._apply_per_agent_sdk_disable" = 1
+"test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_eval_isolation" = 1
+"test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_sdk_disable" = 1
 "test_exec_child.py#monkeypatch.setattr ava.__plugin_installation__" = 1
 "test_exec_child.py#monkeypatch.setattr ava.boot.ensure_plugins_loaded" = 1
-"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child._build_state_slot" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
+"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.line_buffered_output" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.pop_overlay_env" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.run_code" = 1
@@ -40,8 +40,6 @@
 "test_resource_admission.py#monkeypatch.setattr base.agents.incarnation.exec_owner_recovery.exec_run_dir" = 1
 
 [debt.private-name]
-"test_context_binding.py -> test_exec_child.py#_spawn" = 1
-"test_exec_slot.py -> test_exec_child.py#_spawn" = 1
 "test_resource_admission.py -> test_exec_owner_entry.py#_start" = 1
 
 [debt.unresolved-patch]

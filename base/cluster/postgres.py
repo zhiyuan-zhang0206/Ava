@@ -224,7 +224,7 @@ def _admission() -> Generator[Callable[[], None]]:
             signal.signal(signum, handler)
 
 
-def _spawn(
+def spawn_postgres(
     data: Path,
     receipt: Receipt,
     argv: list[str],
@@ -334,7 +334,7 @@ def start(
         if observe(data) is not None:
             raise RuntimeError("PostgreSQL is already running; startup cannot replace its birth")
         require_listener(None, port, required=False)
-        captured = _spawn(
+        captured = spawn_postgres(
             data,
             Receipt(
                 data=str(data),

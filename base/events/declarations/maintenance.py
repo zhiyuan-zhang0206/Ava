@@ -274,13 +274,13 @@ EVENTS: dict[str, EventSpec] = {
         "daily PR-flow aggregates — ready->merged percentiles and "
         "flake discoveries (absolute gauges, one sample per complete day)",
         payload=PrFlowDaily,
-        site="scripts/ci/pull_requests/pr_flow_export.py:_emit_events (positional emit)",
+        site="scripts/ci/pull_requests/pr_flow_export.py:emit_events (positional emit)",
     ),
     "pr_flow_run": telemetry_event(
         "pr_flow_run",
         "PR-flow sampler run — point-in-time Trunk queue depth (absolute state)",
         payload=PrFlowRun,
-        site="scripts/ci/pull_requests/pr_flow_export.py:_emit_events (positional emit)",
+        site="scripts/ci/pull_requests/pr_flow_export.py:emit_events (positional emit)",
     ),
     "ci_runs_daily": telemetry_event(
         "ci_runs_daily",
@@ -305,13 +305,13 @@ EVENTS: dict[str, EventSpec] = {
         "overdue-task owner digest",
         payload=TaskReminderDigest,
         tier="noise",
-        site="task_maintenance/daemon.py:_run_reminders",
+        site="task_maintenance/daemon.py:run_reminders",
     ),
     "task_escalation": telemetry_event(
         "task_escalation",
         "stalled-task escalation",
         payload=TaskEscalation,
-        site="task_maintenance/daemon.py:_run_escalate",
+        site="task_maintenance/daemon.py:run_escalate",
     ),
     # labeler / trace housekeeping
     "label_generated": telemetry_event("label_generated", "label auto-generated", tier="noise"),
@@ -339,14 +339,14 @@ EVENTS: dict[str, EventSpec] = {
         "a queued understanding chunk failed (attempted once, never retried) and stays undescribed",
         payload=UnderstandingChunkFailed,
         tier="anomaly",
-        site="base/agents/history/hierarchy/chunk_consumer.py:_settle",
+        site="base/agents/history/hierarchy/chunk_consumer.py:settle_chunk_job",
     ),
     "understanding_chunk_skipped": telemetry_event(
         "understanding_chunk_skipped",
         "a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk)",
         payload=UnderstandingChunkSkipped,
         tier="anomaly",
-        site="base/agents/history/hierarchy/chunk_consumer.py:_settle",
+        site="base/agents/history/hierarchy/chunk_consumer.py:settle_chunk_job",
     ),
     "understanding_chunk_gap": telemetry_event(
         "understanding_chunk_gap",

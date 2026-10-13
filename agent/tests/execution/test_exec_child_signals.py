@@ -90,7 +90,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     ) -> bool:
         return False
 
-    def fake_build_state_slot(_child: exec_child._ChildContext, _payload: RequestPayload) -> None:
+    def fake_build_state_slot(_child: exec_child.ChildContext, _payload: RequestPayload) -> None:
         return None
 
     def fake_run_code(_code: str, _payload: ResultPayload) -> None:
@@ -119,7 +119,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "pop_overlay_env", lambda: (None, None))
     monkeypatch.setattr(exec_child, "apply_overlay_scope", fake_apply_scope)
-    monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
+    monkeypatch.setattr(exec_child, "build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr(ava, "ensure_plugins_loaded", fake_ensure_plugins_loaded)

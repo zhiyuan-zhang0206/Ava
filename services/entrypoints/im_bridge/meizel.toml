@@ -16,10 +16,7 @@ exports = ["daemon.py", "ingress", "tests", "types.py"]
 "timeline_acceptance.py" = ["outbound", "types.py"]
 
 [debt.private-name]
-"tests/im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> push_watchdog.py#_sleep" = 3
 "tests/test_im_bridge_daemon.py -> daemon.py#_hard_exit" = 1
 "tests/test_im_bridge_daemon.py -> daemon.py#_is_running" = 2
 "tests/test_im_bridge_daemon.py -> daemon.py#_remove_pidfile" = 3
 "tests/test_im_bridge_daemon.py -> daemon.py#_write_pidfile" = 2
-"tests/test_im_bridge_notify.py -> push_watchdog.py#_sleep" = 1
-"tests/test_push_watchdog_retry.py -> push_watchdog.py#_sleep" = 1

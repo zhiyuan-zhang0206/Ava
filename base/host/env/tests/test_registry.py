@@ -298,7 +298,7 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
     config package.
 
     Before the fix, `base.config.config_registry` built `FIELD_INFOS` at module
-    level, which ran `_build_registry()` during the module import; its deferred
+    level, which ran `build_registry()` during the module import; its deferred
     `base.config` package import re-entered the half-initialized registry
     module (the package __init__ re-imports `field_alias` from it) and raised
     ``ImportError: cannot import name 'field_alias' from partially initialized

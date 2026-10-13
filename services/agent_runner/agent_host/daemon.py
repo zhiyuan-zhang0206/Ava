@@ -108,7 +108,7 @@ from .pools import build_control_pool, build_shared_pool
 from .pools import close_host_pools as _close_host_pools
 from .stdout_log import _rotate_stdout_log_forever
 
-_log = logging.getLogger("services.agent_runner.agent_host.daemon")
+host_log = logging.getLogger("services.agent_runner.agent_host.daemon")
 
 _MODULE = "services.agent_runner.agent_host.daemon"
 
@@ -182,7 +182,7 @@ async def _watch_plugins_for_restart() -> None:
         now = _plugins_fingerprint()
         if now == baseline:
             continue
-        _log.info(
+        host_log.info(
             "[agent-host] external plugins changed under $AVA_HOME/plugins — "
             "restarting to load them (issue #170)"
         )
@@ -214,14 +214,14 @@ async def _publish_turn_progress_heartbeat(
                 ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,
             )
     except TimeoutError:
-        _log.warning(
+        host_log.warning(
             "[agent-host] turn-progress heartbeat publish exceeded %.1fs",
             _TURN_PROGRESS_PUBLISH_TIMEOUT_S,
         )
         return False
     except (RedisConnectionError, RedisTimeoutError, NoPermissionError, OSError):
         # A known Redis outage must not stall renewal; defects reach the owner.
-        _log.warning(
+        host_log.warning(
             "[agent-host] turn-progress heartbeat publish failed — the gateway's "
             "breaker sees stale progress until it recovers",
             exc_info=True,
@@ -277,7 +277,7 @@ async def _beat_forever(
                 await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
             except (TimeoutError, psycopg.OperationalError, PoolTimeout):
                 renewal_failures += 1
-                _log.exception("[agent-host] database renewal failed (%s/3)", renewal_failures)
+                host_log.exception("[agent-host] database renewal failed (%s/3)", renewal_failures)
                 if renewal_failures >= 3:
                     raise
             else:
@@ -286,7 +286,7 @@ async def _beat_forever(
             bus, machine, scheduler.active_agents, host.turn_progress
         )
         if published and not heartbeat_ok:
-            _log.warning("[agent-host] turn-progress heartbeat publish recovered")
+            host_log.warning("[agent-host] turn-progress heartbeat publish recovered")
         heartbeat_ok = published
         _report_long_admission_waits(host, read_alert_seconds=read_alert_seconds)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
@@ -386,7 +386,7 @@ def _background_loops(
     return {
         "plugins_watch": _watch_plugins_for_restart(),
         "stdout_log_rotate": _rotate_stdout_log_forever(),
-        "exec_memory_guard": run_memory_guard_forever(_log),
+        "exec_memory_guard": run_memory_guard_forever(host_log),
         "understanding_chunks": understanding_loop_forever(
             control_pool,
             db,
@@ -451,7 +451,7 @@ async def _close_joined_host_pools(
     if host is None or host.resources_joined:
         await _close_host_pools(workload_pool, control_pool)
     else:
-        _log.error("[agent-host] resource join unfinished; keeping pools open until hard exit")
+        host_log.error("[agent-host] resource join unfinished; keeping pools open until hard exit")
 
 
 async def _close_process_owners(
@@ -556,10 +556,10 @@ async def run(
     """Boot the host and serve wakes in the order documented by this module."""
     assert_clock_lattice()
     if _is_running():
-        _log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
+        host_log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
     if not acquire_pidfile(_pidfile(), _MODULE):
-        _log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
+        host_log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
         sys.exit(1)
 
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
@@ -679,14 +679,14 @@ async def run(
             clients=clients,
             primary=sys.exception(),
         )
-        _log.info("[agent-host] daemon stopped")
+        host_log.info("[agent-host] daemon stopped")
 
 
 def _require_helper_parent_chain() -> None:
     """Exit a helper-spawned host whose ancestor chain no longer holds the helper."""
     if parent_chain_intact():
         return
-    _log.warning(
+    host_log.warning(
         "[agent-host] permissions helper parent chain broken, self-terminating for helper respawn"
     )
     os._exit(70)
@@ -735,15 +735,15 @@ def main() -> None:
         )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
-        _log.info("[agent-host] interrupted, shutting down")
+        host_log.info("[agent-host] interrupted, shutting down")
         # Explicit task drain reaches run's health/turn/pool/pidfile cleanup
         # without joining default-executor workers.
         failures = cancel_and_drain(runner)
         if failures:
-            _log.error("[agent-host] async shutdown failed: %r", failures)
+            host_log.error("[agent-host] async shutdown failed: %r", failures)
             code = 1
     except Exception:
-        _log.exception("[agent-host] fatal error, shutting down")
+        host_log.exception("[agent-host] fatal error, shutting down")
         code = 1
     finally:
         # A running host retains its clients when a turn cannot join. Only a
@@ -755,7 +755,7 @@ def main() -> None:
                 primary = sys.exception()
                 if primary is not None:
                     primary.add_note(f"Host boot cleanup also failed: {secondary!r}")
-                _log.exception("[agent-host] process client cleanup failed")
+                host_log.exception("[agent-host] process client cleanup failed")
                 code = 1
     _hard_exit(code)
 

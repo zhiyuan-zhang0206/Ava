@@ -101,7 +101,7 @@ class _Sdk(Protocol):
 
 
 @dataclass(frozen=True)
-class _ChildContext:
+class ChildContext:
     """What this one exec child holds for the run: the SDK modules it bound after boot, and
     when boot began.
 
@@ -114,11 +114,11 @@ class _ChildContext:
     boot_started_at: float
 
 
-def _import_runtime(boot_started_at: float) -> _ChildContext:
+def import_runtime(boot_started_at: float) -> ChildContext:
     """Load the SDK only after `main` can turn a boot failure into a result."""
     import ava
 
-    return _ChildContext(ava=ava, boot_started_at=boot_started_at)
+    return ChildContext(ava=ava, boot_started_at=boot_started_at)
 
 
 def line_buffered_output() -> None:
@@ -221,7 +221,7 @@ def apply_overlay_scope(
     return applied
 
 
-def _init_logger(
+def init_logger(
     agent_id: int | None,
     *,
     producer: Callable[[], Any],
@@ -260,7 +260,7 @@ def _init_logger(
     producer().defer_exports()
 
 
-def _emit_child_boot_timing(child: _ChildContext, *, clients: Any) -> None:
+def emit_child_boot_timing(child: ChildContext, *, clients: Any) -> None:
     """Record the child-ready boundary before executing agent-authored code."""
     duration_ms = (time.perf_counter() - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
@@ -321,7 +321,7 @@ class _LazyStateSlot:
         setattr(object.__getattribute__(self, "_real"), name, value)
 
 
-def _build_state_slot(child: _ChildContext, payload: RequestPayload) -> None:
+def build_state_slot(child: ChildContext, payload: RequestPayload) -> None:
     """Arm the dynamic AgentState slot from the request snapshot.
 
     A stateless request binds no slot, so `ava.state` does not exist in that child. A
@@ -335,7 +335,7 @@ def _build_state_slot(child: _ChildContext, payload: RequestPayload) -> None:
     child.ava.state_update = {}
 
 
-def _take_result_state_update(child: _ChildContext, payload: Any, *, state_injected: bool) -> None:
+def _take_result_state_update(child: ChildContext, payload: Any, *, state_injected: bool) -> None:
     """Serialize this turn's plugin delta into the result envelope.
 
     A tampered slot (agent replaced ava.state_update with a non-dict) is reported as
@@ -530,13 +530,13 @@ def _run(
 ) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
-    child = _import_runtime(boot_started_at)
+    child = import_runtime(boot_started_at)
     from agent.graph.exec.protocol import ResultPayload, read_request, write_result
 
     line_buffered_output()
     _install_signal_handlers()
     raw_agent_id = os.environ.get("AVA_AGENT_ID")
-    _init_logger(
+    init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
         producer=context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
@@ -560,7 +560,7 @@ def _run(
     )
     import ava
 
-    _init_logger(
+    init_logger(
         request.agent_id,
         producer=ava.context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
@@ -589,22 +589,22 @@ def _run(
     if framework_overlay_applied:
         # Per-agent sdk_disable additions ride the overlay; they apply additively
         # on top of the installed surface (delta — only new entries take effect).
-        from agent.process_boot import _apply_per_agent_sdk_disable
+        from agent.process_boot import apply_per_agent_sdk_disable
 
-        _apply_per_agent_sdk_disable(default_reader=read_agent_default)
+        apply_per_agent_sdk_disable(default_reader=read_agent_default)
     # A text-only agent gets no attach contract anywhere in its SDK docs,
     # including interactive `ava.help(ava.self)` (user ruling 2026-08-28): the
     # renderer computes the child's media gating itself, per call.
-    from agent.process_boot import _apply_per_agent_eval_isolation
+    from agent.process_boot import apply_per_agent_eval_isolation
 
-    _apply_per_agent_eval_isolation(default_reader=read_agent_default)
-    _build_state_slot(child, request)
+    apply_per_agent_eval_isolation(default_reader=read_agent_default)
+    build_state_slot(child, request)
 
     if request.timeout_s > 0:
         _arm_watchdog(request.timeout_s)
 
     try:
-        _emit_child_boot_timing(child, clients=context.clients)
+        emit_child_boot_timing(child, clients=context.clients)
     except BaseException as exc:
         # Boot-timing failure: the code never ran.
         write_crashed_result(result_path, exc, code_reached=False)

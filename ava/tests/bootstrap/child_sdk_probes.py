@@ -11,7 +11,7 @@ def config_lite() -> None:
     import ava  # noqa: F401  # pyright: ignore[reportUnusedImport]
     import base.config as c
 
-    st = c._boot_state()  # pyright: ignore[reportAttributeAccessIssue]
+    st = c.boot_state()  # pyright: ignore[reportAttributeAccessIssue]
     print(
         "AVA",
         st["mode"],

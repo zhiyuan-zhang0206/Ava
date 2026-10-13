@@ -122,7 +122,7 @@ def test_launch_execs_in_place_on_posix(monkeypatch: pytest.MonkeyPatch) -> None
     one pid and killing the pane kills the browser."""
     captured: list[tuple[str, list[str]]] = []
     monkeypatch.setattr(bd.os, "execvp", lambda f, a: captured.append((f, a)))  # pyright: ignore[reportUnknownArgumentType]
-    bd._launch("/chrome", ["/chrome", "--remote-debugging-port=9222"])
+    bd.exec_chrome("/chrome", ["/chrome", "--remote-debugging-port=9222"])
     assert captured == [("/chrome", ["/chrome", "--remote-debugging-port=9222"])]
 
 

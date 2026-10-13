@@ -685,7 +685,7 @@ def test_ingest_loopback_trust_when_no_token(monkeypatch: pytest.MonkeyPatch) ->
 # -- list --------------------------------------------------------------------
 
 
-def _seed(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
+def seed_alert_rows(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
     with db.cursor() as cur:
         for r in rows:
             cur.execute(

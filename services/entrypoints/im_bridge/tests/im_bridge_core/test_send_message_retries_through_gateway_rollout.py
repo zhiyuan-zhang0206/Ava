@@ -464,7 +464,7 @@ async def test_weixin_push_failure_emits_the_failed_event(
         async def _record(seconds: float) -> None:
             sleeps.append(seconds)
 
-        monkeypatch.setattr(push_watchdog, "_sleep", _record)
+        monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _record)
 
         await core._send("weixin", "o9cq804", Reply("hello"))
 
@@ -486,7 +486,7 @@ async def test_weixin_healed_retry_emits_no_failed_event(
         async def _no_sleep(seconds: float) -> None:
             del seconds
 
-        monkeypatch.setattr(push_watchdog, "_sleep", _no_sleep)
+        monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _no_sleep)
         await core._send("weixin", "o9cq804", Reply("hello"))
         assert not [r for r in loguru_records if r["extra"].get("event") == "im_push_failed"]
 
@@ -547,7 +547,7 @@ async def test_push_retry_sleeps_backoff_before_retrying(monkeypatch: pytest.Mon
             assert base <= seconds <= base + jitter
             events.append("sleep")
 
-        monkeypatch.setattr(push_watchdog, "_sleep", _sleep)
+        monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _sleep)
         wx = FakeFlakyWeixinAdapter(events)
         tg = FakeTypingAdapter()
         core.register(wx)

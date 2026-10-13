@@ -570,4 +570,4 @@ def test_valid_legacy_strings_normalize_without_wire_changes(
 ) -> None:
     snapshot = record_codec.CodingSessionOwner(key=_key(tmp_path), status=cast(Any, status.value))
     assert snapshot.status is status
-    assert json.loads(json.dumps(record_codec._payload(snapshot)))["status"] == status.value
+    assert json.loads(json.dumps(record_codec.owner_payload(snapshot)))["status"] == status.value
