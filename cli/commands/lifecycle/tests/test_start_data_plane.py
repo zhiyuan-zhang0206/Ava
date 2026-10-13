@@ -17,9 +17,9 @@ from base.host.db_authority import api, ledger
 from cli import start_identity
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.commands.lifecycle import start as _start
+from cli.commands.tests.data_plane_records import cluster_record
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
-from tests.factories.data_plane import cluster_record
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
