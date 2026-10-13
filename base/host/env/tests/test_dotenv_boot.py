@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 
 from base.host.env import dotenv_boot
+from base.host.env.tests.env_files import use_env_files
 from base.paths.home import resolve_ava_home
-from tests.fixtures.units import use_env_files
 
 
 @pytest.fixture(autouse=True)

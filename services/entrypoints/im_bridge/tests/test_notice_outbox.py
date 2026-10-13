@@ -10,6 +10,7 @@ import pytest
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -27,7 +28,6 @@ from services.entrypoints.im_bridge.types import (
     PreparedOutboundSend,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 class NoticeAdapter(RecordingAdapter):

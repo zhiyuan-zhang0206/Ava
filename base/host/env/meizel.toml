@@ -1,4 +1,4 @@
-exports = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "health_ports.py", "port_table.py", "registry.py"]
+exports = ["agent_slices.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "health_ports.py", "port_table.py", "registry.py", "tests"]
 
 [uses]
 "agent_slices.py" = ["config_lite_table.py"]

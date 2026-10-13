@@ -12,6 +12,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -29,7 +30,6 @@ from services.wake.heartbeat.daemon import (
 from services.wake.heartbeat.tests.heartbeat_support import THRESHOLD_S, make_idle
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 @pytest.fixture

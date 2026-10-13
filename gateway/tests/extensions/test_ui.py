@@ -29,6 +29,7 @@ from ava import ui
 from ava.gateway_client.transport import use_client
 from ava.sdk_surface import agent_identity
 from ava.ui import InvalidPageName, PageClosed
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -36,7 +37,6 @@ from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from tests.fixtures.pin_agent import pin_agent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
 
