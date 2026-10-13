@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from threading import RLock, get_ident
 from typing import Any, cast
@@ -691,25 +692,27 @@ class ConfigBoot:
 
 
 class _LegacyConfigBoot(ConfigBoot):
-    """Temporary adapter for the unmigrated facade, with its existing bindings."""
+    """Temporary adapter for the unmigrated facade, with its existing bindings.
 
-    __slots__ = ()
+    The facade (`base.config`) binds itself once its module body is complete
+    (`bind_facade`): it hands over its namespace and its timezone applier, so this module
+    never imports the package that imports it."""
+
+    __slots__ = ("_apply_timezone", "_facade")
+
+    def bind_facade(self, namespace: dict[str, Any], apply_timezone: Callable[[], None]) -> None:
+        self._facade = namespace
+        self._apply_timezone = apply_timezone
 
     def _current_settings(self) -> Any:
-        from base.config import settings
-
-        return settings
+        return self._facade["settings"]
 
     def _apply_cluster_timezone(self) -> None:
-        from base.config import apply_cluster_timezone
-
-        apply_cluster_timezone()
+        self._apply_timezone()
 
     def _install(self, bundle: Any, reason: str) -> None:
-        from base import config as facade
-
-        facade.__dict__.update(bundle.exports)
-        facade.__dict__["settings"] = bundle.settings
+        self._facade.update(bundle.exports)
+        self._facade["settings"] = bundle.settings
         super()._install(bundle, reason)
 
 
@@ -749,7 +752,9 @@ def ensure_eager() -> None:
     _state.ensure_eager()
 
 
-def boot() -> None:
+def boot(namespace: dict[str, Any], apply_timezone: Callable[[], None]) -> None:
+    """Bind the facade (its namespace and timezone applier), then prepare or go eager."""
+    _state.bind_facade(namespace, apply_timezone)
     _state.boot()
 
 
