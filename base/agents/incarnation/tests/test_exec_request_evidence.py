@@ -452,7 +452,7 @@ def test_cli_entry_captures_once_and_keeps_the_database_gated(
     monkeypatch.setattr(exec_request_evidence.Database, "from_settings", create)
     monkeypatch.setattr(exec_request_evidence, "row_identity", identity)
     monkeypatch.setattr(exec_request_evidence, "survey", Mock(return_value=[]))
-    monkeypatch.setattr(exec_request_evidence, "_report", Mock())
+    monkeypatch.setattr(exec_request_evidence, "print_request_evidence", Mock())
 
     assert main(["--agent", str(_AGENT)]) == 0
 

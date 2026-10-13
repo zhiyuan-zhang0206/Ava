@@ -2,6 +2,3 @@ exports = ["home_lifecycle_locks.py", "launch_failures.py", "service_selection.p
 
 [uses]
 "tests" = ["home_lifecycle_locks.py", "service_selection.py", "start_serving.py", "status_journal.py"]
-
-[debt.private-name]
-"tests/test_status_journal.py -> status_journal.py#_path" = 1

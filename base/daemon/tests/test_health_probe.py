@@ -394,7 +394,7 @@ def test_probe_daemon_survives_a_pidfile_oserror(
     would have escaped."""
     monkeypatch.setattr(
         health,
-        "_probe_daemon",
+        "probe_daemon_identity",
         lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("pidfile unreadable")),  # pyright: ignore[reportUnknownArgumentType]
     )
     probe = health.probe_daemon("agent_host", probe_url(9), pidfile=tmp_path / "x.pid")
@@ -413,7 +413,7 @@ def test_probe_daemon_verdict_is_down_never_up_on_failure(
     revival of a daemon a respawn could have saved."""
     monkeypatch.setattr(
         health,
-        "_probe_daemon",
+        "probe_daemon_identity",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType]
     )
     probe = health.probe_daemon("labeler", probe_url(9), pidfile=tmp_path / "x.pid")
@@ -428,7 +428,7 @@ def test_probe_daemon_passes_through_a_normal_verdict(
     behaviour change."""
     monkeypatch.setattr(
         health,
-        "_probe_daemon",
+        "probe_daemon_identity",
         lambda *_a, **_k: health.DaemonProbe.up("pid 42"),  # pyright: ignore[reportUnknownArgumentType]
     )
     probe = health.probe_daemon("ops", probe_url(9), pidfile=tmp_path / "x.pid")
@@ -529,7 +529,7 @@ def test_probe_home_always_returns_a_verdict(monkeypatch: pytest.MonkeyPatch) ->
     """Fail CLOSED — an unreadable probe is reported down, never alive."""
     monkeypatch.setattr(
         health,
-        "_probe_home",
+        "probe_unit_home",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType]
     )
     probe = health.probe_home("http://127.0.0.1:9/api/health")
@@ -542,7 +542,7 @@ def test_probe_fails_closed_on_any_unexpected_exception(monkeypatch: pytest.Monk
     watchdog skip a genuinely dead gateway forever."""
     monkeypatch.setattr(
         health,
-        "_probe_home",
+        "probe_unit_home",
         lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("unpredicted")),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert health.probe_home("http://gateway.example/api/health").alive is False
@@ -550,7 +550,11 @@ def test_probe_fails_closed_on_any_unexpected_exception(monkeypatch: pytest.Monk
 
 def test_probe_passes_through_a_normal_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
     """The wrapper adds a floor, not a behaviour change."""
-    monkeypatch.setattr(health, "_probe_home", lambda *_a, **_kw: health.DaemonProbe.up("home /x"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        health,
+        "probe_unit_home",
+        lambda *_a, **_kw: health.DaemonProbe.up("home /x"),  # pyright: ignore[reportUnknownArgumentType]
+    )
     probe = health.probe_home("http://gateway.example/api/health")
     assert probe.alive is True
     assert probe.detail == "home /x"

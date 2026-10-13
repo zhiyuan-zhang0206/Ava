@@ -47,4 +47,3 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "tests/config/test_config_registry.py -> config/config_registry.py#_build_registry" = 3
 "tests/config/test_home_resolution.py -> host/env/bootstrap.py#_snapshot_path" = 1
 "tests/impersonation/test_impersonation_closure.py -> deploy/maintenance/cohort.py#_classify" = 1
-"tests/test_checkpoint_message_history.py -> agents/history/checkpoint_postgres_walks.py#_body_batches" = 1

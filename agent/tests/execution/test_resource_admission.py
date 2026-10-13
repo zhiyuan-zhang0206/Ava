@@ -18,7 +18,12 @@ from base.agents.incarnation.resources import (
     complete_exec,
     register_exec,
 )
-from base.agents.incarnation.tests.test_resources import _admitted, _entry, _force, _process
+from base.agents.incarnation.tests.test_resources import (
+    _admitted,
+    _process,
+    exec_allocation_entry,
+    force_incarnation,
+)
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -35,7 +40,7 @@ async def test_successor_cannot_reset_unknown_or_unresolved_set(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     target = _admitted(db_conn)
-    entry = _entry()
+    entry = exec_allocation_entry()
     with db_conn.transaction():
         register_exec(db_conn, target, entry)
     successor = RuntimeIncarnation(target.agent_id, uuid4(), uuid4())
@@ -52,7 +57,7 @@ def test_exact_terminal_consumption_survives_force_but_replay_refuses(
     db_conn: psycopg.Connection,
 ) -> None:
     target = _admitted(db_conn)
-    entry = _entry()
+    entry = exec_allocation_entry()
     attached = entry.model_copy(
         update={
             "owner_process": _process(10, 1.0),
@@ -62,7 +67,7 @@ def test_exact_terminal_consumption_survives_force_but_replay_refuses(
     with db_conn.transaction():
         register_exec(db_conn, target, entry)
         attach_exec(db_conn, target, entry, attached)
-        command = _force(db_conn, target)
+        command = force_incarnation(db_conn, target)
     with pytest.raises(ResourceEvidenceError), db_conn.transaction():
         complete_exec(db_conn, target, attached.model_copy(update={"domain": uuid4()}))
     with db_conn.transaction():

@@ -21,5 +21,4 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 "tests/observability/test_inspect_event_metrics.py -> inspect/_plugin_metrics.py" = 4
 
 [debt.private-name]
-"tests/observability/test_ops_monitor.py -> cluster/ops_series.py#_bucket_starts" = 1
 "tests/test_agent_inspect.py -> inspect/router.py#_cluster_rpc" = 1

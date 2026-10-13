@@ -47,7 +47,7 @@ def _admitted(conn: psycopg.Connection) -> RuntimeIncarnation:
     return target
 
 
-def _entry() -> ExecAllocation:
+def exec_allocation_entry() -> ExecAllocation:
     return ExecAllocation(
         request=uuid4(),
         domain=uuid4(),
@@ -56,7 +56,7 @@ def _entry() -> ExecAllocation:
     )
 
 
-def _force(conn: psycopg.Connection, target: RuntimeIncarnation) -> int:
+def force_incarnation(conn: psycopg.Connection, target: RuntimeIncarnation) -> int:
     conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (target.agent_id,))
     row = conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,content,source,status) "
@@ -82,7 +82,7 @@ def test_unknown_or_bad_evidence_is_never_empty(value: object) -> None:
 
 def test_registration_and_attachment_require_exact_live_owner(db_conn: psycopg.Connection) -> None:
     target = _admitted(db_conn)
-    entry = _entry()
+    entry = exec_allocation_entry()
     with db_conn.transaction():
         register_exec(db_conn, target, entry)
     for wrong in (
@@ -90,7 +90,7 @@ def test_registration_and_attachment_require_exact_live_owner(db_conn: psycopg.C
         RuntimeIncarnation(target.agent_id, target.generation, uuid4()),
     ):
         with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-            register_exec(db_conn, wrong, _entry())
+            register_exec(db_conn, wrong, exec_allocation_entry())
     attached = entry.model_copy(
         update={
             "owner_process": _process(100, 1.0),
@@ -105,12 +105,12 @@ def test_registration_and_attachment_require_exact_live_owner(db_conn: psycopg.C
 
 def test_force_freezes_registered_set_and_blocks_later_permit(db_conn: psycopg.Connection) -> None:
     target = _admitted(db_conn)
-    entry = _entry()
+    entry = exec_allocation_entry()
     with db_conn.transaction():
         register_exec(db_conn, target, entry)
-        force = _force(db_conn, target)
+        force = force_incarnation(db_conn, target)
     with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-        register_exec(db_conn, target, _entry())
+        register_exec(db_conn, target, exec_allocation_entry())
     with pytest.raises(ResourceEvidenceError), db_conn.transaction():
         attach_exec(
             db_conn,
@@ -149,14 +149,14 @@ def test_force_lock_wins_over_concurrent_registration(db_conn: psycopg.Connectio
             try:
                 with writer.transaction():
                     started.set()
-                    register_exec(writer, target, _entry())
+                    register_exec(writer, target, exec_allocation_entry())
             except BaseException as exc:
                 failures.append(exc)
             finally:
                 finished.set()
 
         with db_conn.transaction():
-            _force(db_conn, target)
+            force_incarnation(db_conn, target)
             thread = threading.Thread(target=register)
             thread.start()
             assert started.wait(2)
@@ -172,7 +172,7 @@ def test_unchanged_locked_row_expiring_lease_never_permits_exec(
     phase: str,
 ) -> None:
     target = _admitted(db_conn)
-    entry = _entry()
+    entry = exec_allocation_entry()
     with db_conn.transaction():
         if phase == "attach":
             register_exec(db_conn, target, entry)

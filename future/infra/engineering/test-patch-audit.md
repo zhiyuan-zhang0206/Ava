@@ -123,7 +123,7 @@ patched and the test homes that patch them. This is the injection-seam work list
 | `agent.startup` | 16 | `_page_server_alive` 9, `_last_reconcile_at` 7 | `agent/graph/claim` 16 |
 | `cli.commands.lifecycle.root_driver` | 16 | `stop_root_service_tree` 8, `root_tree_selection` 4, `_root_tree_plan` 2 | `cli/commands/data_plane` 10, `cli` 4, `cli/commands/observability` 1, `(top-level)` 1 |
 | `cli.commands.lifecycle._temporary_stop` | 15 | `_temporary_stop` 15 | `cli` 15 |
-| `base.daemon.health` | 14 | `_probe_daemon` 5, `_probe_home` 3, `_health_payload` 3 | `base` 9, `cli/commands` 2, `services/supervision/healthchecks` 2, `services/upkeep/events_maintenance` 1 |
+| `base.daemon.health` | 14 | `probe_daemon_identity` 5, `probe_unit_home` 3, `_health_payload` 3 | `base` 9, `cli/commands` 2, `services/supervision/healthchecks` 2, `services/upkeep/events_maintenance` 1 |
 | `cli.commands.observability.lgtm_native` | 14 | `_download_and_verify` 4, `_verify_loki` 3, `_stream_download` 2 | `cli/commands` 9, `cli/commands/converge` 5 |
 | `ops.agent_pause` | 14 | `_wake` 7, `_lifecycle_wait_seconds` 4, `_LIFECYCLE_WAIT_POLL_SECONDS` 3 | `agent/ownership` 8, `services/agent_runner/agent_host` 3, `cli/commands/lifecycle` 1, `cli/parsers` 1 |
 | `base.telemetry.otlp.telemetry_otlp` | 11 | `_OtlpBackend` 8, `_build_providers` 3 | `base/telemetry` 8, `agent` 2, `base` 1 |
