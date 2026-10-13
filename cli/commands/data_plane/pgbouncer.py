@@ -549,6 +549,7 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     from base.cluster import get_record
     from base.config import settings
     from base.host.env.dotenv_file import upsert_env
+    from ops.env_audit import EnvWriteAudit
 
     if settings.data_plane.is_remote:
         # The pooler is a local-instance component; a remote/SaaS plane's URL
@@ -567,7 +568,9 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
         pooler_enabled=settings.data_plane.pgbouncer_enabled,
     )
     if normalized:
-        upsert_env(env_path, {"AVA_DB_URL": normalized}, audit_site="converge_pgbouncer")
+        upsert_env(
+            env_path, {"AVA_DB_URL": normalized}, audit=EnvWriteAudit(site="converge_pgbouncer")
+        )
     if not settings.data_plane.pgbouncer_enabled:
         return
     binary = pgbouncer_bin()

@@ -15,10 +15,15 @@ import pytest
 
 from base import telemetry
 from base.cluster.machine import MachineIdentity
-from base.host.env import audit
 from base.host.env import runtime_config as runtime_config
-from base.host.env.audit import check_env_integrity, last_env_write_record, record_env_write
 from base.telemetry import Event
+from ops import env_audit as audit
+from ops.env_audit import (
+    EnvWriteAudit,
+    check_env_integrity,
+    last_env_write_record,
+    record_env_write,
+)
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -76,14 +81,18 @@ def test_audited_runtime_write_leaves_integrity_healthy(
     audit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """Removing the post-write record must make the guard report a mismatch."""
-    runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"llm_model": "test-model"}, set(), audit=EnvWriteAudit(site="test")
+    )
 
     assert check_env_integrity(machine_reader=machine_identity.name) is None
 
 
 def test_audited_runtime_write_records_env_aliases(audit_home: Path) -> None:
     """Recording typed field names instead of shared `.env` keys must fail."""
-    runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"llm_model": "test-model"}, set(), audit=EnvWriteAudit(site="test")
+    )
 
     record = last_env_write_record()
 
@@ -95,7 +104,9 @@ def test_armed_guard_rebuilds_deleted_audit_history(
     audit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """Deleting history after an official write must be reported and repaired."""
-    runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"llm_model": "test-model"}, set(), audit=EnvWriteAudit(site="test")
+    )
     (audit_home / ".env.audit.jsonl").unlink()
 
     detection = check_env_integrity(machine_reader=machine_identity.name)
@@ -111,7 +122,9 @@ def test_armed_guard_rebuilds_empty_audit_history(
     audit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """An empty history must not recreate the fresh-home unarmed branch."""
-    runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"llm_model": "test-model"}, set(), audit=EnvWriteAudit(site="test")
+    )
     (audit_home / ".env.audit.jsonl").write_text("")
 
     detection = check_env_integrity(machine_reader=machine_identity.name)
@@ -126,7 +139,9 @@ def test_armed_guard_rebuilds_corrupt_audit_history(
     audit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """A malformed final JSONL line must be reported and replaced safely."""
-    runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"llm_model": "test-model"}, set(), audit=EnvWriteAudit(site="test")
+    )
     (audit_home / ".env.audit.jsonl").write_text("not-json\n")
 
     detection = check_env_integrity(machine_reader=machine_identity.name)
@@ -141,7 +156,9 @@ def test_armed_guard_rebuilds_history_without_a_digest(
     audit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """A record without its digest must not become an implicit unarmed state."""
-    runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"llm_model": "test-model"}, set(), audit=EnvWriteAudit(site="test")
+    )
     (audit_home / ".env.audit.jsonl").write_text('{"site":"test"}\n')
 
     detection = check_env_integrity(machine_reader=machine_identity.name)
@@ -156,7 +173,9 @@ def test_integrity_guard_records_one_out_of_band_write(
     audit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """Removing anomaly recording or its digest self-rate-limit breaks this test."""
-    runtime_config.write_fields({"llm_model": "test-model"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"llm_model": "test-model"}, set(), audit=EnvWriteAudit(site="test")
+    )
     env_path = audit_home / ".env"
     env_path.write_text(env_path.read_text() + "AVA_EXEC_TIMEOUT_SECONDS=12\n")
 
@@ -183,7 +202,7 @@ def test_integrity_guard_is_unarmed_without_an_audit_file(
     assert not (audit_home / ".env.audit.jsonl").exists()
 
 
-def test_runtime_write_without_audit_site_keeps_audit_unarmed(audit_home: Path) -> None:
+def test_runtime_write_without_audit_keeps_audit_unarmed(audit_home: Path) -> None:
     """Ignoring the opt-in audit site must make this compatibility test fail."""
     runtime_config.write_fields({"llm_model": "test-model"}, set())
 
@@ -192,7 +211,7 @@ def test_runtime_write_without_audit_site_keeps_audit_unarmed(audit_home: Path) 
 
 def test_empty_audited_runtime_write_keeps_audit_unarmed(audit_home: Path) -> None:
     """An empty patch must not create an actor record or armed marker."""
-    runtime_config.write_fields({}, set(), audit_site="test")
+    runtime_config.write_fields({}, set(), audit=EnvWriteAudit(site="test"))
 
     assert not (audit_home / ".env.audit.jsonl").exists()
     assert not (audit_home / ".env.audit.armed").exists()
@@ -260,9 +279,11 @@ def test_record_env_write_redacts_sensitive_and_unregistered_changes(audit_home:
 
 def test_write_fields_records_old_to_new_values(audit_home: Path) -> None:
     """A second write records the actual old→new transition and the actor."""
-    runtime_config.write_fields({"llm_model": "m1"}, set(), audit_site="test")
+    runtime_config.write_fields({"llm_model": "m1"}, set(), audit=EnvWriteAudit(site="test"))
     runtime_config.write_fields(
-        {"llm_model": "m2"}, set(), audit_site="test", actor="cluster_bearer:administrator"
+        {"llm_model": "m2"},
+        set(),
+        audit=EnvWriteAudit(site="test", actor="cluster_bearer:administrator"),
     )
 
     records = [
@@ -296,11 +317,13 @@ def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(
     env_path.write_text("AVA_MODEL=first-model\n")
     audit_path = audit_home / ".env.audit.jsonl"
 
-    upsert_env(env_path, {"AVA_MODEL": "second-model"}, audit_site="test")
+    upsert_env(env_path, {"AVA_MODEL": "second-model"}, audit=EnvWriteAudit(site="test"))
     records_after_change = audit_path.read_text().splitlines()
     assert len(records_after_change) == 1
 
-    upsert_env(env_path, {"AVA_MODEL": "second-model"}, audit_site="converge_gateway_port")
+    upsert_env(
+        env_path, {"AVA_MODEL": "second-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
+    )
 
     assert audit_path.read_text().splitlines() == records_after_change
     assert env_path.read_text() == "AVA_MODEL=second-model\n"
@@ -308,7 +331,7 @@ def test_noop_upsert_leaves_no_record_and_a_real_change_still_records(
         check_env_integrity(machine_reader=machine_identity.name) is None
     )  # the skip left the recorded digest standing
 
-    upsert_env(env_path, {"AVA_MODEL": "first-model"}, audit_site="test")
+    upsert_env(env_path, {"AVA_MODEL": "first-model"}, audit=EnvWriteAudit(site="test"))
 
     record = last_env_write_record()
     assert record is not None
@@ -336,19 +359,25 @@ def test_noop_upsert_does_not_arm_a_fresh_home(audit_home: Path) -> None:
     env_path = audit_home / ".env"
     env_path.write_text("AVA_MODEL=test-model\n")
 
-    upsert_env(env_path, {"AVA_MODEL": "test-model"}, audit_site="converge_gateway_port")
+    upsert_env(
+        env_path, {"AVA_MODEL": "test-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
+    )
 
     assert not (audit_home / ".env.audit.jsonl").exists()
     assert not (audit_home / ".env.audit.armed").exists()
 
-    upsert_env(env_path, {"AVA_MODEL": "other-model"}, audit_site="converge_gateway_port")
+    upsert_env(
+        env_path, {"AVA_MODEL": "other-model"}, audit=EnvWriteAudit(site="converge_gateway_port")
+    )
 
     assert (audit_home / ".env.audit.armed").exists()
 
 
 def test_write_fields_withholds_sensitive_values(audit_home: Path) -> None:
     """A secret write lands by name only — its value never reaches the JSONL."""
-    runtime_config.write_fields({"deepseek_api_key": "sk-SECRET-VALUE"}, set(), audit_site="test")
+    runtime_config.write_fields(
+        {"deepseek_api_key": "sk-SECRET-VALUE"}, set(), audit=EnvWriteAudit(site="test")
+    )
 
     line = (audit_home / ".env.audit.jsonl").read_text()
     assert "sk-SECRET-VALUE" not in line
@@ -366,7 +395,9 @@ def test_env_write_event_carries_actor_without_values(
     captured: list[Event] = []
     monkeypatch.setattr(telemetry, "emit_prepared", captured.append)
     runtime_config.write_fields(
-        {"llm_model": "m3"}, set(), audit_site="test", actor="user_session:administrator"
+        {"llm_model": "m3"},
+        set(),
+        audit=EnvWriteAudit(site="test", actor="user_session:administrator"),
     )
 
     assert captured and captured[0].event_name == "env_write"
@@ -465,7 +496,14 @@ def test_declaration_projection_works_without_a_runtime_settings_image(tmp_path:
         [
             sys.executable,
             "-I",
-            str(Path(__file__).with_name("_env_import_child.py")),
+            str(
+                Path(__file__).parents[2]
+                / "base"
+                / "host"
+                / "env"
+                / "tests"
+                / "_env_import_child.py"
+            ),
             "declaration_projection",
         ],
         cwd=tmp_path,
@@ -498,13 +536,17 @@ def test_invalid_metadata_prevents_every_audited_file_write(
     monkeypatch.setattr(audit, "_load_alias_metadata", invalid)
     with pytest.raises(RuntimeError, match="registry unavailable"):
         if writer == "fields-update":
-            runtime_config.write_fields({"llm_model": "after"}, set(), audit_site="test")
+            runtime_config.write_fields(
+                {"llm_model": "after"}, set(), audit=EnvWriteAudit(site="test")
+            )
         elif writer == "fields-remove":
-            runtime_config.write_fields({}, {"llm_model"}, audit_site="test")
+            runtime_config.write_fields({}, {"llm_model"}, audit=EnvWriteAudit(site="test"))
         elif writer == "upsert":
-            dotenv_file.upsert_env(env_path, {"AVA_MODEL": "after"}, audit_site="test")
+            dotenv_file.upsert_env(
+                env_path, {"AVA_MODEL": "after"}, audit=EnvWriteAudit(site="test")
+            )
         else:
-            dotenv_file.remove_env(env_path, {"AVA_MODEL"}, audit_site="test")
+            dotenv_file.remove_env(env_path, {"AVA_MODEL"}, audit=EnvWriteAudit(site="test"))
     assert env_path.read_bytes() == original
     assert not (audit_home / "backups").exists()
     assert not (audit_home / ".env.audit.jsonl").exists()
@@ -526,11 +568,11 @@ def test_noop_writer_does_not_require_audit_metadata(
 
     monkeypatch.setattr(audit, "_load_alias_metadata", unexpected)
     if writer == "fields":
-        runtime_config.write_fields({}, set(), audit_site="test")
+        runtime_config.write_fields({}, set(), audit=EnvWriteAudit(site="test"))
     elif writer == "upsert":
-        dotenv_file.upsert_env(path, {"AVA_MODEL": "before"}, audit_site="test")
+        dotenv_file.upsert_env(path, {"AVA_MODEL": "before"}, audit=EnvWriteAudit(site="test"))
     else:
-        dotenv_file.remove_env(path, {"ABSENT"}, audit_site="test")
+        dotenv_file.remove_env(path, {"ABSENT"}, audit=EnvWriteAudit(site="test"))
     assert path.read_bytes() == original
     assert not (audit_home / ".env.audit.jsonl").exists()
     assert not (audit_home / "backups").exists()
@@ -549,7 +591,7 @@ def test_stale_digest_fails_before_metadata_preparation(
     monkeypatch.setattr(audit, "_load_alias_metadata", unexpected)
     with pytest.raises(RuntimeError, match="changed before owned"):
         runtime_config.write_fields(
-            {"llm_model": "after"}, set(), audit_site="test", expected_digest="stale"
+            {"llm_model": "after"}, set(), audit=EnvWriteAudit(site="test"), expected_digest="stale"
         )
     assert path.read_bytes() == original
     assert not (audit_home / ".env.audit.jsonl").exists()
@@ -574,11 +616,11 @@ def test_redaction_is_prepared_once_while_the_old_env_is_still_present(
 
     monkeypatch.setattr(audit, "_load_alias_metadata", declared)
     if writer == "fields":
-        runtime_config.write_fields({"llm_model": "after"}, set(), audit_site="test")
+        runtime_config.write_fields({"llm_model": "after"}, set(), audit=EnvWriteAudit(site="test"))
     elif writer == "upsert":
-        dotenv_file.upsert_env(env_path, {"AVA_MODEL": "after"}, audit_site="test")
+        dotenv_file.upsert_env(env_path, {"AVA_MODEL": "after"}, audit=EnvWriteAudit(site="test"))
     else:
-        dotenv_file.remove_env(env_path, {"AVA_MODEL"}, audit_site="test")
+        dotenv_file.remove_env(env_path, {"AVA_MODEL"}, audit=EnvWriteAudit(site="test"))
     assert reads == ["prepare"]
     record = last_env_write_record(env_path)
     assert record is not None

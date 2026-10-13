@@ -38,6 +38,7 @@ from base.config import settings
 from base.host.env.dotenv_file import upsert_env
 from base.host.net.url_secret import url_host, url_with_password
 from base.paths import ava_home
+from ops.env_audit import EnvWriteAudit
 
 _TOKEN_BYTES = 32
 _SCOPES = frozenset({"admin", "runner", "both"})
@@ -242,7 +243,7 @@ def write_env(state: RotationState) -> None:
             REDIS_PASSWORD_ENV: state.redis_password,
             "AVA_REDIS_URL": redis_url,
         },
-        audit_site="rotate_data_plane_secrets",
+        audit=EnvWriteAudit(site="rotate_data_plane_secrets"),
     )
 
 

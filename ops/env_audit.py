@@ -60,26 +60,6 @@ def _env_key_names(env_path: Path) -> list[str]:
     return sorted(names)
 
 
-def env_values_from_text(text: str) -> dict[str, str]:
-    """Parse `key=value` text into `{alias: value}` for the audit value diff.
-
-    Surrounding matching quotes are stripped, matching how the write paths
-    render values. This feeds ONLY the local audit record — `record_env_write`
-    drops the values of sensitive and unregistered aliases before persisting.
-    """
-    values: dict[str, str] = {}
-    for line in text.splitlines():
-        key = env_line_key(line)
-        if key is None:
-            continue
-        _, _, raw = line.partition("=")
-        raw = raw.strip()
-        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
-            raw = raw[1:-1]
-        values[key] = raw
-    return values
-
-
 def _load_alias_metadata() -> dict[str, tuple[str, bool]]:
     from base.host.env.config_registry import field_alias, fields, schema_extra
 
@@ -296,6 +276,35 @@ def record_env_write(
             "digest_after": digest_after,
         },
     )
+
+
+@dataclass(frozen=True)
+class EnvWriteAudit:
+    """The `EnvAudit` a writer passes to record one official `.env` write.
+
+    ``site`` names the write path, ``actor`` the initiating credential fact and
+    ``trace_id`` the gateway request, when the write had one.
+    """
+
+    site: str
+    actor: str | None = None
+    trace_id: str | None = None
+
+    def prepare(self, changes: Sequence[Mapping[str, object]]) -> object:
+        return prepare_env_changes(changes)
+
+    def record(self, path: Path, written: set[str], removed: set[str], prepared: object) -> None:
+        if not isinstance(prepared, _PreparedEnvChanges):
+            raise TypeError("EnvWriteAudit.record needs the result of its own prepare")
+        record_env_write(
+            path,
+            written,
+            removed,
+            site=self.site,
+            actor=self.actor,
+            trace_id=self.trace_id,
+            changes=prepared,
+        )
 
 
 def _last_audit_line(audit_path: Path) -> str | None:

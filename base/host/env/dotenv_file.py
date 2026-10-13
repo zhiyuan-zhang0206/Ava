@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
 from base.host.private_storage import ensure_private_file, write_private_bytes
 from base.native_process.os_platform import file_lock
@@ -146,13 +148,46 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         return None
 
 
+class EnvAudit(Protocol):
+    """Records one official `.env` write; implemented above host (`ops.env_audit`).
+
+    A writer calls `prepare` while it still holds the old bytes and `record` after
+    its write landed, both under the `.env` lock. `prepared` is whatever `prepare`
+    returned: the implementation decides what survives redaction.
+    """
+
+    def prepare(self, changes: Sequence[Mapping[str, object]]) -> object: ...
+
+    def record(
+        self, path: Path, written: set[str], removed: set[str], prepared: object
+    ) -> None: ...
+
+
+def env_values_from_text(text: str) -> dict[str, str]:
+    """Parse `key=value` text into `{alias: value}` for an audit value diff.
+
+    Surrounding matching quotes are stripped, matching how the write paths
+    render values. This feeds ONLY the local audit record: the audit drops the
+    values of sensitive and unregistered aliases before persisting.
+    """
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        key = env_line_key(line)
+        if key is None:
+            continue
+        _, _, raw = line.partition("=")
+        raw = raw.strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+            raw = raw[1:-1]
+        values[key] = raw
+    return values
+
+
 def upsert_env(
     path: Path,
     updates: dict[str, str],
     *,
-    audit_site: str | None = None,
-    actor: str | None = None,
-    trace_id: str | None = None,
+    audit: EnvAudit | None = None,
 ) -> None:
     """Set each key in a unit's `.env`, preserving unrelated lines.
 
@@ -191,42 +226,25 @@ def upsert_env(
         if path.exists() and path.read_bytes() == payload:
             return
         prepared = None
-        if audit_site is not None:
-            from base.host.env.audit import (
-                env_values_from_text,
-                prepare_env_changes,
-            )
-
+        if audit is not None:
             before = env_values_from_text("\n".join(lines))
             changes = [
                 {"alias": key, "old": before.get(key), "new": value}
                 for key, value in updates.items()
             ]
             changes.sort(key=lambda change: str(change["alias"]))
-            prepared = prepare_env_changes(changes)
+            prepared = audit.prepare(changes)
         snapshot_env(path)
         write_private_bytes(path, payload)
-        if audit_site is not None:
-            from base.host.env.audit import record_env_write
-
-            record_env_write(
-                path,
-                set(updates),
-                set(),
-                site=audit_site,
-                actor=actor,
-                trace_id=trace_id,
-                changes=prepared,
-            )
+        if audit is not None:
+            audit.record(path, set(updates), set(), prepared)
 
 
 def remove_env(
     path: Path,
     keys: set[str],
     *,
-    audit_site: str | None = None,
-    actor: str | None = None,
-    trace_id: str | None = None,
+    audit: EnvAudit | None = None,
 ) -> None:
     """Remove the named keys from a unit's .env, preserving unrelated lines.
 
@@ -243,30 +261,15 @@ def remove_env(
         if len(out) == len(lines):
             return  # nothing to remove — no snapshot churn
         prepared = None
-        if audit_site is not None:
-            from base.host.env.audit import (
-                env_values_from_text,
-                prepare_env_changes,
-            )
-
+        if audit is not None:
             before = env_values_from_text("\n".join(lines))
             changes = [
                 {"alias": key, "old": before.get(key), "new": None}
                 for key in sorted(keys)
                 if key in before
             ]
-            prepared = prepare_env_changes(changes)
+            prepared = audit.prepare(changes)
         snapshot_env(path)
         write_private_bytes(path, ("\n".join(out) + "\n").encode())
-        if audit_site is not None:
-            from base.host.env.audit import record_env_write
-
-            record_env_write(
-                path,
-                set(),
-                keys,
-                site=audit_site,
-                actor=actor,
-                trace_id=trace_id,
-                changes=prepared,
-            )
+        if audit is not None:
+            audit.record(path, set(), keys, prepared)

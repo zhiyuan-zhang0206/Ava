@@ -9,7 +9,7 @@ import sys
 
 
 def declaration_projection() -> None:
-    from base.host.env.audit import _load_alias_metadata
+    from ops.env_audit import _load_alias_metadata
 
     metadata = _load_alias_metadata()
     assert metadata["AVA_DB_URL"][1] is True

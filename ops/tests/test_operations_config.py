@@ -672,7 +672,7 @@ def test_config_write_op_machine_name_in_result(
 def test_config_audit_read_op_returns_this_hosts_newest_records(
     isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    from base.host.env.audit import record_env_write
+    from ops.env_audit import record_env_write
 
     machine_identity.set(name="test-machine")
     env_path = isolated_host_home / ".env"

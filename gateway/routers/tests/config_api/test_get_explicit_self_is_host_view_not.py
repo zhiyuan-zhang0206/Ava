@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from base.host.env import audit, runtime_config
+from base.host.env import runtime_config
 from gateway.app import app
 from gateway.routers.tests.test_config_api import REMOTE, _seed_machine
 from gateway.routers.tests.test_config_api import (
@@ -22,6 +22,7 @@ from gateway.routers.tests.test_config_api import (
 from gateway.routers.tests.test_config_api import (
     _stub_browser_capability as _stub_browser_capability,
 )
+from ops import env_audit as audit
 from ops.cluster import rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult
 from tests.fixtures.unit.identity import machine_identity as machine_identity
