@@ -174,10 +174,21 @@ def _value_kind(cls: ast.ClassDef) -> bool:
     )
 
 
+def _rooted_in_instance(node: ast.expr) -> bool:
+    """`self`, `cls` or any attribute / subscript chain that starts at one of them."""
+    while isinstance(node, ast.Attribute | ast.Subscript):
+        node = node.value
+    return isinstance(node, ast.Name) and node.id in {"self", "cls"}
+
+
 def _stores_instance_state(node: ast.Assign | ast.AugAssign | ast.AnnAssign) -> bool:
+    """A write to `self.x` / `cls.x`, or to a subscript of `self` / `cls` (`self.table[k] = v`).
+
+    A subscript write on a local (`update["k"] = v`) changes nothing the instance keeps.
+    """
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
     return any(
-        isinstance(t, ast.Subscript)
+        (isinstance(t, ast.Subscript) and _rooted_in_instance(t))
         or (
             isinstance(t, ast.Attribute)
             and isinstance(t.value, ast.Name)
