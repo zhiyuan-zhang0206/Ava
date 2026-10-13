@@ -10,5 +10,4 @@ exports = ["bringup.py", "cluster_instance.py", "maintenance_stop.py", "maintena
 
 [debt.private-name]
 "tests/test_cluster_instance_bind.py -> cluster_instance.py#_pg_bin" = 4
-"tests/test_home_scoped_state.py -> cluster_instance.py#_pg_template_dir" = 1
 "tests/test_start_data_plane.py -> bringup.py#_ensure_pooler" = 1

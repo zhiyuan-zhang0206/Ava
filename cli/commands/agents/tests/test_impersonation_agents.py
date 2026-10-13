@@ -64,5 +64,5 @@ def test_failed_relay_stub_write_removes_partial_file(
 
     monkeypatch.setattr(cli.os, "fchmod", fail_mode)
     with pytest.raises(OSError, match="cannot secure stub"):
-        cli._write_relay_stub(stub, agent_id=405, session_id=9, token="tok")  # noqa: S106
+        cli.write_relay_stub(stub, agent_id=405, session_id=9, token="tok")  # noqa: S106
     assert not stub.exists()

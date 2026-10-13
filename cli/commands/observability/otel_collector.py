@@ -465,7 +465,7 @@ def lgtm_fanout_bases(*, remote: bool = True, database_factory: DatabaseFactory)
     )
 
 
-def _atomic_write(path: Path, rendered: str) -> None:
+def atomic_write(path: Path, rendered: str) -> None:
     """Replace ``path`` with ``rendered`` atomically (mkstemp + rename)."""
     write_text_atomic(path, rendered, encoding="utf-8", suffix="")
 
@@ -488,7 +488,7 @@ def write_config(path: Path, rendered: str) -> None:
         hashes_path,
         path.name,
         surface="otel-collector",
-        writer=_atomic_write,
+        writer=atomic_write,
     )
     if warning is not None:
         print(f"  ! otel-collector: {warning}", file=sys.stderr)

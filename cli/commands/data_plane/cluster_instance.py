@@ -102,7 +102,7 @@ def pg_data_dir() -> Path:
     return ava_home() / "pg"
 
 
-def _pg_template_dir() -> Path:
+def pg_template_dir() -> Path:
     """Cached `initdb` output, copied so a new instance is a directory copy rather
     than a multi-second init. Kept in the home, beside the data directory it seeds."""
     return ava_home() / "pg-template-17"
@@ -280,7 +280,7 @@ def ensure_pg_data() -> Path:
     data = pg_data_dir()
     if (data / "PG_VERSION").exists():
         return data
-    template = _pg_template_dir()
+    template = pg_template_dir()
     if not (template / "PG_VERSION").exists():
         initdb(template)
     shutil.copytree(template, data)

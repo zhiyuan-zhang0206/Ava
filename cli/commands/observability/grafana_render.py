@@ -31,7 +31,7 @@ def provisioning_dashboard(home: Path) -> Path:
     return home / "lgtm" / "native" / "config" / "provisioning" / "dashboards" / _DASHBOARD_FILE
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def atomic_write(path: Path, content: str) -> None:
     """Write via a unique sibling temp file + replace — a reader never sees a partial
     file, and a failed write leaves the previous file untouched."""
     write_text_atomic(
@@ -121,7 +121,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: Databa
         print("run `ava lgtm render --force` to write the render", file=sys.stderr)
         return 1
 
-    _atomic_write(target, rendered)
+    atomic_write(target, rendered)
     print(
         f"{target}: written ({len(json.loads(rendered)['panels'])} entries, sha256 {_digest(rendered)[:12]})"
     )

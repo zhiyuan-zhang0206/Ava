@@ -63,7 +63,7 @@ def _emit(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, default=_json_value))
 
 
-def _write_relay_stub(
+def write_relay_stub(
     path: Path, *, agent_id: int, session_id: int, token: str, interpreter: str | None = None
 ) -> None:
     """Write the resident-relay credential stub the session plugin consumes once.
@@ -120,7 +120,7 @@ def _print_claude_relay_instructions(response: dict[str, Any], *, agent_id: int)
     stub_path = os.environ.get("AVA_IMPERSONATION_RELAY_STUB")
     token = response.get("relay_token")
     if stub_path and token:
-        _write_relay_stub(
+        write_relay_stub(
             Path(stub_path),
             agent_id=agent_id,
             session_id=int(response["session_id"]),
@@ -288,7 +288,7 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
         local_machine=args.runtime.machine.name(),
     )
     if dsh_stub is not None:
-        _write_relay_stub(
+        write_relay_stub(
             dsh_stub,
             agent_id=args.agent_id,
             session_id=int(response["session_id"]),
