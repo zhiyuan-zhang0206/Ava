@@ -8,10 +8,11 @@ from typing import Any
 
 import pytest
 
-from base.telemetry import DrainStatus, Event, emitter
+from base.telemetry.delivery import reporting
+from base.telemetry.delivery.receipts import DrainStatus, Event
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.otlp import telemetry_otlp_worker as worker_module
-from base.telemetry.otlp.tests.test_telemetry_otlp import _event
+from base.telemetry.tests.otlp.test_telemetry_otlp import _event
 
 
 class _Provider:
@@ -340,7 +341,7 @@ def test_known_sdk_shutdown_failure_is_isolated_but_not_claimed_complete(
         names.append(sink)
 
     monkeypatch.setattr(logs, "shutdown", close)
-    monkeypatch.setattr(emitter, "report_sink_failure", report)
+    monkeypatch.setattr(reporting, "report_sink_failure", report)
     assert backend._ensure()
     assert backend.shutdown().status is DrainStatus.UNFINISHED
     assert backend._worker.finished.is_set()

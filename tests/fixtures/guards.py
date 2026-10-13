@@ -47,7 +47,7 @@ def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the test session hermetic: the OTLP dual-write (base.telemetry ->
     base.telemetry.otlp.telemetry_otlp, default ON since the 2026-08-11 stack decision) would
     otherwise fire real OTLP/HTTP requests at 127.0.0.1:4318 from every
-    event-emitting test. base/telemetry/otlp/tests/test_telemetry_otlp.py re-enables the
+    event-emitting test. base/telemetry/tests/otlp/test_telemetry_otlp.py re-enables the
     flag and installs in-memory providers where the OTLP path is under test.
     """
     module = sys.modules.get("base.config")

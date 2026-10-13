@@ -59,9 +59,15 @@ SINK_FACADES: dict[str, str] = {
         "the loguru event-sink adapter: its sample counter and registered sink handle are read "
         "only by sink registration and the record filter"
     ),
-    "base/telemetry/emitter.py": (
-        "the telemetry event pipeline: its state, failure counters and exit hook are written by "
-        "emitters and read only by the pipeline itself"
+    "base/telemetry/delivery/mirror.py": (
+        "the JSONL mirror's consecutive-failure counter: reported by the mirror writer only"
+    ),
+    "base/telemetry/delivery/reporting.py": (
+        "per-seam failure counters for best-effort reporting: read only by the reporter"
+    ),
+    "base/telemetry/pipeline_build.py": (
+        "the exit hook that stops the bound pipeline and closes its sinks; registered once at "
+        "import because it must run for every process that built a pipeline"
     ),
     "base/telemetry/tracing.py": (
         "the tracer facade: the OTel trace API used through the global tracer provider, plus "

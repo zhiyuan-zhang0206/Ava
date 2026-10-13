@@ -45,7 +45,7 @@ from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
-from base.telemetry.emitter import build_pipeline
+from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base

@@ -11,16 +11,17 @@ from typing import Any
 import pytest
 
 from base import config, paths, telemetry
-from base.telemetry import Event
+from base.telemetry.delivery import loss
+from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.otlp.tests.test_telemetry_otlp import _AGENT, _event, _metrics
-from base.telemetry.otlp.tests.test_telemetry_otlp import (
+from base.telemetry.tests.otlp.test_telemetry_otlp import _AGENT, _event, _metrics
+from base.telemetry.tests.otlp.test_telemetry_otlp import (
     _bind_telemetry as _bind_telemetry,
 )
-from base.telemetry.otlp.tests.test_telemetry_otlp import (
+from base.telemetry.tests.otlp.test_telemetry_otlp import (
     _production_process_by_default as _production_process_by_default,
 )
-from base.telemetry.otlp.tests.test_telemetry_otlp import (
+from base.telemetry.tests.otlp.test_telemetry_otlp import (
     otlp_backend as otlp_backend,
 )
 
@@ -71,7 +72,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
     ) -> None:
         emitted.append((event_name, attributes))
 
-    monkeypatch.setattr(telemetry, "emit", capture_emit)
+    monkeypatch.setattr(telemetry_otlp, "emit", capture_emit)
 
     class _MetricProvider:
         def get_meter(self, _name: str) -> object:
@@ -138,7 +139,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
     ) -> None:
         emitted.append((event_name, attributes))
 
-    monkeypatch.setattr(telemetry, "emit", capture_emit)
+    monkeypatch.setattr(telemetry_otlp, "emit", capture_emit)
 
     backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
     assert backend._ensure() is False
@@ -213,7 +214,7 @@ def test_pipeline_mirror_survives_otlp_failure(
         return backend
 
     monkeypatch.setattr(telemetry_otlp, "OtlpBackend", build_backend)  # pyright: ignore[reportUnknownMemberType]
-    pipeline = telemetry._state["pipeline"]
+    pipeline = telemetry.process_state["pipeline"]
     pipeline._exporter = backend
     telemetry.emit("log", "log", agent_id=_AGENT, attributes={"msg": "boom"})
     telemetry.sync()
@@ -310,7 +311,7 @@ def test_queue_loss_metric_survives_full_log_lane(
 
     mirrors: list[Event] = []
     monkeypatch.setattr(backend, "_queue", FullQueue())
-    monkeypatch.setattr(telemetry, "_append_jsonl", mirrors.extend)
+    monkeypatch.setattr(telemetry_otlp, "append_jsonl", mirrors.extend)
     backend.export_batch([_event(), _event()])
     assert mirrors[0].event_name == "event_log_drop"
     assert mirrors[0].attributes["n"] == 2
@@ -332,8 +333,6 @@ def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
         LogRecordExportResult,
     )
 
-    from base.telemetry import loss
-
     entered, release = threading.Event(), threading.Event()
 
     class BlockedExporter(LogRecordExporter):
@@ -352,7 +351,7 @@ def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
     old_filters = list(sdk_logger.filters)
     loss.install_exporter_drop_observer()
     reports: list[Event] = []
-    monkeypatch.setattr(telemetry, "_append_jsonl", reports.extend)
+    monkeypatch.setattr(loss, "append_jsonl", reports.extend)
     provider = LoggerProvider()
     provider.add_log_record_processor(
         BatchLogRecordProcessor(

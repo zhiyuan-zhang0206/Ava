@@ -77,7 +77,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.log import logger
 from base.paths import traces_dir
-from base.telemetry import report_no_pipeline
+from base.telemetry.delivery.reporting import report_no_pipeline
 from base.telemetry.observability import cluster_label
 from base.telemetry.otlp.telemetry_otlp import (
     COLLECTOR_RETRY_INTERVAL_S,

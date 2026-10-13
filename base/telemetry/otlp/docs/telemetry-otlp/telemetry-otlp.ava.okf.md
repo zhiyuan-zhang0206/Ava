@@ -94,7 +94,7 @@ receiver.
 
 ## Key dependencies
 
-- `base/telemetry/emitter.py` — caller: `_write_batch` runs the OTLP export after
+- `base/telemetry/pipeline_build.py` — caller: `_write_batch` runs the OTLP export after
   the JSONL mirror append; the concrete pipeline closes its own exporter after
   joining the ordinary writer. `_drain_on_exit` observes that same pipeline.
 - OTel SDK (`opentelemetry-*`) — imported lazily inside `_build_providers` /
@@ -115,7 +115,7 @@ receiver.
   with its explicit eligibility callback and owned by `ExportingEventPipeline`;
   no-op when the flag is off; `flush()` / `shutdown()` observe that owner. `telemetry_otlp_worker.OtlpWorker`
   owns the one writer and each partial SDK resource through teardown.
-- `base/telemetry/emitter.py:build_pipeline` — constructs the concrete writer
+- `base/telemetry/pipeline_build.py:build_pipeline` — constructs the concrete writer
   and passes its backend export callback to `_write_batch`.
 - `cli/commands/observability/trace.py:cmd_trace_ship` — `ava trace ship
   [--since/--until] [--dry-run]`

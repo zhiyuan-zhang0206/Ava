@@ -42,6 +42,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from base.telemetry.metrics.logql import validate_logql_template
 from base.telemetry.metrics.plugin_metrics_sql import (
     _DOUBLE_QUOTED_OK,
     _QUOTED_RE,
@@ -441,11 +442,8 @@ def validate_spec_sql(spec: MetricSpec) -> None:
     (render-only, per-agent). PromQL has neither event-stream requirements
     nor template substitutions."""
     if spec.query_type == "logql":
-        # Lazy: logql imports this module (the exception class), so a
-        # module-level from-import here would cycle.
-        from base.telemetry.metrics.logql import validate_spec_logql
-
-        validate_spec_logql(spec)
+        for template in [spec.query, *(spec.targets or [])]:
+            validate_logql_template(template, spec.name, raw_view=spec.panel == "logs")
         return
     if spec.query_type == "promql":
         for template in [spec.query, *(spec.targets or [])]:

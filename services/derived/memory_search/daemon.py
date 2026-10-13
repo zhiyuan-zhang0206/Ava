@@ -35,7 +35,7 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from base.telemetry.delivery.receipts import DrainStatus
-from base.telemetry.emitter import build_pipeline
+from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.derived.memory_indexer.embeddings.factory import get_descriptor
 from services.derived.memory_search.app import build_app

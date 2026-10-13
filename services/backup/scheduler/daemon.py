@@ -42,7 +42,7 @@ from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
-from base.telemetry.emitter import build_pipeline
+from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.backup.dump import _cluster_tz, is_due
 from services.backup.scheduler.operation.staging import OperationBusyError

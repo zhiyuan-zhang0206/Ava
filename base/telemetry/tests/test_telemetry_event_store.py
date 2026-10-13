@@ -13,7 +13,6 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from base import telemetry
 from base.db import Database
 from base.db.connections import NoDatabaseAuthorityError
 from base.telemetry import event_store
@@ -179,7 +178,7 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
     def capture_emit(*_args: object, **kwargs: Any) -> None:
         emitted.append(kwargs["attributes"])
 
-    monkeypatch.setattr(telemetry, "emit", capture_emit)
+    monkeypatch.setattr(event_store, "emit", capture_emit)
     event_store.store_events(database, [_event("llm_usage", marker)])
     event_store.store_events(database, [_event("llm_usage", marker)])  # inside the backoff window
 

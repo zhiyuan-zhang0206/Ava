@@ -16,7 +16,11 @@ from base.cluster import derive
 from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.tests.identity_inputs import allow_identity, deny_identity, machine_identity
+from base.telemetry.tests.otlp.identity_inputs import (
+    allow_identity,
+    deny_identity,
+    machine_identity,
+)
 from base.telemetry.tracing import (
     OtlpJsonHttpSpanExporter,
     initialize_tracing,

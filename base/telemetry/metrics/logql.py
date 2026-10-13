@@ -29,16 +29,15 @@ It also owns the template-building vocabulary every metric definition
 ``EVENT_SELECTOR`` / ``EVENT_NAME_SELECTOR``, ``event_count``,
 ``CATEGORY_MATCH`` and ``CATEGORY_OR_LOG``.
 
-Imports stay one-directional (logql -> plugin_metrics): the
-exception class lives in the registry module and is referenced through the
-module object at call time, so plugin_metrics may import this module
-without a cycle.
+Imports stay one-directional: this module raises the registry's `InvalidMetricQuery` (from
+`plugin_metrics_sql`) and never imports `plugin_metrics`, which calls
+`validate_logql_template` for logql specs.
 """
 
 from __future__ import annotations
 
-import base.telemetry.metrics.plugin_metrics as _plugin_metrics
 from base.telemetry.loki_index_labels import EVENT_STREAM_SERVICE_NAME
+from base.telemetry.metrics.plugin_metrics_sql import InvalidMetricQuery
 
 EVENT_STREAM_MATCHER = f'service_name="{EVENT_STREAM_SERVICE_NAME}"'
 """The event-stream matcher every LogQL template must select on — the OTLP
@@ -76,7 +75,7 @@ def event_count(pipeline: str, window: str, matchers: str | None = None) -> str:
     return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
-def _validate_logql_template(template: str, name: str, *, raw_view: bool = False) -> None:
+def validate_logql_template(template: str, name: str, *, raw_view: bool = False) -> None:
     """Lightweight LogQL template checks (task #1280): the query must select
     the event stream and pipeline ``| json``. event_name/agent_id are promoted
     index labels since the 2026-08-23 cutover, so event-scoped templates match
@@ -92,11 +91,11 @@ def _validate_logql_template(template: str, name: str, *, raw_view: bool = False
     filters level/category/event_name as panel content, not as registry
     metadata — so only the stream-selector and json checks apply."""
     if EVENT_STREAM_MATCHER not in template:
-        raise _plugin_metrics.InvalidMetricQuery(
+        raise InvalidMetricQuery(
             f"metric {name!r} LogQL query must select the event stream {{{EVENT_STREAM_MATCHER}}}"
         )
     if "| json" not in template:
-        raise _plugin_metrics.InvalidMetricQuery(
+        raise InvalidMetricQuery(
             f"metric {name!r} LogQL query must pipeline | json before any "
             "event-field filter (event fields are structured metadata, not "
             "stream labels)"
@@ -106,7 +105,7 @@ def _validate_logql_template(template: str, name: str, *, raw_view: bool = False
     )
     has_event_filter = "event_name=" in template or "category=" in template
     if not has_placeholder and has_event_filter and not raw_view:
-        raise _plugin_metrics.InvalidMetricQuery(
+        raise InvalidMetricQuery(
             f"metric {name!r} LogQL query filters event_name/category without "
             "the {event_name}/{category} placeholders (registry metadata is "
             "the single source of truth)"
@@ -119,19 +118,9 @@ def validate_logql(query: str, name: str) -> None:
     placeholder check does not apply post-render (every placeholder is gone
     by construction); the stream selector and json pipeline must survive."""
     if EVENT_STREAM_MATCHER not in query:
-        raise _plugin_metrics.InvalidMetricQuery(
+        raise InvalidMetricQuery(
             f"metric {name!r} rendered LogQL query lost the event stream "
             f"selector {{{EVENT_STREAM_MATCHER}}}"
         )
     if "| json" not in query:
-        raise _plugin_metrics.InvalidMetricQuery(
-            f"metric {name!r} rendered LogQL query lost the | json pipeline"
-        )
-
-
-def validate_spec_logql(spec: _plugin_metrics.MetricSpec) -> None:
-    """Validate every template of a logql MetricSpec (query + targets) —
-    the dialect branch of ``plugin_metrics.validate_spec_sql``, kept here so
-    this module owns the whole LogQL contract."""
-    for template in [spec.query, *(spec.targets or [])]:
-        _validate_logql_template(template, spec.name, raw_view=spec.panel == "logs")
+        raise InvalidMetricQuery(f"metric {name!r} rendered LogQL query lost the | json pipeline")

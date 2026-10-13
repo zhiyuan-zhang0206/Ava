@@ -15,7 +15,7 @@ import pytest
 
 from base import telemetry
 from base.host import proc
-from base.telemetry import emitter
+from base.telemetry.delivery import reporting
 
 CHILD = Path(__file__).with_name("_emitter_lifecycle_child.py")
 
@@ -168,7 +168,7 @@ def test_worker_failure_reports_immediately_and_never_acknowledges(
     def writer(batch: list[telemetry.Event]) -> None:
         raise failure
 
-    monkeypatch.setattr(emitter, "report_no_pipeline", report)
+    monkeypatch.setattr(reporting, "report_no_pipeline", report)
     pipe = telemetry.EventPipeline(writer=writer, batch_size=100, flush_interval_s=60)
     pipe.enqueue(event(1))
     with pytest.raises(type(failure)) as observed:
@@ -193,10 +193,10 @@ def test_explicit_sink_isolation_preserves_successful_barrier(
     def report(sink: str, _exc: BaseException) -> None:
         reports.append(sink)
 
-    monkeypatch.setattr(emitter, "report_sink_failure", report)
+    monkeypatch.setattr(reporting, "report_sink_failure", report)
 
     def writer(batch: list[telemetry.Event]) -> None:
-        with emitter.failure_isolated("documented exporter"):
+        with reporting.failure_isolated("documented exporter"):
             raise RuntimeError("optional sink failure")
 
     pipe = telemetry.EventPipeline(writer=writer, flush_interval_s=60)
