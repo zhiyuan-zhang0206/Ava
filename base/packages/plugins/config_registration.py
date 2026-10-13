@@ -19,32 +19,13 @@ from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.plugin_errors import (
+    DuplicateRegistration,
+    InvalidConfigData,
+    InvalidConfigOverlay,
+    SchemaDriftError,
+)
 from base.paths.home import resolve_ava_home
-
-
-class PluginConfigError(Exception):
-    """Root of plugin config register / bind failures. Plugin author / CLI use this for coarse catch."""
-
-
-class DuplicateRegistration(PluginConfigError):  # noqa: N818
-    """A plugin's Config is bound twice in one install — a second `bind_plugin_config` for the
-    same plugin."""
-
-
-class SchemaDriftError(PluginConfigError):
-    """Disk image field set inconsistent with plugin Config class — run
-    `ava plugins update` to auto-merge (write defaults for new fields, drop removed)."""
-
-
-class InvalidConfigData(PluginConfigError):  # noqa: N818 — parent already has Error suffix, subclass describes specific scenario
-    """Disk image JSON parse failure / Pydantic validation failure — someone
-    edited a line by hand and broke it; framework does not silently repair,
-    plugin author / user handles it."""
-
-
-class InvalidConfigOverlay(PluginConfigError):  # noqa: N818
-    """A config overlay failed validation; the message says which key and why.
-    Nothing was spawned or queued — fix the dict and call again."""
 
 
 def bind_plugin_config(
@@ -742,3 +723,34 @@ def read_plugin_config[C: BaseModel](plugin: str, cls: type[C], config_path: Pat
     from base.packages.plugins.config_view import with_cluster_policy
 
     return with_cluster_policy(plugin, read_config_image(cls, config_path))
+
+
+def plugin_bootstrap_config() -> str:
+    """Serialize only declared, non-secret cluster policy from plugin authority images."""
+    import json
+
+    from base.config import schema_extra
+    from base.packages.plugins.config_face import declared_config_class
+    from base.packages.plugins.enable_config import discover_plugins
+
+    payload: dict[str, dict[str, object]] = {}
+    for plugin, plugin_dir in sorted(discover_plugins().items()):
+        cls = declared_config_class(plugin, plugin_dir)
+        if cls is None:
+            continue
+        fields: list[str] = []
+        for name, info in cls.model_fields.items():
+            extra = schema_extra(info)
+            if extra.get("scope") not in {
+                "cluster-pinned",
+                "cluster-default",
+            }:
+                continue
+            if extra.get("sensitive"):
+                raise ValueError(f"plugin cluster config {plugin}.{name} may not carry secrets")
+            fields.append(name)
+        if fields:
+            config = read_config_image(cls, disk_image_path(plugin))
+            values = config.model_dump(mode="json")
+            payload[plugin] = {name: values[name] for name in fields}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)

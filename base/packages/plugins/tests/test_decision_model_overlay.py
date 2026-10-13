@@ -9,7 +9,8 @@ import pytest
 
 from base.config import settings
 from base.lm.catalog import ModelCatalog
-from base.packages.plugins.config_registration import InvalidConfigOverlay, validate_config_overlay
+from base.packages.plugins.config_registration import validate_config_overlay
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
 
 def test_the_default_skill_recall_model_is_a_registered_decision_model(

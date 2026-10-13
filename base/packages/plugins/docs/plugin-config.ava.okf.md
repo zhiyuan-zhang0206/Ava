@@ -44,7 +44,7 @@ enabled config declarations; an SDK caller additionally supplies its bound
 image so validation retains its existing base values. Unknown keys, ambiguous
 owners, non-overridable fields and invalid values are rejected before writes.
 
-`config_face.plugin_bootstrap_config` builds the gateway cluster-policy packet
+`config_registration.plugin_bootstrap_config` builds the gateway cluster-policy packet
 from discovered declarations and fresh authority disk images. It includes only
 declared `cluster-pinned` and `cluster-default` fields, rejects sensitive fields,
 and retains strict schema admission. The framework config reader receives that

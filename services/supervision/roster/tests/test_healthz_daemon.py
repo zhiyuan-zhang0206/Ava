@@ -25,7 +25,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe
 from base.daemon.tests.fakes import pin_endpoints
 from base.host.env.health_ports import DEFAULT_PORTS
-from base.packages.plugins.enable_config import update_all_disk_images
+from base.packages.plugin_config_admin import update_all_disk_images
 from services.supervision import roster
 from services.supervision.ava_root_glue import manifests as gen
 from services.supervision.roster.healthz import (

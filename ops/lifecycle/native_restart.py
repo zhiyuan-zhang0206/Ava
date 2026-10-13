@@ -25,7 +25,8 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
-from base.packages.plugins.config_registration import InvalidConfigOverlay, validate_config_overlay
+from base.packages.plugins.config_registration import validate_config_overlay
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from ops.rpc_schemas import RestartAgentRequest
 
 

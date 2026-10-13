@@ -213,10 +213,8 @@ class RestartAgentRequest(BaseModel):
     def _validate_config_overlay(self) -> "RestartAgentRequest":
         if self.config_overlay is None:
             return self
-        from base.packages.plugins.config_registration import (
-            InvalidConfigOverlay,
-            validate_config_overlay_shape,
-        )
+        from base.packages.plugins.config_registration import validate_config_overlay_shape
+        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         try:
             validate_config_overlay_shape(self.config_overlay)

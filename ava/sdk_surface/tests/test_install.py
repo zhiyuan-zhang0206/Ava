@@ -35,7 +35,6 @@ from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.packages.plugin_config_images import PluginConfigChangedError
 from base.packages.plugins import flags, load_report
-from base.packages.plugins.config_registration import DuplicateRegistration
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
@@ -43,6 +42,7 @@ from base.packages.plugins.extensions import (
     SdkNamespace,
     SdkWrap,
 )
+from base.packages.plugins.plugin_errors import DuplicateRegistration
 from base.telemetry import EventPipeline
 
 

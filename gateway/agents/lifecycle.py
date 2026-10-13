@@ -285,10 +285,8 @@ async def post_agent_restart(
     new admission, retaining agent ID and context. Terminated agents require
     resurrection; restart returns already_terminated for them."""
     if body.config_overlay:
-        from base.packages.plugins.config_registration import (
-            InvalidConfigOverlay,
-            validate_config_overlay,
-        )
+        from base.packages.plugins.config_registration import validate_config_overlay
+        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         try:
             validate_config_overlay(

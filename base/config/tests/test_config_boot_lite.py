@@ -101,7 +101,7 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
     two direct-import edges (`agent.db` -> base.db.connections, `agent.graph` ->
     exec._crop)."""
     if existing_images:
-        from base.packages.plugins.enable_config import update_all_disk_images
+        from base.packages.plugin_config_admin import update_all_disk_images
 
         updated = update_all_disk_images()
         assert not any(entry.status == "error" for entry in updated.entries), updated

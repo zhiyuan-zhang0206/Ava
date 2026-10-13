@@ -19,9 +19,7 @@ from base.packages.plugin_config_images import (
     image_digest,
     write_config_image,
 )
-from base.packages.plugins.config_registration import (
-    InvalidConfigOverlay,
-)
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
 
 @pytest.fixture(autouse=True)

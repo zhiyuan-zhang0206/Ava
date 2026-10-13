@@ -21,7 +21,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.host.env import bootstrap
 from base.packages.plugin_providers import build_model_catalog
-from base.packages.plugins.config_face import plugin_bootstrap_config
+from base.packages.plugins.config_registration import plugin_bootstrap_config
 from cli import start_intent, unit_join
 from cli.commands.data_plane import bringup
 from cli.commands.tests import test_single_box as _single_box
