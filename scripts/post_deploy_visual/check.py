@@ -64,7 +64,7 @@ def _health_payload(base_url: str) -> dict[str, object]:
     return payload
 
 
-def _assert_gate_origin(base_url: str) -> None:
+def assert_gate_origin(base_url: str) -> None:
     """Refuse a --base-url that points at the gateway API origin.
 
     The gateway's /api/health answers JSON with ``name == "gateway"``; the
@@ -134,7 +134,7 @@ def _cookie_file(cookie_file: Path) -> Path:
     return cookie_file
 
 
-def _session_precheck(base_url: str, cookie_file: Path) -> None:
+def session_precheck(base_url: str, cookie_file: Path) -> None:
     """Fail fast when the stored session cookie is already dead.
 
     The matrix's control surface exercises the real /api/auth/check, and a
@@ -170,13 +170,13 @@ def _session_precheck(base_url: str, cookie_file: Path) -> None:
         raise RuntimeError(SESSION_REJECTED_DETAIL)
 
 
-def _validate_demo_target(value: str) -> None:
+def validate_demo_target(value: str) -> None:
     parsed = urllib.parse.urlsplit(value)
     if parsed.hostname not in {"127.0.0.1", "localhost"} or parsed.port not in range(3001, 3101):
         raise ValueError("demo target must be a loopback address on port 3001..3100")
 
 
-def _expected_capture_names() -> set[str]:
+def expected_capture_names() -> set[str]:
     names = set()
     for viewport in ("desktop", "narrow"):
         surfaces = ["login-card", "control-header", "control-nav", "home-header", "home-composer"]
@@ -193,7 +193,7 @@ def _expected_capture_names() -> set[str]:
 HARD_EXIT_DELAY_SECONDS = 30
 
 
-def _kill_descendants() -> None:
+def kill_descendants() -> None:
     """Best-effort SIGKILL of the gate's process tree on the hard-exit path.
 
     os._exit skips every finally block, so a wedged playwright driver would
@@ -224,11 +224,11 @@ def _hard_exit(_signum: int, _frame: object) -> None:
         + "\n"
     )
     sys.stderr.flush()
-    _kill_descendants()
+    kill_descendants()
     os._exit(1)
 
 
-def _budget_expired(_signum: int, _frame: object) -> None:
+def budget_expired(_signum: int, _frame: object) -> None:
     # Second stage: the graceful unwind (finally: browser.close()) gets a short
     # grace, then the process hard-exits — the former docker rm --force
     # equivalent, so a wedged playwright driver cannot overrun the contract.
@@ -247,7 +247,7 @@ def _run_browser_pass(
     demo: bool,
 ) -> int:
     """Run the browser pass under the 28-minute budget (30-minute contract)."""
-    previous = signal.signal(signal.SIGALRM, _budget_expired)
+    previous = signal.signal(signal.SIGALRM, budget_expired)
     signal.alarm(VISUAL_PASS_TIMEOUT_SECONDS)
     try:
         return run_browser_gate(
@@ -263,7 +263,7 @@ def _run_browser_pass(
         signal.signal(signal.SIGALRM, previous)
 
 
-def _accept_wave(args: argparse.Namespace) -> int:
+def accept_wave(args: argparse.Namespace) -> int:
     if not args.accepted_by:
         raise ValueError("--accept-wave requires --accepted-by")
     output_root = args.output_root.resolve()
@@ -289,7 +289,7 @@ def _accept_wave(args: argparse.Namespace) -> int:
     golden = output_root / "golden" / wave_id / "captures"
     golden.mkdir(parents=True, exist_ok=True)
     present = {path.name for path in captures.glob("*-current-[12].png")}
-    missing = sorted(_expected_capture_names() - present)
+    missing = sorted(expected_capture_names() - present)
     if missing:
         raise RuntimeError(f"wave is missing {len(missing)} required captures")
     accepted = []
@@ -362,7 +362,7 @@ def _isolated_frontend_preview() -> Generator[Path]:
 def _run_demo_preview(args: argparse.Namespace, preview: Path) -> int:
     port = _find_preview_port()
     host_url = f"http://127.0.0.1:{port}"
-    _validate_demo_target(host_url)
+    validate_demo_target(host_url)
     process = subprocess.Popen(  # noqa: S603 - fixed local preview command
         [
             "npm",
@@ -413,20 +413,20 @@ def _run_demo(args: argparse.Namespace) -> int:
         return _run_demo_preview(args, preview)
 
 
-def _run_host(args: argparse.Namespace) -> int:
+def run_host(args: argparse.Namespace) -> int:
     if args.accept_wave:
-        return _accept_wave(args)
+        return accept_wave(args)
     if args.demo_defect:
         return _run_demo(args)
     if not args.base_url:
         raise ValueError("--base-url is required")
-    _assert_gate_origin(args.base_url)
+    assert_gate_origin(args.base_url)
     cookie_value = inherited_process_env().get("AVA_VISUAL_GATE_COOKIE_FILE")
     if not cookie_value:
         raise ValueError("AVA_VISUAL_GATE_COOKIE_FILE is required")
     cookie_file = _cookie_file(Path(cookie_value).resolve())
     health_base = args.health_url or args.base_url.rstrip("/")
-    _session_precheck(health_base, cookie_file)
+    session_precheck(health_base, cookie_file)
     health = _health_payload(health_base)
     started_at = extract_gateway_started_at(health)
     serving_sha = extract_gateway_sha(health)
@@ -458,7 +458,7 @@ def _run_host(args: argparse.Namespace) -> int:
     )
 
 
-def _parser() -> argparse.ArgumentParser:
+def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url")
     parser.add_argument(
@@ -480,9 +480,9 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    args = parser().parse_args(argv)
     try:
-        return _run_host(args)
+        return run_host(args)
     except (
         KeyError,
         OSError,

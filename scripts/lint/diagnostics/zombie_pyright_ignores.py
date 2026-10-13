@@ -508,7 +508,7 @@ def strip_file(
     path.write_text("".join(lines), encoding="utf-8")
 
 
-def _pyright_errors(path: Path) -> frozenset[tuple[int, str]]:
+def pyright_errors(path: Path) -> frozenset[tuple[int, str]]:
     result = subprocess.run(  # noqa: S603 - fixed repo-local executable, no shell
         [str(_PYRIGHT_PATH), "--outputjson", str(path)],
         cwd=_REPO_ROOT,
@@ -546,7 +546,7 @@ def _pyright_errors(path: Path) -> frozenset[tuple[int, str]]:
 def verify_file(path: Path, candidates: frozenset[PyrightIgnore]) -> Verification:
     if not candidates:
         return Verification(frozenset(), frozenset())  # nothing to certify — skip the Pyright run
-    baseline_errors = _pyright_errors(path)
+    baseline_errors = pyright_errors(path)
     try:
         source = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -569,7 +569,7 @@ def verify_file(path: Path, candidates: frozenset[PyrightIgnore]) -> Verificatio
                 frozenset({candidate}),
                 preserve_line_numbers=True,
             )
-            if _pyright_errors(temporary_path) - baseline_errors:
+            if pyright_errors(temporary_path) - baseline_errors:
                 rejected.add(candidate)
     finally:
         temporary_path.unlink(missing_ok=True)
@@ -608,7 +608,7 @@ def _verify_selected(files: Sequence[str]) -> tuple[dict[str, Verification], Sca
     return results, scan
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument(
@@ -631,7 +631,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _changed_python(only: list[str] | None) -> list[str] | None:
+def changed_python(only: list[str] | None) -> list[str] | None:
     """The `--only` changed `.py` files to check, or None for every tracked file.
 
     The tier configuration the ignores are judged against is an input: editing it
@@ -645,9 +645,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     # `--only FILE...` (the commit hook) checks just the changed files, unless the tier
     # configuration they are judged against changed too.
     arguments, only = lint_common.split_only(list(sys.argv[1:] if argv is None else argv))
-    args = _build_parser().parse_args(arguments)
+    args = build_parser().parse_args(arguments)
     if args.all_tier and args.strip is None:
-        _build_parser().error("--all-tier requires --strip")
+        build_parser().error("--all-tier requires --strip")
 
     if args.verify is not None:
         verification, scan = _verify_selected(cast(list[str], args.verify))
@@ -682,7 +682,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
-    scan = classify_ignores(scan_repository(files=_changed_python(only)), _TIER_CONFIG)
+    scan = classify_ignores(scan_repository(files=changed_python(only)), _TIER_CONFIG)
     return check_scan(scan)
 
 

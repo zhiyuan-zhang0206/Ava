@@ -13,12 +13,12 @@ from pathlib import Path
 import pytest
 
 from scripts.lint.agent_docstrings import (
-    _SKILL_REF_RE,
-    _discover_agent_surface_modules,
-    _docstring_violations,
-    _is_in_scope,
-    _module_doc_child_reference_violations,
-    _top_level_surface,
+    SKILL_REF_RE,
+    discover_agent_surface_modules,
+    docstring_violations,
+    is_in_scope,
+    module_doc_child_reference_violations,
+    top_level_surface,
 )
 
 
@@ -29,7 +29,7 @@ def _parse(source: str) -> tuple[ast.Module, list[str]]:
 
 def _module_violations(source: str) -> list[str]:
     tree, lines = _parse(source)
-    return [reason for _, reason in _module_doc_child_reference_violations(tree, lines)]
+    return [reason for _, reason in module_doc_child_reference_violations(tree, lines)]
 
 
 # ── module docstring restating its own children ─────────────────────────────
@@ -96,7 +96,7 @@ def test_function_docstring_may_reference_siblings() -> None:
             """A prebuilt watcher; see `launch`."""
         '''
     )
-    assert _module_doc_child_reference_violations(tree, lines) == []
+    assert module_doc_child_reference_violations(tree, lines) == []
 
 
 # ── SDK<->skill coupling keyword ─────────────────────────────────────────────
@@ -104,11 +104,11 @@ def test_function_docstring_may_reference_siblings() -> None:
 
 def _function_violations(source: str, *, with_skill_rule: bool) -> list[str]:
     tree, lines = _parse(source)
-    extra = [(_SKILL_REF_RE, "SDK<->skill coupling")] if with_skill_rule else []
+    extra = [(SKILL_REF_RE, "SDK<->skill coupling")] if with_skill_rule else []
     out: list[str] = []
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
-            out.extend(r for _, r in _docstring_violations(node, lines, extra=extra))
+            out.extend(r for _, r in docstring_violations(node, lines, extra=extra))
     return out
 
 
@@ -232,7 +232,7 @@ def test_discover_agent_surface_modules(tmp_path: Path) -> None:
         """,
     )
 
-    surface = _discover_agent_surface_modules(tmp_path)
+    surface = discover_agent_surface_modules(tmp_path)
 
     expected = {
         (ava_dir / "__init__.py").resolve(),
@@ -249,7 +249,7 @@ def test_top_level_surface_raises_without_marker(tmp_path: Path) -> None:
     _write(tmp_path / "ava" / "__init__.py", '"""No marker declared here."""\n')
 
     with pytest.raises(ValueError):
-        _top_level_surface(tmp_path)
+        top_level_surface(tmp_path)
 
 
 def test_is_in_scope_consults_provided_surface_set(
@@ -258,8 +258,8 @@ def test_is_in_scope_consults_provided_surface_set(
     monkeypatch.chdir(tmp_path)
     surface = {(tmp_path / "ava" / "files.py").resolve()}
 
-    assert _is_in_scope(Path("ava/files.py"), set(), surface) is True
-    assert _is_in_scope(Path("ava/framework_core.py"), set(), surface) is False
+    assert is_in_scope(Path("ava/files.py"), set(), surface) is True
+    assert is_in_scope(Path("ava/framework_core.py"), set(), surface) is False
 
 
 def test_is_in_scope_plugin_paths_unchanged(
@@ -271,16 +271,15 @@ def test_is_in_scope_plugin_paths_unchanged(
 
     # plugin.py itself is always scanned (dev-facing wrap-target check).
     assert (
-        _is_in_scope(Path("ava_builtins/plugins/x/plugin.py"), plugin_namespace_files, set())
-        is True
+        is_in_scope(Path("ava_builtins/plugins/x/plugin.py"), plugin_namespace_files, set()) is True
     )
     # A helper bound to a namespace -> in scope.
     assert (
-        _is_in_scope(Path("ava_builtins/plugins/x/_walk.py"), plugin_namespace_files, set()) is True
+        is_in_scope(Path("ava_builtins/plugins/x/_walk.py"), plugin_namespace_files, set()) is True
     )
     # A helper NOT bound to any namespace -> out of scope.
     assert (
-        _is_in_scope(Path("ava_builtins/plugins/x/other_helper.py"), plugin_namespace_files, set())
+        is_in_scope(Path("ava_builtins/plugins/x/other_helper.py"), plugin_namespace_files, set())
         is False
     )
 
@@ -294,7 +293,7 @@ def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> No
     # under the new rule too — a public name is not by itself agent-visible.
     repo_root = Path(__file__).resolve().parents[3]
 
-    surface = _discover_agent_surface_modules(repo_root)
+    surface = discover_agent_surface_modules(repo_root)
 
     assert (repo_root / "ava/agents/__init__.py").resolve() in surface
     assert (repo_root / "ava/shell/__init__.py").resolve() in surface

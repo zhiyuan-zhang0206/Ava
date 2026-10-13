@@ -23,7 +23,7 @@ Classes (each patch point lands in exactly one):
   separately as `deep`).
 - **D violation**: a private name (leading underscore attribute, or a private module
   segment) whose owning package does not contain the test's home. The owner is resolved as
-  Rule 4 resolves it (`locality._private_target`): the package that owns the first private
+  Rule 4 resolves it (`locality.private_target`): the package that owns the first private
   component. The relation of the home to the owner is one of `ancestor` (the home is a strict
   ancestor: the test spans several packages and reaches into one of them), `other-unit`,
   `sibling` (same unit, another lineage) or `top-level` (a test with no package home).
@@ -273,11 +273,11 @@ class Classifier:
     def _private(self, dotted: str, module: str) -> tuple[str, str] | None:
         """(private target, owning package directory) of the first private component.
 
-        Rule 4's owner (`locality._private_target`) for a private module or package segment.
+        Rule 4's owner (`locality.private_target`) for a private module or package segment.
         A private attribute past the module boundary (`mod.Class._name`, `mod._name`) belongs
         to the package of the module that defines it.
         """
-        found = locality._private_target(dotted, CODE_TOPS, self.index.repo_root)
+        found = locality.private_target(dotted, CODE_TOPS, self.index.repo_root)
         if found is None:
             return None
         target, owner = found

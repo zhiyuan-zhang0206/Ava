@@ -273,7 +273,7 @@ def test_plugin_sync_rewrites_drift_and_is_idempotent(
     )
     monkeypatch.setattr(
         pricing_updater,
-        "_now_utc",
+        "now_utc",
         lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
 
@@ -291,9 +291,9 @@ def test_plugin_sync_rewrites_drift_and_is_idempotent(
     assert rewritten.count("PriceTier(") == 3
     assert rewritten.count("PriceWindow(") == 1
 
-    manifest = plugin_price_sync._provider_manifest(rewritten, provider_path)
+    manifest = plugin_price_sync.provider_manifest(rewritten, provider_path)
     archive_entry = json.loads(archive_path.read_text())["models"]["fixture-model"]
-    target, _upcoming = plugin_price_sync._archive_price(
+    target, _upcoming = plugin_price_sync.archive_price(
         "fixture-model", archive_entry, datetime(2026, 9, 5, tzinfo=UTC)
     )
     assert manifest.prices["fixture-model"] == target
@@ -314,7 +314,7 @@ def test_plugin_sync_leaves_full_matching_provider_byte_identical(
     )
     monkeypatch.setattr(
         pricing_updater,
-        "_now_utc",
+        "now_utc",
         lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
     pricing_updater.sync_plugin_rates(archive_path, repo_root)
@@ -336,7 +336,7 @@ def test_plugin_sync_check_exit_status_tracks_drift(
     )
     monkeypatch.setattr(
         pricing_updater,
-        "_now_utc",
+        "now_utc",
         lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
     args = [
@@ -366,7 +366,7 @@ def test_plugin_sync_reports_future_effective_window(
     )
     monkeypatch.setattr(
         pricing_updater,
-        "_now_utc",
+        "now_utc",
         lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
 
@@ -400,7 +400,7 @@ def test_plugin_sync_check_reports_a_wrong_window_period(
     )
     monkeypatch.setattr(
         pricing_updater,
-        "_now_utc",
+        "now_utc",
         lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
     pricing_updater.sync_plugin_rates(archive_path, repo_root)
