@@ -166,9 +166,12 @@ def launched_imports_share_boot() -> None:
     os.environ["AVA_AGENT_ID"] = "7123"
     import ava
     from ava.agents import spawn
-    from ava.memory import search  # pyright: ignore[reportMissingImports]
     from ava.sdk_surface.installation import installed
-    from ava.tasks import create  # pyright: ignore[reportMissingImports]
+
+    # `ava.memory` and `ava.tasks` are plugin namespaces installed at run time, with no module
+    # file to import statically; this probe is the check that the installed names resolve.
+    create = importlib.import_module("ava.tasks").create
+    search = importlib.import_module("ava.memory").search
 
     assert "label" in inspect.signature(spawn).parameters
     assert spawn is ava.agents.spawn

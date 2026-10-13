@@ -254,3 +254,18 @@ def test_commands_run_from_the_cwd_when_no_repo_is_given(
     root = make_repo({**SOURCES, **MANIFESTS})
     monkeypatch.chdir(root)
     assert main(["--jobs", "1", *command]) == 0
+
+
+def test_bootstrap_carries_the_root_roles_into_its_mirror(
+    make_repo: RepoFactory, tmp_path: Path
+) -> None:
+    roles = '[roles]\napplication = ["app", "pkg"]\n'
+    root = make_repo({**SOURCES, "meizel.toml": roles})
+    out = tmp_path / "out"
+    assert run(root, "bootstrap", "--out", str(out)) == 0
+    mirrored = (out / "meizel.toml").read_text()
+    assert mirrored == '[uses]\n"app" = ["pkg"]\n\n[roles]\napplication = ["app", "pkg"]\n'
+    shutil.copy(out / "meizel.toml", root / "meizel.toml")
+    shutil.copy(out / "pkg/meizel.toml", root / "pkg/meizel.toml")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)  # noqa: S603 - fixed argv
+    assert verdict(root) == set()

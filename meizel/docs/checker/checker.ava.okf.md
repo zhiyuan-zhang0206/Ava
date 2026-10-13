@@ -47,7 +47,7 @@ python -m meizel roles list <role>... | check | write
   needs, repeating until nothing stale remains. Comments outside the edited
   lists survive; an emptied manifest is deleted. Adding an edge is a manual edit.
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
-  the current fact edges (carrying `[loads]`, `[external]` and `[debt]`), plus
+  the current fact edges (keeping every non-edge table), plus
   `DIR/report.json`: edge counts, transitive-reduction sizes, strongly connected
   components with a shortest cycle and a witness fact per edge, cycles that need
   test files, exports blocked by underscore children, and violation counts by

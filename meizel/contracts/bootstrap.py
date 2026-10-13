@@ -32,6 +32,7 @@ def render_manifest(
     loads: dict[str, tuple[str, ...]],
     external: dict[str, str],
     debt: DebtTable | None = None,
+    roles: dict[str, tuple[str, ...]] | None = None,
 ) -> str:
     def listing(items: list[str]) -> str:
         return "[" + ", ".join(f'"{item}"' for item in items) + "]"
@@ -48,6 +49,9 @@ def render_manifest(
     if external:
         rows = "\n".join(f'"{src}" = {json.dumps(external[src])}' for src in sorted(external))
         blocks.append(f"[external]\n{rows}")
+    if roles:
+        rows = "\n".join(f"{role} = {listing(list(names))}" for role, names in roles.items())
+        blocks.append(f"[roles]\n{rows}")
     if debt:
         blocks.append(render_debt(debt).rstrip("\n"))
     return "\n\n".join(blocks) + "\n"
@@ -170,9 +174,10 @@ def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
     carried = {d: m.loads for d, m in analysis.manifests.items() if m.loads}
     externals = {d: m.external for d, m in analysis.manifests.items() if m.external}
     debts = {d: m.debt for d, m in analysis.manifests.items() if m.debt}
+    roles = {d: m.roles for d, m in analysis.manifests.items() if m.roles}
     written = 0
     for directory in sorted(
-        set(grouped) | set(exports) | set(carried) | set(externals) | set(debts)
+        set(grouped) | set(exports) | set(carried) | set(externals) | set(debts) | set(roles)
     ):
         uses: dict[str, set[str]] = defaultdict(set)
         for cf, ct in grouped.get(directory, {}):
@@ -186,6 +191,7 @@ def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
                 carried.get(directory, {}),
                 externals.get(directory, {}),
                 debts.get(directory),
+                roles.get(directory),
             ),
             encoding="utf-8",
         )
