@@ -288,8 +288,8 @@ async def test_llm_node_validator_wired(
 
     from agent.graph.llm._retry import Attempt
     from agent.graph.llm.node import llm_attempt
+    from agent.hooks.tests.fakes import make_fake_ops_pool
     from agent.state import AgentState
-    from agent.tests._fakes import make_fake_ops_pool
     from base.agents.context import AvaContext
 
     async def _truncated_stream() -> AsyncIterator[AIMessageChunk]:

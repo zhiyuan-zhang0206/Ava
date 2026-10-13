@@ -27,7 +27,6 @@
     "test_commands_cluster_status_lifecycle.py",
     "identity/test_commands_restart_stop.py",
     "test_commands_status.py",
-    "test_hold_report.py",
     "test_remote_data_plane.py",
     "test_rollout_robustness.py",
     "test_start_data_plane.py",

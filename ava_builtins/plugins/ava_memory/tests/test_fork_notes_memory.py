@@ -19,11 +19,11 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.node import claim_node
+from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
+from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.graph.prompt.context_notes import FRAMEWORK_NOTES
-from agent.graph.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.messages import NoteTag
 from agent.state import AgentState
-from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
 from ava.boot import process_clients
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity

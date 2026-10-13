@@ -72,7 +72,7 @@ def _state(messages: list[AnyMessage], **fields: Any):
 def _runtime(*, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     # The hooks ignore runtime/config; a placeholder context satisfies the
     # AvaContext invariant.
-    from agent.tests._fakes import placeholder_runtime
+    from agent.hooks.tests.fakes import placeholder_runtime
 
     return placeholder_runtime(database_gate=database_gate)
 
@@ -81,7 +81,7 @@ def _runtime_for_runner(*, database_gate: ProcessDbGate) -> Runtime[AvaContext]:
     """Runtime for tests that drive a real make_hook_runner — its node_lifecycle
     wrapper publishes a timeline snapshot through ops_pool, so a DB-shaped fake
     pool (not a bare MagicMock) is needed."""
-    from agent.tests._fakes import make_fake_ops_pool, placeholder_runtime
+    from agent.hooks.tests.fakes import make_fake_ops_pool, placeholder_runtime
 
     return placeholder_runtime(make_fake_ops_pool(), database_gate=database_gate)
 

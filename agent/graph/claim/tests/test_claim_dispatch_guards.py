@@ -8,13 +8,13 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim import node
 from agent.graph.claim.node import claim_node
-from agent.state import AgentState
-from agent.tests.claim.claim_support import (
+from agent.graph.claim.tests.claim_support import (
     await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
     thread_config,
 )
+from agent.state import AgentState
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.agents.tests.units import spawn_agent

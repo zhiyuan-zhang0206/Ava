@@ -16,9 +16,9 @@ from langgraph.types import Command
 
 from agent.graph import LlmLedger, llm_node
 from agent.hooks import understanding_chunks as uc
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from agent.state_channels import CompactState
-from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock

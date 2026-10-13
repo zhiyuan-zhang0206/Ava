@@ -14,7 +14,7 @@ from base.telemetry import station_endpoint
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import _render_real_template
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.wake.heartbeat import station_probe
 from tests.path_scoped.cli_tests import operator_database as operator_database
 

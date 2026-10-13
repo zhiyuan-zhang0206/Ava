@@ -27,7 +27,7 @@ from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.cli_tests import operator_database as operator_database

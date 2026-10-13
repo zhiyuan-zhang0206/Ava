@@ -13,7 +13,7 @@ from base.config import ConfigBoot
 from base.host.system import logs_job as job
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

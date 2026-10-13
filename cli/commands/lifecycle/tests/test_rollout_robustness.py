@@ -40,7 +40,7 @@ from base.events.live.bus import EventBus
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause
 from ops.cluster_status import pause
 from tests.factories.maintenance import WHEN, maintenance_agent

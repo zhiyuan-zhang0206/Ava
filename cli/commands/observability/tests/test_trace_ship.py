@@ -22,7 +22,7 @@ from cli.commands.observability.trace import (
     post_line,
 )
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 def test_load_watermark_drops_entries_for_missing_files(

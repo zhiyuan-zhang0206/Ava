@@ -22,15 +22,13 @@ Coverage (cancel/timeout behavior inside nodes):
 """
 
 import asyncio
-from collections.abc import AsyncIterator
 from typing import cast
 from unittest.mock import MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
@@ -43,268 +41,27 @@ from agent.graph.exec.node import (
     ExecTimedOut,
     exec_node,
 )
-from agent.graph.llm.node import llm_node
-from agent.graph.llm_errors import LlmLedger
+from agent.graph.exec.tests.cancel_fixture import (
+    ai_with_code,
+    has_cancelled_event,
+    make_runtime,
+)
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
-from base.agents.context import AvaContext
-from base.clock import Clock
 
 # Most tests here drive exec_node/llm_node with mocked run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.
-from base.config import settings
-from base.db import Database, create_agent
+from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
-from base.events.live.projection import EVENT_ADAPTER, Cancelled
-from base.host.env.agent_slices import AgentSlices
+from base.events.live.projection import EVENT_ADAPTER
 from base.native_process.turn_identity import HostedTurnResources
-from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
-
-def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
-    """assert helper: whether pub.emit calls contain Cancelled(agent_id=...)."""
-    for call in pub.emit.call_args_list:
-        (payload,) = call.args
-        try:
-            ev = EVENT_ADAPTER.validate_json(payload)
-        except Exception:  # noqa: S112 — skip payloads outside the events union
-            continue
-        if isinstance(ev, Cancelled) and ev.agent_id == agent_id:
-            return True
-    return False
-
-
-def _make_runtime(
-    hosted_resources: HostedTurnResources,
-    *,
-    llm=None,
-    ops_pool=None,
-    event_publisher=None,
-    database_gate: ProcessDbGate,
-) -> Runtime[AvaContext]:
-    """Test helper: assemble an AvaContext and wrap it in Runtime."""
-    if llm is None:
-        llm = MagicMock()
-    if isinstance(llm, MagicMock):
-        llm.bind_tools.return_value = llm
-    if ops_pool is None:
-        ops_pool = make_fake_ops_pool()
-    ctx = AvaContext(
-        hosted_resources=hosted_resources,
-        ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
-        llm=llm,  # pyright: ignore[reportUnknownArgumentType]
-        event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        catalog=build_model_catalog(),
-        clock_factory=Clock.from_settings,
-    )
-    return Runtime(context=ctx)
-
-
-def _ai_with_code(code: str) -> AIMessage:
-    """Single tool wire format: AIMessage with execute_code tool_call."""
-    return AIMessage(
-        content="",
-        tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call_test"}],
-    )
-
-
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
-
-
-async def _set_after(ev: asyncio.Event, delay: float) -> None:
-    """Helper: set event after `delay` seconds — used as a cancel_event trigger."""
-    await asyncio.sleep(delay)
-    ev.set()
 
 
 # ---------------------------------------------------------------------------
 # llm_node cancel_event race paths
 # ---------------------------------------------------------------------------
-
-
-def _committed_messages(update: dict) -> list:
-    """The cancel discard path must not commit any message — extract the messages
-    from update (missing key or empty list counts as "not committed")."""
-    return update.get("messages", [])  # pyright: ignore[reportUnknownMemberType]
-
-
-async def test_llm_node_cancel_event_race_discards_partial(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
-) -> None:
-    """cancel_event set during LLM stream → llm_node detects it via asyncio.wait
-    race → discards the entire partial generation: Command(halted=True,
-    goto=after_exec) commits no messages (generation has no side effects,
-    nothing to retain)."""
-
-    async def _stream_then_hang():
-        yield AIMessageChunk(content="par")
-        yield AIMessageChunk(content="tial code")
-        await asyncio.Future()
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_then_hang()
-    pub = MagicMock()
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.1))
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-        llm=fake_llm,
-        event_publisher=pub,
-        database_gate=database_gate,
-    )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
-    await trigger
-
-    assert isinstance(result, Command)
-    assert result.goto == "after_exec"
-    update = result.update
-    assert update is not None
-    assert update["halted"] is True
-    # Clean discard: no partial AIMessage, no marker
-    assert _committed_messages(update) == []
-    assert _has_cancelled_event(pub, agent_id=7)
-
-
-async def test_llm_node_cancel_event_race_discards_partial_tool_call(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
-) -> None:
-    """cancel arrives mid tool_call stream → partial AIMessage is entirely
-    discarded, so **no** tool_result debt is incurred: because no complete
-    AIMessage with tool_use is committed, history has no "assistant.tool_calls
-    must be followed by ToolMessage" protocol debt.
-
-    This is the exact opposite of exec cancel (there tool_use is already
-    committed, exec_node must supply a [cancelled by user] tool_result).
-    """
-
-    async def _stream_tool_call_then_hang():
-        yield AIMessageChunk(content=[{"type": "text", "text": "I'll run that.", "index": 0}])
-        yield AIMessageChunk(
-            content=[
-                {
-                    "type": "tool_use",
-                    "id": "call_cancelled",
-                    "name": "execute_code",
-                    "input": {},
-                    "index": 1,
-                }
-            ],
-            tool_call_chunks=[
-                {"name": "execute_code", "args": "", "id": "call_cancelled", "index": 1},
-            ],
-        )
-        yield AIMessageChunk(
-            content=[],
-            tool_call_chunks=[
-                {"name": None, "args": '{"code": "print(1)', "id": None, "index": 1},
-            ],
-        )
-        await asyncio.Future()
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_tool_call_then_hang()
-    pub = MagicMock()
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.1))
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-        llm=fake_llm,
-        event_publisher=pub,
-        database_gate=database_gate,
-    )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
-    await trigger
-
-    assert isinstance(result, Command)
-    assert result.goto == "after_exec"
-    update = result.update
-    assert update is not None
-    assert update["halted"] is True
-    # Entirely discarded: neither partial AIMessage nor supplemental tool_result
-    assert _committed_messages(update) == []
-    assert _has_cancelled_event(pub, agent_id=7)
-
-
-async def test_llm_node_cancel_event_race_no_partial_returns_halted(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
-) -> None:
-    """cancel_event set before LLM emits anything → llm_node returns Command(halted=True,
-    goto=after_exec) without committing any message; does not raise CancelledError
-    (which is BaseException and would silently exit the process via asyncio.run)."""
-
-    async def _hang_immediately():
-        await asyncio.Future()
-        yield  # pragma: no cover
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _hang_immediately()
-    pub = MagicMock()
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    trigger = asyncio.create_task(_set_after(fake_cancel_event, 0.05))
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources,
-        llm=fake_llm,
-        event_publisher=pub,
-        database_gate=database_gate,
-    )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
-    await trigger
-    assert _has_cancelled_event(pub, agent_id=7)
-
-    assert isinstance(result, Command)
-    assert result.goto == "after_exec"
-    assert result.update is not None
-    assert result.update["halted"] is True
-    assert _committed_messages(result.update) == []
-
-
-async def test_llm_node_cancel_event_race_normal_completion(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
-) -> None:
-    """cancel_event not set, LLM stream completes normally → llm_node returns
-    Command(goto=before_exec)."""
-
-    async def _fast_stream() -> AsyncIterator[AIMessageChunk]:
-        # tool_use must have non-empty tool_calls (validator enforces "protocol consistency"
-        # to prevent recurrence of 169)
-        yield AIMessageChunk(
-            content="print('hi')",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            tool_call_chunks=[
-                {"name": "execute_code", "args": '{"code": "x"}', "id": "call_1", "index": 0},
-            ],
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _fast_stream()
-    state = AgentState(messages=[HumanMessage(content="go")], halted=False)
-
-    runtime = _make_runtime(
-        hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate
-    )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
-
-    assert isinstance(result, Command)
-    assert result.update["messages"][0].content == "print('hi')"  # pyright: ignore[reportUnknownMemberType]
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +108,8 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
 
     monkeypatch.setattr(node, "run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
     result = await exec_node(
-        AgentState(messages=[_ai_with_code("pass")], halted=False),
-        _make_runtime(
+        AgentState(messages=[ai_with_code("pass")], halted=False),
+        make_runtime(
             hosted_resources=hosted_resources, ops_pool=aops_pool, database_gate=database_gate
         ),
         {"configurable": {"thread_id": str(agent_id)}},
@@ -386,9 +143,9 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     monkeypatch.setattr(node, "run_in_subprocess", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
 
     pub = MagicMock()
-    state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
+    state = AgentState(messages=[ai_with_code('print("x")')], halted=False)
 
-    runtime = _make_runtime(
+    runtime = make_runtime(
         hosted_resources=hosted_resources, event_publisher=pub, database_gate=database_gate
     )
     result = await exec_node(state, runtime, _CONFIG)
@@ -403,7 +160,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     assert "[cancelled by user]" in content
     assert "partial work" in content
     assert update["halted"] is True
-    assert _has_cancelled_event(pub, agent_id=7)
+    assert has_cancelled_event(pub, agent_id=7)
 
 
 async def test_exec_node_cancel_event_race_normal_completion(
@@ -422,9 +179,9 @@ async def test_exec_node_cancel_event_race_normal_completion(
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
 
-    state = AgentState(messages=[_ai_with_code('print("hello")')], halted=False)
+    state = AgentState(messages=[ai_with_code('print("hello")')], halted=False)
 
-    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
+    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert isinstance(result, Command)
@@ -463,9 +220,9 @@ async def test_exec_node_timeout_path(
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
 
-    state = AgentState(messages=[_ai_with_code('print("long task")')], halted=False)
+    state = AgentState(messages=[ai_with_code('print("long task")')], halted=False)
 
-    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
+    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert isinstance(result, Command)
@@ -495,9 +252,9 @@ async def test_exec_node_timeout_empty_output(
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
 
-    state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
+    state = AgentState(messages=[ai_with_code('print("x")')], halted=False)
 
-    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
+    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     msg = result.update["messages"][0]
@@ -616,8 +373,8 @@ async def test_exec_node_dispatch_system_halt(
 
     emitter = MagicMock()
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
-    state = AgentState(messages=[_ai_with_code('ava.self.compact("s")')], halted=False)
-    runtime = _make_runtime(
+    state = AgentState(messages=[ai_with_code('ava.self.compact("s")')], halted=False)
+    runtime = make_runtime(
         hosted_resources=hosted_resources, event_publisher=emitter, database_gate=database_gate
     )
     result = await exec_node(state, runtime, _CONFIG)
@@ -648,8 +405,8 @@ async def test_exec_node_dispatch_agent_termination(
         return (ExecLifecycle(output="", exc=AgentTermination()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
-    state = AgentState(messages=[_ai_with_code("ava.self.terminate()")], halted=False)
-    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
+    state = AgentState(messages=[ai_with_code("ava.self.terminate()")], halted=False)
+    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
@@ -675,8 +432,8 @@ async def test_exec_node_dispatch_agent_restart(
         return (ExecLifecycle(output="", exc=AgentRestart()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
-    state = AgentState(messages=[_ai_with_code("ava.self.restart()")], halted=False)
-    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
+    state = AgentState(messages=[ai_with_code("ava.self.restart()")], halted=False)
+    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is True
@@ -704,8 +461,8 @@ async def test_exec_node_dispatch_ordinary_exception(
         )
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
-    state = AgentState(messages=[_ai_with_code('raise ValueError("boom")')], halted=False)
-    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
+    state = AgentState(messages=[ai_with_code('raise ValueError("boom")')], halted=False)
+    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
     result = await exec_node(state, runtime, _CONFIG)
 
     assert result.update["halted"] is False
@@ -738,8 +495,8 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
         return (ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
 
     monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
-    state = AgentState(messages=[_ai_with_code("...")], halted=False)
-    runtime = _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
+    state = AgentState(messages=[ai_with_code("...")], halted=False)
+    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
 
     with pytest.raises(TypeError, match="Unrecognized LifecycleExit subclass"):
         await exec_node(state, runtime, _CONFIG)

@@ -154,7 +154,7 @@ def start_once(
             require_initialized(home)
             _enter_home(home)
             from base.telemetry.process_logging import init_cli_process
-            from cli.main import init_cli_logging
+            from cli.startup_support import init_cli_logging
 
             def initialize(name: str) -> None:
                 init_cli_process(
@@ -184,7 +184,7 @@ def start_once(
         from pydantic import ValidationError
 
         if isinstance(exc, ValidationError):
-            from cli.main import print_settings_load_failure
+            from cli.startup_support import print_settings_load_failure
 
             return print_settings_load_failure(exc)
         print(f"ava start: {exc}", file=sys.stderr)

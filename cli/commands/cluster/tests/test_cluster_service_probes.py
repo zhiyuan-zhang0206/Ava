@@ -20,7 +20,7 @@ from cli.commands.cluster.tests.health_probe_inputs import (
 from cli.commands.cluster.tests.health_probe_inputs import ran as ran
 from cli.commands.cluster.tests.health_probe_inputs import signals as signals
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 def test_service_probes_skips_gated_but_rejects_unknown_specs(

@@ -7,7 +7,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_machine as command_machine
 from services.supervision.roster import spec
 
 

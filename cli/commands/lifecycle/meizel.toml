@@ -8,7 +8,7 @@ exports = ["converge_host.py", "hold_report.py", "lgtm_toggle.py", "migrations.p
 "start.py" = ["_pause_resume.py", "_start_bookmarks.py", "converge_host.py", "login_link.py", "migrations.py", "root_driver.py", "status.py"]
 "status.py" = ["hold_report.py", "root_driver.py"]
 "stop.py" = ["_pause_resume.py", "_start_readiness_preflight.py", "_temporary_stop.py", "root_driver.py", "service_stop.py", "start.py"]
-"tests" = ["_pause_resume.py", "_start_readiness_preflight.py", "_stop_extras.py", "_temporary_stop.py", "converge_host.py", "hold_report.py", "lgtm_toggle.py", "login_link.py", "migrations.py", "root_driver.py", "service_stop.py", "start.py", "start_generation.py", "status.py", "stop.py"]
+"tests" = ["_pause_resume.py", "_start_readiness_preflight.py", "_stop_extras.py", "_temporary_stop.py", "converge_host.py", "lgtm_toggle.py", "login_link.py", "migrations.py", "root_driver.py", "service_stop.py", "start.py", "start_generation.py", "status.py", "stop.py"]
 
 [debt.private-name]
 "_start_readiness_preflight.py -> root_driver.py#_root_tree_roster" = 1

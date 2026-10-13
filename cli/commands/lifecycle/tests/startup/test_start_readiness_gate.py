@@ -24,7 +24,7 @@ from cli import start_runtime
 from cli.commands.lifecycle import converge_host, start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline

@@ -32,8 +32,8 @@ from agent.graph.llm_errors import (
     LlmLedger,
     LLMStreamStallTimeoutError,
 )
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from agent.tests._fakes import make_fake_ops_pool
 from base import config
 from base.agents.context import AvaContext
 from base.clock import Clock

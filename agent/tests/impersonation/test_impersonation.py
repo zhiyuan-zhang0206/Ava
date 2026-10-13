@@ -20,8 +20,8 @@ from agent import impersonation, impersonation_handoff, impersonation_process
 from agent.extensions import plugin_state_codec
 from agent.graph.exec._result import lifecycle_exception_from_name
 from agent.graph.exec.protocol import read_request, write_request
+from agent.hooks.tests.fakes import placeholder_runtime
 from agent.state import BaseAgentState
-from agent.tests._fakes import placeholder_runtime
 from base.agents.context import AvaContext
 from base.agents.impersonation import relay
 from base.agents.impersonation.notes import HandoffNotes

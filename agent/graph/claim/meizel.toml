@@ -1,4 +1,4 @@
-exports = ["node.py"]
+exports = ["node.py", "tests"]
 
 [uses]
 "_decide.py" = ["_batch.py", "_dispatch.py", "_routing.py"]

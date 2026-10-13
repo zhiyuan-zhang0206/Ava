@@ -7,10 +7,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
+from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.graph.hooks.compact import compose_summary_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import committed_publishes, compact_tail
-from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority

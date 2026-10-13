@@ -21,8 +21,8 @@ from agent.graph.exec.node import _exec_node_impl
 from agent.graph.hooks.framework import framework_hooks
 from agent.graph.interrupt import InterruptEvent
 from agent.hooks.security import deliver_security_findings
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState, build_agent_state
-from agent.tests._fakes import make_fake_ops_pool
 from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity

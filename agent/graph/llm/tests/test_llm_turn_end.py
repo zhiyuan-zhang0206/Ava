@@ -24,7 +24,7 @@ from agent.graph.llm import node
 from agent.graph.llm._retry import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
 from agent.graph.llm_errors import LlmLedger
-from agent.tests._fakes import make_fake_ops_pool
+from agent.hooks.tests.fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.clock import Clock
 from base.config import settings
