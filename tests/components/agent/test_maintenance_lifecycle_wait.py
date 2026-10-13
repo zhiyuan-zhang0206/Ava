@@ -211,7 +211,7 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
         agent_pause.prepare, database, event_bus, "move", WHEN, local_machine=machine_identity
     )
 
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == {agent}
     assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
@@ -253,7 +253,7 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     assert "unfinished lifecycle command" in str(raised.value)
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.PREPARING and hold.commands == {}
     assert [event["attributes"]["outcome"] for event in events] == ["exceeded"]
     assert events[0]["attributes"]["agents"] == [agent]
@@ -278,7 +278,7 @@ async def test_collision_free_prepare_is_unchanged(
     events = _events(monkeypatch)
 
     agent_pause.prepare(database, event_bus, "move", WHEN, local_machine=machine_identity)
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == {agent}
     assert events == []
@@ -411,7 +411,7 @@ def test_parked_claimed_work_prepares_without_wait(
 
     agent_pause.prepare(database, event_bus, "move", WHEN, local_machine=machine_identity)
 
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == set()
     assert hold.parked == (agent,)
@@ -448,7 +448,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     assert "unfinished lifecycle command" in str(raised.value)
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.PREPARING and hold.commands == {} and hold.parked == ()
     assert [event["attributes"]["outcome"] for event in events] == ["exceeded"]
     assert events[0]["attributes"]["agents"] == [agent]
@@ -489,7 +489,7 @@ def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
     ).fetchall() == [(ordinary, "claimed"), (authored, "claimed")]
     assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
     assert events[0]["attributes"]["outcome"] == "refused"
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.PREPARING and hold.parked == ()
 
 

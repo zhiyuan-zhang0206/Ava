@@ -4,7 +4,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.config import settings
@@ -24,7 +24,7 @@ async def test_generic_dead_letter_leaves_fixed_command_claimed(
 ) -> None:
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    command_id = _command(db_conn, agent_id, "restart")
+    command_id = insert_lifecycle_command(db_conn, agent_id, "restart")
     assert [
         i.id
         for i in await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation, work=None)

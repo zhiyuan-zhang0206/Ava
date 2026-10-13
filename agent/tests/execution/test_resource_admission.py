@@ -98,11 +98,15 @@ async def test_malformed_never_downgrades_to_legacy(
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
-    from agent.tests.execution.test_exec_owner_entry import _context, _ready, _start
+    from agent.tests.execution.test_exec_owner_entry import (
+        _start,
+        exec_owner_context,
+        wait_for_owner_ready,
+    )
     from base.agents.incarnation import exec_owner_recovery
 
     target = _admitted(db_conn)
-    context = _context(tmp_path, target.agent_id)
+    context = exec_owner_context(tmp_path, target.agent_id)
     directory = tmp_path / str(target.agent_id) / "domains" / str(context.allocation.request)
     directory.mkdir(parents=True)
     request = directory / context.request_path.name
@@ -121,7 +125,7 @@ def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
         register_exec(db_conn, target, context.allocation)
     proc = _start(directory, context)
     try:
-        ready = _ready(directory, proc)
+        ready = wait_for_owner_ready(directory, proc)
         with db_conn.transaction():
             attach_exec(db_conn, target, context.allocation, ready.allocation)
         assert proc.stdin is not None

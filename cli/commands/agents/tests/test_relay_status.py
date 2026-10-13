@@ -60,7 +60,7 @@ def test_wire_lease_status_restores_shared_enum(
         ).status
         is status
     )
-    snapshot = relay._read_inbox(
+    snapshot = relay.read_relay_inbox(
         database, event_bus, 42, LEASE_ID, "test-token", local_machine=machine_identity.name()
     )
     assert snapshot.status is status
@@ -98,7 +98,7 @@ def test_pending_consent_checks_status_without_opening_inbox(
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    snapshot = relay._read_inbox(
+    snapshot = relay.read_relay_inbox(
         database, event_bus, 42, LEASE_ID, "test-token", local_machine=machine_identity.name()
     )
     assert snapshot.status == status
