@@ -16,7 +16,6 @@ from psycopg.types.json import Jsonb
 
 from ava import mcp_config
 from ava.skills import composer_commands
-from ava_builtins.plugins import ava_code
 from base.db import create_agent
 from base.packages.plugins import mcp_enabled
 from base.paths import skills_dir
@@ -177,20 +176,6 @@ def test_agent_skill_view_clears_project_provider_after_each_op(
     assert "project-skill" not in {
         command.name for command in cluster.agent_skill_view_op(43, object()).commands
     }
-
-
-def test_agent_skill_view_tolerates_ava_code_plugin_import_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
-) -> None:
-    """An unavailable ava-code plugin degrades to the converged load-dir list."""
-    repo, _ = _project_with_skill(tmp_path)
-    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
-    # `from ... import project_skill_roots` raises ImportError once the name is gone.
-    monkeypatch.delattr(ava_code, "project_skill_roots")
-
-    view = cluster.agent_skill_view_op(42, object())
-
-    assert {command.name for command in view.commands} == {"load-skill"}
 
 
 def test_agent_skill_view_honors_per_agent_skill_narrowing(

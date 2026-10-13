@@ -58,10 +58,11 @@ from base.clock import Clock
 from base.config import settings
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
+from base.packages.skills.project_roots import project_skill_roots
 
 from . import _code_namespace
 from ._state_access import read_state, update_state
-from ._walk import find_context_files_along_path, project_skill_roots
+from ._walk import find_context_files_along_path
 
 _files_resolve = _ava_files_mod.resolve
 
