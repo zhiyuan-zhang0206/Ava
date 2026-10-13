@@ -112,6 +112,20 @@ def test_module_dir_lists_servers(fake_config: Path) -> None:
     assert "description" in listing
 
 
+def test_the_agent_visible_surface_is_the_helpers_plus_the_configured_servers(
+    fake_config: Path,
+) -> None:
+    """`__all_for_ava__` is declared on the module class and computed live, so `help()` and the
+    metering wrappers see exactly `servers` / `description` and each configured server, however
+    many names the module itself gains."""
+    assert mcps_mod.__all_for_ava__ == ["description", "servers"]
+    fake_config.write_text(
+        json.dumps({"mcpServers": {"fs": {"command": "x"}, "github": {"command": "y"}}}),
+        encoding="utf-8",
+    )
+    assert mcps_mod.__all_for_ava__ == ["description", "fs", "github", "servers"]
+
+
 # ─── tools / call / call_raw via ServerProxy ─────────────────────────────
 
 
