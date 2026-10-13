@@ -84,13 +84,13 @@ def test_every_field_resolves_a_valid_capability(authority: ConfigAuthority) -> 
     domain default; `_build_registry` fail-fasts on a bad value at import, so this
     guards the public metadata surface the frontend groups on."""
     from base.config import get_config_metadata
-    from base.config.config_registry import _ALLOWED_CAPABILITIES
+    from base.config.config_registry import ALLOWED_CAPABILITIES
 
-    assert frozenset({"gateway", "agent-runner", "common"}) == _ALLOWED_CAPABILITIES
+    assert frozenset({"gateway", "agent-runner", "common"}) == ALLOWED_CAPABILITIES
     bad = [
         (m.name, m.capability)
         for m in get_config_metadata(authority=authority)
-        if m.capability not in _ALLOWED_CAPABILITIES
+        if m.capability not in ALLOWED_CAPABILITIES
     ]
     assert not bad, f"fields with invalid capability: {bad}"
 

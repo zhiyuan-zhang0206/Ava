@@ -110,7 +110,7 @@ def _require_no_foreign_members(conn: Conn, ledger: Ledger, allowed: tuple[str, 
         )
 
 
-def _create_missing(conn: Conn, ledger: Ledger, secret: GenerationSecret) -> None:
+def create_missing(conn: Conn, ledger: Ledger, secret: GenerationSecret) -> None:
     with conn.transaction():
         existing = role_facts(conn, (secret.roles.gateway.name, secret.roles.runner.name))
         for cls in CLASSES:
@@ -152,5 +152,5 @@ def mint_generation(conn: Conn, home: Path) -> VerifiedGeneration:
     if current != ledger.active:
         # Only a pending generation's roles are ever created; an active
         # generation whose role vanished is an unknown effect and holds below.
-        _create_missing(conn, ledger, read_secret(home, current))
+        create_missing(conn, ledger, read_secret(home, current))
     return verify_generation(conn, home)

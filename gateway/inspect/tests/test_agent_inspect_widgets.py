@@ -3,7 +3,7 @@ taskList payload reshaped in #3216).
 
 The extension surface where enabled plugins embed inspector widgets: the
 gateway builds the widget registry in process (mocked here by patching
-`_load_inspect_widgets`), resolves each widget's payload for the agent — a
+`load_inspect_widgets`), resolves each widget's payload for the agent — a
 `taskList` lists the agent's active tasks — every one — and drops
 widgets with nothing to show.
 
@@ -69,7 +69,7 @@ def _patch_loader(monkeypatch: pytest.MonkeyPatch, *specs: InspectWidgetSpec) ->
     def _loaded() -> list[InspectWidgetSpec]:
         return list(specs)
 
-    monkeypatch.setattr(_plugin_widgets, "_load_inspect_widgets", _loaded)
+    monkeypatch.setattr(_plugin_widgets, "load_inspect_widgets", _loaded)
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
@@ -343,16 +343,16 @@ def _fixture_inspector(root: Path, plugin: str, source: str, *, widget_id: str) 
 
 
 def _shipped_fleet_module() -> Any:
-    path = _plugin_widgets._PLUGINS_DIR / "ava_fleet" / "inspector.py"
+    path = _plugin_widgets.PLUGINS_DIR / "ava_fleet" / "inspector.py"
     assert path.is_file(), "ava_fleet must ship inspector.py for this test"
     return path
 
 
 def test_loader_imports_shipped_fleet_widget(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _shipped_fleet_module()
-    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [module])
+    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [module])
 
-    specs = _plugin_widgets._load_inspect_widgets()
+    specs = _plugin_widgets.load_inspect_widgets()
     assert [(s.plugin, s.id, s.kind, s.order) for s in specs] == [
         ("ava_fleet", "today-tasks", "taskList", 150)
     ]
@@ -363,18 +363,18 @@ def test_loader_filters_widgets_of_disabled_plugins(monkeypatch: pytest.MonkeyPa
     """A plugin disabled after its module was imported (and served) must not
     serve widgets: the registry is rebuilt from the enabled set on every call."""
     module = _shipped_fleet_module()
-    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [module])
-    assert [s.id for s in _plugin_widgets._load_inspect_widgets()] == ["today-tasks"]
+    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [module])
+    assert [s.id for s in _plugin_widgets.load_inspect_widgets()] == ["today-tasks"]
 
     def _no_modules() -> list[Any]:
         return []
 
-    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", _no_modules)
-    assert _plugin_widgets._load_inspect_widgets() == []
+    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", _no_modules)
+    assert _plugin_widgets.load_inspect_widgets() == []
 
 
 def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_enabled_inspector_modules` reads the enable bit per request."""
+    """`enabled_inspector_modules` reads the enable bit per request."""
     from base.packages.plugins import enable_config
 
     module = _shipped_fleet_module()
@@ -394,13 +394,13 @@ def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch
         plugins={"ava_fleet": enable_config.PluginEntry(enabled=True)}
     )
     monkeypatch.setattr(enable_config, "load_for_runtime", _loader(enabled))
-    assert _plugin_widgets._enabled_inspector_modules() == [module]
+    assert _plugin_widgets.enabled_inspector_modules() == [module]
 
     disabled = enable_config.PluginsConfig(
         plugins={"ava_fleet": enable_config.PluginEntry(enabled=False)}
     )
     monkeypatch.setattr(enable_config, "load_for_runtime", _loader(disabled))
-    assert _plugin_widgets._enabled_inspector_modules() == []
+    assert _plugin_widgets.enabled_inspector_modules() == []
 
 
 def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
@@ -422,7 +422,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
         "import _missing_for_the_test\n" + _widget_source("w"),
         widget_id="w",
     )
-    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [bad, good])
+    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [bad, good])
 
     events: list[tuple[str, dict[str, object]]] = []
 
@@ -440,7 +440,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
 
     # A failed import must not leave the module behind (importlib's own cleanup).
     leftover = "ava_builtins.plugins.fx_broken_plugin.inspector"
-    specs = _plugin_widgets._load_inspect_widgets()  # must not raise
+    specs = _plugin_widgets.load_inspect_widgets()  # must not raise
     assert leftover not in sys.modules
 
     # the healthy plugin still serves; the broken one contributes nothing
@@ -455,8 +455,8 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     assert "ModuleNotFoundError" in str(attrs[0]["error"])
 
     # every plugin broken -> still no raise, an empty registry
-    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [bad])
-    assert _plugin_widgets._load_inspect_widgets() == []
+    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [bad])
+    assert _plugin_widgets.load_inspect_widgets() == []
 
 
 def test_loader_skips_a_failing_inspector_and_recovers(
@@ -472,14 +472,14 @@ def test_loader_skips_a_failing_inspector_and_recovers(
         widget_id="drop_partial_widget",
     )
 
-    assert _plugin_widgets._load_inspect_widgets([inspector_py]) == []  # must not raise
+    assert _plugin_widgets.load_inspect_widgets([inspector_py]) == []  # must not raise
     assert any(
         "fx_drop_partial_insp" in r["message"] and "failed to load" in r["message"]
         for r in loguru_records
     )
 
     inspector_py.write_text(_widget_source("drop_partial_widget"), encoding="utf-8")
-    specs = _plugin_widgets._load_inspect_widgets([inspector_py])
+    specs = _plugin_widgets.load_inspect_widgets([inspector_py])
     assert [(s.plugin, s.id) for s in specs] == [("fx_drop_partial_insp", "drop_partial_widget")]
 
 
@@ -496,7 +496,7 @@ def test_loader_refuses_a_plugin_declaring_a_widget_id_twice(
     )
     fine = _fixture_inspector(tmp_path, "fx_fine", _widget_source("fine"), widget_id="fine")
 
-    specs = _plugin_widgets._load_inspect_widgets([twice, fine])
+    specs = _plugin_widgets.load_inspect_widgets([twice, fine])
     assert [(s.plugin, s.id) for s in specs] == [("fx_fine", "fine")]
     assert any(
         "fx_twice" in r["message"]

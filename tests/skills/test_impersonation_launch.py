@@ -166,8 +166,8 @@ def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) 
     workspace = tmp_path / "ws"
     workspace.mkdir()
     endpoint = f"unix://{tmp_path}/run/codex-app-server.0123456789ab-01234567.sock"
-    server = codex._app_server_command(owner, workspace, endpoint)
-    tui = codex._codex_command(workspace, None, remote=endpoint)
+    server = codex.app_server_command(owner, workspace, endpoint)
+    tui = codex.codex_command(workspace, None, remote=endpoint)
     assert f"codex app-server --listen {endpoint}" in server
     assert "AP=${!}" in server and "kill $AP" in server
     assert "if ! kill -0 $$ 2>/dev/null; then" in server
@@ -183,7 +183,7 @@ def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) 
 def test_supervised_launch_command_has_no_remote(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    command = codex._codex_command(workspace)
+    command = codex.codex_command(workspace)
     assert command.startswith(
         f"cd {workspace} && exec codex --dangerously-bypass-approvals-and-sandbox -c "
     )
@@ -214,7 +214,7 @@ def test_app_server_wait_accepts_a_bound_socket() -> None:
     thread = threading.Thread(target=accept_once, daemon=True)
     thread.start()
     try:
-        codex._wait_for_app_server(f"unix://{path}", timeout=5.0)
+        codex.wait_for_app_server(f"unix://{path}", timeout=5.0)
     finally:
         # Join before closing the listener: under CI load the accept thread can
         # be scheduled only after the waiter returns; closing first makes the
@@ -229,9 +229,7 @@ def test_app_server_wait_accepts_a_bound_socket() -> None:
 def test_app_server_wait_fails_loudly_when_absent(tmp_path: Path) -> None:
     log_path = tmp_path / "app-server.log"
     with pytest.raises(RuntimeError, match="did not become ready") as excinfo:
-        codex._wait_for_app_server(
-            f"unix://{tmp_path}/missing.sock", timeout=0.4, log_path=log_path
-        )
+        codex.wait_for_app_server(f"unix://{tmp_path}/missing.sock", timeout=0.4, log_path=log_path)
     assert str(log_path) in str(excinfo.value)
 
 
@@ -303,7 +301,7 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     run = tmp_path / "run"
     run.mkdir()
     endpoint = f"unix://{run}/codex-app-server.0123456789ab-01234567.sock"
-    command = codex._app_server_command(owner, workspace, endpoint)
+    command = codex.app_server_command(owner, workspace, endpoint)
 
     shim_dir = tmp_path / "bin"
     argv_file = tmp_path / "codex-argv.txt"
@@ -608,7 +606,7 @@ def test_instruction_script_prints_only_after_successful_detach(
         )
         raise RuntimeError("lease expired before detach")
 
-    monkeypatch.setattr(instruction_reader.external, "attach", attach)
+    monkeypatch.setattr(instruction_reader.impersonation, "attach", attach)
     monkeypatch.setattr(sys, "argv", ["read_instructions.py", "0", "--agent", "405"])
     with pytest.raises(RuntimeError, match="lease expired"):
         instruction_reader.main()

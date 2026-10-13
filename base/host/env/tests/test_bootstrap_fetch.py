@@ -332,7 +332,7 @@ def _write_snapshot(home: Path, *, base_url: str, age_s: float, values: dict[str
     snap.write_text(
         _json.dumps(
             {
-                "v": bootstrap._SNAPSHOT_VERSION,
+                "v": bootstrap.SNAPSHOT_VERSION,
                 "base_url": base_url,
                 "written_at": _time.time() - age_s,
                 "values": values,
@@ -400,7 +400,7 @@ def test_inject_fetches_and_refreshes_stale_snapshot(
     )
     bootstrap.inject_config_from_gateway()
     assert os.environ["AVA_DB_URL"] == "postgresql://fresh/x"  # fetch is authoritative
-    values, age = bootstrap._read_config_snapshot("http://gw:8000")  # type: ignore[misc]
+    values, age = bootstrap.read_config_snapshot("http://gw:8000")  # type: ignore[misc]
     assert values == {"AVA_DB_URL": "postgresql://fresh/x"}
     assert age < 10.0  # refreshed for the next process
 

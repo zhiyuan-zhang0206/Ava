@@ -9,10 +9,10 @@ from fastapi.testclient import TestClient
 from base.api_contracts.idempotency import keyed_headers
 from gateway.app import app
 from gateway.routers.tests.test_tasks_router import (
-    _make_agent,
-    _make_root_task,
-    _make_task,
     _status,
+    make_agent,
+    make_root_task,
+    make_task,
 )
 
 
@@ -20,9 +20,9 @@ class TestParentClose:
     def test_done_with_in_progress_child_is_rejected_and_unchanged(
         self, db_conn: psycopg.Connection
     ) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent-active-child")
-        child = _make_task(
+        owner = make_agent(db_conn)
+        parent = make_task(db_conn, owner=owner, title="parent-active-child")
+        child = make_task(
             db_conn,
             owner=owner,
             title="active-child",
@@ -44,9 +44,9 @@ class TestParentClose:
     def test_cancelled_with_in_progress_child_is_rejected(
         self, db_conn: psycopg.Connection
     ) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent-active-child")
-        child = _make_task(
+        owner = make_agent(db_conn)
+        parent = make_task(db_conn, owner=owner, title="parent-active-child")
+        child = make_task(
             db_conn,
             owner=owner,
             title="active-child",
@@ -64,16 +64,16 @@ class TestParentClose:
         assert _status(db_conn, parent) == "in_progress"
 
     def test_all_children_closed_allows_parent_close(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent-closed-children")
-        _make_task(
+        owner = make_agent(db_conn)
+        parent = make_task(db_conn, owner=owner, title="parent-closed-children")
+        make_task(
             db_conn,
             owner=owner,
             title="done-child",
             status="done",
             parent_id=parent,
         )
-        _make_task(
+        make_task(
             db_conn,
             owner=owner,
             title="cancelled-child",
@@ -100,9 +100,9 @@ def _parent(db: psycopg.Connection, tid: int) -> int | None:
 
 class TestParent:
     def test_patch_reparents(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent")
-        tid = _make_task(db_conn, owner=owner, title="child")
+        owner = make_agent(db_conn)
+        parent = make_task(db_conn, owner=owner, title="parent")
+        tid = make_task(db_conn, owner=owner, title="child")
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -113,10 +113,10 @@ class TestParent:
         assert _parent(db_conn, tid) == parent
 
     def test_patch_null_moves_to_root(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        parent = _make_task(db_conn, owner=owner, title="parent2")
-        tid = _make_task(db_conn, owner=owner, title="child2")
+        owner = make_agent(db_conn)
+        root = make_root_task(db_conn)
+        parent = make_task(db_conn, owner=owner, title="parent2")
+        tid = make_task(db_conn, owner=owner, title="child2")
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -141,14 +141,14 @@ class TestParent:
         """PATCH mirrors the SDK reparent check: moving a task under a closed
         (done / cancelled) parent is a 422 — a closed task never gains
         children (task #1975)."""
-        owner = _make_agent(db_conn)
-        parent = _make_task(
+        owner = make_agent(db_conn)
+        parent = make_task(
             db_conn,
             owner=owner,
             title=f"closed-parent-{closed_status}",
             status=closed_status,
         )
-        tid = _make_task(db_conn, owner=owner, title=f"child-{closed_status}")
+        tid = make_task(db_conn, owner=owner, title=f"child-{closed_status}")
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -161,8 +161,8 @@ class TestParent:
         assert _parent(db_conn, tid) is None
 
     def test_patch_missing_parent_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -173,8 +173,8 @@ class TestParent:
         assert "does not exist" in resp.json()["detail"]
 
     def test_patch_self_parent_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -185,10 +185,10 @@ class TestParent:
         assert "own parent" in resp.json()["detail"]
 
     def test_patch_cycle_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        a = _make_task(db_conn, owner=owner, title="cycle-a")
-        b = _make_task(db_conn, owner=owner, title="cycle-b")
-        c = _make_task(db_conn, owner=owner, title="cycle-c")
+        owner = make_agent(db_conn)
+        a = make_task(db_conn, owner=owner, title="cycle-a")
+        b = make_task(db_conn, owner=owner, title="cycle-b")
+        c = make_task(db_conn, owner=owner, title="cycle-c")
         with TestClient(app) as client:
             assert (
                 client.patch(

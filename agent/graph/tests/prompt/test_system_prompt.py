@@ -114,8 +114,8 @@ def test_wildcard_excludes_functions_and_private_names(
     )
     assert "help" not in result
     assert "understand" not in result
-    assert "external" not in result
-    assert "## ava.external" not in _sdk_expand_section(
+    assert "impersonation" not in result
+    assert "## ava.impersonation" not in _sdk_expand_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
         ),

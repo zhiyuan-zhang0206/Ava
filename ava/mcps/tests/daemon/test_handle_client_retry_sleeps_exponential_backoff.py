@@ -14,14 +14,14 @@ import pytest
 
 import ava.mcps._daemon as daemon_mod
 from ava.mcps.tests.test_daemon import (
-    _call_result,
+    FakeWriter,
     _content,
-    _FakeWriter,
-    _make_reader,
-    _make_session,
-    _tool,
     _write_config,
-    _writer_arg,
+    call_result,
+    make_reader,
+    make_session,
+    tool,
+    writer_arg,
 )
 from ava.mcps.tests.test_daemon import (
     _no_reap_stale_daemons as _no_reap_stale_daemons,
@@ -41,7 +41,7 @@ from ava.mcps.tests.test_daemon import (
 
 
 async def test_handle_client_retry_sleeps_exponential_backoff(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """Each retry sleeps with increasing backoff (0s, 1s, 2s)."""
     _write_config(fake_home, {"fs": {"command": "x"}})
@@ -53,18 +53,18 @@ async def test_handle_client_retry_sleeps_exponential_backoff(
 
     monkeypatch.setattr(daemon_mod.asyncio, "sleep", _fake_sleep)
 
-    session = _make_session()
+    session = make_session()
     session.list_tools = AsyncMock(side_effect=BrokenPipeError())
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
     # 3 attempts = 2 retries = 2 sleep calls: attempt 0 fails → sleep(1),
@@ -75,27 +75,27 @@ async def test_handle_client_retry_sleeps_exponential_backoff(
 async def test_shared_connections_isolate_sessions(
     fake_home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    scope: daemon_mod._Scope,
-    daemon_wide: daemon_mod._DaemonWide,
+    scope: daemon_mod.Scope,
+    daemon_wide: daemon_mod.DaemonWide,
 ) -> None:
     """Two clients on the shared daemon never share session state.
 
     Each connection gets its own sessions/stacks/locks (created inside
-    `_handle_connection`); agent A's `fs` session must be invisible to agent B,
-    and each connection triggers its own `_connect_server`.
+    `handle_connection`); agent A's `fs` session must be invisible to agent B,
+    and each connection triggers its own `connect_server`.
     """
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session_a = _make_session()
-    session_b = _make_session()
+    session_a = make_session()
+    session_b = make_session()
     connect = AsyncMock(side_effect=[(session_a, MagicMock()), (session_b, MagicMock())])
-    monkeypatch.setattr(daemon_mod, "_connect_server", connect)
+    monkeypatch.setattr(daemon_mod, "connect_server", connect)
 
     async def _call_list_tools() -> tuple[list[dict[str, Any]], Any]:
         """Run one full connection (request line -> response) with fresh state."""
         req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
-        reader = _make_reader([(json.dumps(req) + "\n").encode()])
-        writer = _FakeWriter()
-        await daemon_mod._handle_connection(reader, _writer_arg(writer), daemon_wide)
+        reader = make_reader([(json.dumps(req) + "\n").encode()])
+        writer = FakeWriter()
+        await daemon_mod.handle_connection(reader, writer_arg(writer), daemon_wide)
         return writer.responses(), writer
 
     resp_a, _ = await _call_list_tools()
@@ -108,7 +108,7 @@ async def test_shared_connections_isolate_sessions(
 
 
 async def test_handle_connection_cleans_sessions_on_close(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod._DaemonWide
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod.DaemonWide
 ) -> None:
     """When a client connection ends, its MCP server subprocesses are released.
 
@@ -116,46 +116,46 @@ async def test_handle_connection_cleans_sessions_on_close(
     chrome/x stdio children in the shared daemon.
     """
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session()
+    session = make_session()
     stack = MagicMock()
     aclose = AsyncMock()
     stack.aclose = aclose  # type: ignore[method-assign]
-    monkeypatch.setattr(daemon_mod, "_connect_server", AsyncMock(return_value=(session, stack)))
+    monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock(return_value=(session, stack)))
 
     req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
-    reader = _make_reader([(json.dumps(req) + "\n").encode(), b""])
-    writer = _FakeWriter()
-    await daemon_mod._handle_connection(reader, _writer_arg(writer), daemon_wide)
+    reader = make_reader([(json.dumps(req) + "\n").encode(), b""])
+    writer = FakeWriter()
+    await daemon_mod.handle_connection(reader, writer_arg(writer), daemon_wide)
     # the connection's own stack was closed on disconnect
     aclose.assert_awaited_once()
 
 
-async def test_handle_client_ping_returns_pong(scope: daemon_mod._Scope) -> None:
+async def test_handle_client_ping_returns_pong(scope: daemon_mod.Scope) -> None:
     """Lock-free liveness probe: no config / session involved, answers pong.
 
     The watchdog healthcheck dials the shared socket with ping; a slow MCP
     server must never make the daemon look dead.
     """
     req = {"id": 0, "method": "ping"}
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(reader, _writer_arg(writer), scope)
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(reader, writer_arg(writer), scope)
     [resp] = writer.responses()
     assert resp == {"id": 0, "ok": True, "result": "pong"}
 
 
 async def test_get_session_shared_true_uses_daemon_wide_buckets(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """A `"shared": true` server caches in the daemon-wide buckets and is
     wrapped in a serializing session — one stdio child for every connection."""
     _write_config(fake_home, {"disc": {"command": "x", "shared": True}})
-    session = _make_session()
+    session = make_session()
     stack = MagicMock()
-    monkeypatch.setattr(daemon_mod, "_connect_server", AsyncMock(return_value=(session, stack)))
+    monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock(return_value=(session, stack)))
 
-    got = await daemon_mod._get_session("disc", scope)
-    assert isinstance(got, daemon_mod._SerialSession)
+    got = await daemon_mod.get_session("disc", scope)
+    assert isinstance(got, daemon_mod.SerialSession)
     # per-connection buckets untouched; daemon-wide buckets hold the child
     assert scope.local.sessions == {}
     assert scope.shared.sessions["disc"] is got
@@ -163,23 +163,23 @@ async def test_get_session_shared_true_uses_daemon_wide_buckets(
 
 
 async def test_shared_connections_share_one_server_child(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod._DaemonWide
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod.DaemonWide
 ) -> None:
     """Two client connections on a shared server trigger exactly one connect:
     the daemon-wide child is reused, and closing one connection does not
     release it (it outlives every connection, released at daemon shutdown)."""
     _write_config(fake_home, {"disc": {"command": "x", "shared": True}})
-    session = _make_session(tools=[_tool("echo")])
+    session = make_session(tools=[tool("echo")])
     stack = MagicMock()
     stack.aclose = AsyncMock()  # type: ignore[method-assign]
     connect = AsyncMock(return_value=(session, stack))
-    monkeypatch.setattr(daemon_mod, "_connect_server", connect)
+    monkeypatch.setattr(daemon_mod, "connect_server", connect)
 
     async def _one_connection() -> None:
         req = {"id": 1, "method": "list_tools", "params": {"server": "disc"}}
-        reader = _make_reader([(json.dumps(req) + "\n").encode()])
-        writer = _FakeWriter()
-        await daemon_mod._handle_connection(reader, _writer_arg(writer), daemon_wide)
+        reader = make_reader([(json.dumps(req) + "\n").encode()])
+        writer = FakeWriter()
+        await daemon_mod.handle_connection(reader, writer_arg(writer), daemon_wide)
 
     await _one_connection()
     await _one_connection()
@@ -194,12 +194,12 @@ async def test_shared_browser_server_connects_direct_no_child(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A `"shared": "browser"` server is dialed directly (no stdio child):
-    _connect_server dispatches to connect_browser_direct, never stdio_client."""
+    connect_server dispatches to connect_browser_direct, never stdio_client."""
     _write_config(fake_home, {"chrome": {"command": ".venv/bin/python", "shared": "browser"}})
     browser_session = MagicMock()
     browser_stack = MagicMock()
     direct = AsyncMock(return_value=(browser_session, browser_stack))
-    # _connect_server imports the direct-connect helper lazily inside the
+    # connect_server imports the direct-connect helper lazily inside the
     # function, so patch the source module attribute it resolves.
     import ava.mcps._browser as browser_mod
 
@@ -211,27 +211,27 @@ async def test_shared_browser_server_connects_direct_no_child(
 
     monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
 
-    session, stack = await daemon_mod._connect_server("chrome", {}, timeout_seconds=lambda: 15.0)
+    session, stack = await daemon_mod.connect_server("chrome", {}, timeout_seconds=lambda: 15.0)
     assert session is browser_session and stack is browser_stack
     direct.assert_awaited_once_with()
     assert spawned == []
 
 
 async def test_get_session_shared_browser_uses_per_connection_buckets(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """A `"shared": "browser"` server caches in the CALLER's per-connection
     buckets, not the daemon-wide ones: each agent connection keeps its own
     socket, so the browser-mcp service's page affinity stays per agent and no
     connection can corrupt another's request-id stream. It is not wrapped in
-    _SerialSession either — one connection is one serial caller by design."""
+    SerialSession either — one connection is one serial caller by design."""
     _write_config(fake_home, {"chrome": {"command": ".venv/bin/python", "shared": "browser"}})
     browser_session = MagicMock()
     browser_stack = MagicMock()
     connect = AsyncMock(return_value=(browser_session, browser_stack))
-    monkeypatch.setattr(daemon_mod, "_connect_server", connect)
+    monkeypatch.setattr(daemon_mod, "connect_server", connect)
 
-    got = await daemon_mod._get_session("chrome", scope)
+    got = await daemon_mod.get_session("chrome", scope)
     assert got is browser_session
     assert scope.local.sessions["chrome"] is browser_session
     assert scope.local.stacks["chrome"] is browser_stack
@@ -241,22 +241,20 @@ async def test_get_session_shared_browser_uses_per_connection_buckets(
 
 
 async def test_shared_browser_connections_keep_own_socket(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod._DaemonWide
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod.DaemonWide
 ) -> None:
     """Two client connections on `"shared": "browser"` each dial their own
     browser-mcp socket (one connect per connection) and release it on close —
     there is no daemon-wide shared browser socket to desync."""
     _write_config(fake_home, {"chrome": {"command": ".venv/bin/python", "shared": "browser"}})
-    connect = AsyncMock(
-        side_effect=[(_make_session(), MagicMock()), (_make_session(), MagicMock())]
-    )
-    monkeypatch.setattr(daemon_mod, "_connect_server", connect)
+    connect = AsyncMock(side_effect=[(make_session(), MagicMock()), (make_session(), MagicMock())])
+    monkeypatch.setattr(daemon_mod, "connect_server", connect)
 
     async def _one_connection() -> None:
         req = {"id": 1, "method": "list_tools", "params": {"server": "chrome"}}
-        reader = _make_reader([(json.dumps(req) + "\n").encode()])
-        writer = _FakeWriter()
-        await daemon_mod._handle_connection(reader, _writer_arg(writer), daemon_wide)
+        reader = make_reader([(json.dumps(req) + "\n").encode()])
+        writer = FakeWriter()
+        await daemon_mod.handle_connection(reader, writer_arg(writer), daemon_wide)
 
     await _one_connection()
     await _one_connection()
@@ -266,7 +264,7 @@ async def test_shared_browser_connections_keep_own_socket(
 
 @pytest.mark.flaky  # real AF_UNIX sockets: two live browser-service connections
 async def test_browser_concurrent_connections_no_id_desync(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod._DaemonWide
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod.DaemonWide
 ) -> None:
     """Two connections calling the browser server concurrently both succeed.
 
@@ -315,9 +313,9 @@ async def test_browser_concurrent_connections_no_id_desync(
             "method": "call_tool",
             "params": {"server": "chrome", "tool": "navigate", "args": {"url": "https://x"}},
         }
-        reader = _make_reader([(json.dumps(req) + "\n").encode()])
-        writer = _FakeWriter()
-        await daemon_mod._handle_connection(reader, _writer_arg(writer), daemon_wide)
+        reader = make_reader([(json.dumps(req) + "\n").encode()])
+        writer = FakeWriter()
+        await daemon_mod.handle_connection(reader, writer_arg(writer), daemon_wide)
         return writer.responses()
 
     try:
@@ -338,23 +336,23 @@ async def test_connect_server_unknown_shared_value_raises(
     back to a per-connection child (which would defeat the declared intent)."""
     _write_config(fake_home, {"weird": {"command": "x", "shared": "mars"}})
     with pytest.raises(ValueError, match="unknown shared value 'mars'"):
-        await daemon_mod._connect_server("weird", {}, timeout_seconds=lambda: 15.0)
+        await daemon_mod.connect_server("weird", {}, timeout_seconds=lambda: 15.0)
 
 
 async def test_invalidate_session_shared_clears_daemon_wide_buckets(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """Transport-error invalidation of a shared server rebuilds the daemon-wide
     child (not the caller's per-connection buckets)."""
     _write_config(fake_home, {"disc": {"command": "x", "shared": True}})
-    session = _make_session()
+    session = make_session()
     stack = MagicMock()
     stack.aclose = AsyncMock()  # type: ignore[method-assign]
-    monkeypatch.setattr(daemon_mod, "_connect_server", AsyncMock(return_value=(session, stack)))
-    await daemon_mod._get_session("disc", scope)
+    monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock(return_value=(session, stack)))
+    await daemon_mod.get_session("disc", scope)
     assert "disc" in scope.shared.sessions
 
-    await daemon_mod._invalidate_session("disc", scope)
+    await daemon_mod.invalidate_session("disc", scope)
     assert "disc" not in scope.shared.sessions
     assert "disc" not in scope.shared.stacks
     stack.aclose.assert_awaited_once()
@@ -363,7 +361,7 @@ async def test_invalidate_session_shared_clears_daemon_wide_buckets(
 async def test_serial_session_serializes_concurrent_calls() -> None:
     """Concurrent calls on a shared session are serialized under one lock: the
     inner session sees one in-flight call at a time."""
-    inner = _make_session()
+    inner = make_session()
     entered = 0
     max_inflight = 0
     in_flight = 0
@@ -379,7 +377,7 @@ async def test_serial_session_serializes_concurrent_calls() -> None:
         return MagicMock(tools=[])
 
     inner.list_tools = AsyncMock(side_effect=_slow_list_tools)  # type: ignore[method-assign]
-    serial = daemon_mod._SerialSession(inner, asyncio.Lock())
+    serial = daemon_mod.SerialSession(inner, asyncio.Lock())
 
     t1 = asyncio.create_task(serial.list_tools())
     await asyncio.sleep(0.01)
@@ -393,7 +391,7 @@ async def test_serial_session_serializes_concurrent_calls() -> None:
 
 
 def test_shared_kind_reads_spec(fake_home: Path) -> None:
-    """_shared_kind returns the declared value, None when absent/unknown."""
+    """shared_kind returns the declared value, None when absent/unknown."""
     _write_config(
         fake_home,
         {
@@ -402,22 +400,22 @@ def test_shared_kind_reads_spec(fake_home: Path) -> None:
             "c": {"command": "x"},
         },
     )
-    assert daemon_mod._shared_kind("a") is True
-    assert daemon_mod._shared_kind("b") == "browser"
-    assert daemon_mod._shared_kind("c") is None
-    assert daemon_mod._shared_kind("nope") is None
+    assert daemon_mod.shared_kind("a") is True
+    assert daemon_mod.shared_kind("b") == "browser"
+    assert daemon_mod.shared_kind("c") is None
+    assert daemon_mod.shared_kind("nope") is None
 
 
 async def test_connect_server_routes_url_servers_to_http(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A `url` entry skips the stdio child path entirely — `_connect_http` owns it."""
+    """A `url` entry skips the stdio child path entirely — `connect_http` owns it."""
     _write_config(fake_home, {"remote": {"url": "https://mcp.example.com/mcp"}})
     timeout_reader = MagicMock(return_value=15.0)
     http = AsyncMock(return_value=(MagicMock(), MagicMock()))
-    monkeypatch.setattr(daemon_mod, "_connect_http", http)
+    monkeypatch.setattr(daemon_mod, "connect_http", http)
 
-    session, stack = await daemon_mod._connect_server("remote", {}, timeout_seconds=timeout_reader)
+    session, stack = await daemon_mod.connect_server("remote", {}, timeout_seconds=timeout_reader)
 
     http.assert_awaited_once_with(
         "https://mcp.example.com/mcp",
@@ -449,7 +447,7 @@ async def test_connect_http_initializes_session(
     session_cls = MagicMock(return_value=session_cm)
     monkeypatch.setattr("mcp.ClientSession", session_cls)
 
-    got, stack = await daemon_mod._connect_http(
+    got, stack = await daemon_mod.connect_http(
         "https://mcp.example.com/mcp", None, oauth_locks={}, timeout_seconds=lambda: 15.0
     )
 
@@ -479,7 +477,7 @@ async def test_connect_http_passes_headers_to_client_factory(
     client_factory = MagicMock(return_value=object())
     monkeypatch.setattr("mcp.client.streamable_http.create_mcp_http_client", client_factory)
 
-    await daemon_mod._connect_http(
+    await daemon_mod.connect_http(
         "https://mcp.example.com/mcp",
         {"Authorization": "Bearer k"},
         oauth_locks={},
@@ -509,7 +507,7 @@ async def test_connect_http_fails_fast_and_closes_stack(
     monkeypatch.setattr(daemon_mod.AsyncExitStack, "aclose", aclose)
 
     with pytest.raises(ConnectionError):
-        await daemon_mod._connect_http(
+        await daemon_mod.connect_http(
             "https://mcp.example.com/mcp", None, oauth_locks={}, timeout_seconds=lambda: 15.0
         )
     aclose.assert_awaited_once()
@@ -522,9 +520,9 @@ async def test_connect_server_routes_oauth_servers(
     _write_config(fake_home, {"remote": {"url": "https://mcp.example.com/mcp", "oauth": True}})
     timeout_reader = MagicMock(return_value=15.0)
     http = AsyncMock(return_value=(MagicMock(), MagicMock()))
-    monkeypatch.setattr(daemon_mod, "_connect_http", http)
+    monkeypatch.setattr(daemon_mod, "connect_http", http)
 
-    await daemon_mod._connect_server("remote", {}, timeout_seconds=timeout_reader)
+    await daemon_mod.connect_server("remote", {}, timeout_seconds=timeout_reader)
 
     http.assert_awaited_once_with(
         "https://mcp.example.com/mcp",
@@ -559,7 +557,7 @@ async def test_connect_http_oauth_builds_provider(
 
     monkeypatch.setattr(oauth_mod, "oauth_http_client", oauth_builder)
 
-    await daemon_mod._connect_http(
+    await daemon_mod.connect_http(
         "https://mcp.example.com/mcp",
         None,
         oauth=True,
@@ -576,7 +574,7 @@ async def test_shared_computer_use_server_connects_direct_no_child(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A `"shared": "computer_use"` server is dialed directly (no stdio child):
-    _connect_server dispatches to connect_computer_direct, never stdio_client."""
+    connect_server dispatches to connect_computer_direct, never stdio_client."""
     _write_config(
         fake_home,
         {"computer_use": {"command": ".venv/bin/python", "shared": "computer_use"}},
@@ -594,7 +592,7 @@ async def test_shared_computer_use_server_connects_direct_no_child(
 
     monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
 
-    got_session, got_stack = await daemon_mod._connect_server(
+    got_session, got_stack = await daemon_mod.connect_server(
         "computer_use", {}, timeout_seconds=lambda: 15.0
     )
     assert got_session is session and got_stack is stack
@@ -603,7 +601,7 @@ async def test_shared_computer_use_server_connects_direct_no_child(
 
 
 async def test_computer_use_call_stamps_agent_id(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod._DaemonWide
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, daemon_wide: daemon_mod.DaemonWide
 ) -> None:
     """The agent id from the client envelope is stamped onto the computer_use
     session before every call_tool, so the computer daemon can gate and audit
@@ -645,10 +643,10 @@ async def test_computer_use_call_stamps_agent_id(
         "params": {"server": "computer_use", "tool": "click", "args": {"x": 1}},
         "agent_id": 42,
     }
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
     try:
-        await daemon_mod._handle_connection(reader, _writer_arg(writer), daemon_wide)
+        await daemon_mod.handle_connection(reader, writer_arg(writer), daemon_wide)
     finally:
         server.close()
         await server.wait_closed()
@@ -659,18 +657,18 @@ async def test_computer_use_call_stamps_agent_id(
 
 
 async def test_handle_client_stamps_agent_id_on_session(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """The SDK's per-request agent_id reaches the session before the call —
     BrowserLineSession (and ComputerLineSession) carry it on the wire so the
     service can key per-agent state. Sessions without the attribute (plain
     stdio servers) are skipped."""
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session(
-        call_result=_call_result([_content({"type": "text", "text": "hi"})]),
+    session = make_session(
+        call_result=call_result([_content({"type": "text", "text": "hi"})]),
     )
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     req = {
@@ -679,11 +677,11 @@ async def test_handle_client_stamps_agent_id_on_session(
         "params": {"server": "fs", "tool": "read", "args": {}},
         "agent_id": 42,
     }
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
 

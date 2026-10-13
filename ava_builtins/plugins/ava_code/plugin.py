@@ -267,7 +267,7 @@ def _wrapped_read(
 # Inject the plugin-tracked cwd so the agent's one-off commands run in the
 # working directory by default, instead of having to `cd <path> && ...` every
 # time. `inner` is the wrapped `ava.shell.run`.
-def _wrapped_shell_run(
+def wrapped_shell_run(
     inner: Callable[..., str],
     cmd: str,
     *,
@@ -409,7 +409,7 @@ def _wrapped_understand(
 # (files / shell / understand), not the agent process cwd — otherwise the
 # page-server daemon reports serve_dir missing and the page degrades
 # (Task #1523).
-def _wrapped_serve(
+def wrapped_serve(
     inner: Callable[..., Any],
     dir: str,
     name: str,
@@ -429,14 +429,14 @@ def contribute() -> PluginContributions:
         sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=True),),
         sdk_wraps=(
             SdkWrap("files.read", _wrapped_read),
-            SdkWrap("shell.run", _wrapped_shell_run),
+            SdkWrap("shell.run", wrapped_shell_run),
             SdkWrap("files.edit", _wrapped_edit),
             SdkWrap("files.write", _wrapped_write),
             SdkWrap("files.append", _wrapped_append),
             SdkWrap("files.delete", _wrapped_delete),
             SdkWrap("files.glob", _wrapped_glob),
             SdkWrap("understand", _wrapped_understand),
-            SdkWrap("ui.serve", _wrapped_serve),
+            SdkWrap("ui.serve", wrapped_serve),
         ),
         skill_sources=(_project_skill_source,),
     )

@@ -74,7 +74,7 @@ all); a test moved elsewhere gets its file named in the destination directory's 
 | `base/packages/plugins/manifest.py` | `base/packages/plugins/tests/test_manifest.py` |
 | `agent/graph/exec/node.py` | `agent/graph/exec/tests/test_exec_output.py` |
 | `gateway/agents/history/timeline.py` | `gateway/agents/history/tests/test_timeline.py` |
-| `ava/shell.py` | `ava/shell/tests/test_shell.py` |
+| `ava/shell.py` | `ava/tests/namespaces/shell/test_shell.py` |
 
 If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` in
 the package's own `tests/` directory when it has one (`ava/tests/`), otherwise under

@@ -64,7 +64,7 @@ def _make_backend(*, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
 
     log_exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider()
-    resource_exporter: Any = telemetry_otlp._EventDimensionResourceExporter(log_exporter)
+    resource_exporter: Any = telemetry_otlp.EventDimensionResourceExporter(log_exporter)
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(resource_exporter))
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])

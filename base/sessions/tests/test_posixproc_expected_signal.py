@@ -46,7 +46,7 @@ def test_replaced_name_never_signals_replacement(
                 new.write(path)
                 return new
 
-            monkeypatch.setattr(posixproc, "_read_record", swapped_read)
+            monkeypatch.setattr(posixproc, "read_record", swapped_read)
             assert not posixproc.graceful_signal("ava-ops", expected=expected)
             assert calls == 2
             assert replacement.poll() is None
@@ -121,7 +121,7 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
                 return path
 
             monkeypatch.setattr(record, "pid_starttime_ticks", read_ticks)
-            monkeypatch.setattr(posixproc, "_record_path", record_path)
+            monkeypatch.setattr(posixproc, "record_path", record_path)
             assert (
                 posixproc.graceful_signal("ava-private-ticks", expected=expected) is should_signal
             )

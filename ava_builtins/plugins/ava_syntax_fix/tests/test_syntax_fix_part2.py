@@ -121,11 +121,11 @@ class TestSyntaxFixEvents:
     ):
         """A deterministic (rough) fix records fix_type=rough with the original
         source as `before` and no `after` — the after state is replayable via
-        _apply_fix_pipeline(before)."""
+        apply_fix_pipeline(before)."""
         from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
         events: list[dict] = []
-        monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        monkeypatch.setattr(_plugin, "emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         # Chinese comma -> deterministic fix fires
         original = "print(1\uff0c2)"
         state = AgentState(
@@ -162,7 +162,7 @@ class TestSyntaxFixEvents:
 
         captured: dict = {}
         monkeypatch.setattr(_plugin.logger, "info", lambda _msg, **kw: captured.update(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        _plugin._emit_syntax_fix_event(
+        _plugin.emit_syntax_fix_event(
             fix_type="rough",
             before="print(1\uff0c2)",
             after=None,
@@ -183,12 +183,12 @@ class TestSyntaxFixEvents:
         from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
         events: list[dict] = []
-        monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        monkeypatch.setattr(_plugin, "emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         broken = "x = 'unterminated\nprint(x)"
         repaired = "x = 'fixed'\nprint(x)"
         with patch.object(
             agent_runtime,
-            "_llm_repair_syntax",
+            "llm_repair_syntax",
             new=AsyncMock(return_value=repaired),
         ):
             result = await syntax_fix_before_exec(
@@ -222,10 +222,10 @@ class TestSyntaxFixEvents:
         from ava_builtins.plugins.ava_syntax_fix import agent_runtime as _plugin
 
         events: list[dict] = []
-        monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        monkeypatch.setattr(_plugin, "emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         # Force the pipeline to be a no-op (nothing to fix, nothing formatted)
         # so the event decision is what is under test — not ruff's formatting.
-        monkeypatch.setattr(_plugin, "_apply_fix_pipeline", lambda code, **_kw: (code, []))  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_plugin, "apply_fix_pipeline", lambda code, **_kw: (code, []))  # pyright: ignore[reportUnknownArgumentType]
         state = AgentState(
             messages=[
                 AIMessage(

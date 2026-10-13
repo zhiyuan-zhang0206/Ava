@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from gateway.agents import notices
 from gateway.app import app
-from gateway.tests.events.test_notices_endpoint import _insert_notice, _seed_agent
+from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
 from gateway.tests.receipts.test_current_notice_receipts import HEADERS
 from gateway.tests.receipts.test_current_notice_receipts import client as client
 
@@ -31,8 +31,8 @@ def _path(agent: int, notice: int) -> str:
 def test_required_identity_rejects_before_effects(
     client: TestClient, db_conn: psycopg.Connection, headers: dict[str, str]
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "FYI")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "FYI")
     result = client.post(
         _path(agent, notice), json={"action": "read", "reply": "yes"}, headers=headers
     )
@@ -47,8 +47,8 @@ def test_required_identity_rejects_before_effects(
 def test_concurrent_read_reply_replays_one_inbound(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "FYI")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "FYI")
     path = _path(agent, notice)
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = [
@@ -70,8 +70,8 @@ def test_concurrent_read_reply_replays_one_inbound(
 def test_lost_tail_replays_after_notice_deletion_without_touching_later_row(
     client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A", require_response=True)
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A", require_response=True)
     path = _path(agent, notice)
     body = {"action": "answer", "reply": "yes"}
 
@@ -85,7 +85,7 @@ def test_lost_tail_replays_after_notice_deletion_without_touching_later_row(
         "SELECT id FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone()
     assert original is not None
-    later = _insert_notice(db_conn, agent, "B", require_response=True)
+    later = insert_notice(db_conn, agent, "B", require_response=True)
     db_conn.execute("DELETE FROM agent_notices WHERE id=%s", (notice,))
     db_conn.commit()
     replay = client.post(path, json=body, headers=HEADERS)
@@ -102,8 +102,8 @@ def test_lost_tail_replays_after_notice_deletion_without_touching_later_row(
 def test_consumed_original_reply_does_not_resurrect(
     client: TestClient, db_conn: psycopg.Connection, remove: bool
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     path = _path(agent, notice)
     body = {"action": "read", "reply": "yes"}
     first = client.post(path, json=body, headers=HEADERS)
@@ -131,8 +131,8 @@ def test_consumed_original_reply_does_not_resurrect(
 def test_authentication_is_rechecked_on_replay(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "FYI")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "FYI")
     path = _path(agent, notice)
     body = {"action": "read", "reply": "yes"}
     first = client.post(path, json=body, headers=HEADERS)

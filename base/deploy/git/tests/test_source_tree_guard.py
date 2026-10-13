@@ -157,7 +157,7 @@ def test_git_unavailable_signals_guard_skipped(
     detector blind — the probe must alert on the blind guard, never pass it."""
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
-    monkeypatch.setattr(stg, "_git", _no_git)
+    monkeypatch.setattr(stg, "git", _no_git)
 
     assert stg.source_tree_violations(repo) == ("guard skipped: git unavailable",)
 
@@ -175,7 +175,7 @@ def test_git_command_failure_signals_guard_skipped(
     ) -> subprocess.CompletedProcess[str]:
         return failed
 
-    monkeypatch.setattr(stg, "_git", _git_fail)
+    monkeypatch.setattr(stg, "git", _git_fail)
 
     assert stg.source_tree_violations(repo) == ("guard skipped: git unavailable",)
 
@@ -187,7 +187,7 @@ def test_whitelist_validation_rejects_empty() -> None:
     """An empty whitelist would flag every untracked file, the runtime artifacts
     included, as tamper — the guard must fail fast instead."""
     with pytest.raises(ValueError, match="must be non-empty"):
-        stg._validate_whitelist(())
+        stg.validate_whitelist(())
 
 
 def test_whitelist_validation_rejects_catch_all_patterns() -> None:
@@ -195,19 +195,19 @@ def test_whitelist_validation_rejects_catch_all_patterns() -> None:
     always empty (the silent-no-op misconfiguration)."""
     for bad in (("*",), ("**",), ("*/*",), ("frontend/", "*")):
         with pytest.raises(ValueError, match="arbitrary paths"):
-            stg._validate_whitelist(bad)
+            stg.validate_whitelist(bad)
 
 
 def test_whitelist_validation_accepts_real_whitelist() -> None:
     """The shipped whitelist stays sane: non-empty, no catch-all. Guards the
     constant against a future edit that silently silences the guard."""
-    stg._validate_whitelist(stg.SOURCE_TREE_WHITELIST)
+    stg.validate_whitelist(stg.SOURCE_TREE_WHITELIST)
 
 
 def test_whitelist_matches_only_runtime_artifacts() -> None:
     """Direct invariant for 'the whitelist must not swallow everything': a
     junk path is never whitelisted while the frontend bundle stays legal."""
-    assert stg._is_whitelisted("junk.txt") is False
-    assert stg._is_whitelisted("junkdir/inner.txt") is False
-    assert stg._is_whitelisted("frontend/.next/build.txt") is True
-    assert stg._is_whitelisted("frontend/") is True
+    assert stg.is_whitelisted("junk.txt") is False
+    assert stg.is_whitelisted("junkdir/inner.txt") is False
+    assert stg.is_whitelisted("frontend/.next/build.txt") is True
+    assert stg.is_whitelisted("frontend/") is True

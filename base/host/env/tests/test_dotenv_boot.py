@@ -20,7 +20,7 @@ from tests.fixtures.units import use_env_files
 
 @pytest.fixture(autouse=True)
 def _restore_authority_env() -> Iterator[None]:
-    """`_enforce_cluster_env_authority` mutates os.environ directly (pop /
+    """`enforce_cluster_env_authority` mutates os.environ directly (pop /
     force-assign) — not through monkeypatch, which only restores keys it set.
     Since Phase C the drop covers every cluster-scope alias key, so a test
     whose temp .env omits one cluster-scope alias deletes a value
@@ -56,12 +56,12 @@ def _restore_authority_env() -> Iterator[None]:
             os.environ[key] = val
 
 
-# ── _enforce_cluster_env_authority: this cluster's .env wins over a polluted parent ──
+# ── enforce_cluster_env_authority: this cluster's .env wins over a polluted parent ──
 
 
 # The suite's own cluster-identity keys — the test process's "unit .env"
 # declarations. `_point_env_at` merges them into the pointed-at env file so
-# `_enforce_cluster_env_authority` takes its FORCE branch for them (a declared
+# `enforce_cluster_env_authority` takes its FORCE branch for them (a declared
 # key) rather than its DROP branch (which would delete them from the process
 # environment for the rest of the session — Settings() builds later in the run
 # need AVA_DB_URL / AVA_REDIS_URL present).
@@ -91,7 +91,7 @@ def test_enforce_overrides_leaked_derived_key(
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_AGENT_HOST_HEALTH_PORT=18035\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_AGENT_HOST_HEALTH_PORT"] == "18035"
 
 
@@ -105,7 +105,7 @@ def test_enforce_ignores_non_enforced_keys(monkeypatch: pytest.MonkeyPatch, tmp_
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_LLM_OVERRIDE=env-file\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_LLM_OVERRIDE"] == "env-live"
 
 
@@ -120,7 +120,7 @@ def test_enforce_forces_identity_key_declared_in_env_file(
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_MACHINE_NAME=file-host\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_MACHINE_NAME"] == "file-host"
 
 
@@ -138,7 +138,7 @@ def test_enforce_drops_undeclared_identity_key(
     monkeypatch.setitem(os.environ, "AVA_MACHINE_NAME", "leaked-prod-host")
     monkeypatch.setitem(os.environ, "AVA_MEMORY_REMOTE", "git@github.com:prod/AvaMemory.git")
     _point_env_at(monkeypatch, tmp_path / "no-identity.env", tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_MACHINE_SERVE_GATEWAY" not in os.environ
     assert "AVA_MACHINE_SERVE_AGENT_RUNNER" not in os.environ
     assert "AVA_MACHINE_NAME" not in os.environ
@@ -157,7 +157,7 @@ def test_enforce_keeps_timezone_supplied_by_env_alone(
     authoritative value via /api/bootstrap at Settings build regardless."""
     monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "Asia/Shanghai")
     _point_env_at(monkeypatch, tmp_path / "no-timezone.env", tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_TIMEZONE"] == "Asia/Shanghai"
 
 
@@ -177,7 +177,7 @@ def test_enforce_forces_declared_tempo_urls_over_forwarded_snapshot(
         "AVA_TELEMETRY_TEMPO_ENDPOINT=http://127.0.0.1:14318\n"
     )
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] == "http://127.0.0.1:3200"
     assert os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] == "http://127.0.0.1:14318"
 
@@ -191,7 +191,7 @@ def test_enforce_keeps_tempo_urls_supplied_by_env_alone(
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_TIMEZONE=Asia/Shanghai\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] == "http://tempo.test:3200"
 
 
@@ -203,7 +203,7 @@ def test_declared_service_path_wins_over_forwarded_snapshot(
     env_file = tmp_path / ".env"
     env_file.write_text(f"AVA_SERVICE_PATH='{declared}'\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_SERVICE_PATH"] == declared
 
 
@@ -256,11 +256,11 @@ def test_enforce_keeps_gateway_url_supplied_by_env_alone(
         + "\n"
     )
     use_env_files(monkeypatch, env_file)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_GATEWAY_URL"] == "http://gw:8000"
 
 
-# ── _enforce_cluster_env_authority: undeclared DERIVED keys are dropped ──
+# ── enforce_cluster_env_authority: undeclared DERIVED keys are dropped ──
 #
 # A DERIVED key in the unit's own .env is forced over a polluted parent env; a
 # key inherited WITHOUT a .env declaration is dropped, not kept: a pure
@@ -281,7 +281,7 @@ def test_enforce_drops_app_port_absent_from_env_file(
     pure-runner case: cluster data-plane keys arrive via bootstrap)."""
     monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
     _point_env_at(monkeypatch, tmp_path / "no-port.env", tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_APP_PORT" not in os.environ
 
 
@@ -294,7 +294,7 @@ def test_enforce_keeps_app_port_declared_in_env_file(
     env_file = tmp_path / ".env"
     env_file.write_text("AVA_APP_PORT=18113\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_APP_PORT"] == "18113"
 
 
@@ -313,7 +313,7 @@ def test_enforce_drops_every_undeclared_derived_key(
     monkeypatch.setitem(os.environ, "AVA_EVENTS_CHANNEL", "ava:events:leaked")
     monkeypatch.setitem(os.environ, "AVA_MEMORY_SEARCH_PORT", "19531")
     _point_env_at(monkeypatch, tmp_path / "no-port.env", tmp_path)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_APP_PORT" not in os.environ
     assert "AVA_EVENTS_CHANNEL" not in os.environ
     assert "AVA_MEMORY_SEARCH_PORT" not in os.environ
@@ -343,7 +343,7 @@ def test_enforce_keeps_placeholder_url(monkeypatch: pytest.MonkeyPatch, tmp_path
         + "\n"
     )
     use_env_files(monkeypatch, env_file)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == dotenv_boot.PLACEHOLDER_DB_URL
 
 
@@ -368,7 +368,7 @@ def test_enforce_drops_undeclared_redis_url(
         + "\n"
     )
     use_env_files(monkeypatch, env_file)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_REDIS_URL" not in os.environ
 
 
@@ -401,7 +401,7 @@ def test_enforce_keeps_placeholder_url_over_a_declaring_env_file(
     )
     use_env_files(monkeypatch, env_file)
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert os.environ["AVA_DB_URL"] == dotenv_boot.PLACEHOLDER_DB_URL
     assert os.environ["AVA_EVENTS_CHANNEL"] == "ava:thisunit:events", (
@@ -431,7 +431,7 @@ def test_enforce_drops_a_leaked_redis_url(monkeypatch: pytest.MonkeyPatch, tmp_p
         + "\n"
     )
     use_env_files(monkeypatch, env_file)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_REDIS_URL" not in os.environ
 
 
@@ -476,7 +476,7 @@ def test_gateway_profile_pops_only_for_gateway(
     else:
         monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
 
-    # The .env file needs the identity keys so _enforce_cluster_env_authority
+    # The .env file needs the identity keys so enforce_cluster_env_authority
     # takes its FORCE branch and doesn't wipe them. DEEPSEEK_API_KEY is declared
     # too — a single-box unit's .env carries every cluster field (its first
     # start writes them all), so the FORCE branch keeps it in every profile and the ONLY thing
@@ -498,7 +498,7 @@ def test_gateway_profile_pops_only_for_gateway(
     _pre_pop = {k: os.environ.get(k) for k in agent_runner_cluster_aliases()}
 
     try:
-        dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+        dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
         if key_should_survive:
             assert test_key in os.environ, (
@@ -633,7 +633,7 @@ def test_agent_profile_keeps_launcher_runner_url_and_drops_admin_passwords(
         "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
     )
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert os.environ["AVA_DB_URL"].startswith("postgresql://ava_runner:")
     assert "AVA_REDIS_ADMIN_PASSWORD" not in os.environ
@@ -647,7 +647,7 @@ _NO_DB_URL_IDENTITY_LINES = tuple(
 )
 
 
-def _point_env_at_without_db_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def point_env_at_without_db_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An env file that declares every identity key EXCEPT AVA_DB_URL — the
     pure agent-runner shape (#4334)."""
     env_file = tmp_path / "no-db.env"
@@ -666,7 +666,7 @@ def test_agent_profile_keeps_undeclared_launcher_runner_url(
     paths, and popping it left the placeholder URL (probe population
     check misread as an environment failure)."""
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(
         os.environ,
         "AVA_DB_URL",
@@ -677,7 +677,7 @@ def test_agent_profile_keeps_undeclared_launcher_runner_url(
     monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
     monkeypatch.setitem(os.environ, "AVA_REDIS_ADMIN_PASSWORD", "redis-admin-only")
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert os.environ["AVA_DB_URL"] == "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
     assert "AVA_APP_PORT" not in os.environ
@@ -690,12 +690,12 @@ def test_agent_profile_drops_undeclared_owner_url(
     """The keep is runner-shaped: an inherited OWNER url on an undeclared unit
     is still dropped in an agent profile (sibling-leak protection unchanged)."""
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(
         os.environ, "AVA_DB_URL", "postgresql://ava_main:owner-password@127.0.0.1:5433/ava"
     )
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_DB_URL" not in os.environ
 
@@ -708,14 +708,14 @@ def test_plain_process_drops_undeclared_runner_url(
     cluster value."""
     monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
     monkeypatch.delitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, raising=False)
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(
         os.environ,
         "AVA_DB_URL",
         "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
     )
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_DB_URL" not in os.environ
 
@@ -728,10 +728,10 @@ def test_agent_profile_drops_malformed_undeclared_db_url(
     like any other unrecognized value. Before the hardening it raised out of
     `load_ava_env` (`ValueError: Invalid IPv6 URL`; e2e repro on the PR)."""
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://[::1")
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_DB_URL" not in os.environ
 

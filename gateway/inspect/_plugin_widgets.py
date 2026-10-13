@@ -46,16 +46,16 @@ from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 # The shipped-plugin inspector directory — every builtin plugin dir with an
 # inspector.py is part of the in-process registry (the metric loader's
 # convention; external plugin code is not imported by the gateway).
-_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
+PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
 
 
-def _enabled_inspector_modules() -> list[Path]:
+def enabled_inspector_modules() -> list[Path]:
     """``inspector.py`` of every ENABLED builtin plugin, sorted — the import
     set of one registry build."""
-    return enabled_face_files(_PLUGINS_DIR, "inspector.py")
+    return enabled_face_files(PLUGINS_DIR, "inspector.py")
 
 
-def _load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[InspectWidgetSpec]:
+def load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[InspectWidgetSpec]:
     """The widget registry of the plugins enabled right now: each enabled
     builtin plugin's ``inspector.py`` declaration, admitted into a data registry
     (``modules`` names the ``inspector.py`` files to load instead of the enabled set).
@@ -73,7 +73,7 @@ def _load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[Inspect
             ),
             (module.parent, data_registry.WIDGETS_KEY),
         )
-        for module in (_enabled_inspector_modules() if modules is None else modules)
+        for module in (enabled_inspector_modules() if modules is None else modules)
     ]
     registry, _refused = data_registry.build_data_registry(declared)
     return list(registry.inspect_widgets())
@@ -102,7 +102,7 @@ def _resolve_tasks(cur: Cursor[Any], agent_id: int) -> list[InspectWidgetTask]:
 
 def widgets_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[InspectWidgetResult]:
     """Sync twin of the widgets endpoint — runs via asyncio.to_thread."""
-    specs = _load_inspect_widgets()
+    specs = load_inspect_widgets()
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:

@@ -16,7 +16,7 @@ import pytest
 from base.config import get_field
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, component
-from base.daemon.tests._health_helpers import _find_free_port, _http_get, _probe_url
+from base.daemon.tests._health_helpers import find_free_port, http_get, probe_url
 from base.daemon.tests.health_support import unknown_image
 from base.host.env.health_ports import health_port
 from base.native_process import loaded_commit
@@ -41,7 +41,7 @@ async def _probe(name: str, port: int, pidfile: Path, **kw: object) -> health.Da
     return await asyncio.to_thread(
         health.probe_daemon,
         name,
-        _probe_url(port),
+        probe_url(port),
         pidfile=pidfile,
         **kw,  # type: ignore[arg-type]
     )
@@ -50,10 +50,10 @@ async def _probe(name: str, port: int, pidfile: Path, **kw: object) -> health.Da
 @pytest.mark.asyncio
 async def test_healthz_body_carries_home(tmp_path: Path) -> None:
     """`home` is in the payload at all — the field the cross-cluster check reads."""
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
-        _status, body = await _http_get(port, "/healthz")
+        _status, body = await http_get(port, "/healthz")
         assert json.loads(body)["home"] == str(ava_home())
     finally:
         await health.stop_health_server(server)
@@ -66,17 +66,17 @@ async def test_healthz_body_carries_the_daemons_own_commit(monkeypatch: pytest.M
     per-daemon view the machine-level roster row cannot give (it speaks only for
     whichever process answers the status probe)."""
     image = loaded_commit.LoadedCommit(Path.cwd(), "c0ffee1234")
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server("agent_host", port=port, image=image)
     try:
-        _status, body = await _http_get(port, "/healthz")
+        _status, body = await http_get(port, "/healthz")
         assert json.loads(body)["sha"] == "c0ffee1234"
 
         def later_capture(_root: Path) -> str:
             return "checkout-advanced"
 
         monkeypatch.setattr(loaded_commit, "capture_commit", later_capture)
-        status, body = await _http_get(port, "/healthz")
+        status, body = await http_get(port, "/healthz")
         assert status == 200
         assert json.loads(body)["sha"] == "c0ffee1234"
     finally:
@@ -91,10 +91,10 @@ async def test_healthz_reports_an_unfrozen_process_as_unknown(
     absent field reads to a probe as an old daemon that predates this payload,
     a null reads as "this process cannot vouch for its code"."""
     image = unknown_image()
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server("agent_host", port=port, image=image)
     try:
-        _status, body = await _http_get(port, "/healthz")
+        _status, body = await http_get(port, "/healthz")
         assert json.loads(body)["sha"] is None
     finally:
         await health.stop_health_server(server)
@@ -118,13 +118,13 @@ async def test_healthz_retains_explicit_loaded_image_after_source_changes(
         raise AssertionError("health requests must not reread the checkout")
 
     monkeypatch.setattr(loaded_commit, "capture_commit", unexpected_capture)
-    port = _find_free_port()
+    port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await health.start_health_server("agent_host", port=port, image=image)
     try:
         for _ in range(2):
-            status, body = await _http_get(port, "/healthz")
+            status, body = await http_get(port, "/healthz")
             payload = json.loads(body)
             assert status == 200
             assert payload["sha"] == sha
@@ -150,7 +150,7 @@ async def test_probe_reports_the_commit_without_judging_it(
     would have every watchdog respawn its daemon the moment a rollout advances
     the checkout, racing the orchestrated restart it is supposed to leave alone."""
     image = loaded_commit.LoadedCommit(Path.cwd(), "c0ffee1234")
-    port = _find_free_port()
+    port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await health.start_health_server("agent_host", port=port, image=image)
@@ -165,7 +165,7 @@ async def test_probe_reports_the_commit_without_judging_it(
 @pytest.mark.asyncio
 async def test_probe_alive_when_name_home_and_pid_all_match(tmp_path: Path) -> None:
     """The happy path: our own daemon, its own pidfile → alive."""
-    port = _find_free_port()
+    port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await health.start_health_server("agent_host", port=port, image=unknown_image())
@@ -185,7 +185,7 @@ async def test_probe_rejects_200_from_a_process_that_is_not_ours(tmp_path: Path)
     Verdict DOWN, not terminal: name and home already matched, so the stray belongs
     to THIS cluster and this daemon kind — `respawn_service` kills our own
     `ava-agent-host` session first, which does free the port."""
-    port = _find_free_port()
+    port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid() + 1))  # our daemon's pid, not the responder's
     server = await health.start_health_server("agent_host", port=port, image=unknown_image())
@@ -211,7 +211,7 @@ async def test_probe_rejects_daemon_from_another_home(
     60s for hours. The two units there were in the SAME cluster (#977), which is
     why the detail must say unit — and why the sentence is asserted here, on the
     string the probe really emits, rather than only where a stub fabricates it."""
-    port = _find_free_port()
+    port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await health.start_health_server("agent_host", port=port, image=unknown_image())
@@ -233,7 +233,7 @@ async def test_probe_rejects_a_different_daemon_kind(tmp_path: Path) -> None:
     """A labeler squatting on the agent host's port is not a live agent host — and
     terminal, because killing `ava-agent-host` does not free a port `ava-labeler`
     holds."""
-    port = _find_free_port()
+    port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await health.start_health_server("labeler", port=port, image=unknown_image())
@@ -253,7 +253,7 @@ async def test_probe_rejects_200_when_no_pidfile_exists(tmp_path: Path) -> None:
 
     DOWN rather than terminal: name and home matched first, so the answerer is a
     stray of this same cluster, which the respawn's kill-session clears."""
-    port = _find_free_port()
+    port = find_free_port()
     server = await health.start_health_server("agent_host", port=port, image=unknown_image())
     try:
         probe = await _probe("agent_host", port, tmp_path / "absent.pid")
@@ -275,7 +275,7 @@ async def test_probe_rejects_non_json_responder(tmp_path: Path) -> None:
         await writer.drain()
         writer.close()
 
-    port = _find_free_port()
+    port = find_free_port()
     server = await asyncio.start_server(_handle, host="127.0.0.1", port=port)
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
@@ -291,7 +291,7 @@ def test_probe_dead_when_nothing_listens(tmp_path: Path) -> None:
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     probe = health.probe_daemon(
-        "agent_host", _probe_url(_find_free_port()), pidfile=pidfile, timeout_s=1.0
+        "agent_host", probe_url(find_free_port()), pidfile=pidfile, timeout_s=1.0
     )
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert probe.terminal is False, "a free port is the respawnable case"
@@ -304,7 +304,7 @@ async def test_probe_dead_when_liveness_is_stale(tmp_path: Path) -> None:
 
     DOWN, so the respawn still runs — a wedged loop in our own daemon is exactly
     what a respawn cures."""
-    port = _find_free_port()
+    port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     stale = health.Liveness(timeout_s=-1.0)
@@ -321,7 +321,7 @@ async def test_probe_dead_when_liveness_is_stale(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_probe_includes_degraded_component_reasons(tmp_path: Path) -> None:
     """A watchdog failure names the stuck component rather than an opaque 503."""
-    port = _find_free_port()
+    port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await health.start_health_server(
@@ -380,7 +380,7 @@ def test_probe_daemon_survives_an_http_exception(
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     with caplog.at_level(logging.ERROR, logger="base.daemon.health"):
-        probe = health.probe_daemon("agent_host", _probe_url(9), pidfile=pidfile)
+        probe = health.probe_daemon("agent_host", probe_url(9), pidfile=pidfile)
     assert probe.alive is False
     assert "BadStatusLine" in probe.detail
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)
@@ -397,7 +397,7 @@ def test_probe_daemon_survives_a_pidfile_oserror(
         "_probe_daemon",
         lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("pidfile unreadable")),  # pyright: ignore[reportUnknownArgumentType]
     )
-    probe = health.probe_daemon("agent_host", _probe_url(9), pidfile=tmp_path / "x.pid")
+    probe = health.probe_daemon("agent_host", probe_url(9), pidfile=tmp_path / "x.pid")
     assert probe.alive is False
     assert "PermissionError" in probe.detail
 
@@ -416,7 +416,7 @@ def test_probe_daemon_verdict_is_down_never_up_on_failure(
         "_probe_daemon",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType]
     )
-    probe = health.probe_daemon("labeler", _probe_url(9), pidfile=tmp_path / "x.pid")
+    probe = health.probe_daemon("labeler", probe_url(9), pidfile=tmp_path / "x.pid")
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert probe.terminal is False
 
@@ -431,7 +431,7 @@ def test_probe_daemon_passes_through_a_normal_verdict(
         "_probe_daemon",
         lambda *_a, **_k: health.DaemonProbe.up("pid 42"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    probe = health.probe_daemon("ops", _probe_url(9), pidfile=tmp_path / "x.pid")
+    probe = health.probe_daemon("ops", probe_url(9), pidfile=tmp_path / "x.pid")
     assert probe.alive is True
     assert probe.detail == "pid 42"
 

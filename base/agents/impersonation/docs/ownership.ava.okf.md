@@ -70,7 +70,7 @@ cannot attest a caller; it is never filled from the current process or converted
 to a wall-time fallback. Caller errors distinguish unavailable evidence from
 confirmed exit, reuse, and a live controller outside the caller's ancestor chain.
 
-`ava.external.attach(session_id, agent_id=...)` loads saved state and
+`ava.impersonation.attach(session_id, agent_id=...)` loads saved state and
 binds SDK identity in the external process. Plugin changes append ordered deltas;
 only the native graph writes checkpoints. On return it applies the journal with
 a durable lease/version receipt. It then writes the handoff file, checkpoints

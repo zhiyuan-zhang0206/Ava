@@ -41,9 +41,9 @@ def _skip_acl_backoff_waits(monkeypatch: pytest.MonkeyPatch) -> None:
     def _max_jitter(delay_cap: float) -> float:
         return delay_cap
 
-    monkeypatch.setattr(redis_client, "_sleep_sync", _no_sync_wait)
-    monkeypatch.setattr(redis_client, "_sleep_async", _no_async_wait)
-    monkeypatch.setattr(redis_client, "_auth_retry_jitter", _max_jitter)
+    monkeypatch.setattr(redis_client, "sleep_sync", _no_sync_wait)
+    monkeypatch.setattr(redis_client, "sleep_async", _no_async_wait)
+    monkeypatch.setattr(redis_client, "auth_retry_jitter", _max_jitter)
 
 
 class _BoomSyncClient:

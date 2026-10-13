@@ -16,7 +16,7 @@ from base.config import settings
 from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, SECRET
-from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
+from gateway.agents.tests.creation.test_sdk_strong_creation import _response, sdk
 from gateway.app import app
 from ops.cluster import rpc
 from ops.lifecycle.launch import _validate_launch_row
@@ -71,7 +71,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
             app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
         ) as target:
             with pytest.raises(GatewayUnavailable):
-                _sdk()
+                sdk()
             lost_attempts = http.post.call_count
             assert lost_attempts > 1
             lose = False
@@ -93,7 +93,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
         with gateway_test_client(
             app, headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
         ) as target:
-            assert _sdk() == agent_id
+            assert sdk() == agent_id
     assert http.post.call_count == lost_attempts + 1
     assert all(call == http.post.call_args_list[0] for call in http.post.call_args_list)
     # Each replay before the rotation re-offers the original launch; a replay

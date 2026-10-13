@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from ava.gateway_client import spawn, transport
-from ava.gateway_client.tests.test_gateway_client import mock_client as mock_client
+from ava.tests.namespaces.gateway_client.test_gateway_client import mock_client as mock_client
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 
 

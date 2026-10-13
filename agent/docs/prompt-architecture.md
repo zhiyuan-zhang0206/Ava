@@ -192,7 +192,7 @@ Capabilities rather than standing as its own section.
   updates, commitments, receipt boundaries, and deduplicated delivery, including
   generated watchers and schedules. Independent of the human guidance toggle.
 - **Reduce context switch for the human** —
-  `ava_builtins/plugins/ava_fleet/agent_runtime.py:_reduce_context_switch_section`,
+  `ava_builtins/plugins/ava_fleet/agent_runtime.py:reduce_context_switch_section`,
   on by default via the Fleet `reduce_context_switch` config image field
   (user ruling 2026-09-20): the human-attention default
   every fleet agent carries — essential delivery and interruption semantics.

@@ -50,7 +50,7 @@ def state_path() -> Path:
     import base.paths
 
     # Admission/status reads must not create a home before setup validation.
-    # Writers create the parent through lock_path() and _write_atomic().
+    # Writers create the parent through lock_path() and write_atomic().
     return base.paths.ava_home() / "run" / "deploy-pause-owner.json"
 
 
@@ -105,7 +105,7 @@ def _fsync_parent(path: Path) -> None:
     fsync_parent(path)
 
 
-def _write_atomic(path: Path, payload: dict[str, object]) -> None:
+def write_atomic(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(
         path,
@@ -150,7 +150,7 @@ def _write_maintenance(
     *,
     resumed: bool = False,
 ) -> PauseOwnerSnapshot:
-    _write_atomic(
+    write_atomic(
         state_path(),
         {
             "state": "resumed" if resumed else "paused",

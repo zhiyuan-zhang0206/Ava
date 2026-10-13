@@ -19,26 +19,26 @@ import random
 import pytest
 
 from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
-    _compiles,
-    _escape_interior_quotes,
-    _escape_interior_triples,
-    _find_triple_quotes,
-    _find_unescaped_char,
-    _first_compiling_closer,
-    _first_compiling_escape,
-    _first_compiling_line_escape,
-    _quote_positions,
-    _scan_cross_line_opener,
-    _scan_unbalanced_brackets,
-    _string_advance,
-    _syntax_error_lineno,
-    _unterminated_error,
-    _unterminated_opener_pos,
+    compiles,
+    escape_interior_quotes,
+    escape_interior_triples,
+    find_triple_quotes,
+    find_unescaped_char,
+    first_compiling_closer,
+    first_compiling_escape,
+    first_compiling_line_escape,
     fix_bracket_matching,
     fix_escape_inner_quotes,
     fix_nested_triple_quote,
     fix_string_newlines,
     fix_unterminated_to_triple,
+    quote_positions,
+    scan_cross_line_opener,
+    scan_unbalanced_brackets,
+    string_advance,
+    syntax_error_lineno,
+    unterminated_error,
+    unterminated_opener_pos,
 )
 from ava_builtins.plugins.ava_syntax_fix.tests.legacy_fixers_support import (
     legacy_fix_bracket_matching,
@@ -55,97 +55,97 @@ from ava_builtins.plugins.ava_syntax_fix.tests.legacy_fixers_support import (
 
 class TestFindUnescapedChar:
     def test_plain_char(self):
-        assert _find_unescaped_char('a"b', '"', 0) == 1
+        assert find_unescaped_char('a"b', '"', 0) == 1
 
     def test_skips_escaped(self):
-        assert _find_unescaped_char('a\\"b"', '"', 0) == 4
+        assert find_unescaped_char('a\\"b"', '"', 0) == 4
 
     def test_not_found(self):
-        assert _find_unescaped_char("abc", '"', 0) == -1
+        assert find_unescaped_char("abc", '"', 0) == -1
 
     def test_start_offset(self):
-        assert _find_unescaped_char('"a"b"', '"', 3) == 4
+        assert find_unescaped_char('"a"b"', '"', 3) == 4
 
     def test_trailing_backslash(self):
         # backslash as last char: skip past end, no match
-        assert _find_unescaped_char("ab\\", '"', 0) == -1
+        assert find_unescaped_char("ab\\", '"', 0) == -1
 
 
 class TestScanCrossLineOpener:
     def test_cross_line_single_quote(self):
-        assert _scan_cross_line_opener("x = 'hello") == ("'", 4, False)
+        assert scan_cross_line_opener("x = 'hello") == ("'", 4, False)
 
     def test_cross_line_double_quote(self):
-        assert _scan_cross_line_opener('x = "hello') == ('"', 4, False)
+        assert scan_cross_line_opener('x = "hello') == ('"', 4, False)
 
     def test_prefix_skipped(self):
-        assert _scan_cross_line_opener("x = f'hello") == ("'", 5, False)
-        assert _scan_cross_line_opener("x = rb'hello") == ("'", 6, False)
+        assert scan_cross_line_opener("x = f'hello") == ("'", 5, False)
+        assert scan_cross_line_opener("x = rb'hello") == ("'", 6, False)
 
     def test_comment_stops_scan(self):
-        assert _scan_cross_line_opener("x = 1  # ' open") is None
+        assert scan_cross_line_opener("x = 1  # ' open") is None
 
     def test_closed_string_then_cross_line(self):
         # first string closes on the line, second does not
-        assert _scan_cross_line_opener("x = 'a' 'b") == ("'", 8, False)
+        assert scan_cross_line_opener("x = 'a' 'b") == ("'", 8, False)
 
     def test_unclosed_triple_marks_stuck(self):
-        assert _scan_cross_line_opener("x = '''unclosed") == ("'''", 4, True)
-        assert _scan_cross_line_opener('x = """unclosed') == ('"""', 4, True)
+        assert scan_cross_line_opener("x = '''unclosed") == ("'''", 4, True)
+        assert scan_cross_line_opener('x = """unclosed') == ('"""', 4, True)
 
     def test_closed_triple_skipped(self):
-        assert _scan_cross_line_opener("x = '''a''' y = 'b") == ("'", 16, False)
+        assert scan_cross_line_opener("x = '''a''' y = 'b") == ("'", 16, False)
 
     def test_no_opener(self):
-        assert _scan_cross_line_opener("x = 1 + 2") is None
+        assert scan_cross_line_opener("x = 1 + 2") is None
 
     def test_escaped_quote_not_closer(self):
         # the \" is escaped, so the string stays open across the line
-        assert _scan_cross_line_opener("x = 'it\\'s") == ("'", 4, False)
+        assert scan_cross_line_opener("x = 'it\\'s") == ("'", 4, False)
 
 
 class TestStringAdvance:
     def test_triple_close(self):
-        assert _string_advance('"""abc"""', 0, '"""', in_triple=True) == (3, None, False)
+        assert string_advance('"""abc"""', 0, '"""', in_triple=True) == (3, None, False)
 
     def test_triple_no_close(self):
-        assert _string_advance('"""ab', 1, '"""', in_triple=True) == (2, '"""', True)
+        assert string_advance('"""ab', 1, '"""', in_triple=True) == (2, '"""', True)
 
     def test_single_escape(self):
-        assert _string_advance('"a\\"b"', 2, '"', in_triple=False) == (4, '"', False)
+        assert string_advance('"a\\"b"', 2, '"', in_triple=False) == (4, '"', False)
 
     def test_single_close(self):
-        assert _string_advance('"ab"', 3, '"', in_triple=False) == (4, None, False)
+        assert string_advance('"ab"', 3, '"', in_triple=False) == (4, None, False)
 
     def test_single_plain(self):
-        assert _string_advance('"ab"', 1, '"', in_triple=False) == (2, '"', False)
+        assert string_advance('"ab"', 1, '"', in_triple=False) == (2, '"', False)
 
 
 class TestScanUnbalancedBrackets:
     def test_balanced(self):
-        assert _scan_unbalanced_brackets("(1, 2)") == ("(1, 2)", [], 0)
+        assert scan_unbalanced_brackets("(1, 2)") == ("(1, 2)", [], 0)
 
     def test_missing_closer(self):
-        _code, stack, changes = _scan_unbalanced_brackets("(1, 2")
+        _code, stack, changes = scan_unbalanced_brackets("(1, 2")
         assert changes == 0
         assert stack == [("(", 0)]
 
     def test_extra_closer_removed(self):
-        code, stack, changes = _scan_unbalanced_brackets("(1, 2))")
+        code, stack, changes = scan_unbalanced_brackets("(1, 2))")
         assert code == "(1, 2)"
         assert changes == 1
         assert stack == []
 
     def test_nested(self):
-        _code, stack, changes = _scan_unbalanced_brackets("([{ }]")
+        _code, stack, changes = scan_unbalanced_brackets("([{ }]")
         assert changes == 0
         assert [op for op, _ in stack] == ["("]
 
     def test_string_brackets_ignored(self):
-        assert _scan_unbalanced_brackets('x = "(" + ")"') == ('x = "(" + ")"', [], 0)
+        assert scan_unbalanced_brackets('x = "(" + ")"') == ('x = "(" + ")"', [], 0)
 
     def test_triple_string_ignored(self):
-        assert _scan_unbalanced_brackets('x = """( [ { ] )"""') == (
+        assert scan_unbalanced_brackets('x = """( [ { ] )"""') == (
             'x = """( [ { ] )"""',
             [],
             0,
@@ -153,7 +153,7 @@ class TestScanUnbalancedBrackets:
 
     def test_unclosed_string_ignores_brackets(self):
         # an unterminated single-quoted string swallows the rest of the scan
-        assert _scan_unbalanced_brackets("x = 'unclosed (string") == (
+        assert scan_unbalanced_brackets("x = 'unclosed (string") == (
             "x = 'unclosed (string",
             [],
             0,
@@ -162,128 +162,128 @@ class TestScanUnbalancedBrackets:
 
 class TestUnterminatedError:
     def test_valid_code(self):
-        assert _unterminated_error("x = 1") is None
+        assert unterminated_error("x = 1") is None
 
     def test_unterminated_string(self):
-        assert _unterminated_error('x = "unterminated\nstill') == (1, 5)
+        assert unterminated_error('x = "unterminated\nstill') == (1, 5)
 
     def test_unrelated_error(self):
-        assert _unterminated_error("def f(:\n    pass") is None
+        assert unterminated_error("def f(:\n    pass") is None
 
     def test_unterminated_fstring(self):
-        err = _unterminated_error('x = f"{v}\nstill')
+        err = unterminated_error('x = f"{v}\nstill')
         assert err is not None
 
 
 class TestUnterminatedOpenerPos:
     def test_quote_position(self):
-        assert _unterminated_opener_pos('x = "unterminated\nstill', 1, 5) == 4
+        assert unterminated_opener_pos('x = "unterminated\nstill', 1, 5) == 4
 
     def test_prefix_skipped(self):
-        assert _unterminated_opener_pos('x = f"unterminated\nstill', 1, 6) == 5
+        assert unterminated_opener_pos('x = f"unterminated\nstill', 1, 6) == 5
 
 
 class TestFirstCompilingCloser:
     def test_finds_compiling_closer(self):
-        assert _first_compiling_closer('x = "unterminated\nstill"', 4, '"') == (
+        assert first_compiling_closer('x = "unterminated\nstill"', 4, '"') == (
             'x = """unterminated\nstill"""'
         )
 
     def test_no_closer(self):
-        assert _first_compiling_closer('x = "unterminated\nstill', 4, '"') is None
+        assert first_compiling_closer('x = "unterminated\nstill', 4, '"') is None
 
     def test_body_quote_candidate_rejected(self):
         # first same-char quote in the body does not compile; the later one does
-        fixed = _first_compiling_closer("r = run('cmd\n'body' more')", 9, "'")
+        fixed = first_compiling_closer("r = run('cmd\n'body' more')", 9, "'")
         assert fixed is not None
         assert fixed.count("'''") == 2
-        assert _compiles(fixed)
+        assert compiles(fixed)
 
 
 class TestFindTripleQuotes:
     def test_positions(self):
-        assert _find_triple_quotes('a"""b"""c"""', '"""') == [1, 5, 9]
+        assert find_triple_quotes('a"""b"""c"""', '"""') == [1, 5, 9]
 
     def test_empty(self):
-        assert _find_triple_quotes("abc", '"""') == []
+        assert find_triple_quotes("abc", '"""') == []
 
     def test_overlapping_run(self):
         # """""" = two adjacent triples
-        assert _find_triple_quotes('""""""', '"""') == [0, 3]
+        assert find_triple_quotes('""""""', '"""') == [0, 3]
 
 
 class TestEscapeInteriorTriples:
     def test_rebuild(self):
-        assert _escape_interior_triples('"""a"""b"""c"""', 0, 10, [4], '"""') == (
+        assert escape_interior_triples('"""a"""b"""c"""', 0, 10, [4], '"""') == (
             '"""a\\"\\"\\"b"""""""'
         )
 
     def test_multiple_interior(self):
-        out = _escape_interior_triples('"""a"""b"""c"""d"""', 0, 14, [4, 8], '"""')
+        out = escape_interior_triples('"""a"""b"""c"""d"""', 0, 14, [4, 8], '"""')
         assert out.count('\\"') == 6
 
 
 class TestFirstCompilingEscape:
     def test_simple_docstring(self):
         src = 'src = """\ndef f():\n    """doc"""\n    return 1\n"""'
-        result = _first_compiling_escape(src, '"""', _find_triple_quotes(src, '"""'))
+        result = first_compiling_escape(src, '"""', find_triple_quotes(src, '"""'))
         assert result is not None
         fixed, n = result
         assert n == 2
-        assert _compiles(fixed)
+        assert compiles(fixed)
 
     def test_raw_prefixed_opener_skipped(self):
         src = 'x = r"""raw\n"""doc"""\n"""'
-        assert _first_compiling_escape(src, '"""', _find_triple_quotes(src, '"""')) is None
+        assert first_compiling_escape(src, '"""', find_triple_quotes(src, '"""')) is None
 
     def test_no_candidate(self):
-        assert _first_compiling_escape("abc", '"""', []) is None
+        assert first_compiling_escape("abc", '"""', []) is None
 
 
 class TestSyntaxErrorLineno:
     def test_valid(self):
-        assert _syntax_error_lineno("x = 1") is None
+        assert syntax_error_lineno("x = 1") is None
 
     def test_error_line(self):
-        assert _syntax_error_lineno('x = "unterminated') == 1
+        assert syntax_error_lineno('x = "unterminated') == 1
 
     def test_second_line(self):
-        assert _syntax_error_lineno("x = 1\ny = 'unterminated") == 2
+        assert syntax_error_lineno("x = 1\ny = 'unterminated") == 2
 
 
 class TestQuotePositions:
     def test_unescaped_positions(self):
-        assert _quote_positions('a"b"c"d', '"') == [1, 3, 5]
+        assert quote_positions('a"b"c"d', '"') == [1, 3, 5]
 
     def test_escaped_skipped(self):
-        assert _quote_positions('a\\"b"', '"') == [4]
+        assert quote_positions('a\\"b"', '"') == [4]
 
     def test_single_quotes(self):
-        assert _quote_positions("a'b'c", "'") == [1, 3]
+        assert quote_positions("a'b'c", "'") == [1, 3]
 
 
 class TestEscapeInteriorQuotes:
     def test_rebuild(self):
-        assert _escape_interior_quotes('"a"b"c"', 0, [2, 4], '"') == '"a\\"b\\"c"'
+        assert escape_interior_quotes('"a"b"c"', 0, [2, 4], '"') == '"a\\"b\\"c"'
 
 
 class TestFirstCompilingLineEscape:
     def test_finds_compiling_escape(self):
         line = 'print(run("grep -n "pat" file"))'
-        positions = _quote_positions(line, '"')
-        result = _first_compiling_line_escape([line], 1, line, '"', positions)
+        positions = quote_positions(line, '"')
+        result = first_compiling_line_escape([line], 1, line, '"', positions)
         assert result is not None
         fixed, n = result
         assert n == 2
-        assert _compiles(fixed)
+        assert compiles(fixed)
 
     def test_boundary_quotes_rejected(self):
         line = 'print("a" + "b" + "c"'
-        positions = _quote_positions(line, '"')
-        assert _first_compiling_line_escape([line], 1, line, '"', positions) is None
+        positions = quote_positions(line, '"')
+        assert first_compiling_line_escape([line], 1, line, '"', positions) is None
 
     def test_no_candidate(self):
-        assert _first_compiling_line_escape(["abc"], 1, "abc", '"', []) is None
+        assert first_compiling_line_escape(["abc"], 1, "abc", '"', []) is None
 
 
 # ---------------------------------------------------------------------------

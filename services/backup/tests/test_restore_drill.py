@@ -98,7 +98,7 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
             groups=Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP),
         )
     with db_conn.cursor() as cur:
-        for role in restore_drill._RESTORE_ROLES:
+        for role in restore_drill.RESTORE_ROLES:
             cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
             if cur.fetchone() is None:
                 cur.execute(pgsql.SQL("CREATE ROLE {} LOGIN").format(pgsql.Identifier(role)))
@@ -181,7 +181,7 @@ def test_scratch_space_requirement_scales_with_the_dump_size(tmp_path: Path) -> 
     base."""
     dump = tmp_path / "backup.dump"
     dump.write_bytes(b"x" * 1000)
-    assert restore_drill._scratch_space_requirement(dump) == 3000
+    assert restore_drill.scratch_space_requirement(dump) == 3000
 
 
 def test_restore_failure_message_names_the_base_and_the_capacity_knob(
@@ -203,7 +203,7 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
         returncode=1,
         stderr=b"pg_restore: error: PQputCopyData: server closed the connection unexpectedly\n",
     )
-    message = restore_drill._restore_failure_message(proc, base)
+    message = restore_drill.restore_failure_message(proc, base)
     assert "pg_restore exited 1" in message
     assert str(base) in message
     assert "512 MiB free" in message

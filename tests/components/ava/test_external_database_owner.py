@@ -14,7 +14,8 @@ import pytest
 
 import ava
 from agent.extensions import plugin_state_codec
-from ava import boot, external
+from ava import boot, impersonation
+from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import process_context
 from ava.sdk_surface import settings as _settings
 from base.agents.impersonation import manifest
@@ -83,7 +84,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
     """A second attachment starts fresh even inside the first one's thirty seconds."""
     now = [100.0]
     dials: list[_AttachmentDial] = []
-    require = external.control.require_active
+    require = attachment_module.control.require_active
     prior = process_context.unbind_context()
 
     def dial(*_args: object, **_kwargs: object) -> _AttachmentDial:
@@ -108,7 +109,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
     monkeypatch.setattr(connections.psycopg, "connect", dial)
     monkeypatch.setattr(code_version_gate.time, "monotonic", lambda: now[0])
     monkeypatch.setattr(code_version_gate.ProcessDbGate, "min_read_due", owner_check)
-    monkeypatch.setattr(external.control, "require_active", active)
+    monkeypatch.setattr(attachment_module.control, "require_active", active)
     (tmp_path / ".env").write_text(
         "AVA_DB_URL=postgresql://test:test@127.0.0.1:1/attachment\n"
         "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
@@ -131,7 +132,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
                 now[0] = timestamp
                 first_dial = len(dials)
                 first_check = len(checked)
-                with external.attach("lease"):
+                with impersonation.attach("lease"):
                     first_db = _settings.database()
                     second_db = _settings.database()
                     assert first_db is not second_db
@@ -181,7 +182,7 @@ def test_attachment_borrows_existing_database_factory_without_closing_prior_clie
     monkeypatch.setattr(prior.clients, "database", borrowed_database)
     prior.sql.execute("SELECT 1")
     original_connection = cast(Any, prior.sql._get())
-    with external.attach("lease"):
+    with impersonation.attach("lease"):
         assert ava.context.clients is prior.clients
         assert _settings.database() in handles
     assert ava.context is prior
@@ -211,7 +212,7 @@ def test_read_only_attachment_refuses_an_undelivered_login_before_dial(tmp_path:
 
 def _assert_competing_attachment_is_refused() -> None:
     with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(external.attach, "lease")
+        future = pool.submit(impersonation.attach, "lease")
         with pytest.raises(RuntimeError, match="already has an external attachment"):
             future.result(timeout=5)
 
@@ -236,14 +237,14 @@ def test_independent_attachment_does_not_redeliver_environment(
         delivered.read_process_environment()
         prior = process_context.unbind_context()
         try:
-            with external.attach("lease"):
+            with impersonation.attach("lease"):
                 assert dict(os.environ) == before
                 assert ava.context.require_clock().timezone == delivered.view.general.timezone
                 if contended:
                     _assert_competing_attachment_is_refused()
                 assert dict(os.environ) == before
             if not contended:
-                with external.attach("lease"):
+                with impersonation.attach("lease"):
                     assert dict(os.environ) == before
             assert dict(os.environ) == before
         finally:
@@ -260,7 +261,7 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
 ) -> None:
     prior = process_context.unbind_context()
     created: list[tuple[Any, list[bool]]] = []
-    build = external.process_clients
+    build = attachment_module.process_clients
     primary = RuntimeError("owned constructor failed")
 
     def clients(**kwargs: Any) -> Any:
@@ -279,9 +280,9 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
     def fail(*_args: Any, **_kwargs: Any) -> Any:
         raise primary
 
-    monkeypatch.setattr(external, "process_clients", clients)
+    monkeypatch.setattr(attachment_module, "process_clients", clients)
     target = (
-        (external.control, "require_active")
+        (attachment_module.control, "require_active")
         if failure_at == "lease"
         else (boot, "ensure_plugins_loaded")
         if failure_at == "plugins"
@@ -305,11 +306,11 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
             with monkeypatch.context() as failed:
                 failed.setattr(*target, fail)
                 with pytest.raises(RuntimeError) as raised:
-                    external.attach("lease")
+                    impersonation.attach("lease")
                 assert raised.value is primary
             assert created[0][1][0]
             assert getattr(ava, "context", None) is None
-            with external.attach("lease"):
+            with impersonation.attach("lease"):
                 assert ava.self.AGENT_ID == 405
             assert created[1][1][0]
     finally:
@@ -339,7 +340,7 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
     def open_participant(_db: Database, _lease_id: str, *, agent_id: int, source_key: str) -> bool:
         return True
 
-    monkeypatch.setattr(external, "ConfigBoot", build)
+    monkeypatch.setattr(attachment_module, "ConfigBoot", build)
     monkeypatch.setattr(manifest, "open_local_participant", open_participant)
     monkeypatch.setattr(manifest, "close_local_participant_admission", wait)
     (tmp_path / ".env").write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n", encoding="utf-8")
@@ -353,7 +354,7 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
                 "AVA_MACHINE_NAME": attached_runtime[0]["machine"],
             },
         ):
-            attachment = external.attach("lease")
+            attachment = impersonation.attach("lease")
             assert len(owners) == 1
             owners[0].set_field("impersonation_event_seal_wait_seconds", 37)
             assert waits == []

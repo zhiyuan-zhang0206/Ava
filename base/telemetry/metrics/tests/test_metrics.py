@@ -1,7 +1,7 @@
 """Unit tests for base/telemetry/metrics/report.py — the render helpers shared with the
 SQL-aggregated metrics path.
 
-These are the pure helpers (`pctiles`, `third_of`, `_fix_kinds`) that
+These are the pure helpers (`pctiles`, `third_of`, `fix_kinds`) that
 `base.telemetry.metrics.aggregate` reuses so the math cannot drift between the SQL
 aggregation and the rendered report. The per-row computation units they used
 to accompany (EventRow/EventIndex/@metric_unit) were retired with the SQL
@@ -10,22 +10,22 @@ aggregation — see the module docstring in base/telemetry/metrics/report.py.
 
 from __future__ import annotations
 
-from base.telemetry.metrics import _fix_kinds, pctiles, third_of
+from base.telemetry.metrics import fix_kinds, pctiles, third_of
 
 
 def test_fix_kinds_strips_count_suffix():
-    assert _fix_kinds("ruff,ruff_format") == ["ruff", "ruff_format"]
-    assert _fix_kinds("chinese_punct(3),missing_imports(2)") == [
+    assert fix_kinds("ruff,ruff_format") == ["ruff", "ruff_format"]
+    assert fix_kinds("chinese_punct(3),missing_imports(2)") == [
         "chinese_punct",
         "missing_imports",
     ]
-    assert _fix_kinds("") == []
+    assert fix_kinds("") == []
 
 
 def test_fix_kinds_drops_none_sentinel():
     # llm_repair / compile_failed paths log fixes="none" — not a real fix kind
-    assert _fix_kinds("none") == []
-    assert _fix_kinds("ruff,none") == ["ruff"]
+    assert fix_kinds("none") == []
+    assert fix_kinds("ruff,none") == ["ruff"]
 
 
 def test_pctiles_pins_nearest_rank_values():

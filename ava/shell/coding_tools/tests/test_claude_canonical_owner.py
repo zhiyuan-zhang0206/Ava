@@ -49,9 +49,9 @@ def _launch_takeover(workspace: Path, brief: str) -> int:
 
 def _unwrap_paste(text: str) -> str:
     """The pasted bootstrap body; the operator's own words must follow the paste."""
-    assert text.startswith(_claude_checks._PASTE_BEGIN)
-    assert text.endswith(_claude_checks._PASTE_END + _claude_checks._OWN_WORDS)
-    return text[len(_claude_checks._PASTE_BEGIN) : text.index(_claude_checks._PASTE_END)]
+    assert text.startswith(_claude_checks.PASTE_BEGIN)
+    assert text.endswith(_claude_checks.PASTE_END + _claude_checks.OWN_WORDS)
+    return text[len(_claude_checks.PASTE_BEGIN) : text.index(_claude_checks.PASTE_END)]
 
 
 def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
@@ -84,7 +84,7 @@ def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
 def test_launch_command_unsets_api_key_and_skips_permission_prompts(tmp_path: Path) -> None:
     record = _owner(tmp_path)
 
-    command = claude._claude_command(Path(record.key.workspace))
+    command = claude.claude_command(Path(record.key.workspace))
 
     assert command.startswith(f"cd {record.key.workspace} && ")
     assert "unset ANTHROPIC_API_KEY && " in command
@@ -95,7 +95,7 @@ def test_launch_command_unsets_api_key_and_skips_permission_prompts(tmp_path: Pa
 def test_launch_command_can_explicitly_declare_external_caller(tmp_path: Path) -> None:
     record = _owner(tmp_path)
 
-    command = claude._claude_command(Path(record.key.workspace), "run-42")
+    command = claude.claude_command(Path(record.key.workspace), "run-42")
 
     assert "AVA_CALLER_IDENTITY=" in command
     assert '"kind":"external_agent"' in command
@@ -110,10 +110,10 @@ def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) ->
     plugin = _SKILL_DIR / "scripts" / "ava-relay"
     stub = tmp_path / "generation" / "relay.env"
 
-    resident = claude._claude_command(workspace, relay_stub=stub, relay_plugin_dir=plugin)
-    manual = claude._claude_command(workspace)
+    resident = claude.claude_command(workspace, relay_stub=stub, relay_plugin_dir=plugin)
+    manual = claude.claude_command(workspace)
     with pytest.raises(ValueError, match="stub path and its plugin dir"):
-        claude._claude_command(workspace, relay_plugin_dir=plugin)
+        claude.claude_command(workspace, relay_plugin_dir=plugin)
 
     assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in resident
     assert "AVA_IMPERSONATION_RELAY_PY=" in resident
@@ -166,7 +166,7 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
             + "bash prompt $ " * 10
         )
 
-    original_command = claude._claude_command
+    original_command = claude.claude_command
 
     def _missing_command(
         workspace: Path,
@@ -201,18 +201,18 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
         pytest.fail("bootstrap sent")
 
     monkeypatch.setattr(claude, "new_generation", _claim)
-    monkeypatch.setattr(claude, "_pretrust", _pretrust)
+    monkeypatch.setattr(claude, "pretrust", _pretrust)
     monkeypatch.setattr(claude.sessions, "new", _new)
     monkeypatch.setattr(claude.sessions, "send", _send)
     monkeypatch.setattr(claude.sessions, "capture", _capture)
     monkeypatch.setattr(claude.sessions, "kill", _kill)
-    monkeypatch.setattr(claude, "_claude_command", _missing_command)
+    monkeypatch.setattr(claude, "claude_command", _missing_command)
     monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
     monkeypatch.setattr(claude.coding_session_owner, "terminate_generation", _terminate)
-    monkeypatch.setattr(claude, "_verify_start_receipt", _receipt)
+    monkeypatch.setattr(claude, "verify_start_receipt", _receipt)
 
     with pytest.raises(RuntimeError, match="claude executable not found"):
-        claude._run_takeover_launch(
+        claude.run_takeover_launch(
             Path(active.key.workspace),
             "Fix login",
             "brief",
@@ -295,11 +295,11 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
 
     monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "init_file", _unexpected)
-    monkeypatch.setattr(claude, "_pretrust", _pretrust)
+    monkeypatch.setattr(claude, "pretrust", _pretrust)
     monkeypatch.setattr(claude.sessions, "new", _new)
     monkeypatch.setattr(claude.sessions, "send", _send)
-    monkeypatch.setattr(claude, "_wait_for_ready", _ready)
-    monkeypatch.setattr(claude, "_verify_start_receipt", _receipt)
+    monkeypatch.setattr(claude, "wait_for_ready", _ready)
+    monkeypatch.setattr(claude, "verify_start_receipt", _receipt)
     monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
 
     workspace = Path(launching.key.workspace)
@@ -363,11 +363,11 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
         )
 
     monkeypatch.setattr(claude, "new_generation", _claim)
-    monkeypatch.setattr(claude, "_pretrust", _pretrust)
+    monkeypatch.setattr(claude, "pretrust", _pretrust)
     monkeypatch.setattr(claude.sessions, "new", _new)
     monkeypatch.setattr(claude.sessions, "send", _send)
-    monkeypatch.setattr(claude, "_wait_for_ready", _ready)
-    monkeypatch.setattr(claude, "_verify_start_receipt", _receipt)
+    monkeypatch.setattr(claude, "wait_for_ready", _ready)
+    monkeypatch.setattr(claude, "verify_start_receipt", _receipt)
     monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
 
     workspace = Path(launching.key.workspace)
@@ -422,7 +422,7 @@ def test_start_receipt_survives_a_dead_session_at_the_enter_retry(
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
     monkeypatch.setattr(claude.sessions, "send_keys", dead_keys)
 
-    _claude_checks._verify_start_receipt(7, no_receipt, timeout=0.01)
+    _claude_checks.verify_start_receipt(7, no_receipt, timeout=0.01)
     out = capsys.readouterr().out
     assert "start-receipt=not-submitted" in out
     assert "Enter retry failed" in out
@@ -445,7 +445,7 @@ def test_start_receipt_does_not_press_enter_when_the_bootstrap_is_submitted(
     monkeypatch.setattr(claude.sessions, "send_keys", unexpected_enter)
     monkeypatch.setattr(claude.sessions, "send", unexpected_send)
 
-    _claude_checks._verify_start_receipt(7, transcript_evidence)
+    _claude_checks.verify_start_receipt(7, transcript_evidence)
 
 
 def test_start_receipt_accepts_evidence_that_appears_after_the_enter_retry(
@@ -471,7 +471,7 @@ def test_start_receipt_accepts_evidence_that_appears_after_the_enter_retry(
     monkeypatch.setattr(claude.sessions, "send_keys", send_enter)
     monkeypatch.setattr(claude.sessions, "send", unexpected_send)
 
-    _claude_checks._verify_start_receipt(7, transcript_evidence, timeout=0.0)
+    _claude_checks.verify_start_receipt(7, transcript_evidence, timeout=0.0)
 
     assert keys == ["Enter"]
     assert "start-receipt=submitted after Enter retry" in capsys.readouterr().out
@@ -504,7 +504,7 @@ def test_start_receipt_warns_and_never_resends_when_one_enter_leaves_no_evidence
     monkeypatch.setattr(claude.sessions, "send_keys", send_enter)
     monkeypatch.setattr(claude.sessions, "send", record_send)
 
-    _claude_checks._verify_start_receipt(7, no_receipt, timeout=0.0)
+    _claude_checks.verify_start_receipt(7, no_receipt, timeout=0.0)
 
     assert keys == ["Enter"]
     assert sent == []
@@ -638,10 +638,10 @@ def test_failed_early_publish_kills_claude_session_before_startup(
         return False
 
     monkeypatch.setattr(claude, "new_generation", _claim)
-    monkeypatch.setattr(claude, "_pretrust", _pretrust)
+    monkeypatch.setattr(claude, "pretrust", _pretrust)
     monkeypatch.setattr(claude.sessions, "new", _new)
     monkeypatch.setattr(claude.sessions, "send", _send)
-    monkeypatch.setattr(claude, "_wait_for_ready", _ready)
+    monkeypatch.setattr(claude, "wait_for_ready", _ready)
     monkeypatch.setattr(claude.coding_session_owner, "publish_active", _publish)
     monkeypatch.setattr(claude.sessions, "kill", _kill)
     monkeypatch.setattr(claude.coding_session_owner, "terminate_generation", _terminate)
@@ -656,18 +656,18 @@ def test_failed_early_publish_kills_claude_session_before_startup(
 
 
 def test_bracketed_paste_wraps_a_multi_chunk_payload() -> None:
-    payload = "x" * (_claude_checks._PASTE_WRAP_THRESHOLD_CHARS + 1)
-    assert _claude_checks._bracketed_paste(payload) == f"\x1b[200~{payload}\x1b[201~"
+    payload = "x" * (_claude_checks.PASTE_WRAP_THRESHOLD_CHARS + 1)
+    assert _claude_checks.bracketed_paste(payload) == f"\x1b[200~{payload}\x1b[201~"
 
 
 def test_bracketed_paste_leaves_a_single_chunk_payload_unchanged() -> None:
-    payload = "x" * _claude_checks._PASTE_WRAP_THRESHOLD_CHARS
-    assert _claude_checks._bracketed_paste(payload) == payload
+    payload = "x" * _claude_checks.PASTE_WRAP_THRESHOLD_CHARS
+    assert _claude_checks.bracketed_paste(payload) == payload
 
 
 def test_bracketed_paste_strips_inner_markers() -> None:
-    payload = "\x1b[201~" + "y" * (_claude_checks._PASTE_WRAP_THRESHOLD_CHARS + 1) + "\x1b[200~"
-    wrapped = _claude_checks._bracketed_paste(payload)
+    payload = "\x1b[201~" + "y" * (_claude_checks.PASTE_WRAP_THRESHOLD_CHARS + 1) + "\x1b[200~"
+    wrapped = _claude_checks.bracketed_paste(payload)
     assert wrapped.startswith("\x1b[200~") and wrapped.endswith("\x1b[201~")
     assert wrapped.count("\x1b[200~") == 1
     assert wrapped.count("\x1b[201~") == 1

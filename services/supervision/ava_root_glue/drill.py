@@ -48,7 +48,7 @@ def build_drill_wiring(context: WiringContext) -> list[WiringParticipant]:
     registry = ProbeRegistry()
     heartbeat_dir = context.run_dir / "heartbeat"
     for manifest in context.registry.units:
-        probe = _liveness_probe(context.supervisor, manifest.id, heartbeat_dir=heartbeat_dir)
+        probe = liveness_probe(context.supervisor, manifest.id, heartbeat_dir=heartbeat_dir)
         registry.register(manifest.id, probe)
     return assemble(
         context,
@@ -58,7 +58,7 @@ def build_drill_wiring(context: WiringContext) -> list[WiringParticipant]:
     )
 
 
-def _liveness_probe(host: _TreeHost, unit_id: str, *, heartbeat_dir: Path | None = None) -> Probe:
+def liveness_probe(host: _TreeHost, unit_id: str, *, heartbeat_dir: Path | None = None) -> Probe:
     """`running with a live pid`; a published heartbeat must also be fresh.
 
     A unit opts into the heartbeat surface by touching

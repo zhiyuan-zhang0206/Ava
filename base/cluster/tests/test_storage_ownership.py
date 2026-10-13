@@ -132,7 +132,7 @@ def test_prior_boot_never_donates_reused_pid_authority(
     monkeypatch.setattr(
         pg.OwnedProcess, "live", Mock(side_effect=AssertionError("old boot PID observed"))
     )
-    monkeypatch.setattr(pg, "_require_closed", Mock(return_value=None))
+    monkeypatch.setattr(pg, "require_closed", Mock(return_value=None))
     assert pg.observe(pg_data) is None
 
 
@@ -169,7 +169,7 @@ def test_closed_postgres_with_unknown_scan_refuses_restart(
     def unknown(_data: Path, _receipt: pg.Receipt | None) -> None:
         raise PermissionError("native metadata unavailable")
 
-    monkeypatch.setattr(pg, "_require_closed", unknown)
+    monkeypatch.setattr(pg, "require_closed", unknown)
     with pytest.raises(PermissionError):
         pg.observe(pg_data)
 
@@ -281,7 +281,7 @@ def test_stop_reaps_only_the_matching_home_child_after_native_closure(
     def closed(_data: Path, _receipt: pg.Receipt) -> None:
         order.append("closed")
 
-    monkeypatch.setattr(pg, "_require_closed", closed)
+    monkeypatch.setattr(pg, "require_closed", closed)
     monkeypatch.setattr(pg, "require_listener", Mock(return_value=None))
     pg.stop(pg_data, retained_children=children)
     assert order == ["closed", "reap:1"]

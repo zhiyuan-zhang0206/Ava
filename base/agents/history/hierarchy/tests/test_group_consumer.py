@@ -90,7 +90,7 @@ def test_generation_keeps_operation_reader_order(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(gc, "generate_groups", lambda *_args, **_kw: read("generate", []))
     assert reads == []
     assert (
-        gc._generate(models, "m", ModelOverrides.from_pins(None), 1, [], [], 7, inputs=inputs) == []
+        gc.generate(models, "m", ModelOverrides.from_pins(None), 1, [], [], 7, inputs=inputs) == []
     )
     assert reads == ["reasoning", "model", "corrections", "clock", "open", "decay", "generate"]
 
@@ -137,7 +137,7 @@ def _small_step(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
     seen: dict = {"asked": [], "emitted": [], "reply": lambda _nodes: []}
     monkeypatch.setattr(
-        gc, "_group_model", lambda *_a, **_k: ("deepseek-flash", ModelOverrides.from_pins(None))
+        gc, "group_model", lambda *_a, **_k: ("deepseek-flash", ModelOverrides.from_pins(None))
     )
 
     def generate(
@@ -154,7 +154,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> dict:
         calls.append(GroupCall(0, model, "prompt", AIMessage(content="r"), 5.0, None, None))
         return seen["reply"](nodes)
 
-    monkeypatch.setattr(gc, "_generate", generate)
+    monkeypatch.setattr(gc, "generate", generate)
     monkeypatch.setattr(gc.telemetry, "emit", lambda _k, name, **_kw: seen["emitted"].append(name))
     return seen
 
@@ -314,7 +314,7 @@ def test_the_configured_group_model_wins_over_the_agents(
     model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(policy, "understanding_group_model", "other-model")
-    model, _overrides = gc._group_model(MagicMock(), 1, catalog=model_catalog, inputs=read_inputs())
+    model, _overrides = gc.group_model(MagicMock(), 1, catalog=model_catalog, inputs=read_inputs())
     assert model == "other-model"
 
 
@@ -326,7 +326,7 @@ def test_without_a_configured_model_the_agents_own_is_used(
         gc, "agent_model_target", lambda *_a, **_k: ("agent-model", ModelOverrides.from_pins(None))
     )
     assert (
-        gc._group_model(MagicMock(), 1, catalog=model_catalog, inputs=read_inputs())[0]
+        gc.group_model(MagicMock(), 1, catalog=model_catalog, inputs=read_inputs())[0]
         == "agent-model"
     )
 
@@ -340,7 +340,7 @@ def test_standalone_groupings_hand_the_reasoning_setting_to_the_model(
     none = ModelOverrides.from_pins(None)
     for value in ("", "off", "high"):
         monkeypatch.setattr(policy, "understanding_group_reasoning", value)
-        gc._generate(models, "m", none, 1, [], [], 7, inputs=read_inputs())
+        gc.generate(models, "m", none, 1, [], [], 7, inputs=read_inputs())
         assert models.get.call_args.args == ("m", none, value)
 
 
@@ -369,7 +369,7 @@ async def test_two_checkers_of_one_level_make_one_call(
     aops_pool: AsyncConnectionPool, _seams: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _fill(aops_pool, 5)
-    monkeypatch.setattr(gc, "_generate", _slow_generate(_seams))
+    monkeypatch.setattr(gc, "generate", _slow_generate(_seams))
     await asyncio.gather(
         *(
             gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), AGENT, inputs=read_inputs())
@@ -401,7 +401,7 @@ async def test_different_agents_are_checked_at_the_same_time(
         both.wait()
         return []
 
-    monkeypatch.setattr(gc, "_generate", generate)
+    monkeypatch.setattr(gc, "generate", generate)
     await asyncio.gather(
         *(
             gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), a, inputs=read_inputs())
@@ -436,15 +436,15 @@ def test_an_open_set_past_three_checks_must_close_a_group(monkeypatch: pytest.Mo
         for i in range(15)
     ]
     monkeypatch.setattr(policy, "understanding_group_check_open", 5)
-    gc._generate(MagicMock(), "m", none, 1, nodes[:14], [], 7, inputs=read_inputs())
-    gc._generate(MagicMock(), "m", none, 1, nodes, [], 7, inputs=read_inputs())
+    gc.generate(MagicMock(), "m", none, 1, nodes[:14], [], 7, inputs=read_inputs())
+    gc.generate(MagicMock(), "m", none, 1, nodes, [], 7, inputs=read_inputs())
     monkeypatch.setattr(gc, "MIN_CHECK_OPEN", 6)
     monkeypatch.setattr(policy, "understanding_group_check_open", 60)
     monkeypatch.setattr(policy, "understanding_group_check_decay", 3)
-    gc._generate(
+    gc.generate(
         MagicMock(), "m", none, 2, nodes[:59], [], 7, inputs=read_inputs()
     )  # level 2: 3 x 20 = 60
-    gc._generate(MagicMock(), "m", none, 2, nodes * 4, [], 7, inputs=read_inputs())
+    gc.generate(MagicMock(), "m", none, 2, nodes * 4, [], 7, inputs=read_inputs())
     assert seen == [False, True, False, True]  # 14 < 3 x 5, 15 = 3 x 5; per level: 59 < 60 = 3 x 20
 
 
@@ -489,7 +489,7 @@ async def test_single_groups_in_the_middle_close_and_no_level_ever_overlaps(
         calls.append(GroupCall(0, model, "prompt", AIMessage(content=text), 5.0, None, None))
         return parse_groups(text, nodes, must_close=False)
 
-    monkeypatch.setattr(gc, "_generate", generate)
+    monkeypatch.setattr(gc, "generate", generate)
     for i in range(60):
         await _add_leaf(aops_pool, i)
         await gc.run_group_checks(aops_pool, MagicMock(), MagicMock(), AGENT, inputs=read_inputs())

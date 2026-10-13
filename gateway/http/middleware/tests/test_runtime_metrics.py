@@ -131,7 +131,7 @@ def test_runtime_monitor_reschedules_after_sampling_failure(
 
 def test_sse_metrics_initialize_idle_modes_at_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     emitted: list[dict[str, Any]] = []
-    monkeypatch.setattr(runtime_metrics, "_sse_active_connections", {"filtered": 9})
+    monkeypatch.setattr(runtime_metrics, "sse_active_connections", {"filtered": 9})
 
     def capture_emit(_category: str, _event_name: str, *, attributes: dict[str, Any]) -> None:
         emitted.append(attributes)

@@ -32,7 +32,7 @@ async def test_completed_failure_preserves_the_original_exception(failure: Excep
 
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(type(failure)) as raised:
-            await daemon._maintenance_with_liveness(_FAKE_POOL, progress, fail, tasks=tasks)
+            await daemon.maintenance_with_liveness(_FAKE_POOL, progress, fail, tasks=tasks)
         assert raised.value is failure
         assert not progress.snapshot()["wedged"]
 
@@ -56,7 +56,7 @@ async def test_late_failure_is_reported_without_reviving_the_loop(
         try:
             async with asyncio.TaskGroup() as tasks:
                 with pytest.raises(daemon.WedgedPassError):
-                    await daemon._maintenance_with_liveness(
+                    await daemon.maintenance_with_liveness(
                         _FAKE_POOL, progress, fail_after_release, tasks=tasks
                     )
                 assert progress.snapshot()["wedged"]
@@ -123,7 +123,7 @@ def _mock_service(
     monkeypatch.setattr(daemon, "start_health_server", health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon, "_run_maintenance", work)
-    monkeypatch.setattr(daemon, "_resolution_loop", sibling)
+    monkeypatch.setattr(daemon, "resolution_loop", sibling)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", sibling)
     monkeypatch.setattr(daemon.Database, "pool", pool)
     monkeypatch.setattr(daemon.admission, "quiesced", lambda: False)

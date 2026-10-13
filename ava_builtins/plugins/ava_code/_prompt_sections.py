@@ -22,7 +22,7 @@ from base.lm.catalog import ModelCatalog
 _PROMOTED_MODULES = ("cwd", "files", "shell")
 
 
-def _coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Render the cwd / files / shell modules as Python stubs under `## ava.X`.
 
     A module already expanded by the framework's "Expanded SDK reference"
@@ -80,7 +80,7 @@ def _coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
 # prompt. Off by default; toggled by adding "ava_code_workflow" to
 # settings.agent.system_prompt_extra (env AVA_SYSTEM_PROMPT_EXTRA).
 # Empty return when disabled = no contribution.
-def _engineering_workflow_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def engineering_workflow_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Loose bug-fix-workflow advice, gated by system_prompt_extra=ava_code_workflow."""
     del catalog
     if "ava_code_workflow" not in slices.prompt.system_prompt_extra:

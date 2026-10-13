@@ -54,7 +54,7 @@ def test_successful_lsof_distinguishes_listeners_from_absence(
     monkeypatch.setattr(proc, "run_bounded", lsof)
     # Resolution is deterministic here: the fixture host may or may not have
     # lsof installed, and neither case should change what is asserted.
-    monkeypatch.setattr(port_preflight, "_lsof_argv", _resolve)
+    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
     assert port_preflight.strict_listeners_on(4319) == expected
 
 

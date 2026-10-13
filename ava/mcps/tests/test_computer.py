@@ -134,7 +134,7 @@ async def test_dial_computer_exhaustion_has_no_trailing_sleep(
 
     monkeypatch.setattr(computer_mod.asyncio, "open_unix_connection", fail)
     with pytest.raises(ConnectionError) as error:
-        await computer_mod._dial_computer_mcp("test.sock")
+        await computer_mod.dial_computer_mcp("test.sock")
     assert str(error.value) == "computer-mcp daemon not reachable at test.sock: offline"
     assert error.value.__context__ is None
     assert calls == 10
@@ -148,6 +148,6 @@ async def test_dial_computer_non_retryable_error_passes_through(
     call = AsyncMock(side_effect=failure)
     monkeypatch.setattr(computer_mod.asyncio, "open_unix_connection", call)
     with pytest.raises(PermissionError) as error:
-        await computer_mod._dial_computer_mcp("test.sock")
+        await computer_mod.dial_computer_mcp("test.sock")
     assert error.value is failure
     assert call.await_count == 1

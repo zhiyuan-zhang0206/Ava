@@ -185,7 +185,7 @@ def _plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
     ]
 
 
-def _get_services_status() -> ServicesStatus:
+def get_services_status() -> ServicesStatus:
     """Gateway-only daemon health (pidfile + signal).
 
     Per-host daemons (agent-host, watchdog) are not here — they ride each
@@ -335,7 +335,7 @@ def _status_from_snapshot(
     )
 
 
-async def _probe_agent_runner(
+async def probe_agent_runner(
     identity_log: roster_probe.IdentityMismatchLog,
     name: str,
     role: list[str],
@@ -521,7 +521,7 @@ async def gather_cluster_status(
                 )
                 continue
             probe_coros.append(
-                _probe_agent_runner(
+                probe_agent_runner(
                     identity_log,
                     name,
                     role,
@@ -539,7 +539,7 @@ async def gather_cluster_status(
     return sorted(machines, key=lambda m: m.name)
 
 
-def _get_cluster_status(
+def get_cluster_status(
     db: Database,
     cur: Cursor,
     identity_log: roster_probe.IdentityMismatchLog,
@@ -616,7 +616,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
     """One uncached build of the status panel."""
     # Services
     try:
-        services = _get_services_status()
+        services = get_services_status()
     except Exception:
         _log.exception("GET /api/status: services check failed")
         services = ServicesStatus(items=[])
@@ -624,7 +624,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
     # Cluster
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cluster = _get_cluster_status(
+            cluster = get_cluster_status(
                 request.app.state.db,
                 cur,
                 request.app.state.identity_mismatch_log,

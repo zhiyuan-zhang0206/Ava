@@ -14,13 +14,13 @@ import ava
 from ava.sdk_surface import install, process_context
 from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
 from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
-    _get_injected_context_notes,
-    _make_git_repo,
-    _make_state_with_cwd,
-    _stub_understand_text_path,
+    _load_ava_code_plugin as _load_ava_code_plugin,
 )
 from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
-    _load_ava_code_plugin as _load_ava_code_plugin,
+    get_injected_context_notes,
+    make_git_repo,
+    make_state_with_cwd,
+    stub_understand_text_path,
 )
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
@@ -34,11 +34,11 @@ def test_read_wrap_corrupted_state_field_raises(tmp_path: Path):
     Pydantic validation raises (handle.read goes through cls.model_validate, schema type error explodes on the spot)."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     (repo / "AGENTS.md").write_text("X")
     (repo / "foo.py").write_text("")
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     # pyright type=ignore: deliberately mutate field to wrong type, simulating sibling plugin / framework bug.
     ava.state.ava_code__injected_paths = 42  # type: ignore[assignment]
     ava.state_update = {}
@@ -58,7 +58,7 @@ def test_set_cwd_relative_resolves_against_current_cwd(tmp_path: Path):
     sub = repo / "src"
     sub.mkdir()
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         ava.cwd.set("src")  # relative path
@@ -75,7 +75,7 @@ def test_set_cwd_expanduser_supported(tmp_path: Path):
     sub.mkdir()
 
     with patch.dict(os.environ, {"HOME": str(fake_home)}):
-        ava.state = _make_state_with_cwd(str(tmp_path))
+        ava.state = make_state_with_cwd(str(tmp_path))
         ava.state_update = {}
         try:
             ava.cwd.set("~/project")
@@ -184,7 +184,7 @@ def test_plugin_wraps_all_files_ops_for_cwd():
 def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path: Path):
     """The shell wrapper passes logical state as an explicit subprocess cwd;
     it never relies on or mutates the Python process cwd."""
-    from ava_builtins.plugins.ava_code.plugin import _wrapped_shell_run
+    from ava_builtins.plugins.ava_code.plugin import wrapped_shell_run
 
     logical_cwd = tmp_path / "logical"
     logical_cwd.mkdir()
@@ -195,10 +195,10 @@ def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path
         captured.update(cmd=cmd, cwd=cwd, timeout=timeout)
         return "ok"
 
-    ava.state = _make_state_with_cwd(str(logical_cwd))
+    ava.state = make_state_with_cwd(str(logical_cwd))
     ava.state_update = {}
     try:
-        assert _wrapped_shell_run(fake_inner, "pwd", timeout=7.0) == "ok"
+        assert wrapped_shell_run(fake_inner, "pwd", timeout=7.0) == "ok"
         assert captured == {"cmd": "pwd", "cwd": str(logical_cwd), "timeout": 7.0}
         assert Path.cwd() == process_cwd
     finally:
@@ -206,7 +206,7 @@ def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path
 
 
 def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
-    from ava_builtins.plugins.ava_code.plugin import _wrapped_serve
+    from ava_builtins.plugins.ava_code.plugin import wrapped_serve
 
     captured: dict[str, object] = {}
 
@@ -221,10 +221,10 @@ def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
         captured.update(dir=dir, name=name, port=port, title=title, ttl=ttl)
         return "served"
 
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
-        assert _wrapped_serve(fake_inner, "site", "preview", port=8123, title="Preview") == "served"
+        assert wrapped_serve(fake_inner, "site", "preview", port=8123, title="Preview") == "served"
         assert captured == {
             "dir": str((tmp_path / "site").resolve()),
             "name": "preview",
@@ -237,7 +237,7 @@ def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
 
 
 def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
-    from ava_builtins.plugins.ava_code.plugin import _wrapped_serve
+    from ava_builtins.plugins.ava_code.plugin import wrapped_serve
 
     captured: dict[str, object] = {}
 
@@ -255,10 +255,10 @@ def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
     logical_cwd = tmp_path / "cwd"
     logical_cwd.mkdir()
     absolute_dir = tmp_path / "site"
-    ava.state = _make_state_with_cwd(str(logical_cwd))
+    ava.state = make_state_with_cwd(str(logical_cwd))
     ava.state_update = {}
     try:
-        assert _wrapped_serve(fake_inner, str(absolute_dir), "preview") == "served"
+        assert wrapped_serve(fake_inner, str(absolute_dir), "preview") == "served"
         assert captured["dir"] == str(absolute_dir.resolve())
     finally:
         process_context.unbind_exec_turn()
@@ -283,7 +283,7 @@ def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
     )
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
 
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         ava.cwd.set(repo)
@@ -298,7 +298,7 @@ def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
 def test_set_cwd_non_git_stores_cwd_note(tmp_path: Path):
     """A cwd not under a git repo sets cwd_note with just the path
     (no project-skills listing)."""
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         ava.cwd.set(tmp_path)
@@ -317,10 +317,10 @@ def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pyte
     child (e.g. `shell.sessions`) does not suppress the parent's stub. `cwd`
     is declared as an expanded namespace by `contribute()`, so it is
     always expanded and never promoted here."""
-    from ava_builtins.plugins.ava_code._prompt_sections import _coding_tools_section
+    from ava_builtins.plugins.ava_code._prompt_sections import coding_tools_section
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
-    text = _coding_tools_section(
+    text = coding_tools_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
@@ -335,10 +335,10 @@ def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pyte
 def test_coding_tools_section_all_expanded_keeps_preamble_only(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from ava_builtins.plugins.ava_code._prompt_sections import _coding_tools_section
+    from ava_builtins.plugins.ava_code._prompt_sections import coding_tools_section
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["cwd", "files", "shell"])
-    text = _coding_tools_section(
+    text = coding_tools_section(
         AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
@@ -355,9 +355,9 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only(
 
 def test_understand_wrap_resolves_paths_against_cwd(tmp_path: Path, monkeypatch):
     """In-turn relative paths= resolved against tracked cwd — same string same file as files.read."""
-    captured = _stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "rel.txt").write_text("cwd material", encoding="utf-8")
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         [out] = ava.understand([{"prompt": "p", "paths": ["rel.txt"]}])
@@ -373,7 +373,7 @@ def test_understand_wrap_missing_paths_raises_with_cwd_location(tmp_path: Path):
     (same semantics as files.read, won't silently treat as text)."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with pytest.raises(FileNotFoundError, match=r"nope\.txt"):
@@ -384,7 +384,7 @@ def test_understand_wrap_missing_paths_raises_with_cwd_location(tmp_path: Path):
 
 def test_understand_wrap_outside_turn_defers_to_workspace(workspace: Path, monkeypatch):
     """Outside turn (not in_exec_turn) → workspace baseline resolution (via _resolve_for_cwd passthrough)."""
-    captured = _stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     assert not process_context.in_exec_turn()
     workspace.mkdir(parents=True)
     (workspace / "f.txt").write_text("ws material", encoding="utf-8")
@@ -406,7 +406,7 @@ def test_understand_wrap_passes_invalid_combo_to_core(tmp_path: Path):
     """A malformed target reaches the core untouched so its canonical ValueError
     fires — the wrap does not preempt validation, in either direction (a target
     carrying both `paths` and `text`, or neither)."""
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         with pytest.raises(ValueError, match="exactly one"):
@@ -451,7 +451,7 @@ def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path, monkey
     tracked cwd, while a `text` target passes through untouched."""
     from unittest.mock import MagicMock
 
-    captured = _stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     materials: list[str] = []
 
     def _record(messages):
@@ -464,7 +464,7 @@ def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path, monkey
     captured["llm"].invoke.side_effect = _record  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "a.txt").write_text("material A", encoding="utf-8")
     (tmp_path / "b.txt").write_text("material B", encoding="utf-8")
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         out = ava.understand(
@@ -485,11 +485,11 @@ def test_understand_wrap_resolves_every_entry_in_a_paths_list(
 ):
     """Each entry of a multi-file `paths` target is resolved against the tracked
     cwd — the wrap walks the list, not just the first file."""
-    captured = _stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "a.txt").write_text("material A", encoding="utf-8")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.txt").write_text("material B", encoding="utf-8")
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         [out] = ava.understand([{"prompt": "p", "paths": ["a.txt", "sub/b.txt"]}])
@@ -506,9 +506,9 @@ def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, monkeypatch):
     """`max_concurrent` passes through the wrap to the core — a call with the
     knob completes, and the core's own validation still fires on a bad value
     (regression: the wrap used to drop the keyword and raise TypeError)."""
-    _stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "rel.txt").write_text("cwd material", encoding="utf-8")
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         [out] = ava.understand([{"prompt": "p", "paths": ["rel.txt"]}], max_concurrent=2)
@@ -526,7 +526,7 @@ def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path):
     content but live at different absolute paths."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     # Main repo AGENTS.md
     agents_main = repo / "AGENTS.md"
     agents_main.write_text("SHARED CONTENT")
@@ -539,14 +539,14 @@ def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path):
     (wt / "src").mkdir()
     (wt / "src" / "foo.py").write_text("# code")
 
-    ava.state = _make_state_with_cwd(str(wt / "src"))
+    ava.state = make_state_with_cwd(str(wt / "src"))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
             ava.files.read("foo.py")
 
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         # Only ONE injection — the second AGENTS.md has the same content hash
         assert len(notes) == 1
         assert "SHARED CONTENT" in notes[0]["content"]
@@ -576,7 +576,7 @@ def test_set_cwd_with_skills_stores_project_skills_note(tmp_path: Path):
 
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
 
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         ava.cwd.set(repo)
@@ -594,7 +594,7 @@ def test_read_wrap_hash_dedup_respects_different_content(tmp_path: Path):
     injected. Hash dedup must not collapse distinct files."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     agents_main = repo / "AGENTS.md"
     agents_main.write_text("MAIN CONTENT")
     wt = repo / ".worktrees" / "wt1"
@@ -604,14 +604,14 @@ def test_read_wrap_hash_dedup_respects_different_content(tmp_path: Path):
     (wt / "src").mkdir()
     (wt / "src" / "foo.py").write_text("# code")
 
-    ava.state = _make_state_with_cwd(str(wt / "src"))
+    ava.state = make_state_with_cwd(str(wt / "src"))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
             ava.files.read("foo.py")
 
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         # Both injected — content differs
         assert len(notes) == 2
         contents = {e["content"] for e in notes}

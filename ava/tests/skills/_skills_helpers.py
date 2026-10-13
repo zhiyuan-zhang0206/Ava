@@ -31,7 +31,7 @@ def fake_skills_dir(unit_home: Path) -> Path:
     return d
 
 
-def _write_skill(root: Path, dirname: str, frontmatter: str, body: str = "") -> None:
+def write_skill(root: Path, dirname: str, frontmatter: str, body: str = "") -> None:
     skill_dir = root / dirname
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text(f"---\n{frontmatter}\n---\n\n{body}", encoding="utf-8")

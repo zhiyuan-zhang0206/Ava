@@ -7,9 +7,9 @@ import httpx
 import pytest
 
 from ava.agents import work
-from ava.agents.tests.test_work import TARGET
 from ava.gateway_client import transport
 from ava.sdk_surface import agent_identity
+from ava.tests.namespaces.agents.test_work import TARGET
 from base.agents.incarnation.native_restart_models import (
     NativeRestartAcceptance,
     NativeRestartOutcome,

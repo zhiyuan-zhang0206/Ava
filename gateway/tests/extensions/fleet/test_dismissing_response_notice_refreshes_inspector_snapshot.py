@@ -15,10 +15,10 @@ from base.lm.catalog import ModelCatalog
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
     _load_activity_plugin as _load_activity_plugin,
 )
-from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import _seed_agent
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
     sdk_via_inprocess_gateway as sdk_via_inprocess_gateway,
 )
+from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import seed_agent
 from ops import lifecycle
 from tests.fixtures.pin_agent import pin_agent
 
@@ -49,7 +49,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
         notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
     )
 
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     ava.ui.notify("decision needed", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     ava.ui.dismiss_notice()  # type: ignore[attr-defined]
@@ -95,7 +95,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     monkeypatch.setattr(lifecycle, "publish_notice_posted", _capture_posted)
     monkeypatch.setattr(lifecycle, "publish_notice_resolved", _capture_resolved)
 
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     ava.ui.notify("FYI old", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     ava.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
@@ -126,7 +126,7 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
 ):
     """notify returns a Notice (int subclass); edit/dismiss act on the single
     open notice with no id argument."""
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     notice = ava.ui.notify("hold this", content="body", priority="P2", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     assert isinstance(notice, int)
@@ -160,7 +160,7 @@ def test_notify_with_expire_at_valid(
 ):
     from datetime import datetime, timedelta
 
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     # timedelta
     nid1 = ava.ui.notify(
@@ -192,7 +192,7 @@ def test_notify_with_expire_at_in_past_raises_value_error(
 ):
     from datetime import datetime, timedelta
 
-    agent_id = _seed_agent(db_conn)
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     past = datetime.now(UTC) - timedelta(minutes=5)
     with pytest.raises(ValueError, match="expire_at is in the past"):

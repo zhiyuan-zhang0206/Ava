@@ -57,7 +57,7 @@ def _read(
 ) -> _metrics.MetricsSnapshot:
     born = conn.execute("SELECT spawned_at FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert born is not None
-    return _metrics._read_snapshot(
+    return _metrics.read_snapshot(
         conn, agent_id, start, end, born[0], collection or start - timedelta(seconds=1)
     )
 

@@ -18,7 +18,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
-from gateway.tests.test_agents_endpoints import _inbound_rows, _returned_id, _terminate_hosted
+from gateway.tests.test_agents_endpoints import inbound_rows, returned_id, terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
 from tests.fixtures.gateway_config import spawn_via_http
 
@@ -59,14 +59,14 @@ class TestSystemNote:
         """resurrect=True (task assignment) revives a terminated target, like chat."""
         with TestClient(app) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            _terminate_hosted(db_conn, agent_id)
+            terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" is now assigned to you.'},
                 headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 201
-        rows = _inbound_rows(db_conn, agent_id)
+        rows = inbound_rows(db_conn, agent_id)
         # Auto-resurrect inserts its 'resurrect' lifecycle inbound before the note
         assert ("", "resurrect", "system") in rows
         assert any(kind == "system_note" for _, kind, _ in rows)
@@ -78,14 +78,14 @@ class TestSystemNote:
         terminated owner — the note stays queued (user ruling 2026-08-27)."""
         with TestClient(app) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            _terminate_hosted(db_conn, agent_id)
+            terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" was updated.', "resurrect": False},
                 headers=keyed_headers(str(uuid4())),
             )
         assert resp.status_code == 201
-        rows = _inbound_rows(db_conn, agent_id)
+        rows = inbound_rows(db_conn, agent_id)
         assert rows == [('Task #1 "t" was updated.', "system_note", "system")]
         assert all(r[1] != "resurrect" for r in rows)
 
@@ -180,15 +180,15 @@ class TestSystemNote:
 
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-            owner_id = _returned_id(cur)
+            owner_id = returned_id(cur)
             cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-            new_owner_id = _returned_id(cur)
+            new_owner_id = returned_id(cur)
             cur.execute(
                 "INSERT INTO agent_tasks (title, description, created_by, owner) "
                 "VALUES ('locked task', 'd', 'user', %s) RETURNING id",
                 (owner_id,),
             )
-            task_id = _returned_id(cur)
+            task_id = returned_id(cur)
         db_conn.commit()
         monkeypatch.setattr(system_note, "insert_inbound_message_in_transaction", pause_enqueue)
 
@@ -298,7 +298,7 @@ class TestRestart:
             resp = client.post(f"/api/agents/{agent_id}/restart")
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued"}
-        assert _inbound_rows(db_conn, agent_id) == [("", "restart", "user")]
+        assert inbound_rows(db_conn, agent_id) == [("", "restart", "user")]
 
     def test_restart_merges_config_overlay_and_records_it_in_the_inbound(
         self, db_conn: psycopg.Connection
@@ -395,7 +395,7 @@ class TestRestart:
             )
 
         assert resp.status_code == 422
-        assert _inbound_rows(db_conn, agent_id) == []
+        assert inbound_rows(db_conn, agent_id) == []
 
     def test_restart_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
@@ -408,7 +408,7 @@ class TestRestart:
             resp = client.post(f"/api/agents/{agent_id}/restart")
         assert resp.status_code == 200
         assert resp.json() == {"status": "already_terminated"}
-        assert _inbound_rows(db_conn, agent_id) == []  # not delivered
+        assert inbound_rows(db_conn, agent_id) == []  # not delivered
 
     def test_restart_nonexistent_404(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:

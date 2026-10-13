@@ -77,7 +77,7 @@ def _worker_probe(credentials_path: str, work_path: str, roots: tuple[str, ...])
     def no_restore(url: str) -> Database:
         raise AssertionError("dump must not restore")
 
-    result = worker._execute(
+    result = worker.execute(
         {"kind": "dump", "now": datetime(2026, 10, 2, 3, tzinfo=UTC).isoformat()},
         work,
         config=config,

@@ -260,7 +260,7 @@ def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyP
     # The module-level counter may be non-zero from a prior test in the
     # same process (xdist workers share the module) — reset it so the
     # first-failure report cadence assertion is deterministic.
-    monkeypatch.setattr(mirror, "_jsonl_failures", 0)
+    monkeypatch.setattr(mirror, "jsonl_failures", 0)
     monkeypatch.setattr(paths, "logs_dir", _boom)
     sink_id = logger.add(
         lambda m: captured.append(m.record["message"]),

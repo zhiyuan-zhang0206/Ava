@@ -13,7 +13,7 @@ tags:
 
 `base/telemetry/otlp/telemetry_otlp_metrics._build_providers` builds both SDK providers
 with `shutdown_on_exit=False`, so neither registers an atexit shutdown of
-its own. `base.telemetry._drain_on_exit` is the single ordered exit seam:
+its own. `base.telemetry.drain_on_exit` is the single ordered exit seam:
 the concrete pipeline closes emitter admission and joins its sole writer,
 then closes its own OTLP admission and observes that same exporter worker
 within the remaining caller deadline. Independent attachments close their own

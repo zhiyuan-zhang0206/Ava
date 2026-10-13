@@ -1,7 +1,7 @@
 """The provider-call layer of the understanding calls (chunk and upper-level grouping).
 
 `build_generation_llm` builds the model the way the agent builds its own (so the provider
-matches the request against the agent's prompt cache); `_invoke_agent_shaped` sends a finished
+matches the request against the agent's prompt cache); `invoke_agent_shaped` sends a finished
 agent-shaped request through the tool-bound model: the request carries the agent's real tool
 schema for cache parity, so a response that calls a tool is refused with an error result and
 re-invoked a bounded number of times. `ModelCall` is the raw record of each provider call, handed to
@@ -85,7 +85,7 @@ def build_generation_llm(
 
 @dataclass(frozen=True)
 class ModelCall:
-    """One provider call made by `_invoke_agent_shaped`, as handed to `on_call`.
+    """One provider call made by `invoke_agent_shaped`, as handed to `on_call`.
 
     `round` counts the calls of one request from 0 (a refused tool call makes
     the next round). `response` is the provider's raw message, None when the
@@ -99,7 +99,7 @@ class ModelCall:
     error: str | None
 
 
-def _invoke_agent_shaped(
+def invoke_agent_shaped(
     llm: Any,
     messages: list[Any],
     *,

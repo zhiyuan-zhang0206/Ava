@@ -29,7 +29,7 @@ from services.supervision.ava_root.intent_store import (
 )
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
-from services.supervision.ava_root.unit_records import _UnitRuntime
+from services.supervision.ava_root.unit_records import UnitRuntime
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 _SLEEP_FOREVER = ("sleep",)
@@ -93,7 +93,7 @@ def _up_failure_supervisor(
     owner = _supervisor(run_dir, units)
     stop = owner._stop_unit
 
-    async def stop_after_exit(runtime: _UnitRuntime, *, force: bool = False) -> None:
+    async def stop_after_exit(runtime: UnitRuntime, *, force: bool = False) -> None:
         generation = runtime.generation
         if generation is not None and generation.proc.returncode is None:
             identity = generation.identity

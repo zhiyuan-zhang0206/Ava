@@ -179,13 +179,13 @@ def test_unreapable_foreground_retains_data_and_registration(
     process.args = ["/private/bin/postgres", "-D", str(data)]
     monkeypatch.setattr(pg_foreground.subprocess, "run", MagicMock())
     unregister = MagicMock()
-    monkeypatch.setattr(pg_tools, "_unregister_throwaway", unregister)
+    monkeypatch.setattr(pg_tools, "unregister_throwaway", unregister)
 
     with pytest.raises(subprocess.TimeoutExpired):
-        pg_tools._teardown_throwaway(
+        pg_tools.teardown_throwaway(
             instance,
             data,
-            pg_tools._Registration(-1, instance / "owner.lock"),
+            pg_tools.Registration(-1, instance / "owner.lock"),
             process,
             foreground=True,
         )
@@ -204,25 +204,25 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
     process.wait.return_value = 0
     if stop_fails:
         process.wait.side_effect = subprocess.TimeoutExpired("postgres", 2)
-    registrations: list[pg_tools._Registration] = []
-    register = pg_tools._register_throwaway
-    unregister = pg_tools._unregister_throwaway
-    released: list[pg_tools._Registration] = []
+    registrations: list[pg_tools.Registration] = []
+    register = pg_tools.register_throwaway
+    unregister = pg_tools.unregister_throwaway
+    released: list[pg_tools.Registration] = []
 
-    def capture_registration(path: Path, port: int) -> pg_tools._Registration:
+    def capture_registration(path: Path, port: int) -> pg_tools.Registration:
         registration = register(path, port)
         registrations.append(registration)
         return registration
 
-    def release_registration(registration: pg_tools._Registration) -> None:
+    def release_registration(registration: pg_tools.Registration) -> None:
         released.append(registration)
         unregister(registration)
 
     def never_ready(*_args: Any, **_kwargs: Any) -> None:
         raise TimeoutError("injected readiness deadline")
 
-    monkeypatch.setattr(pg_tools, "_register_throwaway", capture_registration)
-    monkeypatch.setattr(pg_tools, "_unregister_throwaway", release_registration)
+    monkeypatch.setattr(pg_tools, "register_throwaway", capture_registration)
+    monkeypatch.setattr(pg_tools, "unregister_throwaway", release_registration)
     monkeypatch.setattr(pg_tools, "start_foreground_postgres", MagicMock(return_value=process))
     monkeypatch.setattr(pg_tools, "wait_foreground_postgres", never_ready)
     monkeypatch.setattr(pg_tools, "stop_foreground_postgres", _wait_mock_postmaster)

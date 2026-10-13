@@ -242,14 +242,14 @@ def _node_from_note(note: Note) -> MemoryGraphNode:
         kind="note",
         description=note.description,
         tags=tags,
-        primary_tag=_primary_tag(tags),
+        primary_tag=primary_tag(tags),
         timestamp=note.timestamp,
         ava_agent=note.ava_agent,
         ava_machine=note.ava_machine,
     )
 
 
-def _primary_tag(tags: list[str]) -> str:
+def primary_tag(tags: list[str]) -> str:
     """The tag the graph view groups nodes by: the first *domain* tag.
 
     `type/<x>` says how a note is meant to be used, not what it is about, and

@@ -89,7 +89,7 @@ class ExponentialBackoff:
         return min(self.base * (self.factor**attempt), self.cap)
 
 
-def _agent_phase(span: float) -> float:
+def agent_phase(span: float) -> float:
     """Deterministic phase for this native process, independent of agent identity.
 
     Agent-specific schedules pass their identity explicitly at their own owner
@@ -120,12 +120,12 @@ def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
     if mode == "none":
         return delay
     if mode == "phase":
-        return max(0.0, delay + _agent_phase(span))
+        return max(0.0, delay + agent_phase(span))
     if mode == "relative":
         return max(0.0, delay * (1 + random.uniform(-span, span)))  # noqa: S311
     if mode == "random":
         return max(0.0, delay + random.uniform(-span, span))  # noqa: S311 — spread, not secrecy
-    return max(0.0, delay + _agent_phase(span) + random.uniform(-span, span))  # noqa: S311
+    return max(0.0, delay + agent_phase(span) + random.uniform(-span, span))  # noqa: S311
 
 
 def extract_retry_after(exc: Exception) -> float | None:
@@ -181,7 +181,7 @@ def _is_transport(exc: Exception) -> bool:
 
 
 @dataclass(frozen=True, init=False)
-class _HttpClassifier:
+class HttpClassifier:
     """The one HTTP error-classification semantics (design D2).
 
     Retryable: transient statuses (429/5xx) and transport errors. Permanent:
@@ -210,9 +210,9 @@ class _HttpClassifier:
         *,
         permanent: AbstractSet[int] = frozenset(),
         transient: AbstractSet[int] = frozenset(),
-    ) -> _HttpClassifier:
+    ) -> HttpClassifier:
         """Compose: the same base semantics plus the given status overrides."""
-        return _HttpClassifier(
+        return HttpClassifier(
             permanent=self._permanent | permanent,
             transient=self._transient | transient,
         )
@@ -229,7 +229,7 @@ class _HttpClassifier:
         return _is_transport(exc)
 
 
-http_classifier = _HttpClassifier()
+http_classifier = HttpClassifier()
 
 
 @dataclass(frozen=True)

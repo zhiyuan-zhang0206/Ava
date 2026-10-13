@@ -19,23 +19,23 @@ _skip_if_root = pytest.mark.skipif(
 )
 
 
-# ── _is_writable round-trip ──────────────────────────────────────────────
+# ── is_writable round-trip ──────────────────────────────────────────────
 
 
 def test_is_writable_true_and_cleans_up(tmp_path: Path) -> None:
-    assert gd._is_writable(tmp_path) is True
+    assert gd.is_writable(tmp_path) is True
     # the probe file is removed after the round-trip — nothing left behind
     assert list(tmp_path.glob(".ava_drive_check_*")) == []
 
 
 def test_is_writable_false_for_missing_dir(tmp_path: Path) -> None:
-    assert gd._is_writable(tmp_path / "nope") is False
+    assert gd.is_writable(tmp_path / "nope") is False
 
 
 def test_is_writable_false_for_file_target(tmp_path: Path) -> None:
     f = tmp_path / "f"
     f.write_text("x")
-    assert gd._is_writable(f) is False
+    assert gd.is_writable(f) is False
 
 
 @_skip_if_root
@@ -44,7 +44,7 @@ def test_is_writable_false_for_readonly_dir(tmp_path: Path) -> None:
     d.mkdir()
     d.chmod(0o500)
     try:
-        assert gd._is_writable(d) is False
+        assert gd.is_writable(d) is False
     finally:
         d.chmod(0o700)
 

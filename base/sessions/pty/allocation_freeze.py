@@ -139,7 +139,7 @@ def _fsync_parent(path: Path) -> None:
     fsync_parent(path)
 
 
-def _write_atomic(path: Path, payload: dict[str, object]) -> None:
+def write_atomic(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(
         path,
@@ -193,7 +193,7 @@ def freeze(*, holder: str, reason: str) -> PtyAllocationFreeze:
             "reason": reason,
             "created_at": now.isoformat(),
         }
-        _write_atomic(path, payload)
+        write_atomic(path, payload)
         return _parse(payload)
 
 
@@ -209,7 +209,7 @@ def resume(generation: str) -> bool:
             )
         if current.status != "frozen" or current.generation != generation:
             return False
-        _write_atomic(
+        write_atomic(
             path,
             {
                 "schema_version": SCHEMA_VERSION,

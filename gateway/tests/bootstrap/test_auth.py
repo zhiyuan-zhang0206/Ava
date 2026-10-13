@@ -35,18 +35,18 @@ from gateway.app import app
 from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
 
-_SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
+SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
 
-def _auth() -> dict[str, str]:
-    return bearer_header(_SECRET)
+def auth() -> dict[str, str]:
+    return bearer_header(SECRET)
 
 
-def _session_cookie(token: str) -> dict[str, str]:
+def session_cookie(token: str) -> dict[str, str]:
     return {"Cookie": f"{cookie_name()}={token}"}
 
 
-def _request_with_origin(origin: str) -> Request:
+def request_with_origin(origin: str) -> Request:
     return Request(
         {
             "type": "http",
@@ -56,7 +56,7 @@ def _request_with_origin(origin: str) -> Request:
 
 
 @contextmanager
-def _rebuilt_cors_middleware() -> Generator[None, None, None]:
+def rebuilt_cors_middleware() -> Generator[None, None, None]:
     """Swap the app's CORS middleware for one built from the CURRENT settings.
 
     CORSMiddleware captures ``allow_origins`` when the middleware stack is
@@ -91,20 +91,20 @@ def _rebuilt_cors_middleware() -> Generator[None, None, None]:
         app.middleware_stack = None
 
 
-def _login(client: TestClient, *, user_agent: str = "test-browser") -> str:
+def login(client: TestClient, *, user_agent: str = "test-browser") -> str:
     response = client.post(
         "/api/auth/login",
-        json={"password": _SECRET},
+        json={"password": SECRET},
         headers={"User-Agent": user_agent},
     )
     assert response.status_code == 200
     return response.cookies[cookie_name()]
 
 
-def _legacy_hmac_cookie() -> str:
+def legacy_hmac_cookie() -> str:
     """One valid pre-change cookie, built independently of production code."""
     expiry = str(int(time.time()) + 3600).encode()
-    mac = hmac.new(_SECRET.encode(), expiry, hashlib.sha256).digest()
+    mac = hmac.new(SECRET.encode(), expiry, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(expiry + b"." + mac).rstrip(b"=").decode()
 
 
@@ -116,7 +116,7 @@ def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     do not carry the suite's default bearer and present only what a test gives them.
     """
     disable_default_gateway_credentials(monkeypatch)
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", SECRET)
 
 
 # ── Gateway security settings ─────────────────────────────────────────
@@ -311,7 +311,7 @@ def test_auth_login_no_auth_allowed() -> None:
     """Login endpoint must be accessible without auth so the browser can
     obtain a session cookie."""
     with TestClient(app) as client:
-        resp = client.post("/api/auth/login", json={"password": _SECRET})
+        resp = client.post("/api/auth/login", json={"password": SECRET})
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
@@ -341,7 +341,7 @@ def test_login_empty_password_returns_401() -> None:
 
 def test_login_creates_current_server_side_session() -> None:
     with TestClient(app) as client:
-        token = _login(client, user_agent="session-list-test")
+        token = login(client, user_agent="session-list-test")
         resp = client.get("/api/auth/sessions")
 
     assert resp.status_code == 200
@@ -358,9 +358,9 @@ def test_sessions_list_masks_non_current_ids() -> None:
     """Only the request's current session keeps its full id; other rows show
     the final 8 characters (the suffix the revoke endpoint accepts)."""
     with TestClient(app) as client:
-        current = _login(client)
+        current = login(client)
         client.cookies.clear()
-        other = _login(client, user_agent="other-browser")
+        other = login(client, user_agent="other-browser")
         listed = client.get("/api/auth/sessions")
 
     assert listed.status_code == 200
@@ -375,9 +375,9 @@ def test_sessions_list_masks_non_current_ids() -> None:
 def test_sessions_list_labels_managed_browser_sessions() -> None:
     """The managed-browser daemon's login UA marks its session rows."""
     with TestClient(app) as client:
-        _login(client, user_agent="ava-managed-browser")
+        login(client, user_agent="ava-managed-browser")
         client.cookies.clear()
-        _login(client, user_agent="test-browser")
+        login(client, user_agent="test-browser")
         rows = client.get("/api/auth/sessions").json()
 
     managed = [row for row in rows if row["user_agent"] == "ava-managed-browser"]
@@ -390,16 +390,16 @@ def test_sessions_list_labels_managed_browser_sessions() -> None:
 def test_revoke_endpoint_accepts_masked_suffix() -> None:
     """The sessions list shows masked ids; revoking one must still work."""
     with TestClient(app) as client:
-        current = _login(client)
+        current = login(client)
         client.cookies.clear()
-        target = _login(client)
+        target = login(client)
         client.cookies.clear()
-        headers = _session_cookie(current)
+        headers = session_cookie(current)
 
         listed = client.get("/api/auth/sessions", headers=headers).json()
         target_row = next(row for row in listed if not row["current"] and row["id"] == target[-8:])
         revoke = client.post(f"/api/auth/sessions/{target_row['id']}/revoke", headers=headers)
-        replay = client.get("/api/agents", headers=_session_cookie(target))
+        replay = client.get("/api/agents", headers=session_cookie(target))
 
     assert revoke.status_code == 200
     assert replay.status_code == 401
@@ -409,7 +409,7 @@ def test_revoke_endpoint_refuses_ambiguous_suffix(db_conn: psycopg.Connection) -
     """A suffix shared by more than one active session is refused, not revoked
     wholesale."""
     with TestClient(app) as client:
-        _login(client)
+        login(client)
         with db_conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
@@ -425,7 +425,7 @@ def test_revoke_endpoint_refuses_ambiguous_suffix(db_conn: psycopg.Connection) -
 def test_revoke_endpoint_short_suffix_returns_404() -> None:
     """Shorter-than-masked inputs are neither full ids nor valid suffixes."""
     with TestClient(app) as client:
-        _login(client)
+        login(client)
         response = client.post("/api/auth/sessions/abcdefg/revoke")
 
     assert response.status_code == 404
@@ -435,7 +435,7 @@ def test_revoke_endpoint_refuses_current_session_by_suffix() -> None:
     """The current session's own masked suffix must not bypass the logout-only
     guard: it 404s and the session stays valid (QA nit1 regression)."""
     with TestClient(app) as client:
-        current = _login(client)
+        current = login(client)
         response = client.post(f"/api/auth/sessions/{current[-8:]}/revoke")
         check = client.get("/api/auth/check")
 
@@ -449,7 +449,7 @@ def test_revoke_endpoint_ambiguous_suffix_excludes_current_session(
     """The current session is filtered out of suffix matches BEFORE ambiguity
     is judged: current + two others sharing a suffix still 409s on the two."""
     with TestClient(app) as client:
-        current = _login(client)
+        current = login(client)
         suffix = current[-8:]
         with db_conn.cursor() as cur:
             cur.executemany(
@@ -471,7 +471,7 @@ def test_revoke_endpoint_rejects_longer_than_masked_suffix(
     """Only the exact 8-character masked form falls back to suffix matching; a
     longer non-full-id string must not revoke by suffix (QA nit2 regression)."""
     with TestClient(app) as client:
-        _login(client)
+        login(client)
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
@@ -494,7 +494,7 @@ def test_login_sets_cookie_flags_and_configured_ttl(
     monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 123)
 
     with TestClient(app) as client:
-        resp = client.post("/api/auth/login", json={"password": _SECRET})
+        resp = client.post("/api/auth/login", json={"password": SECRET})
 
     set_cookie = resp.headers["Set-Cookie"]
     assert set_cookie.startswith(f"{cookie_name()}=")
@@ -510,7 +510,7 @@ def test_login_cookie_secure_derives_from_gateway_url(
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "https://gateway.example:8000")
 
     with TestClient(app) as client:
-        resp = client.post("/api/auth/login", json={"password": _SECRET})
+        resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
@@ -522,10 +522,10 @@ def test_https_browser_entry_login_preserves_authenticated_cookie(
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://192.0.2.2:20016")
     monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
     monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    with _rebuilt_cors_middleware(), TestClient(app, base_url="https://console.example") as client:
+    with rebuilt_cors_middleware(), TestClient(app, base_url="https://console.example") as client:
         response = client.post(
             "/api/auth/login",
-            json={"password": _SECRET},
+            json={"password": SECRET},
             headers={"Origin": "https://console.example"},
         )
         assert response.status_code == 200
@@ -540,7 +540,7 @@ def test_login_cookie_not_secure_for_http_gateway(
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://gateway.example:8000")
 
     with TestClient(app) as client:
-        resp = client.post("/api/auth/login", json={"password": _SECRET})
+        resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" not in resp.headers["Set-Cookie"]
 
@@ -552,7 +552,7 @@ def test_login_cookie_secure_when_policy_explicitly_enabled(
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://gateway.example:8000")
 
     with TestClient(app) as client:
-        resp = client.post("/api/auth/login", json={"password": _SECRET})
+        resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
@@ -564,7 +564,7 @@ def test_login_cookie_secure_for_https_gateway(
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "https://gateway.example:8000")
 
     with TestClient(app) as client:
-        resp = client.post("/api/auth/login", json={"password": _SECRET})
+        resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
@@ -574,7 +574,7 @@ def test_login_with_username_succeeds() -> None:
     with TestClient(app) as client:
         resp = client.post(
             "/api/auth/login",
-            json={"username": "admin", "password": _SECRET},
+            json={"username": "admin", "password": SECRET},
         )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
@@ -592,10 +592,10 @@ def test_login_with_wrong_password_but_username_fails() -> None:
 
 def test_logout_revokes_server_side_and_clears_cookie() -> None:
     with TestClient(app) as client:
-        token = _login(client)
+        token = login(client)
         assert client.get("/api/agents").status_code == 200
         resp = client.post("/api/auth/logout")
-        replay = client.get("/api/agents", headers=_session_cookie(token))
+        replay = client.get("/api/agents", headers=session_cookie(token))
 
     assert resp.status_code == 200
     set_cookie = resp.headers["Set-Cookie"]
@@ -605,8 +605,8 @@ def test_logout_revokes_server_side_and_clears_cookie() -> None:
 
 def test_check_returns_true_with_valid_cookie() -> None:
     with TestClient(app) as client:
-        token = _login(client)
-        resp = client.get("/api/auth/check", headers=_session_cookie(token))
+        token = login(client)
+        resp = client.get("/api/auth/check", headers=session_cookie(token))
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is True
 
@@ -615,7 +615,7 @@ def test_check_returns_false_with_invalid_cookie() -> None:
     with TestClient(app) as client:
         resp = client.get(
             "/api/auth/check",
-            headers=_session_cookie("garbage-token"),
+            headers=session_cookie("garbage-token"),
         )
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is False
@@ -632,7 +632,7 @@ def test_check_returns_false_with_expired_cookie(db_conn: psycopg.Connection) ->
     with TestClient(app) as client:
         resp = client.get(
             "/api/auth/check",
-            headers=_session_cookie("expired-session"),
+            headers=session_cookie("expired-session"),
         )
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is False

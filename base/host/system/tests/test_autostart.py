@@ -34,7 +34,7 @@ def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_plist_runs_ava_start_at_load() -> None:
-    xml = autostart._autostart_plist_content()
+    xml = autostart.autostart_plist_content()
     assert "<string>com.ava.autostart</string>" in xml
     assert "<key>RunAtLoad</key>" in xml and "<true/>" in xml
     # ProgramArguments == `ava start --boot` — no name flag exists (path-only).
@@ -49,7 +49,7 @@ def test_plist_embeds_a_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
     boot. The PATH composition itself is `base.host.system.cron.launchd_path_env`
     (shared with the watchdog probe's plist) and is unit-tested there."""
     monkeypatch.setattr(cron, "launchd_path_env", lambda: "/opt/homebrew/bin:/usr/bin")
-    xml = autostart._autostart_plist_content()
+    xml = autostart.autostart_plist_content()
     assert "<key>PATH</key>" in xml
     assert "/opt/homebrew/bin" in xml
 
@@ -60,7 +60,7 @@ def test_register_macos_writes_plist_but_never_bootstraps(
     monkeypatch.setenv("HOME", str(tmp_path))
     called: list = []
     monkeypatch.setattr(autostart.subprocess, "run", lambda *a, **_k: called.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    rc = autostart._register_macos()
+    rc = autostart.register_macos()
     assert rc == 0
     plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.autostart.plist"
     assert plist.exists()
@@ -75,9 +75,9 @@ def test_register_macos_idempotent_no_rewrite(
     capsys,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    autostart._register_macos()
+    autostart.register_macos()
     capsys.readouterr()  # drop first-write output  # pyright: ignore[reportUnknownMemberType]
-    rc = autostart._register_macos()  # second call, identical content
+    rc = autostart.register_macos()  # second call, identical content
     assert rc == 0
     assert (
         "wrote" not in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -98,7 +98,7 @@ def test_the_job_retries_on_macos_only_while_it_fails() -> None:
     once it succeeds. Getting this key backwards (or passing a bare
     `KeepAlive: true`) would respawn `ava start` forever, including after a
     deliberate `ava stop`."""
-    xml = autostart._autostart_plist_content()
+    xml = autostart.autostart_plist_content()
     assert "<key>KeepAlive</key>" in xml
     keep_alive = xml.split("<key>KeepAlive</key>", 1)[1].split("</dict>", 1)[0]
     assert "<key>SuccessfulExit</key>" in keep_alive
@@ -109,6 +109,6 @@ def test_the_job_retries_on_macos_only_while_it_fails() -> None:
 def test_the_job_retries_on_macos_at_the_shared_interval() -> None:
     """ThrottleInterval overrides launchd's 10s respawn floor; without it a
     failing start would be retried six times a minute."""
-    xml = autostart._autostart_plist_content()
+    xml = autostart.autostart_plist_content()
     assert "<key>ThrottleInterval</key>" in xml
     assert f"<integer>{BOOT_RETRY_INTERVAL_S}</integer>" in xml

@@ -1,6 +1,6 @@
 """The per-unit records the supervisor and its stop family share.
 
-`_Generation` is one process instance of a unit; `_UnitRuntime` is its mutable
+`Generation` is one process instance of a unit; `UnitRuntime` is its mutable
 supervisor-side record. They live beside — not inside — `supervisor.py` so the
 stop family can be a separate module within the file budget without a circular
 import.
@@ -18,7 +18,7 @@ from services.supervision.ava_root.manifest import UnitManifest
 
 
 @dataclass(slots=True)
-class _Generation:
+class Generation:
     """One process instance of a unit.
 
     `exited` is set as the *last* action of the wait task, so any coroutine
@@ -37,7 +37,7 @@ class _Generation:
 
 
 @dataclass(slots=True)
-class _UnitRuntime:
+class UnitRuntime:
     """Mutable per-unit state owned by the supervisor.
 
     `intent` is the policy fact — what an operator or the deployment asked for
@@ -51,7 +51,7 @@ class _UnitRuntime:
     intent_source: IntentSource = IntentSource.SELECTION
     restart_failed: RestartFailure | None = None
     state: UnitState = UnitState.STOPPED
-    generation: _Generation | None = None
+    generation: Generation | None = None
     restart_count: int = 0
     last_exit: str | None = None
     last_error: str | None = None

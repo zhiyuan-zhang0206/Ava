@@ -3,8 +3,8 @@
 Does not start real MCP servers (requires external npm/uvx packages) nor long-running daemon processes.
 Three layers of mock:
 - `ava_home()` → tmpdir, so `_load_config()` reads a fake `mcp.json`
-- `_connect_server` → returns a MagicMock session, bypassing stdio_client / ClientSession
-- `_handle_client` runs with in-memory `asyncio.StreamReader` + a custom fake writer
+- `connect_server` → returns a MagicMock session, bypassing stdio_client / ClientSession
+- `handle_client` runs with in-memory `asyncio.StreamReader` + a custom fake writer
 
 At least one real socket E2E (`asyncio.start_unix_server` ↔ `asyncio.open_unix_connection`)
 is kept as a minimal smoke test, verifying lifecycle/clean-up; not repeated in every test case.
@@ -36,12 +36,12 @@ import ava.mcps._daemon as daemon_mod
 # ─── helpers ─────────────────────────────────────────────────────────────
 
 
-class _FakeWriter:
+class FakeWriter:
     """Minimal asyncio.StreamWriter mock — accumulates written bytes, drain/close are noops.
 
     Uses list to accumulate chunks + helper to parse all response lines back into dicts,
     making assertions more convenient.
-    `_handle_client` only uses write / drain / close / wait_closed four APIs,
+    `handle_client` only uses write / drain / close / wait_closed four APIs,
     Pyright sees the full StreamWriter protocol and complains — pass cast when calling.
     """
 
@@ -67,13 +67,13 @@ class _FakeWriter:
         return [json.loads(line) for line in raw.splitlines() if line]
 
 
-def _writer_arg(w: _FakeWriter) -> asyncio.StreamWriter:
-    """Pyright sees `_FakeWriter` is not a `StreamWriter` subclass and complains;
-    `_handle_client` actually only duck-types 4 methods, force cast here to silence the warning."""
+def writer_arg(w: FakeWriter) -> asyncio.StreamWriter:
+    """Pyright sees `FakeWriter` is not a `StreamWriter` subclass and complains;
+    `handle_client` actually only duck-types 4 methods, force cast here to silence the warning."""
     return w  # type: ignore[return-value]
 
 
-def _make_reader(lines: list[bytes]) -> asyncio.StreamReader:
+def make_reader(lines: list[bytes]) -> asyncio.StreamReader:
     """build StreamReader fed lines + EOF, so `await reader.readline()` returns them in order."""
     reader = asyncio.StreamReader()
     for line in lines:
@@ -82,32 +82,32 @@ def _make_reader(lines: list[bytes]) -> asyncio.StreamReader:
     return reader
 
 
-_ORIG_REAP = daemon_mod._reap_stale_daemons
+ORIG_REAP = daemon_mod.reap_stale_daemons
 
 
 @pytest.fixture(autouse=True)
 def _no_reap_stale_daemons(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep run_daemon tests from scanning the real process table.
 
-    `_reap_stale_daemons` walks psutil.process_iter on every daemon start; the
+    `reap_stale_daemons` walks psutil.process_iter on every daemon start; the
     reap behavior itself is unit-tested with a mocked process table (see
     `test_reap_stale_daemons_kills_only_this_unit`), which restores the real
     function first.
     """
-    monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon_mod, "reap_stale_daemons", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture
-def daemon_wide() -> daemon_mod._DaemonWide:
+def daemon_wide() -> daemon_mod.DaemonWide:
     """The daemon-wide state of one fresh daemon (what `run_daemon` builds once)."""
-    return daemon_mod._DaemonWide(timeout_seconds=lambda: 15.0)
+    return daemon_mod.DaemonWide(timeout_seconds=lambda: 15.0)
 
 
 @pytest.fixture
-def scope(daemon_wide: daemon_mod._DaemonWide) -> daemon_mod._Scope:
+def scope(daemon_wide: daemon_mod.DaemonWide) -> daemon_mod.Scope:
     """One client connection's scope: its own empty buckets over the daemon-wide state."""
-    return daemon_mod._Scope(
-        local=daemon_mod._Buckets(),
+    return daemon_mod.Scope(
+        local=daemon_mod.Buckets(),
         shared=daemon_wide.shared,
         oauth_locks=daemon_wide.oauth_locks,
         timeout_seconds=lambda: 15.0,
@@ -133,7 +133,7 @@ def _write_config(home: Path, servers: dict[str, dict[str, Any]]) -> Path:
     return cfg
 
 
-def _make_session(
+def make_session(
     *,
     tools: list[Any] | None = None,
     call_result: Any = None,
@@ -149,7 +149,7 @@ def _make_session(
     return session
 
 
-def _tool(name: str, description: str = "", schema: dict | None = None) -> MagicMock:
+def tool(name: str, description: str = "", schema: dict | None = None) -> MagicMock:
     t = MagicMock(spec=["name", "description", "input_schema"])
     t.name = name
     t.description = description
@@ -163,7 +163,7 @@ def _content(payload: dict[str, Any]) -> MagicMock:
     return c
 
 
-def _call_result(
+def call_result(
     content: list[Any], *, is_error: bool = False, structured: dict | None = None
 ) -> MagicMock:
     r = MagicMock()
@@ -193,21 +193,21 @@ def test_load_config_returns_parsed_servers(fake_home: Path) -> None:
     assert cfg["fs"] == {"command": "x"}
 
 
-# ─── _get_session ────────────────────────────────────────────────────────
+# ─── get_session ────────────────────────────────────────────────────────
 
 
 async def test_get_session_lazy_inits_and_caches(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
-    """First get calls _connect_server once, second directly returns cached (no further call)."""
+    """First get calls connect_server once, second directly returns cached (no further call)."""
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session()
+    session = make_session()
     stack = MagicMock()
     connect = AsyncMock(return_value=(session, stack))
-    monkeypatch.setattr(daemon_mod, "_connect_server", connect)
+    monkeypatch.setattr(daemon_mod, "connect_server", connect)
 
-    s1 = await daemon_mod._get_session("fs", scope)
-    s2 = await daemon_mod._get_session("fs", scope)
+    s1 = await daemon_mod.get_session("fs", scope)
+    s2 = await daemon_mod.get_session("fs", scope)
     assert s1 is session and s2 is session
     connect.assert_awaited_once_with("fs", scope.oauth_locks, timeout_seconds=scope.timeout_seconds)
     assert scope.local.sessions["fs"] is session
@@ -215,24 +215,24 @@ async def test_get_session_lazy_inits_and_caches(
 
 
 async def test_get_session_raises_on_unknown_server(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """server not configured in mcp.json → ValueError immediately blows up (fail-fast, no silent connect)."""
     _write_config(fake_home, {"fs": {"command": "x"}})
-    monkeypatch.setattr(daemon_mod, "_connect_server", AsyncMock())
+    monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock())
     with pytest.raises(ValueError, match="nope"):
-        await daemon_mod._get_session("nope", scope)
+        await daemon_mod.get_session("nope", scope)
 
 
 async def test_get_session_concurrent_calls_share_one_connect(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
-    """Multiple concurrent _get_session(same server) trigger only one _connect_server (lock convergence).
+    """Multiple concurrent get_session(same server) trigger only one connect_server (lock convergence).
 
     Simulate two clients simultaneously listing tools for the same server without duplicate subprocess launch.
     """
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session()
+    session = make_session()
     stack = MagicMock()
     call_count = 0
     started = asyncio.Event()
@@ -247,37 +247,37 @@ async def test_get_session_concurrent_calls_share_one_connect(
         await asyncio.sleep(0.05)
         return session, stack
 
-    monkeypatch.setattr(daemon_mod, "_connect_server", slow_connect)
+    monkeypatch.setattr(daemon_mod, "connect_server", slow_connect)
 
-    t1 = asyncio.create_task(daemon_mod._get_session("fs", scope))
+    t1 = asyncio.create_task(daemon_mod.get_session("fs", scope))
     await started.wait()  # ensure t1 has entered connect
-    t2 = asyncio.create_task(daemon_mod._get_session("fs", scope))
+    t2 = asyncio.create_task(daemon_mod.get_session("fs", scope))
     r1, r2 = await asyncio.gather(t1, t2)
     assert r1 is session and r2 is session
     assert call_count == 1
 
 
-# ─── _handle_client: JSON-line protocol ──────────────────────────────────────
+# ─── handle_client: JSON-line protocol ──────────────────────────────────────
 
 
 async def test_handle_client_lists_tools(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session(
-        tools=[_tool("read_file", "Read a file", {"type": "object"}), _tool("write_file")]
+    session = make_session(
+        tools=[tool("read_file", "Read a file", {"type": "object"}), tool("write_file")]
     )
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     req = {"id": 1, "method": "list_tools", "params": {"server": "fs"}}
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
 
-    await daemon_mod._handle_client(
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
 
@@ -293,18 +293,18 @@ async def test_handle_client_lists_tools(
 
 
 async def test_handle_client_call_tool_returns_content(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session(
-        call_result=_call_result(
+    session = make_session(
+        call_result=call_result(
             [_content({"type": "text", "text": "hi"})],
             is_error=False,
             structured={"k": 1},
         ),
     )
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     req = {
@@ -312,11 +312,11 @@ async def test_handle_client_call_tool_returns_content(
         "method": "call_tool",
         "params": {"server": "fs", "tool": "read", "args": {"path": "/x"}},
     }
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
 
@@ -334,7 +334,7 @@ async def test_handle_client_call_tool_returns_content(
 
 
 async def test_handle_client_call_tool_carries_is_error_true(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """tool returns isError=True → daemon still ok=True and returns the full structure,
     error judgment left to the client.
@@ -342,19 +342,19 @@ async def test_handle_client_call_tool_carries_is_error_true(
     Consistent with the ava.mcps client contract: daemon layer only transports,
     semantic layer (`is_error → raise`) is implemented on the client side."""
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session(
-        call_result=_call_result([_content({"type": "text", "text": "denied"})], is_error=True),
+    session = make_session(
+        call_result=call_result([_content({"type": "text", "text": "denied"})], is_error=True),
     )
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     req = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "rm"}}
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
 
@@ -364,7 +364,7 @@ async def test_handle_client_call_tool_carries_is_error_true(
 
 
 async def test_handle_client_call_tool_unknown_content_block_raises_type_error(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """ContentBlock is not a pydantic model (no model_dump) → outer try catch → ok=False.
 
@@ -375,17 +375,17 @@ async def test_handle_client_call_tool_unknown_content_block_raises_type_error(
     class _BadBlock:
         """No model_dump deliberately triggers TypeError branch."""
 
-    session = _make_session(call_result=_call_result([_BadBlock()]))
+    session = make_session(call_result=call_result([_BadBlock()]))
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     req = {"id": 2, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
 
@@ -397,14 +397,14 @@ async def test_handle_client_call_tool_unknown_content_block_raises_type_error(
 
 
 async def test_handle_client_bad_json_returns_parse_error(
-    fake_home: Path, scope: daemon_mod._Scope
+    fake_home: Path, scope: daemon_mod.Scope
 ) -> None:
     """JSON line parse failure → ok=False with 'JSON parse error', id is None."""
-    reader = _make_reader([b"not json {{{\n"])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([b"not json {{{\n"])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
     [resp] = writer.responses()
@@ -414,16 +414,16 @@ async def test_handle_client_bad_json_returns_parse_error(
 
 
 async def test_handle_client_continues_after_bad_json(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """After bad JSON, the next good list_tools still responds normally — line-by-line resync, no broken connection."""
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session(tools=[_tool("ok")])
+    session = make_session(tools=[tool("ok")])
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
-    reader = _make_reader(
+    reader = make_reader(
         [
             b"garbage\n",
             (
@@ -431,10 +431,10 @@ async def test_handle_client_continues_after_bad_json(
             ).encode(),
         ]
     )
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
 
@@ -447,26 +447,26 @@ async def test_handle_client_continues_after_bad_json(
     }
 
 
-async def test_handle_client_unknown_method(fake_home: Path, scope: daemon_mod._Scope) -> None:
+async def test_handle_client_unknown_method(fake_home: Path, scope: daemon_mod.Scope) -> None:
     req = {"id": 3, "method": "nuke_database", "params": {"server": "fs"}}
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
     [resp] = writer.responses()
     assert resp == {"id": 3, "ok": False, "error": "Unknown method: nuke_database"}
 
 
-async def test_handle_client_eof_closes_writer(fake_home: Path, scope: daemon_mod._Scope) -> None:
+async def test_handle_client_eof_closes_writer(fake_home: Path, scope: daemon_mod.Scope) -> None:
     """Empty readline (client disconnects) → break out of loop, finally close writer."""
-    reader = _make_reader([])  # immediate EOF
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([])  # immediate EOF
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
     assert writer.responses() == []
@@ -475,7 +475,7 @@ async def test_handle_client_eof_closes_writer(fake_home: Path, scope: daemon_mo
 
 
 async def test_handle_client_connection_reset_is_suppressed(
-    fake_home: Path, scope: daemon_mod._Scope
+    fake_home: Path, scope: daemon_mod.Scope
 ) -> None:
     """readline raises ConnectionResetError → not re-raised, finally still closes writer."""
 
@@ -483,31 +483,31 @@ async def test_handle_client_connection_reset_is_suppressed(
         async def readline(self) -> bytes:
             raise ConnectionResetError("peer reset")
 
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         _ResettingReader(),  # type: ignore[arg-type]
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
     assert writer.closed
 
 
 async def test_handle_client_call_tool_session_call_failure_propagates_as_error(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """upstream session.call_tool raise → outer try → ok=False (daemon does not die)."""
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session(call_error=RuntimeError("upstream boom"))
+    session = make_session(call_error=RuntimeError("upstream boom"))
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     req = {"id": 4, "method": "call_tool", "params": {"server": "fs", "tool": "x"}}
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
     [resp] = writer.responses()
@@ -518,20 +518,20 @@ async def test_handle_client_call_tool_session_call_failure_propagates_as_error(
 
 
 async def test_handle_client_default_server_param_empty_string(
-    fake_home: Path, scope: daemon_mod._Scope
+    fake_home: Path, scope: daemon_mod.Scope
 ) -> None:
-    """Missing server param → goes to _get_session('') → ValueError → ok=False.
+    """Missing server param → goes to get_session('') → ValueError → ok=False.
 
     Verify the default path does not silently swallow errors — empty server name treated as unconfigured.
     """
     _write_config(fake_home, {"fs": {"command": "x"}})
 
     req = {"id": 5, "method": "list_tools", "params": {}}  # didn't pass server
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
     [resp] = writer.responses()
@@ -541,21 +541,21 @@ async def test_handle_client_default_server_param_empty_string(
 
 
 async def test_handle_client_response_content_empty_when_no_blocks(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod._Scope
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch, scope: daemon_mod.Scope
 ) -> None:
     """tool returns empty content → ok=True with empty list (no raise)."""
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session(call_result=_call_result([], structured=None))
+    session = make_session(call_result=call_result([], structured=None))
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     req = {"id": 6, "method": "call_tool", "params": {"server": "fs", "tool": "noop"}}
-    reader = _make_reader([(json.dumps(req) + "\n").encode()])
-    writer = _FakeWriter()
-    await daemon_mod._handle_client(
+    reader = make_reader([(json.dumps(req) + "\n").encode()])
+    writer = FakeWriter()
+    await daemon_mod.handle_client(
         reader,
-        _writer_arg(writer),
+        writer_arg(writer),
         scope,
     )
     [resp] = writer.responses()
@@ -577,7 +577,7 @@ async def test_cleanup_closes_all_stacks_and_clears_state() -> None:
     s3 = MagicMock()
     s3.aclose = AsyncMock()
 
-    buckets = daemon_mod._Buckets(
+    buckets = daemon_mod.Buckets(
         sessions={"a": "fake_session_a", "b": "fake_session_b", "c": "fake_session_c"},
         stacks={"a": s1, "b": s2, "c": s3},
     )
@@ -605,7 +605,7 @@ def short_socket_path() -> Iterator[str]:
             Path(sock).unlink()
 
 
-async def _wait_for_daemon_socket(
+async def wait_for_daemon_socket(
     daemon_task: asyncio.Task, socket_path: str, *, timeout: float = 3.0
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     """Wait for daemon to listen, return the connected (reader, writer).
@@ -635,14 +635,14 @@ async def test_run_daemon_full_lifecycle_via_unix_socket(
 
     A minimal real socket smoke test verifies:
     - `asyncio.start_unix_server` starts + accepts connection
-    - JSON-line protocol runs through (`_handle_client` already unit-tested with fake reader/writer,
+    - JSON-line protocol runs through (`handle_client` already unit-tested with fake reader/writer,
       here real socket integration)
     - stale file cleaned before binding again
     """
     _write_config(fake_home, {"fs": {"command": "x"}})
-    session = _make_session(tools=[_tool("ping")])
+    session = make_session(tools=[tool("ping")])
     monkeypatch.setattr(
-        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+        daemon_mod, "connect_server", AsyncMock(return_value=(session, MagicMock()))
     )
 
     # pre-write a stale file to verify run_daemon startup cleans it
@@ -651,7 +651,7 @@ async def test_run_daemon_full_lifecycle_via_unix_socket(
     daemon_task = asyncio.create_task(
         daemon_mod.run_daemon(short_socket_path, timeout_seconds=lambda: 15.0)
     )
-    reader, writer = await _wait_for_daemon_socket(daemon_task, short_socket_path, timeout=1.5)
+    reader, writer = await wait_for_daemon_socket(daemon_task, short_socket_path, timeout=1.5)
 
     try:
         req = json.dumps({"id": 42, "method": "list_tools", "params": {"server": "fs"}})
@@ -679,7 +679,7 @@ async def test_run_daemon_graceful_shutdown_closes_server_and_cleans_socket(
     Real SIGTERM/SIGINT signals would pollute the pytest runner; instead monkeypatch
     `asyncio.Event` to a spy instance capturing, explicit set in test triggers graceful path.
     """
-    monkeypatch.setattr(daemon_mod, "_connect_server", AsyncMock())
+    monkeypatch.setattr(daemon_mod, "connect_server", AsyncMock())
     captured: list[asyncio.Event] = []
 
     class _SpyEvent(asyncio.Event):
@@ -714,7 +714,7 @@ async def test_run_daemon_graceful_shutdown_closes_server_and_cleans_socket(
 # ─── socket ownership guards (Task #1142) ──────────────────────────────────
 
 
-class _FakeProc:
+class FakeProc:
     """A psutil.Process stand-in for the reaper: argv, cwd, env, and a kill flag."""
 
     def __init__(self, pid: int, cmdline: list[str], cwd: str, env: dict[str, str]) -> None:
@@ -737,7 +737,7 @@ class _FakeProc:
         self.killed = True
 
 
-def _is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
+def is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
     """(cmdline, expected) pairs for `_is_daemon_cmdline`."""
     return [
         # The daemon's own launch shapes.
@@ -778,7 +778,7 @@ def _is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
 # no exception raised
 
 
-# ─── _handle_client retry ─────────────────────────────────────────────────
+# ─── handle_client retry ─────────────────────────────────────────────────
 
 
 # ─── shared daemon: per-connection session isolation ─────────────────────
@@ -787,7 +787,7 @@ def _is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
 # ─── server subprocess sharing (`shared` spec) ────────────────────────────
 
 
-# ─── _connect_server / _connect_http: remote (url) servers ───────────────
+# ─── connect_server / _connect_http: remote (url) servers ───────────────
 
 
-__all__ = ["_FakeProc"]
+__all__ = ["FakeProc"]
