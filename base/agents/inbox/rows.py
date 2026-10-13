@@ -1,6 +1,5 @@
-"""Inbox read surface: the pending-chat strip, chat anchors and the FYI notice lifetime."""
+"""Inbox read surface: the pending-chat strip and the FYI notice lifetime."""
 
-from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, NamedTuple
 
@@ -21,17 +20,6 @@ class InboundRow(NamedTuple):
     # select the column (list_pending_inbounds — the multimodal
     # `{"content_blocks": [...]}` shape); the rest leave it defaulted.
     payload: dict[str, Any] | None = None
-
-
-class ChatAnchor(NamedTuple):
-    """The alignment columns of one ``kind='chat'`` inbound row.
-
-    ``build_timeline_items`` reads only the id and arrival time of a chat
-    anchor, so the gateway's cold timeline read selects nothing else.
-    """
-
-    id: int
-    created_at: datetime
 
 
 # FYI notice (require_response=false) lifetime in the open queue: after this many
@@ -95,31 +83,3 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
             (agent_id,),
         )
         return [InboundRow(*row) for row in cur.fetchall()]
-
-
-def list_chat_anchors(
-    db: psycopg.Connection,
-    agent_id: int,
-    *,
-    referenced_ids: Sequence[int],
-    limit: int,
-) -> list[ChatAnchor]:
-    """This agent's ``kind='chat'`` inbound anchors in created_at ascending order.
-
-    The result is the oldest ``limit`` chat rows plus every chat row whose id
-    is in ``referenced_ids``. The oldest prefix serves legacy positional
-    alignment, which consumes anchors from the first chat row; the referenced
-    rows serve exact ``ava_inbound_id`` lookups, so a newer anchor past the
-    bound is never dropped. Callers state their own bound: there is no
-    default (task #3696).
-    """
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT id, created_at FROM inbound_messages "
-            "WHERE agent_id = %s AND kind = 'chat' AND (id = ANY(%s) OR id IN ("
-            "  SELECT id FROM inbound_messages WHERE agent_id = %s AND kind = 'chat' "
-            "  ORDER BY created_at ASC, id ASC LIMIT %s"
-            ")) ORDER BY created_at ASC, id ASC",
-            (agent_id, list(referenced_ids), agent_id, limit),
-        )
-        return [ChatAnchor(*r) for r in cur.fetchall()]

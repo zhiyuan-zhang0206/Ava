@@ -67,7 +67,7 @@ class TestAttachItems:
         self, tmp_path: Path, *, model_catalog: ModelCatalog
     ):
         msg = self._attach_message(tmp_path, model_catalog=model_catalog)
-        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         item = items[0]
         assert item.kind == "attach"
@@ -101,7 +101,7 @@ class TestAttachItems:
             ],
             model_catalog=model_catalog,
         )
-        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         item = items[0]
         assert item.kind == "attach"
@@ -127,7 +127,7 @@ class TestAttachItems:
             ],
             model_catalog=model_catalog,
         )
-        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         item = items[0]
         assert item.kind == "attach"
@@ -161,7 +161,7 @@ class TestAttachItems:
             ],
             model_catalog=model_catalog,
         )
-        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         item = items[0]
         assert item.images == ["data:image/png;base64,RklyU1Q=", "data:image/png;base64,U0VDT05E"]
@@ -198,7 +198,7 @@ class TestAttachItems:
             ],
             model_catalog=model_catalog,
         )
-        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         item = items[0]
         assert item.kind == "attach"
@@ -236,9 +236,7 @@ class TestAttachItems:
             created_at=datetime.now(UTC),
         )
         attach = self._attach_message(tmp_path, model_catalog=model_catalog)
-        items, count = build_timeline_items(
-            [tool_call, output, attach], [], inputs=_TIMELINE_INPUTS
-        )
+        items, count = build_timeline_items([tool_call, output, attach], inputs=_TIMELINE_INPUTS)
         assert count == 3
         kinds = [it.kind for it in items]
         assert kinds == ["agent_code", "code_output", "attach"]

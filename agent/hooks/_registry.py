@@ -232,7 +232,6 @@ def make_hook_runner(
         async with node_lifecycle(
             hook_name,
             messages=state.messages,
-            ops_pool=runtime.context.ops_pool,
             event_publisher=event_publisher,
             agent_id=agent_id_from_config(config),
             turn_progress=runtime.context.turn_progress,

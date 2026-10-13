@@ -281,7 +281,6 @@ async def llm_attempt(
     async with node_lifecycle(
         "llm",
         messages=state.messages,
-        ops_pool=runtime.context.ops_pool,
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=runtime.context.turn_progress,

@@ -125,7 +125,7 @@ def read_times(
     read order back, so units and nodes do not overlap on the time axis. A message without a time
     takes the previous value, None until the first. Stored stamps are not touched.
     """
-    items, _ = build_timeline_items(messages, [], inputs=timeline_inputs)
+    items, _ = build_timeline_items(messages, inputs=timeline_inputs)
     own: list[datetime | None] = [None] * len(messages)
     for idx, group in _by_message(items):
         stamps = [ts for item in group if (ts := _stamp(item)) is not None]
@@ -214,7 +214,7 @@ def divide_units(
     Raises:
         ValueError: a message renders as a mix of item kinds no rule covers.
     """
-    items, _ = build_timeline_items(messages, [], inputs=timeline_inputs)
+    items, _ = build_timeline_items(messages, inputs=timeline_inputs)
     divider = _Divider()
     for idx, group in _by_message(items):
         divider.message(idx, group)

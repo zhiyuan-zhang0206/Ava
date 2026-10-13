@@ -34,7 +34,6 @@ from base.agents.impersonation.history import ImpersonationMetadata
 
 # Re-export: TimelineItem's home is base/agents/history/timeline_item.py (file line budget);
 # callers keep importing it from here.
-from base.agents.inbox.rows import ChatAnchor, InboundRow
 from base.agents.messages.kwargs import (
     AvaMessageKwargs,
     AvaMsgType,
@@ -48,7 +47,6 @@ from base.lm.content import message_addl_kwargs, message_content
 
 __all__ = [
     "build_timeline_items",
-    "needs_chat_anchors",
     "tail_window",
     "timeline_default_limit",
 ]
@@ -119,32 +117,8 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
     return str(content)
 
 
-def needs_chat_anchors(messages: Sequence[BaseMessage]) -> bool:
-    """Whether rendering *messages* consumes chat inbound anchors at all.
-
-    ``build_timeline_items`` matches each INBOUND HumanMessage to its
-    ``kind='chat'`` row by ``ava_inbound_id``; the anchor supplies the real ts
-    for LEGACY rows that predate ``ava_created_at``. Modern messages carry
-    their own ts and id, so an
-    all-modern window renders identically with ``[]`` anchors — and querying
-    the inbound table for it (one round trip per full-window snapshot, per
-    node enter) is pure waste. Callers skip the DB query when this is False.
-
-    Compacted histories are always all-modern (REMOVE_ALL wipes the legacy
-    rows; the rebuilt head is freshly stamped), so the post-compact snapshots
-    — the ones the frontend is waiting on to refresh the context panel —
-    render without a single DB round trip.
-    """
-    for msg in messages:
-        kwargs = read_ava_kwargs(msg)
-        if kwargs.get("ava_msg_type") == AvaMsgType.INBOUND and not kwargs.get("ava_created_at"):
-            return True
-    return False
-
-
 def build_timeline_items(
     messages: Sequence[BaseMessage],
-    chat_anchors: Sequence[ChatAnchor | InboundRow],
     *,
     inputs: TimelineReadInputs,
     start: int = 0,
@@ -152,22 +126,10 @@ def build_timeline_items(
 ) -> tuple[list[TimelineItem], int]:
     """Render state.messages into timeline items + return msg_count.
 
-    `chat_anchors` are the agent's `kind='chat'` inbound rows in created_at
-    ascending order. An inbound HumanMessage carrying `ava_inbound_id` advances
-    to that exact anchor; only a legacy message without the id consumes the
-    next row positionally. This matters after compaction, where the surviving
-    checkpoint starts after many historical DB rows. Pass `[]` when no inbound
-    table is available (container / eval mode); modern inbound items still
-    retain their embedded id and timestamp.
-
     `start` renders only `messages[start:]` (incremental snapshot path: the
     caller holds a per-agent cursor of the last published msg_idx). Item ids
     keep their ABSOLUTE msg_idx (`enumerate(..., start=start)`), so streaming
-    SSE item_ids stay aligned. When `start > 0` the anchors are deliberately
-    NOT consumed: modern messages carry their own `ava_created_at` (ts is
-    never synthetic on the incremental path), and consuming anchors from
-    position 0 would misalign the window's first inbound with a historical
-    chat's anchor. The caller passes `[]`.
+    SSE item_ids stay aligned.
 
     msg_count is ALWAYS the full `len(messages)`, never the window length —
     the frontend's future-partial boundary (`msg_idx == msg_count`) depends
@@ -182,19 +144,16 @@ def build_timeline_items(
     """
     items: list[TimelineItem] = []
     sdk_by_id = sdk_calls_by_tool_call_id(messages, start)
-    anchor_positions = {anchor.id: index for index, anchor in enumerate(chat_anchors)}
-    next_anchor_idx = 0
-    # Fallback anchor for "no inbound seen yet" — epoch 0 sorts these items
-    # before all real-ts items. In practice only framework-INSERTed 'system'
-    # source takes this path.
-    current_anchor = datetime.fromtimestamp(0, tz=UTC)
+    # Epoch-0 base of the synthetic ts for a message with no read time (it
+    # sorts such items before all real-ts items).
+    epoch = datetime.fromtimestamp(0, tz=UTC)
     sub_offset = 0
 
     def next_ts(msg: BaseMessage | None = None) -> str:
         """The item's wall-clock ts: the message's own real read time
         (`message_read_time`: `ava_picked_up_at` for an injected message, else
         `ava_created_at`; never an inbound's arrival time) when present, else a
-        synthetic anchor+microsecond offset for legacy messages persisted
+        synthetic epoch+microsecond offset for legacy messages persisted
         before the field existed. The offset advances only on the synthetic
         path, so a turn's blocks that share one real ts collapse onto that ts
         while legacy blocks still fan out by a microsecond for stable ordering."""
@@ -204,7 +163,7 @@ def build_timeline_items(
                 return real
         nonlocal sub_offset
         sub_offset += _LG_TS_STEP_US
-        return (current_anchor + timedelta(microseconds=sub_offset)).isoformat()
+        return (epoch + timedelta(microseconds=sub_offset)).isoformat()
 
     msg_count = len(messages)
     # msg_idx is 1:1 with the position in state.messages; streaming SSE events
@@ -227,18 +186,7 @@ def build_timeline_items(
         raw_content = message_content(msg)
         kwargs = read_ava_kwargs(msg)
         if kwargs.get("ava_msg_type") == AvaMsgType.INBOUND:
-            item, current_anchor, sub_offset, next_anchor_idx = _inbound_item(
-                msg_idx,
-                raw_content,
-                kwargs,
-                chat_anchors,
-                anchor_positions,
-                next_anchor_idx,
-                current_anchor,
-                sub_offset,
-                next_ts,
-            )
-            items.append(item)
+            items.append(_inbound_item(msg_idx, raw_content, kwargs, next_ts))
         else:
             items.extend(_message_items(msg, msg_idx, kwargs, next_ts, sdk_by_id, inputs))
     _add_source_coordinates(items, messages)
@@ -335,54 +283,30 @@ def _inbound_item(
     msg_idx: int,
     raw_content: str | list[str | dict[str, Any]],
     kwargs: AvaMessageKwargs,
-    chat_anchors: Sequence[ChatAnchor | InboundRow],
-    anchor_positions: dict[int, int],
-    next_anchor_idx: int,
-    current_anchor: datetime,
-    sub_offset: int,
     next_ts: Callable[[BaseMessage | None], str],
-) -> tuple[TimelineItem, datetime, int, int]:
-    """Render one inbound HumanMessage and advance the legacy anchor cursor.
+) -> TimelineItem:
+    """Render one inbound HumanMessage.
 
     A multimodal inbound carries list content (a text block + base64 image
     blocks); render the text part only, never str()-ing the base64 into the
-    payload. Its image urls ride on ava_image_urls. Returns the item plus the
-    advanced anchor state.
+    payload. Its image urls ride on ava_image_urls. `inbound_id` is the
+    message's own embedded `ava_inbound_id`, or None when it has none.
     """
+    embedded_id = None
     if "ava_inbound_id" in kwargs:
         embedded_id = kwargs["ava_inbound_id"]
         if type(embedded_id) is not int or embedded_id <= 0:
             raise ValueError(f"inbound ava_inbound_id must be a positive int, got {embedded_id!r}")
-        # Exact lookup is non-destructive: a missing, duplicate, or out-of-order
-        # modern id cannot exhaust or rewind the cursor used by truly legacy
-        # messages. A forward match does advance past compacted-away rows.
-        anchor_idx = anchor_positions.get(embedded_id)
-        nxt = chat_anchors[anchor_idx] if anchor_idx is not None else None
-        if anchor_idx is not None:
-            next_anchor_idx = max(next_anchor_idx, anchor_idx + 1)
-    else:
-        # Pre-ava_inbound_id checkpoints have no correlation key. Preserve the
-        # historical best-effort positional fallback for those rows only.
-        embedded_id = None
-        nxt = chat_anchors[next_anchor_idx] if next_anchor_idx < len(chat_anchors) else None
-        if nxt is not None:
-            next_anchor_idx += 1
-    if nxt is not None:
-        current_anchor = nxt.created_at
-        sub_offset = 0
     images = kwargs.get("ava_image_urls")
-    item = TimelineItem(
+    return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="inbound_chat",
         source=kwargs.get("ava_source"),
         payload=_inbound_text(raw_content),
-        created_at=(
-            kwargs_read_time(kwargs) or (current_anchor.isoformat() if nxt else next_ts(None))
-        ),
-        inbound_id=embedded_id if embedded_id is not None else (nxt.id if nxt else None),
+        created_at=kwargs_read_time(kwargs) or next_ts(None),
+        inbound_id=embedded_id,
         images=images if images else None,
     )
-    return item, current_anchor, sub_offset, next_anchor_idx
 
 
 def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | None:
