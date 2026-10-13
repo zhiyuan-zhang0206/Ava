@@ -114,7 +114,7 @@ def test_marker_replace_failure_keeps_old_content_and_cleans_temps(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("writer", [observatory_urls._atomic_write, otel_collector._atomic_write])
+@pytest.mark.parametrize("writer", [observatory_urls.atomic_write, otel_collector.atomic_write])
 def test_cli_writer_commits_utf8_without_directory_sync(
     writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,7 +196,7 @@ def test_text_helper_applies_requested_public_mode(tmp_path: Path) -> None:
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
 
 
-@pytest.mark.parametrize("writer", [grafana_render._atomic_write])
+@pytest.mark.parametrize("writer", [grafana_render.atomic_write])
 def test_visible_text_writers_use_distinct_sibling_temps_under_concurrency(
     writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -228,7 +228,7 @@ def test_visible_text_writers_use_distinct_sibling_temps_under_concurrency(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("writer", [grafana_render._atomic_write])
+@pytest.mark.parametrize("writer", [grafana_render.atomic_write])
 def test_visible_text_writers_clean_temp_after_failed_replace(
     writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -245,7 +245,7 @@ def test_visible_text_writers_clean_temp_after_failed_replace(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("writer", [grafana_render._atomic_write])
+@pytest.mark.parametrize("writer", [grafana_render.atomic_write])
 def test_visible_text_writers_set_public_mode_without_sync(
     writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

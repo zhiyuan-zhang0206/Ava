@@ -128,7 +128,7 @@ def alerts_webhook_url(*, machine: MachineIdentity) -> str:
     return f"http://127.0.0.1:{port}/api/alerts"
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def atomic_write(path: Path, content: str) -> None:
     """Replace ``path`` with ``content`` atomically (mkstemp + rename).
 
     Grafana's provisioning watcher may read a file mid-write; a torn render

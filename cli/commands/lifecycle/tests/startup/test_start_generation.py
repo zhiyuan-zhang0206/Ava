@@ -112,7 +112,7 @@ def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatc
     def no_status(_client: object) -> None:
         return None
 
-    monkeypatch.setattr(driver, "_root_status", no_status)
+    monkeypatch.setattr(driver, "root_status", no_status)
     monkeypatch.setattr(driver, "root_client", object)
 
     def unknown() -> None:

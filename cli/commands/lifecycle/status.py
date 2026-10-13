@@ -35,10 +35,10 @@ def root_tree_units() -> dict[str, dict[str, object]]:
     """Read one root snapshot; an unreachable root claims no running services."""
     from cli.commands.lifecycle import root_driver
 
-    status = root_driver._root_status(root_driver.root_client())
+    status = root_driver.root_status(root_driver.root_client())
     if status is None:
         return {}
-    return root_driver._root_units(status)
+    return root_driver.root_units(status)
 
 
 def _status_roster(
