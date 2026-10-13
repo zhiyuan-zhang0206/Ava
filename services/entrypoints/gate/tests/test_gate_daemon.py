@@ -13,9 +13,13 @@ import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
+from base.daemon import shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import pipeline_build, process_logging
+from base.telemetry.delivery import reporting
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
 from services.entrypoints.gate import daemon
@@ -80,9 +84,9 @@ def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
         assert name == "gate"
 
     setup.pipeline.stop.side_effect = stop
-    monkeypatch.setattr("base.telemetry.pipeline_build.build_pipeline", build_pipeline)
-    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", logging)
-    monkeypatch.setattr("base.daemon.shutdown.install_graceful_shutdown", install_shutdown)
+    monkeypatch.setattr(pipeline_build, "build_pipeline", build_pipeline)
+    monkeypatch.setattr(process_logging, "init_gateway_process", logging)
+    monkeypatch.setattr(shutdown, "install_graceful_shutdown", install_shutdown)
     monkeypatch.setattr(daemon, "Gate", gate)
     monkeypatch.setattr(daemon, "ThreadingHTTPServer", server)
     return setup
@@ -92,7 +96,7 @@ def test_entry_keeps_one_image_gate_factory_and_producer(
     entry: _Entry, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     version = Mock(return_value=17)
-    monkeypatch.setattr("base.native_process.code_version.first_parent_count", version)
+    monkeypatch.setattr(code_version, "first_parent_count", version)
     opened: list[ProcessDbGate] = []
 
     def database(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
@@ -183,7 +187,7 @@ def test_unfinished_stop_is_reported_without_reentering_pipeline(
     entry.pipeline.stop.side_effect = None
     entry.pipeline.stop.return_value = drain
     report = Mock()
-    monkeypatch.setattr("base.telemetry.delivery.reporting.report_no_pipeline", report)
+    monkeypatch.setattr(reporting, "report_no_pipeline", report)
     daemon.main()
     entry.pipeline.stop.assert_called_once_with(timeout=2)
     assert "unfinished" in report.call_args.args[0]
@@ -201,7 +205,7 @@ def test_real_owned_pipeline_is_joined_on_http_exit(
         del database
         return pipeline
 
-    monkeypatch.setattr("base.telemetry.pipeline_build.build_pipeline", build_pipeline)
+    monkeypatch.setattr(pipeline_build, "build_pipeline", build_pipeline)
     try:
         daemon.main()
         assert entry.logging.call_args.kwargs["producer"]() is pipeline

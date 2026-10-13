@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.env import audit, runtime_config
@@ -239,7 +240,7 @@ def test_get_config_audit_default_last_comes_from_display_config(
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    monkeypatch.setattr("base.cluster.machines.lookup_role", _unregistered)
+    monkeypatch.setattr(machines, "lookup_role", _unregistered)
 
     env_path = runtime_config.env_file_path()
     env_path.write_text("AVA_MODEL=audit-one\n")
@@ -274,7 +275,7 @@ def test_get_config_audit_reads_own_records(
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    monkeypatch.setattr("base.cluster.machines.lookup_role", _unregistered)
+    monkeypatch.setattr(machines, "lookup_role", _unregistered)
     env_path = runtime_config.env_file_path()
     env_path.write_text("AVA_MODEL=audit-self\n")
     audit.record_env_write(
@@ -324,13 +325,13 @@ async def test_get_config_audit_all_merges_runners_newest_first(
     def _roles(_db: object, _target: str) -> list[str]:
         return ["agent-runner"]
 
-    monkeypatch.setattr("base.cluster.machines.lookup_role", _roles)
+    monkeypatch.setattr(machines, "lookup_role", _roles)
     monkeypatch.setattr(_cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
     def _runners(_db: object) -> list[tuple[str, str | None]]:
         return [("m1", None), ("m2", None)]
 
-    monkeypatch.setattr("base.cluster.machines.list_agent_runners", _runners)
+    monkeypatch.setattr(machines, "list_agent_runners", _runners)
 
     with TestClient(app) as client:
         resp = client.get("/api/config/audit?machine=all&last=2")

@@ -17,6 +17,7 @@ from base.db import Database
 from base.deploy.schema import migrations
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import process_logging
 from services.backup.scheduler import daemon, worker
 
 
@@ -95,7 +96,7 @@ def test_worker_shares_one_gate_with_work_log_and_scratch_url(
     monkeypatch.setattr(worker, "worker_request", Mock(return_value=({"kind": "restore"}, output)))
     monkeypatch.setattr(worker, "Database", create)
     monkeypatch.setattr(worker, "build_pipeline", pipeline)
-    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", logging)
+    monkeypatch.setattr(process_logging, "init_gateway_process", logging)
     publish = Mock()
     monkeypatch.setattr(worker, "publish_result", publish)
 

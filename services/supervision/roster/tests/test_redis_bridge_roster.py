@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster.dataplane import redis_bridge
 from base.cluster.dataplane.redis_bridge import RedisBridgeEndpoint
 from base.cluster.machine import MachineIdentity
 from base.paths import ava_home
@@ -40,7 +41,7 @@ def test_a_macos_gateway_with_a_private_address_is_not_gated(
             {"record": {"ports": {"redis": 16380}, "gateway_home": str(home), "created_at": "t"}}
         )
     )
-    monkeypatch.setattr("base.cluster.dataplane.redis_bridge.sys.platform", "darwin")
+    monkeypatch.setattr(redis_bridge.sys, "platform", "darwin")
     machine_identity.set(host="10.64.0.7")
     assert ops_spec._gate_reason(_bridge(), machine=machine_identity) is None
 
@@ -63,6 +64,6 @@ def test_the_unit_command_carries_the_recorded_listen_address(
 def test_a_non_macos_host_is_gated_out(
     monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr("base.cluster.dataplane.redis_bridge.sys.platform", "linux")
+    monkeypatch.setattr(redis_bridge.sys, "platform", "linux")
     reason = ops_spec._gate_reason(_bridge(), machine=machine_identity)
     assert reason == "no off-box Redis ingress on this host"
