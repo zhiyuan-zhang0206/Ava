@@ -56,9 +56,8 @@ def _stamp_picked_up(kwargs: dict[str, object]) -> dict[str, object]:
 
 
 def _stamp_created_at(kwargs: dict[str, object], created_at: datetime | None) -> dict[str, object]:
-    """Add the ISO-8601 `ava_created_at` when a real creation time is known.
-    The timeline read side prefers it over its synthetic anchor+offset ordering;
-    omitting it (created_at None) leaves the message on the legacy fallback path."""
+    """Add the ISO-8601 `ava_created_at` when a creation time is supplied.
+    Omitting it (created_at None) leaves the message without a creation time."""
     if created_at is not None:
         kwargs["ava_created_at"] = created_at.isoformat()
     return kwargs

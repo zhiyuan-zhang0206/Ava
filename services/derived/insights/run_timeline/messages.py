@@ -11,7 +11,7 @@ longer than ``display.run_timeline_message_text_max`` is clipped and flagged;
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -28,7 +28,6 @@ from services.derived.insights.run_timeline.tokens import span_tokens
 
 router = APIRouter()
 
-_LEGACY_TS_FLOOR = datetime(2020, 1, 1, tzinfo=UTC)
 _LIMIT_MAX = 200
 
 _PART_KIND: dict[str, RunTimelinePartKind] = {
@@ -64,7 +63,7 @@ def _message(
     tokens = span_tokens(view, idx, idx)
     return RunTimelineMessage(
         idx=idx,
-        ts=ts if ts is not None and ts >= _LEGACY_TS_FLOOR else None,
+        ts=ts,
         source=next((item.source for item in items if item.source), None),
         parts=parts,
         context_tokens=tokens.context_tokens,
