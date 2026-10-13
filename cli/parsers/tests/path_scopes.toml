@@ -1,0 +1,12 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.fixtures.unit.sdk" = [
+    "test_walg_cmd.py",
+    "test_hold_report.py",
+]
+"tests.fixtures.unit.generation" = [
+    "test_hold_report.py",
+]
+"base.paths.tests.homes" = [
+    "test_hold_report.py",
+]

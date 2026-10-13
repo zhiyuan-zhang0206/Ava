@@ -26,7 +26,7 @@ from cli.commands import probe
 from cli.commands.lifecycle import _start_readiness_preflight as preflight
 from cli.commands.lifecycle import root_driver
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 class _Backend:

@@ -138,7 +138,7 @@ def test_the_check_goes_through_the_cli_entry_with_a_throwaway_home() -> None:
     assert '(umask 077; AVA_HOME="$H"' in script  # the rows file holds every stored script
     assert 'rm -f "$R"' in script and 'worktree remove --force "$W"' in script
     check_py = fleet_update.check_rows_py()
-    assert "from cli.main import main" in check_py and '"schedules", "verify"' in check_py
+    assert '"cli.main"' in check_py and '"schedules"' in check_py and '"verify"' in check_py
     assert '"--rows-file"' in check_py and '"--no-notify"' in check_py
 
 
@@ -193,6 +193,10 @@ def main():
     for row in reds:
         print(f"RED id={row[0]} name={row[1]} missing=x")
     return 1 if reds else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 

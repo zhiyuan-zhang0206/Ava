@@ -1,5 +1,9 @@
+exports = ["data_plane_records.py"]
+
 [uses]
 "test_native_storage_diagnostics.py" = ["test_pooler_stop.py"]
+"test_remote_data_plane.py" = ["data_plane_records.py"]
+"test_start_data_plane.py" = ["data_plane_records.py"]
 
 [debt.env-patch]
 "test_cluster_instance_bind.py#monkeypatch.setenv os.environ" = 2
@@ -10,9 +14,10 @@
 "test_pgbouncer_stop_isolation.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
 "test_pooler_stop.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 "test_storage_ownership_data_plane.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_walg_cmd.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
+"data_plane_records.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+"data_plane_records.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
 "test_cluster_instance_bind.py#monkeypatch.setattr base.cluster.ownership.redis_data_dir" = 4
 "test_cluster_instance_bind.py#monkeypatch.setattr base.cluster.port_preflight.bind_addrs" = 5
 "test_cluster_instance_bind.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
@@ -168,14 +173,6 @@
 "test_storage_ownership_data_plane.py#monkeypatch.setattr cli.commands.data_plane.pgbouncer.pgbouncer_bin" = 2
 "test_storage_ownership_data_plane.py#monkeypatch.setattr cli.commands.data_plane.pgbouncer.psutil" = 1
 "test_storage_ownership_data_plane.py#monkeypatch.setattr cli.commands.data_plane.pgbouncer.write_config" = 2
-"test_walg_cmd.py#monkeypatch.setattr base.config.ConfigBoot.boot" = 1
-"test_walg_cmd.py#monkeypatch.setattr base.config.settings.walg.walg_config_file" = 2
-"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.ConfigBoot" = 2
-"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.check.run_check" = 1
-"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.restored_instance" = 2
-"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.tick.run_drill_now" = 1
-"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.tick.run_tick" = 1
-"test_walg_cmd.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 3
 
 [debt.stdlib-patch]
 "test_pg_socket_dir.py#monkeypatch.setattr os.geteuid" = 1

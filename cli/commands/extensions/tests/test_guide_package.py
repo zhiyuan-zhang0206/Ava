@@ -17,7 +17,7 @@ from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills
 from cli.commands.extensions.skills_sync import converge_skills
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

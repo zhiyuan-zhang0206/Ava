@@ -15,7 +15,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.telemetry import EventPipeline
 from cli.database import OperatorDatabaseFactory, operator_database_factory
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

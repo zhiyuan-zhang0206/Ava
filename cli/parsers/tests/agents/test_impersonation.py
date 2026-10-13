@@ -23,8 +23,8 @@ from base.agents.impersonation import history
 from base.agents.impersonation import sessions as sessions
 from cli.commands.agents import impersonation as cli
 from cli.database.runtime import CommandRuntime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from typing import cast
 
@@ -19,10 +20,9 @@ from base.deploy.schema import migrations
 from cli.commands._repo import register_machine_or_die
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
-from cli.tests._commands_helpers import _assert_named_commands_parse
-from cli.tests._commands_helpers import fake_session_backends as fake_session_backends
-from cli.tests._commands_helpers import hermetic_gateway_base as hermetic_gateway_base
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
+from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 # ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
 
@@ -287,6 +287,11 @@ def test_register_agent_runner_loopback_host_exits_nonzero(
     assert calls == ["http://127.0.0.1:8106"]
 
 
+def _named_commands(text: str) -> set[str]:
+    """The `ava ...` commands an operator hint names. The parser tests pin that each parses."""
+    return set(re.findall(r"`(ava [^`]+)`", text))
+
+
 # ─── remediation hints name commands that exist ──────────────────────────────
 
 
@@ -325,7 +330,7 @@ def test_register_schema_behind_hint_names_working_commands(
     assert rc == 1
     err = capsys.readouterr().err
     assert "`ava stop` then `ava start` on the gateway" in err
-    _assert_named_commands_parse(err)
+    assert _named_commands(err) == {"ava stop", "ava start"}
 
 
 def test_code_behind_schema_hint_names_working_commands(
@@ -342,4 +347,4 @@ def test_code_behind_schema_hint_names_working_commands(
     assert _repo_commands.assert_schema_current_or_die() == 1
     err = capsys.readouterr().err
     assert "gateway's revision" in err
-    _assert_named_commands_parse(err)
+    assert _named_commands(err) == {"ava start"}

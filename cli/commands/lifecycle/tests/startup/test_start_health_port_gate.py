@@ -44,7 +44,7 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 )
 from cli.commands.probe import ReadinessWait
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.roster.service_spec import AGENT_RUNNER, GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline

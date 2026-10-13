@@ -23,7 +23,7 @@ from cli.commands.observability.tests.lgtm_inputs import (
 from cli.commands.observability.tests.lgtm_inputs import (
     empty_native_versions as _empty_native_versions,
 )
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_machine as command_machine
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

@@ -22,8 +22,8 @@ from cli.commands.extensions import mcp
 from cli.commands.extensions.mcp import cmd_mcp_install, cmd_mcp_upgrade
 from cli.commands.extensions.plugins import cmd_plugins_install
 from cli.commands.extensions.skill import cmd_skill_install
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 # Every test here installs a package, which records `local:<machine>` provenance

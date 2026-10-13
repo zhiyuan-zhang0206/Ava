@@ -34,7 +34,7 @@ from cli.commands.lifecycle.tests.stop.stop_support import Launcher, PtyServiceP
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_machine as command_machine
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline

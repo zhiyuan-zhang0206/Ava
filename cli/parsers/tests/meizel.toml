@@ -1,9 +1,20 @@
+[debt.env-patch]
+"test_walg_cmd.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_commands_cluster_status_parsers.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
 "test_commands_cluster_status_parsers.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
 "test_commands_cluster_status_parsers.py#monkeypatch.setattr base.host.net.http_dial.post" = 1
 "test_logs_retention.py#monkeypatch.setattr base.config.settings.observability.log_retention_days" = 1
 "test_logs_retention.py#monkeypatch.setattr cli.commands.observability.logs.os.scandir" = 1
+"test_walg_cmd.py#monkeypatch.setattr base.config.ConfigBoot.boot" = 1
+"test_walg_cmd.py#monkeypatch.setattr base.config.settings.walg.walg_config_file" = 2
+"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.ConfigBoot" = 2
+"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.check.run_check" = 1
+"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.restored_instance" = 2
+"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.tick.run_drill_now" = 1
+"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.tick.run_tick" = 1
+"test_walg_cmd.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 3
 
 [debt.stdlib-patch]
 "test_logs_retention.py#monkeypatch.setattr pathlib.Path.unlink" = 1
