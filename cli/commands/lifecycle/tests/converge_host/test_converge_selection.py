@@ -7,11 +7,15 @@ from typing import Any
 import pytest
 
 from base.telemetry import EventPipeline
-from cli.commands.converge import host as converge_host
 from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
-from cli.commands.converge.tests.context_inputs import Converge, default_home, other_home
-from cli.commands.converge.tests.context_inputs import converge as converge
-from cli.commands.converge.tests.context_inputs import home as home
+from cli.commands.lifecycle import converge_host
+from cli.commands.lifecycle.tests.converge_host.context_inputs import (
+    Converge,
+    default_home,
+    other_home,
+)
+from cli.commands.lifecycle.tests.converge_host.context_inputs import converge as converge
+from cli.commands.lifecycle.tests.converge_host.context_inputs import home as home
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database

@@ -11,9 +11,9 @@ import pytest
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.telemetry import EventPipeline
-from cli.commands.converge import host as converge_host
 from cli.commands.converge import walg as converge_walg_module
 from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.lifecycle import converge_host
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.backup.walg import config as walg_config
 from services.backup.walg.tests.support import Sandbox, make_sandbox, valid_config
@@ -190,7 +190,7 @@ def job_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def test_the_job_step_runs_on_gateways_after_the_other_scheduled_jobs() -> None:
-    from cli.commands.converge._os_jobs import ensure_walg_job
+    from cli.commands.converge.os_jobs import ensure_walg_job
 
     names = [step.name for step in converge_host.CONVERGE_STEPS]
     step = converge_host.CONVERGE_STEPS[names.index("WAL-G backup job")]
@@ -207,7 +207,7 @@ def test_the_key_being_set_registers_the_tick(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    from cli.commands.converge._os_jobs import ensure_walg_job
+    from cli.commands.converge.os_jobs import ensure_walg_job
 
     sandbox = make_sandbox(tmp_path, monkeypatch)
 
@@ -223,7 +223,7 @@ def test_the_key_being_unset_removes_the_tick(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    from cli.commands.converge._os_jobs import ensure_walg_job
+    from cli.commands.converge.os_jobs import ensure_walg_job
 
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 

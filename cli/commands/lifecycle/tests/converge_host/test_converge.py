@@ -15,20 +15,22 @@ from base.deploy.git import cluster_drift
 from base.host.permissions_helper import client
 from base.telemetry import EventPipeline
 from cli import python_install
-from cli.commands.converge import _frontend_env as _fe_env
-from cli.commands.converge import _steps
-from cli.commands.converge import host as converge_host
-from cli.commands.converge.tests.context_inputs import (
+from cli.commands.converge import frontend_env as _fe_env
+from cli.commands.converge import steps as _steps
+from cli.commands.lifecycle import converge_host
+from cli.commands.lifecycle.tests.converge_host.context_inputs import (
     Converge,
     accessibility_environment,
     capable_helper_context,
     default_home,
     screen_capture_environment,
 )
-from cli.commands.converge.tests.context_inputs import converge as converge
-from cli.commands.converge.tests.context_inputs import converge_context as _ctx
-from cli.commands.converge.tests.context_inputs import home as home
-from cli.commands.converge.tests.context_inputs import pgbouncer_context as _pgbouncer_ctx
+from cli.commands.lifecycle.tests.converge_host.context_inputs import converge as converge
+from cli.commands.lifecycle.tests.converge_host.context_inputs import converge_context as _ctx
+from cli.commands.lifecycle.tests.converge_host.context_inputs import home as home
+from cli.commands.lifecycle.tests.converge_host.context_inputs import (
+    pgbouncer_context as _pgbouncer_ctx,
+)
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.desktop import permissions_helper
@@ -46,11 +48,11 @@ def test_ensure_ava_on_path_links_bare_ava_to_this_checkouts_cli(
     link.parent.mkdir(parents=True)
     repo = tmp_path / "repo"
     link.symlink_to(repo / "scripts" / "ava-launcher.sh")  # the retired launcher link
-    converge_host._ensure_ava_on_path(
+    converge_host.ensure_ava_on_path(
         _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline)
     )
     assert link.readlink() == repo / ".venv" / "bin" / "ava"
-    converge_host._ensure_ava_on_path(
+    converge_host.ensure_ava_on_path(
         _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline)
     )  # idempotent
     assert link.readlink() == repo / ".venv" / "bin" / "ava"
@@ -66,11 +68,11 @@ def test_ensure_local_bin_on_path_block_is_idempotent(
     rc = home / ".zshrc"
     rc.write_text("export FOO=1\n")  # pyright: ignore[reportUnknownMemberType]
 
-    converge_host._ensure_local_bin_on_path(ctx)
-    converge_host._ensure_local_bin_on_path(ctx)
+    converge_host.ensure_local_bin_on_path(ctx)
+    converge_host.ensure_local_bin_on_path(ctx)
 
     text = rc.read_text()  # pyright: ignore[reportUnknownMemberType]
-    assert text.count(converge_host._PATH_BEGIN) == 1  # pyright: ignore[reportUnknownMemberType]
+    assert text.count(converge_host.PATH_BEGIN) == 1  # pyright: ignore[reportUnknownMemberType]
     assert "export FOO=1" in text
     assert str(home / ".local" / "bin") in text  # pyright: ignore[reportUnknownArgumentType]
 
@@ -82,7 +84,7 @@ def test_ensure_ava_home_dirs(
     operator_pipeline: Callable[[], EventPipeline],
 ):
     ava_home = tmp_path / "avahome"
-    converge_host._ensure_ava_home_dirs(
+    converge_host.ensure_ava_home_dirs(
         _ctx(tmp_path, ava_home, operator_database=operator_database, producer=operator_pipeline)
     )
     for sub in ("logs", "configs", "secrets"):
@@ -110,7 +112,7 @@ def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(
         for parent in (target.parent, target.parent.parent):
             parent.chmod(0o755)
 
-    converge_host._ensure_ava_home_dirs(
+    converge_host.ensure_ava_home_dirs(
         _ctx(tmp_path, ava_home, operator_database=operator_database, producer=operator_pipeline)
     )
 
@@ -141,7 +143,7 @@ def test_ensure_ava_home_dirs_survives_a_workspace_socket(
         socket_path = socket_dir / "app.sock"
         server.bind(str(socket_path))
 
-        converge_host._ensure_ava_home_dirs(
+        converge_host.ensure_ava_home_dirs(
             _ctx(root, ava_home, operator_database=operator_database, producer=operator_pipeline)
         )
 
@@ -166,7 +168,7 @@ def test_ensure_ava_home_dirs_rejects_logs_symlink_before_writing_marker(
     (ava_home / "logs").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(RuntimeError, match=r"logs.*symlink"):
-        converge_host._ensure_ava_home_dirs(
+        converge_host.ensure_ava_home_dirs(
             _ctx(
                 tmp_path, ava_home, operator_database=operator_database, producer=operator_pipeline
             )

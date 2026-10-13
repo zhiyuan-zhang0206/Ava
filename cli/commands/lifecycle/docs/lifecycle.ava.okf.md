@@ -31,7 +31,7 @@ kernel with the data plane and browser kept (`keep_infra`,
 refused it for a start that would fail ([[start-readiness-preflight.ava.okf.md]]).
 `ops.agent_pause` and `ops.agent_pause.probe` own prepare/drain and runtime
 capability checks; `service_stop` and `data_plane/maintenance_stop` verify
-resource exits (`_maintenance_stop_report` names survivors).
+resource exits (`data_plane/maintenance_stop_report` names survivors).
 `data_plane/_pooler_stop.OwnedPooler` owns ordinary pooler stop
 admission for maintenance and startup recovery: exact native birth and listener
 proof precede a durable stop intent and the first SIGINT (`WAIT_FOR_SERVERS`).
@@ -64,7 +64,7 @@ See [the coordinated operator procedure](../../../../docs/conventions/operations
 The native stop tests create fresh PTY sessions and wait for their requested
 job's bare readiness output before treating a terminal as busy. A login-profile
 child can exist before the initial command runs; child presence alone is not
-job readiness. `cli/commands/lifecycle/tests/stop_support.py:busy_session` keeps cleanup custody of the
+job readiness. `cli/commands/lifecycle/tests/stop/stop_support.py:busy_session` keeps cleanup custody of the
 shell before waiting, then records the running job. Regular jobs print
 `job-ready`; stubborn jobs print `stubborn-ready` after installing their signal
 handlers. Fresh-session creation refuses reuse; the public capture wait requires

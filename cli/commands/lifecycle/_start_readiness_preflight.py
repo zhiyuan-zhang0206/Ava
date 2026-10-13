@@ -191,7 +191,7 @@ def _private_tree_findings(home: Path) -> tuple[list[str], list[str]]:
             )
 
     # `configs` / `secrets`: converge only mkdirs these (the same
-    # `_ensure_ava_home_dirs` step), so a path that exists but is not a
+    # `ensure_ava_home_dirs` step), so a path that exists but is not a
     # directory makes that mkdir raise AFTER the stop — the same class as the
     # three tree roots above, under mkdir's own rule: a symlink TO a directory
     # is tolerated (`mkdir(exist_ok=True)`), a file or a dangling link is not.

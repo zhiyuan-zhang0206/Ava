@@ -5,8 +5,8 @@ A sibling of `skills_sync.py` (repo/plugin skills from the checkout) and
 `ava skill install` on any machine (`future/infra/extensions/extension-ownership.md` S2,
 model in `docs/decisions/extensions/plugins/2026-08-21-extension-ownership-three-tiers.md`).
 
-Its own module rather than another function in `converge/host.py` because it is
-not a converge STEP — see the docstring below — and because `converge/host.py`
+Its own module rather than another function in `lifecycle/converge_host.py` because it is
+not a converge STEP — see the docstring below — and because `lifecycle/converge_host.py`
 is a roster of host-state steps, not a place for a subsystem's reader.
 """
 

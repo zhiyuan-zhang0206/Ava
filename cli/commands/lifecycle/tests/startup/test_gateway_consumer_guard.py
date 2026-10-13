@@ -35,6 +35,7 @@ from typing import cast
 
 import pytest
 
+from base.config import Settings
 from cli.commands.data_plane import bringup
 
 # Intentional import-time isolation: pin settings-lite before any project import
@@ -513,7 +514,6 @@ def _closure_domains(closure: set[Path]) -> set[str]:
     check; only dump-excluded Settings fields outside the domain registry are
     classified as non-domain facts.
     """
-    from base.config import Settings
     from base.config.config_registry import DOMAIN_ATTRS
     from cli.commands.lifecycle.tests.startup.config_read_facts import explicit_config_reads
 
@@ -552,7 +552,6 @@ def _process_profiles() -> tuple[str, ...]:
 def test_boot_authority_fact_is_retained_outside_profile_domains(
     profile: str, tmp_path: Path
 ) -> None:
-    from base.config import Settings
     from base.host.env.dotenv_boot import EnvBootResult
 
     boot = EnvBootResult(db_authority_refusal="fixture refusal")

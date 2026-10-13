@@ -83,4 +83,4 @@ Only the existing Codex and Claude Code home integrations are supported.
 
 - [[docs/skills/project-local.ava.okf.md]] — the normal visibility path for the repo skill family
 - [[docs/skills/load-directory-sync.ava.okf.md]] — Ava's distinct runtime load-directory contract
-- `cli/commands/converge/host.py` — prod/default-home and worktree gate
+- `cli/commands/lifecycle/converge_host.py` — prod/default-home and worktree gate

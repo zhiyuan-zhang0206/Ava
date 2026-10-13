@@ -44,7 +44,7 @@ def test_station_role_renders_full_native_set_without_marker(
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
 
     lgtm_native.ensure_lgtm_native(
         repo,
@@ -84,7 +84,7 @@ def test_native_storage_dir_default_matches_historical_layout(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(config.settings.observability, "lgtm_storage_dir", "")
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -117,7 +117,7 @@ def test_native_storage_dir_parameterized(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(config.settings.observability, "lgtm_storage_dir", "/data/obs")
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -152,7 +152,7 @@ def test_station_role_creates_configured_storage_dirs(
     agents_dir.mkdir()
     storage = tmp_path / "obs-data"
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "native_versions", _empty_native_versions)
     monkeypatch.setattr(config.settings.observability, "lgtm_storage_dir", str(storage))
 
     lgtm_native.ensure_lgtm_native(

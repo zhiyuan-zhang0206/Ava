@@ -8,8 +8,8 @@ import pytest
 
 from base.deploy.schema import migrations
 from base.telemetry import EventPipeline
-from cli.commands.converge import host as converge_host
-from cli.commands.converge.tests.context_inputs import converge_context as _ctx
+from cli.commands.lifecycle import converge_host
+from cli.commands.lifecycle.tests.converge_host.context_inputs import converge_context as _ctx
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline

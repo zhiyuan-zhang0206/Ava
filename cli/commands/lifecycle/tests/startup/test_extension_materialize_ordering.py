@@ -40,7 +40,7 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 def test_materialization_is_not_a_converge_step() -> None:
     """Converge runs before the data plane is up (`ava start` step 1 vs step 2),
     so nothing in `CONVERGE_STEPS` may require the cluster database."""
-    from cli.commands.converge.host import CONVERGE_STEPS
+    from cli.commands.lifecycle.converge_host import CONVERGE_STEPS
 
     offenders = [s.name for s in CONVERGE_STEPS if "extension" in s.name.lower()]
     assert not offenders, (
@@ -57,10 +57,10 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     `test_release_cold_start_uses_same_storage_readiness_without_source_or_schema_writes`
     in `cli/tests/bootstrap/test_start_runtime.py` rather than inspecting source text."""
     import cli.commands._repo as _repo_commands
-    import cli.commands.converge.host as converge_host
     import cli.commands.lifecycle.start as _start_commands
     from cli.commands.data_plane import bringup
     from cli.commands.extensions import materialize
+    from cli.commands.lifecycle import converge_host
 
     def skip_converge(*_args: object, **_kwargs: object) -> None:
         return None
@@ -152,7 +152,7 @@ def test_standalone_converge_materializes_too() -> None:
     """`ava converge` is run against a cluster that is already up, so it has the
     precondition the start path has to wait for — and an operator running it
     expects the machine to end up caught up."""
-    from cli.commands.converge.host import cmd_converge
+    from cli.commands.lifecycle.converge_host import cmd_converge
 
     assert "materialize_cluster_extensions(database_factory=database_factory)" in inspect.getsource(
         cmd_converge
@@ -161,8 +161,8 @@ def test_standalone_converge_materializes_too() -> None:
 
 def test_the_materializer_lives_beside_its_siblings() -> None:
     """`extensions/materialize.py`, next to `extensions/skills_sync.py` — a subsystem
-    reader, not another entry in `converge/host.py`'s host-state roster. Extracting
-    it is also what kept `converge/host.py` under the 800-line ceiling."""
+    reader, not another entry in `lifecycle/converge_host.py`'s host-state roster. Extracting
+    it is also what kept `lifecycle/converge_host.py` under the 800-line ceiling."""
     from cli.commands.extensions import materialize
 
     assert hasattr(materialize, "materialize_cluster_extensions")
@@ -204,7 +204,7 @@ def test_start_adopts_before_it_materializes(
 def test_standalone_converge_adopts_too() -> None:
     """`ava converge` is what an operator runs to make a machine correct without
     restarting it, and a machine holding un-adopted installs is not correct."""
-    from cli.commands.converge.host import cmd_converge
+    from cli.commands.lifecycle.converge_host import cmd_converge
 
     assert (
         "adopt_local_extensions(database_factory=database_factory, machine_name=command.machine.name)"

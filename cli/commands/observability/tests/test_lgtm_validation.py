@@ -12,7 +12,7 @@ from cli.tests.bootstrap.command_inputs import command_runtime as command_runtim
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
-_REAL_VERIFY_LOKI = lgtm_native._verify_loki
+_REAL_VERIFY_LOKI = lgtm_native.verify_loki
 
 
 def test_pinned_loki_parser_rejection_blocks_preparation(

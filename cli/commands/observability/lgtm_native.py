@@ -78,7 +78,7 @@ def platform_tag() -> str | None:
     return None
 
 
-def _load_versions(repo: Path) -> dict[str, dict[str, str]]:
+def native_versions(repo: Path) -> dict[str, dict[str, str]]:
     tag = platform_tag()
     if tag is None:
         raise RuntimeError("Native LGTM has no pinned assets for this platform")
@@ -90,7 +90,7 @@ def _binary_path(name: str, native_dir: Path) -> Path:
     return native_dir / _NATIVE_CONSTANTS[name].binary_path
 
 
-def _stream_download(url: str, destination: Path) -> None:
+def stream_download(url: str, destination: Path) -> None:
     """Download one archive with bounded time and periodic progress reporting."""
     started = time.monotonic()
     last_progress = started
@@ -121,7 +121,7 @@ def _stream_download(url: str, destination: Path) -> None:
     )
 
 
-def _download_with_retry(url: str, archive: Path) -> None:
+def download_with_retry(url: str, archive: Path) -> None:
     """Retry a pinned archive download a bounded number of times."""
     started = time.monotonic()
     attempt = 0
@@ -130,7 +130,7 @@ def _download_with_retry(url: str, archive: Path) -> None:
         nonlocal attempt
         attempt += 1
         try:
-            _stream_download(url, archive)
+            stream_download(url, archive)
         except Exception as exc:  # network and filesystem failures are all retriable here
             elapsed = time.monotonic() - started
             print(
@@ -191,12 +191,12 @@ def _extract_tree(name: str, archive: Path, destination: Path) -> None:
         shutil.move(str(roots[0]), destination)
 
 
-def _download_and_verify(name: str, version: str, asset: dict[str, str], native_dir: Path) -> None:
+def download_and_verify(name: str, version: str, asset: dict[str, str], native_dir: Path) -> None:
     """Download, hash-verify, and install one pinned native backend binary."""
     with tempfile.TemporaryDirectory() as temporary_dir:
         archive = Path(temporary_dir) / Path(asset["url"]).name
         print(f"  · lgtm native: downloading {name} {version} from {asset['url']}")
-        _download_with_retry(asset["url"], archive)
+        download_with_retry(asset["url"], archive)
         actual = hashlib.sha256(archive.read_bytes()).hexdigest()
         if actual != asset["sha256"]:
             raise RuntimeError(
@@ -212,7 +212,7 @@ def _download_and_verify(name: str, version: str, asset: dict[str, str], native_
     (native_dir / f"platform-{name}").write_text(str(platform_tag()) + "\n", encoding="utf-8")
 
 
-def _write_if_changed(path: Path, content: str, *, mode: int | None = None) -> None:
+def write_if_changed(path: Path, content: str, *, mode: int | None = None) -> None:
     """Publish text only when it differs, avoiding needless launchd churn."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.read_text(encoding="utf-8") == content:
@@ -333,7 +333,7 @@ def _warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
         )
 
 
-def _render_configs(
+def render_configs(
     repo: Path,
     native_dir: Path,
     ava_home: Path,
@@ -429,17 +429,17 @@ def _render_configs(
             if not isinstance(rendered, dict):
                 raise TypeError("native Loki config must render to a mapping")
             validate_loki_deploy_config(cast(dict[str, object], rendered))
-        _write_if_changed(native_dir / "config" / name, content)
+        write_if_changed(native_dir / "config" / name, content)
     run_script = (source_dir / "run.sh").read_text(encoding="utf-8")
     for key, value in substitutions.items():
         run_script = run_script.replace(f"{{{{{key}}}}}", value)
     rendered_run_script = native_dir / "grafana" / "run.sh"
-    _write_if_changed(rendered_run_script, run_script)
+    write_if_changed(rendered_run_script, run_script)
     rendered_run_script.chmod(0o755)
     _render_provisioning(repo, native_dir, database_factory=database_factory, producer=producer)
 
 
-def _render_grafana_admin_password(native_dir: Path) -> None:
+def render_grafana_admin_password(native_dir: Path) -> None:
     """Render the host-scoped Grafana credential when the setting is configured."""
     from base.config import settings
 
@@ -447,7 +447,7 @@ def _render_grafana_admin_password(native_dir: Path) -> None:
     if credential is None:
         return
     credential_file = native_dir / "grafana/admin_password"
-    _write_if_changed(credential_file, credential.get_secret_value() + "\n", mode=0o600)
+    write_if_changed(credential_file, credential.get_secret_value() + "\n", mode=0o600)
 
 
 def _render_grafana_telegram_env(native_dir: Path) -> None:
@@ -468,7 +468,7 @@ def _render_grafana_telegram_env(native_dir: Path) -> None:
         f"export AVA_ALERTS_TELEGRAM_BOT_TOKEN={shlex.quote(token)}\n"
         f"export AVA_ALERTS_TELEGRAM_CHAT_ID={owner}\n"
     )
-    _write_if_changed(env_file, content, mode=0o600)
+    write_if_changed(env_file, content, mode=0o600)
 
 
 def ensure_lgtm_native(
@@ -492,7 +492,7 @@ def ensure_lgtm_native(
     storage = _storage_dir(ava_home)
     for sub in ("", "loki", "prom"):
         (storage / sub).mkdir(parents=True, exist_ok=True)
-    for name, asset in _load_versions(repo).items():
+    for name, asset in native_versions(repo).items():
         if name not in services:
             continue
         marker = native_dir / f"version-{name}"
@@ -505,9 +505,9 @@ def ensure_lgtm_native(
         if matching_platform and marker.exists() and marker.read_text().strip() == asset["version"]:
             print(f"  · lgtm native: {name} {asset['version']} present")
             continue
-        _download_and_verify(name, asset["version"], asset, native_dir)
+        download_and_verify(name, asset["version"], asset, native_dir)
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
-    _render_configs(
+    render_configs(
         repo,
         native_dir,
         ava_home,
@@ -516,13 +516,13 @@ def ensure_lgtm_native(
         machine=machine,
     )
     if "grafana" in services:
-        _render_grafana_admin_password(native_dir)
+        render_grafana_admin_password(native_dir)
         _render_grafana_telegram_env(native_dir)
     if "loki" in services:
-        _verify_loki(ava_home)
+        verify_loki(ava_home)
 
 
-def _verify_loki(home: Path) -> None:
+def verify_loki(home: Path) -> None:
     """Use the pinned binary's own parser before starting the root generation."""
     from base.telemetry.lgtm_local import binary_path
 

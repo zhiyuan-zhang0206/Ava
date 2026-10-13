@@ -14,7 +14,6 @@ See docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure
 
 from __future__ import annotations
 
-import math
 import subprocess
 import sys
 import time
@@ -22,93 +21,28 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from base import telemetry
 from base.agents.context.clients import DatabaseFactory
-from base.cluster import postgres as owned_postgres
 from base.cluster.machine import MachineIdentity
 from base.events.live.bus import EventBus
-from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
 from base.telemetry import EventPipeline
-from cli.commands.lifecycle._maintenance_stop_report import (
+from cli.commands.data_plane.maintenance_stop_report import (
     StopIncompleteError,
     SurvivorInventory,
     capture_survivor,
     live_identities,
-    occupied_groups,
+)
+from cli.commands.data_plane.stop_waits import (
+    PROCESS_CLEANUP_WAIT_S,
+    PROCESS_KILL_WAIT_S,
 )
 from ops import pty_close_notices
 from services.agent_runner.pty_sessions import ledger
 
-# How long a normal stop's terminal closure waits between its HUP/TERM and the
-# SIGKILL of whatever is left (docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md):
-# a job that handles TERM gets this long to clean up. The stop's own deadline
-# caps it as well.
-_TERMINAL_STOP_GRACE_S = 10.0
-
-# The SIGKILL leg's own bound at a normal stop: each wait inside a session kill,
-# the wait for the killed sessions' hosts to end, and the least the closure
-# evidence waits (it also gets the rest of the stop deadline).
-# Every wait ends as soon as its processes are gone. The leg runs even when the
-# grace spent the rest of the stop deadline — a stop that reached its terminal
-# phase closes its terminals — so a stop can overrun its deadline by this
-# bounded leg.
-_TERMINAL_KILL_WAIT_S = 3.0
-
-# The data-plane stop's escalation legs (`cli/commands/data_plane/maintenance_stop.py`)
-# use the same two bounds under their own names: how long Postgres' immediate shutdown
-# is given to finish, and how long the SIGKILL of what outlives it is waited for.
-PROCESS_CLEANUP_WAIT_S = _TERMINAL_STOP_GRACE_S
-PROCESS_KILL_WAIT_S = _TERMINAL_KILL_WAIT_S
-
-
-def deadline_after(timeout: float) -> float:
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("maintenance stop timeout must be finite and positive")
-    return time.monotonic() + timeout
-
-
-def remaining(deadline: float) -> float:
-    value = deadline - time.monotonic()
-    if value <= 0:
-        raise TimeoutError("maintenance kept its hold; stop deadline expired")
-    return value
-
-
-def wait_for_exit(
-    tracked: set[OwnedProcess],
-    deadline: float,
-    *,
-    groups: tuple[int, ...] = (),
-    escalate: Callable[[set[OwnedProcess]], None] | None = None,
-) -> None:
-    """Wait for `tracked` identities and `groups` to empty, within `deadline`.
-
-    `escalate`, when given, is called once per iteration with the current
-    living identities, AFTER the descendant re-capture: it may deliver further
-    graceful signals to confirmed-owned identities (issue #2123 — a leader that
-    exits without closing its children must not stall the stop until the
-    deadline; the caller's escalator owns the ownership validation). Never
-    escalates to SIGKILL and never certifies success while anything is alive.
-    """
-    while True:
-        living = {identity for identity in tracked if identity.live()}
-        occupied = occupied_groups(groups)
-        if not living and not occupied:
-            return
-        for identity in living:
-            retain_processes(tracked, capture_tree(identity))
-        if escalate is not None:
-            escalate(living)
-        try:
-            budget = remaining(deadline)
-        except TimeoutError:
-            raise TimeoutError(
-                f"maintenance kept its hold; processes did not exit: "
-                f"{sorted(identity.pid for identity in living)}; occupied process groups: {occupied}"
-            ) from None
-        time.sleep(min(0.05, budget))
+# The unit stop's terminal closure uses the shared stop bounds (`data_plane/stop_waits.py`).
+_TERMINAL_STOP_GRACE_S = PROCESS_CLEANUP_WAIT_S
+_TERMINAL_KILL_WAIT_S = PROCESS_KILL_WAIT_S
 
 
 def require_no_terminals() -> None:
@@ -307,40 +241,6 @@ def force_close_terminals() -> None:
         raise RuntimeError(
             f"force stop did not close terminals: {sorted({s.session for s in outcome.survivors if s.role == 'terminal'})}"
         )
-
-
-def report_postgres_stop_escalation(
-    escalation: owned_postgres.Escalation,
-    notes: list[str] | None = None,
-    *,
-    producer: Callable[[], EventPipeline],
-) -> None:
-    """Report a Postgres shutdown that had to be ended by an immediate one.
-
-    The owner (`base.cluster.postgres`) logs the escalation; this adds the
-    operator line and the `postgres_stop_escalated` event. `notes`, when the
-    caller owns a stop journal, collects the line for it
-    (`_temporary_stop._finish_stop`); a leg that owns no journal passes
-    nothing and still gets stderr and the event
-    (docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md).
-    """
-    killed = ", ".join(str(pid) for pid in escalation.killed) or "none"
-    note = (
-        f"postgres {escalation.detail}; ended by an immediate shutdown "
-        f"(crash recovery at the next start; unarchived WAL stays in pg_wal), "
-        f"killed leftover processes: {killed}"
-    )
-    print(f"  ! {note}", file=sys.stderr, flush=True)
-    telemetry.emit(
-        "telemetry",
-        "postgres_stop_escalated",
-        producer=producer,
-        level="error",
-        source="stop",
-        attributes={"detail": escalation.detail, "killed": list(escalation.killed)},
-    )
-    if notes is not None:
-        notes.append(note)
 
 
 def stop_data_plane(

@@ -11,8 +11,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
 from base.telemetry import EventPipeline
-from cli.commands.converge import host
-from cli.commands.converge._os_jobs import (
+from cli.commands.converge.os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
     ensure_logs_maintenance,
@@ -21,6 +20,7 @@ from cli.commands.converge._os_jobs import (
     ensure_walg_job,
 )
 from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
+from cli.commands.lifecycle import converge_host as host
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database

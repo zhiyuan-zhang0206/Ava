@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 
 from base.telemetry import EventPipeline
-from cli.commands.converge import _ownership_preflight as _ownership
-from cli.commands.converge import host as converge_host
+from cli.commands.converge import ownership_preflight as _ownership
 from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
@@ -60,15 +60,15 @@ def test_collect_ownership_warnings_names_only_non_user_owned_key_paths(
     )
     foreign = ctx.ava_home / "source"
 
-    def owner_uid(path: Path) -> int:
+    def path_owner_uid(path: Path) -> int:
         return 0 if path == foreign else 501
 
     def repair_command(path: Path) -> str:
         return f"sudo chown -R ava:staff {path}"
 
     monkeypatch.setattr(_ownership.os, "getuid", lambda: 501)
-    monkeypatch.setattr(_ownership, "_owner_uid", owner_uid)
-    monkeypatch.setattr(_ownership, "_repair_command", repair_command)
+    monkeypatch.setattr(_ownership, "path_owner_uid", path_owner_uid)
+    monkeypatch.setattr(_ownership, "repair_command", repair_command)
 
     warnings = _ownership.collect_ownership_warnings(ctx)
 
@@ -94,11 +94,11 @@ def test_collect_ownership_warnings_skips_a_missing_source_tree(
     )
     (ctx.ava_home / "source").rmdir()
 
-    def owner_uid(_path: Path) -> int:
+    def path_owner_uid(_path: Path) -> int:
         return 501
 
     monkeypatch.setattr(_ownership.os, "getuid", lambda: 501)
-    monkeypatch.setattr(_ownership, "_owner_uid", owner_uid)
+    monkeypatch.setattr(_ownership, "path_owner_uid", path_owner_uid)
 
     assert _ownership.collect_ownership_warnings(ctx) == []
 

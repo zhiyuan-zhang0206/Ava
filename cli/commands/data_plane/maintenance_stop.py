@@ -38,16 +38,15 @@ from base.cluster.dataplane import pooler as pooler_files
 from base.config import settings
 from base.host.db_authority.delivery import read_pooler_admin
 from base.log import logger
+from base.native_process.ownership import OwnedProcess, capture_tree
 from base.paths import ava_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
-from cli.commands.lifecycle.service_stop import (
+from cli.commands.data_plane.stop_waits import (
     PROCESS_CLEANUP_WAIT_S,
     PROCESS_KILL_WAIT_S,
-    OwnedProcess,
-    capture_tree,
     deadline_after,
     remaining,
     report_postgres_stop_escalation,
@@ -79,7 +78,7 @@ def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
             if process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
                 continue
             if name == "pgbouncer":
-                belongs = pooler._pid_is_our_pooler(process.pid)
+                belongs = pooler.pid_is_our_pooler(process.pid)
                 key = "pgbouncer"
             else:
                 key = "redis" if name == "redis-server" else "postgres"
@@ -104,7 +103,7 @@ def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
 _CLIENTS_LISTED = 10
 
 
-def _report_pooler_clients(identity: OwnedProcess, report: list[str] | None) -> None:
+def report_pooler_clients(identity: OwnedProcess, report: list[str] | None) -> None:
     """Say who is still connected to the pooler when it is about to stop (report only).
 
     The pooler stops by SIGINT, which disconnects its clients, so nothing here gates or
@@ -236,7 +235,7 @@ async def _stop(
             if not identity.live():
                 raise RuntimeError(f"{name} identity changed before stop")
             if name == "pgbouncer":
-                _report_pooler_clients(identity, clients)
+                report_pooler_clients(identity, clients)
             await _request_stop(
                 name,
                 identity,

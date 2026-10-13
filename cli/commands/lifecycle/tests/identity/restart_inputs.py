@@ -9,7 +9,6 @@ import pytest
 
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
-import cli.commands.converge.host as converge_host
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.stop as _stop_commands
 import cli.commands.probe as _probe_commands
@@ -18,7 +17,7 @@ from base.config import ConfigBoot
 from base.deploy.lifecycle.start_serving import RootBirth
 from cli import start_runtime
 from cli.commands.data_plane import bringup
-from cli.commands.lifecycle import start
+from cli.commands.lifecycle import converge_host, start
 from cli.database.runtime import CommandRuntime
 from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime

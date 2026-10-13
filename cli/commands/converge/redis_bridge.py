@@ -46,11 +46,11 @@ def _installed_path(home: Path) -> Path:
     return home / "redis-bridge" / "relay.py"
 
 
-def _plist_path() -> Path:
+def launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
-def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
+def launchctl(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # fixed internal launchctl argv
         ["launchctl", *args],
         capture_output=True,
@@ -59,14 +59,14 @@ def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _job_loaded() -> bool:
-    return _launchctl("print", f"gui/{os.getuid()}/{_LABEL}").returncode == 0
+def job_loaded() -> bool:
+    return launchctl("print", f"gui/{os.getuid()}/{_LABEL}").returncode == 0
 
 
-def _bootout_and_wait() -> bool:
-    _launchctl("bootout", f"gui/{os.getuid()}/{_LABEL}")
+def bootout_and_wait() -> bool:
+    launchctl("bootout", f"gui/{os.getuid()}/{_LABEL}")
     deadline = time.monotonic() + _BOOTOUT_TIMEOUT_S
-    while _job_loaded():
+    while job_loaded():
         if time.monotonic() >= deadline:
             return False
         _sleep(_BOOTOUT_POLL_INTERVAL_S)
@@ -75,12 +75,12 @@ def _bootout_and_wait() -> bool:
 
 def _retire_launchd_bridge(home: Path) -> None:
     """Unload and remove the standalone launchd job and installed copy."""
-    plist_path = _plist_path()
+    plist_path = launchd_plist_path()
     installed_path = _installed_path(home)
-    loaded = _job_loaded()
+    loaded = job_loaded()
     if not loaded and not plist_path.exists() and not installed_path.exists():
         return
-    if loaded and not _bootout_and_wait():
+    if loaded and not bootout_and_wait():
         raise RuntimeError(
             f"Redis bridge LaunchAgent {_LABEL} remained loaded after "
             f"{_BOOTOUT_TIMEOUT_S:.0f}s; retained {plist_path} for inspection"

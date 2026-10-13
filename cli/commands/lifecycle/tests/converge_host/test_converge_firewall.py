@@ -23,7 +23,7 @@ import pytest
 
 import cli.commands.converge.firewall as cfw
 import cli.commands.converge.firewall_command as firewall_cmd
-import cli.commands.converge.host as cv
+import cli.commands.lifecycle.converge_host as cv
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot

@@ -26,16 +26,16 @@ from base.sessions.pty.paths import ledger_path
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
-from cli.commands.lifecycle.tests.stop_support import (
+from cli.commands.lifecycle.tests.stop.stop_support import (
     WRITE_NOTICES,
     PtyServiceProcess,
     busy_session,
     dependencies,
     stop_env,
 )
-from cli.commands.lifecycle.tests.stop_support import home as home
-from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
-from cli.commands.lifecycle.tests.stop_support import written as written
+from cli.commands.lifecycle.tests.stop.stop_support import home as home
+from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
+from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from ops import pty_close_notices

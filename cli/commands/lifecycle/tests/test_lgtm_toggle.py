@@ -10,7 +10,7 @@ import cli.commands.lifecycle.start as lifecycle_start
 from base.deploy.lifecycle import service_selection
 from base.deploy.lifecycle.service_selection import ServiceSelection
 from base.telemetry import EventPipeline
-from cli.commands.observability import lgtm
+from cli.commands.lifecycle import lgtm_toggle as lgtm
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.supervision import roster

@@ -31,7 +31,7 @@ def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """These existing lifecycle cases exercise the Darwin implementation."""
     monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(lgtm_native, "_verify_loki", _skip_binary_verification)
+    monkeypatch.setattr(lgtm_native, "verify_loki", _skip_binary_verification)
 
 
 _STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
@@ -86,7 +86,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "127.0.0.1")
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -102,7 +102,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
 
     # A non-loopback setting flows through to the rendered listeners.
     monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "10.0.0.5")
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
@@ -179,7 +179,7 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
         "http://tempo.test:14318/",
     )
 
-    lgtm_native._render_configs(
+    lgtm_native.render_configs(
         repo,
         native_dir,
         home,
