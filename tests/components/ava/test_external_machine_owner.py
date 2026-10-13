@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import ava
 from ava import external
+from ava.sdk_surface import process_context
 from base.cluster.machine import MachineIdentity
 from tests.factories.external_attachment import attached_runtime as attached_runtime
 
@@ -32,7 +33,7 @@ def test_independent_attachments_own_fresh_machine_caches(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
     lease, _, _ = attached_runtime
-    prior = ava.unbind_context()
+    prior = process_context.unbind_context()
     owners: list[MachineIdentity] = []
     try:
         for name in ("first-attachment", "second-attachment"):
@@ -48,4 +49,4 @@ def test_independent_attachments_own_fresh_machine_caches(
         assert owners[1].name() == "second-attachment"
     finally:
         if prior is not None:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)

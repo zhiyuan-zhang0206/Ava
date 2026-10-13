@@ -61,6 +61,7 @@ from tests.fixtures import env_bootstrap
 pytest_plugins = ["tests.fixtures.env_bootstrap", "tests.fixtures.identity_restore"]
 
 import ava
+from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -68,7 +69,7 @@ from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
 from tests.fixtures.unit.sdk import sdk_identity as sdk_identity
 
 prior = AvaContext()
-ava.bind_context(prior)
+process_context.bind_context(prior)
 closed = []
 original_close = ClientSet.close
 

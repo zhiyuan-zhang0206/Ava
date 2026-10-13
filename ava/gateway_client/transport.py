@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-import ava
+from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import GatewayHandle
 from base.agents.messages.delivery.retry import GatewayResponse, network_errors, retryable_response
@@ -74,7 +74,7 @@ class GatewayTransportInputs:
 
 
 def _inputs(context: AvaContext | None = None) -> GatewayTransportInputs:
-    owner = context if context is not None else ava.context
+    owner = context if context is not None else process_context.current_context()
     return owner.clients.get(GatewayTransportInputs)
 
 
@@ -87,14 +87,14 @@ def _http(context: AvaContext | None = None) -> GatewayHandle:
     comfortably exceed the server's confirm window, otherwise a read timeout on a spawn that DID
     succeed triggers a retry that re-POSTs the non-idempotent create and yields a phantom-twin
     agent. `use_client` routes the calls through a different one."""
-    return (context if context is not None else ava.context).gateway
+    return (context if context is not None else process_context.current_context()).gateway
 
 
 @contextmanager
 def use_client(client: Any) -> Generator[Any]:
     """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
     in-process gateway, or any `httpx.Client` — then put back whichever client was there before."""
-    with ava.context.clients.using_gateway(client):
+    with process_context.current_context().clients.using_gateway(client):
         yield client
 
 

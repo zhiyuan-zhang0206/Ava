@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 import ava
-from ava.sdk_surface import agent_identity
+from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.installation import Installation
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import _write_skill
@@ -49,12 +49,12 @@ def _exec_turn(
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
     monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
     monkeypatch.setattr(audit_events, "record_audit_reported", _discard_audit)
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
     ava.state = object()
     update: dict[str, Any] = {}
     ava.state_update = update
     yield update
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
 
 
 def _skills(root: Path) -> None:
@@ -119,7 +119,7 @@ def test_resolving_or_listing_a_skill_notes_nothing(
 
 def test_outside_an_exec_turn_a_read_succeeds_and_notes_nothing(fake_skills_dir: Path) -> None:
     _skills(fake_skills_dir)
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
 
     assert "# A" in (ava.skills.alpha.__doc__ or "")
 

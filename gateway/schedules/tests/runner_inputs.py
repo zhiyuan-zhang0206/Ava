@@ -4,6 +4,7 @@ from contextlib import closing
 from functools import partial
 
 import ava
+from ava.sdk_surface import process_context
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
@@ -20,7 +21,7 @@ from services.wake.schedule_manager import engine
 
 
 def bind_actor(schedule_id: int, *, clients: ClientSet, machine: MachineIdentity) -> None:
-    ava.bind_context(
+    process_context.bind_context(
         AvaContext(
             identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
             clients=clients,

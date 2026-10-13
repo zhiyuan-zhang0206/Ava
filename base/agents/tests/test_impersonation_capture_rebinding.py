@@ -12,7 +12,7 @@ import psycopg
 import pytest
 
 import ava
-from ava.sdk_surface import metering
+from ava.sdk_surface import metering, process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
@@ -95,14 +95,14 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         sdk_calls=tally,
         sdk_capture=_CaptureOwner(previous_gate),
     )
-    ava.bind_context(context)
+    process_context.bind_context(context)
     ledger = metering.install(call_policy.SamplingPolicyOwner())
     calls = [asyncio.create_task(namespace.held()) for _ in range(2)]
     try:
         await asyncio.wait_for(entered.wait(), timeout=2)
         assert previous_gate.in_flight == 2
         assert not close_local_participant_admission(previous_gate, timeout=0)
-        ava.bind_context(replace(context, sdk_capture=_CaptureOwner(current_gate)))
+        process_context.bind_context(replace(context, sdk_capture=_CaptureOwner(current_gate)))
         release.set()
         await asyncio.gather(*calls)
         assert previous_gate.in_flight == current_gate.in_flight == 0
@@ -116,9 +116,9 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         await asyncio.gather(*calls, return_exceptions=True)
         metering.uninstall(ledger)
         if prior is None:
-            ava.unbind_context()
+            process_context.unbind_context()
         else:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)
         close_local_participant_admission(current_gate, timeout=0)
         seal_local_participant(current_gate)
 
@@ -153,7 +153,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         config=lambda: None,
     )
     clients = ClientSet(database=lambda: database)
-    ava.bind_context(
+    process_context.bind_context(
         AvaContext(
             identity=AgentIdentity(None, True, lease=borrowed),
             sdk_capture=_CaptureOwner(gate),
@@ -179,9 +179,9 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
     finally:
         clients.close()
         if prior is None:
-            ava.unbind_context()
+            process_context.unbind_context()
         else:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)
 
 
 def test_known_capture_database_outage_retains_the_failed_receipt_recovery(

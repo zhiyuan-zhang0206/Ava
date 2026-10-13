@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 from langchain_core.messages import HumanMessage
 from langgraph.types import Overwrite
 
-import ava
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from agent.tests.test_state_slot import (
@@ -21,6 +20,7 @@ from agent.tests.test_state_slot import (
 from agent.tests.test_state_slot import (
     _reset_state_slot as _reset_state_slot,
 )
+from ava.sdk_surface import process_context
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.db.code_version_gate import ProcessDbGate
 
@@ -54,7 +54,7 @@ async def test_exec_node_preserves_state_update_on_lifecycle(
     update = cast(dict, cmd.update)
     assert update.get("plugin__last_action") == "about-to-terminate"  # pyright: ignore[reportUnknownMemberType]
     assert update["halted"] is True
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
 
 
 async def test_exec_node_commits_security_finding_to_graph_state(

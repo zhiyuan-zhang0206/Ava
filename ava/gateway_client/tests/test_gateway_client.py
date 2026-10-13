@@ -17,6 +17,7 @@ import pytest
 
 import ava
 from ava.gateway_client.transport import use_client
+from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
 from base.api_contracts.agent_contract import GatewayUnavailable
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
@@ -643,7 +644,7 @@ class TestRetryBackoffJitter:
         from ava.gateway_client.transport import post
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-        ava.bind_context(replace(ava.context, identity=None))
+        process_context.bind_context(replace(ava.context, identity=None))
         mock_client.post.side_effect = httpx.ConnectError("refused")
 
         with pytest.raises(GatewayUnavailable):

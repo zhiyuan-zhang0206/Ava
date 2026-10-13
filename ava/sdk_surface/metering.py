@@ -40,6 +40,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import ava
+from ava.sdk_surface import process_context
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
@@ -80,7 +81,7 @@ def _caller(
     """Snapshot this call's provenance; invalid identity rejects admission."""
     from base.agents.messages.external_caller import external_caller
 
-    bound = getattr(ava, "context", None)
+    bound = process_context.ambient_context()
     own = None if bound is None else bound.identity
     borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
     agent_id = borrowed
