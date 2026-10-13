@@ -90,15 +90,16 @@ def test_a_python_without_psutil_gets_its_own_exit_code_and_says_what_to_run(
     script = (
         Path(__file__).resolve().parents[2] / "scripts" / "host_ops" / "check_worktree_remove.py"
     )
-    launch = (
-        "import runpy, sys; sys.modules['psutil'] = None; "
-        "sys.argv = [sys.argv[1], sys.argv[2]]; "
-        "runpy.run_path(sys.argv[0], run_name='__main__')"
-    )
+    # A `psutil` that cannot be imported, first on the child's path: what a system python is.
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    (blocked / "psutil.py").write_text("raise ModuleNotFoundError('psutil', name='psutil')\n")
+    env = {**os.environ, "PYTHONPATH": str(blocked)}
     result = subprocess.run(  # noqa: S603 - test-owned interpreter and fixture path
-        [sys.executable, "-c", launch, str(script), str(tmp_path)],
+        [sys.executable, str(script), str(tmp_path)],
         capture_output=True,
         text=True,
+        env=env,
         check=False,
     )
     assert result.returncode == 3, result.stdout + result.stderr
