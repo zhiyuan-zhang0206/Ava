@@ -29,8 +29,8 @@ class ImportAccess:
     def add(self, dst: str, line: int, kind: FactKind, names: tuple[str, ...], detail: str) -> None:
         self.facts.append(Fact(self.path, dst, line, kind, names, detail))
 
-    def problem(self, line: int, message: str) -> None:
-        self.problems.append(Problem(line, Code.UNRESOLVED_IMPORT, message))
+    def problem(self, line: int, message: str, code: Code = Code.UNRESOLVED_IMPORT) -> None:
+        self.problems.append(Problem(line, code, message))
 
     # --- name resolution -----------------------------------------------------------
 

@@ -59,6 +59,7 @@ class Code(StrEnum):
     THIRD_PARTY_PATCH = "third-party-patch"
     ENV_PATCH = "env-patch"
     UNRESOLVED_PATCH = "unresolved-patch"
+    MISSING_PATCH_TARGET = "missing-patch-target"
 
 
 @dataclass(frozen=True, slots=True)
