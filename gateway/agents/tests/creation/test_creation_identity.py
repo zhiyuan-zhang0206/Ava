@@ -7,6 +7,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster import machines
 from gateway.agents import creation as agent_creation
 from gateway.app import app
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
@@ -106,7 +107,7 @@ def test_creation_replay_precedes_mutable_spawn_validation(
     def paused(_db: object, _name: str) -> bool:
         return True
 
-    monkeypatch.setattr("base.cluster.machines.is_paused", paused)
+    monkeypatch.setattr(machines, "is_paused", paused)
     fresh = spawn_via_http(client, body)
     assert fresh.status_code == 409
     retry = spawn_via_http(client, body, key=key)

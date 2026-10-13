@@ -19,6 +19,7 @@ import pytest
 
 from base.cluster import authority
 from base.cluster.authority import delivery
+from base.db import connections
 from base.db.code_version_gate import ProcessDbGate
 from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
 from base.host.env import dotenv_boot
@@ -265,6 +266,6 @@ def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
     def unexpected_dial(*_args: Any, **_kwargs: Any) -> Any:
         pytest.fail("a later boot authorized a previously refused database handle")
 
-    monkeypatch.setattr("base.db.connections.psycopg.connect", unexpected_dial)
+    monkeypatch.setattr(connections.psycopg, "connect", unexpected_dial)
     with pytest.raises(NoDatabaseAuthorityError, match="source checkout"):
         handle.connect()

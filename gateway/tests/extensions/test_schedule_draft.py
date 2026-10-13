@@ -9,6 +9,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
+from gateway.schedules import router
 
 
 def test_draft_spawns_writer_agent(
@@ -37,7 +38,7 @@ def test_draft_spawns_writer_agent(
         calls["target"] = target
         return SpawnedAgent(id=4242)
 
-    monkeypatch.setattr("gateway.schedules.router.create_and_launch_agent", _fake_create_launch)
+    monkeypatch.setattr(router, "create_and_launch_agent", _fake_create_launch)
     r = client.post(
         "/api/keyed/v1/schedules/draft",
         json={"nl": "consolidate memory nightly"},

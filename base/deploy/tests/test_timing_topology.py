@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 import base.deploy.progress_timeout as deploy
+from base import config
 from base.cluster.authority import unit
 from base.deploy.timing import CLOCKS, CONSTRAINTS, assert_clock_lattice, validate_clock_lattice
 
@@ -39,7 +40,7 @@ def test_checker_catches_derived_violation(monkeypatch: pytest.MonkeyPatch) -> N
     """A wedged threshold shrunk below its derivation (exec node + LLM retry
     budget) must be reported — an operator override that tightens wedged
     detection below a healthy agent's longest legitimate stall."""
-    monkeypatch.setattr("base.config.settings.daemon.wedged_agent_inbound_age_seconds", 500.0)
+    monkeypatch.setattr(config.settings.daemon, "wedged_agent_inbound_age_seconds", 500.0)
     failures = validate_clock_lattice()
     assert any("WEDGED_AGE_SEC >= EXEC_NODE_TIMEOUT_S" in f for f in failures)
 

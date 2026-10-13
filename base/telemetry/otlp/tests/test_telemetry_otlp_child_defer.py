@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from base import config
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.identity_inputs import allow_identity
@@ -105,7 +106,7 @@ def _spy_calls(monkeypatch: pytest.MonkeyPatch, backend: Any, name: str) -> list
 def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
     """An `OtlpBackend` with in-memory providers, retained by this test
     owner (so module-level wrappers hit it); not yet armed."""
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     backend, log_exporter, metric_reader = _make_backend()
 
     yield backend, log_exporter, metric_reader
@@ -303,7 +304,7 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates(
     def invalid() -> bool:
         raise error
 
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     backend = telemetry_otlp.OtlpBackend(export_allowed=invalid)
     backend.defer_until_exit()
     backend.export_batch([_event()])

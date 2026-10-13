@@ -12,6 +12,8 @@ from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
+from ops.agents import birth_transaction
+from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
@@ -119,7 +121,7 @@ def test_snapshot_failure_rolls_back_birth_and_prompt(
     def fail(*args: object, **kwargs: object) -> None:
         raise RuntimeError("injected snapshot failure")
 
-    monkeypatch.setattr("ops.agents.birth_transaction.record_creation_snapshot", fail)
+    monkeypatch.setattr(birth_transaction, "record_creation_snapshot", fail)
     with pytest.raises(RuntimeError, match="injected snapshot"):
         client.post("/api/keyed/v1/guide/draft", json={"nl": "one"}, headers=HEADERS)
     for table in ("agents", "inbound_messages", "agent_creation_snapshots"):
@@ -210,7 +212,7 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     async def reconcile(*args: object, **kwargs: object) -> dict[str, object]:
         return {}
 
-    monkeypatch.setattr("ops.cluster.rpc.dispatch_to_machine", reconcile)
+    monkeypatch.setattr(rpc, "dispatch_to_machine", reconcile)
     retry = client.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
         json={"expected_prior_attempt_id": str(attempt)},

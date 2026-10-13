@@ -13,6 +13,7 @@ from typing import cast
 
 import pytest
 
+from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.host.env import audit
 from base.host.env import runtime_config as runtime_config
@@ -363,7 +364,7 @@ def test_env_write_event_carries_actor_without_values(
 ) -> None:
     """The value-free event stream also gains the initiating actor."""
     captured: list[Event] = []
-    monkeypatch.setattr("base.telemetry.emit_prepared", captured.append)
+    monkeypatch.setattr(telemetry, "emit_prepared", captured.append)
     runtime_config.write_fields(
         {"llm_model": "m3"}, set(), audit_site="test", actor="user_session:administrator"
     )

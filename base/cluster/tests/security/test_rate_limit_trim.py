@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from base.cluster import rate_limit
 from base.cluster.rate_limit import LoginRateLimiter, _Entry
 from base.config import ConfigBoot, settings
 
@@ -23,7 +24,7 @@ def test_sweep_trims_oldest_active_entries_over_cap(monkeypatch: pytest.MonkeyPa
         lockout_seconds_reader=lambda: settings.gateway.login_lockout_seconds,
     )
     # shrink the cap so the test needs no 10k entries
-    monkeypatch.setattr("base.cluster.rate_limit._MAX_ENTRIES", 5)
+    monkeypatch.setattr(rate_limit, "_MAX_ENTRIES", 5)
     now = 1000.0
     for i in range(8):
         ip = f"10.0.0.{i}"
@@ -74,7 +75,7 @@ def test_policy_readers_are_lazy_and_read_in_order_for_each_failure(
         calls.append("lockout_seconds")
         return 17.5
 
-    monkeypatch.setattr("base.cluster.rate_limit.time.time", now)
+    monkeypatch.setattr(rate_limit.time, "time", now)
     limiter = LoginRateLimiter(max_failures_reader=maximum, lockout_seconds_reader=window)
     assert calls == []
     limiter.record_failure("ip")
@@ -104,7 +105,7 @@ def test_independent_config_owners_update_policy_at_failure_time(
         lockout_seconds_reader=lambda: second.view.gateway.login_lockout_seconds,
     )
     now = [1000.0]
-    monkeypatch.setattr("base.cluster.rate_limit.time.time", lambda: now[0])
+    monkeypatch.setattr(rate_limit.time, "time", lambda: now[0])
     for limiter in (left, right):
         limiter.record_failure("ip")
         limiter.record_failure("ip")

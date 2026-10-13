@@ -16,6 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from base.events.live import publisher
+
 from ..publisher import AgentEventPublisher
 
 
@@ -32,7 +34,7 @@ def _capture(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, objec
     reports: list[tuple[str, dict[str, object]]] = []
     fake_logger = MagicMock()
     fake_logger.log.side_effect = lambda level, _msg, **kw: reports.append((level, kw))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    monkeypatch.setattr("base.events.live.publisher.logger", fake_logger)
+    monkeypatch.setattr(publisher, "logger", fake_logger)
     return reports
 
 

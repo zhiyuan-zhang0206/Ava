@@ -12,7 +12,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base import telemetry
+from base import config, telemetry
 from base.db import Database
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
@@ -78,7 +78,7 @@ def otlp_backend(monkeypatch):
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])
 
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True, providers=(logger_provider, metric_provider)
     )
@@ -644,7 +644,7 @@ def test_flag_off_disables_export(otlp_backend: Any, monkeypatch: pytest.MonkeyP
     """AVA_TELEMETRY_OTLP_ENABLED=false -> export is a no-op: no backend
     bring-up, no records, no queue traffic."""
     backend, log_exporter, metric_reader = otlp_backend
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", False)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", False)
 
     def fail_emit(*_args: object, **_kwargs: object) -> None:
         pytest.fail("flag-off must not emit backend status events")
@@ -662,7 +662,7 @@ def test_flag_defaults_on_with_standard_endpoint(monkeypatch) -> None:
     = the standard OTLP/HTTP port on loopback."""
     from base.config import settings
 
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
     assert settings.observability.telemetry_otlp_enabled is True
     assert settings.observability.telemetry_otlp_endpoint == "http://127.0.0.1:4318"
 
