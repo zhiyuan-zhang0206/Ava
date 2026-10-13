@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_memory_backends.py#monkeypatch.setattr base.config.settings.services.memory_search_backend" = 3
+"test_numpy_backend_backends.py#monkeypatch.setattr base.config.settings.services.memory_search_uri" = 1

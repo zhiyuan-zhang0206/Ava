@@ -5,6 +5,53 @@
 "test_native_input.py" = ["support.py"]
 "test_native_mouse_hold.py" = ["support.py"]
 
+[debt.first-party-patch]
+"test_ax_tree_wire.py#monkeypatch.setattr base.host.permissions_helper.client._call" = 1
+"test_helper_retirement.py#monkeypatch.setattr base.host.permissions_helper.client.shutdown_helper" = 2
+"test_helper_retirement.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.capture" = 1
+"test_helper_retirement.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_helper_retirement.py#monkeypatch.setattr base.paths.permissions_helper_app_dir" = 3
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job._executable_pids" = 2
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job._retirement_command" = 4
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job._retirement_owner" = 2
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job._wait_retirement_owner" = 2
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.helper_job_agents_dir" = 8
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.helper_job_loaded" = 1
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.retirement_query" = 4
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.sys.platform" = 6
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._expected_dr" = 2
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._interactive_signing_reason" = 3
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._is_valid_stable_app" = 1
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._keychain_lock_reason" = 3
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._run" = 3
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._source_content_hash" = 2
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._verify_dr" = 2
+"test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.preflight_signing_smoke" = 3
+"test_os_jobs_gate.py#monkeypatch.setattr base.config.settings.general.os_jobs_enabled" = 1
+"test_os_jobs_gate.py#monkeypatch.setattr base.host.system.autostart.ava_binary_path" = 1
+"test_os_jobs_gate.py#monkeypatch.setattr base.host.system.cron.ava_binary_path" = 2
+"test_os_jobs_gate.py#monkeypatch.setattr base.host.system.pr_flow_job.credential_blocker" = 2
+"test_os_jobs_gate.py#monkeypatch.setattr base.paths.repo_root" = 1
+"test_permissions_helper.py#monkeypatch.setattr base.config.settings.services.permissions_helper_port" = 1
+"test_permissions_helper.py#monkeypatch.setattr base.paths.permissions_helper_app_dir" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.helper_job_loaded" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._ENTITLEMENTS" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._INFO_PLIST" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._LOCALES" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._SOURCE" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._agents_dir" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._domain" = 2
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._is_loaded" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._label" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._plist_path" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._probe" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._refuse_foreign_label_jobs" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle._run" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.base.paths.ava_home" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.logs_dir" = 1
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.permissions_helper_socket" = 2
+"test_permissions_helper.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 1
+
 [debt.private-name]
 "permissions_helper/test_foreign_label_job_bound_to_our_socket.py -> test_permissions_helper.py#_retire_env" = 1
 "permissions_helper/test_foreign_label_job_bound_to_our_socket.py -> test_permissions_helper.py#_write_agent_plist" = 1

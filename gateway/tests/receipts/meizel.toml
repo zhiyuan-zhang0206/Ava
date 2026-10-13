@@ -1,2 +1,12 @@
 [uses]
 "test_guarded_notice_resolution.py" = ["test_current_notice_receipts.py"]
+
+[debt.first-party-patch]
+"test_current_notice_receipts.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_current_notice_receipts.py#monkeypatch.setattr gateway.agents.notice_operations.current.save_receipt" = 3
+"test_current_notice_receipts.py#monkeypatch.setattr gateway.agents.notice_operations.router.lifecycle" = 1
+"test_mcp_creation_receipts.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_mcp_creation_receipts.py#monkeypatch.setattr gateway.mcp_server.creation_receipts.create_client_in_transaction" = 2
+"test_mcp_creation_receipts.py#monkeypatch.setattr gateway.mcp_server.creation_receipts.write_transaction" = 2
+"test_notice_idempotency.py#monkeypatch.setattr gateway.agents.notices.publish_inbound_wake" = 2
+"test_notice_idempotency.py#monkeypatch.setattr gateway.agents.notices.validate_creation_state" = 1

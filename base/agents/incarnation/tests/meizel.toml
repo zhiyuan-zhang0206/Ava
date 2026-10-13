@@ -1,1 +1,23 @@
 exports = ["test_resources.py"]
+
+[debt.first-party-patch]
+"test_exec_owner_recovery.py#monkeypatch.setattr base.agents.incarnation.exec_owner_protocol.psutil.Process" = 1
+"test_exec_owner_recovery.py#monkeypatch.setattr base.agents.incarnation.exec_owner_recovery.psutil.Process" = 2
+"test_exec_owner_recovery.py#monkeypatch.setattr base.agents.incarnation.resources.ResourceProcess.capture" = 1
+"test_exec_owner_recovery.py#monkeypatch.setattr base.native_process.native_boot_id" = 4
+"test_exec_owner_recovery.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 2
+"test_exec_owner_recovery.py#monkeypatch.setattr base.native_process.ownership.stable_create_time" = 1
+"test_exec_owner_recovery.py#monkeypatch.setattr base.native_process.ownership.sys.platform" = 2
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.Database.from_settings" = 2
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence._report" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.exec_run_dir" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.process_name" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.psutil.process_iter" = 3
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.row_identity" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.shutil.move" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.survey" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.config.settings" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 2
+"test_exec_request_evidence.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
+"test_exec_request_evidence.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1

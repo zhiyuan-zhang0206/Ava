@@ -1,2 +1,13 @@
 [loads]
 "test_coding_session_resume.py" = ["ava_builtins/skills"]
+
+[debt.first-party-patch]
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.claude.preset_claude_first_run" = 1
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.claude.run_supervised_launch" = 1
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.read_session_id" = 1
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.sessions.capture" = 1
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.sessions.send" = 1
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.sessions.send_keys" = 1
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.time.sleep" = 1
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.verify_submitted" = 1
+"test_coding_session_resume.py#monkeypatch.setattr ava.shell.coding_tools.codex.wait_for_ready" = 1

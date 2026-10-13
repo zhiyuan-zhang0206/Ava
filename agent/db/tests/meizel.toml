@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_db.py#monkeypatch.setattr agent.db.publish_inbound_wake" = 1
+"test_db_pool.py#monkeypatch.setattr agent.db.time.monotonic" = 3

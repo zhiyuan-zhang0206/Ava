@@ -1,3 +1,8 @@
 [external]
 "test_fix_invalid_escapes.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "test_fix_nested_triple_quote.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
+
+[debt.first-party-patch]
+"test_fix_invalid_escapes.py#monkeypatch.setattr base.config.settings.sandbox.syntax_fix_ruff_format" = 3
+"test_fix_invalid_escapes.py#patch.object ava_builtins.plugins.ava_syntax_fix.agent_runtime.llm_repair_syntax" = 3
+"test_fix_invalid_escapes.py#patch.object base.lm.factory.build_chat_model" = 3

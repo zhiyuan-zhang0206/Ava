@@ -1,0 +1,5 @@
+[debt.first-party-patch]
+"test_relay_lifecycle.py#monkeypatch.setattr services.redis_bridge.relay.Connection._close_sockets" = 1
+"test_relay_lifecycle.py#monkeypatch.setattr services.redis_bridge.relay.Pump.request_stop" = 1
+"test_relay_lifecycle.py#monkeypatch.setattr services.redis_bridge.relay.socket.create_connection" = 4
+"test_relay_lifecycle.py#monkeypatch.setattr services.redis_bridge.relay.threading.Thread.start" = 1

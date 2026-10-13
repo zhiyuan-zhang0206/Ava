@@ -11,5 +11,12 @@ exports = ["weixin_native.py"]
 "test_weixin_ingress_recovery.py" = ["weixin_native.py"]
 "test_weixin_ingress_runtime.py" = ["weixin_native.py"]
 
+[debt.first-party-patch]
+"test_feishu_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.feishu.logger" = 2
+"test_prepared_timeline.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 2
+"test_segment_retry_safety.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 1
+"test_services_weixin_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 1
+"test_telegram_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.telegram.logger" = 3
+
 [debt.private-name]
 "test_prepared_timeline.py -> test_telegram_adapter.py#_config" = 1

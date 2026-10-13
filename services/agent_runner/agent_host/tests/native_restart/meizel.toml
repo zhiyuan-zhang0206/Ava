@@ -1,2 +1,5 @@
 [uses]
 "test_cold_owner.py" = ["child_fixture.py"]
+
+[debt.first-party-patch]
+"test_return.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.apply_hosted_lifecycle" = 1

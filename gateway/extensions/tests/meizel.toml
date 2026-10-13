@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_inventory_router.py#monkeypatch.setattr gateway.cluster.snapshots.read_all_blocking" = 1
+"test_inventory_router.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 3

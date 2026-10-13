@@ -1,5 +1,14 @@
 [uses]
 "test_dismissing_response_notice_refreshes_inspector_snapshot.py" = ["test_fleet_notices_via_gateway.py"]
 
+[debt.first-party-patch]
+"test_dismissing_response_notice_refreshes_inspector_snapshot.py#monkeypatch.setattr gateway.agents.notices.publish_agent_updated_sync" = 2
+"test_dismissing_response_notice_refreshes_inspector_snapshot.py#monkeypatch.setattr ops.lifecycle.publish_notice_posted" = 1
+"test_dismissing_response_notice_refreshes_inspector_snapshot.py#monkeypatch.setattr ops.lifecycle.publish_notice_resolved" = 1
+"test_fleet_notices_via_gateway.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_fleet_notices_via_gateway.py#monkeypatch.setattr gateway.agents.notices.publish_agent_updated_sync" = 1
+"test_fleet_notices_via_gateway.py#monkeypatch.setattr ops.lifecycle.publish_notice_resolved" = 1
+"test_task_registry_notification_via_gateway.py#monkeypatch.setattr gateway.routers.tasks.enqueue_task_notifications" = 2
+
 [debt.private-name]
 "test_dismissing_response_notice_refreshes_inspector_snapshot.py -> test_fleet_notices_via_gateway.py#_load_activity_plugin" = 1
