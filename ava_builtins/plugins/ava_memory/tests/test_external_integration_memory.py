@@ -22,12 +22,12 @@ from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
-from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
