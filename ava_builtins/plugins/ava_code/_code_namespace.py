@@ -29,8 +29,7 @@ def set(path: str | Path) -> None:
     import stat as _stat
 
     import ava.skills as _ava_skills
-
-    from ._walk import project_skill_roots
+    from base.packages.skills.project_roots import project_skill_roots
 
     p = Path(path).expanduser()
     # Single stat avoids the TOCTOU race between exists() → is_dir() syscalls.

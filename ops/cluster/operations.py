@@ -20,8 +20,8 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
-from base.log import logger
 from base.native_process.loaded_commit import LoadedCommit
+from base.packages.skills.project_roots import project_skill_roots
 from ops.cluster_status import (
     ClusterStatus,
     agent_shell_sessions,
@@ -119,15 +119,8 @@ def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, lis
 
 
 def _project_skill_roots(cwd: Path | None) -> list[Path]:
-    """Best-effort project roots; an absent ava-code plugin is not an op failure."""
-    if cwd is None:
-        return []
-    try:
-        from ava_builtins.plugins.ava_code import project_skill_roots
-    except ImportError:
-        logger.debug("agent_skill_view: ava-code plugin unavailable; skipping project skills")
-        return []
-    return project_skill_roots(cwd)
+    """Project-local skill roots for the agent's working directory; none before it has one."""
+    return [] if cwd is None else project_skill_roots(cwd)
 
 
 def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]:

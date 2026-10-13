@@ -142,7 +142,7 @@ does today. What changes for them is only that enablement (today
 `.agents/skills/` (the kernel-contributor project skills) is the exception:
 since issue #146 it does **not** converge fleet-wide — it reaches agents
 through the project-local mount
-(`ava_builtins/plugins/ava_code/_walk.py:project_skill_roots`), so only agents
+(`base/packages/skills/project_roots.py:project_skill_roots`), so only agents
 working inside the checkout see it.
 
 The agent side is one column:
