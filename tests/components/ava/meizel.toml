@@ -2,20 +2,9 @@
 "test_self_evolution_schedules.py" = ["schedules"]
 
 [debt.env-patch]
-"test_external_database_owner.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
-"test_external_database_owner.py#patch.dict os.environ" = 4
-"test_external_machine_owner.py#patch.dict os.environ" = 2
 "test_sdk_clock_owner.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.ConfigBoot" = 1
-"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 1
-"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.process_clients" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.close_local_participant_admission" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.ProcessDbGate.min_read_due" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.time.monotonic" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
 "test_sdk_event_producer.py#monkeypatch.setattr ava.boot.process_clients" = 1
 "test_sdk_event_producer.py#monkeypatch.setattr ava.context" = 1
 "test_sdk_event_producer.py#monkeypatch.setattr ava.sdk_surface.extensions.load_extensions" = 1
@@ -26,9 +15,4 @@
 "test_sdk_event_producer.py#monkeypatch.setattr random.randrange" = 1
 
 [debt.third-party-patch]
-"child_undelivered_login.py#patch psycopg.connect" = 1
 "test_self_evolution_schedules.py#monkeypatch.setattr httpx.get" = 2
-
-[debt.unresolved-patch]
-"test_external_database_owner.py#monkeypatch.setattr prior.clients.database" = 1
-"test_external_database_owner.py#monkeypatch.setattr result.close" = 1
