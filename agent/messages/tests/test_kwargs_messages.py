@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.messages import exec_output_message, inbound_message, system_note_message
@@ -18,7 +19,11 @@ def test_stored_discriminator_is_plain_str() -> None:
     inbound = inbound_message(content="hi", source="user", inbound_id=1, body_start=0)
     note = system_note_message(content="n", tag=NoteTag.MEMORY)
     exec_out = exec_output_message(
-        content="ok", tool_call_id="t1", status=ExecStatus.COMPLETED, body_start=0
+        content="ok",
+        tool_call_id="t1",
+        status=ExecStatus.COMPLETED,
+        body_start=0,
+        created_at=datetime.now(UTC),
     )
 
     assert type(inbound.additional_kwargs["ava_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -49,16 +54,26 @@ def test_exec_output_sdk_calls_present_empty_and_omitted() -> None:
         sdk_calls=[{"method": "files.read", "count": 3}],
         status=ExecStatus.COMPLETED,
         body_start=0,
+        created_at=datetime.now(UTC),
     )
     assert sized.additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]  # pyright: ignore[reportUnknownMemberType]
 
     empty = exec_output_message(
-        content="ok", tool_call_id="t2", sdk_calls=[], status=ExecStatus.COMPLETED, body_start=0
+        content="ok",
+        tool_call_id="t2",
+        sdk_calls=[],
+        status=ExecStatus.COMPLETED,
+        body_start=0,
+        created_at=datetime.now(UTC),
     )
     assert empty.additional_kwargs["sdk_calls"] == []  # pyright: ignore[reportUnknownMemberType]
 
     unknown = exec_output_message(
-        content="ok", tool_call_id="t3", status=ExecStatus.COMPLETED, body_start=0
+        content="ok",
+        tool_call_id="t3",
+        status=ExecStatus.COMPLETED,
+        body_start=0,
+        created_at=datetime.now(UTC),
     )
     assert "sdk_calls" not in unknown.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
 
@@ -72,6 +87,7 @@ def test_exec_output_sdk_calls_survive_checkpoint_roundtrip() -> None:
         sdk_calls=[{"method": "files.read", "count": 3}],
         status=ExecStatus.COMPLETED,
         body_start=0,
+        created_at=datetime.now(UTC),
     )
     restored = serde.loads_typed(serde.dumps_typed(msg))
     assert restored.additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]  # pyright: ignore[reportUnknownMemberType]
@@ -86,6 +102,7 @@ def test_exec_output_records_status_start_and_body_offset() -> None:
         body_start=len("Code execution output after running for 1min 53s:\n\n"),
         started_at=started,
         exec_ms=113_000,
+        created_at=datetime.now(UTC),
     )
     kwargs = read_ava_kwargs(msg)
     assert kwargs.get("ava_exec_status") == "timed_out"
@@ -100,3 +117,26 @@ def test_inbound_records_where_its_content_begins() -> None:
     )
     kwargs = read_ava_kwargs(msg)
     assert msg.text[kwargs.get("ava_inbound_body_start", -1) :] == "hi"
+
+
+def test_inbound_without_a_queue_row_carries_no_inbound_id_and_keeps_its_message_id() -> None:
+    msg = inbound_message(
+        content="hi",
+        source="codex",
+        inbound_id=None,
+        body_start=0,
+        created_at=datetime(2026, 10, 13, tzinfo=UTC),
+        message_id="request-1",
+    )
+    kwargs = read_ava_kwargs(msg)
+    assert msg.id == "request-1"
+    assert "ava_inbound_id" not in kwargs
+    assert kwargs.get("ava_created_at") == "2026-10-13T00:00:00+00:00"
+    assert "ava_picked_up_at" in kwargs
+
+
+def test_exec_output_requires_a_creation_time() -> None:
+    with pytest.raises(TypeError, match="created_at"):
+        exec_output_message(  # pyright: ignore[reportCallIssue]
+            content="ok", tool_call_id="t1", status=ExecStatus.COMPLETED, body_start=0
+        )

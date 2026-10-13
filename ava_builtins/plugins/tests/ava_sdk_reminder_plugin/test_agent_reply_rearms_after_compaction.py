@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -345,6 +346,7 @@ async def test_after_exec_leaves_exec_output_untouched(
         exec_ms=1300,
         status=ExecStatus.COMPLETED,
         body_start=0,
+        created_at=datetime.now(UTC),
     )
     out.id = "out-1"
     out_kwargs_before = dict(out.additional_kwargs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]

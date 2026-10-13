@@ -14,8 +14,8 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 ## Message Types
 
 ### Inbound Messages (`inbound_message`)
-- `inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=)` — envelope wrapper (the header is `base/agents/messages/envelope.py:inbound_head`; `ava_inbound_body_start` records its length so readers cut the content out by offset and never parse the header; the sender is `ava_source`). Inbounds written before the field existed show whole, header included, in the hierarchy catalog
-- `source` is the original source string (`"system"` / `"agent:N"` / `"user"`), `ava_inbound_id` records the source row id so history readers can correlate a message with its queue row
+- `inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=, message_id=)` — envelope wrapper (the header is `base/agents/messages/envelope.py:inbound_head`; `ava_inbound_body_start` records its length so readers cut the content out by offset and never parse the header; the sender is `ava_source`). Inbounds written before the field existed show whole, header included, in the hierarchy catalog
+- `source` is the original source string (`"system"` / `"agent:N"` / `"user"`), `ava_inbound_id` records the source row id so history readers can correlate a message with its queue row. `inbound_id=None` (no key written) is for the one inbound with no queue row, the impersonation consent request, which is stamped with both times like every other injected message
 - `content` plain text or multimodal block list
 - Two times in metadata: `ava_created_at` keeps its meaning (an inbound's is its ARRIVAL time, the source row's `created_at`; other messages' is when they were produced). `ava_picked_up_at` is when an injected message (inbound, note, attachment) was put into the LLM context, i.e. when the model reads it; the builders stamp it. AIMessage and tool output are produced inside the context, so their `ava_created_at` already is the read time and they carry no `ava_picked_up_at`. Time-ordered readers (timeline, history tree, history dump) use `message_read_time()` (`ava_picked_up_at`, else `ava_created_at`); delivery tracking uses `inbound_messages.created_at`. The body envelope header (`wrap_inbound`) keeps the arrival time so the agent knows when a message came in.
 
@@ -40,6 +40,7 @@ formatting and source validation keep their existing order.
 ### Exec Output (`exec_output_message`)
 - Wraps sandbox execution results from `execute_code`
 - Contains merged stdout/stderr output
+- `created_at` is a required argument: every writer (exec node, repair hook, syntax-fix plugin) stamps `ava_created_at`, which is also the read time
 
 ### Attachments (`attach_message`)
 - Appends one HumanMessage at the completed-turn boundary for files registered with `ava.self.attach`
@@ -56,7 +57,7 @@ formatting and source validation keep their existing order.
 - [[context-window.ava.okf.md]] — message history is the main consumer of the context window
 
 ## Entry Points
-- `agent/messages/__init__.py:inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope-wrapped inbound message
+- `agent/messages/__init__.py:inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=, message_id=)` — envelope-wrapped inbound message
 - `agent/messages/__init__.py:system_note_message(...)` — system notification (with `NoteTag`)
 - `agent/messages/__init__.py:security_note_message(...)` — SECURITY note for one injection-scan finding
 - `agent/messages/__init__.py:exec_output_message(...)` — execution output; one shape for every ending. The structured record is `ava_exec_status` (`ExecStatus`: completed / failed / timed_out / cancelled / halted / not_run / unknown), `ava_exec_started_at` (the end is `ava_created_at`), `ava_exec_ms` and `ava_exec_body_start` (where the body begins after the header); readers use these fields and never parse the header text, which is for the model. Results written before these fields existed carry no offset; the hierarchy catalog shows them whole, header included, instead of parsing the header

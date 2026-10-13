@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -228,7 +229,11 @@ class TestAttachItems:
             ],
         )
         output = exec_output_message(
-            content="ok", tool_call_id="tc-1", status=ExecStatus.COMPLETED, body_start=0
+            content="ok",
+            tool_call_id="tc-1",
+            status=ExecStatus.COMPLETED,
+            body_start=0,
+            created_at=datetime.now(UTC),
         )
         attach = self._attach_message(tmp_path, model_catalog=model_catalog)
         items, count = build_timeline_items(
