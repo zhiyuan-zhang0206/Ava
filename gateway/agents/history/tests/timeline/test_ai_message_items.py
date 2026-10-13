@@ -19,26 +19,19 @@ _TIMELINE_INPUTS = TimelineReadInputs(
 
 
 class TestAiMessageItems:
-    """`_ai_message_items(msg, msg_idx, next_ts)` splits a single AIMessage into
+    """`_ai_message_items(msg, msg_idx, sdk_by_id)` splits a single AIMessage into
     per-block timeline items, each carrying a stable `item_id = f"{msg_idx}.{block_idx}"`.
 
     The production path ChatAnthropic + bind_tools returns list-of-blocks; legacy /
     no-tools degenerates to string content (the whole thing as chat, block_idx=0).
     """
 
-    @staticmethod
-    def _next_ts(_msg=None):
-        # In production, next_ts returns the message's own real timestamp (ava_created_at)
-        # or an incrementing-microsecond fallback; these block-split tests don't care about
-        # timestamps, so the stub ignores _msg and returns a placeholder value.
-        return "2026-01-01T00:00:00.000001+00:00"
-
     def _items(self, msg, msg_idx=5):
         from langchain_core.messages import AIMessage
 
         if not isinstance(msg, AIMessage):
             msg = AIMessage(content=msg)  # pyright: ignore[reportUnknownArgumentType]
-        return _ai_message_items(msg, msg_idx, self._next_ts, {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        return _ai_message_items(msg, msg_idx, {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     def test_string_content_treated_as_chat(self):
         from langchain_core.messages import AIMessage
@@ -188,7 +181,7 @@ class TestAiMessageItems:
             body_start=0,
             created_at=datetime.now(UTC),
         )
-        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         assert items[0].kind == "code_output"
         assert items[0].exec_ms == 1300
@@ -203,7 +196,7 @@ class TestAiMessageItems:
             tool_call_id="t1",
             additional_kwargs={"ava_msg_type": "exec_output"},
         )
-        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert items[0].kind == "code_output"
         assert items[0].exec_ms is None
 
@@ -217,7 +210,7 @@ class TestAiMessageItems:
         from agent.messages import NoteTag, system_note_message
 
         msg = system_note_message(content="use ava.agents.send_message", tag=NoteTag.AGENT_REPLY)
-        items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         assert items[0].kind == "system_marker"
         assert items[0].source == "agent_reply"
@@ -279,12 +272,12 @@ class TestAiMessageItems:
 
         for tag in shown:
             items, _ = build_timeline_items(
-                [system_note_message(content="x", tag=tag)], [], inputs=_TIMELINE_INPUTS
+                [system_note_message(content="x", tag=tag)], inputs=_TIMELINE_INPUTS
             )
             assert items[0].show_timestamp is True, tag
         for tag in hidden:
             items, _ = build_timeline_items(
-                [system_note_message(content="x", tag=tag)], [], inputs=_TIMELINE_INPUTS
+                [system_note_message(content="x", tag=tag)], inputs=_TIMELINE_INPUTS
             )
             assert items[0].show_timestamp is False, tag
 
@@ -295,7 +288,7 @@ class TestAiMessageItems:
         from langchain_core.messages import SystemMessage
 
         msg = SystemMessage(content="You are Ava.\nAct via execute_code.")
-        items, msg_count = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+        items, msg_count = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert msg_count == 1
         assert len(items) == 1
         assert items[0].kind == "system_prompt"

@@ -33,7 +33,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Literal, cast
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
@@ -44,10 +44,6 @@ from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.lm.content import message_addl_kwargs
 
 UnitKind = Literal["work", "text", "inbound", "note"]
-
-# A message stamped before this carries a synthesized epoch-anchored time (it
-# predates `ava_created_at`); such a time cannot be placed on a real axis.
-_LEGACY_TS_FLOOR = datetime(2020, 1, 1, tzinfo=UTC)
 
 PREVIEW_CHARS = 160
 
@@ -70,10 +66,7 @@ class MessageUnit:
 
 
 def _stamp(item: TimelineItem) -> datetime | None:
-    if not item.created_at:
-        return None
-    ts = datetime.fromisoformat(item.created_at)
-    return ts if ts >= _LEGACY_TS_FLOOR else None
+    return datetime.fromisoformat(item.created_at) if item.created_at else None
 
 
 def _preview(items: Sequence[TimelineItem]) -> str:
@@ -125,7 +118,7 @@ def read_times(
     read order back, so units and nodes do not overlap on the time axis. A message without a time
     takes the previous value, None until the first. Stored stamps are not touched.
     """
-    items, _ = build_timeline_items(messages, [], inputs=timeline_inputs)
+    items, _ = build_timeline_items(messages, inputs=timeline_inputs)
     own: list[datetime | None] = [None] * len(messages)
     for idx, group in _by_message(items):
         stamps = [ts for item in group if (ts := _stamp(item)) is not None]
@@ -214,7 +207,7 @@ def divide_units(
     Raises:
         ValueError: a message renders as a mix of item kinds no rule covers.
     """
-    items, _ = build_timeline_items(messages, [], inputs=timeline_inputs)
+    items, _ = build_timeline_items(messages, inputs=timeline_inputs)
     divider = _Divider()
     for idx, group in _by_message(items):
         divider.message(idx, group)

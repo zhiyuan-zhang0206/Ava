@@ -1,7 +1,6 @@
 """Stored identity provenance survives every history representation and projection."""
 
 from copy import deepcopy
-from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -29,7 +28,6 @@ from base.agents.history.delta_read_compat import (
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.inbox.rows import InboundRow
 from base.agents.messages.identity import normalize_stored_message_ids
 from base.clock import Clock
 from base.config import settings
@@ -87,7 +85,7 @@ def test_legacy_walk_seed_and_writes_never_upgrade_after_reserialization(seed: s
     if seed == "writes":
         assert first[0].id and first[0].id != second[0].id
     restored = serde.loads_typed(serde.dumps_typed(first))
-    items, _ = build_timeline_items(restored, [], inputs=_TIMELINE_INPUTS)
+    items, _ = build_timeline_items(restored, inputs=_TIMELINE_INPUTS)
     assert items[0].source_message_id is None
     assert items[0].source_block_idx is None
     assert "ava_ephemeral_message_id" not in items[0].payload
@@ -99,12 +97,10 @@ def test_durable_source_coordinates_survive_compact_renumbering_and_json() -> No
         content=[{"type": "text", "text": "first"}, {"type": "text", "text": "second"}],
     )
     before, _ = build_timeline_items(
-        [HumanMessage(content="old head", id="head"), msg], [], inputs=_TIMELINE_INPUTS
+        [HumanMessage(content="old head", id="head"), msg], inputs=_TIMELINE_INPUTS
     )
-    history, _ = build_timeline_items(
-        [msg], [], segment_prefix="s1.boundary", inputs=_TIMELINE_INPUTS
-    )
-    current, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
+    history, _ = build_timeline_items([msg], segment_prefix="s1.boundary", inputs=_TIMELINE_INPUTS)
+    current, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
     assert before[1].item_id == "1.0"
     assert history[0].item_id == "s1.boundary.0.0"
     assert current[0].item_id == "0.0"
@@ -115,31 +111,24 @@ def test_durable_source_coordinates_survive_compact_renumbering_and_json() -> No
         ]
         assert TimelineItem.model_validate_json(items[0].model_dump_json()) == items[0]
     other, _ = build_timeline_items(
-        [AIMessage(id="different", content=msg.content)], [], inputs=_TIMELINE_INPUTS
+        [AIMessage(id="different", content=msg.content)], inputs=_TIMELINE_INPUTS
     )
     assert other[0].source_message_id != current[0].source_message_id
 
 
 def test_only_explicit_inbound_id_qualifies_legacy_source() -> None:
-    # The same positional anchor remains valid for UI timestamps/correlation.
-    anchor = InboundRow(
-        id=9,
-        kind="chat",
-        content="chat",
-        source="web",
-        status="claimed",
-        created_at=datetime.now(UTC),
-    )
+    # An inbound without an embedded id renders no inbound id at all: nothing
+    # matches it to a queue row, so none is invented.
     legacy = HumanMessage(content="chat", additional_kwargs={"ava_msg_type": "inbound"})
-    anchored, _ = build_timeline_items([legacy], [anchor], inputs=_TIMELINE_INPUTS)
-    assert anchored[0].inbound_id == 9
-    assert anchored[0].source_inbound_id is None
-    assert anchored[0].source_block_idx is None
+    unidentified, _ = build_timeline_items([legacy], inputs=_TIMELINE_INPUTS)
+    assert unidentified[0].inbound_id is None
+    assert unidentified[0].source_inbound_id is None
+    assert unidentified[0].source_block_idx is None
     explicit = HumanMessage(
         content="chat", additional_kwargs={"ava_msg_type": "inbound", "ava_inbound_id": 9}
     )
     qualified, _ = build_timeline_items(
-        normalize_stored_message_ids([explicit]), [], inputs=_TIMELINE_INPUTS
+        normalize_stored_message_ids([explicit]), inputs=_TIMELINE_INPUTS
     )
     assert qualified[0].source_message_id is None
     assert qualified[0].source_inbound_id == 9

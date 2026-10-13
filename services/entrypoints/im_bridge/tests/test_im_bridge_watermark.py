@@ -20,6 +20,16 @@ from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as po
         ("377.1", "2026-10-03T10:00:00Z", "1.0", "2026-10-03T11:00:00Z", True),
         ("377.1", "2026-10-03T11:00:00Z", "1.0", "2026-10-03T10:00:00Z", False),
         ("1.0", "2026-10-03T11:00:00Z", "1.0", "2026-10-03T11:00:00Z", False),
+        # An item that carries no created_at (the timeline renders a message
+        # without a read time with none) orders by item_id alone: past the
+        # stamped watermark it is pushed once, at or before it never again.
+        ("377.1", "2026-10-03T10:00:00Z", "378.0", None, True),
+        ("377.1", "2026-10-03T10:00:00Z", "377.1", None, False),
+        ("377.1", "2026-10-03T10:00:00Z", "5.0", None, False),
+        # And the unstamped watermark it leaves behind compares by item_id for
+        # the stamped items that follow.
+        ("378.0", None, "379.0", "2026-10-03T12:00:00Z", True),
+        ("378.0", None, "378.0", "2026-10-03T12:00:00Z", False),
     ],
 )
 def test_durable_cursor_orders_compact_and_numeric_tail(
