@@ -61,11 +61,11 @@ def _admin_url(url: str) -> str:
     return url.rsplit("/", 1)[0] + "/postgres"
 
 
-def _runner_url(url: str) -> str:
+def runner_url(url: str) -> str:
     return url_with_userinfo(url, _RUNNER_LOGIN, _RUNNER_PW)
 
 
-def _grant_runner(url: str, identity: str = _IDENTITY) -> None:
+def grant_runner(url: str, identity: str = _IDENTITY) -> None:
     """The start-path grant refresh (`ensure_groups` after migrations) on the
     `identity` database, plus one runner login inheriting the group the way a
     write generation's login does (INHERIT TRUE, SET FALSE, ADMIN FALSE)."""
@@ -91,8 +91,8 @@ def test_runner_group_is_a_nologin_capability_and_the_refresh_is_idempotent(
 ) -> None:
     """The refresh creates `ava_runner` as a NOLOGIN group; running it again is
     a no-op, not an error, and the login's privileges are the group's."""
-    _grant_runner(runner_db)
-    _grant_runner(runner_db)
+    grant_runner(runner_db)
+    grant_runner(runner_db)
 
     with psycopg.connect(_admin_url(runner_db), autocommit=True) as conn:
         attrs = conn.execute(
@@ -103,11 +103,11 @@ def test_runner_group_is_a_nologin_capability_and_the_refresh_is_idempotent(
 
 
 def test_runner_projects_observations_and_records_actual_lifecycle(runner_db: str) -> None:
-    _grant_runner(runner_db)
+    grant_runner(runner_db)
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("INSERT INTO agents (id) VALUES (712345)")
         conn.execute("INSERT INTO agents_meta (id,status) VALUES (712345,'running')")
-    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+    with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
         fact = MetricObservation(
             event_id=1,
             agent_id=712345,
@@ -178,7 +178,7 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
 
         # The runner grants now target the freshly-created tables — the birth order
         # a cluster's provisioning uses (checkpoint schema first, grants second).
-        _grant_runner(runner_db, identity)
+        grant_runner(runner_db, identity)
         with psycopg.connect(
             url_with_userinfo(
                 runner_db.rsplit("/", 1)[0] + "/" + identity, _RUNNER_LOGIN, _RUNNER_PW
@@ -320,7 +320,7 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
     from base.config import settings
     from base.db import Database
 
-    _grant_runner(runner_db)
+    grant_runner(runner_db)
 
     trace_id = "f" * 32
     checkpoint = empty_checkpoint()
@@ -337,7 +337,7 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
             new_versions={"messages": "1"},
         )
 
-    monkeypatch.setattr(settings.data_plane, "db_url", _runner_url(runner_db))
+    monkeypatch.setattr(settings.data_plane, "db_url", runner_url(runner_db))
     current = load_checkpoint_messages(Database.from_settings(gate=database_gate), 73)
     checkpoint_id, traced = load_checkpoint_messages_by_trace(
         Database.from_settings(gate=database_gate), 73, trace_id
@@ -351,7 +351,7 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
     assert current == [expected]
     assert checkpoint_id == saved["configurable"]["checkpoint_id"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     assert traced == [expected]
-    with PostgresSaver.from_conn_string(_runner_url(runner_db)) as saver:
+    with PostgresSaver.from_conn_string(runner_url(runner_db)) as saver:
         original = saver.get_tuple(saved)
     assert original is not None
     assert original.checkpoint["channel_values"]["messages"] == [
@@ -390,20 +390,20 @@ def test_runner_checkpoint_schema_assertion_requires_exact_set(
     from base.cluster import assert_checkpoint_schema_current
     from base.cluster.provision import CheckpointSchemaMismatchError
 
-    _grant_runner(runner_db)
+    grant_runner(runner_db)
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute(corruption_sql)  # type: ignore[arg-type]
 
     with pytest.raises(CheckpointSchemaMismatchError):
-        assert_checkpoint_schema_current(_runner_url(runner_db))
+        assert_checkpoint_schema_current(runner_url(runner_db))
 
 
 def test_runner_accepts_exact_checkpoint_schema_read_only(runner_db: str) -> None:
     """A pure runner can pass the start gate with checkpoint SELECT alone."""
     from base.cluster import assert_checkpoint_schema_current
 
-    _grant_runner(runner_db)
-    assert_checkpoint_schema_current(_runner_url(runner_db))
+    grant_runner(runner_db)
+    assert_checkpoint_schema_current(runner_url(runner_db))
 
 
 def test_existing_behind_schema_never_falls_back_to_setup(
@@ -481,7 +481,7 @@ def test_birth_retry_refuses_non_prefix_checkpoint_state(
         )
 
 
-def _exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
+def exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The pause-trail surface ava.self.pause_heartbeat writes from the runner
     process: SELECT the previous window (the backoff-reminder lookup) and
     INSERT the new row; the BIGSERIAL id draws from the owning sequence.
@@ -501,7 +501,7 @@ def _exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
     assert row == (1800,)
 
 
-def _exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int) -> None:
+def exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The named-impersonation session trail the lease lifecycle writes from
     the database side: creating a lease fires the lifecycle trigger, whose
     INSERT into agent_impersonation_entries must land, and the relay reads
@@ -533,7 +533,7 @@ def _exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int
     assert allocated == (0, 1)
 
 
-def _exercise_task_receipt_grants(conn: psycopg.Connection, agent_id: int) -> None:
+def exercise_task_receipt_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The task-receipt tombstones the SDK task mutations write from the
     runner process: ava.tasks.update/log and ava.tasks.create retain one row
     per accepted operation (idempotency admission + replay).
@@ -566,7 +566,7 @@ def _exercise_task_receipt_grants(conn: psycopg.Connection, agent_id: int) -> No
     assert created == ({"id": 41},)
 
 
-def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int) -> None:
+def exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The understanding-node surface the understanding loops write from the
     runner side (manual first-run / ad-hoc regeneration, task #3704): INSERT a
     node (the BIGSERIAL id draws from the owning sequence), UPDATE it in
@@ -606,7 +606,7 @@ def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int)
     )
 
 
-def _exercise_understanding_queue_grants(conn: psycopg.Connection, agent_id: int) -> None:
+def exercise_understanding_queue_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The chunk-triggered understanding queue the runner process writes: INSERT a
     pending job (BIGSERIAL id from the owning sequence), claim it with an UPDATE and
     SELECT it back."""
@@ -634,7 +634,7 @@ def _exercise_understanding_queue_grants(conn: psycopg.Connection, agent_id: int
     conn.execute("DELETE FROM understanding_group_state WHERE agent_id = %s", (agent_id,))
 
 
-def _assert_alert_writes_denied(conn: psycopg.Connection) -> None:
+def assert_alert_writes_denied(conn: psycopg.Connection) -> None:
     """The alerts table is written only by the gateway ingest: the runner reads
     it and holds neither INSERT nor UPDATE (nor DELETE)."""
     assert conn.execute("SELECT count(*) FROM alerts").fetchone() == (0,)
@@ -650,7 +650,7 @@ def _assert_alert_writes_denied(conn: psycopg.Connection) -> None:
         conn.execute("DELETE FROM alerts WHERE fingerprint = 'fp-runner'")
 
 
-def _identity_url(url: str) -> str:
+def identity_url(url: str) -> str:
     """The cluster's MAIN identity — the role migrations actually run as.
     `AVA_DB_URL` names role and database with one identifier on a live cluster
     (`identity_from_url`); the fixture dials the initdb superuser instead,

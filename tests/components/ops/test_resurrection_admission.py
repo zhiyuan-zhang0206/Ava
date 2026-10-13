@@ -55,7 +55,7 @@ def wakes(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[int, str]]]:
     yield captured
 
 
-def _resources(db: psycopg.Connection, aid: int) -> object:
+def resources(db: psycopg.Connection, aid: int) -> object:
     row = db.execute("SELECT incarnation_resources FROM agents_meta WHERE id=%s", (aid,)).fetchone()
     db.commit()
     assert row is not None
@@ -105,13 +105,13 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
     )
 
     assert status(db_conn, aid) == ("idling", None)
-    assert _resources(db_conn, aid) == marker
+    assert resources(db_conn, aid) == marker
     assert wakes == [(aid, "0")]
     incarnation = await admit_hosted_runtime(
         aops_pool, aid, machine_identity.name(), uuid4(), expected_from="idling", db=database
     )
     assert incarnation is not None
-    admitted = decode_resources(_resources(db_conn, aid))
+    admitted = decode_resources(resources(db_conn, aid))
     assert isinstance(admitted, IncarnationResources)
     assert (admitted.generation, admitted.owner) == (incarnation.generation, incarnation.owner)
 
@@ -210,7 +210,7 @@ def test_retired_resources_require_cutover_before_resurrection(
             database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
         )
     assert status(db_conn, aid) == ("terminated", "hosted")
-    assert _resources(db_conn, aid) == before
+    assert resources(db_conn, aid) == before
     assert wakes == []
 
 
@@ -258,7 +258,7 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
         aops_pool, aid, machine_identity.name(), uuid4(), expected_from="idling", db=database
     )
     assert successor is not None
-    admitted = decode_resources(_resources(db_conn, aid))
+    admitted = decode_resources(resources(db_conn, aid))
     assert isinstance(admitted, IncarnationResources)
     assert admitted.owner == successor.owner != owner
 
@@ -521,7 +521,7 @@ async def _resurrected(
     return aid
 
 
-async def _restarted(
+async def restarted(
     db: psycopg.Connection,
     pool: AsyncConnectionPool,
     *,
@@ -559,7 +559,7 @@ async def _restarted(
     return aid
 
 
-async def _managed_restarted(
+async def managed_restarted(
     db: psycopg.Connection,
     pool: AsyncConnectionPool,
     *,
@@ -595,12 +595,12 @@ async def _managed_restarted(
         await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings(), resources=None)
         == "restart"
     )
-    assert isinstance(decode_resources(_resources(db, aid)), IncarnationResources)
+    assert isinstance(decode_resources(resources(db, aid)), IncarnationResources)
     return aid
 
 
 @pytest.mark.parametrize("guarded", [False, True])
-@pytest.mark.parametrize("arrange", [_spawned, _resurrected, _restarted, _managed_restarted])
+@pytest.mark.parametrize("arrange", [_spawned, _resurrected, restarted, managed_restarted])
 async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -702,6 +702,6 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
     successor = await _admitted(
         aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
     )
-    admitted = decode_resources(_resources(db_conn, aid))
+    admitted = decode_resources(resources(db_conn, aid))
     assert isinstance(admitted, IncarnationResources)
     assert (admitted.generation, admitted.owner) == (successor.generation, successor.owner)
