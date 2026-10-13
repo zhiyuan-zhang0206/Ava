@@ -36,7 +36,7 @@ from base.paths import ava_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
-from ops.roster.service_spec import DbAccess
+from services.supervision.roster.service_spec import DbAccess
 
 
 def ensure_gateway_data_plane(

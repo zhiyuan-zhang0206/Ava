@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from ops.spec import ServiceSpec, _gate_reason
+from services.supervision.roster.spec import ServiceSpec, _gate_reason
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

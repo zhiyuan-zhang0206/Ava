@@ -530,7 +530,7 @@ def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(
 ) -> None:
     """End to end: the labeler's session env (the gateway session-forward
     allowlist — cluster-scope provider keys deliberately NOT forwarded, and no
-    AVA_PROCESS_PROFILE marker after the ops.spec opt-out, task #1230) boots
+    AVA_PROCESS_PROFILE marker after the services.supervision.roster.spec opt-out, task #1230) boots
     against a unit .env that declares DEEPSEEK_API_KEY; the key must resolve
     through the DeepSeek provider plugin's DEEPSEEK_API_KEY environment seam.
 

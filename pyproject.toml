@@ -1335,11 +1335,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "ops/roster/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "ops/rpc_schemas/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1606,6 +1601,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/supervision/healthchecks/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/roster/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

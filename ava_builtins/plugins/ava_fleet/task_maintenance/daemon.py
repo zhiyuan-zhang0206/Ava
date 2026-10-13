@@ -2,7 +2,7 @@
 
 Fleet-domain gateway daemon, registered into the ops service roster by the
 `ava_fleet` plugin (`plugins/ava_fleet/services.py`) rather than hardcoded in
-`ops/spec.py`: the whole remind/escalate surface is fleet, so it lives under the
+`services/supervision/roster/spec.py`: the whole remind/escalate surface is fleet, so it lives under the
 plugin namespace and is discovered only when the plugin is enabled.
 
 One gateway-side loop, cluster-wide. Reminders and escalations directly insert

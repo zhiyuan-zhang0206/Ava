@@ -73,9 +73,6 @@ One row per contract in `pyproject.toml`, under the name it has there.
 
 Edges the contracts do not see or do not cover. They are listed, not exempted.
 
-- `ops` ↔ `services`: `ops/roster/__init__.py` and `ops/spec.py` import `services.*`
-  inside functions, and many `services` modules import `ops`. No contract covers the
-  pair.
 - String-form imports of a higher layer. `ava/__init__.py` loads `agent.extensions` by name;
   it documents that as how `ava` keeps no static dependency on `agent`.
 

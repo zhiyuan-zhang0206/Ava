@@ -117,7 +117,7 @@ def collector_allowed_for_home(
     behavior — relay collectors are not gated.
 
     One decision shared by the three collector-lifecycle paths — the roster
-    gate (``ops.spec._otel_collector_gate_reason``), the converge step
+    gate (``services.supervision.roster.spec._otel_collector_gate_reason``), the converge step
     (``cli.commands.observability.otel_collector.ensure_otel_collector_step``), and the
     sidecar healthcheck (``services.supervision.healthchecks.otel_collector.
     _collector_serves_this_home``) — so they cannot drift apart again

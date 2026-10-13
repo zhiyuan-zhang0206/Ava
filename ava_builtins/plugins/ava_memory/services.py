@@ -3,12 +3,12 @@
 The memory indexer is the pool's search side: it watches the gateway's
 consolidated checkout and keeps the memory search index current, which is what makes
 `ava.memory.search` — and therefore passive recall — return anything. It is
-declared here rather than hardcoded into `ops/roster/__init__.py` because the pool is this
+declared here rather than hardcoded into `services/supervision/roster/__init__.py` because the pool is this
 plugin's. Its host-scoped `indexer_enabled` config controls the daemon separately
 from whether agents inject the standing memory index into their prompts.
 
 Discovery keys on this plugin's code being PRESENT on the machine (see
-`ops.roster.plugin_services.plugin_services`), so the cluster-level on/off is the explicit gate
+`services.supervision.roster.plugin_services.plugin_services`), so the cluster-level on/off is the explicit gate
 below rather than the presence check.
 
 Deliberately light, like `ava_fleet/services.py`: it imports the ops service
@@ -25,8 +25,8 @@ from functools import partial
 from ava_builtins.plugins.ava_memory.default_config import MemoryConfig
 from base.cluster.machine import MachineRole
 from base.packages.plugins.config_registration import disk_image_path, read_config_image
-from ops.roster import healthz_daemon
-from ops.roster.service_spec import ServiceSpec
+from services.supervision.roster import healthz_daemon
+from services.supervision.roster.service_spec import ServiceSpec
 
 # The indexer runs on the gateway capability: it indexes the gateway's
 # consolidated checkout, which only a gateway-capable unit has. Declared here
@@ -46,7 +46,7 @@ def services() -> tuple[ServiceSpec, ...]:
     """The ops services the memory plugin contributes to the roster.
 
     The gateway-side indexing daemon. Ordering against memory-search (which it
-    cold-start-connects to) is preserved by `ops.roster.plugin_services.plugin_services()` folding plugin
+    cold-start-connects to) is preserved by `services.supervision.roster.plugin_services.plugin_services()` folding plugin
     services onto the tail of the roster, well after the gateway group.
     """
     config_path = disk_image_path("ava_memory")

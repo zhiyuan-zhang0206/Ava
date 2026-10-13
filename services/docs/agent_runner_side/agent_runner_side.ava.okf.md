@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent-runner Side Services — background services run by agent-runner capability
-description: "A group of background daemons run on machines whose capabilities include agent-runner — services meaningful only alongside machines that run agents: inbound ops server, agent turn execution, shared headed browser, macOS desktop automation. Source of truth: ServiceSpec.capabilities in ops/spec.py."
+description: "A group of background daemons run on machines whose capabilities include agent-runner — services meaningful only alongside machines that run agents: inbound ops server, agent turn execution, shared headed browser, macOS desktop automation. Source of truth: ServiceSpec.capabilities in services/supervision/roster/spec.py."
 tags: []
 ---
 
@@ -13,7 +13,7 @@ Background service group run on machines whose capabilities set includes `agent-
 `services/docs/agent_runner_side/` is a **capability grouping, not a directory of code** — there is no `services/agent_runner_side/` package, its nodes sit in `services/docs/agent_runner_side/`. Each daemon's code lives in a domain group under `services/<group>/<name>/` (`agent_runner`, `desktop`, ...); which side it runs on is a `ServiceSpec.capabilities` attribute that cuts across the filesystem. See [[gateway_side.ava.okf.md]] for the same note on the mirror group.
 
 ## Service List
-Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpec.capabilities` includes `agent-runner` (`AGENT_RUNNER` / `BOTH` groups).
+Source of truth = services in `services/supervision/roster/spec.py` `build_services()` whose `ServiceSpec.capabilities` includes `agent-runner` (`AGENT_RUNNER` / `BOTH` groups).
 
 | Service | Responsibility | File |
 |------|------|------|

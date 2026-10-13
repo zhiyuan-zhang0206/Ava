@@ -1,7 +1,7 @@
-"""Plugin-registered ops services — the discovery + folding machinery in ops.roster.plugin_services.
+"""Plugin-registered ops services — the discovery + folding machinery in services.supervision.roster.plugin_services.
 
 A plugin ships a `services.py` exposing `services() -> tuple[ServiceSpec, ...]`;
-`ops.roster_plugins.plugin_services()` discovers the INSTALLED plugins (by code presence,
+`services.supervision.roster.plugin_services.plugin_services()` discovers the INSTALLED plugins (by code presence,
 via `base.packages.plugins.enable_config`) and folds their specs onto `build_services()` so the
 roster stays single-source. These lock the load-bearing invariants:
 - the real ava_fleet plugin registers task-maintenance (venv-direct cmd whose
@@ -23,9 +23,9 @@ import pytest
 
 import base.packages.plugins.enable_config as pc
 from base.cluster.machine import MachineIdentity
-from ops import roster, spec
-from ops.roster import plugin_services as roster_plugins
-from ops.roster import service_spec
+from services.supervision import roster
+from services.supervision.roster import plugin_services as roster_plugins
+from services.supervision.roster import service_spec, spec
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -141,7 +141,7 @@ def test_broken_services_py_reports_and_aborts_roster(
     good_dir = tmp_path / "goodplugin"
     good_dir.mkdir()
     (good_dir / "services.py").write_text(
-        "from ops.roster.service_spec import ServiceSpec\n"
+        "from services.supervision.roster.service_spec import ServiceSpec\n"
         "def services():\n"
         "    return (ServiceSpec(session='probe-good', cmd='noop',\n"
         "            capabilities=frozenset({'gateway'}), requires_db=False),)\n"
@@ -182,7 +182,7 @@ def test_external_service_healthcheck_loads_without_agent_bootstrap(
     (plugin_dir / "services.py").write_text(
         "from __future__ import annotations\n"
         "from dataclasses import dataclass\n"
-        "from ops.roster.service_spec import ServiceSpec\n"
+        "from services.supervision.roster.service_spec import ServiceSpec\n"
         "@dataclass\n"
         "class Sample:\n"
         "    value: int = 1\n"

@@ -8,7 +8,7 @@ tags: []
 # PG-Backup — Daily Local Postgres Backup
 
 ## What is it
-A gateway-owned `pg-backup` scheduler daemon, declared by `ops/spec.py` as a
+A gateway-owned `pg-backup` scheduler daemon, declared by `services/supervision/roster/spec.py` as a
 first-class `ServiceSpec`. It calls the dump logic after `services.backup_hour` (default 3 AM
 **cluster** time — `AVA_TIMEZONE`, cluster-pinned) when the current cluster day
 has no dump; a host down at 03:00 catches up at the next scheduler wake. Its

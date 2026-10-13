@@ -247,7 +247,7 @@ def _service_probes(*, machine: MachineIdentity) -> list[str]:
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
     from base.deploy.lifecycle.service_selection import read_selection
-    from ops.spec import services_for_capabilities_annotated
+    from services.supervision.roster.spec import services_for_capabilities_annotated
 
     roles = _repo_commands._roles_or_none(machine=machine)
     if roles is None:

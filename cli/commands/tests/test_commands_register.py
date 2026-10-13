@@ -8,8 +8,8 @@ from typing import cast
 import pytest
 
 import cli.commands.probe as _probe_commands
-import ops.roster as _roster
-import ops.roster.service_spec as _service_spec
+import services.supervision.roster as _roster
+import services.supervision.roster.service_spec as _service_spec
 from base.cluster.machine import MachineRoles
 from base.daemon.tests.fakes import pin_endpoints
 from base.db import Database

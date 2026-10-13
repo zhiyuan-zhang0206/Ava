@@ -26,17 +26,17 @@ from base.daemon.health import DaemonProbe
 from base.daemon.tests.fakes import pin_endpoints
 from base.host.env.health_ports import DEFAULT_PORTS
 from base.packages.plugins.enable_config import update_all_disk_images
-from ops import roster
-from ops.roster.healthz import (
+from services.supervision import roster
+from services.supervision.ava_root_glue import manifests as gen
+from services.supervision.roster.healthz import (
     daemon_identity,
     health_name_of,
     healthz_daemon,
     healthz_url,
 )
-from ops.roster.service_spec import ServiceSpec
-from services.supervision.ava_root_glue import manifests as gen
+from services.supervision.roster.service_spec import ServiceSpec
 
-_REPO = Path(__file__).resolve().parents[3]
+_REPO = Path(__file__).resolve().parents[4]
 _PYTHON_M = ".venv/bin/python -m "
 
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
@@ -481,6 +481,6 @@ def test_the_literal_finder_does_not_attribute_an_unknown_resource_owner(source:
 
 
 def test_the_public_probe_builder_is_still_the_roster_door() -> None:
-    """Plugin services import `daemon_identity` from `ops.roster`; it must stay there."""
+    """Plugin services import `daemon_identity` from `services.supervision.roster`; it must stay there."""
     assert roster.daemon_identity is daemon_identity
     assert roster.healthz_daemon is healthz_daemon

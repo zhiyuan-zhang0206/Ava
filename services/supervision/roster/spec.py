@@ -1,7 +1,7 @@
-"""Ops Spec — capability filtering and gate policy for machine desired state.
+"""Service spec — capability filtering and gate policy for machine desired state.
 
 Given a host's capability set, this K8s-shaped module family answers what should
-run. ``ops.roster.build_services()`` is the canonical roster; this module applies
+run. ``services.supervision.roster.build_services()`` is the canonical roster; this module applies
 capability selection and runtime gates to it.
 
 Every service declares its ``ServiceSpec.capabilities`` in one of three groups:
@@ -11,21 +11,22 @@ declares ``requires_db`` so database-dependent readiness remains explicit.
 
 Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
 module. ``plugin_services()`` discovers code-present plugins and appends them
-to the roster: plugin declares, ops discovers. Each plugin service's
+to the roster: plugin declares, the roster discovers. Each plugin service's
 own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``_gate_reason``.
 The fleet task daemon follows this path; see
 ``docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md``.
 
-Layer: the ``ops`` module family imports ``base``, plus lazy function-local
-reaches into the shared-tier browser identity probe and gate app-port source.
-Nothing reaches up into cli/gateway, so start, root monitoring, and ``ava status``
-share one roster.
+Layer: this module family lives in ``services/supervision``; it imports ``base``,
+plus lazy function-local reaches into the shared-tier browser identity probe and
+gate app-port source. Nothing reaches up into cli/gateway, so start, root
+monitoring, and ``ava status`` share one roster.
 
 Native Postgres, Redis, and PgBouncer have separate data-plane custody so they
 can remain available during an application-root transition. The macOS helper
 is root's platform parent, not an application service. Read-only extra checks
 live in the root diagnostic roster; they never acquire service ownership.
-The definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``;
+The definitions live in ``services.supervision.roster.service_spec``,
+``services.supervision.roster``, and ``services.supervision.roster.spec``;
 callers import them from there.
 """
 
@@ -44,9 +45,9 @@ from base.host.system.probes import (
 from base.log import logger
 from base.paths import ava_home
 from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
-from ops.roster import build_services
-from ops.roster.plugin_services import PluginServiceError
-from ops.roster.service_spec import (
+from services.supervision.roster import build_services
+from services.supervision.roster.plugin_services import PluginServiceError
+from services.supervision.roster.service_spec import (
     ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
 )
 

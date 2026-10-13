@@ -45,15 +45,15 @@ The enable set comes from the per-machine `plugins_config.json`, read by both
 loaders through `base/plugins_config`: host boot via `load_for_runtime()`
 and the graph loader via `load()`, each falling back to
 `load(allow_dangling=True)` when a config entry's plugin directory is gone —
-every dangling name is reported on each failed load through the canonical
+every dangling name is reported on each failed load by the canonical
 reporter and treated as disabled. A plugin with
 `enabled: false` is imported by neither `plugin.py` loader (issue #2161: the
 boot loader imported every directory on disk regardless of config, so `ava
 plugins disable` changed nothing about startup). Host boot passes the enabled
 set of the *external* plugins it scans; the graph build adds the built-ins.
-Machine-level roster paths sit outside the enable plane by design: the
+Machine-level roster paths sit outside the enable plane: the
 `services.py` roster and the shipped-`metrics.py` scan key on presence, not
-enable-state (`ops/roster/plugin_services.py:plugin_services`).
+enable-state (`services/supervision/roster/plugin_services.py:plugin_services`).
 
 ## The external `plugins` prefix is registered, not resolved from sys.path
 `register_plugin_parent_packages` (`ava/sdk_surface/plugin_loader.py`, applied by the loader for
@@ -79,9 +79,9 @@ plugin directory is gone (`DanglingPlugin`) is reported and treated as
 disabled. `KeyboardInterrupt` / `SystemExit` still propagate — cancellation is
 not a plugin failure.
 
-The same containment applies at the other plugin-code load sites, each
-reporting through the one reporter: a plugin's `provider.py`
-(`base/lm/plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
+The same containment applies at other plugin load sites, each
+reporting through one reporter: a plugin's `provider.py`
+(`base/lm/plugin_providers.py`), `services.py` (`services/supervision/roster/spec.py`), `setup.py`
 (`cli/commands/extensions/_plugin_scaffold.py`), a built-in plugin's `metrics.py`
 (`gateway/inspect/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/inspect/_plugin_widgets.py`). The config face `default_config.py` is read by two more processes through

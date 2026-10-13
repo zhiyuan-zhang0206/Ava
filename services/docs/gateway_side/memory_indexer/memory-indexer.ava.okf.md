@@ -10,7 +10,7 @@ tags: []
 ## What is it
 Semantic indexing daemon for the memory pool — monitors `**/*.md` file changes under `gateway_memory_dir()` (combined machine `$AVA_HOME/gateway/memory`), uses the configured embedding provider (Gemini Embedding 2 by default, `AVA_EMBEDDING_BACKEND`) to vectorize markdown files, stores them in the selected memory search backend (numpy by default; pgvector behind the same `AVA_MEMORY_SEARCH_BACKEND` switch), supporting semantic search via `ava.memory.search()`.
 
-**Role attribution**: gateway side (pure agent-runner doesn't run) — `ServiceSpec.capabilities=GATEWAY` in `ops/spec.py`, roster derived by `services_for_capabilities` intersecting with the local machine's `machine_role()`.
+**Role attribution**: gateway side (pure agent-runner doesn't run) — `ServiceSpec.capabilities=GATEWAY` in `supervision/roster/spec.py`, roster derived by `services_for_capabilities` intersecting with the local machine's `machine_role()`.
 
 ## Core Responsibilities
 - **Cold-start full scan**: at startup diff memory pool files against the selected backend index, embed new/changed files, purge deleted entries — worked in file-granular chunks that beat daemon liveness between chunks

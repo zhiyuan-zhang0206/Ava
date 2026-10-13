@@ -8,8 +8,8 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
-from ops.cluster_status import observe
-from ops.roster.service_spec import ServiceSpec
+from services.supervision.roster import observe
+from services.supervision.roster.service_spec import ServiceSpec
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -155,7 +155,7 @@ def test_observe_leaves_detail_empty_on_a_healthy_service(
 
 
 def test_reported_kind_agrees_with_the_probe_actually_run() -> None:
-    from ops.roster import build_services
+    from services.supervision.roster import build_services
 
     for spec in build_services():
         kind, _target = observe._probe_kind_target(spec)

@@ -17,7 +17,7 @@ gateway.
 Provides:
 - `daemon.py` — bounded dispatch loop; `AVA_HEARTBEAT_INTERVAL_SECONDS`
   (default 5 min) is each agent's durable minimum reminder cadence
-- the roster's `/healthz` identity probe (`ops/roster/healthz.py`) — root's health monitor revives it on death
+- the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`) — root's health monitor revives it on death
 """
 
 # ── Dispatch semantics (single source of truth) ──

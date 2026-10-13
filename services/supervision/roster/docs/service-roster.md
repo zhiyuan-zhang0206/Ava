@@ -4,12 +4,12 @@ An absent plugin `services.py` is optional. A present face with an import,
 configuration, declaration or gate error reports and aborts roster evaluation;
 it never produces a partial-success roster or enables a service by failing open.
 
-`ops.roster.build_services()` owns the applicable service specifications. The
+`services.supervision.roster.build_services()` owns the applicable service specifications. The
 sentinel table below is a readable inventory checked against that registration
 by `scripts/content_lint/lint_doc_roster.py` in both directions. Native custody
-and readiness belong to [Ava Root](../../services/supervision/ava_root/docs/ava_root.ava.okf.md),
-[host lifecycle](../../cli/commands/lifecycle/docs/lifecycle.ava.okf.md) and
-[the service domain](../../services/docs/services.ava.okf.md).
+and readiness belong to [Ava Root](../../../../services/supervision/ava_root/docs/ava_root.ava.okf.md),
+[host lifecycle](../../../../cli/commands/lifecycle/docs/lifecycle.ava.okf.md) and
+[the service domain](../../../../services/docs/services.ava.okf.md).
 
 <!-- lint:roster-table -->
 | Service (suffix)         | Runs                                     | Healthcheck |

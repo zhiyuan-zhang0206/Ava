@@ -23,7 +23,7 @@ from cli.commands.lifecycle import start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
-from ops.roster.service_spec import GATEWAY, ServiceSpec
+from services.supervision.roster.service_spec import GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -56,7 +56,8 @@ def _roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None],
         for name, reason in rows
     )
     monkeypatch.setattr(
-        "ops.spec.services_for_capabilities_annotated", _ignoring_args(lambda: specs)
+        "services.supervision.roster.spec.services_for_capabilities_annotated",
+        _ignoring_args(lambda: specs),
     )
 
     def selected(

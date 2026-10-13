@@ -2,9 +2,9 @@
 
 Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services module;
 ``plugin_services()`` discovers the code-present plugins and returns what they declare, and
-``ops.roster.build_services()`` appends it to the core roster: the plugin declares, ops discovers.
+``services.supervision.roster.build_services()`` appends it to the core roster: the plugin declares, ops discovers.
 Each plugin service's own ``ServiceSpec.gate`` keeps cluster-level enablement out of
-``ops.spec._gate_reason``. The fleet task daemon follows this path; see
+``services.supervision.roster.spec._gate_reason``. The fleet task daemon follows this path; see
 ``docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md``.
 """
 
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import cast
 
-from ops.roster.service_spec import ServiceSpec
+from services.supervision.roster.service_spec import ServiceSpec
 
 
 def plugin_services() -> tuple[ServiceSpec, ...]:

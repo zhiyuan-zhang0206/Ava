@@ -9,7 +9,7 @@ import pytest
 import cli.commands.probe as _probe_commands
 from base import telemetry
 from cli.commands.lifecycle import start as start_commands
-from ops.roster.service_spec import GATEWAY, ServiceSpec
+from services.supervision.roster.service_spec import GATEWAY, ServiceSpec
 
 
 def _spec(session: str) -> ServiceSpec:

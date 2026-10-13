@@ -405,7 +405,7 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   service-memory audit is in progress, and this page makes no reduction plan until it
   reports.
 - **Cost of splitting into services: onboarding.** Adding a service today means
-  editing `ops/roster/__init__.py`, `base/host/env/port_table.py` and
+  editing `services/supervision/roster/__init__.py`, `base/host/env/port_table.py` and
   `base/cluster/ports.py`, plus a health-check module under `services/supervision/healthchecks/`
   with its documentation and tests. A declarative roster could remove most of that
   boilerplate; it is not designed.

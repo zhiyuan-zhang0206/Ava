@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 
 from cli.commands.lifecycle import root_driver
-from ops.roster.service_spec import AGENT_RUNNER, ServiceSpec
 from services.supervision.ava_root.manifest import load_manifests
 from services.supervision.ava_root_glue.manifests import generate
+from services.supervision.roster.service_spec import AGENT_RUNNER, ServiceSpec
 
 
 def test_root_manifest_projects_runner_url_for_agent_profile(

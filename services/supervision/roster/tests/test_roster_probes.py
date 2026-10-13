@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 import pytest
 
-from ops import roster
+from services.supervision import roster
 
 
 @pytest.mark.parametrize("service", ["gateway", "browser", "task-maintenance"])
@@ -24,7 +24,7 @@ def test_roster_uses_healthy_protocol_without_native_listener_proof(
 
     monkeypatch.setattr(roster, "probe_home", healthy)
     monkeypatch.setattr(roster, "_browser_probe", healthy)
-    monkeypatch.setattr("ops.roster.healthz.probe_daemon", healthy)
+    monkeypatch.setattr("services.supervision.roster.healthz.probe_daemon", healthy)
 
     def identity(*_args: object) -> Callable[[], DaemonProbe]:
         return healthy

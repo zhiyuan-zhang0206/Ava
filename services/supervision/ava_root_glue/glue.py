@@ -27,7 +27,6 @@ from base.deploy.progress_timeout import (
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import build_pipeline
-from ops.roster import build_services
 from services.supervision.ava_root.health import HealthConfig, HealthMonitor
 from services.supervision.ava_root.probes import ProbeError, ProbeRegistry
 from services.supervision.ava_root.selfcheck import SelfCheckConfig, TreeSelfCheck
@@ -37,6 +36,7 @@ from services.supervision.ava_root_glue.diagnostics import (
     DiagnosticMonitor,
     RootHealthRounds,
 )
+from services.supervision.roster import build_services
 
 STATIC_PROBES: Mapping[str, str] = MappingProxyType({})
 """Spec-less unit id -> `"module:attribute"` probe reference.

@@ -44,7 +44,7 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 from cli.commands.probe import ReadinessWait
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
-from ops.roster.service_spec import AGENT_RUNNER, GATEWAY, ServiceSpec
+from services.supervision.roster.service_spec import AGENT_RUNNER, GATEWAY, ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -219,7 +219,9 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
         del roles
         return tuple(spec for spec in specs if spec.session not in skip)
 
-    monkeypatch.setattr("ops.spec.services_for_capabilities_annotated", annotated_roster)
+    monkeypatch.setattr(
+        "services.supervision.roster.spec.services_for_capabilities_annotated", annotated_roster
+    )
     monkeypatch.setattr(_root_driver_commands, "start_roster", start_roster)
 
     def launch(roster: tuple[ServiceSpec, ...], *_a: object, **_kw: object) -> LaunchOutcome:

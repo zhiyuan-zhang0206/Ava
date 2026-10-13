@@ -110,7 +110,7 @@ def test_off_only_backend_allowlist_does_not_enable_all_services(
         monkeypatch, tmp_path, ServiceSelection("only", frozenset(lgtm.BACKENDS))
     )
     monkeypatch.setattr(
-        "ops.roster.build_services",
+        "services.supervision.roster.build_services",
         lambda: tuple(
             SimpleNamespace(session=n) for n in ("gateway", "loki", "prometheus", "grafana")
         ),

@@ -36,7 +36,7 @@ per-machine daemon (the `services/desktop/computer` module family: `mcp_daemon.p
 removed 2026-08-10. Agents have identical OS permissions; permission division
 is a peer convention. The gateway/user entry point owns the security boundary.
 
-The only gate left is **platform capability** (`ops/spec.py`
+The only gate left is **platform capability** (`services/supervision/roster/spec.py`
 `_computer_mcp_gate_reason`): the service joins the agent-runner roster only
 when the signed permissions helper is enabled and reports capable. The
 healthcheck (`services.supervision.healthchecks.computer_mcp`) probes it every

@@ -9,14 +9,14 @@ import pytest
 
 from base.cluster.machine import MachineRole
 from base.config import settings
+from services.supervision.ava_root.manifest import ManifestError, load_manifests
+from services.supervision.ava_root.supervisor import SupervisorConfig
+from services.supervision.ava_root_glue import manifests as gen
 
 # The capability constants are typed frozenset[MachineRole]; capability values
 # are irrelevant to the roster-driven assertions here (same precedent as
 # cli/commands/cluster/tests/test_cluster_health.py).
-from ops.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
-from services.supervision.ava_root.manifest import ManifestError, load_manifests
-from services.supervision.ava_root.supervisor import SupervisorConfig
-from services.supervision.ava_root_glue import manifests as gen
+from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
 
 _REPO = Path("/checkout/repo")
 
@@ -27,7 +27,7 @@ def _declared_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     from base import paths
     from base.packages.plugins.enable_config import update_all_disk_images
     from base.telemetry.lgtm_local import BACKENDS, service_input_paths
-    from ops import roster
+    from services.supervision import roster
 
     tmp_path = tmp_path.resolve()
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
@@ -190,7 +190,7 @@ def test_declared_shutdown_ceiling_becomes_root_window_and_undeclared_keeps_the_
 
 def test_every_roster_unit_gets_a_window_strictly_above_its_declared_ceiling() -> None:
     """Root never waits for a unit less long than the unit's own cleanup may take."""
-    from ops.roster import build_services
+    from services.supervision.roster import build_services
 
     default_window = SupervisorConfig().stop_timeout_s
     units = _real_units()

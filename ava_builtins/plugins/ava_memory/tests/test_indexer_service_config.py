@@ -15,9 +15,9 @@ from base.packages.plugins.config_registration import (
     disk_image_path,
 )
 from base.packages.plugins.enable_config import update_all_disk_images
-from ops.roster import plugin_services as roster_plugins
 from services.supervision.ava_root.inputs import InputChangedError, InputSeal
 from services.supervision.ava_root_glue.manifests import build_units
+from services.supervision.roster import plugin_services as roster_plugins
 
 
 @pytest.fixture

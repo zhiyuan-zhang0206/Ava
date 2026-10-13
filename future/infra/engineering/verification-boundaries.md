@@ -185,7 +185,7 @@ outcome, so a partial result keeps its evidence:
 |---|---|
 | `toolchain` | Redis is on the approved 8.2 series, PostgreSQL is 17 with pgvector installed; records the versions of PostgreSQL, Redis, PgBouncer, Node, uv and Python |
 | `source` | the checkout is at the named commit with no changed or untracked file (so no build step dirtied a tracked file) |
-| `services` | gateway, frontend, ops and agent-host answer their identity probes (`ops.roster`) |
+| `services` | gateway, frontend, ops and agent-host answer their identity probes (`services.supervision.roster`) |
 | `frontend` | the app port answers 2xx over HTTP |
 | `cors` | the gateway answers the frontend's exact origin with credentials allowed and `authenticated: true` |
 | `scripted_agent` | an agent created through the gateway executed `print(1 + 2)` through the real agent host and its recorded output body is exactly `3` |

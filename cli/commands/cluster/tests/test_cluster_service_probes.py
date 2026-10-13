@@ -34,7 +34,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
 
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
-    from ops.roster.service_spec import ServiceSpec
+    from services.supervision.roster.service_spec import ServiceSpec
 
     # requires_db is irrelevant here (no watchdog round involved), so it is uniform.
     def _spec(session: str) -> ServiceSpec:
@@ -61,7 +61,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
         )
 
     monkeypatch.setattr(
-        "ops.spec.services_for_capabilities_annotated",
+        "services.supervision.roster.spec.services_for_capabilities_annotated",
         fake_services_for_capabilities_annotated,
     )
 
@@ -89,7 +89,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
-    import ops.roster.service_spec as _service_spec
+    import services.supervision.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -103,7 +103,10 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
         assert isinstance(_machine, MachineIdentity)
         return tmp_home
 
-    monkeypatch.setattr("ops.spec.gateway_observability_home", fake_gateway_observability_home)
+    monkeypatch.setattr(
+        "services.supervision.roster.spec.gateway_observability_home",
+        fake_gateway_observability_home,
+    )
 
     def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
         recorded_sessions.append(spec.session)
@@ -127,7 +130,7 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
 
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
-    import ops.roster.service_spec as _service_spec
+    import services.supervision.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -141,7 +144,10 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
         assert isinstance(_machine, MachineIdentity)
         return tmp_home
 
-    monkeypatch.setattr("ops.spec.gateway_observability_home", fake_gateway_observability_home)
+    monkeypatch.setattr(
+        "services.supervision.roster.spec.gateway_observability_home",
+        fake_gateway_observability_home,
+    )
 
     def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
         recorded_sessions.append(spec.session)
@@ -165,7 +171,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
 
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
-    import ops.roster.service_spec as _service_spec
+    import services.supervision.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -179,7 +185,10 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
         assert isinstance(_machine, MachineIdentity)
         return tmp_home
 
-    monkeypatch.setattr("ops.spec.gateway_observability_home", fake_gateway_observability_home)
+    monkeypatch.setattr(
+        "services.supervision.roster.spec.gateway_observability_home",
+        fake_gateway_observability_home,
+    )
 
     def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
         recorded_sessions.append(spec.session)
@@ -202,7 +211,7 @@ def test_service_probes_carry_the_failing_fact(
 
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
-    from ops.roster.service_spec import ServiceSpec
+    from services.supervision.roster.service_spec import ServiceSpec
 
     spec = ServiceSpec(
         session="ops", cmd="x", capabilities=frozenset({"gateway"}), requires_db=True
@@ -216,7 +225,7 @@ def test_service_probes_carry_the_failing_fact(
         return ((spec, None),)
 
     monkeypatch.setattr(
-        "ops.spec.services_for_capabilities_annotated",
+        "services.supervision.roster.spec.services_for_capabilities_annotated",
         fake_services_for_capabilities_annotated,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
@@ -263,7 +272,7 @@ def test_service_probes_respect_durable_service_intent(
 
     import cli.commands._repo as _repo_commands
     import cli.commands.probe as _probe_commands
-    import ops.roster.service_spec as _service_spec
+    import services.supervision.roster.service_spec as _service_spec
     from base.deploy.lifecycle import service_selection
 
     wanted = _service_spec.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)
@@ -280,7 +289,9 @@ def test_service_probes_respect_durable_service_intent(
         return _probe_commands.ServiceProbe(True, "owned", "ready")
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    monkeypatch.setattr("ops.spec.services_for_capabilities_annotated", roster)
+    monkeypatch.setattr(
+        "services.supervision.roster.spec.services_for_capabilities_annotated", roster
+    )
     monkeypatch.setattr(_probe_commands, "probe_service", probe)
     monkeypatch.setattr(
         service_selection,
