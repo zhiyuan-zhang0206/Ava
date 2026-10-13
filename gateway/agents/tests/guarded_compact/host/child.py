@@ -21,7 +21,7 @@ from base.telemetry import process_name
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.invocation.compact import execute as compact_execute
 from services.agent_runner.agent_host.invocation.compact import lifecycle as compact_lifecycle
-from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel, make_host
+from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel, make_host
 
 
 async def park(stage: str, model: SummaryModel) -> None:
