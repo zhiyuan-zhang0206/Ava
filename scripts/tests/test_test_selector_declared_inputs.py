@@ -151,3 +151,49 @@ def test_an_invalid_policy_fails_fast(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"meizel\.policy\.toml is invalid"):
         _select(root, "base/leaf.py")
+
+
+def test_markdown_is_not_a_data_change(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _write(root, "tests/support/helper.py", "def load(path):\n    return path.read_text()\n")
+    _write(root, "base/NOTES.md", "notes\n")
+
+    result = _select(root, "base/leaf.py", "base/NOTES.md")
+
+    assert result.decision == "SELECTED", result.as_json()
+    assert "tests/consumer/test_helper.py" not in result.tests
+    assert result.diagnostics == ()
+
+
+@pytest.mark.parametrize(
+    ("changed", "reader", "needle"),
+    [
+        ("base/skills/demo/SKILL.md", "tests/consumer/test_skill_reader.py", "SKILL.md"),
+        ("base/docs/base.ava.okf.md", "tests/consumer/test_okf_reader.py", "*.ava.okf.md"),
+    ],
+)
+def test_known_readers_of_skills_and_okf_documents_are_pinned(
+    tmp_path: Path, changed: str, reader: str, needle: str
+) -> None:
+    root = _repo(tmp_path)
+    _write(root, "base/skills/demo/SKILL.md", "---\n---\n")
+    _write(root, "base/docs/base.ava.okf.md", "okf\n")
+    _write(root, "base/NOTES.md", "notes\n")
+    _write(root, reader, f"PATTERN = {needle!r}\n")
+    _write(
+        root,
+        "tests/consumer/test_mentions_only.py",
+        f'"""Mentions {needle} in prose only."""\n',
+    )
+    durations = json.loads((root / ".test_durations").read_text())
+    durations[f"{reader}::test_x"] = 1
+    durations["tests/consumer/test_mentions_only.py::test_x"] = 1
+    _write(root, ".test_durations", json.dumps(durations))
+
+    result = _select(root, "base/leaf.py", changed)
+    unrelated = _select(root, "base/leaf.py", "base/NOTES.md")
+
+    assert result.decision == "SELECTED", result.as_json()
+    assert reader in result.tests  # pinned though nothing imports it
+    assert "tests/consumer/test_mentions_only.py" not in result.tests  # a docstring reads nothing
+    assert reader not in unrelated.tests
