@@ -126,5 +126,10 @@ be automatically dispatched. See
 `GET /api/alerts?window=1h|6h|24h|7d&status=&severity=&limit=`
 → `{alerts: [row...], meta: {window, total, unresolved_count}}`, ordered
 `(status = 'unresolved') DESC, starts_at DESC`. `unresolved_count` backs the
-top-bar badge (same window/severity scope, 0 when scoped to resolved). GET and
+top-bar badge (all unresolved instances in the severity scope, 0 when scoped to resolved).
+Unresolved instances never age out. The window limits resolved history by
+`ends_at` (falling back to `starts_at` for legacy rows without a recovery time).
+SSE frames invalidate the frontend's alert snapshots: the API owns exact counts
+and ordering even when a page is capped or an updated instance is absent from it.
+GET and
 stream sit behind the normal session/Bearer middleware (the UI + SDK).

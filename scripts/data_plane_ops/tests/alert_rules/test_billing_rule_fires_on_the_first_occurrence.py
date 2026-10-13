@@ -135,6 +135,10 @@ def test_disk_watermark_rule_excludes_non_asset_mounts(uid: str) -> None:
     rules = {r["uid"]: r for r in _load_rules()}
     expr = _exprs(rules[uid], "prometheus")[0]
     assert 'mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"' in expr
+    # Read-only installer ISOs can mount under /Users, outside the path exclusion.
+    assert 'mode!="ro"' in expr
+    assert 'type!~"iso9660|udf|cd9660"' in expr
+    assert "WindowsRunner" not in expr  # filesystem metadata, never a machine-specific path
     # the grouping contract survives the matcher: still per-machine, per-mount
     assert "by (machine_name, mountpoint)" in expr
 

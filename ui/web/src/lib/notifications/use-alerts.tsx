@@ -5,9 +5,9 @@
 // IM channel.
 //
 // One profile-shared stream to /api/alerts/stream feeds the TanStack Query ["alerts"]
-// prefix: every frame (one AlertRow JSON per ingest) folds into every
-// matching cache (the badge query with default params, the section query
-// cache) — no polling for SSE-backed data (frontend AGENTS.md state rule).
+// prefix: every frame invalidates matching snapshots — no polling for
+// SSE-backed data (frontend AGENTS.md state rule). The server owns filters,
+// ordering and uncapped counts; a capped page cannot derive count deltas.
 // The initial GET /api/alerts is the fetch fallback for rows
 // ingested before the subscription opened.
 //
@@ -17,8 +17,8 @@
 // with a valid session reconnects with capped backoff, and an expired session
 // stays closed. Hidden pages close the stream and reconcile their active reads on return.
 //
-// Cache shape: AlertsResponse (alerts + meta.unresolved_count). Frames upsert
-// by row id and apply unresolved-count deltas.
+// Cache shape: AlertsResponse (alerts + meta.unresolved_count). TanStack Query
+// re-reads active observers and marks inactive history snapshots stale.
 
 import {
   useCallback,
@@ -71,36 +71,6 @@ function isAlertRow(raw: unknown): raw is Alert {
   );
 }
 
-/** Fold one SSE frame into an existing cache: upsert by id and apply the
- *  unresolved-count delta so the badge stays exact. */
-export function foldAlert(prev: AlertsResponse | undefined, row: Alert): AlertsResponse {
-  if (!prev) {
-    return {
-      alerts: [row],
-      meta: {
-        window: "24h",
-        total: 1,
-        unresolved_count: row.status === "unresolved" ? 1 : 0,
-      },
-    };
-  }
-  const existing = prev.alerts.find((a) => a.id === row.id);
-  const alerts = existing
-    ? prev.alerts.map((a) => (a.id === row.id ? row : a))
-    : [row, ...prev.alerts].slice(0, 200);
-  let unresolved = prev.meta.unresolved_count;
-  if (existing) {
-    if (existing.status === "resolved" && row.status === "unresolved") unresolved += 1;
-    if (existing.status === "unresolved" && row.status === "resolved") unresolved -= 1;
-  } else {
-    if (row.status === "unresolved") unresolved += 1;
-  }
-  return {
-    alerts,
-    meta: { ...prev.meta, unresolved_count: Math.max(0, unresolved) },
-  };
-}
-
 export function AlertsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { status: authStatus } = useAuth();
@@ -109,6 +79,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
   useQuery<AlertsResponse>({
     queryKey: ALERTS_QUERY_KEY,
     queryFn: () => api.getAlerts({}),
+    enabled: authStatus === "authenticated",
     refetchOnWindowFocus: false,
     staleTime: Infinity,
   });
@@ -151,7 +122,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
       onInvalidSession: notifySessionInvalid,
     });
 
-    const foldFrame = (raw: string) => {
+    const reconcileFrame = (raw: string) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
@@ -166,12 +137,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (isHeartbeat(parsed) || !isAlertRow(parsed)) return;
-      // Fold into every ["alerts", ...] cache (the badge query and the
-      // section query — prefix match keeps one writer per cache).
-      const caches = queryClient.getQueryCache().findAll({ queryKey: ALERTS_QUERY_KEY });
-      for (const cache of caches) {
-        queryClient.setQueryData<AlertsResponse>(cache.queryKey, (old) => foldAlert(old, parsed));
-      }
+      void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY });
     };
 
     const handleOpen = () => {
@@ -187,7 +153,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
       if (lifecycle.isDisposed()) return;
       lifecycle.armWatchdog();
       if (!raw) return;
-      foldFrame(raw);
+      reconcileFrame(raw);
     };
     if (transport) {
       const unsubscribe = transport.subscribe("alerts", {

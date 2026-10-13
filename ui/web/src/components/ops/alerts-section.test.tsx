@@ -6,7 +6,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AlertsSection from "@/components/ops/alerts-section";
-import { api } from "@/lib/transport/api";
+import { API_BASE, api } from "@/lib/transport/api";
 import type { AlertsResponse } from "@/lib/contracts/types";
 
 afterEach(cleanup);
@@ -76,6 +76,7 @@ describe("AlertsSection", () => {
     wrap(<AlertsSection />);
     await waitFor(() => screen.getByTestId("alert-row-7"));
     expect(screen.getByText("cluster health")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Alert rules" }).getAttribute("href")).toBe(`${API_BASE}/grafana/alerting/list`);
     expect(screen.getByText("gateway down")).toBeTruthy();
     expect(screen.getAllByText("error")).toHaveLength(2);
     expect(screen.getByText("unresolved")).toBeTruthy();
@@ -94,7 +95,7 @@ describe("AlertsSection", () => {
   it("shows the empty state when there are no alerts", async () => {
     vi.spyOn(api, "getAlerts").mockResolvedValue(response());
     wrap(<AlertsSection />);
-    await waitFor(() => screen.getByText(/No alerts in the last 24h/));
+    await waitFor(() => screen.getByText(/No active alerts or recoveries in the last 24h/));
   });
 
   it("renders a no-horizontal-scroll layout: fixed table, wrapping detail cell, responsive columns (task #1960)", async () => {
