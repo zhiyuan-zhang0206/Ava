@@ -186,6 +186,33 @@ def _pending_reason(result: CIResult) -> str:
     )
 
 
+def _drop_unexpanded_cancellations(checks: list[dict]) -> list[dict]:
+    """Drop the CANCELLED entries a run leaves when it is cut down before its jobs are named.
+
+    A run killed in the cancel-in-progress race leaves check entries whose `name` is still the
+    raw template — `backend shard (${{ matrix.group }}/16)`, `e2e shard (${{ matrix.group }}/4)`.
+    GitHub expands `${{ ... }}` when it creates the job, so a name that still holds the expression
+    proves no job was ever created under it: the entry names no schedulable work, and no rerun can
+    ever repeat that literal name (every successor run expands the matrix). Judged like a normal
+    check it is a permanent red that nothing can clear — the poison that froze heads through this
+    shared surface (2026-10-12, PR #5262: run 38272499220 was cancelled pre-expansion; its 22
+    named CANCELLED checks all had same-named successor successes, but its two template-named
+    shard checks had no successor of any kind, so the head read FAILED while the successor run
+    38272500006 was fully green).
+
+    Deliberately name-level and CANCELLED-only. A concrete-named CANCELLED check is NOT dropped,
+    even when no same-named successor exists: that job was real, its result is missing, and a
+    rerun settles that very name — "not run" must never read as green. Another conclusion
+    (FAILURE, TIMED_OUT, ...) on an unexpanded name keeps its red for the same reason: only the
+    cancellation race produces never-created jobs, and widening the drop would hide real failures.
+    """
+    return [
+        c
+        for c in checks
+        if not (c.get("conclusion") == "CANCELLED" and "${{" in str(c.get("name") or ""))
+    ]
+
+
 def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
     """Keep the newest COMPLETED check run per name.
     GitHub lists every check run on a commit, but branch protection and the required-status UI
@@ -575,7 +602,10 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     draft gating skipped the suite, so there is no CI evidence either way.
 
     The key rule: only COMPLETED checks are evaluated.  Checks that are QUEUED / IN_PROGRESS /
-    PENDING are correctly identified as such and do NOT trigger a FAILED verdict.
+    PENDING are correctly identified as such and do NOT trigger a FAILED verdict.  Dropped before
+    that rule: a CANCELLED check whose name still holds a raw `${{ ... }}` template — a run
+    cancelled before its jobs were named — which no rerun can ever repeat and which therefore can
+    never become evidence either way (`_drop_unexpanded_cancellations`).
     """
     pr_num = str(pr_number)
     result = CIResult(verdict=CIStatus.ERROR)
@@ -613,7 +643,12 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
         return _merge_conflict_result(data, result)
 
     # --- CI check evaluation ---
-    checks = _latest_completed_per_name(data.get("statusCheckRollup", []))
+    # Pre-expansion cancellation artifacts are dropped before any judging: a run cancelled before
+    # matrix expansion leaves CANCELLED entries whose names are still raw templates, which no
+    # rerun can ever satisfy (see `_drop_unexpanded_cancellations`).
+    checks = _latest_completed_per_name(
+        _drop_unexpanded_cancellations(data.get("statusCheckRollup", []))
+    )
     result.checks = checks
 
     if not checks:
