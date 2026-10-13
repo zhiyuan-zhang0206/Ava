@@ -1,0 +1,5 @@
+exports = ["fakes.py", "health_support.py"]
+
+[uses]
+"test_health.py" = ["_health_helpers.py", "health_support.py"]
+"test_health_probe.py" = ["_health_helpers.py", "health_support.py"]

@@ -1,0 +1,22 @@
+exports = ["allowlist.py"]
+
+[uses]
+"__init__.py" = ["allowlist.py", "bundle.py", "busrule.py", "clockrule.py", "dbhandle.py", "endpointrule.py", "scan.py", "sliced.py"]
+"allowlist.py" = ["roots.py"]
+"bundle.py" = ["scan.py"]
+"busrule.py" = ["rootrule.py"]
+"clockrule.py" = ["rootrule.py"]
+"dbhandle.py" = ["allowlist.py", "scan.py"]
+"endpointrule.py" = ["rootrule.py"]
+"handle_ratchet.py" = ["__init__.py", "busrule.py", "dbhandle.py"]
+"owner_method.py" = ["module.py"]
+"rootrule.py" = ["allowlist.py", "scan.py"]
+"scan.py" = ["allowlist.py", "module.py", "task_owner.py", "thread_owner.py"]
+"sliced.py" = ["allowlist.py", "scan.py"]
+"task_owner.py" = ["module.py", "owner_method.py", "task_owner_span.py"]
+"task_owner_span.py" = ["module.py", "owner_method.py"]
+"tests" = ["__init__.py", "allowlist.py", "bundle.py", "busrule.py", "dbhandle.py", "handle_ratchet.py", "owner_method.py", "roots.py"]
+"thread_owner.py" = ["module.py", "owner_method.py"]
+
+[debt.private-name]
+"tests/test_handle_ratchet.py -> handle_ratchet.py#_REPO_ROOT" = 2

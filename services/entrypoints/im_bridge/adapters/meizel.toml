@@ -1,0 +1,10 @@
+exports = ["feishu.py", "telegram.py", "tests", "weixin.py"]
+
+[uses]
+"feishu.py" = ["feishu_inbound.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py"]
+"feishu_inbound.py" = ["feishu_poll_cursor.py"]
+"tests" = ["feishu.py", "feishu_ws_proxy.py", "telegram.py", "weixin.py", "weixin_login.py"]
+"weixin_login.py" = ["weixin.py"]
+
+[debt.private-name]
+"tests/test_feishu_adapter.py -> feishu.py#_segment" = 1

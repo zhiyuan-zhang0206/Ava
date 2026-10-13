@@ -1,0 +1,7 @@
+exports = ["diagnostic_probes.py", "manifests.py"]
+
+[uses]
+"diagnostic_probes.py" = ["diagnostics.py"]
+"drill.py" = ["glue.py"]
+"glue.py" = ["diagnostic_probes.py", "diagnostics.py"]
+"tests" = ["diagnostic_probes.py", "diagnostics.py", "drill.py", "glue.py"]

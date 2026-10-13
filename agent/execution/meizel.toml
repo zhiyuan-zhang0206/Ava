@@ -1,2 +1,13 @@
+exports = ["child.py", "domain_owner.py"]
+
+[uses]
+"owner_child.py" = ["child.py"]
+"tests" = ["child.py", "owner_child.py"]
+
 [external]
 "child.py" = "executes the agent-authored code of one execute_code call"
+
+[debt.private-name]
+"tests/test_exec_child_telemetry_delivery.py -> child.py#_deliver_envelope_telemetry" = 1
+"tests/test_exec_child_telemetry_delivery.py -> child.py#_deliver_run_telemetry" = 3
+"tests/test_sampling_shutdown.py -> child.py#_run_code" = 1

@@ -1,0 +1,6 @@
+exports = ["base.py", "factory.py", "gemini.py", "tests"]
+
+[uses]
+"factory.py" = ["base.py", "gemini.py"]
+"gemini.py" = ["base.py"]
+"tests" = ["base.py", "factory.py", "gemini.py"]

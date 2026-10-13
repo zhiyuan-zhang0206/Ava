@@ -1,0 +1,10 @@
+exports = ["host_support.py", "hosted_resources.py", "test_agent_host_shutdown.py", "test_resource_join.py"]
+
+[uses]
+"host_support.py" = ["observation.py"]
+"test_host_pool_isolation.py" = ["host_support.py"]
+"test_policy_inputs.py" = ["host_support.py"]
+"test_settlement_reconciles.py" = ["host_support.py"]
+
+[debt.private-name]
+"test_host_pool_isolation.py -> host_support.py#_FakePool" = 1

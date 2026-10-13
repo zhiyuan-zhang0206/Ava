@@ -1,0 +1,10 @@
+exports = ["test_embeddings.py"]
+
+[uses]
+"embeddings" = ["test_embeddings.py"]
+"test_explicit_inputs.py" = ["test_embeddings.py"]
+
+[debt.private-name]
+"embeddings/test_worst_case_single_attempt_has_no_sleep.py -> test_embeddings.py#_dummy_gemini_key" = 1
+"embeddings/test_worst_case_single_attempt_has_no_sleep.py -> test_embeddings.py#_provider" = 1
+"test_explicit_inputs.py -> test_embeddings.py#_AsyncClient" = 1

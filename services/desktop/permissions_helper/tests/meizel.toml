@@ -1,0 +1,29 @@
+[uses]
+"permissions_helper" = ["test_permissions_helper.py"]
+"test_helper_retirement.py" = ["support.py"]
+"test_native_drag.py" = ["support.py"]
+"test_native_input.py" = ["support.py"]
+"test_native_mouse_hold.py" = ["support.py"]
+
+[debt.private-name]
+"permissions_helper/test_foreign_label_job_bound_to_our_socket.py -> test_permissions_helper.py#_retire_env" = 1
+"permissions_helper/test_foreign_label_job_bound_to_our_socket.py -> test_permissions_helper.py#_write_agent_plist" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_FakeHelper" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_argvs" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_fake_tools" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_is_whitelisted_file_path" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_parse_strings" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_ping_reply" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_read_line" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_sign_command" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_stage_bundle" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_test_dr" = 1
+"permissions_helper/test_root_keeper_method_requests_and_results.py -> test_permissions_helper.py#_write_current_build_state" = 1
+"permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_TEST_CERT_SHA1" = 1
+"permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_argvs" = 1
+"permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_fake_tools" = 1
+"permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_install_env" = 1
+"permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_sign_command" = 1
+"permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_stage_bundle" = 1
+"permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_test_dr" = 1
+"permissions_helper/test_source_content_change_forces_rebuild.py -> test_permissions_helper.py#_write_current_build_state" = 1

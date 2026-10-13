@@ -1,2 +1,10 @@
+exports = ["daemon_shutdown_test_support.py", "test_maintenance_readiness.py"]
+
+[uses]
+"test_backup_scheduler_shutdown.py" = ["daemon_shutdown_test_support.py"]
+
 [loads]
 "daemon_shutdown_test_support.py" = ["services/backup/scheduler"]
+
+[debt.restricted-python]
+"test_maintenance_readiness.py#string patch target 'base.paths.ava_home'" = 1

@@ -1,0 +1,7 @@
+exports = ["background.py", "coding_tools", "sessions.py", "tests"]
+
+[uses]
+"__init__.py" = ["background.py", "sessions.py"]
+"background.py" = ["sessions.py"]
+"coding_tools" = ["sessions.py", "tests"]
+"tests" = ["__init__.py", "background.py", "sessions.py"]

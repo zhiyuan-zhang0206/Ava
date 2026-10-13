@@ -1,0 +1,4 @@
+exports = ["host_deploy_state.py"]
+
+[uses]
+"tests" = ["host_deploy_state.py"]

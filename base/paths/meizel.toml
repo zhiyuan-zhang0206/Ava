@@ -1,0 +1,5 @@
+exports = ["home.py", "private_dir.py"]
+
+[uses]
+"__init__.py" = ["home.py", "private_dir.py"]
+"tests" = ["__init__.py", "home.py", "private_dir.py"]

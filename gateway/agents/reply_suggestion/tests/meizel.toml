@@ -1,0 +1,4 @@
+[uses]
+"test_configuration.py" = ["support.py"]
+"test_router.py" = ["support.py"]
+"test_service.py" = ["support.py"]

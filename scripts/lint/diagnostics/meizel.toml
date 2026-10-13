@@ -1,0 +1,7 @@
+exports = ["logger_add_diagnose.py", "loguru_format.py", "no_emoji.py", "time_bomb.py", "zombie_pyright_ignores.py"]
+
+[uses]
+"tests" = ["logger_add_diagnose.py", "loguru_format.py", "no_emoji.py", "no_silent_failures.py", "time_bomb.py", "zombie_pyright_ignores.py"]
+
+[debt.private-name]
+"tests/test_lint_zombie_pyright_ignores.py -> zombie_pyright_ignores.py#_REPO_ROOT" = 2

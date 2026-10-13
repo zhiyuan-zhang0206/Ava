@@ -1,0 +1,5 @@
+exports = ["runner_inputs.py"]
+
+[uses]
+"test_runner_admission.py" = ["runner_inputs.py"]
+"test_runner_lifecycle.py" = ["runner_inputs.py"]

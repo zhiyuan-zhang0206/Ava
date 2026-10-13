@@ -1,0 +1,5 @@
+exports = ["clients.py", "identity.py"]
+
+[uses]
+"__init__.py" = ["clients.py", "identity.py"]
+"tests" = ["__init__.py", "clients.py", "identity.py"]

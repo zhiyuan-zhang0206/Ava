@@ -1,3 +1,6 @@
+[uses]
+"self_evolution_collect" = ["test_self_evolution_collect.py"]
+
 [loads]
 "test_rss_feed.py" = ["ava_builtins/skills"]
 "test_sms.py" = ["ava_builtins/skills"]

@@ -1,2 +1,19 @@
+exports = ["attach", "call.py", "catalog", "compat", "content.py", "context_budget.py", "decision", "effort.py", "errors.py", "factory.py", "pricing", "provider_api.py", "reasoning.py", "registry.py", "tests", "usage.py"]
+
+[uses]
+"attach" = ["catalog", "factory.py", "provider_api.py"]
+"call.py" = ["effort.py", "errors.py", "factory.py", "usage.py"]
+"catalog" = ["compat", "pricing", "registry.py"]
+"compat" = ["content.py"]
+"context_budget.py" = ["catalog", "registry.py"]
+"decision" = ["catalog", "factory.py", "provider_api.py", "registry.py", "usage.py"]
+"errors.py" = ["catalog", "factory.py"]
+"factory.py" = ["catalog", "effort.py", "provider_api.py", "registry.py"]
+"provider_api.py" = ["catalog", "registry.py"]
+"reasoning.py" = ["content.py"]
+"registry.py" = ["pricing"]
+"tests" = ["attach", "call.py", "catalog", "compat", "context_budget.py", "effort.py", "errors.py", "factory.py", "pricing", "provider_api.py", "reasoning.py", "registry.py", "usage.py"]
+"usage.py" = ["catalog", "content.py", "pricing", "provider_api.py", "reasoning.py"]
+
 [external]
 "factory.py" = "imports the module named by AVA_LLM_OVERRIDE"

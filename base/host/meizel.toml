@@ -1,0 +1,11 @@
+exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "memory_pressure.py", "net", "permissions_helper", "private_storage.py", "proc.py", "resource_sample.py", "runtime_interpreter.py", "system", "verified_file.py"]
+
+[uses]
+"config_validators.py" = ["system"]
+"converge" = ["system"]
+"db_authority" = ["net", "private_storage.py", "verified_file.py"]
+"env" = ["db_authority", "net", "private_storage.py", "proc.py"]
+"git" = ["proc.py"]
+"permissions_helper" = ["converge", "net"]
+"system" = ["__init__.py", "atomic_io.py", "brew_pin.py", "proc.py", "runtime_interpreter.py"]
+"tests" = ["config_validators.py", "env", "private_storage.py", "proc.py", "resource_sample.py"]

@@ -1,0 +1,4 @@
+[uses]
+"daemon" = ["test_daemon.py"]
+"test_dispatch_lifecycle.py" = ["test_daemon.py"]
+"test_native_restart.py" = ["test_request_identity.py"]

@@ -1,2 +1,11 @@
+exports = ["daemon.py", "engine.py", "manager.py", "requests.py", "revisions.py", "runner.py"]
+
+[uses]
+"daemon.py" = ["manager.py", "requests.py"]
+"manager.py" = ["revisions.py"]
+"requests.py" = ["manager.py"]
+"runner.py" = ["engine.py"]
+"tests" = ["manager.py"]
+
 [external]
 "engine.py" = "runs schedule scripts (the one materialized from the database under $AVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"

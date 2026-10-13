@@ -1,0 +1,7 @@
+exports = ["compact.py", "framework.py", "node.py"]
+
+[uses]
+"capabilities.py" = ["compact.py"]
+"framework.py" = ["capabilities.py", "compact.py", "skill_recall.py"]
+"skill_recall.py" = ["compact.py"]
+"tests" = ["capabilities.py", "compact.py", "framework.py", "skill_recall.py"]

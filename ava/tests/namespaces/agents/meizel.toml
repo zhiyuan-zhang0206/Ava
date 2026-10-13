@@ -1,0 +1,2 @@
+[uses]
+"test_work_restart.py" = ["test_work.py"]

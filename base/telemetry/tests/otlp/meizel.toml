@@ -1,0 +1,16 @@
+exports = ["identity_inputs.py"]
+
+[uses]
+"telemetry_otlp" = ["test_telemetry_otlp.py"]
+"test_otlp_worker_lifecycle.py" = ["test_telemetry_otlp.py"]
+"test_telemetry_otlp.py" = ["identity_inputs.py"]
+"test_telemetry_otlp_child_defer.py" = ["identity_inputs.py"]
+"test_telemetry_otlp_endpoint_preflight.py" = ["test_telemetry_otlp.py"]
+
+[debt.private-name]
+"telemetry_otlp/test_backend_init_failure_isolated_and_waits_before.py -> test_telemetry_otlp.py#_bind_telemetry" = 1
+"telemetry_otlp/test_backend_init_failure_isolated_and_waits_before.py -> test_telemetry_otlp.py#_event" = 1
+"telemetry_otlp/test_backend_init_failure_isolated_and_waits_before.py -> test_telemetry_otlp.py#_metrics" = 1
+"telemetry_otlp/test_backend_init_failure_isolated_and_waits_before.py -> test_telemetry_otlp.py#_production_process_by_default" = 1
+"test_otlp_worker_lifecycle.py -> test_telemetry_otlp.py#_event" = 1
+"test_telemetry_otlp_endpoint_preflight.py -> test_telemetry_otlp.py#_production_process_by_default" = 1

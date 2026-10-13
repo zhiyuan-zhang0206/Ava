@@ -1,0 +1,8 @@
+exports = ["inventory.py", "packages.py", "plugin_ui.py", "skills.py", "ui_contributions.py"]
+
+[uses]
+"inventory.py" = ["inventory_matrix.py", "schemas.py"]
+"inventory_matrix.py" = ["schemas.py"]
+"skills.py" = ["schemas.py"]
+"tests" = ["inventory.py", "inventory_matrix.py", "packages.py", "schemas.py", "skills.py"]
+"ui_contributions.py" = ["schemas.py"]

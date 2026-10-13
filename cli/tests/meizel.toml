@@ -1,0 +1,14 @@
+exports = ["bootstrap"]
+
+[uses]
+"_commands_helpers.py" = ["bootstrap"]
+"extensions" = ["bootstrap"]
+"test_cluster_health_parser.py" = ["bootstrap"]
+"test_main_log_init.py" = ["bootstrap"]
+"test_plugin_scaffold.py" = ["bootstrap"]
+"test_start_gate.py" = ["bootstrap"]
+"test_stop_parser.py" = ["bootstrap"]
+"test_unit_capability_cli.py" = ["bootstrap"]
+
+[debt.private-module]
+"test_unit_capability_cli.py -> bootstrap/_init_identity.py" = 1

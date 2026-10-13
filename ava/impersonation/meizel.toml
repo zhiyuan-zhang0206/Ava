@@ -1,6 +1,7 @@
-# Debt, owned by the plugin system review: a bare script that attaches needs the agent
-# kernel's plugin-state codec and state admission check, and `ava` sits below `agent`.
-# This is the only dynamic reference from `ava` to `agent`. It goes away when the
-# plugin system supplies the codec.
+exports = ["attachment.py", "launch.py"]
+
+[uses]
+"__init__.py" = ["attachment.py"]
+
 [loads]
 "attachment.py" = ["agent/extensions"]

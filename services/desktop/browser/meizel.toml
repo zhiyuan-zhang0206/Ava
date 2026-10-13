@@ -1,0 +1,36 @@
+exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py", "probe.py", "profile.py", "protocol.py", "shutdown_budget.py"]
+
+[uses]
+"daemon.py" = ["macos_readiness.py", "probe.py", "profile.py"]
+"gateway_session.py" = ["mcp_upstream.py", "session.py"]
+"mcp_daemon.py" = ["gateway_session.py", "mcp_upstream.py", "page_lifecycle.py", "protocol.py", "tab_groups"]
+"mcp_socket_bridge.py" = ["protocol.py"]
+"mcp_upstream.py" = ["shutdown_budget.py"]
+"mcp_wrapper.py" = ["mcp_socket_bridge.py"]
+"orphan.py" = ["profile.py"]
+"page_lifecycle.py" = ["protocol.py"]
+"probe.py" = ["macos_readiness.py", "orphan.py", "profile.py"]
+"tab_groups" = ["session.py"]
+"tests" = ["daemon.py", "gateway_session.py", "macos_readiness.py", "mcp_daemon.py", "mcp_upstream.py", "orphan.py", "page_lifecycle.py", "probe.py", "profile.py", "session.py", "tab_groups"]
+
+[debt.private-name]
+"gateway_session.py -> mcp_upstream.py#_await_stop_or_timeout" = 1
+"mcp_daemon.py -> mcp_upstream.py#_StoppingError" = 1
+"mcp_daemon.py -> mcp_upstream.py#_await_stop_or_timeout" = 1
+"mcp_daemon.py -> mcp_upstream.py#_bounded" = 1
+"mcp_daemon.py -> mcp_upstream.py#_bounded_stack_close" = 1
+"mcp_daemon.py -> mcp_upstream.py#_create_upstream" = 1
+"mcp_daemon.py -> page_lifecycle.py#_text_of" = 1
+"tests/browser_mcp_daemon/test_handle_client_renew_page_wire_roundtrip.py -> mcp_daemon.py#_handle_client" = 1
+"tests/browser_mcp_daemon/test_parse_page_listing_tolerates_titled_and_suffix.py -> mcp_daemon.py#_text_of" = 1
+"tests/test_browser_daemon.py -> daemon.py#_launch" = 1
+"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_handle_client" = 1
+"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_no_page_result" = 1
+"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_selected_id" = 1
+"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_socket_in_use" = 2
+"tests/test_browser_mcp_daemon.py -> mcp_daemon.py#_text_of" = 1
+"tests/test_browser_mcp_daemon_stop.py -> mcp_daemon.py#_create_upstream" = 1
+"tests/test_browser_mcp_daemon_stop.py -> mcp_daemon.py#_socket_in_use" = 1
+"tests/test_browser_session.py -> gateway_session.py#_await_stop_or_timeout" = 1
+"tests/test_mcp_upstream_timeout.py -> mcp_upstream.py#_StoppingError" = 1
+"tests/test_mcp_upstream_timeout.py -> mcp_upstream.py#_create_upstream" = 1

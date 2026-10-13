@@ -1,0 +1,14 @@
+exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record.py", "env_forwarding.py", "helper_chain_guard.py", "helperproc.py", "hosting.py", "log_prefix.py", "page_session.py", "posixproc.py", "protocol.py", "pty", "record.py"]
+
+[uses]
+"backend.py" = ["env_forwarding.py", "helperproc.py", "posixproc.py", "protocol.py", "pty", "record.py"]
+"coding_session_owner.py" = ["backend.py", "coding_session_owner_record.py"]
+"helperproc.py" = ["env_forwarding.py", "protocol.py", "record.py"]
+"hosting.py" = ["pty", "record.py"]
+"posixproc.py" = ["record.py"]
+"protocol.py" = ["record.py"]
+"pty" = ["record.py"]
+"tests" = ["backend.py", "coding_session_owner.py", "coding_session_owner_record.py", "env_forwarding.py", "hosting.py", "log_prefix.py", "posixproc.py", "protocol.py", "pty", "record.py"]
+
+[debt.private-name]
+"tests/test_coding_session_owner.py -> coding_session_owner_record.py#_payload" = 1

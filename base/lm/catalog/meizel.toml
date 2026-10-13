@@ -1,0 +1,5 @@
+exports = ["decide", "provider_contract.py"]
+
+[uses]
+"__init__.py" = ["decide", "provider_contract.py"]
+"provider_contract.py" = ["decide"]

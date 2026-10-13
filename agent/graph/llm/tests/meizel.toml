@@ -1,0 +1,4 @@
+exports = ["cancel_fixture.py"]
+
+[uses]
+"conftest.py" = ["cancel_fixture.py"]

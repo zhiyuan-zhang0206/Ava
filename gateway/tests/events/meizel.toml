@@ -1,0 +1,5 @@
+exports = ["test_notices_endpoint.py"]
+
+[uses]
+"test_notices_resolve_history_live.py" = ["test_notices_endpoint.py"]
+"test_weixin_ingress_command_http.py" = ["test_notices_endpoint.py"]

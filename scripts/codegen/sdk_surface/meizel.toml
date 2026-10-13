@@ -1,0 +1,4 @@
+exports = ["contracts.py"]
+
+[uses]
+"tests" = ["contracts.py"]

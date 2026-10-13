@@ -1,0 +1,14 @@
+exports = ["daemon.py", "shells.py"]
+
+[uses]
+"daemon.py" = ["remote.py", "shells.py", "sweep.py"]
+"remote.py" = ["shells.py"]
+"shells.py" = ["owner_notice.py"]
+"sweep.py" = ["cadence.py", "lifecycle_fences.py", "owner_notice.py"]
+"tests" = ["cadence.py", "daemon.py", "lifecycle_fences.py", "remote.py", "shells.py", "sweep.py"]
+
+[debt.private-name]
+"sweep.py -> lifecycle_fences.py#_scan_stuck_lifecycle_pointers_blocking" = 1
+"tests/test_loops.py -> daemon.py#_run_loops" = 3
+"tests/test_loops.py -> sweep.py#_scan_stuck_lifecycle_pointers_blocking" = 1
+"tests/test_sweep.py -> lifecycle_fences.py#_scan_stuck_lifecycle_pointers_blocking" = 4

@@ -1,0 +1,8 @@
+exports = ["test_mcp_endpoint.py"]
+
+[uses]
+"test_mcp_guarded_creation.py" = ["test_mcp_endpoint.py"]
+"test_mcp_message_source.py" = ["test_mcp_endpoint.py"]
+
+[debt.private-name]
+"test_mcp_guarded_creation.py -> test_mcp_endpoint.py#_enable_endpoint" = 1

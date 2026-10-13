@@ -1,0 +1,6 @@
+exports = ["models.py", "paths.py", "source.py", "storage.py"]
+
+[uses]
+"models.py" = ["paths.py"]
+"source.py" = ["models.py", "paths.py", "storage.py"]
+"storage.py" = ["models.py"]

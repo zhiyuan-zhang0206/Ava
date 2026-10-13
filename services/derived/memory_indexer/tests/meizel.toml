@@ -1,0 +1,4 @@
+exports = ["fake_provider.py"]
+
+[uses]
+"test_memory_indexer_config.py" = ["fake_provider.py"]

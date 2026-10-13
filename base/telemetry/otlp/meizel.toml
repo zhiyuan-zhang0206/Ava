@@ -1,0 +1,6 @@
+exports = ["telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_metrics.py", "telemetry_otlp_worker.py", "tests", "trace_workers.py"]
+
+[uses]
+"telemetry_otlp.py" = ["telemetry_otlp_defer.py", "telemetry_otlp_gauges.py", "telemetry_otlp_logs.py", "telemetry_otlp_metrics.py", "telemetry_otlp_worker.py"]
+"telemetry_otlp_worker.py" = ["telemetry_otlp_barrier.py"]
+"tests" = ["telemetry_otlp.py"]

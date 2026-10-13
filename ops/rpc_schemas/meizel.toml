@@ -1,0 +1,6 @@
+exports = ["content.py", "terminate.py"]
+
+[uses]
+"__init__.py" = ["content.py", "messages.py", "terminate.py"]
+"terminate.py" = ["content.py"]
+"tests" = ["__init__.py"]

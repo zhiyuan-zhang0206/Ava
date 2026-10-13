@@ -1,2 +1,12 @@
+exports = ["contract.py", "declarations", "live", "reads", "scan_kinds.py", "tests"]
+
+[uses]
+"__init__.py" = ["contract.py"]
+"contract.py" = ["loader.py", "vocabulary.py"]
+"declarations" = ["vocabulary.py"]
+"loader.py" = ["declarations", "vocabulary.py"]
+"reads" = ["contract.py"]
+"tests" = ["contract.py", "declarations", "loader.py", "vocabulary.py"]
+
 [loads]
 "loader.py" = ["base/events/declarations"]

@@ -1,0 +1,5 @@
+exports = ["router.py"]
+
+[uses]
+"receipts.py" = ["schemas.py"]
+"router.py" = ["receipts.py", "schemas.py"]

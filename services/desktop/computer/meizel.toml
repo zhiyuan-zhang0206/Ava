@@ -1,0 +1,46 @@
+exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.py", "protocol.py", "tests"]
+
+[uses]
+"ax_act.py" = ["ax_ids.py", "ax_tools.py", "errors.py", "screen.py"]
+"ax_gap.py" = ["ocr", "screen.py"]
+"ax_ids.py" = ["errors.py"]
+"ax_tools.py" = ["ax_gap.py", "ax_ids.py", "errors.py", "screen.py", "targets.py"]
+"execute.py" = ["ax_act.py", "ax_ids.py", "ax_tools.py", "errors.py", "input.py", "ocr", "ocr_text.py", "screen.py", "targets.py"]
+"input.py" = ["errors.py", "targets.py"]
+"mcp_daemon.py" = ["ax_ids.py", "config.py", "execute.py", "protocol.py", "session.py", "task_sessions.py"]
+"ocr_text.py" = ["errors.py", "ocr", "screen.py"]
+"screen.py" = ["errors.py", "targets.py"]
+"targets.py" = ["errors.py"]
+"tests" = ["ax_act.py", "ax_gap.py", "ax_ids.py", "ax_tools.py", "config.py", "errors.py", "mcp_daemon.py", "mcp_wrapper.py", "ocr", "ocr_text.py", "protocol.py", "screen.py", "session.py", "targets.py", "task_sessions.py"]
+
+[debt.private-name]
+"ax_act.py -> screen.py#_current_scale" = 1
+"ax_gap.py -> screen.py#_capture_screen" = 1
+"ax_tools.py -> screen.py#_current_scale" = 1
+"execute.py -> ocr_text.py#_click_text_tool" = 1
+"execute.py -> ocr_text.py#_find_text_tool" = 1
+"execute.py -> screen.py#_capture_screen" = 1
+"execute.py -> screen.py#_current_scale" = 1
+"execute.py -> screen.py#_png_size" = 1
+"execute.py -> screen.py#_snapshot_path" = 1
+"execute.py -> screen.py#_to_logical" = 1
+"mcp_daemon.py -> execute.py#_TOOLS" = 1
+"mcp_daemon.py -> execute.py#_execute_tool" = 1
+"mcp_daemon.py -> execute.py#_mcp_result" = 1
+"mcp_daemon.py -> execute.py#_priority" = 1
+"ocr_text.py -> screen.py#_capture_screen" = 1
+"ocr_text.py -> screen.py#_to_logical" = 1
+"tests/computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> mcp_daemon.py#_socket_in_use" = 3
+"tests/computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> mcp_daemon.py#_tracked_client" = 1
+"tests/computer_mcp_daemon/test_click_text_measures_scale_and_tracks_pointer.py -> screen.py#_snapshot_path" = 4
+"tests/test_computer_loop_liveness.py -> mcp_daemon.py#_LoopWatchdog" = 3
+"tests/test_computer_loop_liveness.py -> mcp_daemon.py#_bounded_cleanup" = 2
+"tests/test_computer_loop_liveness.py -> mcp_daemon.py#_dump_and_exit" = 2
+"tests/test_computer_loop_liveness.py -> mcp_daemon.py#_guard_loop_liveness" = 1
+"tests/test_computer_loop_liveness.py -> mcp_daemon.py#_socket_in_use" = 1
+"tests/test_computer_mcp_daemon.py -> ocr_text.py#_match_ocr_boxes" = 4
+"tests/test_computer_mcp_daemon.py -> ocr_text.py#_validate_text_query" = 2
+"tests/test_computer_mcp_daemon.py -> screen.py#_snapshot_path" = 17
+"tests/test_computer_mcp_wrapper.py -> mcp_wrapper.py#_Link" = 1
+"tests/test_computer_mcp_wrapper.py -> mcp_wrapper.py#_ReconnectingLink" = 1
+"tests/test_computer_screen_region.py -> screen.py#_snapshot_path" = 2

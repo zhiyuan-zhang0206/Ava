@@ -1,0 +1,4 @@
+exports = ["rotate_cluster_secret.py"]
+
+[uses]
+"tests" = ["rotate_data_plane_secrets.py"]

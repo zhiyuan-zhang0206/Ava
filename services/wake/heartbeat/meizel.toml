@@ -1,0 +1,34 @@
+exports = ["daemon.py", "station_probe.py"]
+
+[uses]
+"daemon.py" = ["__init__.py", "completion_digest.py", "liveness.py"]
+"tests" = ["__init__.py", "completion_digest.py", "daemon.py", "liveness.py", "station_probe.py"]
+
+[debt.private-name]
+"tests/test_heartbeat_checkin.py -> daemon.py#_reconcile_checkin_outcomes" = 1
+"tests/test_heartbeat_checkin.py -> daemon.py#_select_idle_agents_needing_heartbeat" = 1
+"tests/test_heartbeat_checkin.py -> daemon.py#_send_heartbeat_checkin" = 1
+"tests/test_heartbeat_checkin_retry.py -> daemon.py#_dispatch_loop" = 1
+"tests/test_heartbeat_checkin_retry.py -> daemon.py#_send_heartbeat_checkin" = 1
+"tests/test_heartbeat_checkin_retry.py -> daemon.py#_sleep_with_liveness" = 1
+"tests/test_heartbeat_checkin_retry.py -> daemon.py#_sweep_backoff_resets" = 1
+"tests/test_heartbeat_daemon.py -> daemon.py#_select_idle_agents_needing_heartbeat" = 1
+"tests/test_heartbeat_daemon_part2.py -> daemon.py#_reconcile_checkin_outcomes" = 1
+"tests/test_heartbeat_daemon_part2.py -> daemon.py#_select_idle_agents_needing_heartbeat" = 1
+"tests/test_heartbeat_daemon_part2.py -> daemon.py#_sweep_backoff_resets" = 1
+"tests/test_heartbeat_failure_budget.py -> daemon.py#_dispatch_loop" = 1
+"tests/test_heartbeat_failure_budget.py -> daemon.py#_reconcile_checkin_outcomes" = 1
+"tests/test_heartbeat_failure_budget.py -> daemon.py#_select_idle_agents_needing_heartbeat" = 1
+"tests/test_heartbeat_failure_budget.py -> daemon.py#_sleep_with_liveness" = 1
+"tests/test_heartbeat_failure_budget.py -> daemon.py#_sweep_backoff_resets" = 1
+"tests/test_heartbeat_loops.py -> daemon.py#_dispatch_loop" = 1
+"tests/test_heartbeat_loops.py -> daemon.py#_is_running" = 1
+"tests/test_heartbeat_loops.py -> daemon.py#_remove_pidfile" = 1
+"tests/test_heartbeat_loops.py -> daemon.py#_write_pidfile" = 1
+"tests/test_heartbeat_quiesced.py -> daemon.py#_dispatch_loop" = 1
+"tests/test_heartbeat_quiesced.py -> daemon.py#_sleep_with_liveness" = 1
+"tests/test_heartbeat_snapshots.py -> daemon.py#_sleep_with_liveness" = 2
+"tests/test_impersonation_heartbeat.py -> daemon.py#_reconcile_checkin_outcomes" = 1
+"tests/test_impersonation_heartbeat.py -> daemon.py#_select_idle_agents_needing_heartbeat" = 1
+"tests/test_impersonation_heartbeat.py -> daemon.py#_send_heartbeat_checkin" = 1
+"tests/test_station_healthcheck.py -> station_probe.py#_station_answers" = 7

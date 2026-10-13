@@ -1,0 +1,7 @@
+[uses]
+"test_machines.py" = ["machines"]
+
+[debt.private-name]
+"test_machines.py -> machines/setup.py#_db" = 1
+"test_machines.py -> machines/setup.py#_machine_setup" = 1
+"test_machines.py -> machines/setup.py#_truncate_machines" = 1

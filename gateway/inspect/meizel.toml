@@ -1,3 +1,17 @@
+exports = ["neighbors.py", "okf_graph.py", "router.py", "schemas.py"]
+
+[uses]
+"_live.py" = ["schemas.py"]
+"_metrics.py" = ["_metrics_health.py", "schemas.py"]
+"_metrics_health.py" = ["schemas.py"]
+"_plugin_metrics.py" = ["_event_metrics.py", "_plugin_faces.py", "schemas.py"]
+"_plugin_widgets.py" = ["_plugin_faces.py", "schemas.py"]
+"router.py" = ["_cache.py", "_live.py", "_metrics.py", "_plugin_metrics.py", "_plugin_widgets.py", "neighbors.py", "schemas.py"]
+"tests" = ["_cache.py", "_live.py", "_metrics.py", "_metrics_health.py", "_plugin_metrics.py", "_plugin_widgets.py", "router.py", "schemas.py"]
+
 [external]
 "_plugin_metrics.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "_plugin_widgets.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
+
+[debt.private-name]
+"tests/test_inspect_metrics_health.py -> _metrics_health.py#_historical" = 1

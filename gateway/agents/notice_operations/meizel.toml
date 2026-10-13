@@ -1,0 +1,4 @@
+exports = ["current.py", "router.py"]
+
+[uses]
+"router.py" = ["current.py"]

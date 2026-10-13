@@ -1,0 +1,2 @@
+[uses]
+"test_rpc_result_domains.py" = ["test_agents_cmd.py"]

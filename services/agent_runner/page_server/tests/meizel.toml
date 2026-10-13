@@ -1,0 +1,9 @@
+[uses]
+"page_server_daemon" = ["page_shell.py", "test_page_server_daemon.py"]
+"test_dead_pages.py" = ["slices.py"]
+"test_page_server_daemon.py" = ["page_shell.py"]
+"test_page_server_quiesced.py" = ["slices.py"]
+
+[debt.private-name]
+"page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py -> test_page_server_daemon.py#_identity" = 1
+"page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py -> test_page_server_daemon.py#_reconcile" = 1

@@ -1,0 +1,7 @@
+exports = ["chat_delivery.py", "compact.py", "insert.py", "live.py", "native_cancel.py", "native_restart.py", "rows.py"]
+
+[uses]
+"compact.py" = ["control_delivery.py", "insert.py"]
+"control_delivery.py" = ["insert.py"]
+"native_restart.py" = ["insert.py", "native_cancel.py"]
+"tests" = ["chat_delivery.py", "compact.py", "insert.py", "live.py"]

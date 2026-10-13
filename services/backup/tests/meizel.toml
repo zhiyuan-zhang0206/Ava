@@ -1,0 +1,5 @@
+[uses]
+"backup" = ["test_backup.py"]
+
+[debt.private-name]
+"backup/test_run_with_progress_without_a_sink_defers.py -> test_backup.py#_dt" = 1

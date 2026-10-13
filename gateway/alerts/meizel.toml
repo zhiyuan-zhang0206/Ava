@@ -1,0 +1,4 @@
+exports = ["router.py"]
+
+[uses]
+"router.py" = ["schemas.py"]

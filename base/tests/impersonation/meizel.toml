@@ -1,0 +1,8 @@
+exports = ["support.py"]
+
+[uses]
+"test_impersonation.py" = ["support.py"]
+"test_impersonation_closure.py" = ["support.py"]
+"test_impersonation_recovery.py" = ["support.py"]
+"test_impersonation_relay.py" = ["support.py"]
+"test_impersonation_reminders.py" = ["support.py"]

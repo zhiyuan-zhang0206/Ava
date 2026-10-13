@@ -1,0 +1,4 @@
+exports = ["relay.py"]
+
+[uses]
+"tests" = ["relay.py"]

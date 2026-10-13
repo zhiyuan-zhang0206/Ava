@@ -1,0 +1,4 @@
+exports = ["anthropic_thinking.py", "openai_reasoning.py", "stop.py"]
+
+[uses]
+"tests" = ["anthropic_thinking.py", "openai_reasoning.py"]

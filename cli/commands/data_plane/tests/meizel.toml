@@ -1,0 +1,2 @@
+[uses]
+"test_native_storage_diagnostics.py" = ["test_pooler_stop.py"]

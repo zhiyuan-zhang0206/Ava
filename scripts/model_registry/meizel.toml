@@ -1,0 +1,6 @@
+exports = ["update_model_pricing.py"]
+
+[uses]
+"plugin_price_sync.py" = ["plugin_price_rates.py"]
+"tests" = ["check_model_updates.py", "plugin_price_sync.py", "update_model_pricing.py"]
+"update_model_pricing.py" = ["plugin_price_sync.py"]

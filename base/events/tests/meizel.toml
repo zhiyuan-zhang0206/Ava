@@ -1,2 +1,4 @@
+exports = ["codegen_sources.py"]
+
 [loads]
 "test_declarations_layout.py" = ["base/events/declarations"]

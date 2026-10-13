@@ -1,0 +1,7 @@
+exports = ["compact_anchor.py", "compact_events.py", "history_dump.py", "repair.py", "security.py", "understanding_chunks.py"]
+
+[uses]
+"__init__.py" = ["_registry.py"]
+"repair.py" = ["_registry.py"]
+"security.py" = ["_registry.py"]
+"tests" = ["__init__.py", "compact_events.py", "understanding_chunks.py"]

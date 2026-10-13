@@ -1,0 +1,8 @@
+[uses]
+"browser_mcp_daemon" = ["test_browser_mcp_daemon.py"]
+"test_browser_mcp_daemon_tab_groups.py" = ["test_browser_mcp_daemon.py"]
+
+[debt.private-name]
+"browser_mcp_daemon/test_parse_page_listing_tolerates_titled_and_suffix.py -> test_browser_mcp_daemon.py#_daemon" = 1
+"browser_mcp_daemon/test_selected_page_custody.py -> test_browser_mcp_daemon.py#_daemon" = 1
+"test_browser_mcp_daemon_tab_groups.py -> test_browser_mcp_daemon.py#_text_of" = 1

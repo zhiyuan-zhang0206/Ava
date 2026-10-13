@@ -1,0 +1,11 @@
+exports = ["test_guarded_creation.py"]
+
+[uses]
+"test_guarded_creation_birth.py" = ["test_guarded_creation.py"]
+"test_keyed_fork_creation.py" = ["test_guarded_creation.py", "test_sdk_strong_creation.py"]
+"test_sdk_creation_birth.py" = ["test_guarded_creation.py", "test_sdk_strong_creation.py"]
+"test_sdk_strong_creation.py" = ["test_guarded_creation.py"]
+
+[debt.private-name]
+"test_keyed_fork_creation.py -> test_sdk_strong_creation.py#_response" = 1
+"test_sdk_creation_birth.py -> test_sdk_strong_creation.py#_response" = 1

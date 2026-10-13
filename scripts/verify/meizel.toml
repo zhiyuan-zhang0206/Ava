@@ -1,0 +1,9 @@
+exports = ["scripted_reply.py", "understanding_replay.py"]
+
+[uses]
+"container.py" = ["boundary.py"]
+"observe.py" = ["scripted_reply.py"]
+"tart_golden.py" = ["boundary.py", "tart_vm.py"]
+"tart_run.py" = ["boundary.py", "tart_vm.py"]
+"tart_vm.py" = ["boundary.py"]
+"tests" = ["boundary.py", "container.py", "observe.py", "tart_golden.py", "tart_run.py", "tart_vm.py"]

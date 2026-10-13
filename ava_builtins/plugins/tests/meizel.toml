@@ -1,0 +1,13 @@
+[uses]
+"ava_sdk_reminder_plugin" = ["test_ava_sdk_reminder_plugin.py"]
+
+[debt.private-name]
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_agent_inbound" = 1
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_config" = 1
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_load_ava_code_plugin" = 1
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_loaded" = 1
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_nameerror_output" = 1
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_pin_compact_budget" = 1
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_runtime" = 1
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_runtime_for_runner" = 1
+"ava_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> test_ava_sdk_reminder_plugin.py#_state" = 1
