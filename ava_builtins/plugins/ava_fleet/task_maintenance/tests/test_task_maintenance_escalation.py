@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from itertools import count
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -23,13 +22,9 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import escalation
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate
-from base.api_contracts.idempotency import keyed_headers
-from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from gateway.app import app
-from tests.fixtures.gateway_config import gateway_test_client
 
 _TASK_TITLE = count(1)
 
@@ -203,31 +198,3 @@ def test_delegator_escalation_rearms_after_owner_update(
     db_conn.commit()
     assert _run_escalate(pool, database, event_bus, 3) == 1
     assert len(_inbound_messages(db_conn, parent_owner)) == 2
-
-
-def test_gateway_patch_clears_escalation_marker(
-    db_conn: psycopg.Connection, machine_identity: MachineIdentity
-) -> None:
-    """The gateway update() path clears the marker with the reminder counters —
-    the same reset as the SDK path (test_update_resets_reminder_count)."""
-    owner = _make_agent(db_conn)
-    tid = _make_task(db_conn, owner=owner)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_tasks SET reminder_count = 3, last_reminded_at = now(), "
-            "escalated_at = now() WHERE id = %s",
-            (tid,),
-        )
-    db_conn.commit()
-    with gateway_test_client(app, machine=machine_identity) as client:
-        resp = client.patch(
-            f"/api/tasks/{tid}", json={"priority": "P1"}, headers=keyed_headers(str(uuid4()))
-        )
-    assert resp.status_code == 200
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT reminder_count, last_reminded_at, escalated_at FROM agent_tasks WHERE id = %s",
-            (tid,),
-        )
-        row = cur.fetchone()
-    assert row == (0, None, None)

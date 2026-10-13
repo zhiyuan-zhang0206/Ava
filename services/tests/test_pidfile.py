@@ -14,7 +14,6 @@ from typing import Any
 
 import pytest
 
-from ava_builtins.plugins.ava_fleet.task_maintenance import daemon as task_maintenance_daemon
 from base.config import ConfigBoot
 from base.host.proc import process_cmdline
 from services import pidfile as pidfiles
@@ -43,7 +42,6 @@ from services.wake.heartbeat import daemon as heartbeat_daemon
         delivery_watchdog_daemon,
         events_maintenance_daemon,
         agent_ops_daemon,
-        task_maintenance_daemon,
     ],
     ids=lambda module: module.__name__,
 )
@@ -74,14 +72,8 @@ def test_daemon_guard_checks_only_current_pidfile(
         assert calls == [(ops_boot.pidfile(process_config, runtime=runtime), module_name)]
     else:
         monkeypatch.setattr(daemon, "pidfile_holds_daemon", holds_daemon)
-        if module_name in {
-            "ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
-        }:
-            assert daemon._is_running() is False
-            assert calls == [(daemon._pidfile(), module_name)]
-        else:
-            assert daemon._is_running(process_config, runtime=runtime) is False
-            assert calls == [(daemon._pidfile(process_config, runtime=runtime), module_name)]
+        assert daemon._is_running(process_config, runtime=runtime) is False
+        assert calls == [(daemon._pidfile(process_config, runtime=runtime), module_name)]
 
 
 def test_acquire_writes_own_pid(tmp_path: Any) -> None:

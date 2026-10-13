@@ -9,16 +9,16 @@ import psycopg
 import pytest
 
 import ava
-from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import (
-    _load_activity_plugin as _load_activity_plugin,
-)
-from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import _seed_agent
-from ava_builtins.plugins.ava_fleet.tests.test_ava_fleet_plugin import (
-    sdk_via_inprocess_gateway as sdk_via_inprocess_gateway,
-)
 from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.lm.catalog import ModelCatalog
+from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
+    _load_activity_plugin as _load_activity_plugin,
+)
+from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import _seed_agent
+from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
+    sdk_via_inprocess_gateway as sdk_via_inprocess_gateway,
+)
 from ops import lifecycle
 from tests.fixtures.pin_agent import pin_agent
 
