@@ -1,6 +1,6 @@
 """CI tests against the Postgres production runs: the vendored zonky tree, not an apt build.
 
-PGDG keeps only its newest 17.x, so no apt pin can match `runtime_binaries._PG_VERSION`; the
+PGDG keeps only its newest 17.x, so no apt pin can match `runtime_binaries.PG_VERSION`; the
 backend jobs instead build that tree (`scripts/ci/vendor_pg_runtime.py`) and every pytest
 session links it (`tests/fixtures/env_bootstrap.py`). These tests fail when a job installs the
 data plane without wiring the vendored tree, or when the wiring drifts from the pin.

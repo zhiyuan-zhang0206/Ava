@@ -97,7 +97,7 @@ def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> No
         scan_tmp,
         "ava/mcps/_oauth.py",
         """
-        _OAUTH_FLOW_TIMEOUT_S = 600.0
+        OAUTH_FLOW_TIMEOUT_S = 600.0
         """,
     )
     assert errs == []

@@ -151,7 +151,7 @@ def test_sink_agent_id_numeric_string_converts_to_int(
 
 
 def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
-    """stdlib `logging.getLogger(...).info(...)` goes through _StdlibInterceptHandler →
+    """stdlib `logging.getLogger(...).info(...)` goes through StdlibInterceptHandler →
     loguru sink → the unified event stream. Verifies that service modules (e.g.
     `services/agent_runner/agent_ops/daemon.py` that use stdlib logging) have their logs reach
     the event stream after the upgrade, without needing to rewrite callsites line by line."""
@@ -313,16 +313,16 @@ def test_host_stall_companion_demotes_only_its_emitted_event(sink_logger) -> Non
 
 
 def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_StdlibInterceptHandler.emit` must never propagate (audit 2026-08-08 +
+    """`StdlibInterceptHandler.emit` must never propagate (audit 2026-08-08 +
     #1862): stdlib `Handler.handle` has no try/except around emit, so a
     formatting TypeError inside a log call (im_bridge's `%d`-with-str-args
     SSE reconnect crash) or a shallow call stack (`sys._getframe(6)`
     ValueError) would otherwise kill the logger's caller."""
     import logging
 
-    from base.log import _StdlibInterceptHandler
+    from base.log import StdlibInterceptHandler
 
-    handler = _StdlibInterceptHandler()
+    handler = StdlibInterceptHandler()
     seen: list[logging.LogRecord] = []
     handler.handleError = seen.append  # type: ignore[method-assign]
 

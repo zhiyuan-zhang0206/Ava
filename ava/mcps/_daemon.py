@@ -50,7 +50,7 @@ from base.config import settings
 from base.log.sinks import add_sink
 from base.paths import ava_home
 
-from ._oauth import _OAUTH_FLOW_TIMEOUT_S
+from ._oauth import OAUTH_FLOW_TIMEOUT_S
 
 
 def load_config() -> dict[str, dict[str, Any]]:
@@ -307,7 +307,7 @@ async def connect_http(
     local_stack = AsyncExitStack()
     # An OAuth authorization flow involves the user clicking through a browser,
     # so the connect envelope is far more generous there than for stdio/static-auth.
-    timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else timeout_seconds()
+    timeout = OAUTH_FLOW_TIMEOUT_S if oauth else timeout_seconds()
     try:
         if oauth:
             from ._oauth import oauth_http_client

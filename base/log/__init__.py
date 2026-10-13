@@ -21,10 +21,10 @@ from base.log.sinks import (
     GenaiEmptyPartsWarningFilter as GenaiEmptyPartsWarningFilter,
 )
 from base.log.sinks import (
-    _install_stdlib_intercept as _install_stdlib_intercept,
+    StdlibInterceptHandler as StdlibInterceptHandler,
 )
 from base.log.sinks import (
-    _StdlibInterceptHandler as _StdlibInterceptHandler,
+    _install_stdlib_intercept as _install_stdlib_intercept,
 )
 from base.log.sinks import (
     add_file_sink as add_file_sink,

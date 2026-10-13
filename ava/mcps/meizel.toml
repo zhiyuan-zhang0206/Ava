@@ -9,7 +9,6 @@ exports = ["config.py"]
 "tests" = ["__init__.py", "_browser.py", "_clients.py", "_computer.py", "_daemon.py", "_oauth.py", "_remote.py", "_tools.py", "config.py"]
 
 [debt.private-name]
-"_daemon.py -> _oauth.py#_OAUTH_FLOW_TIMEOUT_S" = 1
 "tests/test_browser.py -> _browser.py#_CONNECT_ATTEMPTS" = 1
 "tests/test_browser.py -> _browser.py#_CONNECT_DELAY_S" = 1
 "tests/test_browser.py -> _browser.py#_LINE_LIMIT" = 1

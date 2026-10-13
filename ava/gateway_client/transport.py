@@ -78,7 +78,7 @@ def _inputs(context: AvaContext | None = None) -> GatewayTransportInputs:
     return owner.clients.get(GatewayTransportInputs)
 
 
-def _http(context: AvaContext | None = None) -> GatewayHandle:
+def gateway_http(context: AvaContext | None = None) -> GatewayHandle:
     """The bound context's gateway client, built on first use so importing the SDK in a no-config
     context does not require the gateway URL to be resolvable until an actual call is made. Its
     timeout is `Settings.gateway_client_http_timeout_seconds` (env override
@@ -300,7 +300,7 @@ def _request_with_retry(
     if attempts < 1:
         # Preserve the old range(attempts) behavior for a zero/negative override.
         raise GatewayUnavailable(
-            f"Gateway transport error at {_http(context).base_url} (after {attempts} retries): None"
+            f"Gateway transport error at {gateway_http(context).base_url} (after {attempts} retries): None"
         )
     policy = Policy(
         max_attempts=attempts,
@@ -317,11 +317,11 @@ def _request_with_retry(
     except transport_errors as exc:
         if not retryable and not isinstance(exc, pre_send_errors):
             raise GatewayUnavailable(
-                f"Gateway transport error at {_http(context).base_url} "
+                f"Gateway transport error at {gateway_http(context).base_url} "
                 f"(no retry: non-idempotent request; result unknown, may have been delivered): {exc!s}"
             ) from exc
         raise GatewayUnavailable(
-            f"Gateway transport error at {_http(context).base_url} (after {attempts} retries): {exc!s}"
+            f"Gateway transport error at {gateway_http(context).base_url} (after {attempts} retries): {exc!s}"
         ) from exc
 
 
@@ -406,7 +406,7 @@ def post(
 
     retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
-        lambda: _http(context).post(
+        lambda: gateway_http(context).post(
             path, json=json or {}, params=params, timeout=per_call, headers=headers
         ),
         retries,
@@ -440,7 +440,9 @@ def get(
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else cast(httpx.Timeout, timeout)
     retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
-        lambda: _http(context).get(path, params=params, timeout=per_call), retries, context=context
+        lambda: gateway_http(context).get(path, params=params, timeout=per_call),
+        retries,
+        context=context,
     )
 
 
@@ -465,7 +467,7 @@ def patch(
         else None
     )
     return _request_with_retry(
-        lambda: _http().patch(path, json=json or {}, headers=headers),
+        lambda: gateway_http().patch(path, json=json or {}, headers=headers),
         request_max_retries(),
         retryable=keyed or semantics is Idempotency.IDEMPOTENT,
     )

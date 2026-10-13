@@ -35,7 +35,7 @@ class MachineSetup:
         )
 
 
-def _db(database_gate: ProcessDbGate) -> Database:
+def machines_test_db(database_gate: ProcessDbGate) -> Database:
     return Database.from_settings(gate=database_gate)
 
 

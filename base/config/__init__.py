@@ -347,7 +347,7 @@ def refresh_data_plane_settings() -> None:
 
 # Private acceptance/test hook: the boot-lite state machine snapshot
 # ({mode, reason, upgrades, pending_count, prepared}).
-_boot_state = _lite.boot_state
+boot_state = _lite.boot_state
 
 
 def __getattr__(name: str) -> Any:

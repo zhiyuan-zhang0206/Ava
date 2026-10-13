@@ -323,7 +323,7 @@ async def run_job(
     return Outcome("done")
 
 
-async def _settle(pool: AsyncConnectionPool, job: ChunkJob, outcome: Outcome) -> None:
+async def settle_chunk_job(pool: AsyncConnectionPool, job: ChunkJob, outcome: Outcome) -> None:
     """Record a job's outcome on its row, with the event for the ones that end without a node."""
     if outcome.status == "wait":
         await release_job(pool, job.id, error=outcome.error or "")
@@ -431,7 +431,9 @@ class Consumer:
     async def _fail_stopped(self, job: ChunkJob) -> None:
         """Fail a job this consumer holds because its host is stopping; never raises."""
         try:
-            await asyncio.shield(_settle(self.pool, job, Outcome("failed", "host stopping")))
+            await asyncio.shield(
+                settle_chunk_job(self.pool, job, Outcome("failed", "host stopping"))
+            )
         except Exception:
             logger.opt(exception=True).warning(
                 "understanding chunk {job} could not be failed; its lease will lapse and fail it",
@@ -458,7 +460,7 @@ class Consumer:
                     agent=job.agent_id,
                 )
                 outcome = Outcome("failed", f"{type(exc).__name__}: {exc}")
-            await _settle(self.pool, job, outcome)
+            await settle_chunk_job(self.pool, job, outcome)
             if (
                 outcome.status == "done"
                 and self.replay is None

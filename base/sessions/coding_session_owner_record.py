@@ -393,7 +393,7 @@ def remove_unlocked(key: CodingSessionKey, generation: str) -> None:
     state_path(key, generation).unlink(missing_ok=True)
 
 
-def _payload(owner: CodingSessionOwner) -> dict[str, object]:
+def owner_payload(owner: CodingSessionOwner) -> dict[str, object]:
     return {
         "schema_version": SCHEMA_VERSION,
         "status": owner.status,
@@ -430,7 +430,7 @@ def write_unlocked(owner: CodingSessionOwner) -> None:
     path = state_path(owner.key, owner.generation)
     write_text_atomic(
         path,
-        json.dumps(_payload(owner), separators=(",", ":"), sort_keys=True),
+        json.dumps(owner_payload(owner), separators=(",", ":"), sort_keys=True),
         encoding="utf-8",
         mode=0o600,
         prefix=".coding-owner-",

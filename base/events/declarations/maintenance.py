@@ -339,14 +339,14 @@ EVENTS: dict[str, EventSpec] = {
         "a queued understanding chunk failed (attempted once, never retried) and stays undescribed",
         payload=UnderstandingChunkFailed,
         tier="anomaly",
-        site="base/agents/history/hierarchy/chunk_consumer.py:_settle",
+        site="base/agents/history/hierarchy/chunk_consumer.py:settle_chunk_job",
     ),
     "understanding_chunk_skipped": telemetry_event(
         "understanding_chunk_skipped",
         "a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk)",
         payload=UnderstandingChunkSkipped,
         tier="anomaly",
-        site="base/agents/history/hierarchy/chunk_consumer.py:_settle",
+        site="base/agents/history/hierarchy/chunk_consumer.py:settle_chunk_job",
     ),
     "understanding_chunk_gap": telemetry_event(
         "understanding_chunk_gap",

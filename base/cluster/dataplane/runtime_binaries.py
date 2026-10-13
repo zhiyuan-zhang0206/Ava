@@ -39,7 +39,7 @@ from base.log import logger
 # Pinned Postgres distribution. A major-version bump is an expand step (a new
 # version dir beside the old + re-initdb / pg_upgrade), never an in-place swap —
 # initdb and the data dir it created must share a major.
-_PG_VERSION = "17.11.0"
+PG_VERSION = "17.11.0"
 
 _MAVEN_BASE = "https://repo1.maven.org/maven2/io/zonky/test/postgres"
 
@@ -90,7 +90,7 @@ def runtime_root() -> Path:
 
 
 def vendored_pg_dir() -> Path:
-    return runtime_root() / "pg" / _PG_VERSION
+    return runtime_root() / "pg" / PG_VERSION
 
 
 def vendored_pg_bin_dir() -> Path | None:
@@ -116,19 +116,19 @@ def ensure_pg_binaries() -> Path:
 
     key = platform_key()
     artifact, expected_sha = PG_ARTIFACTS[key]
-    url = f"{_MAVEN_BASE}/{artifact}/{_PG_VERSION}/{artifact}-{_PG_VERSION}.jar"
-    logger.info(f"[runtime] fetching vendored Postgres {_PG_VERSION} ({key}) from {url}")
+    url = f"{_MAVEN_BASE}/{artifact}/{PG_VERSION}/{artifact}-{PG_VERSION}.jar"
+    logger.info(f"[runtime] fetching vendored Postgres {PG_VERSION} ({key}) from {url}")
     jar_bytes = download(url)
 
     actual_sha = hashlib.sha256(jar_bytes).hexdigest()
     if actual_sha != expected_sha:
         raise RuntimeError(
-            f"vendored Postgres jar sha256 mismatch for {artifact}-{_PG_VERSION}: "
+            f"vendored Postgres jar sha256 mismatch for {artifact}-{PG_VERSION}: "
             f"expected {expected_sha}, got {actual_sha}"
         )
 
     _extract_pg(jar_bytes, vendored_pg_dir())
-    logger.info(f"[runtime] vendored Postgres {_PG_VERSION} ready at {vendored_pg_dir()}")
+    logger.info(f"[runtime] vendored Postgres {PG_VERSION} ready at {vendored_pg_dir()}")
     return bin_dir
 
 
@@ -230,8 +230,8 @@ def _extract_pg(jar_bytes: bytes, target: Path) -> None:
 # The pinned pgvector version. A PG major bump must re-pin these artifacts
 # (pgvector builds are per-major: PGDG ships postgresql-<major>-pgvector,
 # Homebrew bottles carry per-major dirs).
-_PGVECTOR_VERSION = "0.8.7"
-_PGVECTOR_SQL = f"vector--{_PGVECTOR_VERSION}.sql"
+PGVECTOR_VERSION = "0.8.7"
+_PGVECTOR_SQL = f"vector--{PGVECTOR_VERSION}.sql"
 
 # platform key -> (download URL, pinned sha256 of the whole artifact).
 # The deb is a plain HTTPS file; the bottle is a content-addressed ghcr.io
@@ -299,7 +299,7 @@ def ensure_pgvector() -> None:
             f"vendored Postgres tree missing at {pg_dir} — ensure_pg_binaries() must run first"
         )
     url, expected_sha = PGVECTOR_ARTIFACTS[key]
-    logger.info(f"[runtime] fetching pgvector {_PGVECTOR_VERSION} ({key}) from {url}")
+    logger.info(f"[runtime] fetching pgvector {PGVECTOR_VERSION} ({key}) from {url}")
     blob = download_ghcr_blob(url) if url.startswith("https://ghcr.io/") else download(url)
     actual_sha = hashlib.sha256(blob).hexdigest()
     if actual_sha != expected_sha:
@@ -316,14 +316,14 @@ def ensure_pgvector() -> None:
         staging = target.with_name(f".{target.name}.tmp")
         staging.write_bytes(content)
         staging.replace(target)
-    logger.info(f"[runtime] pgvector {_PGVECTOR_VERSION} injected into {pg_dir}")
+    logger.info(f"[runtime] pgvector {PGVECTOR_VERSION} injected into {pg_dir}")
 
 
 def pgvector_extension_files(blob: bytes, key: str) -> dict[str, bytes]:
     """The extension files from the pinned artifact, keyed by their target path
     inside the vendored PG tree. Fail-fast on a missing member: a renamed
     upstream layout must be re-pinned, never silently skipped."""
-    major = _PG_VERSION.split(".", 1)[0]
+    major = PG_VERSION.split(".", 1)[0]
     if key.startswith("darwin"):
         return _pgvector_files_from_bottle(blob, major)
     return _pgvector_files_from_deb(blob, major)
@@ -354,7 +354,7 @@ def _pgvector_files_from_bottle(blob: bytes, major: str) -> dict[str, bytes]:
     members live under `pgvector/<version>/`). The bottle carries builds for
     every formula dependency major (postgresql@17 + postgresql@18 today); only
     the pinned major is taken."""
-    prefix = f"pgvector/{_PGVECTOR_VERSION}/"
+    prefix = f"pgvector/{PGVECTOR_VERSION}/"
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
         return {
             "lib/postgresql/vector.dylib": _tar_member_bytes(

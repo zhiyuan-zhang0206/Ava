@@ -18,7 +18,7 @@ def default_boot_is_lite_and_pydantic_settings_free() -> None:
 
     import base.config as c
 
-    st = c._boot_state()
+    st = c.boot_state()
     mods = sorted(m for m in sys.modules if m.startswith("base.config"))
     emit("BOOT", st["mode"], st["upgrades"], "pydantic_settings" in sys.modules, mods)
 
@@ -26,13 +26,13 @@ def default_boot_is_lite_and_pydantic_settings_free() -> None:
 def eager_escape_boots_full_at_import() -> None:
     import base.config as c
 
-    emit("EAGER", c._boot_state()["mode"], type(c.settings).__name__, c.settings.lm.llm_model)
+    emit("EAGER", c.boot_state()["mode"], type(c.settings).__name__, c.settings.lm.llm_model)
 
 
 def config_fetch_skip_wins_over_eager() -> None:
     import base.config as c
 
-    st = c._boot_state()
+    st = c.boot_state()
     emit("SKIPWIN", st["mode"], st["prepared"])
 
 
@@ -41,7 +41,7 @@ def dotenv_boot_mode_is_not_honored() -> None:
 
     import base.config as c
 
-    emit("DOTENV", c._boot_state()["mode"], os.environ.get("AVA_CONFIG_BOOT"))
+    emit("DOTENV", c.boot_state()["mode"], os.environ.get("AVA_CONFIG_BOOT"))
 
 
 def present(value: object) -> bool:
@@ -57,7 +57,7 @@ def overlay_writes_stay_pending_and_never_upgrade() -> None:
 
     c.set_field("llm_model", "overlay-model")
     c.set_field("exec_timeout_seconds", 123.0)
-    st = c._boot_state()
+    st = c.boot_state()
     emit(
         "PENDING",
         c.settings.lm.llm_model,
@@ -73,7 +73,7 @@ def overlay_replays_in_order_on_upgrade() -> None:
     c.set_field("llm_model", "replayed")
     c.set_field("exec_timeout_seconds", 7.5)
     c.ensure_eager()
-    st = c._boot_state()
+    st = c.boot_state()
     emit(
         "REPLAY",
         c.settings.lm.llm_model,
@@ -96,7 +96,7 @@ def overlay_unknown_and_out_of_profile_keys_fail_fast() -> None:
         c.set_field("telegram_bot_token", "x")
     except AttributeError as exc:
         excluded = "AttributeError" if "profile" in str(exc) else str(exc)
-    emit("BADKEYS", unknown, excluded, c._boot_state()["upgrades"])
+    emit("BADKEYS", unknown, excluded, c.boot_state()["upgrades"])
 
 
 def lite_reads_see_environment_changes_live() -> None:
@@ -107,7 +107,7 @@ def lite_reads_see_environment_changes_live() -> None:
     first = c.settings.lm.llm_model
     os.environ["AVA_MODEL"] = "changed-later"
     second = c.settings.lm.llm_model
-    emit("LIVE", first, second, c._boot_state()["upgrades"])
+    emit("LIVE", first, second, c.boot_state()["upgrades"])
 
 
 def import_then_ensure_eager() -> None:
@@ -136,7 +136,7 @@ def concurrent_first_touch_upgrades_once() -> None:
     after = c.settings.sandbox.exec_timeout_seconds
     emit(
         "CONC",
-        c._boot_state()["upgrades"],
+        c.boot_state()["upgrades"],
         len(errors),
         len(values),
         all(value == after for value in values),
@@ -180,7 +180,7 @@ def inflight_build_read_waits_then_serves_the_full_value() -> None:
     t2.join(30)
     same = out.get("a") == out.get("b")
     served = str(out.get("b", "")).startswith("https://")
-    emit("WAIT", c._boot_state()["upgrades"], held, same, served)
+    emit("WAIT", c.boot_state()["upgrades"], held, same, served)
 
 
 def inflight_build_read_timeout_raises_retryable() -> None:
@@ -221,7 +221,7 @@ def inflight_build_read_timeout_raises_retryable() -> None:
     b = str(out.get("b", ""))
     emit(
         "TMOUT",
-        c._boot_state()["upgrades"],
+        c.boot_state()["upgrades"],
         str(out.get("a", "")).startswith("https://"),
         b.startswith("ConfigBuildWaitTimeoutError"),
         "retry" in b,
@@ -259,7 +259,7 @@ def inflight_build_same_thread_read_does_not_self_wait() -> None:
     result = str(inside.get("result", "?"))
     emit(
         "SELF",
-        c._boot_state()["upgrades"],
+        c.boot_state()["upgrades"],
         result.startswith("AttributeError: config boot-lite:"),
         "in flight" in result,
     )
@@ -302,7 +302,7 @@ def inflight_build_get_field_waits_then_serves() -> None:
     t2.join(30)
     same = out.get("a") == out.get("b")
     served = str(out.get("b", "")).startswith("https://")
-    emit("GETFL", c._boot_state()["upgrades"], held, same, served)
+    emit("GETFL", c.boot_state()["upgrades"], held, same, served)
 
 
 def inflight_build_get_field_timeout_raises_retryable() -> None:
@@ -344,7 +344,7 @@ def inflight_build_get_field_timeout_raises_retryable() -> None:
     retry = c.get_field("web_jina_reader_base")
     emit(
         "GETFLT",
-        c._boot_state()["upgrades"],
+        c.boot_state()["upgrades"],
         str(out.get("a", "")).startswith("https://"),
         b.startswith("ConfigBuildWaitTimeoutError"),
         "retry" in b,
@@ -393,7 +393,7 @@ def pre_install_build_death_revives_on_waiting_reader() -> None:
     t2.join(30)
     emit(
         "DEATH",
-        c._boot_state()["upgrades"],
+        c.boot_state()["upgrades"],
         held,
         str(out.get("a", "")).startswith("RuntimeError:"),
         str(out.get("b", "")).startswith("https://"),
@@ -442,13 +442,13 @@ def current_facade_resolves_after_upgrade() -> None:
         "_FIELDS",
         "FIELD_INFOS",
     ]
-    served_ok = all(hasattr(c, n) for n in lite_served) and c._boot_state()["mode"] == "lite"
+    served_ok = all(hasattr(c, n) for n in lite_served) and c.boot_state()["mode"] == "lite"
     from base.config import _full
 
     missing = [n for n in _full.facade_exports() if not hasattr(c, n)]
     pinned = c.Settings.__module__
     same = pickle.loads(pickle.dumps(c.Settings)) is c.Settings  # noqa: S301
-    emit("FACADE", served_ok, missing, pinned, same, c._boot_state()["mode"])
+    emit("FACADE", served_ok, missing, pinned, same, c.boot_state()["mode"])
 
 
 def forked_child_keeps_full_state() -> None:
@@ -460,7 +460,7 @@ def forked_child_keeps_full_state() -> None:
     r, w = os.pipe()
     pid = os.fork()
     if pid == 0:
-        ok = c._boot_state()["mode"] == "full" and bool(c.settings.lm.llm_model)
+        ok = c.boot_state()["mode"] == "full" and bool(c.settings.lm.llm_model)
         os.write(w, b"1" if ok else b"0")
         os._exit(0)
     os.close(w)
@@ -474,7 +474,7 @@ def bad_non_lite_field_does_not_block_lite_scripts() -> None:
 
     alias = c.field_alias("llm_model")
     value = c.settings.lm.llm_model
-    st = c._boot_state()
+    st = c.boot_state()
     try:
         _ = c.settings.sandbox.exec_timeout_seconds
         raised = "no"
@@ -527,10 +527,10 @@ def field_faces_serve_while_another_thread_builds() -> None:
     except Exception as exc:
         faces = f"{type(exc).__name__}: {exc}"
     held = t.is_alive()
-    upgrades = c._boot_state()["upgrades"]
+    upgrades = c.boot_state()["upgrades"]
     release.set()
     t.join(30)
-    emit("FACES", faces, held, upgrades, c._boot_state()["mode"])
+    emit("FACES", faces, held, upgrades, c.boot_state()["mode"])
 
 
 def module_attribute_read_waits_then_serves() -> None:
@@ -586,7 +586,7 @@ def module_attribute_read_waits_then_serves() -> None:
     reentrant = str(inside.get("reentrant", "?"))
     emit(
         "ATTR",
-        c._boot_state()["upgrades"],
+        c.boot_state()["upgrades"],
         held,
         served,
         same,

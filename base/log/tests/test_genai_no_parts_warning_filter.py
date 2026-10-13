@@ -24,8 +24,8 @@ from langchain_google_genai.chat_models import _parse_chat_history
 
 from base.log import (
     GenaiEmptyPartsWarningFilter,
+    StdlibInterceptHandler,
     _install_stdlib_intercept,
-    _StdlibInterceptHandler,
 )
 
 _MODEL = "gemini-2.5-flash"
@@ -106,7 +106,7 @@ def test_repeated_install_does_not_stack_filters(loguru_records: list[dict]) -> 
     intercept_handlers = [
         handler
         for handler in logging.getLogger().handlers
-        if isinstance(handler, _StdlibInterceptHandler)
+        if isinstance(handler, StdlibInterceptHandler)
     ]
     assert len(intercept_handlers) == 1
     installed_filters = [

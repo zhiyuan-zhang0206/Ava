@@ -481,7 +481,7 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     sid = shell.sessions.new("test-tree", ttl=120)
     try:
         _ready(sid)
-        full = _sessions._handle().resolve(sid)
+        full = _sessions.shell_sessions_handle().resolve(sid)
         (info,) = [s for s in client.list_sessions() if s.name == full]
         shell_pid = info.pid
         assert psutil.pid_exists(shell_pid)
