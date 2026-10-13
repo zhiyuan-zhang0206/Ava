@@ -24,7 +24,7 @@ from base.db.config import db_config_from_settings
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
-from scripts.data_plane_ops import restore_drill
+from services.backup import restore_drill
 from services.backup.artifact import offsite, passphrase
 
 
