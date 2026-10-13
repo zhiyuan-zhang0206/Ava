@@ -10,6 +10,10 @@ from unittest.mock import Mock
 
 import pytest
 
+import base.host.system.autostart as system_autostart
+import base.host.system.cron as system_cron
+import services.desktop.permissions_helper.launchd_job as permissions_helper_launchd_job
+from cli import start_identity
 from cli.commands.cluster import home as lifecycle
 
 
@@ -51,10 +55,10 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, roles: list[str]) -> P
     def helper(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr("cli.start_identity.read_intent", read_intent)
+    monkeypatch.setattr(start_identity, "read_intent", read_intent)
     monkeypatch.setattr(lifecycle, "_stop_cluster", stop)
     monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", unregister_jobs)
-    monkeypatch.setattr("services.desktop.permissions_helper.launchd_job.unregister_helper", helper)
+    monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", helper)
     return home
 
 
@@ -195,12 +199,10 @@ def test_the_default_home_can_be_destroyed(
     """It used to be refused outright; the typed path is what guards it now."""
     prod = (default_home / ".ava").resolve()
     prod.mkdir(mode=0o700)
-    monkeypatch.setattr("cli.start_identity.read_intent", _gateway_intent)
+    monkeypatch.setattr(start_identity, "read_intent", _gateway_intent)
     monkeypatch.setattr(lifecycle, "_stop_cluster", _nothing_to_stop)
     monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", _no_jobs)
-    monkeypatch.setattr(
-        "services.desktop.permissions_helper.launchd_job.unregister_helper", _no_helper
-    )
+    monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", _no_helper)
     _at_a_terminal(monkeypatch, str(prod))
 
     assert lifecycle.cmd_cluster_destroy() == 0
@@ -212,7 +214,7 @@ def test_stop_failure_leaves_home_attached_and_never_unloads_helper(
 ) -> None:
     monkeypatch.setattr(lifecycle, "_stop_cluster", lambda: 4)
     unload = Mock()
-    monkeypatch.setattr("services.desktop.permissions_helper.launchd_job.unregister_helper", unload)
+    monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", unload)
     _at_a_terminal(monkeypatch, str(home))
 
     assert lifecycle.cmd_cluster_destroy() == 4
@@ -230,9 +232,7 @@ def test_ambiguous_cleanup_leaves_home_attached(
     if stage == "jobs":
         monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", fail)
     else:
-        monkeypatch.setattr(
-            "services.desktop.permissions_helper.launchd_job.unregister_helper", fail
-        )
+        monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", fail)
     _at_a_terminal(monkeypatch, str(home))
 
     assert lifecycle.cmd_cluster_destroy() == 1
@@ -278,7 +278,7 @@ def test_drop_db_removes_the_data_directories_after_the_stop(
 def test_destroy_refuses_a_home_without_a_start_intent(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("cli.start_identity.read_intent", _no_intent)
+    monkeypatch.setattr(start_identity, "read_intent", _no_intent)
     prompt = _at_a_terminal(monkeypatch)
 
     assert lifecycle.cmd_cluster_destroy() == 1
@@ -366,8 +366,8 @@ def test_destroying_a_scratch_home_never_reaches_the_hosts_scheduler(
     def reached(*_a: object, **_k: object) -> None:
         raise AssertionError("the host scheduler was reached from a scratch home")
 
-    monkeypatch.setattr("base.host.system.cron.unregister_platform_job", reached)
-    monkeypatch.setattr("base.host.system.autostart.unregister_platform_job", reached)
+    monkeypatch.setattr(system_cron, "unregister_platform_job", reached)
+    monkeypatch.setattr(system_autostart, "unregister_platform_job", reached)
 
     lifecycle._unregister_scheduled_jobs()  # no AssertionError == nothing was touched
 

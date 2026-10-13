@@ -9,6 +9,7 @@ from uuid import UUID
 
 import pytest
 
+import base.agents.impersonation as agents_impersonation
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
@@ -56,7 +57,7 @@ def test_heartbeat_failure_does_not_cancel_inbox_or_change_cli_error_contract(
     monkeypatch.setattr(relay, "EventBus", MagicMock())
     monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
     monkeypatch.setattr(
-        "base.agents.impersonation.relay_get", MagicMock(return_value={"session_id": 0})
+        agents_impersonation, "relay_get", MagicMock(return_value={"session_id": 0})
     )
     monkeypatch.setattr(relay, "resolve_adapter", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(relay, "_write_heartbeat", MagicMock(return_value=True))

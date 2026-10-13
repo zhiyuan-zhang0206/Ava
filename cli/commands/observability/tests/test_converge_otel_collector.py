@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
+import base.config as base_config
 from base.deploy.release import collector_artifact as artifact
 from cli.commands.observability import otel_collector as oc
 from cli.database.runtime import CommandRuntime
@@ -58,15 +59,15 @@ def test_generate_config_bakes_settings(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint", "http://10.0.0.2:14318"
+        base_config.settings.observability, "telemetry_tempo_endpoint", "http://10.0.0.2:14318"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_loki_url", "http://10.0.0.2:3100"
+        base_config.settings.observability, "telemetry_loki_url", "http://10.0.0.2:3100"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.2:9090"
+        base_config.settings.observability, "telemetry_prometheus_url", "http://10.0.0.2:9090"
     )
-    monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 7)
+    monkeypatch.setattr(base_config.settings.observability, "trace_retention_days", 7)
 
     out = oc.generate_config(
         repo,
@@ -101,18 +102,18 @@ def test_generate_config_two_state_observability_url(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        base_config.settings.observability, "telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        base_config.settings.observability, "telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        base_config.settings.observability, "telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    monkeypatch.setattr("base.config.settings.observability.observability_url", "http://10.0.0.46")
+    monkeypatch.setattr(base_config.settings.observability, "observability_url", "http://10.0.0.46")
     # A remote observatory is a split-cluster shape: the relay authenticates
     # with the cluster bearer, so the secret must be set (empty fails closed).
-    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "cluster-token")
+    monkeypatch.setattr(base_config.settings.data_plane, "cluster_secret", "cluster-token")
 
     out = oc.generate_config(
         repo,
@@ -127,7 +128,7 @@ def test_generate_config_two_state_observability_url(
     assert "prom: http://10.0.0.46:4318" in out
     assert "tempo: http://127.0.0.1:14318" in out
 
-    monkeypatch.setattr("base.config.settings.observability.observability_url", "")
+    monkeypatch.setattr(base_config.settings.observability, "observability_url", "")
     out = oc.generate_config(
         repo,
         Path("/home/u/.ava"),
@@ -207,15 +208,15 @@ def test_ensure_skips_download_when_version_matches(
     )
 
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        base_config.settings.observability, "telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        base_config.settings.observability, "telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        base_config.settings.observability, "telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 3)
+    monkeypatch.setattr(base_config.settings.observability, "trace_retention_days", 3)
 
     oc.ensure_otel_collector(
         repo,
@@ -251,15 +252,15 @@ def test_ensure_downloads_when_missing(
     )
 
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        base_config.settings.observability, "telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        base_config.settings.observability, "telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        base_config.settings.observability, "telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 3)
+    monkeypatch.setattr(base_config.settings.observability, "trace_retention_days", 3)
 
     oc.ensure_otel_collector(
         repo,
@@ -318,9 +319,9 @@ def _local_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(cluster, "get_record", _get_record)
     monkeypatch.setattr(
-        "base.config.settings.data_plane.redis_url", "redis://ava:runtime@127.0.0.1:6380/0"
+        base_config.settings.data_plane, "redis_url", "redis://ava:runtime@127.0.0.1:6380/0"
     )
-    monkeypatch.setattr("base.config.settings.data_plane.redis_admin_password", "abc")
+    monkeypatch.setattr(base_config.settings.data_plane, "redis_admin_password", "abc")
 
 
 def _render_real_template(
@@ -338,19 +339,20 @@ def _render_real_template(
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
     _local_data_plane(monkeypatch)
-    monkeypatch.setattr("base.config.settings.gateway.gateway_url", gateway_url)
+    monkeypatch.setattr(base_config.settings.gateway, "gateway_url", gateway_url)
     from base.host.net.url_secret import url_with_host
 
     monkeypatch.setattr(
-        "base.config.settings.observability.gateway_otlp_endpoint",
+        base_config.settings.observability,
+        "gateway_otlp_endpoint",
         url_with_host("http://localhost:4318", urlsplit(gateway_url).hostname or ""),
     )
-    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", cluster_secret)
+    monkeypatch.setattr(base_config.settings.data_plane, "cluster_secret", cluster_secret)
     monkeypatch.setattr(
-        "base.config.settings.observability.otel_collector_metrics_port", self_metrics_port
+        base_config.settings.observability, "otel_collector_metrics_port", self_metrics_port
     )
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", otlp_enabled)
-    monkeypatch.setattr("base.config.settings.observability.observability_url", observability_url)
+    monkeypatch.setattr(base_config.settings.observability, "telemetry_otlp_enabled", otlp_enabled)
+    monkeypatch.setattr(base_config.settings.observability, "observability_url", observability_url)
     command_runtime.machine.set(host=machine_host)
     command_runtime.machine.set(name="test-machine")
     repo = Path(__file__).resolve().parents[4]
@@ -430,7 +432,7 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     from base.cluster.authority import MONITOR_ROLE
     from base.cluster.dataplane.pg_admin import pg_socket_path
 
-    monkeypatch.setattr("base.config.settings.data_plane.db_url", _DELIVERED)
+    monkeypatch.setattr(base_config.settings.data_plane, "db_url", _DELIVERED)
     cfg = _render_real_template(
         monkeypatch,
         frozenset({"gateway", "agent-runner"}),
@@ -489,13 +491,14 @@ def test_remote_managed_plane_omits_the_postgres_receiver(
     this host (its provider monitors it), so only Redis is scraped; the
     provider's database credential never reaches the config."""
     monkeypatch.setattr(
-        "base.config.settings.data_plane.db_url",
+        base_config.settings.data_plane,
+        "db_url",
         "postgresql://ava:provider-password@10.0.0.2:5433/ava",
     )
-    monkeypatch.setattr("base.config.settings.data_plane.redis_url", "redis://10.0.0.2:6380/0")
-    monkeypatch.setattr("base.config.settings.data_plane.redis_admin_password", "abc")
-    monkeypatch.setattr("base.config.settings.gateway.gateway_url", "http://localhost:8000")
-    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "")
+    monkeypatch.setattr(base_config.settings.data_plane, "redis_url", "redis://10.0.0.2:6380/0")
+    monkeypatch.setattr(base_config.settings.data_plane, "redis_admin_password", "abc")
+    monkeypatch.setattr(base_config.settings.gateway, "gateway_url", "http://localhost:8000")
+    monkeypatch.setattr(base_config.settings.data_plane, "cluster_secret", "")
     command_runtime.machine.set(host="localhost")
     command_runtime.machine.set(name="test-machine")
     repo = Path(__file__).resolve().parents[4]

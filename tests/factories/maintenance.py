@@ -12,7 +12,9 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.db import create_agent
 from base.deploy.maintenance import admission, pause_owner
+from base.deploy.state import host_deploy_state
 from cli.database import operator_database_factory
+from ops import agent_pause
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
@@ -40,8 +42,8 @@ def start_cluster_through_ready_gate(
     from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle._pause_resume import resume_after_start
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
-    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
+    monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
+    monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
     @resume_after_start

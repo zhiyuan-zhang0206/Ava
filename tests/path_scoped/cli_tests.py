@@ -19,7 +19,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.deploy.lifecycle import service_selection as ds
 from base.paths import ava_home
-from base.telemetry import EventPipeline
+from base.telemetry import EventPipeline, process_logging
 from cli.commands.tests.health_port_guard import guard_health_port_gate as guard_health_port_gate
 from cli.database import (
     OperatorDatabaseFactory,
@@ -135,5 +135,5 @@ def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     ) -> None:
         opened.append(name)
 
-    monkeypatch.setattr("base.telemetry.process_logging.init_cli_process", record)
+    monkeypatch.setattr(process_logging, "init_cli_process", record)
     return opened

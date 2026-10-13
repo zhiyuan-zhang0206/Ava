@@ -11,7 +11,8 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from base import config
+from base import config, paths
+from base.cluster.authority import unit
 from base.cluster.authority.api import telemetry_token
 from base.cluster.machine import MachineIdentity
 from base.config.domains.observability.settings import ObservabilitySettings
@@ -44,7 +45,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         "AVA_GATEWAY_OTLP_ENDPOINT=http://stale.invalid:1\n"
     )
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.10")
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "relay-test-token")
     owner = config.ConfigBoot()
@@ -84,7 +85,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     def installed(_home: Path) -> SimpleNamespace:
         return capability
 
-    monkeypatch.setattr("base.cluster.authority.unit.load_unit_capability", installed)
+    monkeypatch.setattr(unit, "load_unit_capability", installed)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     rendered = yaml.safe_load(
         collector.generate_config(

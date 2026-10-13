@@ -12,7 +12,10 @@ from typing import Any
 import pytest
 
 from base import cluster
+from base.cluster import authority
+from base.cluster.authority import api
 from base.config import settings
+from cli import start_identity
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.commands.lifecycle import start as _start
 from cli.database.runtime import CommandRuntime
@@ -35,7 +38,7 @@ def test_gateway_data_plane_brings_up_own_instance(
     ports, with each data-plane identity read from its own URL."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
     # An established home: its database authority ledger exists.
-    monkeypatch.setattr("base.cluster.authority.load_ledger", lambda _home: object())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(authority, "load_ledger", lambda _home: object())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "bearer")
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "redis-admin")
     monkeypatch.setattr(cluster, "redis_password_from_env", lambda: "redis-runtime")
@@ -84,8 +87,8 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
     first start in progress) is refused before any native effect — never
     converted by an ordinary start."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.cluster.authority.load_ledger", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.start_identity.needs_provision", lambda _home: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(authority, "load_ledger", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(start_identity, "needs_provision", lambda _home: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _ci,
         "ensure_cluster_storage",
@@ -137,7 +140,7 @@ def test_local_launch_without_owner_cannot_publish_authority(
     from cli.commands.data_plane import bringup
 
     effect = Mock(side_effect=AssertionError("authority must not be published"))
-    monkeypatch.setattr("base.cluster.authority.api.publish_telemetry_token", effect)
+    monkeypatch.setattr(api, "publish_telemetry_token", effect)
     with pytest.raises(ValueError, match="caller-owned child retention"):
         bringup.ensure_gateway_data_plane(
             database_factory=operator_database, machine=command_runtime.machine

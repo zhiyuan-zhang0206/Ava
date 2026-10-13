@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 
+from base.host import proc
 from cli.commands.agents import impersonation_adapters as adapters
 
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
@@ -29,7 +30,7 @@ def test_codex_refusal_never_falls_back_to_pending(
     from unittest.mock import Mock
 
     queued = Mock(return_value=subprocess.CompletedProcess([], 0))
-    monkeypatch.setattr("base.host.proc.run_bounded", queued)
+    monkeypatch.setattr(proc, "run_bounded", queued)
 
     def refuse(_thread_id: str, _message: str, *, endpoint: str) -> str:
         return failure

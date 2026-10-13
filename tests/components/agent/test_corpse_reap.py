@@ -13,6 +13,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from agent.ownership import hosted
 from agent.ownership.hosted import (
     admit_hosted_runtime,
     settle_and_stamp_turn,
@@ -46,7 +47,7 @@ async def test_corpse_stamp_failure_keeps_its_traceback(
     async def _broken(_pool: object, _incarnation: object) -> None:
         raise RuntimeError("stamp store down")
 
-    monkeypatch.setattr("agent.ownership.hosted.stamp_turn_fatal", _broken)
+    monkeypatch.setattr(hosted, "stamp_turn_fatal", _broken)
 
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(

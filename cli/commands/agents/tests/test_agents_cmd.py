@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+import base.cluster.machine as cluster_machine
 from cli.commands.agents import control as _agents
 
 _TARGET = {
@@ -65,9 +66,9 @@ def _agent_row(agent_id: int, status: str, machine: str, label: str | None) -> d
 
 @pytest.fixture(autouse=True)
 def _gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(cluster_machine, "gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr(
-        "base.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
+        cluster_machine, "gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
     )
 
 
@@ -293,8 +294,8 @@ def test_agents_parser_wires_kill_all_shell_sessions(monkeypatch: pytest.MonkeyP
         seen[str(agent_id)] = kill_all_shell_sessions
         return 0
 
-    monkeypatch.setattr("cli.commands.agents.control.cmd_agents_terminate", _record)
-    monkeypatch.setattr("cli.commands.agents.control.cmd_agents_kill", _record)
+    monkeypatch.setattr(_agents, "cmd_agents_terminate", _record)
+    monkeypatch.setattr(_agents, "cmd_agents_kill", _record)
     for argv in (
         ["agents", "terminate", "7", "--kill-all-shell-sessions"],
         ["agents", "kill", "8", "--kill-all-shell-sessions"],

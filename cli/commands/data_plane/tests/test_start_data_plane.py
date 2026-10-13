@@ -12,6 +12,7 @@ from base import cluster
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db.tests.fakes import patch_database
+from cli import start_identity
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
 from tests.factories.data_plane import cluster_record
@@ -89,14 +90,14 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
 
     monkeypatch.setattr(authority, "activate", activate)
     monkeypatch.setattr(health_preflight, "probe_redis", record("redis-probe"))
-    monkeypatch.setattr("cli.start_identity.mark_phase", record("provisioned"))
+    monkeypatch.setattr(start_identity, "mark_phase", record("provisioned"))
 
     def needs_provision(_home: object) -> bool:
         if state["birth"]:
             state["active"] = False
         return state["birth"]
 
-    monkeypatch.setattr("cli.start_identity.needs_provision", needs_provision)
+    monkeypatch.setattr(start_identity, "needs_provision", needs_provision)
     calls.append("start")
     return recorded
 

@@ -14,11 +14,14 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+import base.sessions.backend as sessions_backend
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent
+from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
+from base.deploy.state import host_deploy_state
 from base.deploy.state.host_deploy_state import HostDeployState
 from base.events.live.bus import EventBus
 from ops import agent_pause
@@ -36,7 +39,7 @@ def posture(monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity) 
         assert machine == machine_identity.name()
         calls.append(value)
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", record)
+    monkeypatch.setattr(host_deploy_state, "set_posture", record)
     return calls
 
 
@@ -44,14 +47,12 @@ def posture(monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity) 
 def local_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _StubBackend:
     """Keep each operation's journal private and leave real DB drain intact."""
     backend = _StubBackend()
-    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: backend)
+    monkeypatch.setattr(sessions_backend, "get_backend", lambda: backend)
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)
     # The real unpause is safe here: the backend records every possible spawn.
-    monkeypatch.setattr(
-        "ops.cluster_status.pause.unpause_local_cluster", _real_unpause_local_cluster
-    )
+    monkeypatch.setattr(cluster_pause, "unpause_local_cluster", _real_unpause_local_cluster)
     return backend
 
 
@@ -86,7 +87,7 @@ def test_is_paused_judges_a_pre_read_state_without_another_db_read(
     def _unexpected_read(_db: object) -> HostDeployState | None:
         raise AssertionError("is_paused re-read host deploy state")
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _unexpected_read)
+    monkeypatch.setattr(host_deploy_state, "read", _unexpected_read)
 
     def _no_name() -> str:
         raise AssertionError("is_paused resolved the name for a pre-read state")
@@ -107,7 +108,7 @@ def test_is_paused_without_an_argument_still_reads_fresh(
         reads += 1
         return _state("paused")
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read)
+    monkeypatch.setattr(host_deploy_state, "read", _read)
 
     assert cluster_pause.is_paused(database, machine_name=machine_identity.name) is True
     assert reads == 1
@@ -334,7 +335,7 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
     pause_owner.change_maintenance(
         "runner-a:pid1", when, MaintenanceHold(), MaintenanceHold(MaintenancePhase.STOPPING)
     )
-    monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: False)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: False)
 
     with pytest.raises(RuntimeError) as raised:
         cluster_pause.unpause_local_cluster(database, event_bus, local_machine=machine_identity)

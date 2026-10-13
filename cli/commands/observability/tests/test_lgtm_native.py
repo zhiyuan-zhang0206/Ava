@@ -11,9 +11,12 @@ from typing import Any
 import pytest
 import yaml
 
+import base.config as base_config
+from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
+from base.packages import dashboard_supply
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
@@ -62,7 +65,8 @@ def _stub_dashboard_render(monkeypatch: pytest.MonkeyPatch) -> None:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
-        "base.packages.dashboard_supply.render_dashboard_json",
+        dashboard_supply,
+        "render_dashboard_json",
         render_dashboard_json,
     )
 
@@ -250,22 +254,23 @@ def test_download_retry_preserves_final_error_and_chain(
 def _pin_default_listen_hosts_and_read_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the listen-host and read-URL settings to their defaults so the
     rendered bytes are deterministic regardless of the runner's environment."""
-    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "127.0.0.1")
+    monkeypatch.setattr(base_config.settings.observability, "lgtm_listen_host", "127.0.0.1")
     monkeypatch.setattr(
-        "base.config.settings.observability.lgtm_grafana_listen_host",
+        base_config.settings.observability,
+        "lgtm_grafana_listen_host",
         "0.0.0.0",  # noqa: S104 — pinned config default, not a bind
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        base_config.settings.observability, "telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        base_config.settings.observability, "telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
+        base_config.settings.observability, "telemetry_grafana_url", "http://127.0.0.1:3003"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+        base_config.settings.observability, "telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
 
 
@@ -402,18 +407,18 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     home = tmp_path / "home"
     _mark_current(home)
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "10.0.0.5")
+    monkeypatch.setattr(base_config.settings.observability, "lgtm_listen_host", "10.0.0.5")
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_loki_url", "http://10.0.0.5:3100"
+        base_config.settings.observability, "telemetry_loki_url", "http://10.0.0.5:3100"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.5:9090"
+        base_config.settings.observability, "telemetry_prometheus_url", "http://10.0.0.5:9090"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_grafana_url", "http://10.0.0.5:3003"
+        base_config.settings.observability, "telemetry_grafana_url", "http://10.0.0.5:3003"
     )
     monkeypatch.setattr(
-        "base.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+        base_config.settings.observability, "telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
 
     lgtm_native.ensure_lgtm_native(
@@ -630,13 +635,13 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
     def broken_render(_db: object, _repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
         raise RuntimeError("render exploded")
 
-    monkeypatch.setattr("base.packages.dashboard_supply.render_dashboard_json", broken_render)
+    monkeypatch.setattr(dashboard_supply, "render_dashboard_json", broken_render)
     emitted: list[tuple[object, ...]] = []
 
     def record_emit(*args: object, **kwargs: object) -> None:
         emitted.append((*args, kwargs))
 
-    monkeypatch.setattr("base.telemetry.emit", record_emit)
+    monkeypatch.setattr(telemetry, "emit", record_emit)
 
     lgtm_native._render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline

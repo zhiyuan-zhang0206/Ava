@@ -20,7 +20,9 @@ from dotenv import dotenv_values
 from psycopg.conninfo import conninfo_to_dict
 
 from base import cluster
+from base.cluster.dataplane import direct_url
 from base.config import settings
+from base.packages import dashboard_supply
 from base.telemetry import EventPipeline
 from cli.commands.observability import lgtm_native, observatory_urls
 from cli.database.runtime import CommandRuntime
@@ -40,7 +42,7 @@ def _dashboard_supply_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     def unavailable(_database: object) -> None:
         raise RuntimeError("native dashboard supply is unavailable in this rendering test")
 
-    monkeypatch.setattr("base.packages.dashboard_supply.render_dashboard_json", unavailable)
+    monkeypatch.setattr(dashboard_supply, "render_dashboard_json", unavailable)
 
 
 def _render(
@@ -129,7 +131,7 @@ def test_registered_pooler_is_rendered_as_direct_postgres(
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
-    monkeypatch.setattr("base.cluster.dataplane.direct_url.get_record", _record)
+    monkeypatch.setattr(direct_url, "get_record", _record)
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:20029/ava")
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
     assert (

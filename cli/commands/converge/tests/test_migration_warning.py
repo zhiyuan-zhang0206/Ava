@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from base.deploy.schema import migrations
 from base.telemetry import EventPipeline
 from cli.commands.converge import host as converge_host
 from cli.commands.converge.tests.context_inputs import converge_context as _ctx
@@ -26,7 +27,8 @@ class TestWarnUntrackedMigrations:
         operator_pipeline: Callable[[], EventPipeline],
     ) -> None:
         monkeypatch.setattr(
-            "base.deploy.schema.migrations.untracked_migration_files",
+            migrations,
+            "untracked_migration_files",
             lambda: ["20260808T010000_add-foo.sql"],
         )
         converge_host._warn_untracked_migrations(
@@ -47,7 +49,7 @@ class TestWarnUntrackedMigrations:
         operator_database: Callable[[], Any],
         operator_pipeline: Callable[[], EventPipeline],
     ) -> None:
-        monkeypatch.setattr("base.deploy.schema.migrations.untracked_migration_files", list)
+        monkeypatch.setattr(migrations, "untracked_migration_files", list)
         converge_host._warn_untracked_migrations(
             _ctx(
                 tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline

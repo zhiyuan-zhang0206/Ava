@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from base import paths
 from scripts.ci.cli import CIStatus
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -125,7 +126,7 @@ def _run_watcher(
     def workspace_for_test(_agent_id: int) -> Path:
         return tmp_path
 
-    monkeypatch.setattr("base.paths.workspace_dir", workspace_for_test)
+    monkeypatch.setattr(paths, "workspace_dir", workspace_for_test)
 
     code = _TEMPLATE.read_text()
     substitutions = (

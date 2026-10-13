@@ -20,6 +20,7 @@ from base.cluster.machine import MachineIdentity
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.sessions.pty.paths import SERVICE_UNIT
 from base.telemetry import EventPipeline
+from cli.commands.data_plane import bringup
 from cli.commands.lifecycle.stop import _force_stop
 from cli.commands.lifecycle.tests.identity.restart_inputs import (
     ignore_retained_children as _ignoring_retention,
@@ -39,6 +40,7 @@ from cli.tests._commands_helpers import (
 )
 from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from services.desktop.browser import orphan
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -75,7 +77,7 @@ def test_cmd_restart_succeeds_non_interactively(
         assert machine_name == command_runtime.machine.name
         return []
 
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_migrations_apply", _apply_migrations)
+    monkeypatch.setattr(_start_commands, "cmd_migrations_apply", _apply_migrations)
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
@@ -427,11 +429,10 @@ def test_stop_proceeds_on_yes(
             "root+terminal-service" if SERVICE_UNIT in kw["preserve"] else "root"
         ),
     )
+    monkeypatch.setattr(_stop_commands, "force_close_terminals", lambda: events.append("terminals"))
     monkeypatch.setattr(
-        "cli.commands.lifecycle.stop.force_close_terminals", lambda: events.append("terminals")
-    )
-    monkeypatch.setattr(
-        "cli.commands.data_plane.bringup.stop_cluster_instance",
+        bringup,
+        "stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert (
@@ -466,7 +467,8 @@ def test_stop_revokes_serving_before_stopping_root(
         lambda **_kw: observed.append(start_serving.is_serving()),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
-        "cli.commands.data_plane.bringup.stop_cluster_instance",
+        bringup,
+        "stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
     assert (
@@ -495,7 +497,8 @@ def test_do_stop_keep_infra_skips_infra_teardown(
         lambda **_kw: events.append("root"),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
-        "cli.commands.data_plane.bringup.stop_cluster_instance",
+        bringup,
+        "stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert (
@@ -527,7 +530,8 @@ def test_do_stop_keeps_browser_by_default(
     )
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: reaps.append(1))
     monkeypatch.setattr(
-        "cli.commands.data_plane.bringup.stop_cluster_instance",
+        bringup,
+        "stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
     assert (
@@ -565,9 +569,10 @@ def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
     def closed() -> None:
         raise AssertionError("a kept service's terminals must not be closed")
 
-    monkeypatch.setattr("cli.commands.lifecycle.stop.force_close_terminals", closed)
+    monkeypatch.setattr(_stop_commands, "force_close_terminals", closed)
     monkeypatch.setattr(
-        "cli.commands.data_plane.bringup.stop_cluster_instance",
+        bringup,
+        "stop_cluster_instance",
         _ignoring_retention(lambda: 0),
     )
     assert (
@@ -599,7 +604,8 @@ def test_do_stop_stop_browser_kills_it(
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_root)
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: events.append("browser"))
     monkeypatch.setattr(
-        "cli.commands.data_plane.bringup.stop_cluster_instance",
+        bringup,
+        "stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
     assert (
@@ -621,18 +627,18 @@ def test_reap_cluster_chrome_reports_pids_and_survives_a_failure(
     """The CLI seam: report what was reaped, stay silent when there was nothing,
     and never let a sweep failure fail the teardown around it."""
 
-    monkeypatch.setattr("services.desktop.browser.orphan.reap_cluster_chrome", lambda: [4242])
+    monkeypatch.setattr(orphan, "reap_cluster_chrome", lambda: [4242])
     _real_reap_cluster_chrome()
     assert "4242" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
-    monkeypatch.setattr("services.desktop.browser.orphan.reap_cluster_chrome", list)
+    monkeypatch.setattr(orphan, "reap_cluster_chrome", list)
     _real_reap_cluster_chrome()
     assert capsys.readouterr().out == "", "nothing to reap prints nothing"  # pyright: ignore[reportUnknownMemberType]
 
     def _boom() -> list[int]:
         raise RuntimeError("process table unavailable")
 
-    monkeypatch.setattr("services.desktop.browser.orphan.reap_cluster_chrome", _boom)
+    monkeypatch.setattr(orphan, "reap_cluster_chrome", _boom)
     _real_reap_cluster_chrome()  # must not raise
     assert "could not sweep" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
@@ -683,9 +689,10 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
         return frozenset({"gateway", "agent-runner"})
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", roles)
-    monkeypatch.setattr("cli.commands.lifecycle.stop._repo_root", lambda: Path("/repo"))
+    monkeypatch.setattr(_stop_commands, "_repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
-        "cli.commands.data_plane.bringup.stop_cluster_instance",
+        bringup,
+        "stop_cluster_instance",
         _ignoring_retention(lambda: events.append("infra") or 0),
     )
 
