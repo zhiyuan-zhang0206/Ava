@@ -242,7 +242,7 @@ class AgentPromptSettings(EnvSettings):
             "Optional communication style. 'oriented': live pairing with substantive "
             "findings and checkpoints. 'concise': brief milestone updates. 'silent': "
             "one report for human-requested work. 'off': only the optional style "
-            "section is omitted; language and returning-reader rules remain active. Unset "
+            "section is omitted; language and substantive communication rules remain active. Unset "
             "resolves the per-model default (base/lm/registry.py; shared floor "
             "'off')."
         ),

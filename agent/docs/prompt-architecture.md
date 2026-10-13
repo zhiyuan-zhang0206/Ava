@@ -126,9 +126,9 @@ Capabilities rather than standing as its own section.
   always present: answer directly, or give a substantive reply in the same dialog
   before investigating or calling tools. `off` and `silent` do not suppress it.
   Ordinary assistant text follows the user's requested language, including standing
-  preferences in injected memory. Each message must remain useful to a user managing
-  many agents who returns after an hour away. Execution updates default to milestones
-  meaningful to the recipient; routine operations stay in tool feedback or working notes.
+  preferences in injected memory. Each message is self-contained, substantive
+  communication with the user. Execution updates default to milestones meaningful
+  to the user; routine operations stay in tool feedback or working notes.
   Automated wakes and peer messages do not require courtesy replies or closing summaries.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
@@ -341,13 +341,13 @@ memory or project instructions, otherwise the latest human message. English
 prompts, code, logs and peer messages do not reset that preference; code,
 identifiers, quotations and artifacts retain their required language.
 
-Assume a user manages many agents and may return after an hour away: each ordinary
-text message must still be independently useful, without watching tools execute
+Each ordinary text message is substantive communication with the user and must
+be independently useful, without watching tools execute
 or reconstructing internal steps. State what changed, why it matters to the
-recipient and any needed action or unresolved limitation.
+user and any needed action or unresolved limitation.
 
 Default execution text requires a milestone with new information that changes what the
-user or a collaborating agent knows, decides or can do: a usable result, material
+user knows, decides or can do: a usable result, material
 direction change, actionable blocker or handoff. Routine calls, retries, file
 reads, bookkeeping and unchanged status stay in tool feedback or working notes.
 There is no fixed cadence. Updates stand alone instead of introducing a tool
@@ -357,7 +357,7 @@ requested explanations or necessary evidence. Automated wakes and peer messages
 require neither courtesy replies nor automatic closing summaries. The optional
 style text is owned by the same `agent/graph/prompt/conversation.py` module.
 An explicitly selected live-pairing style can add more frequent substantive
-updates, but every message must meet the same returning-reader standard.
+updates, but every message must remain self-contained and useful to the user.
 
 A lightweight conversation section lives in the **Ava core** prompt
 (`_communication_style_section`) — it is general-agent behavior, not
@@ -376,7 +376,7 @@ default stays milestone-driven. `concise` keeps milestone updates to one or two
 sentences. `silent` asks for no narration after the initial human response and
 one complete standalone report for human-requested work; actionable blockers and
 user-only questions still interrupt immediately. These styles cannot enable
-routine per-action narration, assume the recipient watches in real time or
+routine per-action narration, assume the user watches in real time or
 disable the user's language preference.
 
 Deliberately **not** as prescriptive as Codex. We do **not** want:
@@ -385,15 +385,16 @@ Deliberately **not** as prescriptive as Codex. We do **not** want:
 - banning specific opener phrasings ("Done —", "Got it", "Great question");
 - mandatory acknowledge-the-request-then-restate ceremony before every action.
 
-The milestone policy is recipient-driven, not clock-driven. These are model
-instructions, not a guarantee of adherence or a completion protocol:
-`ava.agents.get_last_message` still returns the latest text and does not prove
-completion, freshness or delivery to a peer. Fleet owns directed peer delivery.
+The milestone policy serves the user, without a clock-driven reporting cadence.
+Peer communication remains separate: Fleet owns directed delivery through
+`ava.agents.send_message`. `ava.agents.get_last_message` is a fallback read of
+the latest output when an agent forgets to send a peer message; it does not
+define the audience of ordinary assistant text or prove completion or freshness.
 
 Validation combines full-prompt contract tests across all four styles, with
 optional output-shape guidance enabled and disabled, and behavior review on
 representative tasks. Review whether a standing non-English preference survives
-English source/tool content, each message remains useful after an hour away,
+English source/tool content, each message independently serves the user,
 routine retries stay quiet, real results or blockers
 are reported, automated wakes avoid empty closing remarks, and requested detailed
 answers retain their evidence. Contract tests prove injection and compatible
