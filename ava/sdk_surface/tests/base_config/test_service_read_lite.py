@@ -17,7 +17,7 @@ def _probe(scenario: str, home: Path, *args: str, profile: str | None = None) ->
         env["AVA_PROCESS_PROFILE"] = profile
     proc = subprocess.run(  # noqa: S603 — this interpreter runs the fixed child script
         [sys.executable, "-B", str(_CHILD), scenario, *args],
-        cwd=Path(__file__).resolve().parents[3],
+        cwd=Path(__file__).resolve().parents[4],
         env=env,
         capture_output=True,
         text=True,
