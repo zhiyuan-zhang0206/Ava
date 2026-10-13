@@ -242,3 +242,75 @@ a separate decision.
   Tests that use private names or string patch targets move to public behavior
   or injection.
 - Runtime data inputs remain outside the rule until their own decision.
+
+## Addendum (2026-10-13): strict-to-be baselines
+
+The Decision above turns the gate on "for the whole repository at once, after
+those cycles are removed". Measured on 2026-10-13 the repository is far from
+that point: about 20 directories still have cycles, more than 5,000 uses of an
+underscore name cross files (93% of them in tests), and about a hundred
+underscore-module and a dozen restricted-Python violations remain. Waiting for
+zero lets new debt accrue while the old is repaid. This addendum adds a middle
+state that lets the gate open now, stops new debt at once, and makes the debt
+only go down. The rule itself is unchanged.
+
+### Two modes, derived from the baseline
+
+A directory's mode follows from what its baseline records; there is no switch
+and no lenient setting.
+
+- **strict**: the baseline is empty. Every violation fails.
+- **strict-to-be**: the baseline still holds entries. A recorded violation
+  passes, a new one fails, and a recorded entry that no longer occurs fails too,
+  with the instruction to run `meizel debt prune`. The baseline can only
+  shrink, and when it reaches zero the directory is strict again.
+
+A failure in a strict-to-be directory says so in plain words: the directory
+carries N recorded debts that must only shrink, the violation should be fixed
+rather than recorded, and `meizel debt record` exists for deliberate exceptions.
+
+### The baseline is as local as the rule
+
+There is no repository-wide baseline: concurrent repayments would all edit one
+file. Each directory records its own debt in a `[debt.<code>]` table of its
+`meizel.toml`, owned by the directory that judges the violation, which is where
+a declared edge would go:
+
+- edge violations (`undeclared-edge`, `not-exported`, `private-module`,
+  `private-name`) belong to the lowest common directory of the fact edge;
+- file violations (`restricted-python`) belong to the directory of the file;
+- a cycle is recorded as the declared edges allowed to close it: the local graph
+  without them must be acyclic.
+
+Entries are keyed by code, source, target or name, with a count and no line
+number, so moving code does not rewrite the baseline. Tables are sorted and one
+debt takes one line. `[debt]` is not an entry of the directory budget.
+The 800-line file ceiling and the 20-entry directory cap are not meizel
+diagnostics today; when they become one, they take the same two owners (the
+file's directory, and the parent of the directory that is too full).
+
+### Commands and the three depths of `check`
+
+- `meizel debt` reads the manifests only and prints counts by code, by
+  top-level directory and by mode (`--json` for tools). It does not analyse the
+  source, so it answers in about a second. It is where "how much debt is left"
+  is answered.
+- `meizel debt record <paths...>` writes the current violations under the paths
+  into their owners' baselines. It is the only way a baseline grows; `check` and
+  `bootstrap` never write one.
+- `meizel debt prune` lowers the baselines to what still occurs.
+- `meizel debt diff --against <ref> --on-growth fail|warn` compares the recorded
+  totals per code with a git ref. It compares totals, not directories, so debt
+  that moves with its file is not growth.
+- `check --changed <files...>` is the cheap depth for pre-commit: it reads all
+  manifests (so every declared graph is checked for cycles), scans only the named
+  files and what fixture resolution needs, and judges their fact edges and the
+  recorded debt about them, without the repository-wide stale checks. `check` is
+  the whole-repository depth, with stale declarations, for pre-push and CI.
+
+### Mechanism and policy are separate
+
+The tool provides mechanisms: `record` can raise a baseline, and `diff` leaves
+fail-or-warn to its caller (the flag is required). How a repository wires the
+depths into hooks and CI, and whether growth fails or warns, is repository
+policy and is decided with the gate that turns meizel on, not here.

@@ -11,7 +11,7 @@ from meizel.graph.model import MeizelError
 
 __all__ = ["prune", "remove_entries"]
 
-_HEADER = re.compile(r"^\s*\[(\w+)\]\s*(?:#.*)?$")
+_HEADER = re.compile(r"^\s*\[([\w.-]+)\]\s*(?:#.*)?$")
 _ENTRY = re.compile(r"""^(\s*)("[^"]*"|'[^']*'|[\w.-]+)\s*=\s*\[""")
 _QUOTED = re.compile(r""""([^"]*)"|'([^']*)'""")
 

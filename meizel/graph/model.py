@@ -5,7 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-__all__ = ["Code", "Diagnostic", "Fact", "FactKind", "MeizelError", "Problem", "Restricted"]
+__all__ = [
+    "Code",
+    "DebtKey",
+    "Diagnostic",
+    "Fact",
+    "FactKind",
+    "MeizelError",
+    "Problem",
+    "Restricted",
+]
 
 
 class MeizelError(Exception):
@@ -39,6 +48,8 @@ class Code(StrEnum):
     MANIFEST_EXPORT_PRIVATE = "manifest-export-private"
     MANIFEST_STALE_EDGE = "manifest-stale-edge"
     MANIFEST_ROLES = "manifest-roles"
+    MANIFEST_DEBT = "manifest-debt"
+    DEBT_PAID = "debt-paid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,12 +86,21 @@ class Problem:
 
 
 @dataclass(frozen=True, slots=True)
+class DebtKey:
+    """Where a violation can be recorded: its owner directory and a line-free key in its baseline."""
+
+    owner: str
+    key: str
+
+
+@dataclass(frozen=True, slots=True)
 class Diagnostic:
     path: str
     line: int
     code: Code
     message: str
     hints: tuple[str, ...] = ()
+    debt: DebtKey | None = None
 
     def render(self) -> str:
         head = f"{self.path}:{self.line}: [{self.code}] {self.message}"
