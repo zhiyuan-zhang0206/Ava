@@ -21,7 +21,7 @@ class ServiceStarted(TypedDict):
 
 
 class AgentSpawned(TypedDict):
-    """`agent_spawned` payload — ops/agents/spawn.py."""
+    """`agent_spawned` payload — base/agents/birth/spawn.py."""
 
     spawner: str  # "user" | "agent:<id>" | "scheduler" | ...
     forked_from: int | None

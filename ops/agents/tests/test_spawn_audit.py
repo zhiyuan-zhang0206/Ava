@@ -14,6 +14,8 @@ import psycopg
 import pytest
 
 from base import telemetry
+from base.agents.birth import transaction
+from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -22,8 +24,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from ops.agents import birth_transaction
-from ops.agents.spawn import create_agent_row
 from ops.agents.tests.test_agents_internals import _insert_checkpoint, _spawn_agent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -148,7 +148,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     def refuse(_conn: psycopg.Connection, _event: object) -> None:
         raise RuntimeError("audit write failed")
 
-    monkeypatch.setattr(birth_transaction, "record_audit", refuse)
+    monkeypatch.setattr(transaction, "record_audit", refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
         create_agent_row(

@@ -5,6 +5,8 @@ from contextlib import nullcontext
 import psycopg
 import pytest
 
+from base.agents.birth.creation_identity import creation_request_hash
+from base.agents.birth.transaction import insert_agent_birth
 from base.agents.model.birth_config import set_cluster_default_model
 from base.agents.tasks.creation import create_task_in_transaction
 from base.agents.tasks.model import Task
@@ -13,8 +15,6 @@ from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.packages.plugin_providers import build_model_catalog
-from ops.agents.birth_transaction import insert_agent_birth
-from ops.agents.creation_identity import creation_request_hash
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

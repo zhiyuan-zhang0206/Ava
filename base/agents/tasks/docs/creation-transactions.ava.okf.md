@@ -19,14 +19,14 @@ The fleet SDK reexports the same class and retains its existing private column
 and row-conversion aliases. Priority and reminder defaults/validation are owned
 by `base.agents.tasks.priority`; no parallel SDK policy is introduced.
 
-`ops.agents.birth_transaction.insert_agent_birth` similarly accepts the
+`base.agents.birth.transaction.insert_agent_birth` similarly accepts the
 caller's cursor. It writes the identity, metadata, optional fork history,
 initial prompt and birth audit, returning an `AgentBirth` with prepared events.
 It preserves the existing keyed-birth recovery owner: replay returns the
 original launch attempt and no new prompt id or events. Birth remains a gateway
 MAIN-role operation; the runner role cannot create identities.
 
-The existing public `ops.agents.spawn.create_agent_row` wrapper still owns its
+The existing public `base.agents.birth.spawn.create_agent_row` wrapper still owns its
 connection, commit, announcements, logging and tuple result. Standalone
 SDK task creation still owns its receipt advisory lock, validation, transaction
 and post-commit effects. Receipt lookup precedes mutable parent/title checks;

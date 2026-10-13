@@ -7,14 +7,14 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
+from base.agents.birth.creation_identity import creation_request_hash
+from base.agents.birth.transaction import insert_agent_birth
 from base.agents.incarnation.resources import IncarnationResources, ResourceBirth, decode_resources
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.plugin_providers import build_model_catalog
-from ops.agents.birth_transaction import insert_agent_birth
-from ops.agents.creation_identity import creation_request_hash
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

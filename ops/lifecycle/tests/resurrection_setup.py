@@ -8,6 +8,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.birth.spawn import create_agent_row
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.incarnation.resources import IncarnationResources
 from base.cluster.machine import MachineIdentity
@@ -16,7 +17,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from ops.agents import create_agent_row
 
 
 def noop(_db: object, _bus: object, *_args: object, **_kwargs: object) -> None:

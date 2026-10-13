@@ -34,7 +34,7 @@ an empty, unfrozen set only after the admission-captured host native birth is pr
 ended. A live exact host, an expired lease, a missing host identity, a frozen set,
 or any request refuses that handoff. A legacy NULL row keeps its unknown set
 (admission never mints an empty one) and is replaced only after its lease
-expires; NULL evidence never authorizes an earlier takeover. Fresh `ops.agents.birth_transaction.insert_agent_birth` metadata INSERTs stamp
+expires; NULL evidence never authorizes an earlier takeover. Fresh `base.agents.birth.transaction.insert_agent_birth` metadata INSERTs stamp
 one server-owned `ResourceBirth` in the same birth transaction. Real hosted
 admission consumes it and captures its own host process before advertising
 managed work. Receipt replay never refreshes resource evidence; historical NULL

@@ -12,6 +12,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from base import telemetry
+from base.agents.birth.creation_identity import record_creation_snapshot, recover_birth
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
@@ -25,7 +26,6 @@ from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
-from ops.agents.creation_identity import record_creation_snapshot, recover_birth
 
 
 @dataclass(frozen=True)

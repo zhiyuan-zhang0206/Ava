@@ -27,7 +27,7 @@ _INVENTORY: dict[str, str] = {
     "base/agents/tasks/creation.py::insert_task": "local",
     "gateway/agents/router.py::_patch_label_blocking": "central",
     "gateway/mcp_server/endpoint.py::_record_tool_call": "ineligible",
-    "ops/agents/birth_transaction.py::record_birth_event": "central",
+    "base/agents/birth/transaction.py::record_birth_event": "central",
     "ops/agents/wake.py::_stage_resurrect_event": "central",
     "ops/lifecycle/termination.py::_stage_termination_event": "central",
     "services/desktop/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": "central",

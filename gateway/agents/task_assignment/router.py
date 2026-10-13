@@ -8,6 +8,12 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents.birth.creation_identity import (
+    CreationReceipt,
+    creation_request_hash,
+    find_creation,
+)
+from base.agents.birth.transaction import insert_agent_birth
 from base.agents.tasks.creation import create_task_in_transaction, ensure_parent_exists
 from base.api_contracts.agent_contract import AgentLaunchFailed
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
@@ -26,8 +32,6 @@ from gateway.agents.task_assignment.schemas import (
     TaskAssignmentIn,
     TaskAssignmentResult,
 )
-from ops.agents.birth_transaction import insert_agent_birth
-from ops.agents.creation_identity import CreationReceipt, creation_request_hash, find_creation
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()

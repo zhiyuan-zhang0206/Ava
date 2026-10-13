@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from base.agents.birth.creation_identity import creation_request_hash, find_creation
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from gateway.agents import creation as agent_creation
@@ -18,7 +19,6 @@ from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
-from ops.agents.creation_identity import creation_request_hash, find_creation
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -176,14 +176,14 @@ def test_snapshot_fault_rolls_back_then_same_key_accepts_fresh_birth(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ops.agents import birth_transaction
+    from base.agents.birth import transaction
 
-    original = birth_transaction.record_creation_snapshot
+    original = transaction.record_creation_snapshot
 
     def fail(*args: object, **kwargs: object) -> None:
         raise RuntimeError("injected snapshot failure")
 
-    monkeypatch.setattr(birth_transaction, "record_creation_snapshot", fail)
+    monkeypatch.setattr(transaction, "record_creation_snapshot", fail)
     with pytest.raises(RuntimeError, match="injected snapshot"):
         client.post(PATH, json=BODY, headers=HEADERS)
     for statement in (
@@ -193,7 +193,7 @@ def test_snapshot_fault_rolls_back_then_same_key_accepts_fresh_birth(
         "SELECT count(*) FROM agent_creation_snapshots",
     ):
         assert db_conn.execute(statement).fetchone() == (0,)
-    monkeypatch.setattr(birth_transaction, "record_creation_snapshot", original)
+    monkeypatch.setattr(transaction, "record_creation_snapshot", original)
     accepted = client.post(PATH, json=BODY, headers=HEADERS)
     assert accepted.status_code == 201, accepted.text
     assert db_conn.execute("SELECT count(*) FROM agent_creation_snapshots").fetchone() == (1,)
