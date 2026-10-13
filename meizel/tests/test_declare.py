@@ -162,14 +162,36 @@ def test_declare_also_prunes_what_nothing_needs_any_more(make_repo: RepoFactory)
     assert toml_of(root, "pkg")["uses"] == {"a.py": ["b.py"]}
 
 
-def test_declare_never_touches_the_debt(make_repo: RepoFactory) -> None:
+def test_declare_never_adds_or_raises_debt_and_lowers_only_what_is_paid(
+    make_repo: RepoFactory,
+) -> None:
     files = {
         **BASE,
-        "pkg/meizel.toml": '[debt.private-name]\n"x.py -> y.py#_n" = 3\n',
+        "pkg/a.py": "from pkg.b import _hidden\n",
+        "pkg/b.py": "_hidden = 1\n",
+        "pkg/meizel.toml": (
+            '[uses]\n"a.py" = ["b.py"]\n\n[debt.private-name]\n'
+            '"a.py -> b.py#_hidden" = 1\n"x.py -> y.py#_n" = 3\n'
+        ),
     }
     root = make_repo(files)
     assert declare(root, "pkg") == 0
-    assert toml_of(root, "pkg")["debt"] == {"private-name": {"x.py -> y.py#_n": 3}}
+    assert toml_of(root, "pkg")["debt"] == {"private-name": {"a.py -> b.py#_hidden": 1}}
+
+
+def test_a_new_private_name_is_not_recorded_by_declare(make_repo: RepoFactory) -> None:
+    files = {
+        **BASE,
+        "pkg/a.py": "from pkg.b import _hidden, _more\n",
+        "pkg/b.py": "_hidden = 1\n_more = 2\n",
+        "pkg/meizel.toml": (
+            '[uses]\n"a.py" = ["b.py"]\n\n[debt.private-name]\n"a.py -> b.py#_hidden" = 1\n'
+        ),
+    }
+    root = make_repo(files)
+    assert declare(root, "pkg") == 0
+    assert toml_of(root, "pkg")["debt"] == {"private-name": {"a.py -> b.py#_hidden": 1}}
+    assert ("private-name", "pkg/a.py") in failures(root)
 
 
 def test_declare_twice_changes_nothing(make_repo: RepoFactory) -> None:
@@ -215,3 +237,81 @@ def test_a_loads_declaration_edge_is_declared(make_repo: RepoFactory) -> None:
     assert declare(root, "app") == 0
     assert toml_of(root, "") == {"uses": {"app": ["lib"]}}
     assert analysis_of(root).verdict == []
+
+
+def test_a_flipped_direction_is_declared_in_one_run(make_repo: RepoFactory) -> None:
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/a.py": "from pkg import b\n",
+        "pkg/b.py": "VALUE = 1\n",
+        "pkg/meizel.toml": '[uses]\n"b.py" = ["a.py"]\n',
+    }
+    root = make_repo(files)
+    assert declare(root, "pkg") == 0
+    assert toml_of(root, "pkg")["uses"] == {"a.py": ["b.py"]}
+    assert failures(root) == set()
+
+
+def test_a_flipped_direction_that_was_a_recorded_back_edge_is_declared_in_one_run(
+    make_repo: RepoFactory,
+) -> None:
+    manifest = '[uses]\n"b.py" = ["a.py"]\n\n[debt.manifest-cycle]\n"b.py -> a.py" = 1\n'
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/a.py": "from pkg import b\n",
+        "pkg/b.py": "VALUE = 1\n",
+        "pkg/meizel.toml": manifest,
+    }
+    root = make_repo(files)
+    assert declare(root, "pkg") == 0
+    parsed = toml_of(root, "pkg")
+    assert parsed["uses"] == {"a.py": ["b.py"]}
+    assert "debt" not in parsed
+    assert failures(root) == set()
+
+
+MOVED = {
+    "pkg/__init__.py": "",
+    "pkg/a.py": "from pkg import b\n",
+    "pkg/b.py": "VALUE = 1\n",
+    "app/__init__.py": "",
+    "app/run.py": "from pkg import a\n",
+}
+
+
+def test_prune_drops_declarations_that_name_a_file_that_moved_away(make_repo: RepoFactory) -> None:
+    manifest = (
+        'exports = ["a.py", "gone.py"]\n\n'
+        '[uses]\n"a.py" = ["b.py", "gone.py"]\n"gone.py" = ["b.py"]\n'
+    )
+    root = make_repo(
+        {**MOVED, "pkg/meizel.toml": manifest, "meizel.toml": '[uses]\n"app" = ["pkg"]\n'}
+    )
+    assert run(root, "check") == 1
+    assert run(root, "sync", "--prune") == 0
+    assert toml_of(root, "pkg") == {"exports": ["a.py"], "uses": {"a.py": ["b.py"]}}
+    assert failures(root) == set()
+
+
+def test_prune_drops_loads_and_externals_that_name_a_missing_target(make_repo: RepoFactory) -> None:
+    manifest = '[loads]\n"loader.py" = ["gone_dir"]\n\n[external]\n"gone.py" = "runs user code"\n"runner.py" = "runs user code"\n'
+    files = {
+        "app/__init__.py": "",
+        "app/runner.py": "exec('1')\n",
+        "app/loader.py": "VALUE = 1\n",
+        "app/meizel.toml": manifest,
+    }
+    root = make_repo(files)
+    assert run(root, "sync", "--prune") == 0
+    assert toml_of(root, "app") == {"external": {"runner.py": "runs user code"}}
+    assert failures(root) == set()
+
+
+def test_declare_after_a_move_removes_the_old_names_and_declares_the_new_ones(
+    make_repo: RepoFactory,
+) -> None:
+    manifest = '[uses]\n"old.py" = ["b.py"]\n'
+    files = {**MOVED, "pkg/meizel.toml": manifest, "meizel.toml": '[uses]\n"app" = ["pkg"]\n'}
+    root = make_repo(files)
+    assert declare(root, "pkg") == 0
+    assert toml_of(root, "pkg")["uses"] == {"a.py": ["b.py"]}

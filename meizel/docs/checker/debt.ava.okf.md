@@ -75,6 +75,14 @@ errors cannot be recorded.
   back-edges are chosen greedily and then thinned to the ones needed. Violations
   that cannot be recorded are printed and the exit code is 1.
 - `debt prune` lowers counts and drops entries to what still occurs.
+- `debt carry [--base ref]` follows a move. A baseline names files, so a
+  `git mv` leaves the old entries paid and the new place unrecorded. For the
+  files git detects as renamed since the branch point with `origin/main`
+  (default; the move must be staged, and a heavily rewritten file may not be
+  detected), it relocates entries whose source or target was renamed, to the
+  owner and key they now have. It only relocates: counts merge, the total never
+  changes, and a new violation in the moved file stays an error. Run it, then
+  `debt prune`.
 - `debt diff --against <ref> --on-growth fail|warn` compares the recorded
   totals per code with those at a git ref. Totals, not directories, are
   compared, so debt that moves with its file does not count as growth. The

@@ -34,6 +34,9 @@ class Manifest:
     external: dict[str, str] = field(default_factory=dict[str, str])
     roles: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     debt: DebtTable = field(default_factory=dict[Code, dict[str, int]])
+    dangling: list[tuple[str, str | None, str | None]] = field(
+        default_factory=list[tuple[str, str | None, str | None]]
+    )
     lines: list[str] = field(default_factory=list[str])
 
     @property
@@ -169,6 +172,7 @@ class _Reader:
                     line, Code.MANIFEST_CHILD, f"[external] key {key!r} must be a Python file"
                 )
             elif not self.child(key, "[external]", line):
+                self.manifest.dangling.append(("external", key, None))
                 continue
             elif not isinstance(reason, str) or not reason.strip():
                 self.report(
@@ -192,6 +196,8 @@ class _Reader:
                 )
             elif self.child(name, "exports", line):
                 kept.append(name)
+            else:
+                self.manifest.dangling.append(("exports", None, name))
         self.manifest.exports = tuple(kept)
 
     def read_table(
@@ -208,6 +214,8 @@ class _Reader:
             if self.child(key, f"[{section}]", line):
                 values = self.names(value, f"[{section}] {key!r}", line)
                 result[key] = reader(key, values, line)
+            else:
+                self.manifest.dangling.append((section, key, None))
         return result
 
     def read_use(self, source: str, targets: tuple[str, ...], line: int) -> tuple[str, ...]:
@@ -217,6 +225,8 @@ class _Reader:
                 self.report(line, Code.MANIFEST_SELF_EDGE, f"{source!r} cannot use itself")
             elif self.child(target, f"[uses] {source!r}", line):
                 kept.append(target)
+            else:
+                self.manifest.dangling.append(("uses", source, target))
         return tuple(kept)
 
     def read_load(self, source: str, targets: tuple[str, ...], line: int) -> tuple[str, ...]:
@@ -232,6 +242,7 @@ class _Reader:
                     Code.MANIFEST_CHILD,
                     f"[loads] {source!r}: {target!r} is not a tracked directory",
                 )
+                self.manifest.dangling.append(("loads", source, target))
         return tuple(kept)
 
     def check_cycles(self) -> None:
