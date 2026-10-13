@@ -220,7 +220,7 @@ def _run_local(args: argparse.Namespace) -> int:
     )
     if not code.strip():
         raise ValueError("Python input must be nonempty")
-    with ava.external.attach(args.session_id, agent_id=args.agent_id):
+    with ava.impersonation.attach(args.session_id, agent_id=args.agent_id):
         exec(
             compile(code, args.file or "<ava-external>", "exec"),
             {"__name__": "__main__", "ava": ava},

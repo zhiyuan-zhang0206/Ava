@@ -9,7 +9,7 @@ tags:
 
 # External SDK Attachment
 
-`ava.external.attach(session_id, agent_id=...)` binds one active, same-machine controller
+`ava.impersonation.attach(session_id, agent_id=...)` binds one active, same-machine controller
 lease to a Python process. The external model keeps its own tools; SDK calls execute
 in that external process. The attachment is a context manager with explicit `flush`
 and `close` methods, and never starts or renews a lease.

@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 import ava
 from agent import state as state_module
 from agent.extensions import plugin_state_codec
-from ava import external
+from ava import impersonation
+from ava.impersonation import attachment as attachment_module
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
 from base.agents.impersonation import manifest
@@ -138,9 +139,9 @@ def attached_runtime(
         lease["plugin_delta"].append(delta)
         lease["delta_version"] += 1
 
-    monkeypatch.setattr(external.control, "require_active", require)
-    monkeypatch.setattr(external.control, "merge_plugin_delta", stage)
-    monkeypatch.setattr(external, "process_metadata", lambda: {"pid": 777})
+    monkeypatch.setattr(attachment_module.control, "require_active", require)
+    monkeypatch.setattr(attachment_module.control, "merge_plugin_delta", stage)
+    monkeypatch.setattr(attachment_module, "process_metadata", lambda: {"pid": 777})
 
     # This suite models the pre-event-log lease boundary with a symbolic lease
     # id. The receipt seam is integration-tested against real UUID leases;
@@ -156,10 +157,10 @@ def attached_runtime(
 @pytest.fixture
 def attached_mcp_runtime(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
-) -> Iterator[tuple[dict[str, Any], external.Attachment]]:
+) -> Iterator[tuple[dict[str, Any], attachment_module.Attachment]]:
     """Provide the MCP caller's real borrowed identity and close its lifetime."""
     lease, _, _ = attached_runtime
-    attachment = external.attach("lease")
+    attachment = impersonation.attach("lease")
     try:
         yield lease, attachment
     finally:
