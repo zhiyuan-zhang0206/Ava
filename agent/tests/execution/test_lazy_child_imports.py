@@ -411,6 +411,7 @@ from pathlib import Path
 import ava
 from agent.execution import child as exec_child
 from agent.graph.exec.protocol import read_request
+from ava.sdk_surface import process_context
 
 child = exec_child._import_runtime(0.0)  # the child boot's step that binds the SDK (mirrors `_run`)
 
@@ -420,7 +421,7 @@ def _snap(tag):
     modules = sys.modules.copy()
     return {{
         "tag": tag,
-        "state_is_none": not ava.in_exec_turn(),
+        "state_is_none": not process_context.in_exec_turn(),
         "agent_state": "agent.state" in modules,
         "faces": any(
             name.endswith(".agent_runtime")

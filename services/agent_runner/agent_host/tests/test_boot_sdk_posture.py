@@ -7,9 +7,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-import ava
 from agent.extensions import load_extensions
-from ava.sdk_surface import install
+from ava.sdk_surface import install, process_context
 from base import config
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.lifecycle.configuration import load_installation
@@ -25,7 +24,7 @@ def test_sdk_posture_precedes_config_boot(monkeypatch: pytest.MonkeyPatch) -> No
         reads.append("sdk_posture")
         raise BootStoppedError("stop before boot")
 
-    monkeypatch.setattr(ava, "bind_host_process", fix_posture)
+    monkeypatch.setattr(process_context, "bind_host_process", fix_posture)
     monkeypatch.setattr(config, "ensure_eager", lambda: reads.append("config"))
     with pytest.raises(BootStoppedError, match="before boot"):
         daemon.main()

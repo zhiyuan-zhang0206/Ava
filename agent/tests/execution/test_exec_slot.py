@@ -1,7 +1,7 @@
 """The exec turn's state slot: `ava.state` / `ava.state_update` exist only inside an exec turn.
 
 Outside one — the agent host, a bare script — reading either raises an explicit AttributeError
-instead of returning None, `ava.in_exec_turn()` is the one explicit predicate, and a plugin's
+instead of returning None, `process_context.in_exec_turn()` is the one explicit predicate, and a plugin's
 `PluginStateHandle` has a pure host side (`view` / `delta`) beside the exec-side `read` / `update`.
 """
 
@@ -19,14 +19,15 @@ from agent.state import (
     build_agent_state,
     compact_version,
 )
+from ava.sdk_surface import process_context
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
 
 @pytest.fixture(autouse=True)
 def _unbound():
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
     yield
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
 
 
 def _set_union(current: set[str], new: set[str]) -> set[str]:
@@ -34,20 +35,22 @@ def _set_union(current: set[str], new: set[str]) -> set[str]:
 
 
 def test_in_exec_turn_follows_the_bound_slot():
-    assert ava.in_exec_turn() is False
+    assert process_context.in_exec_turn() is False
     ava.state = BaseAgentState()
-    assert ava.in_exec_turn() is True
-    ava.unbind_exec_turn()
-    assert ava.in_exec_turn() is False
+    assert process_context.in_exec_turn() is True
+    process_context.unbind_exec_turn()
+    assert process_context.in_exec_turn() is False
 
 
 def test_state_slots_do_not_exist_outside_an_exec_turn():
     """Reading either slot anywhere but a bound exec turn raises an explicit AttributeError —
     never a None — so a host-side read fails where it is written."""
     for name in ("state", "state_update"):
-        with pytest.raises(ava.PluginStateOutsideTurnError, match="only inside execute_code"):
+        with pytest.raises(
+            process_context.PluginStateOutsideTurnError, match="only inside execute_code"
+        ):
             getattr(ava, name)
-    assert isinstance(ava.PluginStateOutsideTurnError("x"), AttributeError)
+    assert isinstance(process_context.PluginStateOutsideTurnError("x"), AttributeError)
     assert not hasattr(ava, "state")
     assert not hasattr(ava, "state_update")
 
@@ -56,10 +59,10 @@ def test_state_slots_are_readable_once_bound_and_gone_after_unbind():
     ava.state = BaseAgentState()
     ava.state_update = {}
     assert ava.state_update == {}
-    ava.unbind_exec_turn()
-    with pytest.raises(ava.PluginStateOutsideTurnError):
+    process_context.unbind_exec_turn()
+    with pytest.raises(process_context.PluginStateOutsideTurnError):
         _ = ava.state
-    with pytest.raises(ava.PluginStateOutsideTurnError):
+    with pytest.raises(process_context.PluginStateOutsideTurnError):
         _ = ava.state_update
 
 
@@ -69,7 +72,7 @@ def test_state_cannot_be_assigned_none():
 
 
 def test_compact_version_reads_the_bound_snapshot_and_refuses_outside_a_turn():
-    with pytest.raises(ava.PluginStateOutsideTurnError):
+    with pytest.raises(process_context.PluginStateOutsideTurnError):
         compact_version()
     ava.state = BaseAgentState(compact=CompactState(version=3))
     assert compact_version() == 3
@@ -82,9 +85,9 @@ class _SeenState(BaseModel):
 
 def test_handle_read_and_update_outside_a_turn_raise_the_slot_error():
     handle = PluginStateHandle(_SeenState, "demo")
-    with pytest.raises(ava.PluginStateOutsideTurnError):
+    with pytest.raises(process_context.PluginStateOutsideTurnError):
         handle.read()
-    with pytest.raises(ava.PluginStateOutsideTurnError):
+    with pytest.raises(process_context.PluginStateOutsideTurnError):
         handle.update({"counter": 1})
 
 
@@ -98,7 +101,7 @@ def test_handle_view_and_delta_are_pure_over_the_graph_state():
     graph_state = state_cls(messages=[], halted=False, **fields)
     handle = PluginStateHandle(_SeenState, "demo")
 
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
     view = handle.view(graph_state)
     assert (view.counter, view.seen) == (5, {"a"})
     assert handle.delta({"counter": 6, "seen": {"b"}}) == {"demo__counter": 6, "demo__seen": {"b"}}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json as _json
 from typing import NamedTuple, NoReturn
 
-import ava
+from ava.sdk_surface import process_context
 from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.attachment_transport import attach as attach
 from ava.sdk_surface.validation import coerce_str, coerce_typed
@@ -65,7 +65,7 @@ def __getattr__(name: str) -> object:
     if name == "MACHINE_SPEC":
         import ava
 
-        machine = ava.context.require_machine()
+        machine = process_context.current_context().require_machine()
         return MachineSpec(machine.name(), machine.description() or "")
     if name == "InvalidConfigOverlay":
         from base.packages.plugins.config_registration import InvalidConfigOverlay
@@ -95,7 +95,7 @@ def __getattr__(name: str) -> object:
 
 def _publish_self_inbound_wake() -> None:
     """Best-effort Redis wake for a self-inserted inbound (restart / terminate /
-    compact), over the agent's own SDK redis handle (`ava.REDIS`).
+    compact), over the agent's own SDK redis handle (`ava.context.redis`).
 
     Same contract as `base.agents.impersonation.wake.publish_inbound_wake`: never raises (the claim
     loop's SELECT recheck delivers the row regardless), but a `NoPermissionError`
@@ -111,7 +111,7 @@ def _publish_self_inbound_wake() -> None:
 
     channel = inbound_channel(agent_identity.require_agent_id())
     try:
-        ava.REDIS.publish(channel, "0")
+        process_context.current_context().redis.publish(channel, "0")
     except ResponseError as exc:
         logger.warning(
             "self inbound wake publish to {ch!r} rejected by redis ({exc!r}) — "
@@ -174,7 +174,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
             )
         payload_json = _json.dumps({"config_overlay": dict(config_overlay)}, sort_keys=True)
 
-    with ava.DB.cursor() as cur, cur.connection.transaction():
+    with process_context.current_context().sql.cursor() as cur, cur.connection.transaction():
         cur.execute("SET TRANSACTION READ WRITE")
         if config_overlay:
             from base.agents.model.model_config import validate_restart_model_config
@@ -210,7 +210,7 @@ def terminate() -> NoReturn:
     from ava.sdk_surface import agent_identity
 
     agent_identity.assert_self_action("terminate")
-    with ava.DB.cursor() as cur:
+    with process_context.current_context().sql.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, '', 'terminate', 'self')",
@@ -246,7 +246,7 @@ def pause_heartbeat(duration: float) -> None:
             "AVA_HEARTBEAT_PAUSE_MAX_SECONDS), "
             f"got {duration!r}"
         )
-    with ava.DB.cursor() as cur:
+    with process_context.current_context().sql.cursor() as cur:
         cur.execute(
             "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, %s)",
             (agent_identity.agent_id(), float(duration)),
@@ -290,7 +290,8 @@ def compact(summary: str) -> NoReturn:
     from base.telemetry.audit_events import prepare_event_log, record_audit
 
     # The inbound and its audit fact commit together.
-    with ava.DB.transaction(), ava.DB.cursor() as cur:
+    db = process_context.current_context().sql
+    with db.transaction(), db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind) "
             "VALUES (%s, %s, 'compact_summary')",

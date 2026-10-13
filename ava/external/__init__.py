@@ -84,9 +84,9 @@ def _deliver_telemetry_before_detach(*, clients: ClientSet) -> None:
 def _refuse_unless_attachable() -> AvaContext | None:
     """The process's own context, when nothing forbids attaching to it: no attachment yet, and
     no native agent runtime."""
-    if ava.is_host_process():
+    if process_context.is_host_process():
         raise RuntimeError("a native agent runtime cannot attach an external controller")
-    bound = getattr(ava, "context", None)
+    bound = process_context.ambient_context()
     identity = None if bound is None else bound.identity
     if identity is not None and identity.lease is not None:
         raise RuntimeError("this process already has an external attachment")
@@ -126,7 +126,6 @@ class Attachment:
     def __init__(
         self, lease_id: str, *, agent_id: int | None = None, session_id: int | None = None
     ) -> None:
-        import ava
 
         bound = _refuse_unless_attachable()
         if session_id is not None and agent_id is None:
@@ -145,7 +144,7 @@ class Attachment:
         self._own_clients: ClientSet | None = None
         # The agent state class the snapshot loaded into (set before the constructor returns).
         self._state_cls: type[Any]
-        if ava.in_exec_turn():
+        if process_context.in_exec_turn():
             raise RuntimeError("an exec turn cannot attach an external controller")
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
@@ -198,7 +197,7 @@ class Attachment:
         # drop them (review finding, #2616).
         self._bind_borrowed_context()
         ava.initialize_context(
-            ava.context,
+            process_context.current_context(),
             surface=False,
             config=config,
             clock_factory=self._clock_factory,
@@ -229,7 +228,8 @@ class Attachment:
             codec.apply_plugin_delta(state, codec.decode_plugin_delta(encoded, self._state_cls))
         self._validate()
         self._open_event_participant()
-        ava.state, ava.state_update = state, {}
+        process_context.set_state(state)
+        process_context.set_state_update({})
 
     def _codec(self) -> ExternalState:
         """The agent layer's plugin-state codec, supplied through the SDK installation."""
@@ -276,7 +276,7 @@ class Attachment:
         own = (None if bound is None else bound.identity) or AgentIdentity(
             agent_id=None, owns_loop=True
         )
-        ava.bind_context(
+        process_context.bind_context(
             dataclasses.replace(
                 bound or self._new_context(),
                 identity=dataclasses.replace(own, lease=borrowed),
@@ -337,15 +337,15 @@ class Attachment:
 
     def _flush(self, *, allow_closing: bool) -> None:
         """Stage plugin state; attachment close alone may finish this operation."""
-        import ava
 
         if self._closing and not allow_closing:
             raise RuntimeError("external attachment is closing")
         self._validate()
-        if not isinstance(ava.state_update, dict):
+        update = process_context.get_state_update()
+        if not isinstance(update, dict):
             raise TypeError("external plugin state update must be a dict")
-        if ava.state_update:
-            encoded = self._codec().encode_plugin_delta(ava.state_update, self._state_cls)
+        if update:
+            encoded = self._codec().encode_plugin_delta(update, self._state_cls)
             control.merge_plugin_delta(
                 self._database(),
                 self.lease_id,
@@ -355,7 +355,7 @@ class Attachment:
                 local_machine=self._machine.name(),
             )
             self._version += 1
-            ava.state_update.clear()
+            update.clear()
 
     def close(self) -> None:
         """Flush plugin changes and remove the borrowed identity even if flushing fails."""
@@ -460,7 +460,6 @@ class Attachment:
 
     def _detach(self) -> None:
         """Drop local bindings without reading or writing the lease."""
-        import ava
 
         if self._closed:
             return
@@ -469,7 +468,7 @@ class Attachment:
         try:
             for cleanup in (
                 self._restore_prior_context,
-                ava.unbind_exec_turn,
+                process_context.unbind_exec_turn,
                 self._stack.close,
                 self._close_owned_clients,
             ):
@@ -487,9 +486,9 @@ class Attachment:
 
     def _restore_prior_context(self) -> None:
         if self._bound and self._prior_context is not None:
-            ava.bind_context(self._prior_context)
+            process_context.bind_context(self._prior_context)
         elif self._bound:
-            ava.unbind_context()
+            process_context.unbind_context()
 
     def _close_owned_clients(self) -> None:
         if self._own_clients is not None:

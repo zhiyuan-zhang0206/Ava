@@ -7,7 +7,7 @@ from collections.abc import Iterator
 import pytest
 
 import ava
-from ava.sdk_surface import metering
+from ava.sdk_surface import metering, process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
@@ -35,14 +35,14 @@ def sampling(monkeypatch: pytest.MonkeyPatch) -> Iterator[call_policy.SamplingPo
 @pytest.fixture
 def bare_context() -> Iterator[None]:
     prior = getattr(ava, "context", None)
-    ava.unbind_context()
+    process_context.unbind_context()
     try:
         yield
     finally:
         if prior is None:
-            ava.unbind_context()
+            process_context.unbind_context()
         else:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)
 
 
 def test_bare_python_recorder_uses_its_captured_cold_producer(
@@ -141,7 +141,7 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
     monkeypatch.setattr(ava, "context", old_context)
 
     def body() -> None:
-        ava.bind_context(new_context)
+        process_context.bind_context(new_context)
 
     wrapped = metering._make_recorder(body, "probe.switch", sampling, forbidden)
     try:
@@ -208,7 +208,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
     monkeypatch.setattr(process_context, "process_clients", clients)
     monkeypatch.setattr(extensions, "load_extensions", load)
     monkeypatch.setattr(atexit, "register", register)
-    ava.bind_context(
+    process_context.bind_context(
         AvaContext(clients=attachment, identity=AgentIdentity(agent_id=6111, owns_loop=False))
     )
     try:
@@ -217,7 +217,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         assert exits == [bare_clients.close]
         assert made == []
         attachment.close()
-        ava.unbind_context()
+        process_context.unbind_context()
         wrapped = metering._make_recorder(
             lambda: "done", "probe.detached", sampling, bare_clients.event_pipeline
         )

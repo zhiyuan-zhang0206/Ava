@@ -9,7 +9,7 @@ from typing import Any, cast
 import pytest
 
 import ava
-from ava.sdk_surface import install, metering
+from ava.sdk_surface import install, metering, process_context
 from ava.shell.coding_tools._common import owner_terminated
 from base.agents.context import AvaContext
 from base.agents.sdk import call_policy
@@ -52,13 +52,13 @@ def test_real_shell_owner_probe_counts_its_public_fanout(monkeypatch: pytest.Mon
     install.install(registry, sampling=sampling)
     previous = getattr(ava, "context", None)
     tally = SdkCallTally()
-    ava.bind_context(replace(previous or AvaContext(), sdk_calls=tally))
+    process_context.bind_context(replace(previous or AvaContext(), sdk_calls=tally))
     try:
         assert cast(Callable[[int], bool], ava.self.owner_probe_test)(41)
     finally:
         if previous is None:
-            ava.unbind_context()
+            process_context.unbind_context()
         else:
-            ava.bind_context(previous)
+            process_context.bind_context(previous)
     assert tally.snapshot() == {"agents.get_status": 1, "self.owner_probe_test": 1}
     assert calls == ["agents.get_status", "self.owner_probe_test"]

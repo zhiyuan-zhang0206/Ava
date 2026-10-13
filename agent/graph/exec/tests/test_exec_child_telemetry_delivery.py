@@ -35,6 +35,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from ava.sdk_surface import process_context
 from tests.fixtures.pin_agent import exec_context
 
 # Fixed test identity — the child never dials a real DB/Redis here.
@@ -352,7 +353,7 @@ def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path)
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
     prior = getattr(ava, "context", None)
-    ava.bind_context(replace(prior or AvaContext(), clients=clients))
+    process_context.bind_context(replace(prior or AvaContext(), clients=clients))
     result_path = tmp_path / "result.json"
     payload = ResultPayload(kind="done", code_reached=True)
     write_result(result_path, payload)
@@ -382,8 +383,8 @@ def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path)
         assert observed.value is original
     finally:
         if prior is None:
-            ava.unbind_context()
+            process_context.unbind_context()
         else:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)
         with pytest.raises(ValueError):
             pipe.stop(timeout=1)

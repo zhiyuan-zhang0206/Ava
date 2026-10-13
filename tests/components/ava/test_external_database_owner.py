@@ -15,6 +15,7 @@ import pytest
 import ava
 from agent.extensions import plugin_state_codec
 from ava import external
+from ava.sdk_surface import process_context
 from ava.sdk_surface import settings as _settings
 from base.agents.impersonation import manifest
 from base.agents.impersonation.status import LOG_PROTOCOL_VERSION
@@ -83,7 +84,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
     now = [100.0]
     dials: list[_AttachmentDial] = []
     require = external.control.require_active
-    prior = ava.unbind_context()
+    prior = process_context.unbind_context()
 
     def dial(*_args: object, **_kwargs: object) -> _AttachmentDial:
         connection = _AttachmentDial()
@@ -158,7 +159,7 @@ def test_independent_attachments_check_the_minimum_on_first_borrow_and_close_own
         assert len({id(owner) for owner in checked}) == 2
     finally:
         if prior is not None:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)
 
 
 def test_attachment_borrows_existing_database_factory_without_closing_prior_clients(
@@ -233,7 +234,7 @@ def test_independent_attachment_does_not_redeliver_environment(
         before = dict(os.environ)
         delivered = ConfigBoot()
         delivered.read_process_environment()
-        prior = ava.unbind_context()
+        prior = process_context.unbind_context()
         try:
             with external.attach("lease"):
                 assert dict(os.environ) == before
@@ -247,7 +248,7 @@ def test_independent_attachment_does_not_redeliver_environment(
             assert dict(os.environ) == before
         finally:
             if prior is not None:
-                ava.bind_context(prior)
+                process_context.bind_context(prior)
 
 
 @pytest.mark.parametrize("failure_at", ["lease", "plugins", "snapshot"])
@@ -257,7 +258,7 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
     tmp_path: Path,
     failure_at: str,
 ) -> None:
-    prior = ava.unbind_context()
+    prior = process_context.unbind_context()
     created: list[tuple[Any, list[bool]]] = []
     build = external.process_context.process_clients
     primary = RuntimeError("owned constructor failed")
@@ -313,7 +314,7 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
             assert created[1][1][0]
     finally:
         if prior is not None:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)
 
 
 def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
@@ -342,7 +343,7 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
     monkeypatch.setattr(manifest, "open_local_participant", open_participant)
     monkeypatch.setattr(manifest, "close_local_participant_admission", wait)
     (tmp_path / ".env").write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n", encoding="utf-8")
-    prior = ava.unbind_context()
+    prior = process_context.unbind_context()
     try:
         with patch.dict(
             os.environ,
@@ -361,4 +362,4 @@ def test_independent_attachment_seal_wait_reads_its_live_configuration_owner(
             assert getattr(ava, "context", None) is None
     finally:
         if prior is not None:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)

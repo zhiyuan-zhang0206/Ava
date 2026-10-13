@@ -24,6 +24,7 @@ import ava
 import ava.agents
 import ava.self
 from ava.agents import AgentRow
+from ava.sdk_surface import process_context
 from base.api_contracts.agent_contract import AgentStatus
 
 
@@ -54,13 +55,13 @@ def test_self_exports_machine_consts() -> None:
         description=lambda: None,
     )
     prior = getattr(ava, "context", None)
-    ava.bind_context(AvaContext(machine=machine))
+    process_context.bind_context(AvaContext(machine=machine))
     try:
         assert ava.self.MACHINE_SPEC == ("test", "")
     finally:
-        ava.unbind_context()
+        process_context.unbind_context()
         if prior is not None:
-            ava.bind_context(prior)
+            process_context.bind_context(prior)
 
 
 @pytest.mark.usefixtures("sdk_model_owner")

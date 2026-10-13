@@ -39,6 +39,7 @@ from ava.mcp_config import (
 from ava.mcp_config import (
     MCPToolNotFound as MCPToolNotFound,
 )
+from ava.sdk_surface import process_context
 from ava.sdk_surface.validation import coerce_str
 from ava.security import scan_content
 
@@ -153,9 +154,8 @@ def _write_cache(server: str, tools: list[ToolInfo]) -> None:
 
 def _clients() -> McpClients:
     """The daemon client of the bound context, built on first use."""
-    import ava
 
-    return ava.context.clients.get(McpClients)
+    return process_context.current_context().clients.get(McpClients)
 
 
 def _get_remote_client() -> _RemoteMCPClient:

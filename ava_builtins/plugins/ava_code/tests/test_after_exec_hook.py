@@ -13,7 +13,7 @@ import pytest
 
 import ava
 from agent.state import BaseAgentState, CompactState, build_agent_state
-from ava.sdk_surface import install
+from ava.sdk_surface import install, process_context
 from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
 from base.packages.plugins.extensions import ExtensionRegistry
 
@@ -23,7 +23,7 @@ def _installed_surface():
     install.install(code_registry())
     yield
     install.uninstall()
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
 
 
 def _make_state_with_cwd(cwd: str) -> BaseAgentState:
@@ -74,7 +74,7 @@ async def test_after_exec_hook_injects_cwd_and_project_skills_notes(tmp_path: Pa
         ava.cwd.set(repo)
         committed = ava.state  # the working copy is exactly what the exec commits to graph state
     finally:
-        ava.unbind_exec_turn()  # the host holds no exec slot
+        process_context.unbind_exec_turn()  # the host holds no exec slot
 
     with pytest.raises(AttributeError):
         _ = ava.state

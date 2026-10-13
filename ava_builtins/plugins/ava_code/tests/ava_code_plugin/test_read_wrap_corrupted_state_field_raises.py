@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 import ava
-from ava.sdk_surface import install
+from ava.sdk_surface import install, process_context
 from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
 from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
     _get_injected_context_notes,
@@ -48,7 +48,7 @@ def test_read_wrap_corrupted_state_field_raises(tmp_path: Path):
             with pytest.raises(Exception, match=r"injected_paths"):
                 ava.files.read("foo.py")
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_set_cwd_relative_resolves_against_current_cwd(tmp_path: Path):
@@ -64,7 +64,7 @@ def test_set_cwd_relative_resolves_against_current_cwd(tmp_path: Path):
         ava.cwd.set("src")  # relative path
         assert ava.state_update["ava_code__cwd"] == str(sub.resolve())
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_set_cwd_expanduser_supported(tmp_path: Path):
@@ -81,7 +81,7 @@ def test_set_cwd_expanduser_supported(tmp_path: Path):
             ava.cwd.set("~/project")
             assert ava.state_update["ava_code__cwd"] == str(sub.resolve())
         finally:
-            ava.unbind_exec_turn()
+            process_context.unbind_exec_turn()
 
 
 def test_uninstall_restores_original(tmp_path: Path):
@@ -202,7 +202,7 @@ def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path
         assert captured == {"cmd": "pwd", "cwd": str(logical_cwd), "timeout": 7.0}
         assert Path.cwd() == process_cwd
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
@@ -233,7 +233,7 @@ def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
             "ttl": None,
         }
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
@@ -261,7 +261,7 @@ def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
         assert _wrapped_serve(fake_inner, str(absolute_dir), "preview") == "served"
         assert captured["dir"] == str(absolute_dir.resolve())
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_serve_wrap_registered():
@@ -292,7 +292,7 @@ def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
         assert f"Working directory set to {repo}" in ava.state.ava_code__cwd_note  # type: ignore[union-attr]
         assert "demo-proj" in {s["name"] for s in ava_skills.names()}
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_set_cwd_non_git_stores_cwd_note(tmp_path: Path):
@@ -307,7 +307,7 @@ def test_set_cwd_non_git_stores_cwd_note(tmp_path: Path):
         assert note is not None
         assert f"Working directory set to {tmp_path}" == note
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pytest.MonkeyPatch):
@@ -365,7 +365,7 @@ def test_understand_wrap_resolves_paths_against_cwd(tmp_path: Path, monkeypatch)
         sent = captured["llm"].invoke.call_args[0][0][0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         assert sent[0] == {"type": "text", "text": "cwd material"}
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_understand_wrap_missing_paths_raises_with_cwd_location(tmp_path: Path):
@@ -379,13 +379,13 @@ def test_understand_wrap_missing_paths_raises_with_cwd_location(tmp_path: Path):
         with pytest.raises(FileNotFoundError, match=r"nope\.txt"):
             ava.understand([{"prompt": "p", "paths": ["nope.txt"]}])
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_understand_wrap_outside_turn_defers_to_workspace(workspace: Path, monkeypatch):
     """Outside turn (not in_exec_turn) → workspace baseline resolution (via _resolve_for_cwd passthrough)."""
     captured = _stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
     workspace.mkdir(parents=True)
     (workspace / "f.txt").write_text("ws material", encoding="utf-8")
     ava.understand([{"prompt": "p", "paths": ["f.txt"]}])
@@ -418,7 +418,7 @@ def test_understand_wrap_passes_invalid_combo_to_core(tmp_path: Path):
         with pytest.raises(TypeError, match="must be a list of file paths"):
             ava.understand([{"prompt": "p", "paths": "rel.txt"}])
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_understand_wrap_forwards_effort(monkeypatch):
@@ -475,7 +475,7 @@ def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path, monkey
             ]
         )
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
     assert out == ["ok", "ok", "ok"]
     assert sorted(materials) == ["inline", "material A", "material B"]
 
@@ -499,7 +499,7 @@ def test_understand_wrap_resolves_every_entry_in_a_paths_list(
         assert sent[1] == {"type": "text", "text": "material B"}
         assert sent[2] == {"type": "text", "text": "p"}
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, monkeypatch):
@@ -516,7 +516,7 @@ def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, monkeypatch):
         with pytest.raises(ValueError, match="at least 1"):
             ava.understand([{"prompt": "p", "paths": ["rel.txt"]}], max_concurrent=0)
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path):
@@ -559,7 +559,7 @@ def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path):
         assert "ava_code__injected_hashes" in ava.state_update
         assert len(ava.state_update["ava_code__injected_hashes"]) == 1
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_set_cwd_with_skills_stores_project_skills_note(tmp_path: Path):
@@ -586,7 +586,7 @@ def test_set_cwd_with_skills_stores_project_skills_note(tmp_path: Path):
         assert "demo-proj" in note
         assert "a project-local demo" in note
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()
 
 
 def test_read_wrap_hash_dedup_respects_different_content(tmp_path: Path):
@@ -619,4 +619,4 @@ def test_read_wrap_hash_dedup_respects_different_content(tmp_path: Path):
         assert "WORKTREE CONTENT" in contents
         assert len(ava.state_update["ava_code__injected_hashes"]) == 2
     finally:
-        ava.unbind_exec_turn()
+        process_context.unbind_exec_turn()

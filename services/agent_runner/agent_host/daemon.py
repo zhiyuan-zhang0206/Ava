@@ -46,9 +46,9 @@ if __name__ == "__main__":
 
     if "AVA_AGENT_ID" in inherited_process_env():
         raise RuntimeError("a shared agent host cannot inherit a launched-agent identity")
-    import ava
+    from ava.sdk_surface import process_context as _posture
 
-    ava.bind_host_process()
+    _posture.bind_host_process()
 
 import psycopg
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -62,6 +62,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 import ava
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
+from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context.clients import ClientSet
@@ -687,7 +688,7 @@ def _require_helper_parent_chain() -> None:
 
 def main() -> None:
     """Entry point: SDK posture, schema gate, logging, graceful shutdown, then the loop."""
-    ava.bind_host_process()
+    process_context.bind_host_process()
     from base.deploy.schema.migrations import assert_schema_current
 
     config, home = boot_process()

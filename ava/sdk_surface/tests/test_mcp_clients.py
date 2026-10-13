@@ -3,9 +3,9 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import ava
 from ava import mcps
 from ava.mcps import McpClients
+from ava.sdk_surface import process_context
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.paths import mcp_daemon_shared_socket
@@ -27,14 +27,14 @@ def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close()
     socket_path = Path(mcp_daemon_shared_socket())
     socket_path.parent.mkdir(parents=True, exist_ok=True)
     socket_path.touch()
-    previous = ava.unbind_context()
+    previous = process_context.unbind_context()
     try:
-        ava.bind_context(first)
+        process_context.bind_context(first)
         assert mcps._list_tools("test") == []
-        ava.bind_context(second)
+        process_context.bind_context(second)
         assert mcps._list_tools("test") == []
         timeouts["first"] = 2.0
-        ava.bind_context(first)
+        process_context.bind_context(first)
         assert mcps._list_tools("test") == []
         assert [call.kwargs for call in first_remote.list_tools.call_args_list] == [
             {"timeout_seconds": 7.5},
@@ -50,11 +50,11 @@ def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close()
         assert rebuilt._remote is None
     finally:
         socket_path.unlink()
-        ava.unbind_context()
+        process_context.unbind_context()
         first.clients.close()
         second.clients.close()
         if previous is not None:
-            ava.bind_context(previous)
+            process_context.bind_context(previous)
 
 
 def test_mcp_client_construction_does_not_read_configuration() -> None:

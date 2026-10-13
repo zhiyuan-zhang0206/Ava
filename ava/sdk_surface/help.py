@@ -18,6 +18,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from ava.sdk_surface import process_context
+
 from .const import is_documented_const
 from .discovery import (
     _children,
@@ -74,7 +76,7 @@ def render(
     import ava as _ava
 
     if hidden_members is None:
-        if getattr(_ava, "context", None) is None:
+        if process_context.ambient_context() is None:
             hidden_members = frozenset()
         else:
             from ava.sdk_surface.attachment_transport import own_media_gated_members
