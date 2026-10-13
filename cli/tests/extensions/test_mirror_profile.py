@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from dotenv import dotenv_values, load_dotenv
 
-from tests.fixtures.units import skip_authority_pass, use_env_files
+from base.host.env.tests.env_files import skip_authority_pass, use_env_files
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CN_PROFILE = _REPO_ROOT / "scripts" / "mirrors" / "cn.env"

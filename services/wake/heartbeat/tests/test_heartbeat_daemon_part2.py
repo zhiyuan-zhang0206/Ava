@@ -21,6 +21,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -33,7 +34,6 @@ from services.wake.heartbeat.daemon import (
     _sweep_backoff_resets,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.
 _THRESHOLD_S = 300.0

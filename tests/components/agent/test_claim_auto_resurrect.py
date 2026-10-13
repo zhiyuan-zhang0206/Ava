@@ -15,6 +15,7 @@ from agent.graph import claim_node
 from agent.state import AgentState
 from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -22,7 +23,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 @pytest.fixture

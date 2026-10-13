@@ -9,12 +9,12 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from tests.fixtures.units import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.
 THRESHOLD_S = 300.0

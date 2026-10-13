@@ -14,12 +14,12 @@ from base.agents.recovery.breaker import (
     halt_automatic_recovery,
     record_permanent_reject_turn,
 )
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 def test_clear_literal_matches_the_halt_threshold() -> None:

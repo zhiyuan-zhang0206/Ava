@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from base.host.env import dotenv_boot
+from base.host.env.tests.env_files import use_env_files
 from base.paths.home import resolve_ava_home
-from tests.fixtures.units import use_env_files
 
 _NO_DATA_PLANE_IDENTITY_LINES = (
     f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",

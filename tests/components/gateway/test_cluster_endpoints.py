@@ -620,7 +620,7 @@ def seed_agent_on_machine(
 ) -> int:
     """One live agent row homed on `machine` (test spawn helper + machine
     stamp; the row-creation path moved gateway-side, Task #1236 follow-up)."""
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     aid = spawn_agent(
         spawner="user",
