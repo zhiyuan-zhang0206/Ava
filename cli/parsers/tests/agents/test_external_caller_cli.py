@@ -152,10 +152,10 @@ def test_restart_rejects_non_object_config_at_parse_time(
 def test_send_without_provenance_exits_cleanly(
     post: Mock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.agents.parsers import _h_agents_send
+    from cli.commands.agents.parsers import h_agents_send
 
     monkeypatch.delenv("AVA_CALLER_IDENTITY")
-    assert _h_agents_send(_send_args()) == 2
+    assert h_agents_send(_send_args()) == 2
     err = capsys.readouterr().err
     assert "requires --source" in err
     assert "--source user" in err
@@ -165,10 +165,10 @@ def test_send_without_provenance_exits_cleanly(
 def test_send_invalid_source_exits_cleanly(
     post: Mock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.agents.parsers import _h_agents_send
+    from cli.commands.agents.parsers import h_agents_send
 
     monkeypatch.delenv("AVA_CALLER_IDENTITY")
-    assert _h_agents_send(_send_args(source="bogus")) == 2
+    assert h_agents_send(_send_args(source="bogus")) == 2
     assert "Unrecognized inbound source" in capsys.readouterr().err
     post.assert_not_called()
 
@@ -176,9 +176,9 @@ def test_send_invalid_source_exits_cleanly(
 def test_lifecycle_invalid_source_exits_cleanly(
     post: Mock, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.agents.parsers import _h_agents_kill
+    from cli.commands.agents.parsers import h_agents_kill
 
     args = argparse.Namespace(agent_id=42, source="bogus", kill_all_shell_sessions=False)
-    assert _h_agents_kill(args) == 2
+    assert h_agents_kill(args) == 2
     assert "Unrecognized inbound source" in capsys.readouterr().err
     post.assert_not_called()
