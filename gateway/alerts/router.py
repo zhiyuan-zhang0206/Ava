@@ -48,18 +48,15 @@ from base.telemetry.alerts import (
 )
 from base.telemetry.alerts.native import native_sent_count, notify_alert_group
 from base.telemetry.alerts.shadow import AlertShadowBatch
-from gateway.alerts.publish import ALERTS_CHANNEL, publish_alert_rows
 from gateway.alerts.schemas import (
     AlertIngestResult,
-    AlertRow,
-    AlertSeverity,
     AlertsListMeta,
     AlertsListResponse,
-    AlertStatus,
     AlertWebhookPayload,
 )
 from gateway.events.sse import event_stream
 from gateway.http.auth.webhook import authenticate_webhook
+from ops.alerts import ALERTS_CHANNEL, AlertRow, AlertSeverity, AlertStatus, publish_alert_rows
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
