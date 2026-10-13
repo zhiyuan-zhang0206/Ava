@@ -1,9 +1,8 @@
 """Canonical service roster and identity-probe declarations.
 
 This package door holds the roster. Its `service_spec` submodule defines the
-`ServiceSpec` contract every roster entry carries, its `healthz` submodule builds
-the entry of a standard `/healthz` daemon from four declarations, and `observe`
-derives read-only service status from the roster.
+`ServiceSpec` contract every roster entry carries, and its `healthz` submodule builds
+the entry of a standard `/healthz` daemon from four declarations.
 """
 
 from __future__ import annotations
