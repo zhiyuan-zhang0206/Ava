@@ -16,7 +16,7 @@
 "tests.path_scoped.db_authority_tests" = [
     "test_single_box.py",
 ]
-"tests.fixtures.unit.homes" = [
+"base.tests.fixtures.homes" = [
     "test_maintenance_recovery.py",
 ]
 "tests.fixtures.model_catalog" = [
