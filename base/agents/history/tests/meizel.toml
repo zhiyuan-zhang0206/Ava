@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_checkpoint_postgres_walks.py#monkeypatch.setattr base.agents.history.checkpoint_postgres_walks.version" = 1
+"test_timeline_dispatch.py#monkeypatch.setattr base.agents.history.timeline.ai_message_items" = 1

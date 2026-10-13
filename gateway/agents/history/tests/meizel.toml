@@ -1,5 +1,9 @@
 [uses]
 "timeline" = ["test_timeline.py"]
 
+[debt.first-party-patch]
+"test_timeline.py#monkeypatch.setattr base.agents.history.checkpoint_postgres_walks.HistoryPostgresSaver.get_tuple" = 1
+"test_timeline.py#monkeypatch.setattr gateway.agents.history.timeline.build_timeline_items" = 1
+
 [debt.private-name]
 "timeline/test_timeline_skips_inbound_without_langgraph_state.py -> test_timeline.py#_items" = 1

@@ -1,0 +1,10 @@
+[debt.first-party-patch]
+"test_alert_classes.py#monkeypatch.setattr gateway.cluster.alert_classes.ALERT_CLASSES_LIMIT" = 1
+"test_alert_classes.py#monkeypatch.setattr gateway.cluster.alert_classes.SAMPLES_LIMIT" = 1
+"test_latency.py#monkeypatch.setattr gateway.http.middleware.latency.telemetry.emit" = 3
+"test_metrics_router.py#monkeypatch.setattr base.config.settings.display.metrics_default_window_days" = 1
+"test_metrics_router.py#monkeypatch.setattr gateway.events.metrics" = 1
+"test_okf_graph.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_ops_monitor.py#monkeypatch.setattr gateway.cluster.ops_monitor.fetch_ops_series" = 1
+"test_token_usage.py#monkeypatch.setattr base.agents.history.checkpoint_postgres_walks.HistoryPostgresSaver.get_tuple" = 1
+"test_trace_checkpoint_messages.py#monkeypatch.setattr gateway.agents.state.load_checkpoint_messages_by_trace" = 1

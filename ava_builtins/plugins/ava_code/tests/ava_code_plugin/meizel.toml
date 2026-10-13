@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_read_wrap_corrupted_state_field_raises.py#monkeypatch.setattr base.config.settings.agent.sdk_expand_in_system_prompt" = 2
+"test_read_wrap_corrupted_state_field_raises.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 1

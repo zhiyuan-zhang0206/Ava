@@ -1,0 +1,16 @@
+[debt.first-party-patch]
+"test_redis_bridge_roster.py#monkeypatch.setattr base.cluster.dataplane.redis_bridge.sys.platform" = 2
+"test_redis_bridge_roster.py#monkeypatch.setattr services.supervision.roster.redis_bridge_endpoint" = 1
+"test_roster_probes.py#monkeypatch.setattr base.native_process.root_control.client.owned_process" = 1
+"test_roster_probes.py#monkeypatch.setattr services.supervision.roster.browser_probe" = 1
+"test_roster_probes.py#monkeypatch.setattr services.supervision.roster.daemon_identity" = 1
+"test_roster_probes.py#monkeypatch.setattr services.supervision.roster.healthz.probe_daemon" = 1
+"test_roster_probes.py#monkeypatch.setattr services.supervision.roster.probe_home" = 1
+"test_service_graceful_stop.py#monkeypatch.setattr base.sessions.posixproc.new_session" = 1
+"test_spec_roster.py#monkeypatch.setattr base.config.settings.services.im_bridge_enabled" = 1
+"test_spec_roster.py#monkeypatch.setattr base.host.system.probes.browser_incapability" = 1
+"test_spec_roster.py#monkeypatch.setattr services.supervision.healthchecks.lgtm.is_lgtm_host" = 2
+"test_spec_roster.py#monkeypatch.setattr services.supervision.roster.healthz.probe_daemon" = 1
+"test_spec_roster.py#monkeypatch.setattr services.supervision.roster.spec.browser_incapability" = 1
+"test_spec_roster.py#monkeypatch.setattr services.supervision.roster.spec.gateway_observability_home" = 4
+"test_spec_roster.py#monkeypatch.setattr services.supervision.roster.spec.settings.services.browser_enabled" = 2

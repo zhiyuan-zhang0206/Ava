@@ -1,0 +1,17 @@
+[debt.first-party-patch]
+"test_capabilities_drift.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
+"test_capabilities_drift.py#monkeypatch.setattr base.config.settings.agent.sdk_disable" = 1
+"test_capabilities_drift.py#monkeypatch.setattr base.config.settings.agent.skills_to_inject_into_system_prompt" = 3
+"test_capabilities_drift.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 1
+"test_compact_closing_chunk.py#monkeypatch.setattr agent.graph.hooks.compact.mark_compact_boundary" = 2
+"test_compact_closing_chunk.py#monkeypatch.setattr agent.hooks.understanding_chunks.chunk_threshold" = 1
+"test_compact_closing_chunk.py#monkeypatch.setattr agent.hooks.understanding_chunks.enqueue_chunk" = 2
+"test_compact_closing_chunk.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 1
+"test_compact_fail_fast.py#monkeypatch.setattr agent.graph.hooks.compact.ainvoke_tool_call" = 1
+"test_compact_fail_fast.py#monkeypatch.setattr agent.graph.hooks.compact.generate_summary" = 1
+"test_compact_fast_usage.py#patch.object agent.graph.hooks.compact.ainvoke_tool_call" = 1
+"test_compact_fast_usage.py#patch.object base.lm.usage.log_usage_from_message" = 1
+"test_skill_recall_hook.py#monkeypatch.setattr agent.graph.hooks.skill_recall.auto_compact_will_fire" = 2
+"test_skill_recall_hook.py#monkeypatch.setattr base.config.settings.agent.skills_to_expand_at_start" = 2
+"test_skill_recall_hook.py#monkeypatch.setattr base.config.settings.agent.skills_to_inject_into_system_prompt" = 1
+"test_skill_recall_hook.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 1

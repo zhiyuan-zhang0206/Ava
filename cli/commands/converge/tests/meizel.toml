@@ -1,0 +1,14 @@
+[debt.first-party-patch]
+"test_health_preflight.py#monkeypatch.setattr cli.commands.converge.health_preflight.collect_health_warnings" = 3
+"test_health_preflight.py#monkeypatch.setattr cli.commands.converge.health_preflight.get_record" = 2
+"test_health_preflight.py#monkeypatch.setattr cli.commands.converge.health_preflight.probe_postgres" = 2
+"test_health_preflight.py#monkeypatch.setattr cli.commands.converge.health_preflight.probe_redis" = 1
+"test_logs_job_converge.py#monkeypatch.setattr base.host.system.logs_job.register_logs_job" = 1
+"test_packages_job_converge.py#monkeypatch.setattr base.host.system.packages_job.register_packages_job" = 1
+"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.pg_runtime.ensure_pg_runtime" = 2
+"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.pg_runtime.shutil.which" = 1
+"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.ensure_pg_binaries" = 1
+"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.ensure_pgvector" = 1
+"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.vendored_pg_bin_dir" = 1
+"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.vendored_pg_supported" = 1
+"test_pg_runtime_converge.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1

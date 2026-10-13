@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_llm_node_billing_error_logs_billing_vendor.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
+"test_security_findings.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2

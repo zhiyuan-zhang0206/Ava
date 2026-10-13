@@ -1,2 +1,16 @@
 [loads]
 "test_self_evolution_schedules.py" = ["schedules"]
+
+[debt.first-party-patch]
+"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.ConfigBoot" = 1
+"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.control.require_active" = 1
+"test_external_database_owner.py#monkeypatch.setattr ava.impersonation.attachment.process_clients" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.close_local_participant_admission" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.ProcessDbGate.min_read_due" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.time.monotonic" = 1
+"test_external_database_owner.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
+"test_sdk_event_producer.py#monkeypatch.setattr ava.boot.process_clients" = 1
+"test_sdk_event_producer.py#monkeypatch.setattr ava.context" = 1
+"test_sdk_event_producer.py#monkeypatch.setattr ava.sdk_surface.extensions.load_extensions" = 1
+"test_sdk_event_producer.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 2

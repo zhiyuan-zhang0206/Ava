@@ -1,6 +1,29 @@
 [uses]
 "ci_monitor" = ["test_ci_monitor.py"]
 
+[debt.first-party-patch]
+"test_ci_accounting.py#monkeypatch.setattr scripts.ci.pull_requests.accounting.subprocess.run" = 9
+"test_ci_job_rerun.py#monkeypatch.setattr scripts.ci.pull_requests.job_rerun.subprocess.run" = 15
+"test_ci_monitor.py#monkeypatch.setattr scripts.ci.pull_requests.status.check_ci" = 2
+"test_ci_monitor.py#monkeypatch.setattr scripts.ci.pull_requests.status.main_workflow_run_completed" = 1
+"test_ci_monitor.py#monkeypatch.setattr scripts.ci.pull_requests.status.repo_has_workflows" = 1
+"test_ci_monitor.py#monkeypatch.setattr scripts.ci.pull_requests.status.runs_not_yet_reporting" = 3
+"test_ci_monitor.py#monkeypatch.setattr scripts.ci.pull_requests.status.subprocess.run" = 6
+"test_ci_monitor.py#monkeypatch.setattr scripts.ci.pull_requests.status.time.sleep" = 1
+"test_ci_owner_operations.py#monkeypatch.setattr scripts.ci.pull_requests.owner_operations.queue_cooldown_seconds" = 10
+"test_ci_owner_operations.py#monkeypatch.setattr scripts.ci.pull_requests.status.check_ci" = 13
+"test_ci_owner_operations.py#monkeypatch.setattr scripts.ci.pull_requests.status.subprocess.run" = 10
+"test_ci_owner_operations.py#monkeypatch.setattr scripts.ci.pull_requests.status.time.sleep" = 8
+"test_export_process.py#monkeypatch.setattr base.db.Database.from_settings" = 1
+"test_export_process.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
+"test_export_process.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
+"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.ConfigBoot" = 1
+"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.ava_home" = 1
+"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.build_pipeline" = 3
+"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.runs_export.collect_repo" = 1
+"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.runs_export.emit_snapshot" = 1
+"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.runs_export.save_json" = 1
+
 [debt.private-name]
 "ci_monitor/test_pre_expansion_cancellations_do_not_poison_the_verdict.py -> test_ci_monitor.py#_check" = 1
 "ci_monitor/test_queue_ops_exclusive_with_merge_wait.py -> test_ci_monitor.py#_check" = 1

@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_owned_machine.py#monkeypatch.setattr base.config.ConfigBoot.get_field" = 1
