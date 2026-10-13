@@ -15,7 +15,7 @@ from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, PATH
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
-from gateway.tests.lifecycle.creation.test_sdk_strong_creation import _response, sdk
+from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 
@@ -51,7 +51,7 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
         if lose:
             assert response.status_code in (200, 201), response.text
             raise httpx.ReadTimeout("committed fork response lost")
-        return _response(response)
+        return httpx_response_of(response)
 
     http.post.side_effect = submit
     with transport.use_client(http):

@@ -46,7 +46,7 @@ def sdk(**kwargs: Any) -> int:
     return spawn(**(args | kwargs))
 
 
-def _response(response: Any) -> httpx.Response:
+def httpx_response_of(response: Any) -> httpx.Response:
     # Starlette's TestClient uses httpx2; preserve the real ASGI result while
     # giving the SDK its production httpx response/error boundary.
     return httpx.Response(
@@ -88,7 +88,7 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
         if lose:
             assert response.status_code in (200, 201), response.text
             raise httpx.ReadTimeout("committed response lost")
-        return _response(response)
+        return httpx_response_of(response)
 
     http = sdk_http
     http.post.side_effect = submit
@@ -148,7 +148,7 @@ def test_old_router_never_accepts_or_falls_back(
         http = sdk_http
 
         def submit(path: str, **kwargs: Any) -> httpx.Response:
-            return _response(old.post(path, **kwargs))
+            return httpx_response_of(old.post(path, **kwargs))
 
         http.post.side_effect = submit
         with pytest.raises(httpx.HTTPStatusError):
@@ -167,7 +167,7 @@ def test_bearer_and_cookie_share_principal_but_revocation_blocks_replay(
     http = sdk_http
 
     def submit(path: str, **kwargs: Any) -> httpx.Response:
-        return _response(client.post(path, **kwargs))
+        return httpx_response_of(client.post(path, **kwargs))
 
     http.post.side_effect = submit
     original = sdk()
@@ -191,7 +191,7 @@ def test_changed_sdk_context_same_principal_key_conflicts(
     http = sdk_http
 
     def submit(path: str, **kwargs: Any) -> httpx.Response:
-        return _response(client.post(path, **kwargs))
+        return httpx_response_of(client.post(path, **kwargs))
 
     http.post.side_effect = submit
     monkeypatch.setattr(agent_identity, "require_actor", lambda: "user")
