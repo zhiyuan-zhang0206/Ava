@@ -477,7 +477,7 @@ def test_proxy_502_language_lookup_failure_falls_back_to_default(
     def _boom(_conn: object) -> str:
         raise RuntimeError("pg down")
 
-    monkeypatch.setattr("gateway.routers.pages.display_language", _boom)
+    monkeypatch.setattr(pages_router, "display_language", _boom)
     aid = create_agent(db_conn)
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))

@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
+import base.cluster.machine as cluster_machine
 from agent.db import claim_inbound_batch
 from agent.graph.claim._chat_inbound import build_chat_inbound
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
@@ -29,6 +30,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.host.net import http_dial
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
@@ -68,11 +70,10 @@ def authenticated_gateway(
 ) -> Generator[TestClient]:
     """The CLI's `send` posts through a real gateway app with the cluster credential on."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
+    monkeypatch.setattr(cluster_machine, "gateway_api_base", Mock(return_value="http://testserver"))
     monkeypatch.setattr(
-        "base.cluster.machine.gateway_api_base", Mock(return_value="http://testserver")
-    )
-    monkeypatch.setattr(
-        "base.cluster.machine.gateway_auth_headers",
+        cluster_machine,
+        "gateway_auth_headers",
         Mock(return_value={"Authorization": f"Bearer {_SECRET}"}),
     )
     with gateway_test_client(app, machine=machine) as client:
@@ -80,7 +81,7 @@ def authenticated_gateway(
         def post(url: str, **kwargs: Any) -> httpx2.Response:
             return client.post(url, **kwargs)
 
-        monkeypatch.setattr("base.host.net.http_dial.post", post)
+        monkeypatch.setattr(http_dial, "post", post)
         yield client
 
 

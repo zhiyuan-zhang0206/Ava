@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from base import telemetry
+from base import config, telemetry
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
 
@@ -28,7 +28,7 @@ def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
         export_allowed=lambda: True,
         providers=(logs, MeterProvider(metric_readers=[InMemoryMetricReader()])),
     )
-    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     yield backend, exporter
     backend.shutdown()
 

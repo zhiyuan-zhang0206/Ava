@@ -19,6 +19,7 @@ from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.app import app
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from ops.agents.creation_identity import creation_request_hash, find_creation
+from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
@@ -133,7 +134,7 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
     async def reconcile(*args: object, **kwargs: object) -> dict[str, object]:
         return {}
 
-    monkeypatch.setattr("ops.cluster.rpc.dispatch_to_machine", reconcile)
+    monkeypatch.setattr(rpc, "dispatch_to_machine", reconcile)
     retry = client.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
         json={"expected_prior_attempt_id": str(original)},

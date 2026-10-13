@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.agents.observation.evidence import AvailabilityReason
+from base.cluster import machines
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -138,7 +139,7 @@ class TestRouting:
         set_machine_identity(role="gateway", name="gw-only")
         # The registry says the (local) target is gateway-only — overrides the
         # conftest autouse stub that defaults the local machine to agent-runner.
-        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _db, _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(machines, "lookup_role", lambda _db, _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
         forwarded: list[str] = []
 
         async def _should_not_forward(
@@ -168,10 +169,11 @@ class TestRouting:
         anyway; the precise wire error is what schedules / peers see."""
         set_machine_identity(role="agent-runner", name="local-test")
         monkeypatch.setattr(
-            "base.cluster.machines.lookup_role",
+            machines,
+            "lookup_role",
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: True)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(machines, "is_paused", lambda _db, _name: True)  # pyright: ignore[reportUnknownArgumentType]
         forwarded: list[str] = []
 
         async def _should_not_forward(
@@ -207,10 +209,11 @@ class TestRouting:
         # a runner so the forward proceeds (the lookup itself is exercised by the
         # 404 / no-capability tests).
         monkeypatch.setattr(
-            "base.cluster.machines.lookup_role",
+            machines,
+            "lookup_role",
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(machines, "is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = spawn_via_http(client, {"machine": "remote-mac", "spawner": "user"})
         assert resp.status_code == 201
@@ -244,10 +247,11 @@ class TestRouting:
 
         monkeypatch.setattr(creation, "forward_spawn_to_remote", _capture_forward)
         monkeypatch.setattr(
-            "base.cluster.machines.lookup_role",
+            machines,
+            "lookup_role",
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(machines, "is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = spawn_via_http(client, {"machine": "remote-mac"})
         assert resp.status_code == 201
@@ -282,10 +286,11 @@ class TestRouting:
 
         monkeypatch.setattr(creation, "forward_spawn_to_remote", _forward_raises)
         monkeypatch.setattr(
-            "base.cluster.machines.lookup_role",
+            machines,
+            "lookup_role",
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(machines, "is_paused", lambda _db, _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = spawn_via_http(client, {"machine": "remote-mac"})
         assert resp.status_code == 502

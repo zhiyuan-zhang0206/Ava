@@ -570,7 +570,7 @@ def fixture_plugins_dir(
 
     monkeypatch.setattr(enable_config, "load_for_runtime", _with_fixture_plugins)
     shipped_path = shipped_plugins.__path__
-    monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
+    monkeypatch.setattr(shipped_plugins, "__path__", [*shipped_path, str(tmp_path)])
 
     def _forget_fixture_modules() -> None:
         for module_name in [m for m in sys.modules if m.startswith("ava_builtins.plugins.fx_")]:
