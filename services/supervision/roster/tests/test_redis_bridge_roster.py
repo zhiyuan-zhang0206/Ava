@@ -43,7 +43,7 @@ def test_a_macos_gateway_with_a_private_address_is_not_gated(
     )
     monkeypatch.setattr(redis_bridge.sys, "platform", "darwin")
     machine_identity.set(host="10.64.0.7")
-    assert ops_spec._gate_reason(_bridge(), machine=machine_identity) is None
+    assert ops_spec.gate_reason(_bridge(), machine=machine_identity) is None
 
 
 def test_the_unit_command_carries_the_recorded_listen_address(
@@ -53,7 +53,7 @@ def test_the_unit_command_carries_the_recorded_listen_address(
         return RedisBridgeEndpoint("10.64.0.7", 16380)
 
     monkeypatch.setattr(roster, "redis_bridge_endpoint", fixed_endpoint)
-    command, host, port = roster._redis_bridge_command()
+    command, host, port = roster.redis_bridge_command()
     assert command == (
         "/usr/bin/python3 services/redis_bridge/relay.py --listen-host 10.64.0.7 "
         "--listen-port 16380 --backend-port 16380"
@@ -65,5 +65,5 @@ def test_a_non_macos_host_is_gated_out(
     monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
 ) -> None:
     monkeypatch.setattr(redis_bridge.sys, "platform", "linux")
-    reason = ops_spec._gate_reason(_bridge(), machine=machine_identity)
+    reason = ops_spec.gate_reason(_bridge(), machine=machine_identity)
     assert reason == "no off-box Redis ingress on this host"

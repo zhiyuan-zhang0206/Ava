@@ -139,7 +139,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     def database_for_url(url: str) -> Database:
         return Database(replace(db_config_from_settings(), db_url=url), gate=gate)
 
-    result = worker._execute(
+    result = worker.execute(
         {"kind": "dump", "now": datetime.now(UTC).isoformat()},
         work,
         config=config,

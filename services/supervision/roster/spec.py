@@ -12,7 +12,7 @@ declares ``requires_db`` so database-dependent readiness remains explicit.
 Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
 module. ``plugin_services()`` discovers code-present plugins and appends them
 to the roster: plugin declares, the roster discovers. Each plugin service's
-own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``_gate_reason``.
+own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``gate_reason``.
 The fleet task daemon follows this path; see
 ``docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md``.
 
@@ -112,7 +112,7 @@ def _otel_collector_gate_reason(*, machine: MachineIdentity) -> str | None:
 # Uniform "session X is gated out when its single settings flag is off" rows —
 # each entry's predicate is checked in one small loop by `_flag_gate_reason`
 # instead of a repeated `if session == NAME and not settings...: return ...`
-# chain, which is what previously drove `_gate_reason`'s complexity above the
+# chain, which is what previously drove `gate_reason`'s complexity above the
 # hard ceiling. Every row here has exactly this shape; a session whose gate
 # needs more than one flag or a non-boolean comparison (browser, mcp-daemon,
 # computer-mcp, the lgtm trio, otel-collector) stays a dedicated branch
@@ -153,7 +153,7 @@ def _browser_family_gate_reason() -> str | None:
 
 
 def _core_gate_reason(session: str, *, machine: MachineIdentity) -> str | None:
-    """The session-name-keyed half of `_gate_reason` — every core service
+    """The session-name-keyed half of `gate_reason` — every core service
     without its own plugin-registered ``gate``."""
     if session in ("browser", "browser-mcp"):
         return _browser_family_gate_reason()
@@ -182,7 +182,7 @@ def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
     return reason
 
 
-def _gate_reason(spec: ServiceSpec, *, machine: MachineIdentity) -> str | None:
+def gate_reason(spec: ServiceSpec, *, machine: MachineIdentity) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
     path (drops it), ``ava start`` (logs it), and ``ava status`` (shows it) stay
@@ -224,7 +224,7 @@ def services_for_capabilities_annotated(
     them.
     """
     return tuple(
-        (s, _gate_reason(s, machine=machine)) for s in build_services() if s.capabilities & roles
+        (s, gate_reason(s, machine=machine)) for s in build_services() if s.capabilities & roles
     )
 
 

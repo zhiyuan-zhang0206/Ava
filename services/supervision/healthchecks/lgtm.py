@@ -22,7 +22,7 @@ from base.daemon.health import DaemonProbe
 from base.paths import ava_home
 
 
-def _open_local(request: str | urllib.request.Request, *, timeout: float) -> Any:
+def open_local(request: str | urllib.request.Request, *, timeout: float) -> Any:
     """Open a loopback URL without consulting the environment's proxies."""
     return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
         request, timeout=timeout
@@ -62,12 +62,12 @@ def is_lgtm_host(*, machine: MachineIdentity) -> bool:
     return home_is_observability_station(home, machine=machine, unit_home=home)
 
 
-def _protocol_readiness(name: str) -> DaemonProbe:
+def protocol_readiness(name: str) -> DaemonProbe:
     from base.telemetry.lgtm_local import HEALTH_PATHS, backend_urls
 
     url = backend_urls()[name] + HEALTH_PATHS[name]
     try:
-        with _open_local(url, timeout=2.0) as response:
+        with open_local(url, timeout=2.0) as response:
             if not 200 <= response.status < 300:
                 return DaemonProbe.down(f"{name} readiness HTTP {response.status}")
             if name == "grafana" and json.loads(response.read())["database"] != "ok":
@@ -87,7 +87,7 @@ def probe_backend(name: str) -> DaemonProbe:
     port = urllib.parse.urlsplit(backend_urls()[name]).port
     if port is None:
         return DaemonProbe.unavailable("backend has no explicit local port")
-    return probe_protocol(partial(_protocol_readiness, name))
+    return probe_protocol(partial(protocol_readiness, name))
 
 
 def write_path_probe() -> tuple[bool, str]:
@@ -151,7 +151,7 @@ def write_path_probe() -> tuple[bool, str]:
         headers={"X-Scope-OrgID": "fake"},
     )
     try:
-        with _open_local(query_request, timeout=2.0) as response:
+        with open_local(query_request, timeout=2.0) as response:
             if not 200 <= response.status < 300:
                 return False, "query_error"
             payload: dict[str, Any] = json.loads(response.read())
@@ -169,7 +169,7 @@ def _push_probe(request: urllib.request.Request) -> str | None:
     """Push once, retrying only HTTP 429 with bounded backoff."""
     for attempt in range(len(_WRITE_PROBE_RETRY_BACKOFF_SECONDS) + 1):
         try:
-            with _open_local(request, timeout=2.0) as response:
+            with open_local(request, timeout=2.0) as response:
                 status = response.status
                 response_body = response.read() if status >= 500 else b""
         except urllib.error.HTTPError as exc:

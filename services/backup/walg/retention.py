@@ -41,7 +41,7 @@ BACKUPS_PREFIX = "basebackups_005/"
 WAL_PREFIX = "wal_005/"
 
 _MARKED = re.compile(r"Object marked for deletion: (?P<key>\S+) storage=(?P<storage>\S+)")
-_DRY_RUN_COUNT = re.compile(r"Dry run: objects would be deleted count=(?P<count>\d+)")
+DRY_RUN_COUNT = re.compile(r"Dry run: objects would be deleted count=(?P<count>\d+)")
 _DELETED_COUNT = re.compile(r"Objects deleted successfully: count=(?P<count>\d+)")
 _SENTINEL_SUFFIX = "_backup_stop_sentinel.json"
 
@@ -154,7 +154,7 @@ def apply_retention(
     command = ["delete", "retain", "FULL", str(RETAIN_FULL_BACKUPS), "--use-sentinel-time"]
     planned = parse_marked(
         run_walg_logged(command, timeout_s=DELETE_TIMEOUT_S, path_reader=path_reader),
-        _DRY_RUN_COUNT,
+        DRY_RUN_COUNT,
     )
     if not planned:
         report("retention: nothing to delete")
