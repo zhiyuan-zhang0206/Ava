@@ -110,10 +110,11 @@ def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
     seen: list[DatabaseFactory] = []
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path
+        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
     ) -> telemetry.EventPipeline:
         assert machine is command_runtime.machine
         assert home == command_home
+        assert flush_interval_s == 0.5
         seen.append(database)
         return pipeline
 

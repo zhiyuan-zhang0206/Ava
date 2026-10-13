@@ -48,9 +48,16 @@ def write_batch(
 
 
 def build_pipeline(
-    *, database: Callable[[], Any], machine: MachineIdentity, home: Path
+    *,
+    database: Callable[[], Any],
+    machine: MachineIdentity,
+    home: Path,
+    flush_interval_s: float = 0.5,
 ) -> EventPipeline:
-    """Own the writer and lazy exporter with the root's database and machine."""
+    """Own the writer and lazy exporter with the root's database and machine.
+
+    `flush_interval_s` is how long the drain thread holds a partial batch before it writes it.
+    """
     from base.telemetry.otlp.telemetry_otlp import (
         ExportingEventPipeline,
         observability_export_allowed,
@@ -61,6 +68,7 @@ def build_pipeline(
             events, database=database, export=exporter.export_batch
         ),
         export_allowed=lambda: observability_export_allowed(machine, home=home),
+        flush_interval_s=flush_interval_s,
     )
 
 

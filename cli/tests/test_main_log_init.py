@@ -199,7 +199,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     inputs: list[object] = []
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path
+        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
     ) -> telemetry.EventPipeline:
         factories.append(database)
         machines.append(machine)
@@ -347,7 +347,7 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
         return Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path
+        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
     ) -> telemetry.EventPipeline:
         factories.append(database)
 
