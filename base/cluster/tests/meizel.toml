@@ -44,8 +44,6 @@
 
 [debt.private-name]
 "test_machines.py -> machines/setup.py#_db" = 1
-"test_machines.py -> machines/setup.py#_machine_setup" = 1
-"test_machines.py -> machines/setup.py#_truncate_machines" = 1
 
 [debt.third-party-patch]
 "test_cluster_provision.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.setup" = 1

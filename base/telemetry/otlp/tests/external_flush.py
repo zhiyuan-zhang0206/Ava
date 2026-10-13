@@ -11,7 +11,9 @@ from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 
 from base.telemetry.delivery.receipts import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp
-from tests.factories.external_attachment import HANDSHAKE_BOUND_S
+
+# A bounded handshake allows close telemetry to drain on a loaded runner.
+HANDSHAKE_BOUND_S = 30.0
 
 
 @pytest.fixture

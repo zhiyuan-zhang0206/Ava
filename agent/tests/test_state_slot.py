@@ -68,7 +68,7 @@ assert (
 
 
 @pytest.fixture(autouse=True)
-def _reset_state_slot():
+def reset_state_slot():
     """Before/after each test, force reset slots back to None — do not restore previous (would mask test
     leaks). Module-level slots should default to None; any leftover value is a bug."""
     process_context.unbind_exec_turn()

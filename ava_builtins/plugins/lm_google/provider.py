@@ -33,7 +33,7 @@ def _thinking_level(ctx: BuildContext, *, thinking_disabled: bool) -> str | None
     thinking_level: str | None = None
     if ctx.media_thinking_level is not None:
         # Media path — the caller owns the Gemini vocabulary mapping
-        # (ava/understand.py), including the `max` → configured-knob
+        # (ava/understand/answer.py), including the `max` → configured-knob
         # special case; the resolved-effort path is skipped entirely so a
         # global AVA_REASONING_EFFORT cannot silently override the media
         # knob (historic behavior).

@@ -115,12 +115,12 @@ import os
 import sys
 from pathlib import Path
 
-from base.host.permissions_helper.client import spawn_process
+from base.sessions.helperproc import helper_client
 
 workdir = Path(sys.argv[1])
 probe = Path(sys.argv[2])
 results_path = workdir / "probe.results.json"
-result = spawn_process(
+result = helper_client().spawn_process(
     f"tcc-spawn-chain-verify-{os.getpid()}",
     [sys.executable, str(probe), str(results_path)],
     dict(os.environ),

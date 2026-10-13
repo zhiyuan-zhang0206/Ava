@@ -4,6 +4,5 @@
     "test_status_services.py",
 ]
 "tests.fixtures.unit.sdk" = [
-    "test_roster_snapshots.py",
-    "test_status_services.py"
+    "test_status_services.py",
 ]

@@ -152,7 +152,11 @@ def test_helper_admission_requires_normal_retirement_protocol(
     capabilities = {"root_stop_intent_v1": True, "helper_shutdown_v1": True}
     if missing is not None:
         del capabilities[missing]
-    monkeypatch.setattr(permissions_helper_client, "ping", lambda: capabilities)
+    monkeypatch.setattr(
+        permissions_helper_client.PermissionsHelperClient,
+        "ping",
+        lambda _self: capabilities,  # pyright: ignore[reportUnknownArgumentType]
+    )
     assert driver._helper_wire_ok() is (missing is None)
 
 
@@ -247,13 +251,15 @@ def test_helper_seed_is_durable_before_wire_start(
 
     monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
 
-    def seed(config: client.RootSeedConfig) -> client.RootStatus:
+    def seed(
+        _self: client.PermissionsHelperClient, config: client.RootSeedConfig
+    ) -> client.RootStatus:
         path = tmp_path / "seed.json"
         assert json.loads(path.read_text()) == config
         assert path.stat().st_mode & 0o777 == 0o600
         return {"state": "running", "seeded": True, "restarts": 0, "stop_requested": False}
 
-    monkeypatch.setattr(client, "seed_root", seed)
+    monkeypatch.setattr(client.PermissionsHelperClient, "seed_root", seed)
     driver._seed_via_helper(
         tmp_path, tmp_path, tmp_path / "manifests.json", {"AVA_HOME": str(tmp_path)}
     )
@@ -269,15 +275,15 @@ def test_stop_without_root_ipc_cancels_pending_helper_restart(
     monkeypatch.setattr(driver, "require_root_absent", lambda: None)
     calls: list[str] = []
 
-    def keeper() -> client.RootStatus:
+    def keeper(_self: client.PermissionsHelperClient) -> client.RootStatus:
         return {"state": "backoff", "seeded": True, "restarts": 1, "stop_requested": False}
 
-    def stop() -> client.RootStatus:
+    def stop(_self: client.PermissionsHelperClient) -> client.RootStatus:
         calls.append("durable stop")
         return {"state": "stopped", "seeded": True, "restarts": 1, "stop_requested": True}
 
-    monkeypatch.setattr(client, "root_status", keeper)
-    monkeypatch.setattr(client, "stop_root", stop)
+    monkeypatch.setattr(client.PermissionsHelperClient, "root_status", keeper)
+    monkeypatch.setattr(client.PermissionsHelperClient, "stop_root", stop)
     driver._stop_dormant_helper_root(float("inf"))
     assert calls == ["durable stop"]
 
@@ -515,13 +521,13 @@ def test_unusable_helper_socket_requires_positive_native_absence(
 
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
 
-    def unavailable() -> client.RootStatus:
+    def unavailable(_self: client.PermissionsHelperClient) -> client.RootStatus:
         raise client.PermissionsHelperError("AF_UNIX path too long")
 
     def query(_target: str, _deadline: float) -> str | None:
         return "state = spawn scheduled" if loaded else None
 
-    monkeypatch.setattr(client, "root_status", unavailable)
+    monkeypatch.setattr(client.PermissionsHelperClient, "root_status", unavailable)
     monkeypatch.setattr(launchd_job, "retirement_query", query)
     if loaded:
         with pytest.raises(RuntimeError, match="custody is unavailable"):
@@ -634,10 +640,10 @@ def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(
         "last_exit": {"kind": "crash", "code": 1, "at": 0.0},
     }
 
-    def seed_root(_config: object) -> dict[str, Any]:
+    def seed_root(_self: object, _config: object) -> dict[str, Any]:
         return exited
 
-    monkeypatch.setattr(client, "seed_root", seed_root)
+    monkeypatch.setattr(client.PermissionsHelperClient, "seed_root", seed_root)
     with pytest.raises(driver._RootDriverError, match="stopped restarting"):
         driver._seed_via_helper(
             tmp_path, tmp_path, tmp_path / "manifests.json", {"AVA_HOME": str(tmp_path)}

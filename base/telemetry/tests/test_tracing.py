@@ -29,7 +29,7 @@ from base.telemetry.tracing import (
 
 
 @pytest.fixture(autouse=True)
-def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 
@@ -82,7 +82,7 @@ def _drain_background_trace_threads() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _reset_init_flag(monkeypatch: pytest.MonkeyPatch):
+def reset_tracing_init_flag(monkeypatch: pytest.MonkeyPatch):
     """Reset trace-init and retry-loop state (and the key arming writes) between tests."""
     monkeypatch.setenv("TRACELOOP_TRACE_CONTENT", "")  # arming sets it; teardown deletes it
     _assert_no_background_trace_threads()
@@ -123,7 +123,7 @@ def wait_init_resolved(timeout: float = 5.0) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _collector_up(monkeypatch: pytest.MonkeyPatch):
+def collector_up(monkeypatch: pytest.MonkeyPatch):
     """The local-collector preflight must pass by default — the tests exercise
     the exporter/init logic, not the network probe (which is covered by its own
     telemetry_otlp tests)."""
@@ -414,7 +414,7 @@ def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp
     not leave a zombie behind: its delayed Traceloop.init would then land in
     the NEXT test's monkeypatched lambda (counted as a second init — the
     #1065 delta attempt 1 flake). This test only has to leave one in flight;
-    the _reset_init_flag teardown has to drain it, and the setup boundary
+    the reset_tracing_init_flag teardown has to drain it, and the setup boundary
     check turns a leftover into a deterministic failure."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)

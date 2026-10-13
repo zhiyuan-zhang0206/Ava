@@ -270,16 +270,17 @@ def fill_request_error(
 
 def helper_client() -> Any:
     try:
-        from base.host.permissions_helper import client
+        from base.sessions.helperproc import helper_client as sessions_helper_client
     except ImportError as exc:
         raise OnboardError(
             "run this script with the repository venv "
             "(e.g. .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py)"
         ) from exc
-    return client
+    return sessions_helper_client()
 
 
 def spawn_child(client: Any, workdir: Path, name: str, argv: list[str], tag: str) -> int:
+    from base.host.permissions_helper.client import PermissionsHelperError
     from base.sessions import env_forwarding
 
     # The helper spawn contract wants the child's FULL environment; the
@@ -296,7 +297,7 @@ def spawn_child(client: Any, workdir: Path, name: str, argv: list[str], tag: str
             str(workdir / f"{tag}.stdout.log"),
             str(workdir / f"{tag}.stderr.log"),
         )
-    except client.PermissionsHelperError as exc:
+    except PermissionsHelperError as exc:
         message = str(exc)
         if "unknown method" in message:
             raise OnboardError(

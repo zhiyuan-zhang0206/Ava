@@ -166,7 +166,7 @@ async def test_request_id_mismatch_reconnects_then_next_call_succeeds(
                 all_closed.set()
 
     server = await asyncio.start_unix_server(_handle, path=str(sock_path))
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda: sock_path)
+    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
 
     session, stack = await browser_mod.connect_browser_direct()
     with pytest.raises(RuntimeError, match="response id 99 != request 1"):
@@ -219,7 +219,7 @@ async def test_corrupt_line_reconnects_then_next_call_succeeds(
             w.close()
 
     server = await asyncio.start_unix_server(_handle, path=str(sock_path))
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda: sock_path)
+    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
 
     session, stack = await browser_mod.connect_browser_direct()
     with pytest.raises(RuntimeError, match="corrupted line"):
@@ -271,7 +271,7 @@ async def test_connect_browser_direct_dials_socket(
         w.close()
 
     server = await asyncio.start_unix_server(_drop, path=str(sock_path))
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda: sock_path)
+    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
 
     session, stack = await browser_mod.connect_browser_direct()
     assert isinstance(session, browser_mod.BrowserLineSession)
@@ -294,7 +294,7 @@ async def test_connect_browser_direct_retries_until_socket_appears(
         sock_path.unlink()
     monkeypatch.setattr(browser_mod, "_CONNECT_ATTEMPTS", 20)
     monkeypatch.setattr(browser_mod, "_CONNECT_DELAY_S", 0.02)
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda: sock_path)
+    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
 
     server_future: asyncio.Future[asyncio.AbstractServer] = asyncio.Future()
 
@@ -420,7 +420,7 @@ async def test_release_agent_chrome_pages_sends_release_and_reports_ok(
         w.close()
 
     server = await asyncio.start_unix_server(_answer, path=str(sock_path))
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda: sock_path)
+    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
     try:
         assert await browser_mod.release_agent_chrome_pages(7) is True
     finally:
@@ -441,6 +441,6 @@ async def test_release_agent_chrome_pages_no_service_returns_false(
     sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
     with contextlib.suppress(OSError):
         sock_path.unlink()
-    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda: sock_path)
+    monkeypatch.setattr(paths, "chrome_mcp_socket", lambda _port: sock_path)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(browser_mod, "_RELEASE_TIMEOUT_S", 0.5)
     assert await browser_mod.release_agent_chrome_pages(7) is False
