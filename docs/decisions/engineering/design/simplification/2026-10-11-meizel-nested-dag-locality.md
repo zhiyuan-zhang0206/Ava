@@ -409,3 +409,25 @@ CI refuses to grow, or in one file.
   widening a rule legitimately grows the baselines.
 - **Default-argument injection** stays closed. If it is ever opened, the allowed
   values go into `[default-arguments]` and the tool checks them.
+
+## Addendum (2026-10-14): the waiver is for pure rule changes, and the lints' exemptions join the policy
+
+Two gaps in the hard-coded allowances, found when a rename in another line happened to edit
+an allowlist inside `meizel/`.
+
+- **The waiver is for a pure rule change.** The earlier test (the change edits Python under
+  `meizel/` outside tests) let any pull request that touched one such file, for any reason, grow
+  the baselines. Now both conditions must hold: the change edits meizel's rule code, and every
+  file it changes is under `meizel/`, a `meizel.toml` baseline or `meizel.policy.toml`
+  (`debt diff --waive-if-changed ... --waive-only-within ...`). A change that also edits product
+  code or tests is not waived, so a rule change gets its own pull request and its reviewer sees at
+  once what it is. Baselines and the policy are part of a rule change because widening a rule
+  moves them; they alone, without rule code, are not.
+- **Every exemption is in the policy.** The lint rules in `meizel/` kept their own lists of what
+  they let through: the ambient-state facades, wiring and pure callees, the clock-lattice
+  exemptions, the single-owner `postgres-dial` exemptions, the `os.environ` files and variables,
+  the per-agent settings files, the `TYPE_CHECKING` files. They now live in `meizel.policy.toml`,
+  one table per rule, each entry with its reason, and the rule modules only read them
+  (`meizel/allowances.py` owns the format). `policy diff` reports a change to any of them in CI, so
+  rule code holds no exemption of its own. The lists in `scripts/` outside `meizel/` are not moved
+  by this change.

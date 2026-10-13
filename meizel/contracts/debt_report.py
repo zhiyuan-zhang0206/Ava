@@ -175,11 +175,20 @@ def _totals_at(root: Path, ref: str) -> Counter[str]:
 
 
 def changed_under(root: Path, ref: str, pathspecs: list[str]) -> list[str]:
-    """The files that differ between `ref` and the working tree under the given git pathspecs."""
+    """The files that differ between `ref` and the working tree under the given git pathspecs.
+
+    No pathspecs lists every changed file.
+    """
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
     listing = _git(root, "diff", "--name-only", "--no-renames", "-z", ref, "--", *pathspecs)
     return [p for p in listing.decode().split("\0") if p]
+
+
+def changed_outside(root: Path, ref: str, pathspecs: list[str]) -> list[str]:
+    """The changed files that match none of the pathspecs."""
+    inside = set(changed_under(root, ref, pathspecs))
+    return [p for p in changed_under(root, ref, []) if p not in inside]
 
 
 def diff(root: Path, ref: str) -> tuple[list[str], bool]:

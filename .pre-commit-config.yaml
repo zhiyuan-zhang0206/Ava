@@ -102,7 +102,7 @@ repos:
         name: lint os.environ (force settings)
         entry: .venv/bin/python scripts/lint/no_os_environ.py --only
         language: system
-        types: [python]
+        files: ^(meizel\.policy\.toml|.*\.py)$
 
       # PYTHONSAFEPATH=1 (2026-08-22 hardening) keeps a script's own directory
       # off sys.path, so a script-mode file importing a same-dir sibling without
@@ -121,7 +121,7 @@ repos:
         name: lint per-agent config reads (force the agent's slices)
         entry: .venv/bin/python scripts/lint/turn_scoped_config.py --only
         language: system
-        types: [python]
+        files: ^(meizel\.policy\.toml|.*\.py)$
 
       # A fixture whose scope outlives the blast radius of the process global it
       # mutates. A session-scoped fixture in a SUBDIRECTORY conftest restores env in
@@ -178,7 +178,7 @@ repos:
         name: lint pool keepalives (no pool without PG_KEEPALIVE_KWARGS outside Rule 5)
         entry: .venv/bin/python scripts/lint/pool_keepalives.py --only
         language: system
-        types: [python]
+        files: ^(meizel\.policy\.toml|.*\.py)$
 
       # Ban a logger.add(...) sink that does not explicitly pass diagnose=False.
       # loguru's diagnose defaults to True, so logger.exception(...) on an
@@ -497,7 +497,7 @@ repos:
         name: lint clock lattice (lattice-vocabulary clocks only in the family modules)
         language: system
         entry: .venv/bin/python -m meizel.owners.clock_lattice --only
-        files: \.py$
+        files: ^(meizel\.policy\.toml|.*\.py)$
 
       # A test that exactly asserts a value derived from a repo fixed-instant
       # constant while the derivation can reach the real clock is correct only

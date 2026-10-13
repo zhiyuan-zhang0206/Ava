@@ -78,3 +78,295 @@
 "tests/ui/test_android_overlay.py" = ["ui/app/android"]
 
 [default-arguments]
+
+# ---------------------------------------------------------------------------------------------
+# Lint-rule allowances. A rule lets a file, a site or a name through only where it is listed
+# here, with the reason beside it. Each table is read by one rule (meizel/allowances.py owns the
+# format); `python -m meizel policy diff` reports every change to any of them.
+# ---------------------------------------------------------------------------------------------
+
+# ambient-state (meizel/state/ambient_state): what module-level state may be let through.
+# Callees that build a write-only handle, framework wiring, or a constant fixed by its literals.
+[ambient-state]
+sink-callees = [
+    "logging.getLogger",
+]
+sink-callee-suffixes = [
+    ".get_meter",
+    ".get_tracer",
+    ".create_counter",
+    ".create_histogram",
+    ".create_gauge",
+    ".create_up_down_counter",
+]
+wiring-callees = [
+    "argparse.ArgumentParser",
+    "asyncio.BoundedSemaphore",
+    "asyncio.Condition",
+    "asyncio.Event",
+    "asyncio.Lock",
+    "asyncio.Semaphore",
+    "fastapi.APIRouter",
+    "fastapi.FastAPI",
+    "langgraph.graph.StateGraph",
+    "threading.BoundedSemaphore",
+    "threading.Condition",
+    "threading.Event",
+    "threading.Lock",
+    "threading.RLock",
+    "threading.Semaphore",
+    "threading.local",
+    "typer.Typer",
+]
+pure-callees = [
+    "base64.b64decode",
+    "bool",
+    "bytes",
+    "collections.namedtuple",
+    "dataclasses.field",
+    "datetime.date",
+    "datetime.datetime",
+    "datetime.timedelta",
+    "datetime.timezone",
+    "decimal.Decimal",
+    "enum.Enum",
+    "enum.IntEnum",
+    "enum.StrEnum",
+    "enum.auto",
+    "float",
+    "fractions.Fraction",
+    "frozenset",
+    "getattr",
+    "httpx.Limits",
+    "httpx.Timeout",
+    "int",
+    "ipaddress.ip_address",
+    "ipaddress.ip_network",
+    "langgraph.channels.delta.DeltaChannel",
+    "len",
+    "max",
+    "min",
+    "object",
+    "operator.attrgetter",
+    "operator.itemgetter",
+    "os.path.abspath",
+    "os.path.basename",
+    "os.path.dirname",
+    "os.path.join",
+    "pathlib.Path",
+    "pathlib.PurePath",
+    "pathlib.PurePosixPath",
+    "psycopg.sql.Identifier",
+    "psycopg.sql.Literal",
+    "psycopg.sql.SQL",
+    "pydantic.ConfigDict",
+    "pydantic.Field",
+    "pydantic.TypeAdapter",
+    "range",
+    "re.compile",
+    "repr",
+    "sorted",
+    "str",
+    "str.maketrans",
+    "string.Template",
+    "struct.Struct",
+    "tuple",
+    "type",
+    "types.MappingProxyType",
+    "typing.Annotated",
+    "typing.NamedTuple",
+    "typing.NewType",
+    "typing.ParamSpec",
+    "typing.TypeVar",
+    "typing.TypeVarTuple",
+    "typing.TypedDict",
+    "typing.cast",
+    "uuid.UUID",
+]
+pure-chain-callees = [
+    "hashlib.md5",
+    "hashlib.sha1",
+    "hashlib.sha256",
+]
+
+# Files that ARE a sink facade: the module-level state in them is the facade's own write-only
+# machinery. The exemption covers state only; a thread or task a facade starts is still reported.
+[ambient-state.sink-facades]
+"agent/graph/node_log.py" = "snapshot cursor and node-exit aggregate buffered for the log/event stream; written by node exits, read only by the flush that emits them"
+"base/log/process.py" = "the concrete loguru startup and sink facade: its idempotency guard is read only by process logging initialization"
+"base/telemetry/delivery/mirror.py" = "the JSONL mirror's consecutive-failure counter: reported by the mirror writer only"
+"base/telemetry/delivery/reporting.py" = "per-seam failure counters for best-effort reporting: read only by the reporter"
+"base/telemetry/event_store.py" = "the telemetry_events writer: its pool handle, backoff clock and failure counter are written by the emitter's drain thread and read only by the writer itself"
+"base/telemetry/metrics/observed_metrics.py" = "the observed-metrics writer: its pool handle and failure counter are written by emitters and read only by the writer itself"
+"base/telemetry/otlp/telemetry_otlp.py" = "the OTLP export backend: the meter facade over the global meter provider, the backend handle and the once-per-process export gate; write-only for callers"
+"base/telemetry/pipeline_build.py" = "the exit hook that stops the bound pipeline and closes its sinks; registered once at import because it must run for every process that built a pipeline"
+"base/telemetry/process_logging.py" = "the loguru event-sink adapter: its sample counter and registered sink handle are read only by sink registration and the record filter"
+"base/telemetry/tracing.py" = "the tracer facade: the OTel trace API used through the global tracer provider, plus the arm state it keeps; write-only for callers"
+"gateway/http/middleware/latency.py" = "latency aggregation buffer flushed to the event pipeline; written by requests, read only by the flush"
+"gateway/http/middleware/runtime_metrics.py" = "active-SSE-connection gauge state, incremented and decremented by the stream handler and read only by the metrics exporter"
+
+# Repo functions that return a constant derived from literals only. A listed function that no
+# longer exists fails as stale.
+[ambient-state.pure-repo-callees]
+"base.events.contract._sql_keys" = "derives a tuple of key names from the static event registry"
+"base.events.contract.family_events" = "a tuple over the static event registry"
+"base.events.loader.load_events" = "merges the static per-domain event declarations"
+"base.packages.skills.scan._rx" = "compiles a regex from a literal pattern"
+"services.backup.artifact.passphrase.derive" = "a key derivation of a literal: a fixed value"
+
+# Exact sites let through, `path::rule:name`: a memoized pure function or a namespace built once.
+# A site that stops being reported fails as stale.
+[ambient-state.sites]
+"ava/__init__.py::ambient-instance:extend" = "a namespace of functions built once and never rebound or filled afterwards"
+"ava_builtins/plugins/ava_memory/sdk.py::hidden-cache:_documented_pool" = "wraps one home's pool path in a documented constant"
+"base/config/admin/candidate.py::hidden-cache:_candidate_validation_model" = "builds a validation subclass of a given Settings class"
+"base/config/config_registry.py::hidden-singleton:_build_registry" = "the static config registry derived from the Settings classes"
+"base/config/config_registry.py::hidden-singleton:field_infos" = "a static view of the config registry"
+"base/config/service_read.py::hidden-singleton:domain_model_classes" = "the static table of Settings domain classes"
+"base/host/env/registry.py::hidden-singleton:agent_runner_cluster_aliases" = "a static view of the env registry"
+"base/host/env/registry.py::hidden-singleton:cluster_scope_aliases" = "a static view of the env registry"
+"base/host/env/registry.py::hidden-singleton:derived_env_keys" = "a static view of the env registry"
+"base/host/env/registry.py::hidden-singleton:env_identity_keys" = "a static view of the env registry"
+"base/host/env/registry.py::hidden-singleton:health_port_env_aliases" = "a static view of the env registry"
+"base/host/env/registry.py::hidden-singleton:launch_input_keys" = "a static view of the env registry"
+"base/host/env/registry.py::hidden-singleton:session_forward_keys" = "a static view of the env registry"
+"base/native_process/group_closure.py::hidden-singleton:_proc_listpids" = "a ctypes loader of one OS entry point: code, not state"
+"base/native_process/pidfd.py::hidden-singleton:_api" = "a ctypes loader of the pidfd syscalls: code, not state"
+
+# clock-lattice (meizel/owners/clock_lattice): where lattice vocabulary may be defined, and the
+# constants that use it without being part of the lattice (`path::NAME`).
+[clock-lattice]
+family-modules = [
+    "base/deploy/timing.py",
+    "base/deploy/progress_timeout.py",
+    "base/native_process/stop_timing.py",
+    "base/deploy/schedule_timing.py",
+]
+
+[clock-lattice.independent-clocks]
+"agent/graph/node_log.py::_STALL_GUARD_EXEMPT" = "frozenset of exempt node kinds, not a clock"
+"ava_builtins/plugins/lm_anthropic/provider.py::_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET" = "LLM thinking-token budget, not a wall-clock constant"
+"ava_builtins/skills/platform/ava-guide/external-agents/scripts/watch_work.py::STALL_SECONDS" = "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour"
+"base/daemon/schedules/watcher.py::AT_SESSION_TTL_GRACE_SECONDS" = "independent: the at-watcher session's post-fire reclamation window (wake delivery + exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — no lattice neighbour and no ordering safety depends on this value"
+"base/events/contract.py::DELIVERY_STALLED_KEYS" = "SQL key set for the delivery_stalled view, not a clock"
+"base/events/live/redis_listener.py::_CONSUME_ABANDON_GRACE" = "independent: pubsub consume-abandon window, no lattice neighbour"
+"base/host/proc.py::_REAP_TIMEOUT_S" = "independent: single wait_procs bound when reaping a process tree, no lattice neighbour"
+"base/host/proc.py::_TERMINATE_GRACE_S" = "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour"
+"base/native_process/exec_domain.py::KILL_GRACE_S" = "independent: SIGINT/SIGTERM -> SIGKILL grace ladder for the exec child, no lattice neighbour"
+"cli/commands/lifecycle/service_stop.py::_TERMINAL_STOP_GRACE_S" = "independent: HUP/TERM -> SIGKILL grace of a normal stop's terminal closure (docs/decisions/runtime/processes/shutdown/2026-09-28-stop-escalates-to-sigkill.md); the stop's own deadline caps it and nothing orders against it, no lattice neighbour"
+"services/backup/scheduler/operation/staging.py::TERMINATE_GRACE_S" = "independent: bounded TERM grace for a scheduled worker to unwind private cleanup; no family-disappearance proof or lattice neighbour"
+"services/desktop/computer/mcp_daemon.py::_WATCHDOG_MIN_STALL_S" = "not a clock: a sanity floor on the operator-configured loop-stall window (settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor misconfiguration from restart-looping a healthy daemon, no lattice neighbour"
+
+# single-owner (meizel/owners/decisions): modules that bypass a decision's one owner, per decision.
+[single-owner.postgres-dial]
+"base/cluster/dataplane/pg_admin.py" = "the OS-user administrator's peer-socket authority (roles, grants, schema DDL, owner sessions) behind its own postmaster custody check; the FC-10 cutover scripts dial through it, so its transport stays as rehearsed until the cutover lands"
+"base/cluster/dataplane/pg_foreground.py" = "readiness probe of the foreground throwaway postmaster base/cluster/dataplane/pg_tools.py started, under the same home-free constraint"
+"base/cluster/dataplane/pg_stall_watchdog.py" = "probes the throwaway Postgres base/cluster/dataplane/pg_tools.py started, under the same home-free constraint"
+"base/cluster/dataplane/pg_tools.py" = "provisions the throwaway Postgres it just started; run config-free by scripts/ci/migration_smoke.py"
+"base/host/db_authority/unit.py" = "probes an installed unit capability's own runner login at the served endpoint, the credential under test"
+"cli/commands/data_plane/cluster_instance.py" = "proves the running postmaster demands a password by dialing a role that cannot exist, with no credential"
+
+# no-os-environ (meizel/state/no_os_environ): environment variables that tests may set live, and
+# the files that read the environment because they cannot go through Settings.
+[no-os-environ.provider-key-vars]
+"ANTHROPIC_API_KEY" = "read live by ava_builtins/plugins/lm_anthropic"
+"DASHSCOPE_API_KEY" = "read live by ava_builtins/plugins/lm_alibaba"
+"DEEPSEEK_API_KEY" = "read live by ava_builtins/plugins/lm_deepseek"
+"GEMINI_API_KEY" = "read live by ava_builtins/plugins/lm_google"
+"GLM_API_KEY" = "read live by ava_builtins/plugins/lm_zhipu"
+"MIMO_API_KEY" = "read live by ava_builtins/plugins/lm_xiaomi"
+"MOONSHOT_API_KEY" = "read live by ava_builtins/plugins/lm_moonshot"
+"OPENAI_API_KEY" = "read live by ava_builtins/plugins/lm_openai"
+"TYPESAFE_API_KEY" = "read live by ava_builtins/plugins/lm_typesafe"
+
+[no-os-environ.live-read-vars]
+"AVA_TELEMETRY_OTLP_CHILD_DEFER" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
+"AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
+
+[no-os-environ.files]
+"agent/execution/child.py" = "the exec child reads its per-launch protocol env (AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop"
+"agent/execution/owner_child.py" = "the gated exec child validates the same one-shot AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE handoff against its signed owner context before delegating to agent.execution.child; these dynamic per-launch paths are not Settings config"
+"agent/graph/exec/_child_boundary.py" = "build_child_env copies the LIVE parent env and layers the exec protocol vars on top — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env"
+"agent/loop.py" = "run() pops the per-agent config-overlay / birth-config env vars ($AVA_AGENT_CONFIG_OVERLAY / $AVA_AGENT_BIRTH_CONFIG) before spawning children; argv is world-readable via ps (issue #974) and the payloads are per-agent launch secrets, not Settings fields"
+"agent/process_boot.py" = "boot sets os.environ[\"AVA_AGENT_ID\"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)"
+"ava/boot.py" = "launched_context() / has_launched_identity() read os.environ[\"AVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent"
+"ava/watcher/spawn.py" = "build_boot() bootstrap code uses os.environ.get in a string literal for the child process bootstrap"
+"ava_builtins/skills/integrations/telegram-send-file/scripts/send_file.py" = "the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path; same class as the child-env handoff entries"
+"base/agents/impersonation/host_transport.py" = "CODEX_HOME is provider routing context, not cluster configuration; the shared transport preserves the CLI socket resolution contract"
+"base/agents/messages/external_caller.py" = "per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection"
+"base/config/__init__.py" = "Settings aggregate; role-derives the gateway-config fetch before sub-models construct"
+"base/config/_full.py" = "the eager builder reads AVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py"
+"base/config/_lite.py" = "the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py"
+"base/config/domains/storage/data_plane.py" = "self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)"
+"base/host/env/bootstrap.py" = "fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing base.config here is the import cycle this module exists to break"
+"base/host/env/dotenv_boot.py" = "load_dotenv ~/.ava/.env, must run before Settings import"
+"base/host/env/registry.py" = "child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding"
+"base/host/git/gitenv.py" = "git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Ava runtime config"
+"base/host/net/auth.py" = "delivered_token reads the per-launch AVA_API_TOKEN the root launcher (or the boot pass) sets for this process — a write generation's machine credential handoff, never persisted config; it is read during the Settings import (bootstrap fetch), same class as PAGE_SERVER_TOKEN"
+"base/host/system/probes.py" = "display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not ava runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators"
+"base/lm/provider_api.py" = "plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries"
+"base/native_process/child_env.py" = "centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state"
+"base/native_process/os_platform.py" = "launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity"
+"base/native_process/ownership.py" = "process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config"
+"base/paths/home.py" = "resolve_ava_home reads AVA_HOME: the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged"
+"base/sessions/env_forwarding.py" = "forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded"
+"base/telemetry/observability.py" = "endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit"
+"base/telemetry/otlp/telemetry_otlp_defer.py" = "the exec-child OTLP deferral knobs (AVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as base/telemetry/observability.py"
+"base/telemetry/tracing.py" = "sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Ava's own config surface is the AVA_TRACE_STRIP_CONTENT settings field, which drives this env translation"
+"cli/commands/agents/impersonation.py" = "AVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity"
+"cli/commands/cluster/home.py" = "Cross-home child environment projection removes caller credentials before the target's Settings loads."
+"cli/commands/management/config.py" = "the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first"
+"cli/main.py" = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules."
+"cli/start_intent.py" = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports."
+"cli/tests/bootstrap/test_start_identity.py" = "Exercises the settings-free birth boundary; environment is the actual input before Settings exists."
+"meizel/state/ambient_state/scan.py" = "same reason: it MATCHES the strings \"os.environ\" / \"os.getenv\" against a module's AST to find an import-time read; it never reads the environment"
+"meizel/state/no_os_environ.py" = "this script itself has \"os.environ\" in strings"
+"scripts/ci/coverage_gates.py" = "BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser"
+"scripts/ci/migration_smoke.py" = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Ava runtime config"
+"scripts/ci/pull_requests/commands.py" = "TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration"
+"scripts/ci/pull_requests/owner_operations.py" = "TRUNK_API_TOKEN and CI_QUEUE are explicit owner-operation inputs, separate from deployment Settings"
+"scripts/codegen/gen_config_lite_table.py" = "regeneration must run in exactly the states that need it (broken .env, unreachable gateway): it forces AVA_CONFIG_FETCH=skip in the process env BEFORE importing the registry, which Settings cannot mediate by construction"
+"scripts/host_ops/guard_editable_venv.py" = "dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import"
+"scripts/lint/code_structure.py" = "LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings."
+"scripts/lint/fixture_scope.py" = "same reason: it MATCHES the string \"os.environ\" against a test module's AST to find env mutation in a fixture body"
+"scripts/model_registry/check_model_updates.py" = "tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback"
+"services/agent_runner/page_server/daemon.py" = "spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as base/sessions/env_forwarding"
+"services/agent_runner/page_server/server.py" = "reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it"
+"services/desktop/computer/mcp_wrapper.py" = "_agent_id() reads the ambient AVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed"
+"tests/components/cli/test_start_repo_guard.py" = "Verifies checkout/home routing before Settings can be constructed."
+
+# turn-scoped-config (meizel/state/turn_scoped_config): files that read per-agent fields off the
+# singleton by design, and the two files that are the plugin-config mechanism.
+[turn-scoped-config.files]
+"base/host/env/agent_slices.py" = "The slices resolve a field's live default off the singleton by design."
+
+[turn-scoped-config.plugin-mechanism-files]
+"base/packages/plugins/config_registration.py" = "the plugin-config mechanism itself: the registry owns the process-global map, the view layers an agent's overrides over it"
+"base/packages/plugins/config_view.py" = "the plugin-config mechanism itself: the registry owns the process-global map, the view layers an agent's overrides over it"
+
+# type-checking (meizel/language/type_checking): files allowed an `if TYPE_CHECKING:` block.
+[type-checking.files]
+"agent/graph/__init__.py" = "PEP 562 lazy re-export: the node set is a heavy import on paths (the exec child) that never use the names; TYPE_CHECKING restores the real signatures for static checkers without putting them back on the import path (task #3585)."
+"ava/skills/__init__.py" = "Boot-path trim: the skill-index stack is a heavy import every exec child pays; `SkillFile` is annotation-only on the mount helpers (script/module-level imports removed for task #3816)."
+"ava_builtins/plugins/ava_fleet/_task_update.py" = "Boot-path trim: the fleet plugin (autoloaded into every exec child) keeps psycopg off its module import graph — `psycopg` is annotation-only here, imported at the raise sites (task #3816)."
+"ava_builtins/plugins/ava_fleet/task_registry.py" = "Boot-path trim: the fleet plugin (autoloaded into every exec child) keeps psycopg off its module import graph — `psycopg` is annotation-only here, imported at the raise sites (task #3816)."
+"ava_builtins/plugins/lm_alibaba/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"ava_builtins/plugins/lm_anthropic/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"ava_builtins/plugins/lm_deepseek/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"ava_builtins/plugins/lm_google/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"ava_builtins/plugins/lm_moonshot/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"ava_builtins/plugins/lm_openai/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"ava_builtins/plugins/lm_xiaomi/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"ava_builtins/plugins/lm_zhipu/provider.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"base/agents/context/__init__.py" = "The exec child builds an `AvaContext` from its request envelope: the handle types (psycopg pool, redis bus, chat model) are annotation-only fields it never holds, and importing them would put the whole DB / LM stack on its boot path."
+"base/agents/context/clients.py" = "The same exec-child boot path: a ClientSet builds psycopg / redis / httpx clients on first use only, so its client types are annotation-only."
+"base/agents/messages/kwargs.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."
+"base/agents/sdk/telemetry.py" = "Exec-child boot path (`_run_code` -> sdk_telemetry): ToolMessage is runtime-only (imported at the isinstance call site), BaseMessage annotation-only (task #3633)."
+"base/agents/tasks/reparent.py" = "Boot-path trim: the fleet plugin (autoloaded into every exec child) keeps psycopg off its module import graph — `psycopg` is annotation-only here, imported at the raise sites (task #3816)."
+"base/agents/tasks/rules.py" = "Boot-path trim: the fleet plugin (autoloaded into every exec child) keeps psycopg off its module import graph — `psycopg` is annotation-only here, imported at the raise sites (task #3816)."
+"base/config/__init__.py" = "Boot-lite facade: the names are served at runtime by the lite latch; TYPE_CHECKING keeps `from base.config import X` consumers resolving without an eager import that would rebuild the config chain the lite facade defers (task #3621)."
+"base/lm/catalog/provider_contract.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"base/lm/compat/stop.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."
+"base/lm/content.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."
+"base/lm/factory.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
+"base/lm/pricing/__init__.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."

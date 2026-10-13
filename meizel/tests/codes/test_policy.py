@@ -77,6 +77,14 @@ def test_policy_entries_nothing_uses_do_no_harm(make_repo: RepoFactory) -> None:
         '[external]\n"a.py" = ""\n',
         '[external]\n"a.py" = 3\n',
         '[loads]\n"a.py" = "lib"\n',
+        "[ambient-state]\nno-such-section = []\n",
+        '[ambient-state.sink-facades]\n"a.py" = ""\n',
+        "[ambient-state]\npure-callees = 3\n",
+        '[ambient-state]\npure-callees = ["ok", 3]\n',
+        '[type-checking]\nfiles = ["a.py"]\n',
+        '[clock-lattice.family-modules]\n"a.py" = "a list is expected"\n',
+        '[single-owner]\npostgres-dial = ["a.py"]\n',
+        "[mystery.files]\n",
     ],
 )
 def test_a_malformed_policy_fails_at_its_own_path(make_repo: RepoFactory, policy: str) -> None:
@@ -84,6 +92,43 @@ def test_a_malformed_policy_fails_at_its_own_path(make_repo: RepoFactory, policy
     found = diagnostics(root, "policy-syntax")
     assert found, policy
     assert {d.path for d in found} == {"meizel.policy.toml"}
+
+
+LINTS = (
+    '[ambient-state]\npure-callees = ["re.compile"]\n\n'
+    '[ambient-state.sink-facades]\n"a.py" = "a write-only sink"\n\n'
+    '[clock-lattice]\nfamily-modules = ["a.py"]\n\n'
+    '[single-owner.postgres-dial]\n"b.py" = "cannot go through the owner"\n\n'
+    '[type-checking.files]\n"c.py" = "a heavy import"\n'
+)
+
+
+def test_the_tables_of_the_lint_rules_are_part_of_the_policy(make_repo: RepoFactory) -> None:
+    root = repo(make_repo, POLICY + "\n" + LINTS)
+    assert diagnostics(root, "policy-syntax") == []
+    assert unlisted(root) == []
+
+
+def test_policy_diff_lists_the_lint_tables_too(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repo(make_repo, POLICY + "\n" + LINTS)
+    commit(root)
+    changed = (
+        POLICY
+        + '\n[ambient-state]\npure-callees = ["re.compile", "typing.TypeVar"]\n\n'
+        + '[ambient-state.sink-facades]\n"a.py" = "another reason"\n\n'
+        + '[single-owner.postgres-dial]\n"d.py" = "added"\n'
+    )
+    write(root, {"meizel.policy.toml": changed})
+    assert run(root, "policy", "diff", "--against", "HEAD") == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "+ [ambient-state.pure-callees] typing.TypeVar" in out
+    assert "~ [ambient-state.sink-facades] a.py: a write-only sink -> another reason" in out
+    assert "+ [single-owner.postgres-dial] d.py = added" in out
+    assert "- [single-owner.postgres-dial] b.py = cannot go through the owner" in out
+    assert "- [clock-lattice.family-modules] a.py" in out
+    assert "- [type-checking.files] c.py = a heavy import" in out
 
 
 def test_default_arguments_have_a_table_and_it_may_be_empty(make_repo: RepoFactory) -> None:

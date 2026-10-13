@@ -68,9 +68,11 @@ violations pass, anything new fails, and the debt may only shrink
   change so the baseline drops with the fix. `python -m meizel debt` shows what
   is left.
 - CI fails when the recorded total grows against the base (`debt diff --on-growth=fail`).
-  The one waiver is decided by path, not by a reader: a change that edits meizel's own rule code
-  (Python under `meizel/` outside tests) reports growth as a warning, because widening a rule
-  grows the baselines.
+  The one waiver is decided by path, not by a reader: a pure rule change reports growth as a
+  warning, because widening a rule grows the baselines. Pure means it edits meizel's own rule code
+  (Python under `meizel/` outside tests) and touches nothing but `meizel/`, the `meizel.toml`
+  baselines and `meizel.policy.toml`. A change that also edits product code or tests is not waived,
+  so a rule change gets its own PR.
 - Patching is debt of every kind: `first-party-patch`, `stdlib-patch`, `third-party-patch`,
   `env-patch` and `unresolved-patch` (a target the imports do not resolve). Do not add one;
   pass the dependency in as an explicit parameter
@@ -78,8 +80,11 @@ violations pass, anything new fails, and the debt may only shrink
   --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
   `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does.
 - `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
-  `[loads]` sites, default-argument injections). Do not edit it unless the task names the entry;
-  CI prints every change to it ([the policy file](../meizel/docs/checker/policy.ava.okf.md)).
+  `[loads]` sites, default-argument injections) and every exemption of the lint rules in
+  `meizel/` (ambient state, clock lattice, single owners, `os.environ`, per-agent settings,
+  `TYPE_CHECKING`). Rule code holds no exemption of its own. Do not edit the file unless the task
+  names the entry; CI prints every change to it
+  ([the policy file](../meizel/docs/checker/policy.ava.okf.md)).
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes
