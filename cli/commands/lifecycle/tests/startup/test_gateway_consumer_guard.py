@@ -410,7 +410,7 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
         msg += (
             "\nFix: consume the key with a .env-file fallback and register the read "
             "in _FALLBACK_CONSUMED_READS (explicit + pinned; see "
-            "base/runtime_config.read_env_aliases), change the field's capability, "
+            "base/host/env/dotenv_file.read_env_aliases), change the field's capability, "
             "or add the module to _AGENT_ONLY_ALLOWLIST only if it is genuinely "
             "never executed by a gateway process."
         )
