@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_start_agent_bearer.py#monkeypatch.setattr scripts.entrypoints.agent.dial_post" = 1
+"test_start_agent_bearer.py#monkeypatch.setattr scripts.entrypoints.agent.gateway_api_base" = 1
+"test_start_agent_bearer.py#monkeypatch.setattr scripts.entrypoints.agent.gateway_auth_headers" = 1

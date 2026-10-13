@@ -1,0 +1,8 @@
+[debt.first-party-patch]
+"test_protocol.py#monkeypatch.setattr base.sessions.pty.client.CONNECT_WAIT_S" = 1
+"test_session.py#monkeypatch.setattr base.sessions.pty.client.request" = 1
+"test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.OwnedProcess.live" = 2
+"test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.process_groups.live" = 2
+"test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.process_groups.signal" = 2
+"test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.process_groups.wait" = 1
+"test_session.py#monkeypatch.setattr services.agent_runner.pty_sessions.session.reap_child" = 2

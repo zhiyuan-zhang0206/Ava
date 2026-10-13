@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_lint_zombie_pyright_ignores.py#monkeypatch.setattr scripts.lint.diagnostics.zombie_pyright_ignores._REPO_ROOT" = 2
+"test_lint_zombie_pyright_ignores.py#monkeypatch.setattr scripts.lint.diagnostics.zombie_pyright_ignores.pyright_errors" = 6

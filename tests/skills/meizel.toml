@@ -6,3 +6,7 @@
 
 [external]
 "test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
+
+[debt.first-party-patch]
+"test_impersonation_launch.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_agent_id" = 1
+"test_watcher_wake_delivery.py#monkeypatch.setattr ava.self" = 1

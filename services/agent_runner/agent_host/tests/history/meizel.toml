@@ -3,6 +3,16 @@ exports = ["test_hosted_compact_failure.py"]
 [uses]
 "compaction" = ["test_hosted_compact_failure.py"]
 
+[debt.first-party-patch]
+"test_checkpoint_parent_guard.py#monkeypatch.setattr base.config.settings.agent.checkpoint_interval" = 2
+"test_hosted_checkpoint_diagnostics.py#monkeypatch.setattr base.config.settings.agent.checkpoint_interval" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr services.agent_runner.agent_host.host.admit_stored_model" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr services.agent_runner.agent_host.host.close_hosted_turn" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr services.agent_runner.agent_host.host.publish_agent_updated" = 1
+"test_hosted_cold_history.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.boot_agent_scope" = 1
+"test_hosted_trace_checkpoint.py#monkeypatch.setattr services.agent_runner.agent_host.host.turn_span" = 1
+"test_pooled_checkpoint.py#monkeypatch.setattr base.config.settings.agent.checkpoint_interval" = 1
+
 [debt.private-name]
 "compaction/helpers.py -> test_hosted_compact_failure.py#_prepare_graph" = 1
 

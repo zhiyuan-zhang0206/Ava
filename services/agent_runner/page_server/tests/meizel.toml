@@ -4,6 +4,47 @@
 "test_page_server_daemon.py" = ["page_shell.py"]
 "test_page_server_quiesced.py" = ["slices.py"]
 
+[debt.first-party-patch]
+"test_daemon_entry.py#monkeypatch.setattr base.config.settings.general.machine_name" = 1
+"test_daemon_entry.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
+"test_daemon_entry.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.ConfigBoot" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.Database" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.LoadedCommit.capture" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon._hard_exit" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.asyncio.Runner" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.build_pipeline" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.init_gateway_process" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.install_graceful_shutdown" = 1
+"test_daemon_entry.py#monkeypatch.setattr services.agent_runner.page_server.daemon.run" = 1
+"test_dead_pages.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 2
+"test_dead_pages.py#monkeypatch.setattr base.events.live.bus.EventBus.publish_best_effort" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.Database.pool" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.dead_pages.dead_pages_loop" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.reconcile_loop" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.resources.endpoint" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.resources.is_running" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.resources.remove_pidfile" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.resources.write_pidfile" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.start_health_server" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.daemon.stop_health_server" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.dead_pages.dead_pages_round" = 1
+"test_dead_pages.py#monkeypatch.setattr services.agent_runner.page_server.dead_pages.page_server_alive" = 1
+"test_page_server.py#monkeypatch.setattr services.agent_runner.page_server.server.PageHandler.extensions_map" = 1
+"test_page_server.py#monkeypatch.setattr services.agent_runner.page_server.server.PageHandler.token" = 1
+"test_page_server_config.py#monkeypatch.setattr base.config.settings.daemon.page_server_poll_interval_seconds" = 1
+"test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.get_shell_backend" = 1
+"test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.live_session_records" = 2
+"test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.open_rows" = 4
+"test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.page_server_occupants" = 2
+"test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.page_session_shell_pids" = 1
+"test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.row_matches_snapshot" = 2
+"test_page_server_daemon.py#monkeypatch.setattr services.agent_runner.page_server.daemon.server_is_healthy" = 2
+"test_page_server_occupants.py#monkeypatch.setattr services.agent_runner.page_server.daemon.psutil.process_iter" = 1
+"test_page_server_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
+"test_page_server_quiesced.py#monkeypatch.setattr services.agent_runner.page_server.daemon.asyncio.sleep" = 1
+"test_page_server_quiesced.py#monkeypatch.setattr services.agent_runner.page_server.daemon.reconcile_once" = 1
+
 [debt.private-name]
 "page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py -> test_page_server_daemon.py#_identity" = 1
 "page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py -> test_page_server_daemon.py#_reconcile" = 1

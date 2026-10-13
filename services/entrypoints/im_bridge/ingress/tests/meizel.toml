@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_store.py#monkeypatch.setattr services.entrypoints.im_bridge.ingress.store.receipt_from_row" = 1
+"test_store.py#monkeypatch.setattr services.entrypoints.im_bridge.ingress.store.write_transaction" = 2

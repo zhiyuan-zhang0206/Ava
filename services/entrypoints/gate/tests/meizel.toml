@@ -1,1 +1,16 @@
 exports = ["test_gate.py"]
+
+[debt.first-party-patch]
+"test_gate.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_gate.py#monkeypatch.setattr services.entrypoints.gate.daemon._PROBE_TIMEOUT_S" = 1
+"test_gate.py#monkeypatch.setattr services.entrypoints.gate.daemon.settings" = 1
+"test_gate_daemon.py#monkeypatch.setattr base.daemon.shutdown.install_graceful_shutdown" = 1
+"test_gate_daemon.py#monkeypatch.setattr base.db.Database.from_settings" = 1
+"test_gate_daemon.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
+"test_gate_daemon.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
+"test_gate_daemon.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_no_pipeline" = 1
+"test_gate_daemon.py#monkeypatch.setattr base.telemetry.pipeline_build.build_pipeline" = 2
+"test_gate_daemon.py#monkeypatch.setattr base.telemetry.process_logging.init_gateway_process" = 1
+"test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.ConfigBoot" = 1
+"test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.Gate" = 1
+"test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.ThreadingHTTPServer" = 1

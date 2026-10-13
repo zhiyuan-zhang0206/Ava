@@ -2,3 +2,7 @@
 "test_configuration.py" = ["support.py"]
 "test_router.py" = ["support.py"]
 "test_service.py" = ["support.py"]
+
+[debt.first-party-patch]
+"test_configuration.py#monkeypatch.setattr gateway.agents.reply_suggestion.configuration.build_chat_model" = 1
+"test_service.py#monkeypatch.setattr gateway.agents.reply_suggestion.service.log_usage_from_message" = 1

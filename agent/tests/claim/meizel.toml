@@ -8,6 +8,11 @@ exports = ["claim_support.py", "test_inbound_ownership.py"]
 "test_claim_restart.py" = ["claim_status_support.py", "claim_support.py"]
 "test_claim_terminate_cancel.py" = ["claim_status_support.py", "claim_support.py", "test_inbound_ownership.py"]
 
+[debt.first-party-patch]
+"test_claim.py#monkeypatch.setattr agent.graph.prompt.context_notes.fork_notes" = 2
+"test_claim_terminate_cancel.py#monkeypatch.setattr base.config.settings.general.message_timestamps" = 1
+"test_inbound_ownership.py#monkeypatch.setattr base.config.settings.agent.db_pool_acquire_timeout_seconds" = 1
+
 [debt.private-name]
 "test_claim.py -> claim_support.py#_fake_llm" = 1
 "test_claim_compact.py -> claim_status_support.py#_set_agent_status" = 1

@@ -1,0 +1,7 @@
+[debt.first-party-patch]
+"test_shell_background.py#monkeypatch.setattr ava.shell.background.cli_path" = 5
+"test_shell_background.py#monkeypatch.setattr ava.shell.background.output_dir" = 1
+"test_shell_background.py#monkeypatch.setattr ava.shell.background.write_launch_file" = 1
+"test_shell_background.py#monkeypatch.setattr ava.shell.sessions.create_session" = 2
+"test_shell_background.py#monkeypatch.setattr ava.shell.sessions.list" = 1
+"test_shell_background.py#monkeypatch.setattr ava.shell.sessions.send" = 1

@@ -1,0 +1,12 @@
+[debt.first-party-patch]
+"test_update_schedule_script.py#monkeypatch.setattr base.db.Database.from_settings" = 2
+"test_update_schedule_script.py#monkeypatch.setattr base.deploy.lifecycle.home_lifecycle_locks.resource_lock" = 1
+"test_update_schedule_script.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"test_update_schedule_script.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+"test_update_schedule_script.py#monkeypatch.setattr base.native_process.code_version.CodeVersion.get" = 1
+"test_update_schedule_script.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
+"test_update_schedule_script.py#monkeypatch.setattr gateway.schedules.session_control.request_sync" = 1
+"test_update_schedule_script.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 1
+"test_update_schedule_script.py#monkeypatch.setattr scripts.host_ops.update_schedule_script.load_installed_runtime" = 3
+"test_update_schedule_script.py#monkeypatch.setattr scripts.host_ops.update_schedule_script.repair_script" = 1
+"test_update_schedule_script.py#monkeypatch.setattr scripts.host_ops.update_schedule_script.replace_script" = 1
