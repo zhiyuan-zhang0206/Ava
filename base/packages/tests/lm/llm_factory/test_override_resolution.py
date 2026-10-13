@@ -10,7 +10,7 @@ from base.config import get_field, settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import build_chat_model, resolve_override
-from base.lm.tests.llm_factory.factory_support import FakeLLM, install_fake_module
+from base.packages.tests.lm.llm_factory.factory_support import FakeLLM, install_fake_module
 
 
 class TestResolveOverride:

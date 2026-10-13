@@ -12,7 +12,7 @@ exports = ["attach", "call.py", "catalog", "compat", "content.py", "context_budg
 "provider_api.py" = ["catalog", "registry.py"]
 "reasoning.py" = ["content.py"]
 "registry.py" = ["pricing"]
-"tests" = ["attach", "call.py", "catalog", "compat", "context_budget.py", "effort.py", "errors.py", "factory.py", "pricing", "provider_api.py", "reasoning.py", "registry.py", "usage.py"]
+"tests" = ["effort.py", "reasoning.py"]
 "usage.py" = ["catalog", "content.py", "pricing", "provider_api.py", "reasoning.py"]
 
 [external]

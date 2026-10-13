@@ -1,5 +1,6 @@
 [uses]
 "bootstrap" = ["providers"]
+"providers" = ["lm"]
 
 [debt.env-patch]
 "test_update_disk_images.py#monkeypatch.setenv os.environ.AVA_HOME" = 1

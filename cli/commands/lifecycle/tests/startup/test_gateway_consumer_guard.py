@@ -244,7 +244,7 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
         # build_chat_model — agent-side only; the gateway reaches
         # base/lm/factory.py solely for validate_model_config, which reads
         # keys via get_field with a .env-file fallback (see
-        # base/lm/tests/test_lm_factory.py).
+        # base/packages/tests/lm/test_lm_factory.py).
         "base/lm/_providers.py",
         # helper_client() reads the helper port to build the client for a spawn.
         # The session backend takes it as a factory and only a spawn calls it —
