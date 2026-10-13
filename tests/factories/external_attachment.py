@@ -26,9 +26,6 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.pin_agent import pin_agent
 
-# A bounded handshake allows close telemetry to drain on a loaded runner.
-HANDSHAKE_BOUND_S = 30.0
-
 
 def _union(left: set[str], right: set[str]) -> set[str]:
     return left | right
