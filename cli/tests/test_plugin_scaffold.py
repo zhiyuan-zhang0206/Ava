@@ -43,10 +43,10 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) -> None:
-    """`ops.roster` binds `ava_home` by name at import, out of reach of any patch of
+    """`services.supervision.roster` binds `ava_home` by name at import, out of reach of any patch of
     `paths.ava_home`; `converge_host` reaches it through `_desired_service_names`. A home that
     only a patch pointed at made that real call create a second, unrelated directory."""
-    from ops import roster
+    from services.supervision import roster
 
     assert roster.ava_home() == paths.ava_home() == tmp_path / "ava"
 

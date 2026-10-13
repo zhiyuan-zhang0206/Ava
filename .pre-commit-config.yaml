@@ -440,7 +440,7 @@ repos:
         name: lint-doc-roster
         language: system
         entry: .venv/bin/python scripts/content_lint/lint_doc_roster.py
-        files: ^(ops/roster/.*\.py|cli/commands/_repo\.py|ops/docs/service-roster\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
+        files: ^(services/supervision/roster/.*\.py|cli/commands/_repo\.py|services/supervision/roster/docs/service-roster\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.ava\.okf\.md)$
         pass_filenames: false
 
       # Every `ava.<name>` reference in the procedural docs — conventions and

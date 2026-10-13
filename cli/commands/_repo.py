@@ -2,7 +2,7 @@
 
 This module owns the capability read, repo root, and memory-pool / frontend /
 schema / gateway / register preflight checks. Service declarations and roster
-selection are defined in ops.roster.service_spec, ops.roster, and ops.spec;
+selection are defined in services.supervision.roster.service_spec, services.supervision.roster, and services.supervision.roster.spec;
 callers import those definitions directly.
 """
 

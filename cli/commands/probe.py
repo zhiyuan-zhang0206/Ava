@@ -12,7 +12,7 @@ from typing import Any, NamedTuple
 
 from base import telemetry
 from base.cluster.derive import session_name
-from ops.roster.service_spec import ServiceSpec
+from services.supervision.roster.service_spec import ServiceSpec
 
 __all__ = [
     "OccupiedPort",

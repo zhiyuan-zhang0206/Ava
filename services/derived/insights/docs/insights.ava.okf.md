@@ -27,7 +27,7 @@ A stopped or wedged service is 502 (socket unreachable) or 504 (no reply within 
 
 ## Entry Points
 - `services/derived/insights/daemon.py` — `.venv/bin/python -m services.derived.insights.daemon`
-- Supervised through the roster's socket identity probe (`ops/roster/__init__.py`).
+- Supervised through the roster's socket identity probe (`services/supervision/roster/__init__.py`).
 
 Run context model fallback uses the same process configuration owner through an
 explicit live default-model reader; it never reads another process settings facade.

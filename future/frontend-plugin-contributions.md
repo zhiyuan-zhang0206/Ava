@@ -349,7 +349,7 @@ composer/plugin extension point.
   section, and the fleet toolbar.
 
   **The ops-service backend is NOT implemented**, deliberately: a plugin's
-  `ServiceSpec` (`ops/spec.py`) carries `curl_url` / `tcp_port` for probes, not
+  `ServiceSpec` (`services/supervision/roster/spec.py`) carries `curl_url` / `tcp_port` for probes, not
   a page port, and `contributions.ui` has no key naming a backend — so reaching
   a dynamic page would need either a new manifest field or a service-address
   lookup that does not exist. Neither was invented ahead of a plugin that needs

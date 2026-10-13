@@ -6,8 +6,8 @@ coordination. Its design rationale is recorded in
 
 | Responsibility | Current implementation |
 |---|---|
-| Service specification | `ops/roster/` (capability selection and gates, canonical roster and its `service_spec` contract; `healthz.py` builds the entry of a standard `/healthz` daemon from its session, module, capabilities and `requires_db`) |
-| Observation and status | `ops/cluster_status/` (host snapshot, `observe.py` service probes, `pause.py` posture, `schema_mismatch` diagnosis) |
+| Service specification | not in `ops`: the service roster, its `ServiceSpec` contract and gating live in `services/supervision/roster/` (the supervised services own their own declarations) |
+| Observation and status | `ops/cluster_status/` (host snapshot, `pause.py` posture, `schema_mismatch` diagnosis) |
 | Native agent drain | `ops/agent_pause/` (drain, `probe` of the running host) |
 | Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |
 | RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster/rpc.py` (gateway client) |
@@ -16,7 +16,7 @@ coordination. Its design rationale is recorded in
 | Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
 
 Each package door is the module it grew from; `ops.agents`,
-`ops.rpc_schemas`, `ops.cluster.operations_status`, `ops.agent_pause` and `ops.roster`
+`ops.rpc_schemas`, `ops.cluster.operations_status` and `ops.agent_pause`
 kept their import paths. Module names never repeat the package name, so the
 op clusters read `ops.lifecycle`, `ops.cluster.operations.operations`, `ops.host_config`
 and `ops.inventory`. `ops/private_files/` owns the private-file
@@ -31,7 +31,7 @@ complete packet against its declared schema instead of rereading mutable disk.
 Malformed, mismatched or incomplete packets fail; absent packets identify a
 direct development invocation. Cluster bootstrap cannot replace this service
 birth carrier. Authoritative files remain in `config_inputs` when present.
-The [checked service inventory](service-roster.md) belongs beside this owner;
+The [checked service inventory](../../services/supervision/roster/docs/service-roster.md) lives beside the roster;
 its sentinel table is validated against that registration in both directions.
 Agent-runner units execute agents inside one agent host. There is no per-agent
 process launcher or restarter service. Native service sessions and the

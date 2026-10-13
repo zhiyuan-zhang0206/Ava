@@ -28,10 +28,16 @@ from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from base.packages.plugins.config_registration import disk_image_path
-from ops import roster
-from ops.roster.healthz import healthz_url
-from ops.roster.service_spec import DbAccess, ServiceSpec, api_access, db_access, profile_marker
+from services.supervision import roster
 from services.supervision.ava_root_glue import manifests as gen
+from services.supervision.roster.healthz import healthz_url
+from services.supervision.roster.service_spec import (
+    DbAccess,
+    ServiceSpec,
+    api_access,
+    db_access,
+    profile_marker,
+)
 
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 _RUNNER: frozenset[MachineRole] = frozenset({"agent-runner"})

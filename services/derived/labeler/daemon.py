@@ -12,7 +12,7 @@ Usage:
     .venv/bin/python -m services.derived.labeler.daemon
 
 Kept alive by the root supervisor's health monitor through the roster's `/healthz`
-identity probe (`ops/roster/healthz.py`).
+identity probe (`services/supervision/roster/healthz.py`).
 """
 
 import asyncio

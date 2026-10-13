@@ -1,7 +1,7 @@
-"""Roster invariants for ops.spec — the single desired-state source.
+"""Roster invariants for services.supervision.roster.spec — the single desired-state source.
 
 Replaces the slice-1 cross-source equivalence test now that `_repo` re-exports
-`ops.spec` (there is one definition, not two to compare). These lock the roster's
+`services.supervision.roster.spec` (there is one definition, not two to compare). These lock the roster's
 capability semantics + the load-bearing ordering, and assert `_repo` is a pure
 re-export façade so the "single source" property can't silently regress.
 """
@@ -16,8 +16,8 @@ import pytest
 
 from base.cluster.machine import MachineIdentity, MachineRole
 from base.daemon.endpoints import ServiceEndpoints
-from ops import roster, spec
-from ops.roster import service_spec
+from services.supervision import roster
+from services.supervision.roster import service_spec, spec
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _GATEWAY_SESSIONS = {
@@ -183,7 +183,7 @@ def test_application_roster_has_one_supervision_authority() -> None:
 def test_browser_gated_when_disabled(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
-    """The config gate flows through ops.spec: a disabled browser drops it from the
+    """The config gate flows through services.supervision.roster.spec: a disabled browser drops it from the
     start roster but keeps it (with a reason) in the annotated view."""
     monkeypatch.setattr(spec.settings.services, "browser_enabled", False)
     start = {
@@ -345,7 +345,9 @@ def test_browser_mcp_gated_out_when_browser_is(
     monkeypatch.setattr(
         "base.host.system.probes.browser_incapability", lambda: "no display (headless)"
     )
-    monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")
+    monkeypatch.setattr(
+        "services.supervision.roster.spec.browser_incapability", lambda: "no display (headless)"
+    )
     annotated = _agent_runner_annotated(monkeypatch, local_machine=machine_identity)
     assert annotated["browser"] == "no display (headless)"
     assert annotated["browser-mcp"] == "no display (headless)"
@@ -381,7 +383,7 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
 
         return DaemonProbe.up("stub")
 
-    monkeypatch.setattr("ops.roster.healthz.probe_daemon", _capture)
+    monkeypatch.setattr("services.supervision.roster.healthz.probe_daemon", _capture)
     pidfile = tmp_path / "ops.pid"
     assert roster.daemon_identity("ops", pidfile)().alive is True
     assert seen["name"] == "ops"
@@ -420,7 +422,7 @@ def test_im_bridge_gated_when_disabled(
         # the gateway pop must not run against a service that is not gateway-only.
         (frozenset({"gateway", "agent-runner"}), None),
         # No capabilities is no longer a spec that can exist: construction refuses it
-        # (`ops/roster/tests/test_healthz_daemon.py`).
+        # (`services/supervision/roster/tests/test_healthz_daemon.py`).
     ],
 )
 def test_profile_marker_derives_from_capabilities(

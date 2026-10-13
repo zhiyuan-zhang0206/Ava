@@ -10,5 +10,5 @@ Phase 1 of `future/infra/lifecycle/agent-runner-as-server.md`, in three parts:
 
 Importing `host` or `daemon` pulls the whole agent kernel; `dispatcher` does not,
 and neither does the roster's identity probe for this daemon
-(`ops/roster/healthz.py`), which is why root's health round stays cheap.
+(`services/supervision/roster/healthz.py`), which is why root's health round stays cheap.
 """

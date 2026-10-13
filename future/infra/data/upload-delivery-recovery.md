@@ -28,7 +28,7 @@ acceptance, not remote readiness or agent execution.
   maintenance request/worker tracking; `dispatch_sync.py` owns blocking receivers.
 
 The existing Ops outbox loop is suitable mechanically, but the canonical roster
-(`ops/roster/__init__.py`) starts Ops only for agent-runner capability. A pure
+(`services/supervision/roster/__init__.py`) starts Ops only for agent-runner capability. A pure
 Gateway has no Ops. Changing roster/credential profiles or restricting support
 to a single box is rejected. Source recovery belongs in the existing Gateway
 lifespan; the target receiver remains in Ops. Existing `upload_receive` overwrites

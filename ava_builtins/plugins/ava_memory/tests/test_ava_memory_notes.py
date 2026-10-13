@@ -247,11 +247,11 @@ def test_context_notes_skips_the_stores_that_are_off(
 
 def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
     """It still reaches the assembled roster — via plugin discovery, not a
-    hardcoded entry in ops/spec.py."""
+    hardcoded entry in services/supervision/roster/spec.py."""
     from pathlib import Path as _Path
 
     from ava_builtins.plugins.ava_memory.services import services
-    from ops import roster
+    from services.supervision import roster
 
     assert [s.session for s in services()] == ["memory-indexer"]
     assert "memory-indexer" in [s.session for s in roster.build_services()]

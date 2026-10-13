@@ -549,7 +549,7 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
 
     A gateway home is skipped only when it is neither the LGTM host nor opted
     into an explicit ``AVA_TELEMETRY_OTLP_ENDPOINT`` override — same rule as
-    the roster gate (``ops.spec``) and the sidecar healthcheck.
+    the roster gate (``services.supervision.roster.spec``) and the sidecar healthcheck.
     """
     if (
         ctx.roles is not None

@@ -26,7 +26,7 @@ from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from base.host.env.health_ports import DEFAULT_PORTS
-from ops.roster.service_spec import DbAccess, ServiceSpec
+from services.supervision.roster.service_spec import DbAccess, ServiceSpec
 
 # `ava-root` renders this prefix into `cd <repo> && exec <cmd>`; a command that stays
 # bare tokens keeps the unit's pid a direct child of root (`ava_root_glue.manifests`).

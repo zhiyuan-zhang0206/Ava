@@ -33,7 +33,7 @@ from cli.commands.lifecycle.service_stop import (
 )
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause.probe import ops_quiescent
-from ops.roster import build_services
+from services.supervision.roster import build_services
 
 
 def _stop_browser(deadline: float) -> None:

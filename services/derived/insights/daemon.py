@@ -9,7 +9,7 @@ port slot; the supervisor probes it through `services.supervision.healthchecks.i
 
 A stopped service leaves the gateway answering 502 on the insights routes and nothing
 else; the root supervisor restarts it through the roster's socket identity probe
-(`ops/roster/__init__.py`). A cold build in a worker thread is never waited on at stop
+(`services/supervision/roster/__init__.py`). A cold build in a worker thread is never waited on at stop
 (`_hard_exit`).
 
 Usage:

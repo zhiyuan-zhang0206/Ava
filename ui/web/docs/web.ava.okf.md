@@ -25,7 +25,7 @@ overrides the lifecycle projection to `impersonated`. The selected-agent detail
 read and the fleet graph carry no lease field, so they never produce it — an
 impersonated agent there still reads as its underlying `running`/`idling`.
 
-**Role assignment**: gateway side (pure agent-runner does not run it)—Next.js server is a `frontend` session from `build_services` (not in `_AGENT_RUNNER_ONLY_SESSIONS`), roster derived by `ops/spec.py:services_for_capabilities` by capability; callers import its actual definition owner.
+**Role assignment**: gateway side (pure agent-runner does not run it)—Next.js server is a `frontend` session from `build_services` (not in `_AGENT_RUNNER_ONLY_SESSIONS`), roster derived by `services/supervision/roster/spec.py:services_for_capabilities` by capability; callers import its actual definition owner.
 
 ## Browser security boundary
 

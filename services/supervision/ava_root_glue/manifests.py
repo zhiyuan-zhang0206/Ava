@@ -1,7 +1,7 @@
 """Generate K2 unit manifests from the deployment roster (W1.2e).
 
 The generator is the deployment-side half of the root supervisor: it reads
-the ops roster (`ops.roster.build_services`) — the machine-readable place
+the ops roster (`services.supervision.roster.build_services`) — the machine-readable place
 that says which service runs on which capability set — and renders the K2
 manifest JSON the root consumes (`{"units": [...]}`; schema and validators in
 `services.supervision.ava_root.manifest`). Nothing here spawns or stops anything: this is
@@ -50,8 +50,6 @@ from pathlib import Path
 from typing import cast, get_args
 
 from base.cluster.machine import MachineRole
-from ops.roster import build_services
-from ops.roster.service_spec import ServiceSpec
 from services.supervision.ava_root.inputs import InputSeal
 from services.supervision.ava_root.manifest import (
     ManifestError,
@@ -59,6 +57,8 @@ from services.supervision.ava_root.manifest import (
     UnitRegistry,
     load_manifests,
 )
+from services.supervision.roster import build_services
+from services.supervision.roster.service_spec import ServiceSpec
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 

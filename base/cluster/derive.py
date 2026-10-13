@@ -190,7 +190,7 @@ def fe_build_env() -> str:
 
 def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
     """The complete frontend service launch command — single source for BOTH
-    launch paths: the canonical ServiceSpec (``ops/spec.py``) and the watchdog
+    launch paths: the canonical ServiceSpec (``services/supervision/roster/spec.py``) and the watchdog
     respawn (``services/supervision/healthchecks/frontend.py``). The two drifted once
     (2026-08-27 prod outage: the respawn command lost its ``exec``, so the
     session validator rejected it and a dead frontend could never self-heal);

@@ -16,7 +16,7 @@ round. Each loop reports its own progress to `/healthz`, so a wedged loop reads
 as a failing probe even while its sibling stays busy.
 
 Runs on the gateway, one per cluster. Kept alive by the root supervisor's health
-monitor through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
+monitor through the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`).
 
 Usage:
     .venv/bin/python -m services.upkeep.ttl_reaper.daemon

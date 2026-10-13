@@ -3,7 +3,7 @@
 `probe_daemon` believes a 200 only when the body's `name` and `home` match and its
 `pid` equals this unit's pidfile, so a probe built from the wrong name, URL or pidfile
 would accept another daemon as healthy or reject the right one forever. Root probes
-every standard `/healthz` daemon through `ops.roster.healthz.daemon_identity`; this pins
+every standard `/healthz` daemon through `services.supervision.roster.healthz.daemon_identity`; this pins
 that the three facts reaching `probe_daemon` are the daemon's own, for every such entry
 in the roster (the per-module copies of this check died with the modules).
 """
@@ -22,8 +22,6 @@ from base import paths
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
-from ops import roster
-from ops.roster.service_spec import ServiceSpec
 from services.agent_runner.agent_host import daemon as agent_host
 from services.agent_runner.agent_ops import boot as ops_boot
 from services.agent_runner.agent_ops import daemon as agent_ops
@@ -33,6 +31,8 @@ from services.backup.scheduler import daemon as backup_scheduler
 from services.derived.labeler import daemon as labeler
 from services.derived.memory_indexer import daemon as memory_indexer
 from services.entrypoints.im_bridge import daemon as im_bridge
+from services.supervision import roster
+from services.supervision.roster.service_spec import ServiceSpec
 from services.upkeep.events_maintenance import daemon as events_maintenance
 from services.upkeep.ttl_reaper import daemon as ttl_reaper
 from services.wake.delivery_watchdog import daemon as delivery_watchdog

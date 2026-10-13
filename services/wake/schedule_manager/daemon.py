@@ -19,7 +19,7 @@ An unreachable database skips a round. Each loop reports its own progress to
 Runs on the gateway, one per cluster, from the home's own checkout: a checkout
 that does not own the home refuses to supervise schedules, because the sessions
 run that checkout's code (issue #194). Kept alive by the root supervisor's health
-monitor through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
+monitor through the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`).
 
 Usage:
     .venv/bin/python -m services.wake.schedule_manager.daemon

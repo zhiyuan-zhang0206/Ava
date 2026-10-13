@@ -44,7 +44,7 @@ def _reconcile(
         # Turning off an allowlist containing only LGTM leaves an explicit
         # empty desired tree, not the default all-services selection.
         if not names:
-            from ops.roster import build_services
+            from services.supervision.roster import build_services
 
             return cmd_start(
                 disabled_services=tuple(s.session for s in build_services()),

@@ -26,9 +26,9 @@ from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.bringup import print_data_plane_status
 from cli.commands.lifecycle.hold_report import print_hold_section
 from cli.commands.probe import print_service_row
-from ops.roster import build_services
-from ops.roster.service_spec import ServiceSpec
-from ops.spec import services_for_capabilities_annotated
+from services.supervision.roster import build_services
+from services.supervision.roster.service_spec import ServiceSpec
+from services.supervision.roster.spec import services_for_capabilities_annotated
 
 
 def _root_tree_units() -> dict[str, dict[str, object]]:

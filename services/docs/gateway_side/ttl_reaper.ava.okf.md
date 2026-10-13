@@ -29,7 +29,7 @@ Two resident sequential loops under one `TaskGroup` (`services/upkeep/ttl_reaper
 
 ## Entry Points
 - `services/upkeep/ttl_reaper/daemon.py` — `.venv/bin/python -m services.upkeep.ttl_reaper.daemon`
-- The application root supervises it through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
+- The application root supervises it through the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`).
 
 
 ## Process composition

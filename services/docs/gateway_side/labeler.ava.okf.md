@@ -10,7 +10,7 @@ tags: []
 ## What is it
 An independent agent label auto-generation process — polls per second for rows in `agents` where the label is NULL or empty and not user-owned, takes the first chat or task-system-note inbound as prompt, calls LLM to generate a short label name (max `services.labeler_max_chars` characters, default 64). Completely decoupled from Gateway.
 
-**Role affiliation**: gateway side (pure agent-runner does not run) — `ServiceSpec.capabilities=GATEWAY` in `ops/spec.py`; roster derived by `services_for_capabilities` intersecting with local `machine_role()`.
+**Role affiliation**: gateway side (pure agent-runner does not run) — `ServiceSpec.capabilities=GATEWAY` in `services/supervision/roster/spec.py`; roster derived by `services_for_capabilities` intersecting with local `machine_role()`.
 
 ## Core Responsibilities
 - **Poll unnamed agents**: SELECT agents needing auto-naming every second

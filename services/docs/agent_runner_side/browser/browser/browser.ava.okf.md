@@ -10,7 +10,7 @@ tags: []
 ## What is it
 A shared headed Chrome management service on agent-runner — a three-component architecture that enables one Chrome instance to be reused by all agents, replacing the previous N-fold memory waste of each agent spawning its own Chrome.
 
-**Role affiliation**: agent-runner side (gateway does not run) — `ServiceSpec.capabilities=AGENT_RUNNER` in `ops/roster/__init__.py`; the roster is derived by `services_for_capabilities` intersecting with the local `machine_role()`.
+**Role affiliation**: agent-runner side (gateway does not run) — `ServiceSpec.capabilities=AGENT_RUNNER` in `services/supervision/roster/__init__.py`; the roster is derived by `services_for_capabilities` intersecting with the local `machine_role()`.
 
 ## Core Responsibilities
 - **Shared Chrome instance**: `daemon.py` launches a headed Chrome with a CDP remote-debugging port and a dedicated persistent profile. `os.execvp` replaces the supervised session process with Chrome, so the session owns its native PID.
@@ -44,7 +44,7 @@ See [[services/docs/agent_runner_side/browser/browser/gating.ava.okf.md]]. Per-a
 - **An unsupervised Chrome requires operator cleanup**: the healthcheck reports a missing supervised session or an unhealthy CDP endpoint without sweeping or respawning Chrome. Root supervision retains its bounded process restart policy. `ava stop` uses `orphan.reap_cluster_chrome` to clean up this cluster's profile before an explicit start.
 - **The healthcheck's ERROR lines are episode-gated**: one line per failure episode + a 6h reminder; quiet rounds log DEBUG ([[services/supervision/healthchecks/docs/terminal-verdict/terminal-verdict.ava.okf.md]]).
 - **A teardown reaches Chrome by profile, not by process tree**: killing the `ava-browser` session cannot reach a Chrome that left the tree on a `SingletonLock` handoff, so `ava stop` / `ava cluster destroy` additionally name Chrome by this cluster's own `--user-data-dir` and kill it. Identification, the argument it cannot select the operator's browser, scope and ordering: [[services/docs/agent_runner_side/browser/browser-teardown.ava.okf.md]]
-- `AVA_BROWSER_ENABLED` **defaults to True** (not opt-in) — auto-detects host capability (display + Chrome + npx); if unavailable, `browser_incapability()` automatically skips (`base/host/system/probes.py:123`; applied as a service gate in `ops/roster/__init__.py`)
+- `AVA_BROWSER_ENABLED` **defaults to True** (not opt-in) — auto-detects host capability (display + Chrome + npx); if unavailable, `browser_incapability()` automatically skips (`base/host/system/probes.py:123`; applied as a service gate in `services/supervision/roster/__init__.py`)
 - Chrome profile is persistent, retaining login state
 - **No business database dependency**: CDP and Unix requests retain `requires_db=False`; optional logging dials lazily without adding a startup admission gate. See the process composition owner above.
 

@@ -2,7 +2,7 @@
 binary resolution, display detection, and AF_UNIX availability. These pure
 probes are patched-against here (monkeypatching the module's sys / socket /
 Path / shutil / settings) and consumed by services.desktop.browser.daemon,
-ava.mcp_config, ops.spec, and base.host.config_validators.
+ava.mcp_config, services.supervision.roster.spec, and base.host.config_validators.
 """
 
 from collections.abc import Callable

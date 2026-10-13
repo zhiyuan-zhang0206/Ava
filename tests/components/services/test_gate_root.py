@@ -20,13 +20,13 @@ import pytest
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.native_process.root_control.client import owned_process
-from ops.roster import build_services
 from services.entrypoints.gate.tests.test_gate import _FakeApp, _FakeGateway, _request, _Servers
 from services.entrypoints.gate.tests.test_gate import servers as servers
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.server import ControlServer
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.healthchecks import gate
+from services.supervision.roster import build_services
 
 
 async def _ready(probe: Callable[[], DaemonProbe]) -> DaemonProbe:

@@ -1,6 +1,6 @@
 # The only modules here that may call `ServiceEndpoints.from_settings()`; the rest takes its
 # daemon's `ServiceEndpoint` (or the table) from them.
-endpoints = ["agent_pause/probe.py", "cluster_status/pause.py", "cluster_status/__init__.py", "lifecycle/__init__.py", "roster/healthz.py"]
+endpoints = ["agent_pause/probe.py", "cluster_status/pause.py", "cluster_status/__init__.py", "lifecycle/__init__.py"]
 # No operation in this package requires ambient database or event-bus access.
 db = []
 bus = []

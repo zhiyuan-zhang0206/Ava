@@ -10,7 +10,7 @@ tags: []
 ## What it is
 The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat / Feishu — one adapter per channel, sharing the bridge core). Since 2026-08 the bridge **is the product frontend** (user ruling: IM is the only frontend; the Telegram skill was removed — see `docs/decisions/runtime/processes/shutdown/2026-08-03-telegram-skill-removed.md`): user-facing channels are not a side feature but the primary surface.
 
-**Role affiliation**: gateway side. `ops/roster/__init__.py` declares `GATEWAY` capabilities and `requires_db=True`: notice polling reads `agent_notices` directly. The root supervisor monitors the roster's `/healthz` identity probe.
+**Role affiliation**: gateway side. `supervision/roster/__init__.py` declares `GATEWAY` capabilities and `requires_db=True`: notice polling reads `agent_notices` directly. The root supervisor monitors the roster's `/healthz` identity probe.
 
 ## Core Responsibilities
 - **Adapters** (`services/entrypoints/im_bridge/adapters/<channel>.py`): each channel is one adapter sharing the core — envelope, command routing, per-channel session state. Unset credentials keep that channel inactive; invalid imports or configuration fail startup. `AVA_IM_DISABLED_ADAPTERS` disables channels. WeChat's one-off interactive QR login (`python -m services.entrypoints.im_bridge.adapters.weixin_login --login`) lives in `adapters/weixin_login.py`. Feishu inbound is dual-path: `im.message.receive_v1` WS events plus a ListMessage polling fallback (`AVA_FEISHU_POLL_INTERVAL_SECONDS` / `AVA_FEISHU_POLL_CHAT_ID`) for platforms that never push events — a shared seen-set and the gateway's keyed delivery (`feishu:<message_id>`) keep the two paths idempotent. The poll cursor (message id + create time) is persisted in `im_bridge_cursors` (`adapters/feishu_poll_cursor.py`, `cursor_store.py`): a restarted bridge resumes each saved chat from its cursor over one list page (20; an older backlog is lost), dropping messages past the agent's stale-chat-inbound window (`delivery_watchdog_stale_claimed_threshold_seconds`); only a never-polled chat seeds without replay. The WS handshake honors the machine's proxy environment (`HTTP(S)_PROXY` / `ALL_PROXY`, `NO_PROXY` honored per target): the SDK pins `proxy=None` on websockets>=15 and `lark.ws.Client` exposes no proxy parameter, so `adapters/feishu_ws_proxy.py` replaces the SDK's module-level connect-kwargs builder (issue #2089).
@@ -38,7 +38,7 @@ The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat
 - `services/entrypoints/im_bridge/notice_poll_store.py` — normal notice cutover and source receipts
 - `services/entrypoints/im_bridge/types.py` — shared message, chat-state, and adapter contracts
 - `adapters/feishu_inbound.py` — SDK event payload normalization
-- Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`ops/roster/healthz.py`)
+- Root's health monitor keeps it alive via the roster's `/healthz` identity probe (`supervision/roster/healthz.py`)
 
 ## Notes
 - Bridge ↔ agent dialog is human messages in, agent text out — tool execution / reasoning / other agents' messages are never pushed to IM
