@@ -30,11 +30,11 @@ _LABEL_SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
-def _system_prompt(max_chars: int) -> str:
+def system_prompt(max_chars: int) -> str:
     """The system prompt with the configured ceiling filled in.
 
     `services.labeler_max_chars` (default 64) is cluster config, and the prompt
-    and the truncation in `_normalize` must read the same number (task #3696).
+    and the truncation in `normalize` must read the same number (task #3696).
     """
     return _LABEL_SYSTEM_PROMPT_TEMPLATE.format(max_chars=max_chars)
 
@@ -43,7 +43,7 @@ def _system_prompt(max_chars: int) -> str:
 _CJK_BRACKETS = "\u300c\u300d\u300e\u300f\u300a\u300b"
 
 
-def _normalize(raw: str, max_chars: int) -> str:
+def normalize(raw: str, max_chars: int) -> str:
     """Finish the LLM output: take the first line -> strip leading/trailing
     whitespace / common quote wrappers -> truncate to services.labeler_max_chars.
 
@@ -63,7 +63,7 @@ def _normalize(raw: str, max_chars: int) -> str:
 
 
 # Shortest output treated as an echo of the instruction rather than a
-# coincidence. 16 characters into `_system_prompt()` is already mid-sentence
+# coincidence. 16 characters into `system_prompt()` is already mid-sentence
 # ("Summarize the us"), so nothing a summarizer would produce on purpose.
 _ECHO_MIN_CHARS = 16
 
@@ -83,11 +83,11 @@ _ASSISTANT_VOICE_RE = re.compile(
 )
 
 
-def _rejection_reason(label: str, max_chars: int) -> str | None:
+def rejection_reason(label: str, max_chars: int) -> str | None:
     """Classify a normalized output that is not a label at all, returning a
     short reason for the log (None = it looks like a label).
 
-    This is REJECTION, not repair. `_normalize` above deliberately refuses to
+    This is REJECTION, not repair. `normalize` above deliberately refuses to
     rewrite a bad output, on the grounds that a normalization heuristic papers
     over a bad prompt — that stance holds. What was missing is the separate
     judgement of whether the model produced a label *at all*: the caller turns a
@@ -142,7 +142,7 @@ def _rejection_reason(label: str, max_chars: int) -> str | None:
         return "markup"
     if _ASSISTANT_VOICE_RE.match(label):
         return "assistant_voice"
-    if len(label) >= _ECHO_MIN_CHARS and _system_prompt(max_chars).startswith(label):
+    if len(label) >= _ECHO_MIN_CHARS and system_prompt(max_chars).startswith(label):
         return "instruction_echo"
     return None
 
@@ -184,7 +184,7 @@ async def generate_label_async(
         overrides=overrides,
     )
     messages = [
-        SystemMessage(content=_system_prompt(config.labeler_max_chars)),
+        SystemMessage(content=system_prompt(config.labeler_max_chars)),
         HumanMessage(content=f"<user_request>{prompt}</user_request>"),
     ]
     try:
@@ -226,7 +226,7 @@ async def generate_label_async(
         raw = " ".join(text_parts)
     else:
         raw = str(content)
-    label = _normalize(raw, config.labeler_max_chars)
+    label = normalize(raw, config.labeler_max_chars)
     if not label:
         logger.error(
             "label generate produced empty string for agent {agent_id} (raw={raw!r})",
@@ -235,7 +235,7 @@ async def generate_label_async(
             raw=raw,
         )
         return False
-    reason = _rejection_reason(label, config.labeler_max_chars)
+    reason = rejection_reason(label, config.labeler_max_chars)
     if reason:
         # Not a label — a failed generation. Returning False hands it to the
         # daemon's failure observation path instead of writing the

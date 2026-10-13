@@ -24,9 +24,9 @@ from services.wake.heartbeat.daemon import (
     _select_idle_agents_needing_heartbeat,
 )
 from services.wake.heartbeat.tests.heartbeat_support import (
-    _THRESHOLD_S,
-    _lease,
-    _make_idle,
+    THRESHOLD_S,
+    lease,
+    make_idle,
 )
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -34,7 +34,7 @@ from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(_select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S))
+    return dict(_select_idle_agents_needing_heartbeat(pool, THRESHOLD_S))
 
 
 class TestSelectIdleAgents:
@@ -49,7 +49,7 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -73,9 +73,9 @@ class TestSelectIdleAgents:
         machine_identity: MachineIdentity,
     ) -> None:
         """An idle hosted agent has no turn lease and can still receive a check-in."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
-            status_changed_s_ago=_THRESHOLD_S + 60,
+            status_changed_s_ago=THRESHOLD_S + 60,
             model_catalog=model_catalog,
             config_authority=config_authority,
             database_gate=database_gate,
@@ -102,7 +102,7 @@ class TestSelectIdleAgents:
     ) -> None:
         """Scenario 1: a recent wake (status_changed_at fresh) leaves the agent
         under the idle threshold, so it is not yet due."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=120,
             model_catalog=model_catalog,
@@ -124,7 +124,7 @@ class TestSelectIdleAgents:
         machine_identity: MachineIdentity,
     ) -> None:
         """Only idling agents get a check-in; a running one is active by definition."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             status="running",
@@ -147,7 +147,7 @@ class TestSelectIdleAgents:
         machine_identity: MachineIdentity,
     ) -> None:
         """An agent about to wake on a real message does not also need a check-in."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -181,7 +181,7 @@ class TestSelectIdleAgents:
         receive a check-in, so it could not
         produce a turn and must not be queued (it would only age into a false
         delivery poison)."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -189,7 +189,7 @@ class TestSelectIdleAgents:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _lease(db_conn, aid, status=status, local_machine=machine_identity)
+        lease(db_conn, aid, status=status, local_machine=machine_identity)
         assert aid not in _selected(pool)
 
     def test_terminal_impersonation_lease_does_not_block_checkin(
@@ -205,7 +205,7 @@ class TestSelectIdleAgents:
     ) -> None:
         """A lease with nothing left to apply is history: the native loop is
         the consumer again and the check-in cadence resumes."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -213,7 +213,7 @@ class TestSelectIdleAgents:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _lease(db_conn, aid, status="expired", local_machine=machine_identity)
+        lease(db_conn, aid, status="expired", local_machine=machine_identity)
         assert aid in _selected(pool)
 
     def test_unapplied_impersonation_delta_excludes_agent(
@@ -229,7 +229,7 @@ class TestSelectIdleAgents:
     ) -> None:
         """Unapplied delta state counts as in-flight (the impersonation
         subsystem's own predicate): stay silent until the native catches up."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -237,7 +237,7 @@ class TestSelectIdleAgents:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _lease(
+        lease(
             db_conn,
             aid,
             status="expired",
@@ -260,7 +260,7 @@ class TestSelectIdleAgents:
     ) -> None:
         """An automatic lease whose handoff was never applied still counts as
         in-flight; a check-in waits for the application."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -268,7 +268,7 @@ class TestSelectIdleAgents:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _lease(db_conn, aid, status="expired", automatic=True, local_machine=machine_identity)
+        lease(db_conn, aid, status="expired", automatic=True, local_machine=machine_identity)
         assert aid not in _selected(pool)
 
     def test_applied_automatic_handoff_does_not_block_checkin(
@@ -282,7 +282,7 @@ class TestSelectIdleAgents:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -290,7 +290,7 @@ class TestSelectIdleAgents:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _lease(
+        lease(
             db_conn,
             aid,
             status="expired",
@@ -313,7 +313,7 @@ class TestSelectIdleAgents:
     ) -> None:
         """Scenario 2: while the pause window is in the future, the agent is
         skipped even though it has been idle far longer than the threshold."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=600,
             paused_until_s_ahead=1800,
@@ -338,7 +338,7 @@ class TestSelectIdleAgents:
         """R-6: the pause window is a floor, not an absolute check-in time. A
         real turn during the window starts the normal idle clock, so after expiry
         the agent must wait the idle threshold instead of taking a wasted wake."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=10,
             last_active_s_ago=10,
@@ -363,7 +363,7 @@ class TestSelectIdleAgents:
     ) -> None:
         """The R-6 pause floor wins while it is open, then the real turn's
         idle clock wins after expiry; both edges are one unified due-time rule."""
-        open_window = _make_idle(
+        open_window = make_idle(
             db_conn,
             status_changed_s_ago=10,
             last_active_s_ago=10,
@@ -373,7 +373,7 @@ class TestSelectIdleAgents:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        expired_window = _make_idle(
+        expired_window = make_idle(
             db_conn,
             status_changed_s_ago=10,
             last_active_s_ago=10,
@@ -402,7 +402,7 @@ class TestSelectIdleAgents:
         heartbeat_paused_until), the normal wake-resettable clock resumes: an
         agent idle only 120s is under the threshold and not yet due, NOT stuck
         firing forever on the stale past window."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=120,
             paused_until_s_ahead=-300,
@@ -426,7 +426,7 @@ class TestSelectIdleAgents:
     ) -> None:
         """No intervening wake: the agent has been idle 600s and its pause
         window expired 60s ago. It is overdue under both regimes and selected."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=600,
             paused_until_s_ahead=-60,
@@ -458,7 +458,7 @@ class TestIdleClockCountsRealActivityOnly:
         status_changed_at is fresh (5s ago, the re-idle after respawn) but
         last_active_at is still 400s ago (the ops cycle ran no LLM turn). It stays
         due — the rollout did not zero its idle timer."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=5,
             last_active_s_ago=400,
@@ -484,7 +484,7 @@ class TestIdleClockCountsRealActivityOnly:
         agent (fresh status_changed_at) would read as only 5s idle and be excluded.
         Keyed off last_active_at it is correctly overdue. The idle_minutes reported
         reflects the real 400s, not the 5s since the ops re-idle."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=5,
             last_active_s_ago=400,
@@ -511,7 +511,7 @@ class TestIdleClockCountsRealActivityOnly:
         """The mirror case: an agent whose status_changed_at is old (600s) but that
         just completed a real turn 30s ago (last_active_at fresh) is NOT due — real
         activity, unlike ops churn, does reset the idle clock."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=600,
             last_active_s_ago=30,
@@ -557,7 +557,7 @@ class TestWakeupStormFlattening:
         agent idle just past it is selected. Keyed on the real id so the offset is
         exact, not probabilistic."""
         span, threshold = 100.0, 300.0
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=1,
             model_catalog=model_catalog,
@@ -588,7 +588,7 @@ class TestWakeupStormFlattening:
     ) -> None:
         """jitter_span_s=0 (the default) collapses the offset to 0 — no
         divide-by-zero, identical to the un-jittered predicate."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=350,
             model_catalog=model_catalog,
@@ -612,7 +612,7 @@ class TestWakeupStormFlattening:
     ) -> None:
         """`limit` bounds the batch; ordering is oldest-idle first so the most
         overdue agents drain ahead of fresher ones."""
-        a_old = _make_idle(
+        a_old = make_idle(
             db_conn,
             status_changed_s_ago=900,
             model_catalog=model_catalog,
@@ -620,7 +620,7 @@ class TestWakeupStormFlattening:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        a_mid = _make_idle(
+        a_mid = make_idle(
             db_conn,
             status_changed_s_ago=600,
             model_catalog=model_catalog,
@@ -628,7 +628,7 @@ class TestWakeupStormFlattening:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        a_new = _make_idle(
+        a_new = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -637,9 +637,9 @@ class TestWakeupStormFlattening:
             local_machine=machine_identity,
         )
 
-        order = [r[0] for r in _select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S)]
+        order = [r[0] for r in _select_idle_agents_needing_heartbeat(pool, THRESHOLD_S)]
         assert order.index(a_old) < order.index(a_mid) < order.index(a_new)
 
-        capped = _select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S, limit=2)
+        capped = _select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, limit=2)
         assert len(capped) == 2
         assert a_new not in [r[0] for r in capped]

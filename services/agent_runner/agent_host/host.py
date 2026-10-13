@@ -122,7 +122,7 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 # `services/supervision/ava_root/supervisor.py`) or root retains custody of it. With Postgres
 # unreachable the release would otherwise wait out the control pool's acquire
 # timeout (30 s). A release that cannot land leaves the leases to expire by TTL.
-_RELEASE_OWNER_TIMEOUT_S = 3.0
+RELEASE_OWNER_TIMEOUT_S = 3.0
 
 
 class AgentHost:
@@ -695,7 +695,7 @@ class AgentHost:
             ),
             clear_runtimes=self._runtimes.clear,
             resource_deadline=resource_deadline,
-            release_timeout=_RELEASE_OWNER_TIMEOUT_S,
+            release_timeout=RELEASE_OWNER_TIMEOUT_S,
         )
 
     async def renew_ownership(self) -> None:

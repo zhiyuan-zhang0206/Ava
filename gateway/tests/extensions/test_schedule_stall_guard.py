@@ -30,16 +30,16 @@ def _watch_stalls(
     def record_stall(_db: object, _sid: int, msg: str, _rid: int | None) -> None:
         fired.append(msg)
 
-    monkeypatch.setattr(sr, "_stall_action", record_stall)
+    monkeypatch.setattr(sr, "stall_action", record_stall)
     if patch_sleep:
-        sr._patch_park_detection()
-    stop = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
+        sr.patch_park_detection()
+    stop = sr.StallGuard(Database.from_settings(gate=database_gate), 1, None)
     try:
         yield fired
     finally:
         stop.close()
         if patch_sleep:
-            sr._restore_park_detection()
+            sr.restore_park_detection()
 
 
 def test_stall_guard_fires_on_a_stalled_main_thread(
@@ -72,7 +72,7 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     fired: list[str] = []
     monkeypatch.setattr(
         sr,
-        "_stall_action",
+        "stall_action",
         lambda _db, _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -80,15 +80,15 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     # the deepest Python frame of a sleeping main thread is sleep's *caller*,
     # which is indistinguishable from a stall.
     _real_sleep = time.sleep
-    sr._patch_park_detection()
-    stop = sr._StallGuard(Database.from_settings(gate=database_gate), 1, None)
+    sr.patch_park_detection()
+    stop = sr.StallGuard(Database.from_settings(gate=database_gate), 1, None)
     try:
         time.sleep(0.4)  # main thread parked in time.sleep the whole time
         assert fired == []
     finally:
         stop.close()
         # The wrapper is process-wide (`time.sleep = sleep` in
-        # schedule_runner._patch_park_detection) — restore it or every later
+        # schedule_runner.patch_park_detection) — restore it or every later
         # `assert time.sleep is _REAL_SLEEP` guard (test_start_readiness_gate)
         # in this worker session fails on the wrapper.
         time.sleep = _real_sleep

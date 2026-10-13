@@ -19,14 +19,14 @@ from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakeGateway,
     FakePlainAdapter,
     FakeTypingAdapter,
-    _assert_effort_layer_after_pro,
-    _assert_model_layer_after_coder,
-    _assert_preset_layer,
     _core,
-    _models_data,
-    _preset,
-    _row,
     _text,
+    assert_effort_layer_after_pro,
+    assert_model_layer_after_coder,
+    assert_preset_layer,
+    models_data,
+    preset,
+    row,
 )
 from services.entrypoints.im_bridge.types import (
     ChatState,
@@ -84,9 +84,9 @@ async def test_list_on_button_channel_is_text_one_liner_plus_buttons() -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(
             agents=[
-                _row(405, label="Ava \u8d1f\u8d23\u4eba"),
-                _row(228, label=None, status="running"),
-                _row(999, label="gone", status="terminated"),  # filtered out
+                row(405, label="Ava \u8d1f\u8d23\u4eba"),
+                row(228, label=None, status="running"),
+                row(999, label="gone", status="terminated"),  # filtered out
             ]
         )
         core = _core(gateway, tasks=_owned_tasks)
@@ -109,7 +109,7 @@ async def test_list_on_plain_channel_keeps_full_text_list() -> None:
     """WeChat/Feishu never render buttons — /list keeps the full text list
     there or it would be unusable."""
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        gateway = FakeGateway(agents=[row(405, label="Ava \u8d1f\u8d23\u4eba")])
         core = _core(gateway, tasks=_owned_tasks)
         core.register(FakePlainAdapter())
         out = await core._cmd_list("weixin")
@@ -127,8 +127,8 @@ async def test_chat_typing_starts_and_stops_on_agent_reply(
     async with owned_tasks() as _owned_tasks:
         from services.entrypoints.im_bridge import core as core_mod
 
-        monkeypatch.setattr(core_mod, "_TYPING_INTERVAL_S", 0.01)
-        monkeypatch.setattr(core_mod, "_TYPING_MAX_S", 60.0)
+        monkeypatch.setattr(core_mod, "TYPING_INTERVAL_S", 0.01)
+        monkeypatch.setattr(core_mod, "TYPING_MAX_S", 60.0)
         gateway = FakeGateway()
         core = _core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
@@ -206,7 +206,7 @@ async def test_one_typing_loop_per_chat(monkeypatch: pytest.MonkeyPatch) -> None
     async with owned_tasks() as _owned_tasks:
         from services.entrypoints.im_bridge import core as core_mod
 
-        monkeypatch.setattr(core_mod, "_TYPING_INTERVAL_S", 0.01)
+        monkeypatch.setattr(core_mod, "TYPING_INTERVAL_S", 0.01)
         gateway = FakeGateway()
         core = _core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
@@ -232,8 +232,8 @@ async def test_typing_gives_up_after_timeout(monkeypatch: pytest.MonkeyPatch) ->
     async with owned_tasks() as _owned_tasks:
         from services.entrypoints.im_bridge import core as core_mod
 
-        monkeypatch.setattr(core_mod, "_TYPING_INTERVAL_S", 0.01)
-        monkeypatch.setattr(core_mod, "_TYPING_MAX_S", 0.05)
+        monkeypatch.setattr(core_mod, "TYPING_INTERVAL_S", 0.01)
+        monkeypatch.setattr(core_mod, "TYPING_MAX_S", 0.05)
         gateway = FakeGateway()
         core = _core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
@@ -256,17 +256,17 @@ async def test_spawn_menu_layers_render_with_summary_button() -> None:
     plus provider default."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway(
-            presets=[_preset(1, "coder"), _preset(2, "reviewer", label="Code Reviewer")],
-            models=_models_data(),
+            presets=[preset(1, "coder"), preset(2, "reviewer", label="Code Reviewer")],
+            models=models_data(),
         )
         core = _core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
 
-        _assert_preset_layer(await core._cmd_spawn(state))
+        assert_preset_layer(await core._cmd_spawn(state))
         # pick a preset -> model layer
-        _assert_model_layer_after_coder(await core._handle_spawn_menu(state, "spawn:preset:1"))
+        assert_model_layer_after_coder(await core._handle_spawn_menu(state, "spawn:preset:1"))
         # pick a model -> effort layer with the model's own options
-        _assert_effort_layer_after_pro(
+        assert_effort_layer_after_pro(
             await core._handle_spawn_menu(state, "spawn:model:deepseek-v4-pro")
         )
 
@@ -274,7 +274,7 @@ async def test_spawn_menu_layers_render_with_summary_button() -> None:
 async def test_spawn_menu_effort_fallback_without_model_options() -> None:
     """A model without reasoning_effort_options gets the generic set."""
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[], models=_models_data())
+        gateway = FakeGateway(presets=[], models=models_data())
         core = _core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         await core._cmd_spawn(state)
@@ -291,7 +291,7 @@ async def test_spawn_menu_every_layer_completable() -> None:
     """Spawn directly from layer 1 (no selections) or after picking effort:
     both create the agent with the chosen config."""
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[_preset(1, "coder")], models=_models_data())
+        gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
         core = _core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
 
@@ -319,7 +319,7 @@ async def test_spawn_menu_every_layer_completable() -> None:
 
 async def test_spawn_menu_provider_default_effort_means_unset() -> None:
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[_preset(1, "coder")], models=_models_data())
+        gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
         core = _core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         await core._cmd_spawn(state)
@@ -333,7 +333,7 @@ async def test_spawn_menu_provider_default_effort_means_unset() -> None:
 async def test_spawn_skips_preset_layer_when_no_presets() -> None:
     """No presets configured — /spawn jumps straight to the model layer."""
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[], models=_models_data())
+        gateway = FakeGateway(presets=[], models=models_data())
         core = _core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         out = await core._cmd_spawn(state)
@@ -343,7 +343,7 @@ async def test_spawn_skips_preset_layer_when_no_presets() -> None:
 
 async def test_spawn_menu_stale_preset_reports_error() -> None:
     async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway(presets=[_preset(1, "coder")], models=_models_data())
+        gateway = FakeGateway(presets=[preset(1, "coder")], models=models_data())
         core = _core(gateway, tasks=_owned_tasks)
         state = ChatState("telegram", "12345")
         await core._cmd_spawn(state)
@@ -587,7 +587,7 @@ async def test_restore_subscriptions_skips_disabled_channels(
     stops pushing snapshots to a channel with no adapter (Task #855)."""
     async with owned_tasks() as _owned_tasks:
         monkeypatch.setenv("AVA_HOME", str(tmp_path))
-        gateway = FakeGateway(agents=[_row(405, label="Ava \u8d1f\u8d23\u4eba")])
+        gateway = FakeGateway(agents=[row(405, label="Ava \u8d1f\u8d23\u4eba")])
         core = _core(
             gateway, im_disabled_adapters=(), tasks=_owned_tasks
         )  # nothing disabled: both subscribe

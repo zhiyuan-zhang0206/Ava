@@ -18,7 +18,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops.cluster.rpc import ClusterOpUnreachable
 from services.wake.heartbeat import daemon as heartbeat_daemon
-from services.wake.heartbeat.liveness import _probe_machine, run_liveness_pass
+from services.wake.heartbeat.liveness import probe_machine, run_liveness_pass
 
 
 @pytest.fixture
@@ -234,7 +234,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
-            heartbeat_daemon._liveness_loop(
+            heartbeat_daemon.liveness_loop(
                 Database.from_settings(gate=database_gate),
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
@@ -264,7 +264,7 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
-            heartbeat_daemon._liveness_loop(
+            heartbeat_daemon.liveness_loop(
                 Database.from_settings(gate=database_gate),
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
@@ -280,4 +280,4 @@ def test_an_unexpected_probe_error_is_not_counted_as_an_unreachable_host() -> No
         raise RuntimeError("bug in the probe")
 
     with pytest.raises(RuntimeError, match="bug in the probe"):
-        asyncio.run(_probe_machine("runner-1", probe))
+        asyncio.run(probe_machine("runner-1", probe))

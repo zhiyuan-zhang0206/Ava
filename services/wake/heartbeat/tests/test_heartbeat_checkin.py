@@ -21,12 +21,12 @@ from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
-    _backoff_deadlines,
     _reconcile_checkin_outcomes,
     _select_idle_agents_needing_heartbeat,
     _send_heartbeat_checkin,
+    backoff_deadlines,
 )
-from services.wake.heartbeat.tests.heartbeat_support import _THRESHOLD_S, _make_idle
+from services.wake.heartbeat.tests.heartbeat_support import THRESHOLD_S, make_idle
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.units import spawn_agent
@@ -51,7 +51,7 @@ def event_pipeline(
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(_select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S))
+    return dict(_select_idle_agents_needing_heartbeat(pool, THRESHOLD_S))
 
 
 def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
@@ -151,7 +151,7 @@ class TestSendHeartbeatCheckin:
         the pending-inbound guard no longer applies, so the daemon must still
         hold the agent until the configured heartbeat interval has elapsed.
         """
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -179,7 +179,7 @@ class TestSendHeartbeatCheckin:
         machine_identity: MachineIdentity,
     ) -> None:
         """The 15-second dispatcher step must not become the reminder cadence."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -198,10 +198,10 @@ class TestSendHeartbeatCheckin:
         db_conn.commit()
 
         assert aid not in dict(
-            _select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S, heartbeat_interval_s=300.0)
+            _select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, heartbeat_interval_s=300.0)
         )
         assert aid in dict(
-            _select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S, heartbeat_interval_s=15.0)
+            _select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, heartbeat_interval_s=15.0)
         )
 
     async def test_publishes_redis_wake_to_target(
@@ -260,7 +260,7 @@ class TestConsecutiveFailureBackoff:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -271,12 +271,12 @@ class TestConsecutiveFailureBackoff:
         # Deadline in the future -> excluded; deadline passed -> selected.
         assert aid not in dict(
             _select_idle_agents_needing_heartbeat(
-                pool, _THRESHOLD_S, backoff_until={aid: time.time() + 1000}
+                pool, THRESHOLD_S, backoff_until={aid: time.time() + 1000}
             )
         )
         assert aid in dict(
             _select_idle_agents_needing_heartbeat(
-                pool, _THRESHOLD_S, backoff_until={aid: time.time() - 1}
+                pool, THRESHOLD_S, backoff_until={aid: time.time() - 1}
             )
         )
 
@@ -293,7 +293,7 @@ class TestConsecutiveFailureBackoff:
     ) -> None:
         """The limit applies AFTER the backoff filter: a backed-off agent must
         not occupy a per-step wake-rate slot that a healthy due agent needs."""
-        healthy = _make_idle(
+        healthy = make_idle(
             db_conn,
             status_changed_s_ago=900,
             model_catalog=model_catalog,
@@ -301,7 +301,7 @@ class TestConsecutiveFailureBackoff:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        wedged = _make_idle(
+        wedged = make_idle(
             db_conn,
             status_changed_s_ago=700,
             model_catalog=model_catalog,
@@ -312,7 +312,7 @@ class TestConsecutiveFailureBackoff:
 
         selected = _select_idle_agents_needing_heartbeat(
             pool,
-            _THRESHOLD_S,
+            THRESHOLD_S,
             limit=1,
             backoff_until={wedged: time.time() + 10_000},
         )
@@ -333,7 +333,7 @@ class TestConsecutiveFailureBackoff:
         machine_identity: MachineIdentity,
     ) -> None:
         """Use the actual PG result in pending state, as the dispatch loop does."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=1200,
             model_catalog=model_catalog,
@@ -355,7 +355,7 @@ class TestConsecutiveFailureBackoff:
             db_conn.commit()
         streaks: dict[int, int] = {aid: 2}
         _reconcile_checkin_outcomes(
-            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
         assert pending == {}
         assert streaks == ({} if advanced else {aid: 3})
@@ -373,7 +373,7 @@ class TestConsecutiveFailureBackoff:
     ) -> None:
         """The check-in was sent when the agent had been idle ~6 minutes; a
         cycle later `last_active_at` has not moved (no turn ran) -> streak 1."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -385,7 +385,7 @@ class TestConsecutiveFailureBackoff:
         streaks: dict[int, int] = {}
 
         _reconcile_checkin_outcomes(
-            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
 
         assert pending == {}
@@ -404,7 +404,7 @@ class TestConsecutiveFailureBackoff:
     ) -> None:
         """The check-in produced a turn (`last_active_at` advanced) -> streak
         reset (stays empty / drops)."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -422,7 +422,7 @@ class TestConsecutiveFailureBackoff:
         streaks: dict[int, int] = {aid: 3}
 
         _reconcile_checkin_outcomes(
-            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
 
         assert streaks == {}, "a turn after the check-in must clear the streak"
@@ -441,7 +441,7 @@ class TestConsecutiveFailureBackoff:
         """No check-in was sent this cycle (backoff active), but a real wake
         produced a turn — fresh `last_active_at` clears the streak so the
         recovered agent is probed again at the normal cadence."""
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -458,7 +458,7 @@ class TestConsecutiveFailureBackoff:
         streaks: dict[int, int] = {aid: 4}
 
         _reconcile_checkin_outcomes(
-            pool, pending_checkin={}, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+            pool, pending_checkin={}, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
 
         assert streaks == {}
@@ -474,7 +474,7 @@ class TestConsecutiveFailureBackoff:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        aid = _make_idle(
+        aid = make_idle(
             db_conn,
             status_changed_s_ago=400,
             model_catalog=model_catalog,
@@ -488,22 +488,22 @@ class TestConsecutiveFailureBackoff:
         streaks: dict[int, int] = {aid: 2}
 
         _reconcile_checkin_outcomes(
-            pool, pending_checkin={}, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+            pool, pending_checkin={}, failure_streak=streaks, idle_threshold_s=THRESHOLD_S
         )
 
         assert streaks == {}
 
     def test_backoff_deadlines_exponential_capped(self) -> None:
         """streak=1 doubles the normal interval; the growth caps at
-        _BACKOFF_MAX_WINDOWS so the daemon still probes a wedged agent."""
-        from services.wake.heartbeat.daemon import _BACKOFF_MAX_WINDOWS
+        BACKOFF_MAX_WINDOWS so the daemon still probes a wedged agent."""
+        from services.wake.heartbeat.daemon import BACKOFF_MAX_WINDOWS
 
-        d1 = _backoff_deadlines({1: 1}, _THRESHOLD_S)
-        d2 = _backoff_deadlines({1: 2}, _THRESHOLD_S)
-        d10 = _backoff_deadlines({1: 10}, _THRESHOLD_S)
-        assert d1[1] - time.time() == pytest.approx(2 * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
-        assert d2[1] - d1[1] == pytest.approx(2 * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
-        assert d10[1] - d2[1] == pytest.approx((_BACKOFF_MAX_WINDOWS - 4) * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
+        d1 = backoff_deadlines({1: 1}, THRESHOLD_S)
+        d2 = backoff_deadlines({1: 2}, THRESHOLD_S)
+        d10 = backoff_deadlines({1: 10}, THRESHOLD_S)
+        assert d1[1] - time.time() == pytest.approx(2 * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
+        assert d2[1] - d1[1] == pytest.approx(2 * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
+        assert d10[1] - d2[1] == pytest.approx((BACKOFF_MAX_WINDOWS - 4) * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _mirror_event(agent_id: int, event_name: str) -> dict | None:

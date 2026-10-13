@@ -271,7 +271,7 @@ class Gate:
         handler.wfile.write(body)
 
 
-class _Handler(BaseHTTPRequestHandler):
+class Handler(BaseHTTPRequestHandler):
     """One request: probe the gateway, then serve login / unavailable / proxy.
 
     `gate` is set on the server instance (`server.gate`); the handler reads it
@@ -372,7 +372,7 @@ def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> N
         app_base=_app_base(),
         static_dir=static_dir,
     )
-    server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)  # noqa: S104 — the entry must be reachable off-box
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)  # noqa: S104 — the entry must be reachable off-box
     server.gate = gate  # type: ignore[attr-defined]  # handler reads it off the instance
     primary: BaseException | None = None
     try:

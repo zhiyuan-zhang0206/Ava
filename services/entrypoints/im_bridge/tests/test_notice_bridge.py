@@ -18,7 +18,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
-from services.entrypoints.im_bridge.notice_bridge import NoticeBridge, _state_dir
+from services.entrypoints.im_bridge.notice_bridge import NoticeBridge, state_dir
 from services.entrypoints.im_bridge.tests import test_im_bridge_core
 from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
 from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
@@ -431,7 +431,7 @@ async def test_cmd_notice_filter_updates_and_persists(
         out = bridge.cmd_notice("filter P1 agent 5")
         assert '"min_priority": "P1"' in out
         assert '"agent": 5' in out
-        assert (_state_dir() / "notice_filters.json").exists()
+        assert (state_dir() / "notice_filters.json").exists()
         # restart: filter survives
         bridge2 = NoticeBridge(
             _bridge(tmp_path, gateway, monkeypatch, tasks=_owned_tasks)[0].core, im_bridge_config()

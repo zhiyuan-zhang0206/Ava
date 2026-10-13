@@ -57,7 +57,7 @@ from base.host.net.resilience import (
 from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
-_MODEL_ID = "gemini-embedding-2"
+MODEL_ID = "gemini-embedding-2"
 DIM = 3072
 """3072-dim for Gemini Embedding 2 (text mode). Not reduced —
 12 KB/file is more than enough for memory pool scale (<10k files)."""
@@ -65,14 +65,12 @@ DIM = 3072
 # Gemini Developer API (mldev). The google-genai SDK targets exactly this
 # host / version / endpoint for an api-key client; this replicates that
 # wire call. `models/<id>` is the resource name the endpoint expects.
-_ENDPOINT = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/{_MODEL_ID}:batchEmbedContents"
-)
+ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:batchEmbedContents"
 # Per-request timeout is configurable (AVA_EMBED_TIMEOUT_SECONDS, task #698
 # G8). The daemon derives its liveness ceiling from the full document-batch
 # retry budget below, including Retry-After and jitter, so legitimate retries
 # do not trip the healthcheck. The retry policies are module constants (R2-D) —
-# two of them, split by call site, see `_EMBED_POLICY` / `_QUERY_EMBED_POLICY`.
+# two of them, split by call site, see `EMBED_POLICY` / `QUERY_EMBED_POLICY`.
 
 
 # R2-D shared retry primitives (idempotent read; http_classifier makes
@@ -80,23 +78,23 @@ _ENDPOINT = (
 # Two policies deliberately split by call site (task #2003/B): the two embed
 # paths answer to different masters.
 #
-# `_EMBED_POLICY` — the indexer daemon's document embeds. The daemon embeds
+# `EMBED_POLICY` — the indexer daemon's document embeds. The daemon embeds
 # once per batch and has no caller deadline, so its resilience IS the retry:
 # 4 attempts, backoff 1→2→4→8s.
 #
-# `_QUERY_EMBED_POLICY` — search query embeds on the gateway. They run inside
+# `QUERY_EMBED_POLICY` — search query embeds on the gateway. They run inside
 # the search endpoint's own deadline (memory_search_deadline_seconds, default
 # 15s), so the 4-attempt schedule could spend the whole budget retrying a 429
 # the caller (passive recall / an explicit ava.memory.search) would simply
 # watch expire — and the caller retries the *search*, not the embed. One
 # retry with a 1s backoff still rides out a transient blip, and the caller is
 # the one that decides how long a persistent outage is worth waiting for.
-_EMBED_POLICY = Policy(
+EMBED_POLICY = Policy(
     max_attempts=4,
     backoff=ExponentialBackoff(base=1.0, factor=2.0, cap=8.0),
     classify=http_classifier,
 )
-_QUERY_EMBED_POLICY = Policy(
+QUERY_EMBED_POLICY = Policy(
     max_attempts=2,
     backoff=ExponentialBackoff(base=1.0, factor=2.0, cap=2.0),
     classify=http_classifier,
@@ -104,19 +102,19 @@ _QUERY_EMBED_POLICY = Policy(
 
 
 def worst_case_batch_seconds(timeout_seconds: float) -> float:
-    """Budget for one embed_batch call under _EMBED_POLICY.
+    """Budget for one embed_batch call under EMBED_POLICY.
 
     Each sync or async attempt runs under an asyncio cancellation deadline equal
     to the configured timeout. Inter-attempt sleeps allow the greater of the
     last backoff and the shared Retry-After cap, plus both jitter terms (phase
     and random span).
     """
-    attempts = _EMBED_POLICY.max_attempts
+    attempts = EMBED_POLICY.max_attempts
     request_seconds = attempts * timeout_seconds
     if attempts < 2:
         return request_seconds
-    last_backoff = _EMBED_POLICY.backoff(attempts - 2)
-    per_sleep = max(MAX_RETRY_AFTER_RESPECT_S, last_backoff) + 2 * _EMBED_POLICY.jitter_span
+    last_backoff = EMBED_POLICY.backoff(attempts - 2)
+    per_sleep = max(MAX_RETRY_AFTER_RESPECT_S, last_backoff) + 2 * EMBED_POLICY.jitter_span
     return request_seconds + (attempts - 1) * per_sleep
 
 
@@ -136,7 +134,7 @@ def _payload(texts: list[str], task_type: str) -> dict[str, Any]:
     return {
         "requests": [
             {
-                "model": f"models/{_MODEL_ID}",
+                "model": f"models/{MODEL_ID}",
                 "content": {"parts": [{"text": t}]},
                 "taskType": task_type,
                 "outputDimensionality": DIM,
@@ -170,7 +168,7 @@ def _emit_billing(body: dict[str, Any], *, catalog: ModelCatalog) -> None:
     usage: dict[str, Any] = body.get("usageMetadata") or {}
     tok_in = int(usage.get("promptTokenCount") or 0)
     log_usage_fields(
-        model=_MODEL_ID,
+        model=MODEL_ID,
         tok_in=tok_in,
         tok_out=0,
         usage_kind="embedding",
@@ -178,7 +176,7 @@ def _emit_billing(body: dict[str, Any], *, catalog: ModelCatalog) -> None:
     )
 
 
-async def _post_attempt_once(
+async def post_attempt_once(
     client: httpx.AsyncClient,
     timeout_s: float,
     headers: dict[str, str],
@@ -187,7 +185,7 @@ async def _post_attempt_once(
     """Run one HTTP attempt under the shared cancellation deadline."""
     try:
         async with asyncio.timeout(timeout_s):
-            async with client.stream("POST", _ENDPOINT, json=payload, headers=headers) as response:
+            async with client.stream("POST", ENDPOINT, json=payload, headers=headers) as response:
                 # Classify at headers: a slow error body must not hide the status
                 # or Retry-After behind a retryable timeout.
                 if not response.is_success:
@@ -217,14 +215,14 @@ def _attempt_loop() -> asyncio.AbstractEventLoop:
     return loop
 
 
-def _embed(
+def embed(
     texts: list[str],
     task_type: str,
     *,
     catalog: ModelCatalog,
     timeout_reader: Callable[[], float],
     api_key_reader: Callable[[], str | None],
-    policy: Policy = _EMBED_POLICY,
+    policy: Policy = EMBED_POLICY,
 ) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
@@ -238,7 +236,7 @@ def _embed(
     order.
 
     Retry semantics (R2-D): `policy` is the caller's retry schedule —
-    `_EMBED_POLICY` for indexer documents, `_QUERY_EMBED_POLICY` for search
+    `EMBED_POLICY` for indexer documents, `QUERY_EMBED_POLICY` for search
     queries (see those constants). Backoff + jitter; 4xx is permanent
     (fails immediately), 429/5xx and transport failures retry; Retry-After
     is respected.
@@ -251,7 +249,7 @@ def _embed(
 
     async def _attempt() -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
-            return await _post_attempt_once(client, timeout_s, headers, payload)
+            return await post_attempt_once(client, timeout_s, headers, payload)
 
     def _call() -> dict[str, Any]:
         try:
@@ -277,22 +275,22 @@ def _embed(
     return _vectors_from_body(body, texts)
 
 
-async def _embed_async(
+async def embed_async(
     texts: list[str],
     task_type: str,
     *,
     catalog: ModelCatalog,
     timeout_reader: Callable[[], float],
     api_key_reader: Callable[[], str | None],
-    policy: Policy = _EMBED_POLICY,
+    policy: Policy = EMBED_POLICY,
 ) -> np.ndarray:
-    """Async twin of ``_embed`` — native non-blocking I/O over
+    """Async twin of ``embed`` — native non-blocking I/O over
     ``httpx.AsyncClient`` with ``asyncio.sleep`` backoff. Same timeout /
     retry / validation contract. The gateway's ``/api/memory/search`` uses
     this so a slow Gemini API can never freeze the event loop (2026-08-03:
     the sync version blocked the whole gateway for up to ~4.5 min per call,
     causing 13 restarts in 8h). ``policy`` carries the same call-site split
-    as ``_embed``: query embeds pass ``_QUERY_EMBED_POLICY``."""
+    as ``embed``: query embeds pass ``QUERY_EMBED_POLICY``."""
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
     headers = {"x-goog-api-key": _api_key(api_key_reader)}
@@ -308,7 +306,7 @@ async def _embed_async(
         async with client:
 
             async def _call() -> dict[str, Any]:
-                return await _post_attempt_once(client, timeout_s, headers, payload)
+                return await post_attempt_once(client, timeout_s, headers, payload)
 
             body = await aretry(policy)(_call)
     except EmbeddingAPIError:
@@ -331,9 +329,9 @@ class GeminiEmbeddingProvider:
     """
 
     name = "gemini"
-    model_id = _MODEL_ID
+    model_id = MODEL_ID
     dim = DIM
-    fingerprint = f"{name}:{_MODEL_ID}:dim={DIM}"
+    fingerprint = f"{name}:{MODEL_ID}:dim={DIM}"
     """Identifies this provider's semantic space for the indexer's
     per-row reconcile — any change (provider, model, dim) re-embeds the
     whole index."""
@@ -351,7 +349,7 @@ class GeminiEmbeddingProvider:
 
     def embed_batch(self, texts: list[str]) -> np.ndarray:
         """Batch embed markdown file contents for indexing. (N, DIM) float32."""
-        return _embed(
+        return embed(
             texts,
             task_type="RETRIEVAL_DOCUMENT",
             catalog=self._catalog,
@@ -361,24 +359,24 @@ class GeminiEmbeddingProvider:
 
     def embed_query(self, text: str) -> np.ndarray:
         """Embed single query for search. (DIM,) float32."""
-        return _embed(
+        return embed(
             [text],
             task_type="RETRIEVAL_QUERY",
             catalog=self._catalog,
             timeout_reader=self._timeout_reader,
             api_key_reader=self._api_key_reader,
-            policy=_QUERY_EMBED_POLICY,
+            policy=QUERY_EMBED_POLICY,
         )[0]
 
     async def embed_query_async(self, text: str) -> np.ndarray:
         """Async embed of a single query for search. (DIM,) float32."""
         return (
-            await _embed_async(
+            await embed_async(
                 [text],
                 task_type="RETRIEVAL_QUERY",
                 catalog=self._catalog,
                 timeout_reader=self._timeout_reader,
                 api_key_reader=self._api_key_reader,
-                policy=_QUERY_EMBED_POLICY,
+                policy=QUERY_EMBED_POLICY,
             )
         )[0]

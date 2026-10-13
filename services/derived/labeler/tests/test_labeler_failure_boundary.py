@@ -247,7 +247,7 @@ async def test_notification_failure_cannot_uncommit_or_reselect_a_written_label(
     assert caught.value is error
     assert _label(db_conn, tid) == "Fix label generation"
     with db_conn.cursor() as cur:
-        assert tid not in dict(daemon._select_unlabeled(cur, []))
+        assert tid not in dict(daemon.select_unlabeled(cur, []))
 
 
 @pytest.mark.parametrize("error", [TypeError("missing catalog"), psycopg.ProgrammingError("CAS")])
@@ -275,7 +275,7 @@ async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
         cur.execute("SELECT to_jsonb(im) FROM inbound_messages im WHERE id = %s", (inbound_id,))
         before = cur.fetchone()
     db_conn.commit()
-    monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.0)
+    monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.0)
     polls = 0
     calls: list[int] = []
 
@@ -291,7 +291,7 @@ async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
         calls.append(tid)
         raise error
 
-    monkeypatch.setattr(daemon, "_select_unlabeled", select)
+    monkeypatch.setattr(daemon, "select_unlabeled", select)
     monkeypatch.setattr(daemon, "generate_label_async", fail)
     p = pool(gate=database_gate)
     try:
@@ -338,7 +338,7 @@ async def test_poll_failure_reaches_service_owner_without_retry(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.0)
+    monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.0)
     polls = 0
 
     def fail(_cur: object, _cooling: list[int]) -> list[tuple[int, str]]:
@@ -348,7 +348,7 @@ async def test_poll_failure_reaches_service_owner_without_retry(
             raise asyncio.CancelledError
         raise error
 
-    monkeypatch.setattr(daemon, "_select_unlabeled", fail)
+    monkeypatch.setattr(daemon, "select_unlabeled", fail)
     p = pool(gate=database_gate)
     try:
         with pytest.raises(type(error)) as caught:

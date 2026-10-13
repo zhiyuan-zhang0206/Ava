@@ -8,7 +8,7 @@ The launcher redirects the daemon's fd 1/2 straight at
 rotation, nothing owns the file but the process itself — so a crash storm
 that floods the transcript with tracebacks can balloon it to a disk-filling
 size (2026-09-03: 13.5 GB in ~6 minutes, task #2356). The daemon re-points
-its own fds once the file crosses a ceiling; see `_rotate_stdout_log_if_needed`.
+its own fds once the file crosses a ceiling; see `rotate_stdout_log_if_needed`.
 """
 
 from __future__ import annotations
@@ -26,12 +26,12 @@ from base.log import logger
 # log attribution or routing.
 _log = logging.getLogger("services.agent_runner.agent_host.daemon")
 
-_STDOUT_LOG_ROTATE_BYTES = 1 << 30  # 1 GiB — rotate the raw transcript past this
+STDOUT_LOG_ROTATE_BYTES = 1 << 30  # 1 GiB — rotate the raw transcript past this
 _STDOUT_LOG_ROTATE_POLL_S = 60.0  # cadence of the size check
 _STDOUT_LOG_NAME = "ava-agent-host"  # names $AVA_HOME/logs/<name>.out.log
 
 
-def _stdout_log_path() -> Path:
+def stdout_log_path() -> Path:
     """The daemon's raw stdout/stderr transcript.
 
     The launcher opens this file and redirects fd 1/2 onto it before the
@@ -42,7 +42,7 @@ def _stdout_log_path() -> Path:
     return paths.logs_dir() / f"{_STDOUT_LOG_NAME}.out.log"
 
 
-def _rotate_stdout_log_files(log_path: Path) -> None:
+def rotate_stdout_log_files(log_path: Path) -> None:
     """Roll `log_path` over to `log_path.1`, keeping one rotated generation.
 
     The previous `.1` chunk is atomically replaced (a rename over it), and a
@@ -60,7 +60,7 @@ def _rotate_stdout_log_files(log_path: Path) -> None:
     log_path.replace(one)
 
 
-def _rotate_stdout_log_if_needed() -> int | None:
+def rotate_stdout_log_if_needed() -> int | None:
     """Rotate the raw transcript once fd 1's file crosses the ceiling.
 
     Returns the size the file had reached when it was rotated, or None when no
@@ -75,12 +75,12 @@ def _rotate_stdout_log_if_needed() -> int | None:
         size = os.fstat(1).st_size
     except OSError:
         return None
-    if size < _STDOUT_LOG_ROTATE_BYTES:
+    if size < STDOUT_LOG_ROTATE_BYTES:
         return None
-    log_path = _stdout_log_path()
+    log_path = stdout_log_path()
     rotated = False
     try:
-        _rotate_stdout_log_files(log_path)
+        rotate_stdout_log_files(log_path)
         rotated = True
         fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     except OSError:
@@ -114,12 +114,12 @@ async def _rotate_stdout_log_forever() -> None:
     cadence. Self-protecting like the other daemon loops: a failed pass is
     logged and the loop waits for the next interval.
     """
-    _rotate_stdout_log_if_needed()
+    rotate_stdout_log_if_needed()
     # quiesce-exempt: rotates a log file; no database
     while True:
         await asyncio.sleep(_STDOUT_LOG_ROTATE_POLL_S)
         try:
-            rotated_at = _rotate_stdout_log_if_needed()
+            rotated_at = rotate_stdout_log_if_needed()
         except Exception:
             _log.exception("[agent-host] stdout log rotation pass failed — retrying next interval")
             continue
@@ -129,5 +129,5 @@ async def _rotate_stdout_log_forever() -> None:
                 "(ceiling {ceiling})",
                 event="host_stdout_log_rotated",
                 size=rotated_at,
-                ceiling=_STDOUT_LOG_ROTATE_BYTES,
+                ceiling=STDOUT_LOG_ROTATE_BYTES,
             )

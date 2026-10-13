@@ -25,8 +25,8 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat import liveness
 from services.wake.heartbeat.liveness import (
-    _OFFLINE_AFTER_FAILURES,
-    _merge_liveness,
+    OFFLINE_AFTER_FAILURES,
+    merge_liveness,
     run_liveness_pass,
 )
 from services.wake.heartbeat.tests.machine_probe_setup import (
@@ -172,7 +172,7 @@ class TestLivenessPass:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _merge_liveness(pool)
+        merge_liveness(pool)
         assert _state(db_conn, aid) == ("unknown", None)
 
     @pytest.mark.usefixtures(pool.__name__)
@@ -205,7 +205,7 @@ class TestLivenessPass:
             assert row is not None
             observed = row[0]
         db_conn.commit()
-        _merge_liveness(pool)
+        merge_liveness(pool)
         assert _state(db_conn, aid)[1] == observed
 
     @pytest.mark.usefixtures(pool.__name__)
@@ -344,7 +344,7 @@ class TestLivenessPass:
         """A host judged offline (>= 2 consecutive failed probes) takes every
         non-terminated row on it offline, lease notwithstanding."""
         register_machine(db_conn)
-        _set_machine_probe(db_conn, MACHINE, online=False, failures=_OFFLINE_AFTER_FAILURES)
+        _set_machine_probe(db_conn, MACHINE, online=False, failures=OFFLINE_AFTER_FAILURES)
         aid = _make_agent(
             db_conn,
             status="idling",
@@ -365,7 +365,7 @@ class TestLivenessPass:
         )
         # Probe success would reset the failure count — this test exercises
         # the merge judgement directly on a pre-set probe state.
-        _merge_liveness(pool)
+        merge_liveness(pool)
         assert _state(db_conn, aid)[0] == "offline"
         assert _state(db_conn, aid2)[0] == "offline"
 
@@ -382,7 +382,7 @@ class TestLivenessPass:
         machine_identity: MachineIdentity,
     ) -> None:
         """One failed probe is a blip: consecutive_failures must reach
-        _OFFLINE_AFTER_FAILURES before the machine reads offline."""
+        OFFLINE_AFTER_FAILURES before the machine reads offline."""
         register_machine(db_conn)
         _set_machine_probe(db_conn, MACHINE, online=False, failures=1)
         aid = _make_agent(
@@ -394,7 +394,7 @@ class TestLivenessPass:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        _merge_liveness(pool)
+        merge_liveness(pool)
         assert _state(db_conn, aid)[0] == "online"
 
     @pytest.mark.usefixtures(pool.__name__)

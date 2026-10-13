@@ -19,9 +19,9 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.invocation import native_work
 from services.agent_runner.agent_host.tests.runtime.host_support import (
-    _Build,
+    Build,
+    Row,
     _FakePool,
-    _Row,
     build_agent_host,
 )
 from services.agent_runner.agent_host.tests.runtime.host_support import (
@@ -53,7 +53,7 @@ class TestPoolIsolation:
 
     async def test_turn_work_and_lifecycle_control_use_separate_pools(
         self,
-        wired: _Build,
+        wired: Build,
         monkeypatch: pytest.MonkeyPatch,
         *,
         database: Database,
@@ -65,7 +65,7 @@ class TestPoolIsolation:
         import services.agent_runner.agent_host.host as host_mod
         from base.native_process.runtime_incarnation import RuntimeIncarnation
 
-        rows = {11: _Row(status="idling")}
+        rows = {11: Row(status="idling")}
         original, graph, turn_pool = wired(rows)
         control_pool = _FakePool(rows)
         calls: list[tuple[str, object]] = []

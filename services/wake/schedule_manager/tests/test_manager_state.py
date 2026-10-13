@@ -177,10 +177,10 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
 
     with caplog.at_level(logging.WARNING, logger=sm.__name__):
         manager.reconcile()  # first sessionless observation starts the clock
-        _age_not_live(db_conn, sid, sm._STALL_ALERT_AFTER_S - 5)
+        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S - 5)
         manager.reconcile()
         assert emitted == []
-        _age_not_live(db_conn, sid, sm._STALL_ALERT_AFTER_S + 0.1)
+        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
         manager.reconcile()
         manager.reconcile()  # one alert per outage
 
@@ -189,7 +189,7 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
         manager.reconcile()  # seen live again: the alert rearms
         backend.live.remove(name)
         manager.reconcile()
-        _age_not_live(db_conn, sid, sm._STALL_ALERT_AFTER_S + 0.1)
+        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
         manager.reconcile()
 
     assert [(name, attrs["schedule_id"], attrs["status"]) for name, attrs in emitted] == [
@@ -219,7 +219,7 @@ def test_the_stall_alert_clock_and_flag_survive_a_restart(
     monkeypatch.setattr(sm.telemetry, "emit", capture_emit)
 
     sm.ScheduleManager(pool).reconcile()
-    _age_not_live(db_conn, sid, sm._STALL_ALERT_AFTER_S + 1)
+    _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
     sm.ScheduleManager(pool).reconcile()  # a fresh process meets an aged outage
     assert emitted == ["schedule_stalled"]
     sm.ScheduleManager(pool).reconcile()  # and another fresh process stays quiet
@@ -236,7 +236,7 @@ def test_completed_and_disabled_schedules_do_not_stall_alert(
     _set_status(db_conn, completed, "completed")
     disabled = _insert(db_conn, "disabled-no-alert", enabled=False)
     for sid in (completed, disabled):
-        _age_not_live(db_conn, sid, sm._STALL_ALERT_AFTER_S + 1)  # a leftover outage
+        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)  # a leftover outage
     emitted: list[str] = []
 
     def capture_emit(_category: object, event_name: str, **_kwargs: Any) -> None:

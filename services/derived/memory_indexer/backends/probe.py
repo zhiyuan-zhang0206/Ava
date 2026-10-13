@@ -126,7 +126,7 @@ def _probe_pgvector(database: Database, uri_reader: Callable[[], str]) -> ProbeR
         )
 
 
-_PROBES: dict[str, Callable[[Database, Callable[[], str]], ProbeResult]] = {
+PROBES: dict[str, Callable[[Database, Callable[[], str]], ProbeResult]] = {
     "numpy": _probe_numpy,
     "pgvector": _probe_pgvector,
 }
@@ -137,9 +137,9 @@ def probe_backend(name: str, database: Database, *, uri_reader: Callable[[], str
 
     Unknown names are a fatal verdict too (with the fix): an unrecognized
     `AVA_MEMORY_SEARCH_BACKEND` must not silently fall back to numpy."""
-    probe = _PROBES.get(name)
+    probe = PROBES.get(name)
     if probe is None:
-        known = ", ".join(sorted(_PROBES))
+        known = ", ".join(sorted(PROBES))
         return ProbeResult(
             message=(
                 f"unknown memory search backend {name!r} (known: {known}) — "

@@ -13,8 +13,8 @@ from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.runtime.host_support import (
-    _Build,
-    _Row,
+    Build,
+    Row,
 )
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     host_plugin as host_plugin,
@@ -51,13 +51,13 @@ class TestSettlementReconciles:
 
     async def _run_ending(
         self,
-        wired: _Build,
+        wired: Build,
         monkeypatch: pytest.MonkeyPatch,
         drive: _Drive,
         order: list[str],
     ) -> None:
         host, _, _ = wired(
-            {1: _Row()},
+            {1: Row()},
         )
 
         async def settle_and_stamp(
@@ -86,7 +86,7 @@ class TestSettlementReconciles:
         await asyncio.wait_for(host.run_turn(1), 2)
 
     async def test_settled_abort_reconciles_after_the_settle(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         async def drive(
             _agent: int,
@@ -104,7 +104,7 @@ class TestSettlementReconciles:
         assert order == ["settle", "reconcile"]
 
     async def test_unclassified_crash_leaves_the_reconcile_to_the_next_admission(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Only the fatal-abort settlement proves the checkpoint settled; an
         unclassified crash drops the runtime instead, and the next admission
@@ -127,7 +127,7 @@ class TestSettlementReconciles:
         assert order == ["settle"]
 
     async def test_finished_turn_reconciles_after_the_settle(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The finished turn's flushed checkpoint settles its claimed rows
         (#3999): the pass runs right after the settle, never for a crash.

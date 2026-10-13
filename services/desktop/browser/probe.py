@@ -22,7 +22,7 @@ Agents then drive the wrong browser, which is worse than a red check because
 nothing looks wrong.
 
 And even "a debuggable Chrome is up" is not established by the status code alone:
-`_cdp_unreachable` validates the body, not just the 200. An orphaned Chrome that
+`cdp_unreachable` validates the body, not just the 200. An orphaned Chrome that
 keeps the port answered while its DevTools endpoint is wedged serves a 200 with
 an empty or invalid body (the 2026-09-09 macmini swap-pressure outage: ~8 minutes
 of CDP silence from exactly that shape), and reads as DOWN. That verdict is
@@ -58,7 +58,7 @@ list failed, would be read as "another unit's browser holds this port" while
 our own Chrome is the listener — the exact false-terminal class the win box
 field-diagnosis chased on 2026-08-11. The listener-first direction answers the
 same question from the other end: read the global TCP table once
-(`_listener_pid`), and if the pid owning the LISTEN socket is a Chrome on this
+(`listener_pid`), and if the pid owning the LISTEN socket is a Chrome on this
 cluster's profile — by the walk, or by the holder's own argv when the walk
 missed it — the browser is alive, full stop. Either direction can win; only a
 positive identification reads ALIVE, and an unreadable table falls back to the
@@ -118,7 +118,7 @@ def cdp_url(port: int) -> str:
 
 
 @dataclass(frozen=True)
-class _CdpAnswer:
+class CdpAnswer:
     """One CDP dial's outcome.
 
     ``reason`` is None when a debuggable Chrome answers 200 *and* serves a real
@@ -133,7 +133,7 @@ class _CdpAnswer:
     answered: bool
 
 
-def _cdp_unreachable(port: int) -> _CdpAnswer:
+def cdp_unreachable(port: int) -> CdpAnswer:
     """A debuggable Chrome answers 200 with a real `/json/version` payload on
     `port`; else the reason it did not, and whether anything answered at all.
 
@@ -152,33 +152,33 @@ def _cdp_unreachable(port: int) -> _CdpAnswer:
     try:
         with urllib.request.urlopen(url, timeout=_CDP_TIMEOUT_S) as resp:  # noqa: S310 — fixed loopback CDP URL
             if resp.status != 200:
-                return _CdpAnswer(f"CDP {url} returned HTTP {resp.status}", answered=True)
+                return CdpAnswer(f"CDP {url} returned HTTP {resp.status}", answered=True)
             body = resp.read()
     except urllib.error.HTTPError as exc:
         # urlopen RAISES on any non-2xx status — but a status is still an HTTP
         # answer, so it must take the identity path (an occupant holds the
         # port), not the nothing-answered respawnable DOWN.
-        return _CdpAnswer(f"CDP {url} returned HTTP {exc.code}", answered=True)
+        return CdpAnswer(f"CDP {url} returned HTTP {exc.code}", answered=True)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return _CdpAnswer(f"CDP unreachable on {url}: {type(exc).__name__}: {exc}", answered=False)
+        return CdpAnswer(f"CDP unreachable on {url}: {type(exc).__name__}: {exc}", answered=False)
     try:
         parsed: object = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return _CdpAnswer(
+        return CdpAnswer(
             f"CDP {url} answered 200 but the body is not JSON — wedged DevTools endpoint",
             answered=True,
         )
     browser = cast("dict[str, object]", parsed).get("Browser") if isinstance(parsed, dict) else None
     if not isinstance(browser, str) or not browser:
-        return _CdpAnswer(
+        return CdpAnswer(
             f"CDP {url} answered 200 but the body is not a valid /json/version "
             "payload (no Browser field) — wedged DevTools endpoint",
             answered=True,
         )
-    return _CdpAnswer(None, answered=True)
+    return CdpAnswer(None, answered=True)
 
 
-def _process_facts(pid: int) -> tuple[str, list[str] | None]:
+def process_facts(pid: int) -> tuple[str, list[str] | None]:
     """`(name, argv)` for `pid`, with argv None when it cannot be read — the same
     shape `orphan._readable_facts` uses, so a holder that cannot be identified is
     reported, never guessed at."""
@@ -189,7 +189,7 @@ def _process_facts(pid: int) -> tuple[str, list[str] | None]:
         return "", None
 
 
-def _listener_pid(port: int) -> int | None:
+def listener_pid(port: int) -> int | None:
     """The pid owning the LISTEN socket on `port`, from the global TCP table;
     None when the table cannot be read or nobody listens.
 
@@ -211,7 +211,7 @@ def _listener_pid(port: int) -> int | None:
     return None
 
 
-def _listens_on(pid: int, port: int) -> bool | None:
+def listens_on(pid: int, port: int) -> bool | None:
     """Whether `pid` holds a LISTEN socket on `port`; None when its sockets cannot
     be read.
 
@@ -236,14 +236,14 @@ def _our_chrome_holds_port(port: int, profile: Path, found: list[int]) -> int | 
     the answered-but-unusable-payload branch, where the only question is who
     must clear the port. `found` is the caller's profile walk.
     """
-    holder = _listener_pid(port)
+    holder = listener_pid(port)
     if holder is not None:
         if holder in found:
             return holder
-        name, argv = _process_facts(holder)
+        name, argv = process_facts(holder)
         return holder if is_cluster_chrome(name, argv, profile) else None
     for pid in found:
-        if _listens_on(pid, port):
+        if listens_on(pid, port):
             return pid
     return None
 
@@ -276,7 +276,7 @@ def probe_browser(port: int | None = None, profile: Path | None = None) -> Daemo
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
-def _unusable_cdp_verdict(port: int, profile: Path, answer: _CdpAnswer) -> DaemonProbe:
+def _unusable_cdp_verdict(port: int, profile: Path, answer: CdpAnswer) -> DaemonProbe:
     """The verdict when CDP did not give a usable answer (`answer.reason` says why)."""
     assert answer.reason is not None  # noqa: S101
     wait_reason = macos_readiness.degraded_wait_reason()
@@ -331,7 +331,7 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
     port = settings.services.browser_cdp_port if port is None else port
     profile = profile_dir() if profile is None else profile
 
-    answer = _cdp_unreachable(port)
+    answer = cdp_unreachable(port)
     if answer.reason is not None:
         return _unusable_cdp_verdict(port, profile, answer)
 
@@ -342,17 +342,17 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
     # walk missed it — the browser is alive, full stop. This direction is what
     # turns the walk's blind spots into a positive identification instead of a
     # false terminal.
-    holder = _listener_pid(port)
+    holder = listener_pid(port)
     if holder is not None and holder in found:
         return DaemonProbe.up(f"chrome pid {holder} on {profile}")
     if holder is not None:
-        holder_name, holder_argv = _process_facts(holder)
+        holder_name, holder_argv = process_facts(holder)
         if is_cluster_chrome(holder_name, holder_argv, profile):
             return DaemonProbe.up(f"chrome pid {holder} on {profile}")
 
     unreadable: list[int] = []
     for pid in found:
-        listening = _listens_on(pid, port)
+        listening = listens_on(pid, port)
         if listening:
             return DaemonProbe.up(f"chrome pid {pid} on {profile}")
         if listening is None:

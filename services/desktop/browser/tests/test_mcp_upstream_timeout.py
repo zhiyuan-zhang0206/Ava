@@ -10,8 +10,8 @@ from mcp import ClientSession
 
 from services.desktop.browser import mcp_upstream
 from services.desktop.browser.mcp_upstream import (
-    _initialize_until_stop_or_timeout,
     _StoppingError,
+    initialize_until_stop_or_timeout,
 )
 
 
@@ -45,13 +45,13 @@ async def test_initialization_reads_current_timeout_for_each_race() -> None:
     session = Initializer(blocked=True)
     assert values == []
     with pytest.raises(TimeoutError, match="initialize"):
-        await _initialize_until_stop_or_timeout(
+        await initialize_until_stop_or_timeout(
             cast(ClientSession, session), asyncio.Event(), connect_timeout_reader=reader
         )
     assert session.cancelled
     timeout = 1.0
     session.blocked = False
-    await _initialize_until_stop_or_timeout(
+    await initialize_until_stop_or_timeout(
         cast(ClientSession, session), asyncio.Event(), connect_timeout_reader=reader
     )
     assert session.calls == 2
@@ -63,7 +63,7 @@ async def test_stop_still_cancels_pending_initialization() -> None:
     stop.set()
     session = Initializer(blocked=True)
     with pytest.raises(_StoppingError):
-        await _initialize_until_stop_or_timeout(
+        await initialize_until_stop_or_timeout(
             cast(ClientSession, session), stop, connect_timeout_reader=lambda: 10.0
         )
     assert session.cancelled
@@ -73,7 +73,7 @@ async def test_original_initialization_error_is_preserved() -> None:
     error = RuntimeError("initialize failed")
     session = Initializer(error=error)
     with pytest.raises(RuntimeError) as observed:
-        await _initialize_until_stop_or_timeout(
+        await initialize_until_stop_or_timeout(
             cast(ClientSession, session), asyncio.Event(), connect_timeout_reader=lambda: 1.0
         )
     assert observed.value is error

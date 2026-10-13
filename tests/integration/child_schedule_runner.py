@@ -51,7 +51,7 @@ def _delay_record_error(root: Path) -> None:
 
     from services.wake.schedule_manager import engine as r
 
-    record_error = r._record_error
+    record_error = r.record_error
 
     def delayed_record(*args: Any) -> None:
         (root / "record-started").touch()
@@ -63,20 +63,20 @@ def _delay_record_error(root: Path) -> None:
                 time.sleep(0.01)
         record_error(*args)
 
-    r._record_error = delayed_record
+    r.record_error = delayed_record
 
 
 def _delay_completion() -> None:
     from services.wake.schedule_manager import engine as r
 
-    finish = r._finish_completed
+    finish = r.finish_completed
 
     def delayed_completion(*args: Any) -> None:
         assert not any(t.name.endswith("-stall-guard") for t in threading.enumerate())
         time.sleep(0.4)
         finish(*args)
 
-    r._finish_completed = delayed_completion
+    r.finish_completed = delayed_completion
 
 
 def run_runner(root: Path, schedule_id: int, mode: str) -> None:
@@ -106,7 +106,7 @@ def stall_exit(root: Path, blocked_write: str) -> None:
     database, _inputs = _schedule_inputs()
     from services.wake.schedule_manager import engine as r
 
-    r._FAILURE_RECORD_DEADLINE_S = 1.0
+    r.FAILURE_RECORD_DEADLINE_S = 1.0
 
     def record_error(*_args: Any) -> None:
         (root / "started").write_text(str(time.monotonic()))
@@ -116,9 +116,9 @@ def stall_exit(root: Path, blocked_write: str) -> None:
         (root / "second-write").touch()
         threading.Event().wait()
 
-    r._record_error = record_error
-    r._record_run_end = record_run_end
-    r._stall_action(database(), 1, "test stall", 1)
+    r.record_error = record_error
+    r.record_run_end = record_run_end
+    r.stall_action(database(), 1, "test stall", 1)
 
 
 def _ignore(*_args: Any) -> None:
@@ -133,12 +133,12 @@ def completion_during_stall(root: Path) -> None:
     from services.wake.schedule_manager import engine as r
 
     r.settings.gateway.schedule_stall_timeout_seconds = 0.04
-    r._FAILURE_RECORD_DEADLINE_S = 1.0
-    r._schedule_dir = lambda _id: root
-    r._load = lambda *_args: ("pass", "python script.py")
-    r._record_run_start = lambda *_args: 1
+    r.FAILURE_RECORD_DEADLINE_S = 1.0
+    r.schedule_dir = lambda _id: root
+    r.load = lambda *_args: ("pass", "python script.py")
+    r.record_run_start = lambda *_args: 1
     r.base.host.proc.kill_process_tree = lambda *_args, **_kwargs: None  # pyright: ignore[reportAttributeAccessIssue]
-    r._StallGuard._sample = lambda _self: ("script.py", 1, "blocked")  # pyright: ignore[reportAttributeAccessIssue]
+    r.StallGuard._sample = lambda _self: ("script.py", 1, "blocked")  # pyright: ignore[reportAttributeAccessIssue]
     ava.ensure_plugins_loaded = lambda: None
 
     def record_error(*_args: Any) -> None:
@@ -150,9 +150,9 @@ def completion_during_stall(root: Path) -> None:
             time.sleep(0.005)
         (root / "script-returned").touch()
 
-    r._record_error = record_error
+    r.record_error = record_error
     r.runpy.run_path = script  # pyright: ignore[reportAttributeAccessIssue]
-    r._finish_completed = lambda *_args: (root / "completed").touch()
+    r.finish_completed = lambda *_args: (root / "completed").touch()
     raise SystemExit(
         r._run(
             database(),

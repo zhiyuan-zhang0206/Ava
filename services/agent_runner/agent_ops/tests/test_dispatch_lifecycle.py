@@ -17,7 +17,7 @@ from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import daemon
-from services.agent_runner.agent_ops.tests.test_daemon import _stub_pool
+from services.agent_runner.agent_ops.tests.test_daemon import stub_pool
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -33,7 +33,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
     machine_identity: MachineIdentity,
 ) -> None:
     """lifecycle kind -> ops.lifecycle_op with parsed path."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
     captured: dict[str, object] = {}
 
     async def _fake_lifecycle(
@@ -97,7 +97,7 @@ async def test_dispatch_lifecycle_missing_path_fails(
     machine_identity: MachineIdentity,
 ) -> None:
     """lifecycle payload without 'path' returns failed without invoking ops."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
 
     async def _should_not_be_called(_db: object, _bus: object, *_a: object, **_kw: object):
         raise AssertionError("lifecycle_op should not be invoked on missing path")
@@ -133,7 +133,7 @@ async def test_dispatch_unparseable_lifecycle_path(
     machine_identity: MachineIdentity,
 ) -> None:
     """ops.lifecycle_op raising ValueError lands as failed result, not a crash."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
 
     async def _raises(
         _db: object,
@@ -183,7 +183,7 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
     the caller classifies (`ResurrectRefused: <reason>`), not a dispatch crash."""
     from base.api_contracts.agent_contract import ResurrectRefused
 
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
 
     async def _raises(
         _db: object,
@@ -230,7 +230,7 @@ async def test_dispatch_wire_error_carries_reason(
 ) -> None:
     """AvaAgentError raised by an op is converted to a failed result with reason field
     so the gateway's _raise_proxied_wire_error_from_payload can re-emit."""
-    dispatch_pool: ConnectionPool = _stub_pool()
+    dispatch_pool: ConnectionPool = stub_pool()
 
     from base.api_contracts.agent_contract import AgentNotFound
 

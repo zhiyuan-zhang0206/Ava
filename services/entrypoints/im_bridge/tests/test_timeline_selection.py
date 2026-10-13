@@ -12,14 +12,14 @@ from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakeGateway,
     FakePlainAdapter,
-    _row,
     create_test_core,
+    row,
 )
 from services.entrypoints.im_bridge.types import ChatState
 
 
 def gateway() -> FakeGateway:
-    return FakeGateway(agents=[_row(7), _row(8)])
+    return FakeGateway(agents=[row(7), row(8)])
 
 
 async def test_old_replay_cannot_undo_later_selection_or_depend_on_old_liveness() -> None:
@@ -29,7 +29,7 @@ async def test_old_replay_cannot_undo_later_selection_or_depend_on_old_liveness(
         state = core._get_or_create_state("telegram", "chat")
         await core._cmd_switch(state, "7", replay_id="A")
         await core._cmd_switch(state, "8", replay_id="B")
-        upstream.agents = [_row(8)]  # Accepted A must recover even when its target vanished.
+        upstream.agents = [row(8)]  # Accepted A must recover even when its target vanished.
         assert await core._cmd_switch(state, "7", replay_id="A") == []
         assert state.current_agent_id == 8
         assert core.outbound_store.selections() == {("telegram", "chat"): 8}
@@ -138,11 +138,11 @@ async def test_legacy_json_choice_bootstraps_once_without_reviving_old_cursor(
 ) -> None:
     async with owned_tasks() as _owned_tasks:
         from services.entrypoints.im_bridge.cursor_store import PushWatermark
-        from services.entrypoints.im_bridge.state import _save_switch_state
+        from services.entrypoints.im_bridge.state import save_switch_state
 
         core = create_test_core(gateway(), tasks=_owned_tasks)
         core.cursor_store.save_push("telegram", "chat", 7, PushWatermark(None, "20.0"))
-        _save_switch_state({"telegram:chat": json_agent} if json_agent is not None else {})
+        save_switch_state({"telegram:chat": json_agent} if json_agent is not None else {})
         restarted = create_test_core(gateway(), tasks=_owned_tasks)
         await restarted.restore_subscriptions()
         assert restarted.chats[("telegram", "chat")].current_agent_id == json_agent
@@ -151,7 +151,7 @@ async def test_legacy_json_choice_bootstraps_once_without_reviving_old_cursor(
                 "SELECT push_agent_id,push_item_id,push_initialized,push_account_id FROM im_bridge_cursors"
             ).fetchone() == (json_agent, None, False, "test-account")
         # A stale JSON cache cannot override the bound owner on a later restart.
-        _save_switch_state({"telegram:chat": 7})
+        save_switch_state({"telegram:chat": 7})
         again = create_test_core(gateway(), tasks=_owned_tasks)
         await again.restore_subscriptions()
         assert again.chats[("telegram", "chat")].current_agent_id == json_agent
@@ -161,7 +161,7 @@ async def test_spawn_switch_button_empty_receipt_then_first_output() -> None:
     async with owned_tasks() as _owned_tasks:
         from services.entrypoints.im_bridge.types import SpawnDraft
 
-        upstream = FakeGateway(agents=[_row(777)])
+        upstream = FakeGateway(agents=[row(777)])
         core = create_test_core(upstream, tasks=_owned_tasks)
         state = core._get_or_create_state("telegram", "chat")
         state.spawn_draft = SpawnDraft()

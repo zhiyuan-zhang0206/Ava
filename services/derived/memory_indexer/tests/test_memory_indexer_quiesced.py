@@ -26,7 +26,7 @@ async def test_a_quiesced_unit_processes_no_batch(
     machine_identity: MachineIdentity,
 ) -> None:
     monkeypatch.setattr(admission, "quiesced", lambda: quiesced)
-    monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
+    monkeypatch.setattr(daemon, "LOOP_INTERVAL_S", 0.01)
     batches: list[set[Path]] = []
 
     def record_batch(
@@ -39,11 +39,11 @@ async def test_a_quiesced_unit_processes_no_batch(
     ) -> None:
         batches.append(batch)
 
-    monkeypatch.setattr(daemon, "_process_paths", record_batch)
+    monkeypatch.setattr(daemon, "process_paths", record_batch)
     dirty: queue.Queue[Path] = queue.Queue()
     dirty.put(tmp_path / "note.md")
     task = asyncio.create_task(
-        daemon._drain_loop(Mock(), dirty, Liveness(60.0), Mock(), machine=machine_identity)
+        daemon.drain_loop(Mock(), dirty, Liveness(60.0), Mock(), machine=machine_identity)
     )
     try:
         await asyncio.sleep(0.2)

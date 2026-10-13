@@ -96,7 +96,7 @@ def _assert_boot_primary(exc: BaseException, failure: str) -> None:
         assert any("heartbeat defect" in note for note in exc.__notes__)
 
 
-def _exercise_shutdown(failure: str, home: Path) -> None:
+def exercise_shutdown(failure: str, home: Path) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     image = LoadedCommit.capture()
     version = CodeVersion(image)
@@ -344,7 +344,7 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
     expired first and root retained custody of the still-exiting agent-host."""
     from ... import host as host_mod
 
-    monkeypatch.setattr(host_mod, "_RELEASE_OWNER_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(host_mod, "RELEASE_OWNER_TIMEOUT_S", 0.05)
     machine_identity.set(name="this-box")
     host = host_mod.AgentHost(
         policy=configured_policy(),

@@ -22,7 +22,7 @@ from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules.tests.runner_inputs import run_schedule as run
-from services.wake.schedule_manager.engine import _script_filename
+from services.wake.schedule_manager.engine import script_filename
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
@@ -539,7 +539,7 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
     ],
 )
 def test_script_filename(command: str, expected: str) -> None:
-    assert _script_filename(command) == expected
+    assert script_filename(command) == expected
 
 
 def test_run_hung_subprocess_times_out_and_records_error(
@@ -575,7 +575,7 @@ def test_stall_verdict_closes_run_row(
     import services.wake.schedule_manager.engine as sr
 
     sid = _insert_schedule(db_conn, script="x = 1\n")
-    run_id = sr._record_run_start(Database.from_settings(gate=database_gate), sid)
+    run_id = sr.record_run_start(Database.from_settings(gate=database_gate), sid)
     exited: list[int] = []
     monkeypatch.setattr(sr.os, "_exit", exited.append)
     monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", Mock())
@@ -583,7 +583,7 @@ def test_stall_verdict_closes_run_row(
     # covered by the lifecycle test and the real-process integration test.
     monkeypatch.setattr(sr.faulthandler, "dump_traceback_later", Mock())
 
-    sr._stall_action(Database.from_settings(gate=database_gate), sid, "stalled in foo", run_id)
+    sr.stall_action(Database.from_settings(gate=database_gate), sid, "stalled in foo", run_id)
 
     assert exited == [1]
     assert _runs(db_conn, sid) == [(False, f"stalled ({sr._stall_timeout_s():.0f}s)")]

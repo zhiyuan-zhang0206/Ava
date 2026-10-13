@@ -28,8 +28,8 @@ from base.lm import usage
 from base.lm.catalog import ModelCatalog
 from gateway.agents import router
 from gateway.app import app
-from services.derived.labeler.labeler import _normalize as _normalize_to
 from services.derived.labeler.labeler import generate_label_async
+from services.derived.labeler.labeler import normalize as _normalize_to
 from services.derived.labeler.tests.slices import labeler_config, labeler_db
 from tests.fixtures.gateway_config import spawn_via_http
 
@@ -398,7 +398,7 @@ class TestGenerateLabelAsync:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
     ) -> None:
-        """LLM returns blank / only quotes → _normalize returns "" → do not write to DB, do not publish."""
+        """LLM returns blank / only quotes → normalize returns "" → do not write to DB, do not publish."""
         tid = create_agent(db_conn)
         monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _FakeLLM('"   "'))  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []

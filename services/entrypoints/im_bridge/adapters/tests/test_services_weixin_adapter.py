@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 from services.entrypoints.im_bridge.adapters import weixin
-from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, _outbound_message
+from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, outbound_message
 
 _ACCOUNT = {
     "account_id": "acct-1",
@@ -106,5 +106,5 @@ def test_success_clears_pending_and_new_send_gets_fresh_id(
 
 
 def test_outbound_message_uses_given_client_id() -> None:
-    msg = _outbound_message("peer-1", "hi", None, "idem-42")
+    msg = outbound_message("peer-1", "hi", None, "idem-42")
     assert msg["msg"]["client_id"] == "idem-42"
