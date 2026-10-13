@@ -73,10 +73,6 @@ One row per contract in `pyproject.toml`, under the name it has there.
 
 Edges the contracts do not see or do not cover. They are listed, not exempted.
 
-- `services` → `scripts`: `services/backup/scheduler/worker.py` and
-  `services/backup/walg/drill.py` import
-  `scripts.data_plane_ops.restore_drill` inside functions. Production code importing
-  a tooling script; `scripts/` is outside the graph.
 - `ops` ↔ `services`: `ops/roster/__init__.py` and `ops/spec.py` import `services.*`
   inside functions, and many `services` modules import `ops`. No contract covers the
   pair.
