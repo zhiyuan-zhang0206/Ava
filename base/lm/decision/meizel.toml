@@ -1,4 +1,4 @@
-exports = ["call.py"]
+exports = ["call.py", "tests"]
 
 [uses]
 "tests" = ["call.py"]

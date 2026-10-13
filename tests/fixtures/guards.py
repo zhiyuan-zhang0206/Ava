@@ -22,7 +22,7 @@ import redis.asyncio
 from redis.asyncio.connection import AbstractConnection as AsyncRedisConnection
 from redis.connection import AbstractConnection as RedisConnection
 
-from base.tests.fixtures.stdlib_logging import stdlib_logging_isolated
+from base.log.tests.stdlib_logging import stdlib_logging_isolated
 
 __all__ = ["refuse_native_data_plane", "stub_everywhere"]
 

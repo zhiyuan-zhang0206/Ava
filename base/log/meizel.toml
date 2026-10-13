@@ -1,4 +1,4 @@
-exports = ["process.py", "sinks.py"]
+exports = ["process.py", "sinks.py", "tests"]
 
 [uses]
 "__init__.py" = ["sinks.py"]

@@ -21,7 +21,7 @@ from base.agents.compaction.models import (
     CompactTarget,
 )
 from base.agents.incarnation.native_work_models import NativeWorkTarget
-from base.tests.fixtures.retry_waits import retry_waits as retry_waits
+from base.host.net.tests.retry_waits import retry_waits as retry_waits
 
 TARGET = CompactTarget(
     protocol=1,

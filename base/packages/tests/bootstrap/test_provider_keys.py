@@ -14,7 +14,7 @@ from base.host.env.dotenv_file import upsert_env
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 
-pytest_plugins = ("base.lm.tests.providers.test_provider_plugins",)
+pytest_plugins = ("base.packages.tests.providers.test_provider_plugins",)
 
 
 @pytest.fixture

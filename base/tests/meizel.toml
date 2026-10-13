@@ -1,1 +1,1 @@
-exports = ["fixtures", "impersonation"]
+exports = ["impersonation"]
