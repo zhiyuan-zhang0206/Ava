@@ -7,12 +7,12 @@ instead of just the `tests/` tree, so a test in any package directory gets the
 same isolation guards as one under `tests/`. Ordinary fixture dependencies
 admit configuration and throwaway resources only for their real consumers.
 
-The data-plane fixtures that tests outside `tests/` request are imported by name
-from `provisioning` (after `env_bootstrap`, the first statement of this file), so
+The data-plane and guard fixtures that tests outside `tests/` request are imported by
+name from `provisioning` and `guards` (after `env_bootstrap`, the first statement of this file), so
 the root conftest is their lexical scope: a package's tests reach them as an
 ancestor conftest's fixtures and take no dependency on the `tests/` tree.
-`provisioning` stays a plugin as well, because it owns the session hooks and an
-autouse fixture whose registration order is fixed below. Only non-autouse fixtures
+`provisioning` and `guards` stay plugins as well, because they own session hooks and
+autouse fixtures whose registration order is fixed below. Only non-autouse fixtures
 may be imported here: this module registers before every plugin, which would put
 an autouse fixture ahead of `leak_guard`.
 
@@ -50,9 +50,17 @@ pytest.register_assert_rewrite(
     "tests.fixtures.env_bootstrap",
     "tests.fixtures.static_environment",
     "tests.fixtures.provisioning",
+    "tests.fixtures.guards",
 )
 
 import tests.fixtures.env_bootstrap  # noqa: E402, F401  # pyright: ignore[reportUnusedImport] -- isolation first
+from tests.fixtures.guards import (  # noqa: E402
+    guard_service_readiness,
+    homes_get_their_own_ports,
+    permissions_helper_native_io,
+    postgres_access,
+    redis_access,
+)
 from tests.fixtures.provisioning import (  # noqa: E402
     adb_conn,
     aops_pool,
@@ -78,8 +86,13 @@ __all__ = [
     "db_url",
     "event_bus",
     "gateway_data_plane",
+    "guard_service_readiness",
+    "homes_get_their_own_ports",
     "insert_inbound",
+    "permissions_helper_native_io",
+    "postgres_access",
     "publish_wake",
+    "redis_access",
     "redis_url",
 ]
 

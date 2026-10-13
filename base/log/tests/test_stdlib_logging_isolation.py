@@ -1,4 +1,4 @@
-"""`tests/fixtures/guards.py::stdlib_logging_isolated` — no stdlib logging state outlives a test.
+"""`base/tests/fixtures/stdlib_logging.py::stdlib_logging_isolated` — no stdlib logging state outlives a test.
 
 `base.log._install_stdlib_intercept()` (run for real by the intercept tests) sets the root
 logger to INFO and every first-party logger to DEBUG. The autouse guard used to put the
@@ -20,7 +20,7 @@ import logging
 import pytest
 
 from base.log import _FIRST_PARTY_LOGGER_NAMES, _install_stdlib_intercept, _StdlibInterceptHandler
-from tests.fixtures.guards import stdlib_logging_isolated
+from base.tests.fixtures.stdlib_logging import stdlib_logging_isolated
 
 
 def _all_levels() -> dict[str, int]:

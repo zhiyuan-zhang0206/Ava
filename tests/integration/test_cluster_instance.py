@@ -115,7 +115,7 @@ def isolated_cluster(
     retained_children: list[subprocess.Popen[bytes]],
     postgres_access: None,
     redis_access: None,
-    _test_homes_get_their_own_ports: None,
+    homes_get_their_own_ports: None,
 ) -> Iterator[tuple[int, int]]:
     """A temp $AVA_HOME + cluster identity, yielding (pg_port,
     redis_port). Tears the instance down on exit."""
