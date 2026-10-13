@@ -13,7 +13,7 @@ from agent.ownership.hosted_completion import (
 )
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, observe_hosted_admission
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
-from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
@@ -31,7 +31,7 @@ async def test_completion_requires_original_applied_and_observed_receipt(
 ) -> None:
     agent = agent_row(db_conn)
     original = await admit_owner(aops_pool, agent, database_gate=database_gate)
-    command = _command(db_conn, agent, kind)
+    command = insert_lifecycle_command(db_conn, agent, kind)
     async with async_write_transaction(aops_pool) as conn:
         await accept_lifecycle_intent(conn, agent, incarnation=original)
     assert await pending_hosted_lifecycle_id(aops_pool, original) == command
@@ -81,7 +81,7 @@ async def test_receipt_does_not_infer_completion_from_replacement_status(
 ) -> None:
     agent = agent_row(db_conn)
     original = await admit_owner(aops_pool, agent, database_gate=database_gate)
-    command = _command(db_conn, agent, kind)
+    command = insert_lifecycle_command(db_conn, agent, kind)
     async with async_write_transaction(aops_pool) as conn:
         await accept_lifecycle_intent(conn, agent, incarnation=original)
     db_conn.execute(

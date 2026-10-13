@@ -137,7 +137,7 @@ def test_wire_receipt_requires_explicit_native_fields() -> None:
 def test_same_host_admission_keeps_original_receipt_after_clock_movement(
     linux_birth: dict[str, float | int],
 ) -> None:
-    from base.agents.incarnation.resource_admission import _next
+    from base.agents.incarnation.resource_admission import next_incarnation_resources
     from base.native_process.runtime_incarnation import RuntimeIncarnation
 
     original = ResourceProcess.capture(psutil.Process())
@@ -155,7 +155,9 @@ def test_same_host_admission_keeps_original_receipt_after_clock_movement(
         1,
     )
     linux_birth["birth"] += 60
-    admitted = _next(row, target, ResourceProcess.capture(psutil.Process()), predecessor=False)
+    admitted = next_incarnation_resources(
+        row, target, ResourceProcess.capture(psutil.Process()), predecessor=False
+    )
     assert admitted == state
 
 

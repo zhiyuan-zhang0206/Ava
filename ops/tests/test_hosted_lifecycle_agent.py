@@ -9,7 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.config import settings
 from base.db import Database
@@ -27,7 +27,7 @@ async def test_stale_unapplied_pointer_closes_without_retargeting(
 ) -> None:
     agent_id = agent_row(db_conn)
     old = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    first = _command(db_conn, agent_id, "restart")
+    first = insert_lifecycle_command(db_conn, agent_id, "restart")
     await claim_inbound_batch(aops_pool, agent_id, incarnation=old, work=None)
     db_conn.execute(
         "UPDATE agents_meta SET lease_expires_at=now()-interval '1 second' WHERE id=%s", (agent_id,)
@@ -37,7 +37,7 @@ async def test_stale_unapplied_pointer_closes_without_retargeting(
         aops_pool, agent_id, "claim-test", uuid4(), expected_from="running", db=database
     )
     assert new is not None
-    second = _command(db_conn, agent_id, "restart")
+    second = insert_lifecycle_command(db_conn, agent_id, "restart")
     assert [
         row.id for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=new, work=None)
     ] == [second]
@@ -87,7 +87,7 @@ async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    _command(db_conn, agent_id, "restart")
+    insert_lifecycle_command(db_conn, agent_id, "restart")
     _terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)

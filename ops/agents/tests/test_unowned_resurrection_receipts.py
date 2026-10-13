@@ -22,7 +22,7 @@ from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from tests.components.ops.resurrection_support import force, status, unowned_receipt
 from tests.components.ops.test_resurrection_admission import (
-    _admitted,
+    admit_hosted_incarnation,
     managed_restarted,
     resources,
     restarted,
@@ -53,7 +53,9 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
         authority=config_authority,
         catalog=model_catalog,
     )
-    await _admitted(aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity)
+    await admit_hosted_incarnation(
+        aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
+    )
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (aid,))
     db_conn.commit()
 
@@ -165,7 +167,7 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     )
     before = resources(db_conn, aid)
     with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
-        await _admitted(
+        await admit_hosted_incarnation(
             aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
         )
     assert resources(db_conn, aid) == before

@@ -45,7 +45,7 @@ GRID_ORIGIN = OPS_GRID_ORIGIN
 _LLM_ERROR_EVENTS = list(family_events(LLM_ERROR_FAMILY))
 
 
-def _bucket_starts(anchor: datetime, window_s: int, bucket_s: int) -> list[datetime]:
+def bucket_start_times(anchor: datetime, window_s: int, bucket_s: int) -> list[datetime]:
     """Bucket boundary times covering `[anchor - window, anchor]`, oldest
     first, on the fixed 60s grid. The last bucket is the in-progress one
     (start <= anchor < start + bucket_s), so the panel's live-most point is
@@ -251,7 +251,7 @@ def fetch_ops_series(conn: psycopg.Connection[Any], window: str) -> dict[str, An
     dict — meta + the three groups — ready for `OpsMonitorReport(**data)`."""
     window_s, bucket_s = WINDOWS[window]
     anchor = datetime.now(UTC)
-    bucket_starts = _bucket_starts(anchor, window_s, bucket_s)
+    bucket_starts = bucket_start_times(anchor, window_s, bucket_s)
     grid = _Window(bucket_starts, bucket_s)
     return {
         "meta": {

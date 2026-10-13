@@ -9,7 +9,3 @@ exports = ["exec_owner_protocol.py", "exec_owner_recovery.py", "exec_request_evi
 "native_work.py" = ["native_work_models.py", "resources.py"]
 "resource_admission.py" = ["resources.py"]
 "tests" = ["exec_owner_protocol.py", "exec_owner_recovery.py", "exec_request_evidence.py", "hosted_force.py", "native_restart_models.py", "native_work_models.py", "resource_admission.py", "resources.py"]
-
-[debt.private-name]
-"tests/test_exec_owner_recovery.py -> resource_admission.py#_next" = 1
-"tests/test_exec_request_evidence.py -> exec_request_evidence.py#_report" = 1

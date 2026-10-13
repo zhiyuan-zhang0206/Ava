@@ -742,7 +742,7 @@ def test_decrypt_failure_reports_exit_and_removes_private_key(
     def failed_decrypt(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess([], 7)
 
-    monkeypatch.setattr(backup, "_key_file", key_file)
+    monkeypatch.setattr(backup, "passphrase_key_file", key_file)
     monkeypatch.setattr(backup.subprocess, "run", failed_decrypt)
     output = tmp_path / "backup.dump"
     with pytest.raises(RuntimeError, match=r"^backup decrypt exited 7$"):

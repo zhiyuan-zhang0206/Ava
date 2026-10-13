@@ -188,7 +188,7 @@ def _borrowed_agent_id() -> int | None:
 def _assert_detached() -> None:
     """After a detach the process holds no exec slot and no attached config."""
     assert not process_context.in_exec_turn()
-    assert _settings._attached() is None
+    assert _settings.attached_agent_view() is None
 
 
 def test_attach_refuses_inside_an_exec_turn(

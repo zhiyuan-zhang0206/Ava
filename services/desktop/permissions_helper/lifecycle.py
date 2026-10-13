@@ -101,7 +101,7 @@ _TIMEOUTS_S = {
 }
 
 # Stands in for the exit status of a call the bound killed. 124 is `timeout(1)`'s
-# convention and none of the tools above uses it, so `_probe` can hand a hang back
+# convention and none of the tools above uses it, so `run_readonly_query` can hand a hang back
 # as a result instead of an exception without colliding with a real exit code.
 _TIMED_OUT_RC = 124
 
@@ -165,7 +165,9 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
     return proc
 
 
-def _probe(cmd: list[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[bytes]:
+def run_readonly_query(
+    cmd: list[str], *, timeout: float | None = None
+) -> subprocess.CompletedProcess[bytes]:
     """Run a read-only query, folding a timeout into the returned result.
 
     Every caller here asks a yes/no question -- is the keychain open, is this
@@ -200,7 +202,7 @@ def _signing_keychain_search_list_note() -> str:
     """Describe whether the signing keychain is in the user search list."""
     try:
         keychain = str(_keychain_path())
-        proc = _probe(["security", "list-keychains", "-d", "user"])
+        proc = run_readonly_query(["security", "list-keychains", "-d", "user"])
         if proc.returncode != 0:
             return "The user keychain search list is unreadable."
         listed = {
@@ -225,7 +227,7 @@ def _keychain_lock_reason() -> str | None:
     that into a message that names the fix. `security` cannot unlock it here: the
     only non-interactive form takes the password on argv, where every process on
     the box can read it, so the unlock stays a human step."""
-    proc = _probe(["security", "show-keychain-info", str(_keychain_path())])
+    proc = run_readonly_query(["security", "show-keychain-info", str(_keychain_path())])
     if proc.returncode == 0:
         return None
     detail = proc.stderr.decode(errors="replace").strip() or f"exit {proc.returncode}"
@@ -256,7 +258,7 @@ def _interactive_signing_reason() -> str | None:
     with tempfile.TemporaryDirectory() as td:
         scratch = Path(td) / "acl-probe"
         scratch.write_bytes(b"\x00")
-        rc = _probe(
+        rc = run_readonly_query(
             ["codesign", "--sign", _CERT_CN, str(scratch)], timeout=_ACL_PROBE_TIMEOUT_S
         ).returncode
     if rc != _TIMED_OUT_RC:
@@ -274,15 +276,15 @@ def _signed_with_stable_cert(app: Path) -> bool:
     `codesign --display` writes the signing chain to stderr; the stable
     certificate is self-signed, so it appears there as the sole `Authority=`
     line, which an ad-hoc signature has none of."""
-    proc = _probe(["codesign", "--display", "--verbose=2", str(app)])
+    proc = run_readonly_query(["codesign", "--display", "--verbose=2", str(app)])
     if proc.returncode != 0:
         return False
     return f"Authority={_CERT_CN}" in proc.stderr.decode(errors="replace")
 
 
-def _expected_dr() -> str:
+def pinned_designated_requirement() -> str:
     """Return the designated requirement pinned to the named identity's SHA-1."""
-    listing = _probe(["security", "find-identity", "-p", "codesigning"])
+    listing = run_readonly_query(["security", "find-identity", "-p", "codesigning"])
     if listing.returncode != 0:
         detail = listing.stderr.decode(errors="replace").strip() or f"exit {listing.returncode}"
         raise PermissionsHelperBuildError(f"security find-identity failed: {detail}")
@@ -303,7 +305,7 @@ def _source_content_hash() -> str:
     digest.update(_ENTITLEMENTS.read_bytes())
     for path in sorted(p for p in _LOCALES.rglob("*") if p.is_file()):
         digest.update(path.relative_to(_LOCALES).as_posix().encode() + path.read_bytes())
-    digest.update(_expected_dr().encode())
+    digest.update(pinned_designated_requirement().encode())
     # A signing-policy change is a new artifact, never an in-place re-sign.
     digest.update(" ".join(hardened_runtime.SIGNING_OPTIONS).encode())
     return digest.hexdigest()
@@ -326,7 +328,7 @@ def _read_dr(app: Path) -> str:
 def _verify_dr(app: Path) -> str:
     """Verify and return the app's exact designated requirement."""
     actual = _read_dr(app)
-    expected = _expected_dr()
+    expected = pinned_designated_requirement()
     if actual != expected:
         raise PermissionsHelperBuildError(
             "permissions helper designated requirement drift is a macOS permissions reset risk; "
@@ -339,7 +341,7 @@ def preflight_signing_smoke() -> None:
     """Prove codesign and designated-requirement recovery before a rebuild."""
     refusal = "signing smoke failed — refusing to rebuild/deploy; codesign or keychain unusable"
     try:
-        expected_dr = _expected_dr()
+        expected_dr = pinned_designated_requirement()
         with tempfile.TemporaryDirectory() as td:
             scratch = Path(td) / "signing-smoke"
             scratch.write_bytes(b"\x00")
@@ -382,7 +384,7 @@ def _app_executable(app: Path) -> Path:
 def _is_valid_stable_app(app: Path) -> bool:
     return (
         _app_executable(app).exists()
-        and _probe(["codesign", "--verify", str(app)]).returncode == 0
+        and run_readonly_query(["codesign", "--verify", str(app)]).returncode == 0
         and _signed_with_stable_cert(app)
     )
 
@@ -406,7 +408,7 @@ def ensure_signing_cert() -> None:
     self-signed cert -- trust only governs Gatekeeper verification, not signing --
     so no trust-settings change (and its GUI auth prompt) is needed. Idempotent:
     a present identity is left as-is."""
-    listing = _probe(["security", "find-identity", "-p", "codesigning"])
+    listing = run_readonly_query(["security", "find-identity", "-p", "codesigning"])
     if listing.returncode != 0:
         raise PermissionsHelperBuildError(
             f"security find-identity failed: {listing.stderr.decode(errors='replace').strip()}"
@@ -525,7 +527,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     app = build_dir / "AvaPermissionsHelper.app"
     exe = _app_executable(app)
     source_hash = _source_content_hash()
-    expected_dr = _expected_dr()
+    expected_dr = pinned_designated_requirement()
     state = read_build_state(state_path)
     if state is not None and state["dr"] != expected_dr:
         sys.stderr.write(

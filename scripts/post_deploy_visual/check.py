@@ -125,7 +125,7 @@ def _write_json(path: Path, value: object) -> None:
     temporary.replace(path)
 
 
-def _cookie_file(cookie_file: Path) -> Path:
+def resolved_cookie_file(cookie_file: Path) -> Path:
     if not cookie_file.is_file():
         raise FileNotFoundError(f"cookie file does not exist: {cookie_file}")
     mode = stat.S_IMODE(cookie_file.stat().st_mode)
@@ -424,7 +424,7 @@ def run_host(args: argparse.Namespace) -> int:
     cookie_value = inherited_process_env().get("AVA_VISUAL_GATE_COOKIE_FILE")
     if not cookie_value:
         raise ValueError("AVA_VISUAL_GATE_COOKIE_FILE is required")
-    cookie_file = _cookie_file(Path(cookie_value).resolve())
+    cookie_file = resolved_cookie_file(Path(cookie_value).resolve())
     health_base = args.health_url or args.base_url.rstrip("/")
     session_precheck(health_base, cookie_file)
     health = _health_payload(health_base)

@@ -27,7 +27,7 @@ from base.db import Database
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from ops.agent_pause import resume_agents
-from tests.components.agent.test_maintenance import WHEN, _agent
+from tests.components.agent.test_maintenance import WHEN, maintenance_agent
 from tests.components.agent.test_maintenance import isolate as isolate
 
 
@@ -78,7 +78,7 @@ def _persist_end(conn: psycopg.Connection[Any], agent: int, *, pending: str | No
 
 
 def _retired(conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity) -> int:
-    agent = _agent(conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(conn, machine_name=machine_identity.name())
     conn.execute(
         "UPDATE agents_meta SET status='idling',runtime_kind='hosted',runtime_owner=%s,"
         "runtime_generation=%s,lease_expires_at=%s WHERE id=%s",

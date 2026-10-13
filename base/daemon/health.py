@@ -354,8 +354,8 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
     that trying to read one produced.
 
     The single place that decides how much of a 200 has to be true before any
-    identity check even gets to run — shared by ``_probe_daemon`` and
-    ``_probe_home`` so the two cannot drift on "is this an Ava health endpoint at
+    identity check even gets to run — shared by ``probe_daemon_identity`` and
+    ``probe_unit_home`` so the two cannot drift on "is this an Ava health endpoint at
     all". A foreign process on the port can return anything, so the body is parsed
     defensively and the mismatch reported rather than raised out of a cron-invoked
     healthcheck.
@@ -405,19 +405,19 @@ def probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
     """Probe a health endpoint that carries ``home`` but no ``name``/``pid``,
     ALWAYS returning a verdict.
 
-    The total wrapper (same contract as ``probe_daemon``); ``_probe_home`` is the
+    The total wrapper (same contract as ``probe_daemon``); ``probe_unit_home`` is the
     probe. Used for the gateway's ``/api/health``, and it is the probe where
     losing a verdict costs most: the gateway is what the cluster health probe
     polls, with ``--auto-rollback --threshold 3`` armed against it.
     """
     try:
-        return _probe_home(url, timeout_s=timeout_s)
+        return probe_unit_home(url, timeout_s=timeout_s)
     except Exception as exc:
         _log.exception("[probe_home] %s probe raised unexpectedly; treating as down", url)
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
-def _probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
+def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
     """2xx from ``url`` AND a ``home`` matching this unit's ``$AVA_HOME``.
 
     The same failure mode ``probe_daemon`` exists for — a 200 only proves
@@ -443,7 +443,7 @@ def _probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
     and is the property an impostor from another unit actually fails.
 
     A ``home`` mismatch is ``PORT_TAKEN`` for the same reason it is in
-    ``_probe_daemon``: the occupant lives in another unit's session, so no
+    ``probe_daemon_identity``: the occupant lives in another unit's session, so no
     respawn this unit performs can free the port.
     """
     payload = _health_payload(url, timeout_s)
@@ -464,7 +464,7 @@ def probe_daemon(
     """Probe a daemon's ``/healthz`` and verify the answering process is ours,
     ALWAYS returning a verdict.
 
-    This is the total wrapper; ``_probe_daemon`` below is the probe itself. The
+    This is the total wrapper; ``probe_daemon_identity`` below is the probe itself. The
     watchdog's contract needs a ``DaemonProbe``, not an exception: it isolates
     each check, so a raising probe does not take the round down — it just means
     the service is never judged alive-or-dead, **so no restart is ever
@@ -479,7 +479,7 @@ def probe_daemon(
     miss is caught here, logged with a traceback, and reported as down.
     """
     try:
-        return _probe_daemon(name, url, pidfile=pidfile, timeout_s=timeout_s)
+        return probe_daemon_identity(name, url, pidfile=pidfile, timeout_s=timeout_s)
     except Exception as exc:
         # Down, not "unknown": a verdict the watchdog can act on beats silence.
         # An unforeseen probe failure is not evidence of a healthy daemon.
@@ -487,7 +487,7 @@ def probe_daemon(
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
-def _probe_daemon(
+def probe_daemon_identity(
     name: str, url: str, *, pidfile: Path, timeout_s: float = PROBE_TIMEOUT_S
 ) -> DaemonProbe:
     """Probe a daemon's ``/healthz`` AND verify the answering process is ours.

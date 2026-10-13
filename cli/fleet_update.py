@@ -159,7 +159,7 @@ def ssh(alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
     return process.wait()
 
 
-def _hold(text: str) -> tuple[str, str | None]:
+def split_hold_text(text: str) -> tuple[str, str | None]:
     data = json.loads([line for line in text.splitlines() if line.startswith("{")][-1])
     hold = data["hold"]
     held = hold["maintenance"]
@@ -209,7 +209,7 @@ class Session:
 
 def _host_refusals(alias: str, facts: dict[str, str]) -> list[str]:
     hold = facts["hold"] or '{"hold": {"status": "unreadable", "maintenance": null}}'
-    status, phase = _hold(hold)
+    status, phase = split_hold_text(hold)
     reasons: list[str] = []
     if facts["dirty"] != "0":
         reasons.append(f"{alias}: $HOME/.ava/source has uncommitted changes")
@@ -319,7 +319,7 @@ def down(s: Session, args: argparse.Namespace) -> None:
         try:
             s.run(alias, f"{HOME}; {AVA} stop -y --timeout {args.stop_timeout}")
             if not s.dry_run:
-                status, phase = _hold(s.run(alias, _STATUS, effect=False))
+                status, phase = split_hold_text(s.run(alias, _STATUS, effect=False))
                 if (status, phase) != ("paused", "stopped"):
                     raise FailedError(f"{alias}: stop left {status}/{phase}")  # noqa: TRY301
         except FailedError as exc:
@@ -449,7 +449,10 @@ def up(s: Session, args: argparse.Namespace) -> None:
     for alias in [args.gateway, *args.runner]:
         macos = s.os[alias] == "Darwin"
         s.run(alias, gui_oneshot(alias, args.start_timeout) if macos else f"{HOME}; {AVA} start")
-        if not s.dry_run and (hold := _hold(s.run(alias, _STATUS, effect=False)))[0] not in _FREE:
+        if (
+            not s.dry_run
+            and (hold := split_hold_text(s.run(alias, _STATUS, effect=False)))[0] not in _FREE
+        ):
             raise FailedError(f"{alias}: start left maintenance {hold}")
     program = f"{_PYTHON} -"
     if s.dry_run:

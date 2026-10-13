@@ -29,4 +29,3 @@ exports = ["agent_traceback.py", "claim", "exec", "hooks", "interrupt.py", "llm"
 
 [debt.private-name]
 "tests/llm_helpers/test_security_findings.py -> exec/node.py#_exec_node_impl" = 1
-"tests/prompt/test_system_prompt_sections.py -> prompt/system_prompt.py#_workspace_section" = 1

@@ -57,12 +57,6 @@ exports = ["adapters"]
 "test_timeline_outbox.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
 "test_timeline_selection.py#monkeypatch.setattr services.entrypoints.im_bridge.core.IMBridgeCore._apply_selection" = 2
 
-[debt.private-name]
-"im_bridge_core/test_push_snapshot_watermark_is_per_chat.py -> test_im_bridge_core.py#_core" = 1
-"im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_core" = 1
-"im_bridge_core/test_send_message_retries_through_gateway_rollout.py -> test_im_bridge_core.py#_text" = 1
-"test_im_bridge_watermark.py -> test_im_bridge_core.py#_core" = 1
-
 [debt.unresolved-patch]
 "test_alert_outbound.py#monkeypatch.setattr service.store.outbound.insert_intent" = 1
 "test_notice_bridge.py#monkeypatch.setattr bridge._open_notices" = 1
