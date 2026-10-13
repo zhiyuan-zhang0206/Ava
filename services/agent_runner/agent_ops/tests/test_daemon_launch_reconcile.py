@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.api_contracts.launch_retry import LaunchReconciled, LaunchReconcileRequest
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -14,7 +15,6 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import rpc
 from ops.rpc_schemas import OpStatus
-from ops.rpc_schemas.launch_retry import LaunchReconciled, LaunchReconcileRequest
 from services.agent_runner.agent_ops import daemon
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
