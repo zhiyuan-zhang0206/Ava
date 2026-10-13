@@ -30,6 +30,7 @@ from base.agents.context import AvaContext
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity as _MachineIdentity
 from base.config import ConfigBoot
+from base.packages.plugins.loading import StateGate
 
 from .sdk_surface import process_context
 
@@ -45,7 +46,6 @@ from .sdk_surface import process_context
 # contextvars, the SDK-disable entries) are imported from their own module.
 from .sdk_surface.const import const as const
 from .sdk_surface.discovery import agent_visible_names as agent_visible_names
-from .sdk_surface.extensions import StateGate
 from .sdk_surface.help import help as help
 from .sdk_surface.plugins import FrameworkNamespaceConflictError as FrameworkNamespaceConflictError
 from .sdk_surface.plugins import InvalidNamespaceMemberError as InvalidNamespaceMemberError
