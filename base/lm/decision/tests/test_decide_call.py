@@ -205,6 +205,8 @@ async def test_each_call_writes_one_priced_usage_row_with_no_output_tokens(
     assert extra["model"] == MODEL
     assert extra["in_total"] == 2_000_000
     assert extra["out_total"] == 0
+    assert {"cache_read", "cache_write_5m", "cache_write_1h", "cache_pct"}.isdisjoint(extra)
+    assert "cached=" not in record["message"]
     assert extra["usage_kind"] == "injection_check"
     assert extra["source"] == "web.fetch"
     assert extra["agent_id"] == 7

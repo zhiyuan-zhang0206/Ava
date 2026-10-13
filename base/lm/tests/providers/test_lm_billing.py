@@ -276,3 +276,40 @@ def test_emit_billing_event_absorbs_tracing_failure(monkeypatch: pytest.MonkeyPa
         cost_usd=0.0,
         usage_kind="chat",
     )
+
+
+@pytest.mark.parametrize("path", ["message", "durable"])
+@pytest.mark.parametrize("cached", [None, 0])
+def test_billing_distinguishes_unmetered_cache_from_reported_zero(
+    model_catalog: ModelCatalog,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    cached: int | None,
+) -> None:
+    from base.lm.usage import emit_billing_from_message, log_usage_from_message
+
+    tracer = _enable_tracing(monkeypatch)
+    message = AIMessage(
+        content="answer",
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 50,
+            "total_tokens": 1050,
+            "input_token_details": {} if cached is None else {"cache_read": cached},
+        },
+    )
+    if path == "message":
+        emit_billing_from_message(
+            message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog
+        )
+    else:
+        log_usage_from_message(
+            message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog
+        )
+    [span] = tracer.spans
+    assert span.attributes["ava.billing.tokens_in"] == 1000
+    assert span.attributes["ava.billing.cost"] > 0
+    if cached is None:
+        assert "ava.billing.cache_read_tokens" not in span.attributes
+    else:
+        assert span.attributes["ava.billing.cache_read_tokens"] == 0

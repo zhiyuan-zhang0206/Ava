@@ -701,6 +701,22 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     expect(screen.queryByText("7")).toBeNull();
   });
 
+  it("unmetered cache shows N/A while tokens and cost remain visible", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.stats = {
+      live_count: 1, window_hours: 24,
+      tokens: { input: 6000, output: 0, cache_read: 0, cache_hit_pct: null },
+      cost_usd: 3, avg_turn_seconds: null, warnings: 0, errors: 0,
+      alert_classes_active: 0, alert_classes_dismissed: 0, plugin_stats: [],
+    };
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+    expect(screen.getByText("N/A")).toBeTruthy();
+    expect(screen.getByText("6.0k")).toBeTruthy();
+    expect(screen.getByText("$3.00")).toBeTruthy();
+    expect(screen.queryByText("0.00%")).toBeNull();
+  });
+
   it("dismissed classes do not replace the Warning / Error event totals", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
