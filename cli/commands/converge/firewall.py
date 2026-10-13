@@ -16,7 +16,7 @@ not degrade to "unfixed"; it hangs the bring-up, which is strictly worse than th
 defect it was trying to repair, and on a headless host it hangs it invisibly.
 `sudo -n` either runs the fallback mutation or fails immediately, and a failure
 degrades to the historical behavior — print the exact manual commands for the
-operator. See `base.host.macos_firewall` for the platform compatibility contract.
+operator. See `base.host.system.macos_firewall` for the platform compatibility contract.
 
 Because it reports rather than enforces, it warns and returns instead of raising:
 a missing firewall rule does not stop this host serving loopback, `ava start`
@@ -26,13 +26,21 @@ over something it cannot fix would be its own outage.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
-from base.host import macos_firewall as fw
-from base.host.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
+from base.cluster.machine import MachineIdentity, MachineNameMissing
+from base.host.system import macos_firewall as fw
+from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 from cli.commands.converge.spec import ConvergeCtx
+
+
+def configured_machine_name(machine: MachineIdentity) -> str | None:
+    """The configured Ava machine name (``AVA_MACHINE_NAME``), or None when unset."""
+    with contextlib.suppress(MachineNameMissing):
+        return machine.name()
+    return None
 
 
 def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
@@ -123,12 +131,12 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     # running interpreter through the launch helpers (catching a venv the globs
     # do not name), the manifest carries the whole declarative whitelist.
     required = {p.resolve() for p in audit.missing}
-    required.update(fw.manifest_paths(machine=ctx.machine))
+    required.update(fw.manifest_paths(machine_name=configured_machine_name(ctx.machine)))
     required = tuple(sorted(required, key=str))
 
     # Prune before adding: a stale rule still holds its bundle identifier, and
     # macOS 15's ALF daemon silently ignores an --add whose identifier already
-    # has a rule (see base.host.macos_firewall). Removing the stale rule first lets
+    # has a rule (see base.host.system.macos_firewall). Removing the stale rule first lets
     # the replacement version's rule persist in the same pass.
     pruned = fw.prune_stale_rules(rules)
     if pruned.removed:

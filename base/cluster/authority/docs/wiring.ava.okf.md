@@ -27,7 +27,7 @@ the ledger's credential digest:
 ## Machine API tokens
 
 The generation's API tokens gate the HTTP API and `/ops`:
-[[base/cluster/authority/docs/api-tokens.ava.okf.md|Machine API tokens]].
+[[base/host/db_authority/docs/api-tokens.ava.okf.md|Machine API tokens]].
 
 ## Remote agent-runner units
 
@@ -46,7 +46,7 @@ login. `unit` is the only path that carries a login to another home:
   Refused on a pure runner, a remote-managed plane (no generation exists there),
   a home without an active generation.
   Nothing in the bundle is the unit's own; the login and tokens are shared
-  ([what a bundle exposes](unit-bundle.ava.okf.md)).
+  ([what a bundle exposes](../../../host/db_authority/docs/unit-bundle.ava.okf.md)).
 - **Install** (unit, `ava init --db-capability FILE` for the first join and
   `ava cluster db-authority install-unit FILE` for a later bundle, key in
   `AVA_DB_CAPABILITY_KEY`, popped at once): `open_bundle` refuses anything that
@@ -71,7 +71,7 @@ login. `unit` is the only path that carries a login to another home:
 ## Unit bundle exposure
 
 What a bundle carries and who shares it:
-[unit bundle exposure](unit-bundle.ava.okf.md).
+[unit bundle exposure](../../../host/db_authority/docs/unit-bundle.ava.okf.md).
 
 ## Wiring
 

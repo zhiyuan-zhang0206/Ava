@@ -19,9 +19,9 @@ from dataclasses import dataclass
 
 import base.deploy.progress_timeout as deploy
 import base.native_process.stop_timing as stop
-from base.cluster.authority import unit
 from base.config import settings
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
+from base.host.db_authority import unit
 
 # --- schedule supervision family ---------------------------------------------
 # Value lives in base/deploy/schedule_timing.py: the gateway's schedule manager
@@ -91,7 +91,7 @@ CLOCKS: dict[str, Clock] = {
         "the root health monitor startup grace for optional services",
     ),
     # --- unit-bundle family (default in base/deploy/progress_timeout.py, cap in
-    # base/cluster/authority/unit.py) ---
+    # base/host/db_authority/unit.py) ---
     "UNIT_BUNDLE_TTL_S": Clock(
         "unit-bundle",
         lambda: deploy.UNIT_BUNDLE_TTL_S,

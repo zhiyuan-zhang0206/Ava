@@ -35,12 +35,13 @@ from base.cluster import (
     ensure_pgvector_extension,
     provision_database,
 )
-from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+from base.cluster.authority import ensure_groups
 from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
 from base.deploy.schema.migrations import apply_pending_migrations, required_migration_set
+from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.paths.home import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors

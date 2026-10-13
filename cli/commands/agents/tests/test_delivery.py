@@ -37,10 +37,10 @@ def active(
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
 ) -> ActiveSession:
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
     window, attempts = getattr(request, "param", (180, 2))
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     (tmp_path / ".env").write_text(
         f"AVA_IMPERSONATION_ACK_WINDOW_SECONDS={window}\n"
         f"AVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS={attempts}\n"

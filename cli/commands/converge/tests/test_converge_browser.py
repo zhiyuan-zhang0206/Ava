@@ -53,7 +53,7 @@ def test_enabled_runs_preflight(
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda: None)
+    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(bp, "ensure_browser_profile", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     cv._ensure_browser(ctx)
 
@@ -77,7 +77,7 @@ def test_capable_offers_profile_seed_with_tty_flag(
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda: None)
+    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cv.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(cv.sys.stdout, "isatty", lambda: False)
     seen: list[bool] = []
@@ -108,7 +108,7 @@ def test_incapable_host_does_not_offer_profile_seed(
     ctx.config.set_field("browser_enabled", True)
     import services.desktop.browser.profile as bp
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda: "no display")
+    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: "no display")  # pyright: ignore[reportUnknownArgumentType]
 
     def _must_not_call(**_k: object) -> None:
         raise AssertionError("profile seed offered on an incapable host")
@@ -134,7 +134,7 @@ def test_enabled_but_incapable_warns_not_raises(
         command_runtime=command_runtime,
     )
     ctx.config.set_field("browser_enabled", True)
-    monkeypatch.setattr(cv, "browser_incapability", lambda: "no display")
+    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome: "no display")  # pyright: ignore[reportUnknownArgumentType]
     cv._ensure_browser(ctx)
     stderr = capsys.readouterr().err
     assert "not applicable" in stderr
@@ -159,7 +159,9 @@ def test_enabled_with_missing_npx_prints_the_repair_box(
     )
     ctx.config.set_field("browser_enabled", True)
     monkeypatch.setattr(
-        cv, "browser_incapability", lambda: "no npx (install Node.js for chrome-devtools-mcp)"
+        cv,
+        "browser_incapability",
+        lambda _chrome: "no npx (install Node.js for chrome-devtools-mcp)",  # pyright: ignore[reportUnknownArgumentType]
     )
     cv._ensure_browser(ctx)
     assert "Install Node.js" in capsys.readouterr().err
@@ -192,7 +194,7 @@ def test_steps_read_their_context_owner_and_later_overlay(
     second.config.set_field("browser_enabled", True)
     probed: list[bool] = []
 
-    def capable() -> None:
+    def capable(_chrome: str | None) -> None:
         probed.append(True)
 
     def seed(*, interactive: bool) -> None:

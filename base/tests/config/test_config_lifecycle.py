@@ -18,7 +18,7 @@ from base.config.base import EnvSettings
 
 def _registry_with(model: type[EnvSettings]) -> None:
     """Run `_build_registry` over one synthetic domain and nothing else."""
-    from base.host.env import config_registry
+    from base.config import config_registry
 
     domains = (("synthetic", "Synthetic", model, "agent-runner"),)
     original = config_registry.DOMAIN_MODELS

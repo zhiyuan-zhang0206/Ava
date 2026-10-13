@@ -31,10 +31,11 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.env.agent_slices import PluginConfigView
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
-from base.packages.plugins.config_view import PluginConfigView, resolve_agent_plugin_pins
+from base.packages.plugins.config_view import resolve_agent_plugin_pins
 
 __all_for_ava__ = ["attach", "Attachment"]
 

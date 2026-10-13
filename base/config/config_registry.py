@@ -5,16 +5,15 @@ classes (class metadata only — no Settings instantiation, so `dotenv_boot`,
 which runs before Settings exists, can consume the registry's projections
 through `base/host/env/registry.py` without a timing dependency).
 
-It lives OUTSIDE the `base.config` package on purpose: importing any
-`base.config.*` submodule executes `base/config/__init__.py`, which normally
-constructs the Settings singleton (reads env / fetches from the gateway). The
-settings-lite `AVA_CONFIG_FETCH=skip` mode defers that construction, and the
-registry must stay importable before either path has a current value. The
-sub-model class imports are therefore deferred into the build (first use), so
-importing this module or `base/host/env/registry.py` never touches the package —
-the build completes against a partially-initialized `base.config` when one is
-already in flight (for example, the standalone `load_ava_env()` boot path), and
-the double build that results is idempotent.
+It sits in `base.config`, but importing it never constructs Settings: the package
+boots lite (`base/config/_lite.py`), which defers the Settings build, and the
+module-level `_FIELDS` / `FIELD_INFOS` faces of `base.config` are served from this
+registry without upgrading. The sub-model class imports are deferred into the build
+(first use); the build completes against a partially-initialized `base.config` when
+one is already in flight (for example, the standalone `load_ava_env()` boot path),
+and the double build that results is idempotent. Code that must not import
+`base.config` at all (the `ava config` repair path) takes the wire vocabulary it
+needs from `base/api_contracts/config.py`, not from here.
 
 Settings fields and their `json_schema_extra` metadata are declared on the
 owning domain sub-model. This registry exposes those declarations; non-Settings
@@ -34,6 +33,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import UnionType
 from typing import Any, Literal, Protocol, Union, cast, get_args, get_origin
+
+from base.api_contracts.config import Capability
 
 
 class _FieldInfoLike(Protocol):
@@ -56,8 +57,8 @@ class _FieldInfoLike(Protocol):
 # capabilities on a box share). DISPLAY grouping only — orthogonal to `scope`,
 # which alone drives distribution + write routing.
 _ALLOWED_CAPABILITIES = frozenset({"gateway", "agent-runner", "common"})
-# The resolved capability of a field — the top-level config-panel section.
-Capability = Literal["gateway", "agent-runner", "common"]
+# The resolved capability of a field — the top-level config-panel section
+# (declared in the wire contract, which must stay importable without `base.config`).
 
 # (domain attr, frontend group label, sub-model class, default capability).
 # Order = field render order. The default capability owns every field in the

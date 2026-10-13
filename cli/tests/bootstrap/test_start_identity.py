@@ -381,7 +381,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
 ) -> None:
     """Bootstrap serves no login, so a runner's first start needs its unit
     capability; without one it refuses before any identity is written."""
-    from base.cluster.authority import unit
+    from base.host.db_authority import unit
 
     args = _runner_start(inputs, monkeypatch)
     with pytest.raises(ValueError, match="holds no database capability"):

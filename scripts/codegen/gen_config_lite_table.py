@@ -29,7 +29,7 @@ columns are never read as separate units. A data file carries no line budget
 named surfaces consumers import.
 
 Index and reader live OUTSIDE the ``base.config`` package on purpose, like
-``base/host/env/config_registry.py``: ``base/host/env/registry.py`` (the env-authority
+``base/config/config_registry.py``: ``base/host/env/registry.py`` (the env-authority
 projections that ``load_ava_env`` runs before Settings exists) imports it, and a
 package submodule import would execute the ``base.config`` facade first —
 re-entering the boot it is part of.
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     enter_scratch_home()
 _ensure_index_present()
 
-from base.host.env.config_registry import (  # noqa: E402 — must follow the bootstrap above
+from base.config.config_registry import (  # noqa: E402 — must follow the bootstrap above
     _build_registry,
     field_alias,
     schema_extra,

@@ -20,13 +20,13 @@ def test_assert_capable_raises_reason_with_tag(monkeypatch: pytest.MonkeyPatch) 
     """assert_browser_capable raises the browser_incapability reason, prefixed
     with the ava-browser tag, so a launch on an incapable host dies loudly with
     the same wording `ava status` shows."""
-    monkeypatch.setattr(bd, "browser_incapability", lambda: "no display (headless server)")
+    monkeypatch.setattr(bd, "browser_incapability", lambda _chrome: "no display (headless server)")  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(RuntimeError, match=r"ava-browser: no display"):
         bd.assert_browser_capable()
 
 
 def test_assert_capable_ok_when_capable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bd, "browser_incapability", lambda: None)
+    monkeypatch.setattr(bd, "browser_incapability", lambda _chrome: None)  # pyright: ignore[reportUnknownArgumentType]
     bd.assert_browser_capable()  # no raise
 
 
@@ -51,7 +51,7 @@ def test_main_asserts_capable_then_execvps_chrome(
         "_cdp_reachable",
         lambda _p: (order.append("port"), False)[1],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(bd, "resolve_chrome_binary", lambda: "/chrome")
+    monkeypatch.setattr(bd, "resolve_chrome_binary", lambda _chrome: "/chrome")  # pyright: ignore[reportUnknownArgumentType]
 
     def _profile() -> Path:
         order.append("profile")

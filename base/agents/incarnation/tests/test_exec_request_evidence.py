@@ -184,7 +184,7 @@ def test_bounded_age_resolves_profile_safely_without_the_sandbox_domain(
 ) -> None:
     """A sandbox-less process reads the cluster .env, then the declared default."""
     from base import config as config_module
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
     class _NoSandbox:
         def has_domain(self, _name: str) -> bool:
@@ -192,11 +192,11 @@ def test_bounded_age_resolves_profile_safely_without_the_sandbox_domain(
 
     monkeypatch.setattr(config_module, "settings", _NoSandbox())
     monkeypatch.setattr(
-        runtime_config, "read_env_aliases", lambda: {"AVA_EXEC_NODE_TIMEOUT_SECONDS": "600"}
+        dotenv_file, "read_env_aliases", lambda: {"AVA_EXEC_NODE_TIMEOUT_SECONDS": "600"}
     )
     assert exec_request_evidence._exec_node_ceiling_s() == 600.0
 
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
     assert exec_request_evidence._exec_node_ceiling_s() == 1200.0
 
 

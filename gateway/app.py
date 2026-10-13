@@ -68,12 +68,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
 from base.api_contracts.agent_contract import AvaAgentError
-from base.cluster.authority.api import AcceptanceCache
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimiter
 from base.config import ConfigBoot, Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.events.live.bus import EventBus
+from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import cookie_name
 from base.host.system.cron import register_os_cron
 from base.packages.plugin_providers import build_model_catalog

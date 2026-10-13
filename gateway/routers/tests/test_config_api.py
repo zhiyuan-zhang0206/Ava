@@ -25,10 +25,10 @@ from fastapi.testclient import TestClient
 
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
-from base.config import settings
+from base.config import runtime_config, settings
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
-from base.host.env import runtime_config
+from base.host.env import dotenv_file
 from gateway.app import app
 from gateway.routers.configuration import runtime as config_router
 from ops.cluster import rpc as _cluster_rpc
@@ -141,7 +141,7 @@ def _stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Patches the predicate as bound in `config_validators`: no real display / Chrome / npx.
     """
-    monkeypatch.setattr(config_validators, "browser_capable", lambda: True)
+    monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome: True)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_get_self_host_fields_carry_capability_hint(_stub_browser_capability: None) -> None:
@@ -168,7 +168,7 @@ def test_get_self_host_fields_carry_capability_hint(_stub_browser_capability: No
 
 def test_get_self_browser_disabled_when_no_display(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET self with no display: browser_enabled.can_enable is False + a reason."""
-    monkeypatch.setattr(config_validators, "browser_capable", lambda: False)
+    monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(config_validators, "display_available", lambda: False)
     with TestClient(app) as client:
         resp = client.get("/api/config")
@@ -342,7 +342,7 @@ def _clean_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     so a PUT in these tests writes there instead of the real unit .env. The PUT no
     longer mutates the in-memory Settings (strict persist-and-signal), so there is
     nothing to save/restore."""
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     return tmp_path
 
 
@@ -367,7 +367,7 @@ def test_put_self_returns_write_result_and_routes_scopes(_clean_overrides: Path)
     # Both landed in this gateway's .env (the single store): cluster llm_model +
     # host ops_concurrency.
     assert runtime_config.env_set_field_names() == {"llm_model", "ops_concurrency"}
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert aliases["AVA_MODEL"] == "put-cluster"
     assert aliases["AVA_OPS_CONCURRENCY"] == "4"
 
@@ -385,7 +385,7 @@ def test_put_self_capability_failure_writes_nothing(_clean_overrides: Path) -> N
     assert body["results"]["ops_concurrency"]["ok"] is False
     assert body["results"]["ops_concurrency"]["reason"]
     # atomic: nothing landed in .env
-    assert runtime_config.read_env_aliases() == {}
+    assert dotenv_file.read_env_aliases() == {}
 
 
 def test_put_rejects_agent_scope_field(_clean_overrides: Path) -> None:
@@ -400,7 +400,7 @@ def test_put_rejects_agent_scope_field(_clean_overrides: Path) -> None:
     assert resp.status_code == 400, resp.text
     assert "unknown or read-only" in resp.json()["detail"]
     # nothing written to .env
-    assert runtime_config.read_env_aliases() == {}
+    assert dotenv_file.read_env_aliases() == {}
 
 
 def test_put_rejects_unknown_field(_clean_overrides: Path) -> None:
@@ -416,7 +416,7 @@ def test_put_accepts_valid_enum_value(_clean_overrides: Path) -> None:
         resp = client.put("/api/config", json={"agent_reply_reminder_cadence": "every_time"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
-    assert runtime_config.read_env_aliases()["AVA_AGENT_REPLY_REMINDER_CADENCE"] == "every_time"
+    assert dotenv_file.read_env_aliases()["AVA_AGENT_REPLY_REMINDER_CADENCE"] == "every_time"
 
 
 def test_put_rejects_invalid_enum_value(_clean_overrides: Path) -> None:
@@ -426,7 +426,7 @@ def test_put_rejects_invalid_enum_value(_clean_overrides: Path) -> None:
         resp = client.put("/api/config", json={"agent_reply_reminder_cadence": "sometimes"})
     assert resp.status_code == 400, resp.text
     assert "invalid enum value" in resp.json()["detail"]
-    assert runtime_config.read_env_aliases() == {}
+    assert dotenv_file.read_env_aliases() == {}
 
 
 def test_get_self_sensitive_raw_override_is_sentinel(_clean_overrides: Path) -> None:
@@ -454,7 +454,7 @@ def test_put_sentinel_preserves_secret(_clean_overrides: Path) -> None:
             json={"deepseek_api_key": CONFIG_UNCHANGED_SENTINEL, "llm_model": "m2"},
         )
     assert resp.status_code == 200, resp.text
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-REAL-SECRET"  # untouched
     assert aliases["AVA_MODEL"] == "m2"
 
@@ -472,7 +472,7 @@ def test_put_absent_key_preserves_secret(_clean_overrides: Path) -> None:
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"llm_model": "m2"})
     assert resp.status_code == 200, resp.text
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-REAL-SECRET"  # untouched (absent from body)
     assert aliases["OPENAI_API_KEY"] == "sk-OPENAI"  # untouched (absent from body)
     assert aliases["AVA_MODEL"] == "m2"
@@ -507,7 +507,7 @@ def test_put_replaces_one_secret_leaves_others(_clean_overrides: Path) -> None:
             },
         )
     assert resp.status_code == 200, resp.text
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert aliases["DEEPSEEK_API_KEY"] == "sk-NEW-DEEPSEEK"  # rewritten
     assert aliases["OPENAI_API_KEY"] == "sk-OPENAI"  # untouched (sentinel)
     assert aliases["AVA_MODEL"] == "m1"
@@ -521,7 +521,7 @@ def test_put_null_unsets_cluster_field(_clean_overrides: Path) -> None:
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"llm_model": None})
     assert resp.status_code == 200, resp.text
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert "AVA_MODEL" not in aliases  # explicitly unset
     assert aliases["DEEPSEEK_API_KEY"] == "sk-X"  # untouched
 
@@ -536,7 +536,7 @@ def test_put_host_failure_leaves_cluster_unwritten(_clean_overrides: Path) -> No
         )
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is False
-    assert "AVA_MODEL" not in runtime_config.read_env_aliases()
+    assert "AVA_MODEL" not in dotenv_file.read_env_aliases()
 
 
 def test_put_rejects_bad_scalar(
@@ -555,7 +555,7 @@ def test_put_rejects_bad_scalar(
         resp = client.put("/api/config", json={scalar.name: "not-a-number"})
     assert resp.status_code == 400, resp.text
     assert scalar.name in resp.json()["detail"]
-    assert runtime_config.read_env_aliases() == {}
+    assert dotenv_file.read_env_aliases() == {}
 
 
 def test_put_rejects_bool_for_int_field(
@@ -573,7 +573,7 @@ def test_put_rejects_bool_for_int_field(
     with TestClient(app) as client:
         resp = client.put("/api/config", json={scalar.name: True})
     assert resp.status_code == 400, resp.text
-    assert runtime_config.read_env_aliases() == {}
+    assert dotenv_file.read_env_aliases() == {}
 
 
 def test_put_nonsensitive_field_can_hold_literal_sentinel(_clean_overrides: Path) -> None:
@@ -584,7 +584,7 @@ def test_put_nonsensitive_field_can_hold_literal_sentinel(_clean_overrides: Path
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"llm_model": CONFIG_UNCHANGED_SENTINEL})
     assert resp.status_code == 200, resp.text
-    assert runtime_config.read_env_aliases()["AVA_MODEL"] == CONFIG_UNCHANGED_SENTINEL
+    assert dotenv_file.read_env_aliases()["AVA_MODEL"] == CONFIG_UNCHANGED_SENTINEL
 
 
 def test_put_self_edits_writable_host_capability_field(
@@ -596,13 +596,13 @@ def test_put_self_edits_writable_host_capability_field(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _f, _v, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
-    assert runtime_config.read_env_aliases()["AVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
+    assert dotenv_file.read_env_aliases()["AVA_CROSS_MACHINE_TRANSFER_BACKEND"] == "none"
 
 
 @pytest.mark.asyncio
@@ -661,7 +661,7 @@ def test_put_self_rejects_readonly_identity_field(_clean_overrides: Path) -> Non
         resp = client.put("/api/config", json={"machine_name": "renamed"})
     assert resp.status_code == 400, resp.text
     assert "unknown or read-only" in resp.json()["detail"]
-    assert "AVA_MACHINE_NAME" not in runtime_config.read_env_aliases()
+    assert "AVA_MACHINE_NAME" not in dotenv_file.read_env_aliases()
 
 
 def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
@@ -693,7 +693,7 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     monkeypatch.setattr(
         config_validators,
         "validate",
-        lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _f, _v, **_kwargs: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     with TestClient(app) as client:
         # Cluster view (machine omitted): writable=False -> rejected read-only.
@@ -706,7 +706,7 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     assert "unknown or read-only" in cluster_resp.json()["detail"]
     assert host_resp.status_code == 200, host_resp.text
     assert host_resp.json()["applied"] is True
-    assert runtime_config.read_env_aliases()["AVA_HEARTBEAT_ENABLED"] == "false"
+    assert dotenv_file.read_env_aliases()["AVA_HEARTBEAT_ENABLED"] == "false"
 
 
 # ── PUT remote ──
@@ -716,8 +716,8 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(_clean_overrides
     """A mixed request cannot partly commit Core env and a Fleet image."""
     from base.packages.plugins.config_registration import disk_image_path
 
-    runtime_config.env_file_path().touch()
-    before_env = runtime_config.env_file_path().read_bytes()
+    dotenv_file.env_file_path().touch()
+    before_env = dotenv_file.env_file_path().read_bytes()
     image = disk_image_path("ava_fleet")
     before_image = image.read_bytes() if image.exists() else None
     with TestClient(app) as client:
@@ -727,7 +727,7 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(_clean_overrides
         response = client.put("/api/config", json={"task_escalate_n": 7, "llm_model": "unknown"})
     assert response.status_code == 400
     assert "mixes owners" in response.json()["detail"]
-    assert runtime_config.env_file_path().read_bytes() == before_env
+    assert dotenv_file.env_file_path().read_bytes() == before_env
     assert (image.read_bytes() if image.exists() else None) == before_image
 
 
@@ -735,8 +735,8 @@ def test_fleet_cluster_write_goes_only_to_owned_image(_clean_overrides: Path) ->
     from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
 
-    runtime_config.env_file_path().touch()
-    before_env = runtime_config.env_file_path().read_bytes()
+    dotenv_file.env_file_path().touch()
+    before_env = dotenv_file.env_file_path().read_bytes()
     with TestClient(app) as client:
         response = client.put(
             "/api/config", json={"task_escalate_n": 11, "reduce_context_switch": False}
@@ -748,7 +748,7 @@ def test_fleet_cluster_write_goes_only_to_owned_image(_clean_overrides: Path) ->
     assert invalid.status_code == 400
     saved = read_config_image(FleetConfig, disk_image_path("ava_fleet"))
     assert saved.task_escalate_n == 11 and saved.reduce_context_switch is False
-    assert runtime_config.env_file_path().read_bytes() == before_env
+    assert dotenv_file.env_file_path().read_bytes() == before_env
 
 
 def test_remote_host_fleet_toggle_respects_owned_image_and_policy(

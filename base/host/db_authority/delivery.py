@@ -22,7 +22,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from base.cluster.authority.ledger import (
+from base.host.db_authority.ledger import (
     Encrypt,
     _locked,
     _publish_exclusive,
@@ -31,7 +31,7 @@ from base.cluster.authority.ledger import (
     read_secret,
     require_ledger,
 )
-from base.cluster.authority.model import (
+from base.host.db_authority.model import (
     AuthorityRefusedError,
     Generation,
     GenerationClass,

@@ -10,9 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot, config_registry, settings
 from base.config.agent_pins import resolve_agent_config_pins
-from base.host.env import config_registry
 from base.host.env.agent_slices import AgentBrain, AgentSlices, ModelOverrides, agent_setting
 from base.host.env.config_lite_table import FIELD_DOMAINS
 

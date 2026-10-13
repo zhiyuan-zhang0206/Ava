@@ -6,7 +6,7 @@ of serving binaries per capability, and reporting rather than raising.
 
 **Nothing here mutates a real firewall.** The step attempts an unprivileged
 mutation first and falls back to `sudo -n`, but every test stubs the process runner the
-mutation goes through (`base.host.macos_firewall.run_bounded`), so what is asserted
+mutation goes through (`base.host.system.macos_firewall.run_bounded`), so what is asserted
 is output and decision-making, never ALF state.
 """
 
@@ -27,8 +27,8 @@ import cli.commands.converge.host as cv
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.host import macos_firewall as fw
-from base.host.macos_firewall import FirewallAudit, FirewallVerdict
+from base.host.system import macos_firewall as fw
+from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
@@ -157,8 +157,8 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
     assert capsys.readouterr().err == ""
 
 
-def _empty_manifest(*, machine: MachineIdentity) -> tuple[Path, ...]:
-    assert isinstance(machine, MachineIdentity)
+def _empty_manifest(*, machine_name: str | None) -> tuple[Path, ...]:
+    assert machine_name is None or isinstance(machine_name, str)
     return ()
 
 
@@ -328,8 +328,8 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
     state = {str(stale): True}
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: dict(state))
 
-    def manifest(*, machine: MachineIdentity) -> tuple[Path, ...]:
-        assert isinstance(machine, MachineIdentity)
+    def manifest(*, machine_name: str | None) -> tuple[Path, ...]:
+        assert machine_name is None or isinstance(machine_name, str)
         return (missing,)
 
     monkeypatch.setattr(fw, "manifest_paths", manifest)
@@ -430,8 +430,8 @@ def test_firewall_status_renders_manifest_details(
     )
     monkeypatch.setattr(fw, "allowlisted_paths", lambda: {"/bin/listener": True})
 
-    def render_manifest_status(rules: dict[str, bool], *, machine: MachineIdentity) -> str:
-        assert machine is command_runtime.machine
+    def render_manifest_status(rules: dict[str, bool], *, machine_name: str | None) -> str:
+        assert machine_name is None or isinstance(machine_name, str)
         return f"  rendered manifest with {len(rules)} rule"
 
     monkeypatch.setattr(fw, "render_manifest_status", render_manifest_status)

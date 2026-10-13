@@ -30,10 +30,11 @@ import pytest
 
 from base import cluster
 from base.cluster import authority, ownership
-from base.cluster.authority.api import API_TOKEN_ENV
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
+from base.host.db_authority import delivery, ledger, model
+from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.net.url_secret import url_with_userinfo
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
@@ -72,7 +73,7 @@ class Born:
         return self.values["AVA_DB_URL"]
 
     def login(self, cls: str) -> tuple[str, str]:
-        secret = authority.read_secret(self.home, authority.active_generation(self.home))
+        secret = ledger.read_secret(self.home, delivery.active_generation(self.home))
         role = secret.roles.of(cast("Any", cls))
         return role.name, role.password
 
@@ -164,8 +165,8 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
     # The birth adopts the delivered generation next. `delitem(raising=False)` on an absent
     # key records nothing, so register the key (setitem) before removing it: teardown then
     # deletes whatever the birth assigned.
-    monkeypatch.setitem(os.environ, authority.GENERATION_ENV, "")
-    monkeypatch.delitem(os.environ, authority.GENERATION_ENV)
+    monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "")
+    monkeypatch.delitem(os.environ, delivery.GENERATION_ENV)
 
     def _record(_home: Path) -> cluster.ClusterRecord:
         return record
@@ -268,10 +269,10 @@ def _refused(**kwargs: Any) -> str:
 
 
 def test_fresh_birth_mints_generation_zero_behind_nologin_owner(born: Born) -> None:
-    ledger = authority.require_ledger(born.home)
-    assert ledger.owner == "ava"
-    assert ledger.active is not None and ledger.active.number == 0
-    assert ledger.active.origin.kind == "birth"
+    current = ledger.require_ledger(born.home)
+    assert current.owner == "ava"
+    assert current.active is not None and current.active.number == 0
+    assert current.active.origin.kind == "birth"
     with born.admin() as conn:
         owner = conn.execute(
             "SELECT rolcanlogin, rolpassword IS NULL, rolsuper FROM pg_authid WHERE rolname = 'ava'"
@@ -287,7 +288,7 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(born: Born) -> N
         )
     # The start process adopted the delivered gateway login for its own dials.
     assert settings.data_plane.db_url == born.dsn("gateway")
-    assert os.environ[authority.GENERATION_ENV] == "0"
+    assert os.environ[delivery.GENERATION_ENV] == "0"
     assert json.loads((born.home / "start-intent.json").read_text())["phase"] == "provisioned"
 
 
@@ -329,13 +330,13 @@ def test_generation_logins_work_with_group_privileges(born: Born) -> None:
 
 
 def test_pooler_admin_console_is_the_userlist_only_operator_entry(born: Born) -> None:
-    admin = authority.read_pooler_admin(born.home)
+    admin = delivery.read_pooler_admin(born.home)
     assert base_pooler.pgbouncer_listener_reachable(born.pooler_port, admin.password)
     assert not base_pooler.pgbouncer_listener_reachable(born.pooler_port, "wrong-password-xxxxx")
     userlist = (born.home / "pgbouncer" / "userlist.txt").read_bytes()
-    assert userlist == authority.render_userlist(born.home, authority.active_generation(born.home))
+    assert userlist == delivery.render_userlist(born.home, delivery.active_generation(born.home))
     names = [line.split('"')[1] for line in userlist.decode().splitlines()]
-    assert names == [*born.login("gateway")[:1], *born.login("runner")[:1], authority.POOLER_ADMIN]
+    assert names == [*born.login("gateway")[:1], *born.login("runner")[:1], delivery.POOLER_ADMIN]
     assert b"SCRAM-SHA-256$" in userlist
     assert admin.password.encode() not in userlist
 
@@ -350,8 +351,8 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         conn.execute("SELECT 1")
     owner_before = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert owner_before is not None
-    admin = authority.read_pooler_admin(born.home)
-    userlist = authority.render_userlist(born.home, authority.active_generation(born.home))
+    admin = delivery.read_pooler_admin(born.home)
+    userlist = delivery.render_userlist(born.home, delivery.active_generation(born.home))
     without_gateway = b"".join(
         line
         for line in userlist.splitlines(keepends=True)
@@ -395,7 +396,7 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
         conn.execute(
             "CREATE ROLE ava_g7_runner LOGIN PASSWORD 'stale-password-xyz' IN ROLE ava_runner"
         )
-    with pytest.raises(authority.CatalogRefusedError, match="ava_g7_runner"):
+    with pytest.raises(model.CatalogRefusedError, match="ava_g7_runner"):
         bringup.complete_gateway_data_plane(
             database_factory=operator_database, machine=command_runtime.machine
         )
@@ -403,7 +404,7 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
         assert conn.execute(
             "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'ava_g7_runner'"
         ).fetchone() == (True,)
-    assert authority.active_generation(born.home).number == 0
+    assert delivery.active_generation(born.home).number == 0
 
 
 def test_ordinary_start_holds_on_an_invariant_violation(
@@ -415,7 +416,7 @@ def test_ordinary_start_holds_on_an_invariant_violation(
     with born.admin() as conn:
         conn.execute("CREATE ROLE foreign_writer LOGIN PASSWORD 'foreign-password'")
         conn.execute("GRANT INSERT ON agents TO foreign_writer")
-    with pytest.raises(authority.CatalogRefusedError, match="foreign_writer"):
+    with pytest.raises(model.CatalogRefusedError, match="foreign_writer"):
         bringup.complete_gateway_data_plane(
             database_factory=operator_database, machine=command_runtime.machine
         )
@@ -457,21 +458,21 @@ def test_interrupted_birth_retries_to_the_same_generation(
     calls: list[int] = []
     real = bringup.prove_generation_logins
 
-    def failing(home: Path, generation: authority.Generation, endpoint: str) -> None:
+    def failing(home: Path, generation: model.Generation, endpoint: str) -> None:
         calls.append(generation.number)
         raise RuntimeError("injected crash before activation")
 
     monkeypatch.setattr(bringup, "prove_generation_logins", failing)
     with pytest.raises(RuntimeError, match="injected crash"):
         _birth(configured, operator_database=operator_database, command_runtime=command_runtime)
-    ledger = authority.require_ledger(configured.home)
-    assert ledger.active is None and ledger.pending is not None and ledger.pending.number == 0
+    current = ledger.require_ledger(configured.home)
+    assert current.active is None and current.pending is not None and current.pending.number == 0
     monkeypatch.setattr(bringup, "prove_generation_logins", real)
     bringup.complete_gateway_data_plane(
         database_factory=operator_database, machine=command_runtime.machine
     )
-    ledger = authority.require_ledger(configured.home)
-    assert calls == [0] and ledger.active is not None and ledger.active.number == 0
+    current = ledger.require_ledger(configured.home)
+    assert calls == [0] and current.active is not None and current.active.number == 0
 
 
 def test_launched_services_receive_their_class_login_only(
@@ -494,16 +495,16 @@ def test_launched_services_receive_their_class_login_only(
     )
     assert _service_extra_env(gateway)["AVA_DB_URL"] == born.dsn("gateway")
     assert _service_extra_env(runner)["AVA_DB_URL"] == born.dsn("runner")
-    assert _service_extra_env(runner)[authority.GENERATION_ENV] == "0"
+    assert _service_extra_env(runner)[delivery.GENERATION_ENV] == "0"
     assert "AVA_DB_URL" not in _service_extra_env(frontend)
     # The born single box authenticates its API: each service is delivered its class
     # token, the database-free frontend included, and never the root itself.
-    tokens = authority.read_secret(born.home, authority.active_generation(born.home)).api
+    tokens = ledger.read_secret(born.home, delivery.active_generation(born.home)).api
     assert _service_extra_env(gateway)[API_TOKEN_ENV] == tokens.gateway
     assert _service_extra_env(runner)[API_TOKEN_ENV] == tokens.runner
     assert _service_extra_env(frontend)[API_TOKEN_ENV] == tokens.gateway
     root = root_child_env()
-    assert "AVA_DB_URL" not in root and authority.GENERATION_ENV not in root
+    assert "AVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root
 
 
@@ -532,11 +533,11 @@ def _collector_postgres_receiver(
         database_factory=operator_database,
         machine=command_runtime.machine,
     )
-    secret = authority.read_secret(born.home, authority.active_generation(born.home))
+    secret = ledger.read_secret(born.home, delivery.active_generation(born.home))
     credentials = {
         "gateway generation": secret.roles.gateway.password,
         "runner generation": secret.roles.runner.password,
-        "pooler admin": authority.read_pooler_admin(born.home).password,
+        "pooler admin": delivery.read_pooler_admin(born.home).password,
     }
     leaked = [name for name, value in credentials.items() if value in rendered]
     assert leaked == [], f"collector config carries credentials: {leaked}"

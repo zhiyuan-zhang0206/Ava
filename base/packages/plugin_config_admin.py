@@ -78,7 +78,7 @@ def patch_owner(fields: set[str]) -> PluginConfigOwner | None:
 def plugin_metadata() -> list[ConfigFieldMeta]:
     """Derive panel metadata from image values and the owning schema."""
     from base.config import schema_extra
-    from base.host.env.config_registry import field_editor_type
+    from base.config.config_registry import field_editor_type
 
     result: list[ConfigFieldMeta] = []
     fields = plugin_field_owners()

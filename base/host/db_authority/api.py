@@ -30,9 +30,9 @@ import hmac
 from collections.abc import Mapping
 from pathlib import Path
 
-from base.cluster.authority.delivery import active_generation
-from base.cluster.authority.ledger import authority_dir, ledger_path, load_ledger, read_secret
-from base.cluster.authority.model import CLASSES, GenerationClass
+from base.host.db_authority.delivery import active_generation
+from base.host.db_authority.ledger import authority_dir, ledger_path, load_ledger, read_secret
+from base.host.db_authority.model import CLASSES, GenerationClass
 from base.host.net.auth import API_TOKEN_ENV as API_TOKEN_ENV
 from base.host.private_storage import write_private_bytes
 

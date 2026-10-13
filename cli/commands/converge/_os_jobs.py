@@ -69,12 +69,12 @@ def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
     credentials (`gh` on PATH + a Trunk API token) — in the fleet, macmini.
     Every other unit skips with the reason logged, so converge output explains
     the absence. Idempotent."""
+    from base.cluster.derive import production_identity
     from base.host.system.pr_flow_job import register_pr_flow_job
 
     register_pr_flow_job(
         enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
-        machine=ctx.machine,
-        home=ctx.ava_home,
+        production=production_identity(machine=ctx.machine, home=ctx.ava_home),
     )
 
 

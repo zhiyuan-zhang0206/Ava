@@ -10,8 +10,8 @@ import pytest
 
 import base.deploy.progress_timeout as deploy
 from base import config
-from base.cluster.authority import unit
 from base.deploy.timing import CLOCKS, CONSTRAINTS, assert_clock_lattice, validate_clock_lattice
+from base.host.db_authority import unit
 
 
 def test_default_lattice_holds() -> None:

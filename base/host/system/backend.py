@@ -18,7 +18,10 @@ from __future__ import annotations
 import abc
 from pathlib import Path
 
+from base.host.brew_pin import brew_prefix
 from base.native_process.os_platform import is_linux, is_macos
+
+PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 
 # ---------------------------------------------------------------------------
 # Abstract interface
@@ -125,8 +128,6 @@ class MacPlatformBackend(PlatformBackend):
     # -- PostgreSQL --
 
     def pg_binary_path(self, name: str) -> Path | None:
-        from base.cluster.dataplane.pg_tools import brew_prefix
-
         return brew_prefix("postgresql@17") / "bin" / name
 
 
@@ -168,8 +169,6 @@ class LinuxPlatformBackend(PlatformBackend):
     # -- PostgreSQL --
 
     def pg_binary_path(self, name: str) -> Path | None:
-        from base.cluster.dataplane.pg_tools import PG_BIN_LINUX
-
         return PG_BIN_LINUX / name
 
 

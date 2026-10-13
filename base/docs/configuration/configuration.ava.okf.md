@@ -53,7 +53,7 @@ equivalence windows plus first-error parity with the eager path are pinned by
 tests (`tests/base/test_config_lite_*.py`); the design record is
 [2026-09-16-config-boot-lite](../../../docs/decisions/runtime/config/2026-09-16-config-boot-lite.md).
 
-`base/host/env/config_registry.py` is the single projection of field aliases,
+`base/config/config_registry.py` is the single projection of field aliases,
 annotations, editor types, choices, and `json_schema_extra` metadata. Both the
 gateway metadata view and the local config CLI use it, preventing scope,
 sensitivity, and editability policy from diverging. `base/host/env/bootstrap.py`

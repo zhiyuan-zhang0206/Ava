@@ -44,18 +44,6 @@ def swap_db(url: str, db_name: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, f"/{db_name}", parts.query, parts.fragment))
 
 
-def default_home() -> Path:
-    """The default (prod) cluster home, `~/.ava` — the one home whose initialization
-    uses the fixed default port block and whose checkout anchors without a
-    pointer."""
-    return Path.home() / ".ava"
-
-
-def is_default_home(home: Path) -> bool:
-    """Whether `home` is the default prod home (`~/.ava`)."""
-    return Path(home).expanduser().resolve() == default_home().resolve()
-
-
 def home_label(home: Path) -> str:
     """The human-facing label for a cluster — its home's basename, computed on
     the fly (pure display; renaming the directory changes only the label)."""
@@ -259,10 +247,10 @@ def runner_db_url_projection() -> str:
     provider credential, read with its URL from one current file snapshot, never
     a cached URL combined with a newly rotated password. Only a gateway-config
     unit projects this; a pure agent-runner's services receive their installed
-    unit capability instead (`base.cluster.authority.unit`).
+    unit capability instead (`base.host.db_authority.unit`).
     """
     from base.host.env.bootstrap import config_source_is_local
-    from base.host.env.runtime_config import read_env_aliases
+    from base.host.env.dotenv_file import read_env_aliases
 
     if not config_source_is_local():
         raise RuntimeError(

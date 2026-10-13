@@ -21,6 +21,7 @@ import pytest
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
+from base.config.config_registry import _build_registry, field_alias, schema_extra
 from base.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_CAPABILITIES,
@@ -31,7 +32,6 @@ from base.host.env.config_lite_table import (
     REQUIRED_FIELDS,
     SENSITIVE_FIELDS,
 )
-from base.host.env.config_registry import _build_registry, field_alias, schema_extra
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _READER = _REPO_ROOT / "base" / "host" / "env" / "config_lite_table.py"

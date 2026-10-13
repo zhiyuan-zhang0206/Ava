@@ -29,8 +29,8 @@ from base.agents.upload_delivery.paths import (
     agent_upload_dir,
 )
 from base.api_contracts.agent_contract import AgentNotFound
-from base.cluster.authority.unit import UnitIdentity
 from base.db.transaction import write_transaction
+from base.host.db_authority.unit import UnitIdentity
 
 # Copy attempts a batch gets before it is held for a person to re-upload.
 MAX_COPY_ATTEMPTS = 3

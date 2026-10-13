@@ -157,9 +157,9 @@ def _serve_flag(env_key: str) -> bool:
     raw = os.environ.get(env_key)
     if raw is not None and raw.strip():
         return raw.strip().lower() in _TRUTHY
-    from base.host.env import runtime_config
+    from base.host.env import dotenv_file
 
-    raw = runtime_config.read_env_aliases().get(env_key)
+    raw = dotenv_file.read_env_aliases().get(env_key)
     if raw is not None and raw.strip():
         return raw.strip().lower() in _TRUTHY
     return False
@@ -264,7 +264,7 @@ def fetch_bootstrap_config(
 
     Bootstrap serves the credential-free database endpoint and no cluster
     secret. The runner's login comes only from its installed unit capability
-    (`base.cluster.authority.unit`).
+    (`base.host.db_authority.unit`).
 
     Presents `Authorization: Bearer <bearer>`: an explicit `bearer` (a joining
     start holding its bundle's token), else this process's machine API token

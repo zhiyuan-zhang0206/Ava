@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-import base.host.env.config_registry as _config_registry
+import base.config.config_registry as _config_registry
 
 
 def resolve_agent_config_pins(

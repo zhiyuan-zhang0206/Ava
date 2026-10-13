@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from base.config import settings
-from base.host.env import runtime_config
+from base.host.env import dotenv_file
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import model_supports_vision, provider_key_map, validate_model_config
 from tests.fixtures.model_catalog import AddModels
@@ -25,10 +25,10 @@ from tests.fixtures.model_catalog import AddModels
 @pytest.fixture
 def env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Point the plugin key reader at a scratch cluster `.env`."""
-    import base.host.env.runtime_config as rc
+    from base.host.env import dotenv_file
 
     env_path = tmp_path / ".env"
-    monkeypatch.setattr(rc, "env_file_path", lambda: env_path)
+    monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env_path)
     monkeypatch.setattr(settings.lm, "anthropic_api_key", None)
     monkeypatch.setattr(settings.lm, "deepseek_api_key", None)
     monkeypatch.setattr(settings.lm, "llm_override", "")
@@ -77,7 +77,7 @@ def test_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "deepseek_api_key", "sk-test")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["deepseek-"] == ("DeepSeek", "DEEPSEEK_API_KEY")
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
@@ -96,7 +96,7 @@ def test_gemini_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "gemini_api_key", "sk-test")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["gemini-"] == ("Google", "GEMINI_API_KEY")
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
@@ -115,7 +115,7 @@ def test_anthropic_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "anthropic_api_key", "sk-test")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["claude-"] == ("Anthropic", "ANTHROPIC_API_KEY")
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
@@ -134,7 +134,7 @@ def test_openai_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "openai_api_key", "sk-test")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["gpt-"] == ("OpenAI", "OPENAI_API_KEY")
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
@@ -153,7 +153,7 @@ def test_qwen_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "dashscope_api_key", "sk-test")
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["qwen"] == ("Alibaba", "DASHSCOPE_API_KEY")
     with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
@@ -172,7 +172,7 @@ def test_glm_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "zhipu_api_key", "sk-test")
     monkeypatch.delenv("GLM_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["glm-"] == ("Zhipu", "GLM_API_KEY")
     with pytest.raises(ValueError, match="GLM_API_KEY"):
@@ -188,7 +188,7 @@ def test_kimi_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "moonshot_api_key", "sk-test")
     monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["kimi-"] == ("Moonshot", "MOONSHOT_API_KEY")
     with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
@@ -204,7 +204,7 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "xiaomi_api_key", "sk-test")
     monkeypatch.delenv("MIMO_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["mimo-"] == ("Xiaomi", "MIMO_API_KEY")
     with pytest.raises(ValueError, match="MIMO_API_KEY"):

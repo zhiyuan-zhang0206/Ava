@@ -21,10 +21,10 @@ import base.cluster as cl
 import cli.commands.data_plane.bringup as dp
 import cli.commands.data_plane.cluster_instance as ci
 from base.agents.context.clients import DatabaseFactory
-from base.cluster import authority
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.db.tests.fakes import patch_database
+from base.host.db_authority import delivery
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 _ADMIN = "pooler-admin-fixture"
@@ -56,7 +56,7 @@ def test_pgbouncer_line_uses_registry_port(
     monkeypatch.setattr(cl, "get_record", lambda _home: fake_rec)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(
-        authority,
+        delivery,
         "read_pooler_admin",
         lambda _home: SimpleNamespace(password=_ADMIN),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -174,7 +174,7 @@ def test_postgres_probe_dials_pooled_front_door(
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
     monkeypatch.setattr(base_pooler, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        authority,
+        delivery,
         "read_pooler_admin",
         lambda _home: SimpleNamespace(password=_ADMIN),  # pyright: ignore[reportUnknownArgumentType]
     )

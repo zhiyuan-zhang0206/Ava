@@ -92,7 +92,7 @@ def _exec_node_ceiling_s() -> float:
     default is the last resort.
     """
     from base.config import FIELD_INFOS, field_alias, settings
-    from base.host.env.runtime_config import read_env_aliases
+    from base.host.env.dotenv_file import read_env_aliases
 
     if settings.has_domain("sandbox"):
         return settings.sandbox.exec_node_timeout_seconds

@@ -9,9 +9,8 @@ from typing import Any
 
 import pytest
 
-from base.cluster import authority
-from base.cluster.authority import unit
-from base.cluster.authority.api import API_TOKEN_ENV
+from base.host.db_authority import delivery, unit
+from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env import dotenv_boot
 
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
@@ -82,7 +81,7 @@ def runner_boot(
     for key in (
         "AVA_PROCESS_PROFILE",
         dotenv_boot.LAUNCHER_PROFILE_ENV_KEY,
-        authority.GENERATION_ENV,
+        delivery.GENERATION_ENV,
         "AVA_DB_URL",
         API_TOKEN_ENV,
     ):

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from base.config.config_registry import DOMAIN_MODELS, fields, schema_extra
 from base.config.domains.storage.walg import WalgSettings
-from base.host.env.config_registry import DOMAIN_MODELS, fields, schema_extra
 
 
 def test_the_domain_is_registered_once_under_the_gateway_capability() -> None:

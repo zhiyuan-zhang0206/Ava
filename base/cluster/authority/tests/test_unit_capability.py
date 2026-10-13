@@ -19,8 +19,6 @@ from typing import Any
 
 import pytest
 
-from base.cluster import authority
-from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import (
     _ENDPOINT,
     _MACHINE,
@@ -31,7 +29,8 @@ from base.cluster.authority.tests.unit_capability_support import (
 )
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
-from base.cluster.authority.unit import UNIT_BUNDLE_MAX_TTL_S
+from base.host.db_authority import model, unit
+from base.host.db_authority.unit import UNIT_BUNDLE_MAX_TTL_S
 
 # ── sealing: tampering, keys, expiry ────────────────────────────────────────
 
@@ -104,7 +103,7 @@ def test_issue_takes_up_to_the_capped_lifetime(gateway: Path, runner_home: Path)
 def test_issue_needs_an_active_generation(tmp_path: Path, runner_home: Path) -> None:
     bare = (tmp_path / "bare").resolve()
     bare.mkdir(mode=0o700)
-    with pytest.raises(authority.AuthorityRefusedError, match="no database authority ledger"):
+    with pytest.raises(model.AuthorityRefusedError, match="no database authority ledger"):
         _issue(bare, runner_home)
 
 

@@ -22,9 +22,9 @@ from dotenv import dotenv_values
 from pydantic import ValidationError
 from pydantic_core import ErrorDetails, PydanticUndefined
 
+from base.config.config_registry import FIELD_INFOS, field_alias, field_domain
 from base.config.service_read import domain_model_classes
-from base.host.env import runtime_config
-from base.host.env.config_registry import FIELD_INFOS, field_alias, field_domain
+from base.host.env import dotenv_file
 from base.host.env.dotenv_file import capture_env_bytes
 
 __all__ = [
@@ -71,11 +71,11 @@ def validate_env_patch_for_write(
     """
     if not updates and not removals:
         return EnvPatchValidation(
-            [], {}, _env_digest(capture_env_bytes(runtime_config.env_file_path()))
+            [], {}, _env_digest(capture_env_bytes(dotenv_file.env_file_path()))
         )
 
     patched_domains = {field_domain(name) for name in set(updates) | removals}
-    payload = capture_env_bytes(runtime_config.env_file_path())
+    payload = capture_env_bytes(dotenv_file.env_file_path())
     aliases = _env_aliases(payload)
 
     models = domain_model_classes()

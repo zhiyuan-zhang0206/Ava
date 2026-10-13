@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-__all__ = ["home_checkout_error", "resolve_ava_home"]
+__all__ = ["default_home", "home_checkout_error", "is_default_home", "resolve_ava_home"]
 
 
 def resolve_ava_home() -> Path:
@@ -59,3 +59,15 @@ def home_checkout_error(repo: Path) -> str | None:
         f"production host) instead, or set AVA_HOME to a home of your own (a "
         f"temporary directory, for a test or a tool)."
     )
+
+
+def default_home() -> Path:
+    """The default (prod) cluster home, `~/.ava` — the one home whose initialization
+    uses the fixed default port block and whose checkout anchors without a
+    pointer."""
+    return Path.home() / ".ava"
+
+
+def is_default_home(home: Path) -> bool:
+    """Whether `home` is the default prod home (`~/.ava`)."""
+    return Path(home).expanduser().resolve() == default_home().resolve()

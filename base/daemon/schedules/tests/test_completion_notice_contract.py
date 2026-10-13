@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import DotEnvSettingsSource
 
+from base.config.config_registry import field_editor_type
 from base.config.domains.agent.completion_policy import (
     CompletionNoticePolicy,
     validate_completion_notice_policy,
@@ -20,7 +21,6 @@ from base.daemon.schedules.completion_notices import (
     effective_completion_notice_policy,
     pending_digests,
 )
-from base.host.env.config_registry import field_editor_type
 
 
 def test_database_digest_reader_returns_plain_notices() -> None:

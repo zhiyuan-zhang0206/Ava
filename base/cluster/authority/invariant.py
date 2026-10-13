@@ -35,15 +35,15 @@ from base.cluster.authority.catalog import (
     transitive_members,
 )
 from base.cluster.authority.groups import group_violations
-from base.cluster.authority.ledger import require_ledger
-from base.cluster.authority.model import (
+from base.cluster.authority.monitor import MONITOR_ROLE, monitor_violations
+from base.cluster.authority.roles import verify_generation
+from base.host.db_authority.ledger import require_ledger
+from base.host.db_authority.model import (
     AuthorityRefusedError,
     CatalogRefusedError,
     Ledger,
     VerifiedGeneration,
 )
-from base.cluster.authority.monitor import MONITOR_ROLE, monitor_violations
-from base.cluster.authority.roles import verify_generation
 
 _PUBLIC_ALLOWED = frozenset({"EXECUTE", "USAGE", "TEMPORARY"})
 _READONLY_ALLOWED = frozenset({"SELECT", "USAGE", "CONNECT"})

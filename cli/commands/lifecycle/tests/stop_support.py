@@ -25,7 +25,7 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-import base.host.proc as host_proc
+import base.sessions.hosting as sessions_hosting
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance import pause_owner
@@ -204,7 +204,7 @@ def dependencies(monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity) -
         ],
     )
     monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(host_proc, "hosting_supervised_session", lambda: None)
+    monkeypatch.setattr(sessions_hosting, "hosting_supervised_session", lambda: None)
 
     def set_posture(_db: object, _value: str, *, machine: str) -> None:
         del _db, _value, machine

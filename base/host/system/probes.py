@@ -18,9 +18,8 @@ here, in ``base`` (the lowest import layer), so the browser daemon
 (``services``), the MCP loader (``ava``), and the host-config validators
 (``base``) all import the same logic.
 
-``base.config.settings`` is imported lazily inside the function that needs it
-to avoid the ``base.config`` circular import (same pattern as
-``base.host.env.runtime_config``).
+These probes never read Settings: a caller that has them passes the configured
+``AVA_CHROME_BINARY`` override as ``configured_chrome``.
 """
 
 from __future__ import annotations
@@ -49,19 +48,17 @@ def _platform_chrome_binary() -> str | None:
     return None  # other: unsupported
 
 
-def resolve_chrome_binary() -> str | None:
+def resolve_chrome_binary(configured_chrome: str | None) -> str | None:
     """Resolve a Chrome binary path for this host, or None if none is found.
 
     Resolution order:
-    - explicit ``settings.services.chrome_binary`` override -> returned **as-is** (no
+    - explicit ``configured_chrome`` override (``settings.services.chrome_binary``) -> returned **as-is** (no
       existence check; a caller that execs it fails loudly at exec time if the
       path is wrong, which is the intended fail-fast for the browser daemon).
     - platform-default Chrome binary -> resolved by ``_platform_chrome_binary()``.
     """
-    from base.config import settings
-
-    if settings.services.chrome_binary:
-        return settings.services.chrome_binary
+    if configured_chrome:
+        return configured_chrome
     return _platform_chrome_binary()
 
 
@@ -157,7 +154,7 @@ def gui_login_user() -> str | None:
     return _bounded_stdout(["/usr/bin/stat", "-f%Su", "/dev/console"])
 
 
-def browser_incapability() -> str | None:
+def browser_incapability(configured_chrome: str | None) -> str | None:
     """Return why this host cannot run a headed Chrome, or None if it can.
 
     The single source of truth for the three-prong capability check (display +
@@ -172,7 +169,7 @@ def browser_incapability() -> str | None:
     """
     if not display_available():
         return "no display (headless server)"
-    if resolve_chrome_binary() is None:
+    if resolve_chrome_binary(configured_chrome) is None:
         return "no Chrome (install it or set AVA_CHROME_BINARY)"
     if shutil.which("npx") is None:
         return NPX_INCAPABILITY_REASON
@@ -196,14 +193,14 @@ def browser_deps_incapability() -> str | None:
     return None
 
 
-def browser_capable() -> bool:
+def browser_capable(configured_chrome: str | None) -> bool:
     """Return True if this host can run a headed Chrome (display + binary + npx).
 
     Thin bool wrapper over ``browser_incapability()`` for the gates that only
     need yes/no (the service roster's start decision, the host-config validator).
     Callers that want to show or log *why* call ``browser_incapability()``.
     """
-    return browser_incapability() is None
+    return browser_incapability(configured_chrome) is None
 
 
 def permissions_helper_incapability() -> str | None:

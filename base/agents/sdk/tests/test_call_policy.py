@@ -20,12 +20,12 @@ from base.agents.sdk.call_policy import SamplingPolicy
 def test_local_policy_reads_live_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gateway: bool
 ) -> None:
-    from base.host.env import bootstrap, runtime_config
+    from base.host.env import bootstrap, dotenv_file
 
     env_file = tmp_path / ".env"
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: gateway)
     monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", lambda: False)
-    monkeypatch.setattr(runtime_config, "env_file_path", lambda: env_file)
+    monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env_file)
     env_file.write_text("AVA_SDK_CALL_SAMPLING_ENABLED=true\nAVA_SDK_CALL_SAMPLE_EVERY=4\n")
     assert call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=4)
     env_file.write_text("AVA_SDK_CALL_SAMPLING_ENABLED=false\nAVA_SDK_CALL_SAMPLE_EVERY=7\n")

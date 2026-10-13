@@ -31,7 +31,7 @@ A bundle is bound to one unit, but nothing in it is that unit's own: the runner
 login and API token are the write generation's, shared by every runner unit, and
 the telemetry token is the cluster's. The binding guards against installing on
 the wrong unit by mistake, not against theft; what a lost bundle exposes and how
-to contain it: `base/cluster/authority/docs/unit-bundle.ava.okf.md`.
+to contain it: `base/host/db_authority/docs/unit-bundle.ava.okf.md`.
 """
 
 from __future__ import annotations
@@ -57,19 +57,19 @@ from pydantic import (
     model_validator,
 )
 
-from base.cluster.authority.api import API_TOKEN_ENV, telemetry_token, token_digest
-from base.cluster.authority.delivery import (
+from base.host.db_authority.api import API_TOKEN_ENV, telemetry_token, token_digest
+from base.host.db_authority.delivery import (
     GENERATION_ENV,
     active_generation,
     require_admitted_runtime,
 )
-from base.cluster.authority.ledger import (
+from base.host.db_authority.ledger import (
     _locked,
     _read_private,
     authority_dir,
     read_secret,
 )
-from base.cluster.authority.model import AuthorityRefusedError, Digest, RoleName
+from base.host.db_authority.model import AuthorityRefusedError, Digest, RoleName
 from base.host.net.url_secret import url_with_userinfo
 from base.host.private_storage import write_private_bytes
 

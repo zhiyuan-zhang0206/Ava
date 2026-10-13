@@ -88,8 +88,7 @@ def owns_os_jobs(kind: str) -> bool:
     `bootout` the host's real job. Both directions are gated, removal included,
     unlike `os_jobs_enabled`, which gates registration only.
     """
-    from base.cluster import is_default_home
-    from base.paths.home import resolve_ava_home
+    from base.paths.home import is_default_home, resolve_ava_home
 
     home = resolve_ava_home()
     if is_default_home(home):

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.authority.api import (
+from base.host.db_authority.api import (
     publish_telemetry_token,
     read_telemetry_token,
     telemetry_token,

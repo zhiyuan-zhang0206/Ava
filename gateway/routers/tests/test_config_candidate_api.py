@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config import runtime_config
 from base.config.admin.candidate import EnvPatchValidation
-from base.host.env import runtime_config
+from base.host.env import dotenv_file
 from gateway.app import app
 from gateway.routers.configuration import runtime as config_router
 
@@ -16,7 +17,7 @@ from gateway.routers.configuration import runtime as config_router
 @pytest.fixture
 def configured_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A gateway home whose `.env` carries a valid sandbox timeout pair."""
-    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     runtime_config.write_fields(
         {"exec_timeout_seconds": 300, "exec_node_timeout_seconds": 1200}, set()
     )
@@ -65,7 +66,7 @@ def test_put_sets_the_offsite_backup_destination_beside_retired_keys(
     body = response.json()
     assert body["applied"] is True
     assert "gateway" in body["restart_required"]
-    aliases = runtime_config.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases()
     assert aliases["AVA_BACKUP_OFFSITE_ENDPOINT"] == "https://oss-cn-shanghai.aliyuncs.com"
     assert aliases["AVA_BACKUP_OFFSITE_BUCKET"] == "backups"
     assert aliases["AVA_BACKUP_OFFSITE_CREDENTIALS_FILE"] == str(credentials)
@@ -82,7 +83,7 @@ def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> Non
         response = client.put("/api/config", json={"backup_offsite_endpoint": None})
 
     assert response.status_code == 200, response.text
-    assert "AVA_BACKUP_OFFSITE_ENDPOINT" not in runtime_config.read_env_aliases()
+    assert "AVA_BACKUP_OFFSITE_ENDPOINT" not in dotenv_file.read_env_aliases()
 
 
 def test_host_only_put_skips_cluster_candidate_validation(
@@ -102,7 +103,7 @@ def test_host_only_put_skips_cluster_candidate_validation(
 
     assert response.status_code == 200, response.text
     assert response.json()["applied"] is True
-    assert runtime_config.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
+    assert dotenv_file.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_put_returns_conflict_when_cluster_candidate_goes_stale(
