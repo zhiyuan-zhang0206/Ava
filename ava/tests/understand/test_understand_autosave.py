@@ -9,36 +9,22 @@ import pytest
 
 from ava.tests.understand.provider_support import ProviderCapture
 from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
-from ava.tests.understand.provider_support import understand_clock as understand_clock
-from ava.understand import understand
-from base import paths
-from base.clock import Clock
-from tests.fixtures.pin_agent import pin_agent, pin_no_identity
+from ava.tests.understand.provider_support import understand_deps as understand_deps
+from ava.understand.answer import UnderstandDeps
+from tests.fixtures.pin_agent import pin_no_identity
 
-pytestmark = pytest.mark.usefixtures("sdk_model_owner", "understand_clock")
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 
 # ── auto-save output ────────────────────────────────────────────────────────
 
 
-def test_single_result_saved_to_exec_output(
-    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_single_result_saved_to_exec_output(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
     """Single-call understand saves result to .exec_output/ in workspace."""
 
-    # Use a temp workspace dir so we can inspect it
-    agent_id = 2139
     ws = tmp_path / "fake_ws"
-    ws.mkdir(parents=True)
+    mock_deepseek.configure(output_dir=lambda: ws / ".exec_output")
 
-    # Monkeypatch workspace_dir and agent_id
-    pin_agent(agent_id, clock_factory=Clock.from_settings)
-
-    def _fake_workspace(aid: int) -> Path:
-        return ws
-
-    monkeypatch.setattr(paths, "workspace_dir", _fake_workspace)
-
-    understand([{"prompt": "summarize please", "text": "hello world"}])
+    mock_deepseek.understand([{"prompt": "summarize please", "text": "hello world"}])
 
     # Check that .exec_output/ was created and contains the result
     exec_dir = ws / ".exec_output"
@@ -50,26 +36,17 @@ def test_single_result_saved_to_exec_output(
     assert "summarize please" in content
 
 
-def test_batch_results_saved_to_exec_output(
-    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_batch_results_saved_to_exec_output(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
     """Batch understand saves each result individually."""
 
-    agent_id = 2139
     ws = tmp_path / "batch_ws"
-    ws.mkdir(parents=True)
-    pin_agent(agent_id, clock_factory=Clock.from_settings)
-
-    def _fake_workspace(aid: int) -> Path:
-        return ws
-
-    monkeypatch.setattr(paths, "workspace_dir", _fake_workspace)
+    mock_deepseek.configure(output_dir=lambda: ws / ".exec_output")
 
     targets = [
         {"prompt": "question one", "text": "material one"},
         {"prompt": "question two", "text": "material two"},
     ]
-    understand(targets)
+    mock_deepseek.understand(targets)
 
     exec_dir = ws / ".exec_output"
     files = sorted(exec_dir.glob("understand_*.txt"))
@@ -78,20 +55,11 @@ def test_batch_results_saved_to_exec_output(
     assert "question two" in files[1].read_text()
 
 
-def test_auto_save_prunes_old_files(
-    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_auto_save_prunes_old_files(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
     """Old understand output files are pruned, keeping the 20 most recent results."""
 
-    agent_id = 2139
     ws = tmp_path / "prune_ws"
-    ws.mkdir(parents=True)
-    pin_agent(agent_id, clock_factory=Clock.from_settings)
-
-    def _fake_workspace(aid: int) -> Path:
-        return ws
-
-    monkeypatch.setattr(paths, "workspace_dir", _fake_workspace)
+    mock_deepseek.configure(output_dir=lambda: ws / ".exec_output")
 
     # Pre-create many old files, then force every mtime to the same value.
     # This is the condition the pruner has to be right under: files written in
@@ -107,7 +75,7 @@ def test_auto_save_prunes_old_files(
         os.utime(f, (1_700_000_000, 1_700_000_000))
 
     # Run a new understand — should trigger pruning
-    understand([{"prompt": "new question", "text": "new material"}])
+    mock_deepseek.understand([{"prompt": "new question", "text": "new material"}])
 
     files = sorted(exec_dir.glob("understand_*.txt"))
     assert len(files) == 20, "the ring retains the newest 20 results"
@@ -123,7 +91,7 @@ def test_auto_save_prunes_old_files(
 
 
 def test_auto_save_noop_without_agent_id(
-    mock_deepseek: ProviderCapture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_deepseek: ProviderCapture, understand_deps: UnderstandDeps, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When no agent identity is established, auto-save is skipped gracefully."""
 
@@ -132,12 +100,16 @@ def test_auto_save_noop_without_agent_id(
     # Also ensure env var doesn't re-establish
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
+    # This process's own output directory is the one under test: none without an identity.
+    assert understand_deps.output_dir() is None
+    mock_deepseek.configure(output_dir=understand_deps.output_dir)
+
     # Should not raise
-    [result] = understand([{"prompt": "test", "text": "some text"}])
+    [result] = mock_deepseek.understand([{"prompt": "test", "text": "some text"}])
     assert result == "fake answer"
 
 
 def test_one_question_is_a_one_element_batch(mock_deepseek: ProviderCapture) -> None:
     """The single-question ergonomic: a one-element list, unpacked."""
-    [result] = understand([{"prompt": "hello", "text": "world"}])
+    [result] = mock_deepseek.understand([{"prompt": "hello", "text": "world"}])
     assert result == "fake answer"
