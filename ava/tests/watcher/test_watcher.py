@@ -17,6 +17,7 @@ import pathlib
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 
 import psycopg
@@ -35,6 +36,10 @@ pytestmark = [
     # own kill_all/list calls hit the daemon.
     pytest.mark.usefixtures("sdk_model_owner", "pty_service", "_isolated_agent"),
 ]
+
+
+def _ignore_send(_session_id: int, _line: str) -> None:
+    """Accept the launch command without running it: the test reads the generated files."""
 
 
 def _is_live_watcher(wid: int, name: str = "test-watcher") -> bool:
@@ -249,15 +254,12 @@ def test_launch_requires_timeout_and_name() -> None:
 
 
 def test_launch_arms_watchdog_in_boot_file(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+    _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
     # The generated bootstrap must arm a daemon timer that hard-exits with
     # code 124 at the deadline — that is what bounds a custom watcher's
     # lifetime. The timeout reason is printed so it lands in the log file.
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    wid = watcher.launch("import ava\n", timeout=120, name="test-watchdog")
+    wid = launch_watcher("import ava\n", 120, "test-watchdog", send=_ignore_send)
     boot = _boot_text(wid)
     assert "threading.Timer(120.0" in boot
     assert "os._exit(124)" in boot
@@ -265,12 +267,9 @@ def test_launch_arms_watchdog_in_boot_file(
 
 
 def test_watchdog_message_formats_fractional_seconds(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+    _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    wid = watcher.launch("import ava\n", timeout=0.5, name="test-fractional")
+    wid = launch_watcher("import ava\n", 0.5, "test-fractional", send=_ignore_send)
     assert "0.5s limit" in _boot_text(wid)
 
 
@@ -366,23 +365,19 @@ def test_shell_kill_stops_watcher(_agent_row: int) -> None:
 
 
 def test_spawn_kills_session_when_send_fails(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+    _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
     """A session whose launch command never sent must not linger as an idle
     login shell under the watcher's name until its TTL (up to 7 days for a
     default cron) — kill it and propagate the failure."""
-    from ava.shell import sessions as _sessions
-
     captured: dict[str, int] = {}
 
     def fail_send(session_id: int, _cmd: str) -> None:
         captured["session_id"] = session_id
         raise RuntimeError("session send failed")
 
-    monkeypatch.setattr(_sessions, "send", fail_send)
-
     with pytest.raises(RuntimeError, match="session send failed"):
-        watcher.launch("import ava\n", timeout="1h", name="test-send-fail")
+        launch_watcher("import ava\n", "1h", "test-send-fail", send=fail_send)
 
     assert captured["session_id"] not in ava.shell.sessions.list()
 
@@ -448,18 +443,14 @@ def test_watcher_rejects_unknown_notify(_agent_row: int) -> None:
 
 
 def test_launch_carries_agent_and_session_to_child(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+    _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
     # Identity crosses the process boundary inlined into the generated
     # bootstrap (the session env allowlist does NOT forward AVA_AGENT_ID —
     # Task #856/#964): the child must see its agent id as AVA_AGENT_ID.
     # The watcher's session id rides as an env var on the run command so the
     # time watchers can tag their wake-ups.
-    from ava.shell import sessions as _sessions
-
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
-    wid = watcher.launch("import ava\n", timeout="1h", name="test-watcher")
+    wid = launch_watcher("import ava\n", "1h", "test-watcher", send=_ignore_send)
     launch = (_watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
     assert f"AVA_WATCHER_SESSION_ID={wid} " in launch
     boot = _boot_text(wid)
@@ -472,20 +463,15 @@ def test_launch_carries_agent_and_session_to_child(
 
 
 def test_launch_writes_script_verbatim_and_runs_via_runpy(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+    _agent_row: int, launch_watcher: Callable[..., int]
 ) -> None:
     # The script file is the agent's code unchanged — nothing prepended — so a
     # leading `from __future__` import (must be the first statement of a file)
     # stays valid. Watchdog and runpy live in the separate generated bootstrap
     # file; identity is inlined there (the session env allowlist does not
     # forward AVA_AGENT_ID — Task #856/#964).
-    from ava.shell import sessions as _sessions
-
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(_sessions, "send", lambda id, cmd: captured.update(id=id, cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
-
     code = "from __future__ import annotations\nimport ava\n"
-    wid = watcher.launch(code, timeout="1h", name="test-launch")
+    wid = launch_watcher(code, "1h", "test-launch", send=_ignore_send)
 
     script = _watchers_dir() / f"watcher_{wid}.py"
     assert script.read_text() == code  # verbatim, no bootstrap prepended
@@ -504,18 +490,19 @@ def test_launch_writes_script_verbatim_and_runs_via_runpy(
 # -- Completion notice (shell-level, fires on every exit path) -----------------
 
 
-def test_spawn_line_tees_and_notifies(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spawn_line_tees_and_notifies(_agent_row: int, launch_watcher: Callable[..., int]) -> None:
     # The command line must tee the child's output to the per-agent log file
     # and session capture, then end with the CLI completion notice + session
     # close: the notice is sent from the shell level so a crashed or
     # hard-killed child cannot skip it, and `; exit $_ec` closes the session
     # even when delivery fails — a lingering shell is a live session nobody
     # ever intended to keep (Task #1115 bug B).
-    from ava.shell import sessions as _sessions
-
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
-    wid = watcher.launch("import ava\n", timeout="1h", name="test-notice")
+
+    def record_send(_session_id: int, line: str) -> None:
+        captured["cmd"] = line
+
+    wid = launch_watcher("import ava\n", "1h", "test-notice", send=record_send)
 
     import shlex
 
