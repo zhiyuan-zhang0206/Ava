@@ -277,12 +277,39 @@ jobs:
           # pending approval. Approve it so the PR check status can go green;
           # the explicit workflow_dispatch run below stays the authoritative
           # green signal.
-          RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" --event pull_request \
-            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -n "$RUN_ID" ]; then
-            gh api --method POST \
-              "repos/${{ github.repository }}/actions/runs/$RUN_ID/approve" \
-              >/dev/null || echo "approve unavailable — approve the run manually"
+          #
+          # The held run appears a few seconds after the push, so a single
+          # immediate lookup reads the branch's previous run and its approve
+          # call fails with "This workflow run is not waiting for approval"
+          # (HTTP 403: a state error, not an authorization error; observed on
+          # run 38430429569, 2026-10-13). Poll for the held run on the commit
+          # the push just created: 18 attempts five seconds apart bound the
+          # wait to ~90s so a missing run cannot stall the job.
+          HEAD_SHA="$(git rev-parse HEAD)"
+          seen_run=""
+          for attempt in {1..18}; do
+            RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" --event pull_request \
+              --commit "$HEAD_SHA" --status action_required \
+              --limit 1 --json databaseId --jq '.[0].databaseId // empty' || true)"
+            if [ -n "$RUN_ID" ]; then
+              if gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/$RUN_ID/approve" >/dev/null; then
+                echo "Approved pending CI run $RUN_ID for $HEAD_SHA"
+                exit 0
+              fi
+              echo "Approval for pending run $RUN_ID failed; retrying"
+              seen_run="$RUN_ID"
+            fi
+            if [ "$attempt" -lt 18 ]; then
+              sleep 5
+            fi
+          done
+          if [ -n "$seen_run" ]; then
+            echo "::warning title=visual baselines::run $seen_run for $HEAD_SHA stayed without approval;" \
+              "approve it manually: gh api --method POST repos/${GITHUB_REPOSITORY}/actions/runs/$seen_run/approve"
+          else
+            echo "::warning title=visual baselines::no approval-held pull_request run appeared for" \
+              "$HEAD_SHA in 90s; approve it manually if the bot push parked one"
           fi
 
       - name: Re-run CI for the updated PR head
