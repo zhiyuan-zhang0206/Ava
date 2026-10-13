@@ -179,7 +179,7 @@ def test_a_runners_first_join_reaches_a_held_gateway(
     """A runner's init joins (`join_gateway`) with the bundle the gateway issued
     while the gateway's own hold still stands, over the gateway's real
     middleware stack."""
-    from base.cluster.authority import unit
+    from base.host.db_authority import unit
     from base.host.env import bootstrap
     from cli import unit_join
 

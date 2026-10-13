@@ -33,7 +33,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from base.cluster.authority.model import (
+from base.host.db_authority.model import (
     CLASSES,
     GENERATION_NAMES,
     ApiTokens,

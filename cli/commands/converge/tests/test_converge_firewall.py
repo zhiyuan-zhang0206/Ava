@@ -6,7 +6,7 @@ of serving binaries per capability, and reporting rather than raising.
 
 **Nothing here mutates a real firewall.** The step attempts an unprivileged
 mutation first and falls back to `sudo -n`, but every test stubs the process runner the
-mutation goes through (`base.host.macos_firewall.run_bounded`), so what is asserted
+mutation goes through (`base.host.system.macos_firewall.run_bounded`), so what is asserted
 is output and decision-making, never ALF state.
 """
 
@@ -27,8 +27,8 @@ import cli.commands.converge.host as cv
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.host import macos_firewall as fw
-from base.host.macos_firewall import FirewallAudit, FirewallVerdict
+from base.host.system import macos_firewall as fw
+from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime

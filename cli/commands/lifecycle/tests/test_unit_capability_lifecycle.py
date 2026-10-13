@@ -6,11 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster import authority
-from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_boot as runner_boot
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
+from base.host.db_authority import delivery, unit
 from base.host.env import bootstrap
 from cli.commands.data_plane import bringup
 from cli.commands.lifecycle.start_generation import _write_generation
@@ -23,7 +22,7 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
     assert bringup.db_delivery("runner") == {
         "AVA_DB_URL": runner_boot.dsn,
-        authority.GENERATION_ENV: "0",
+        delivery.GENERATION_ENV: "0",
     }
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
         bringup.db_delivery("gateway")

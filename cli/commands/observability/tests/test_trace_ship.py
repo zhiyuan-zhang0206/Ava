@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from base import config
-from base.cluster.authority import unit
+from base.host.db_authority import unit
 from base.telemetry import trace_mirror
 from cli.commands.observability import trace
 from cli.commands.observability.trace import (

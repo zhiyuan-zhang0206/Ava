@@ -247,7 +247,7 @@ def runner_db_url_projection() -> str:
     provider credential, read with its URL from one current file snapshot, never
     a cached URL combined with a newly rotated password. Only a gateway-config
     unit projects this; a pure agent-runner's services receive their installed
-    unit capability instead (`base.cluster.authority.unit`).
+    unit capability instead (`base.host.db_authority.unit`).
     """
     from base.host.env.bootstrap import config_source_is_local
     from base.host.env.runtime_config import read_env_aliases

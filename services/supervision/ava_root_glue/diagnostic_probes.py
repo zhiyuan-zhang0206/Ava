@@ -74,8 +74,9 @@ def redis_acl() -> DaemonProbe:
 
 def pgbouncer(*, machine: MachineIdentity) -> DaemonProbe:
     from base.cluster import get_record
-    from base.cluster.authority import POOLER_ADMIN, AuthorityRefusedError, read_pooler_admin
     from base.cluster.dataplane import pooler
+    from base.host.db_authority.delivery import POOLER_ADMIN, read_pooler_admin
+    from base.host.db_authority.model import AuthorityRefusedError
     from base.paths import ava_home
     from services.supervision.healthchecks import protocol_probe
 

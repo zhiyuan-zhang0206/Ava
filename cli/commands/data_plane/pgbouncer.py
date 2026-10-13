@@ -15,7 +15,7 @@ Auth — always authenticated, whatever the cluster secret (docs/decisions/
 2026-09-26-internal-data-plane-always-authenticated.md):
 
 - **client → pgbouncer**: `auth_type = scram-sha-256` against a `userlist.txt`
-  (0600) rendered by `base.cluster.authority.render_userlist`: exactly the
+  (0600) rendered by `base.host.db_authority.delivery.render_userlist`: exactly the
   delivered write generation's two logins with their stored SCRAM verifiers,
   plus the operator admin-console entry `ava_pooler_admin` (a userlist-only
   name, never a PostgreSQL role). No plaintext password, no owner entry.
@@ -50,11 +50,11 @@ from typing import Literal
 import psutil
 
 from base.cluster import ownership, port_preflight
-from base.cluster.authority import POOLER_ADMIN
 from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.machine import MachineIdentity
 from base.host.brew_pin import brew_prefix
+from base.host.db_authority.delivery import POOLER_ADMIN
 from base.host.proc import process_alive
 from base.native_process.child_env import daemon_process_env
 from base.native_process.os_platform import LockTimeoutError
@@ -302,7 +302,7 @@ def ensure_pgbouncer(
     """Bring up (or reload) this cluster's PgBouncer on `listen_port`, pooling in
     front of the local Postgres on `pg_port`. Idempotent. Returns 0 on success.
 
-    `userlist` is the exact `auth_file` (`base.cluster.authority.render_userlist`)
+    `userlist` is the exact `auth_file` (`base.host.db_authority.delivery.render_userlist`)
     and `admin_password` the admin-console credential it carries. Outcomes for a
     running pooler:
 

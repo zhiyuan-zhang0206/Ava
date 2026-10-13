@@ -17,16 +17,8 @@ def seed_active_generation(home: Path) -> Any:
     tests/components/lifecycle/db_authority/). Returns the generation's secret record,
     whose `.api` carries the gateway and runner machine API tokens.
     """
-    from base.cluster.authority import (
-        GATEWAY_GROUP,
-        RUNNER_GROUP,
-        Groups,
-        VerifiedGeneration,
-        activate,
-        create_ledger,
-        read_secret,
-    )
-    from base.cluster.authority.ledger import begin_mint
+    from base.host.db_authority.ledger import activate, begin_mint, create_ledger, read_secret
+    from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups, VerifiedGeneration
 
     home = home.resolve()
     groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)

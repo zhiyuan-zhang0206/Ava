@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from base.cluster.authority import ledger as store
-from base.cluster.authority.model import (
+from base.host.db_authority import ledger as store
+from base.host.db_authority.model import (
     Generation,
     Groups,
     Ledger,

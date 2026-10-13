@@ -26,8 +26,8 @@ from base.cluster.authority.catalog import (
     require_admin,
     role_facts,
 )
-from base.cluster.authority.ledger import begin_mint, read_secret, require_ledger
-from base.cluster.authority.model import (
+from base.host.db_authority.ledger import begin_mint, read_secret, require_ledger
+from base.host.db_authority.model import (
     CLASSES,
     GENERATION_NAMES,
     CatalogRefusedError,

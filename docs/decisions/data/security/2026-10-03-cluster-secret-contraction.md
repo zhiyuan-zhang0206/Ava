@@ -4,7 +4,7 @@
 
 `AVA_CLUSTER_SECRET` is the human bearer: the API login, the frontend login, the root of the
 telemetry token. Machine callers already present per-generation machine API tokens
-(`base/cluster/authority/api.py`), and the gateway accepts them on every API route. A read-only
+(`base/host/db_authority/api.py`), and the gateway accepts them on every API route. A read-only
 audit (2026-10-02) found three non-gateway components still holding the secret itself:
 im_bridge (it logged in to the gateway with it and accepted it as the bearer of its `/send`),
 the callers of that `/send` (alert delivery, the health probe's owner alert), and the heartbeat's

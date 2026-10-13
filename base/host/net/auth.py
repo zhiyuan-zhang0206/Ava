@@ -6,7 +6,7 @@ Two auth methods for the gateway's human cluster secret:
   stores expiry and revocation state in Postgres.
 
 The secret (`AVA_CLUSTER_SECRET`) stays on the gateway; machine callers present
-their write generation's API token instead (`base.cluster.authority.api`),
+their write generation's API token instead (`base.host.db_authority.api`),
 which an accepting side may verify by digest (`verify_bearer_digest`). Every
 bearer is presented as an HTTP `Authorization: Bearer <token>` header and
 verified in constant time. Pure stdlib (no base.config import) so it is safe to use from
@@ -25,7 +25,7 @@ from collections.abc import Collection
 from secrets import token_bytes
 
 # The launch-environment key carrying this process's machine API token
-# (`base.cluster.authority.api`): set per process by the root launcher, or by
+# (`base.host.db_authority.api`): set per process by the root launcher, or by
 # the boot pass for an admitted operator process; never in `.env`.
 API_TOKEN_ENV = "AVA_API_TOKEN"  # noqa: S105 — env key name, not a credential
 _SCHEME = "Bearer "

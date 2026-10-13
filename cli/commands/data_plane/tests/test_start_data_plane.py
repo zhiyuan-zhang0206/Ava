@@ -43,6 +43,7 @@ class _Plane:
 def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     """Every effect of `complete_gateway_data_plane`, recorded in order."""
     from base.cluster import authority
+    from base.host.db_authority import delivery, ledger
     from cli.commands.converge import health_preflight
     from cli.commands.data_plane import bringup
 
@@ -71,15 +72,15 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://127.0.0.1:6380/0")
     monkeypatch.setattr(cluster, "ensure_pgvector_extension", record("extension"))
 
-    def ledger(_home: object) -> _Ledger:
+    def fake_ledger(_home: object) -> _Ledger:
         return _Ledger(active=state["active"])
 
-    monkeypatch.setattr(authority, "load_ledger", ledger)
-    monkeypatch.setattr(authority, "require_ledger", ledger)
+    monkeypatch.setattr(ledger, "load_ledger", fake_ledger)
+    monkeypatch.setattr(ledger, "require_ledger", fake_ledger)
     monkeypatch.setattr(authority, "ensure_groups", record("groups"))
     monkeypatch.setattr(authority, "ensure_monitor", record("monitor"))
-    monkeypatch.setattr(authority, "create_ledger", record("ledger"))
-    monkeypatch.setattr(authority, "ensure_pooler_admin", record("pooler-admin"))
+    monkeypatch.setattr(ledger, "create_ledger", record("ledger"))
+    monkeypatch.setattr(delivery, "ensure_pooler_admin", record("pooler-admin"))
     monkeypatch.setattr(authority, "mint_generation", record("mint"))
     monkeypatch.setattr(authority, "check_invariant", record("invariant"))
     monkeypatch.setattr(authority, "verify_generation", record("verify"))
@@ -88,7 +89,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
         calls.append("activate")
         state["active"] = True
 
-    monkeypatch.setattr(authority, "activate", activate)
+    monkeypatch.setattr(ledger, "activate", activate)
     monkeypatch.setattr(health_preflight, "probe_redis", record("redis-probe"))
     monkeypatch.setattr(start_identity, "mark_phase", record("provisioned"))
 
@@ -185,13 +186,14 @@ def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
     command_machine: MachineIdentity,
 ) -> None:
     from base.cluster import authority
+    from base.host.db_authority import model
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     def fail(*_a: object, **_kw: object) -> None:
-        raise authority.CatalogRefusedError(("foreign grant",))
+        raise model.CatalogRefusedError(("foreign grant",))
 
     monkeypatch.setattr(authority, "check_invariant", fail)
-    with pytest.raises(authority.CatalogRefusedError, match="foreign grant"):
+    with pytest.raises(model.CatalogRefusedError, match="foreign grant"):
         complete_gateway_data_plane(database_factory=operator_database, machine=command_machine)
     assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor"]
 

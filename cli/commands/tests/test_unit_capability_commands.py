@@ -10,10 +10,9 @@ import psycopg
 import pytest
 
 from base import config
-from base.cluster import authority
-from base.cluster.authority import unit
 from base.cluster.authority.tests.unit_capability_support import _MACHINE, _issue, _open
 from base.config.service_read import ConfigAuthority, served_db_endpoint
+from base.host.db_authority import delivery, unit
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from cli.commands.data_plane import bringup
@@ -83,7 +82,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         born.record,
         "ava",
         born.home,
-        authority.active_generation(born.home),
+        delivery.active_generation(born.home),
         machine=command_runtime.machine,
     )
     installed = unit.install_bundle(

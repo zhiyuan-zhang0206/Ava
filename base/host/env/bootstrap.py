@@ -264,7 +264,7 @@ def fetch_bootstrap_config(
 
     Bootstrap serves the credential-free database endpoint and no cluster
     secret. The runner's login comes only from its installed unit capability
-    (`base.cluster.authority.unit`).
+    (`base.host.db_authority.unit`).
 
     Presents `Authorization: Bearer <bearer>`: an explicit `bearer` (a joining
     start holding its bundle's token), else this process's machine API token

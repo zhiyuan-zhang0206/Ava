@@ -107,7 +107,7 @@ def _station_answers(url: str) -> bool:
     The bearer is the cluster's telemetry token (the station accepts the same token from its
     capability), read from the private file the gateway home's start publishes: this process
     never holds the human secret it is derived from."""
-    from base.cluster.authority.api import read_telemetry_token
+    from base.host.db_authority.api import read_telemetry_token
     from base.paths import ava_home
 
     token = read_telemetry_token(ava_home())

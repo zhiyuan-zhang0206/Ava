@@ -24,7 +24,7 @@ file lists clusters. A new home records the fixed port table
 (`base/host/env/port_table.py`) after a bind probe finds every port free; a
 record whose slots differ from the table is refused. The intent's `checkout` is the
 home's admitted runtime: the database-authority delivery admits only a process running
-from it (`base/cluster/authority/delivery.py`). An intent that still carries the
+from it (`base/host/db_authority/delivery.py`). An intent that still carries the
 `worktree` key an older start recorded is refused by name rather than read. An
 interrupted claim
 resumes the same ports and credentials with `ava init` and no flags (a flag is

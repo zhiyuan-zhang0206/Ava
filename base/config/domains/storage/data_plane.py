@@ -28,7 +28,7 @@ def self_machine_host() -> str:
 
 
 # A runner-class login: a local plane's write-generation runner login
-# (`ava_g0_runner`, base.cluster.authority.model.GENERATION_NAMES) or a
+# (`ava_g0_runner`, base.host.db_authority.model.GENERATION_NAMES) or a
 # remote-managed plane's provider-provisioned `ava_runner`. Duplicated at this
 # leaf because this module runs DURING the Settings build.
 _RUNNER_LOGIN = re.compile(r"ava_runner|ava_g(?:0|[1-9][0-9]*)_runner")

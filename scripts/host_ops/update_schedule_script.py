@@ -51,7 +51,7 @@ def load_installed_runtime(home: Path, source: Path) -> None:
     if launcher_context() is not None:
         raise RuntimeError("run as a local operator without a launcher credential delivery")
     skip_config_fetch()
-    from base.cluster.authority.delivery import require_admitted_runtime
+    from base.host.db_authority.delivery import require_admitted_runtime
     from base.paths import repo_root
 
     if repo_root().resolve() != source:

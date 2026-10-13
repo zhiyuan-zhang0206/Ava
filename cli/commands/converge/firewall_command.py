@@ -20,7 +20,7 @@ from __future__ import annotations
 import sys
 
 from base.cluster.machine import MachineIdentity
-from base.host import macos_firewall as fw
+from base.host.system import macos_firewall as fw
 from cli.commands.converge.firewall import (
     _report_missing,
     audit_this_host,

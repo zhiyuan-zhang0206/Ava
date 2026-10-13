@@ -273,8 +273,8 @@ def telemetry_bearer() -> str | None:
     gateway derives it from its human secret; a remote unit reads it from its
     installed capability and never holds the secret. None = the unit holds neither.
     """
-    from base.cluster.authority.unit import telemetry_bearer as resolve
     from base.config import settings
+    from base.host.db_authority.unit import telemetry_bearer as resolve
     from base.paths import ava_home
 
     return resolve(ava_home().resolve(), settings.data_plane.cluster_secret)

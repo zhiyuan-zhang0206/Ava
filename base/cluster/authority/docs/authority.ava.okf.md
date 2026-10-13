@@ -96,7 +96,7 @@ How the active generation reaches the pooler, launched services, operator
 processes and remote agent-runner units (`unit`: a sealed bundle issued per unit,
 whose login and tokens every runner unit shares), and
 where birth and ordinary start call this library (API tokens:
-[[base/cluster/authority/docs/api-tokens.ava.okf.md|machine API tokens]]):
+[[base/host/db_authority/docs/api-tokens.ava.okf.md|machine API tokens]]):
 [[base/cluster/authority/docs/wiring.ava.okf.md|Write-generation delivery and wiring]].
 
 ## Tests
