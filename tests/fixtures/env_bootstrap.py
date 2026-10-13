@@ -150,7 +150,8 @@ os.environ.pop("AVA_PROCESS_PROFILE", None)
 # `model_fields_set` probes, the metadata walks) assume the eager chain from
 # import time, so pin it here; the lite paths are exercised in their own
 # subprocess tests (base/config/tests/test_config_boot_lite.py). Read at
-# `base.config` import, hence inside this block.
+# `base.config` import, hence inside this block. The `AVA_CONFIG_FETCH=skip`
+# pin below overrides this one, so `_config_chain_upgraded` upgrades explicitly.
 os.environ.setdefault("AVA_CONFIG_BOOT", "eager")
 
 # ── OS-scheduled jobs: the suite never arms one ──
@@ -528,6 +529,25 @@ raise_fd_limit(65536)
 # Resource fixtures deliver real URLs only within the requesting function's
 # window and restore the sentinels before the leak guard compares this baseline.
 _PRISTINE_ENV: dict[str, str] = dict(os.environ)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _config_chain_upgraded() -> None:
+    """Upgrade the boot-lite config before the first test, once the test modules are imported.
+
+    `AVA_CONFIG_BOOT=eager` above does not take effect: the `AVA_CONFIG_FETCH=skip` pin wins
+    over it in `ConfigBoot.boot`, so the process stays boot-lite and the first test to read a
+    non-boot field would upgrade it inside that test. The upgrade installs `Settings` and its
+    companions into `base.config`; the leak guard reads those as a leak, pops them, and leaves
+    the latch saying "upgraded" with the names gone. Session scope runs before the guard's
+    first snapshot, so the upgrade is part of every test's baseline. Only a process that
+    already imported `base.config` upgrades: a run of tests that never touch it stays
+    settings-free (`test_global_guard_cycle_does_not_load_the_sdk`). The lite paths are
+    tested in subprocesses and on their own `ConfigBoot` owners, never on this one.
+    """
+    config = sys.modules.get("base.config")
+    if config is not None:
+        config.ensure_eager()
 
 
 @pytest.fixture(scope="session")

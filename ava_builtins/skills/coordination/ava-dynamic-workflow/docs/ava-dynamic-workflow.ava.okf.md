@@ -44,4 +44,4 @@ conditions and scope survive late results and script re-entry.
 
 - [Skill](../SKILL.md) owns method selection and orchestration guidance.
 - [[ava/agents/docs/agents.ava.okf.md|Agents]] owns peer lifecycle and communication.
-- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] owns checkpoint execution.
+- [[ava/watcher/docs/watcher.ava.okf.md|Watcher SDK]] owns checkpoint execution.

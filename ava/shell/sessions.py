@@ -178,7 +178,7 @@ class ShellSessions:
         # a `-<name>` suffix on the session identifier (None = unnamed). `cwd` sets
         # the session's starting directory (None = the agent's workspace, the same
         # base ava.shell.run uses). Returns (id, full_name). Internal — `new()`
-        # (shell), `run_background`, and `ava.watcher._spawn` (named "watcher")
+        # (shell), `run_background`, and `ava.watcher.spawn.run` (named "watcher")
         # all use it.
         #
         # `ttl` is REQUIRED: user ruling 2026-08-27 made shell TTL mandatory (the
@@ -432,7 +432,7 @@ def create_session(
     env_overrides: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     # Allocate the next session id and create the shell session. Internal — `new()`
-    # (shell), `run_background`, and `ava.watcher._spawn` (named "watcher") all use it.
+    # (shell), `run_background`, and `ava.watcher.spawn.run` (named "watcher") all use it.
     return _handle().create(name, cwd=cwd, ttl=ttl, system=system, env_overrides=env_overrides)
 
 

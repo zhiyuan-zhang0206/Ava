@@ -1,6 +1,6 @@
 """Shared plumbing for background commands that report back on completion.
 
-`ava.shell.run_background` and `ava.watcher._spawn` share one shape: run a
+`ava.shell.run_background` and `ava.watcher.spawn.run` share one shape: run a
 command inside a persistent session with its output teed to a per-agent log
 file and the session capture, then deliver a completion notice through the
 `ava agents send` CLI (log path + output tail) when its notification

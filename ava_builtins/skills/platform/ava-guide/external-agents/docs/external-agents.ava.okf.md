@@ -54,6 +54,6 @@ use non-resurrecting system notes.
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
 - [[ava/shell/docs/shell.ava.okf.md|ava.shell]] — `sessions` (new/send/send_keys/capture/kill) session primitive itself
-- [[ava/docs/watcher.ava.okf.md|ava.watcher]] — wait for it to produce results when supervising long tasks
+- [[ava/watcher/docs/watcher.ava.okf.md|ava.watcher]] — wait for it to produce results when supervising long tasks
 - [[base/sessions/docs/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
 - [[ava/shell/coding_tools/docs/coding-tools.ava.okf.md|ava.shell.coding_tools]] — the launch logic behind the Claude and Codex spawn scripts

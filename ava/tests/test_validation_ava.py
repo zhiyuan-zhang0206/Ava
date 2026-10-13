@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import sys
 from pathlib import Path
 from typing import Any
@@ -149,31 +150,28 @@ class TestUiEntries:
 
 
 class TestWatcherEntries:
-    def test_at_unwraps_when_message_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            _watcher,
-            "_spawn",
-            lambda code, _ttl, name, **kw: seen.update(name=name, code=code, **kw) or 1,  # pyright: ignore[reportUnknownArgumentType]
-        )  # pyright: ignore[reportUnknownArgumentType]
+    def test_at_unwraps_when_message_name(self) -> None:
+        from ava.watcher import plans
 
-        _watcher.at(("2030-01-01T00:00:00+08:00",), ("stand up",), name=("standup",))  # pyright: ignore[reportArgumentType]
-        assert seen["name"] == "standup"
-        # `message` is no longer passed to `_spawn` (ava/watcher.py) — it is
+        request = plans.plan_at(
+            ("2030-01-01T00:00:00+08:00",),  # pyright: ignore[reportArgumentType]
+            ("stand up",),  # pyright: ignore[reportArgumentType]
+            name=("standup",),  # pyright: ignore[reportArgumentType]
+            notify=None,
+            now=datetime.datetime(2029, 1, 1, tzinfo=datetime.UTC),
+            announce_timezone=None,
+        )
+        assert request.name == "standup"
+        # `message` is no longer passed to the spawn as its own field - it is
         # baked into the generated script by `build_at_script` instead.
-        assert "stand up" in seen["code"]
+        assert "stand up" in request.code
 
-    def test_launch_unwraps_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            _watcher,
-            "_spawn",
-            lambda _code, _ttl, name, **_kw: seen.update(ttl=_ttl, name=name) or 1,  # pyright: ignore[reportUnknownArgumentType]
-        )  # pyright: ignore[reportUnknownArgumentType]
+    def test_launch_unwraps_timeout(self) -> None:
+        from ava.watcher import plans
 
-        _watcher.launch(("print(1)",), ("30m",), name=("x",))  # pyright: ignore[reportArgumentType]
-        assert seen["ttl"] == 1800.0
-        assert seen["name"] == "x"
+        request = plans.plan_launch(("print(1)",), ("30m",), ("x",), None)  # pyright: ignore[reportArgumentType]
+        assert request.timeout_secs == 1800.0
+        assert request.name == "x"
 
     @pytest.mark.parametrize(
         ("call", "match"),
