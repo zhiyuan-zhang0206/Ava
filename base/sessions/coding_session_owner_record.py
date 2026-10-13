@@ -136,7 +136,7 @@ def full_session_name(owner_agent_id: int, session_id: int, suffix: str) -> str:
     return f"ava-agent-{owner_agent_id}-shell-{session_id}-{suffix}"
 
 
-def _host_owner_dir() -> Path:
+def host_owner_dir() -> Path:
     from base.paths import ava_home
 
     root = ava_home() / "coding-session-owners"
@@ -147,7 +147,7 @@ def _host_owner_dir() -> Path:
 
 
 def _key_dir(key: CodingSessionKey) -> Path:
-    directory = _host_owner_dir() / key_digest(key)
+    directory = host_owner_dir() / key_digest(key)
     directory.mkdir(mode=0o700, exist_ok=True)
     return directory
 
@@ -162,7 +162,7 @@ def lock_path(key: CodingSessionKey) -> Path:
 
     Transitions are short file writes (plus a sibling's cleanup).
     """
-    return _host_owner_dir() / f"{key_digest(key)}.lock"
+    return host_owner_dir() / f"{key_digest(key)}.lock"
 
 
 def generations(key: CodingSessionKey) -> list[str]:

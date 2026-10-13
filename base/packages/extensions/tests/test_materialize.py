@@ -34,7 +34,7 @@ def _tree(root: Path, files: dict[str, str]) -> Path:
 
 
 def _returns(value: str | None) -> Callable[[str], str | None]:
-    """A stand-in for `_last_written_hash` — what this machine last wrote.
+    """A stand-in for `last_written_hash` — what this machine last wrote.
 
     A named factory rather than a lambda so the stub carries the real
     signature; an untyped lambda would type-check as accepting anything.
@@ -93,7 +93,7 @@ class TestTheThreeVerdicts:
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
             mat.materialize_skills(db_conn, dest_root=dest_root)
             # This machine last wrote v1 — what the per-machine registry records.
-            monkeypatch.setattr(mat, "_last_written_hash", _returns(v1))
+            monkeypatch.setattr(mat, "last_written_hash", _returns(v1))
 
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
             result = mat.materialize_skills(db_conn, dest_root=dest_root)
@@ -111,7 +111,7 @@ class TestTheThreeVerdicts:
         with db_conn.transaction(force_rollback=True):
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
             mat.materialize_skills(db_conn, dest_root=dest_root)
-            monkeypatch.setattr(mat, "_last_written_hash", _returns(v1))
+            monkeypatch.setattr(mat, "last_written_hash", _returns(v1))
 
             (dest_root / "alpha" / "SKILL.md").write_text("MY EDIT")
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
@@ -129,7 +129,7 @@ class TestTheThreeVerdicts:
         resolve, versus destroying an edit nobody can recover."""
         dest_root = tmp_path / "skills"
         _tree(dest_root / "alpha", {"SKILL.md": "pre-existing, provenance unknown"})
-        monkeypatch.setattr(mat, "_last_written_hash", _returns(None))
+        monkeypatch.setattr(mat, "last_written_hash", _returns(None))
         with db_conn.transaction(force_rollback=True):
             _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "cluster version"}))
             result = mat.materialize_skills(db_conn, dest_root=dest_root)
@@ -230,7 +230,7 @@ class TestFailureStates:
         with db_conn.transaction(force_rollback=True):
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
             mat.materialize_skills(db_conn, dest_root=dest_root)
-            monkeypatch.setattr(mat, "_last_written_hash", _returns(v1))
+            monkeypatch.setattr(mat, "last_written_hash", _returns(v1))
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
             mat.materialize_skills(db_conn, dest_root=dest_root)
 

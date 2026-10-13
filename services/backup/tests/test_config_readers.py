@@ -54,7 +54,7 @@ def test_due_reads_two_fresh_clocks_around_hour_and_discovery(
         calls.append("discovery")
         return [(datetime(2026, 1, 1, 2, tzinfo=UTC), Path("existing"))]
 
-    monkeypatch.setattr(dump, "_managed_dumps", dumps)
+    monkeypatch.setattr(dump, "managed_dumps", dumps)
     assert dump.is_due(datetime(2026, 1, 1, 4, tzinfo=UTC), clock_factory=clock, hour_reader=hour)
     assert calls == ["clock", "hour", "discovery", "clock"]
 
@@ -75,8 +75,8 @@ def test_retention_reads_current_keep_after_discovery(
         calls.append("keep")
         return 2
 
-    monkeypatch.setattr(dump, "_managed_dumps", discover)
-    assert dump._prune(tmp_path, keep_reader=keep) == artifacts[:1]
+    monkeypatch.setattr(dump, "managed_dumps", discover)
+    assert dump.prune(tmp_path, keep_reader=keep) == artifacts[:1]
     assert calls == ["discovery", "keep"]
     assert [p.exists() for p in artifacts] == [False, True, True]
 

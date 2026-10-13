@@ -455,7 +455,7 @@ def test_socket_directory_selects_the_platform_at_call_time(
     monkeypatch.setattr(owner, "Path", platform_root)
     monkeypatch.setattr(owner, "is_macos", lambda: macos)
 
-    directory = owner._private_socket_dir()
+    directory = owner.private_socket_dir()
 
     assert selected == [str(Path("/").joinpath(*root))]
     assert directory == tmp_path / f"ava-{os.getuid()}"
@@ -474,7 +474,7 @@ def test_socket_length_limit_selects_the_platform_at_call_time(
 
     for size in [limit - 1, limit]:
         directory = Path("/" + "x" * (size - name_bytes - 2))
-        monkeypatch.setattr(owner, "_private_socket_dir", lambda directory=directory: directory)
+        monkeypatch.setattr(owner, "private_socket_dir", lambda directory=directory: directory)
         if size == limit:
             with pytest.raises(owner.CodingSessionSocketError, match=f"at most {limit - 1}"):
                 owner.codex_app_server_socket(key, _SOCKET_GENERATION)
@@ -525,7 +525,7 @@ def test_a_socket_dir_that_is_not_our_real_directory_is_refused(
     elsewhere.mkdir()
     (tmp_path / f"ava-{os.getuid()}").symlink_to(elsewhere)
     monkeypatch.setattr(
-        owner, "_private_socket_dir", partial(owner._private_socket_dir, base=tmp_path)
+        owner, "private_socket_dir", partial(owner.private_socket_dir, base=tmp_path)
     )
 
     with pytest.raises(owner.CodingSessionSocketError, match="not a directory owned by"):
@@ -538,7 +538,7 @@ def test_a_socket_path_that_cannot_fit_fails_before_launch(
     long_base = tmp_path / ("x" * 90)
     long_base.mkdir()
     monkeypatch.setattr(
-        owner, "_private_socket_dir", partial(owner._private_socket_dir, base=long_base)
+        owner, "private_socket_dir", partial(owner.private_socket_dir, base=long_base)
     )
 
     with pytest.raises(owner.CodingSessionSocketError, match="bytes; unix sockets"):

@@ -30,30 +30,30 @@ from base.agents.messages.kwargs import ExecStatus
 from base.packages.plugins.extensions import PluginContributions
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
-from ._escapes import _fix_invalid_escapes
-from ._imports import _detect_missing_imports, _insert_imports
+from ._escapes import fix_invalid_escapes
+from ._imports import detect_missing_imports, insert_imports
 from ._imports import (
-    _is_stdlib_module as _is_stdlib_module,  # re-exported for tests
+    is_stdlib_module as is_stdlib_module,  # re-exported for tests
 )
 from ._imports import (
-    _ruff_executable as _ruff_executable,
+    ruff_executable as ruff_executable,
 )
 from ._llm_repair import (
-    _extract_text as _extract_text,  # re-exported for tests
+    extract_text as extract_text,  # re-exported for tests
 )
-from ._llm_repair import _llm_repair_syntax, _render_syntax_error
+from ._llm_repair import llm_repair_syntax, render_syntax_error
 from ._llm_repair import (
-    _strip_code_fence as _strip_code_fence,
+    strip_code_fence as strip_code_fence,
 )
-from ._punct import _fix_chinese_punctuation
-from ._ruff import _ruff_fix, _ruff_format
+from ._punct import fix_chinese_punctuation
+from ._ruff import ruff_fix, ruff_format
 
 # ---------------------------------------------------------------------------
 # Main hook
 # ---------------------------------------------------------------------------
 
 
-def _emit_syntax_fix_event(
+def emit_syntax_fix_event(
     *,
     fix_type: str,
     before: str,
@@ -69,7 +69,7 @@ def _emit_syntax_fix_event(
 
     - fix_type="rough" — deterministic rules only (chinese_punct, missing
       imports, ruff, the 11 compile-guarded patterns). Stores `before` only:
-      the after state is exactly `_apply_fix_pipeline(before)`, so it is
+      the after state is exactly `apply_fix_pipeline(before)`, so it is
       replayable and storing it would double the payload for nothing.
     - fix_type="lm" — an LLM rewrote the source (compile() still failed after
       all deterministic steps). The rewrite is NOT replayable, so `after` is
@@ -96,7 +96,7 @@ def _emit_syntax_fix_event(
     )
 
 
-def _apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
+def apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
     """Run the deterministic fix pipeline (steps 1-6): Chinese punctuation,
     missing imports, invalid escapes, ruff --fix, ruff format (gated), and the
     11 compile-guarded deterministic patterns. Returns (fixed_code,
@@ -106,24 +106,24 @@ def _apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]
     fixed_code = code
 
     # Step 1: Chinese punctuation
-    fixed_code, n = _fix_chinese_punctuation(fixed_code)
+    fixed_code, n = fix_chinese_punctuation(fixed_code)
     if n > 0:
         fixes_applied.append(f"chinese_punct({n})")
 
     # Step 2: Missing imports
-    missing = _detect_missing_imports(fixed_code)
+    missing = detect_missing_imports(fixed_code)
     if missing:
-        fixed_code = _insert_imports(fixed_code, missing)
+        fixed_code = insert_imports(fixed_code, missing)
         fixes_applied.append(f"missing_imports({len(missing)})")
 
     # Step 3: Invalid-escape-sequence fix (before ruff so ruff sees clean source)
-    fixed_code, n_esc = _fix_invalid_escapes(fixed_code)
+    fixed_code, n_esc = fix_invalid_escapes(fixed_code)
     if n_esc > 0:
         fixes_applied.append(f"invalid_escape({n_esc})")
 
     # Step 4: ruff --fix (unused imports, formatting)
     ruff_before = fixed_code
-    fixed_code = _ruff_fix(fixed_code)
+    fixed_code = ruff_fix(fixed_code)
     if fixed_code != ruff_before:
         fixes_applied.append("ruff")
 
@@ -158,7 +158,7 @@ def _maybe_ruff_format(code: str, *, enabled: bool) -> tuple[str, bool]:
     when gated on; returns (code, applied)."""
     if not enabled:
         return code, False
-    formatted = _ruff_format(code)
+    formatted = ruff_format(code)
     return formatted, formatted != code
 
 
@@ -179,9 +179,9 @@ def _finalize_success(
             fixes=",".join(fixes_applied),
         )
         # Trace-v2 retention event: deterministic fix, before-only (after is
-        # replayable via _apply_fix_pipeline). `before_code` is the original
+        # replayable via apply_fix_pipeline). `before_code` is the original
         # agent-written source — the pre-fix truth.
-        _emit_syntax_fix_event(
+        emit_syntax_fix_event(
             fix_type="rough",
             before=before_code or "",
             after=None,
@@ -204,15 +204,15 @@ async def _handle_compile_failure(
     the LLM repair model, or surface the error to the agent (skipping the
     subprocess). Returns the graph dict to emit.
     """
-    rendered_error = _render_syntax_error(e, fixed_code)
+    rendered_error = render_syntax_error(e, fixed_code)
 
     # Last resort: hand the still-broken source + its error to a strong
     # reasoning model. Covers open-ended string-delimiter mistakes the
     # deterministic steps can't (multi-line value in single quotes, embedded
     # triple-quote, trailing quote against the closing delimiter).
-    repaired = await _llm_repair_syntax(fixed_code, rendered_error)
+    repaired = await llm_repair_syntax(fixed_code, rendered_error)
     if repaired is not None and repaired != fixed_code:
-        # _llm_repair_syntax only returns source that compiles.
+        # llm_repair_syntax only returns source that compiles.
         logger.info(
             "[syntax_fix] llm_repair: {msg} (deterministic fixes: {fixes})",
             event="syntax_fix",
@@ -223,7 +223,7 @@ async def _handle_compile_failure(
         # so before AND after are stored. `before` is the deterministic-fixed
         # source the LLM actually saw (identical to the original when no
         # deterministic fix fired); `after` is the repair output.
-        _emit_syntax_fix_event(
+        emit_syntax_fix_event(
             fix_type="lm",
             before=fixed_code,
             after=repaired,
@@ -271,7 +271,7 @@ async def _fix_call(
     code = first_tool_call_code([call])
     if not code:
         return None
-    fixed_code, fixes_applied = _apply_fix_pipeline(code, ruff_format=ruff_format)
+    fixed_code, fixes_applied = apply_fix_pipeline(code, ruff_format=ruff_format)
     fixed_msg = replace_execute_code(last_msg, call["id"], fixed_code)
     try:
         compile(fixed_code, "<agent_code>", "exec")

@@ -340,7 +340,7 @@ def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
 
 # ─── call-site contract: the delta read-compat reconstruction (task #3897) ──
 #
-# `_log_reconstruction` passes an explicit `event=` registered as
+# `log_reconstruction` passes an explicit `event=` registered as
 # `delta_read_compat` in base/events/declarations/agent_runtime.py (naming
 # rules §6.2: label is display-only).
 
@@ -348,7 +348,7 @@ def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
 def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger) -> None:
     """The reconstruction line lands as its registered event, end to end.
 
-    Drives the real `_log_reconstruction` through the real loguru → emitter
+    Drives the real `log_reconstruction` through the real loguru → emitter
     sink. Before the fix the call raised `ValueError` inside the sink
     (catch=False here) and nothing reached the mirror; this locks both the
     explicit `event=` at the call site and the name's registration."""
@@ -356,7 +356,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
 
     from langgraph.checkpoint.base import CheckpointTuple
 
-    from base.agents.history.delta_read_compat import _log_reconstruction, _ReadSpan
+    from base.agents.history.delta_read_compat import ReadSpan, log_reconstruction
 
     tuple_ = cast(
         CheckpointTuple,
@@ -365,7 +365,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
             checkpoint={"id": "checkpoint-1"},
         ),
     )
-    _log_reconstruction(tuple_, 3, span=_ReadSpan())
+    log_reconstruction(tuple_, 3, span=ReadSpan())
 
     # Find the row by name rather than taking the mirror's last line: ambient
     # metered `sdk_call` rows can land in the per-test mirror after this test's

@@ -169,7 +169,7 @@ def test_throwaway_postgres_creates_the_instance_under_the_given_base(
     instances = Path(tempfile.mkdtemp(prefix="ava-base-", dir="/tmp"))
     try:
         with pg_tools.throwaway_postgres(base=instances) as url:
-            [instance] = list(instances.glob(f"{pg_tools._THROWAWAY_PREFIX}*"))
+            [instance] = list(instances.glob(f"{pg_tools.THROWAWAY_PREFIX}*"))
             assert (instance / "data" / "PG_VERSION").is_file()
             with psycopg.connect(url) as conn:
                 assert conn.execute("select 1").fetchone() == (1,)

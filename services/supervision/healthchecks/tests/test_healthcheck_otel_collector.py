@@ -53,16 +53,16 @@ def test_collector_serves_this_home_fails_closed_without_machine_role(
     def invalid() -> MachineRoles:
         raise MachineRoleInvalid("bad")
 
-    assert hc._collector_serves_this_home(machine=_role_machine(missing)) is False
+    assert hc.collector_serves_this_home(machine=_role_machine(missing)) is False
     with pytest.raises(MachineRoleInvalid, match="bad"):
-        hc._collector_serves_this_home(machine=_role_machine(invalid))
+        hc.collector_serves_this_home(machine=_role_machine(invalid))
 
 
 def test_collector_serves_this_home_keeps_runner_and_unconfigured_behavior(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     machine_identity.set(role=frozenset({"agent-runner"}))
-    assert hc._collector_serves_this_home(machine=machine_identity) is True
+    assert hc.collector_serves_this_home(machine=machine_identity) is True
 
     machine_identity.set(role=frozenset({"gateway"}))
 
@@ -70,7 +70,7 @@ def test_collector_serves_this_home_keeps_runner_and_unconfigured_behavior(
         assert machine is machine_identity and home.is_dir()
 
     monkeypatch.setattr(hc, "gateway_observability_home", unconfigured)
-    assert hc._collector_serves_this_home(machine=machine_identity) is True
+    assert hc.collector_serves_this_home(machine=machine_identity) is True
 
 
 def test_collector_serves_this_home_requires_gateway_lgtm_marker(
@@ -84,9 +84,9 @@ def test_collector_serves_this_home_requires_gateway_lgtm_marker(
 
     monkeypatch.setattr(hc, "gateway_observability_home", gateway_home)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    assert hc._collector_serves_this_home(machine=machine_identity) is False
+    assert hc.collector_serves_this_home(machine=machine_identity) is False
     (tmp_path / "lgtm-host").touch()
-    assert hc._collector_serves_this_home(machine=machine_identity) is True
+    assert hc.collector_serves_this_home(machine=machine_identity) is True
 
 
 def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
@@ -102,7 +102,7 @@ def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
 
     monkeypatch.setattr(hc, "gateway_observability_home", gateway_home)
     monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    assert hc._collector_serves_this_home(machine=machine_identity) is True
+    assert hc.collector_serves_this_home(machine=machine_identity) is True
 
 
 def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,7 +210,7 @@ def test_queue_pressure_uses_configured_self_metrics_port(
     monkeypatch.setattr(hc.settings.observability, "otel_collector_metrics_port", 8889)
     monkeypatch.setattr(urllib.request, "urlopen", _open)
 
-    assert hc._queue_pressure() == hc.CollectorPressure(saturated=(), enqueue_failures={})
+    assert hc.queue_pressure() == hc.CollectorPressure(saturated=(), enqueue_failures={})
     assert seen == ["http://localhost:8889/metrics"]
 
 
@@ -238,7 +238,7 @@ otelcol_exporter_queue_size{data_type="logs",exporter="otlphttp/loki"} 12
             return payload
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_kw: _Resp())  # pyright: ignore[reportUnknownArgumentType]
-    pressure = hc._queue_pressure()
+    pressure = hc.queue_pressure()
     assert pressure is not None
     assert pressure.saturated == ("otlphttp/prometheus",)
     assert pressure.enqueue_failures == {"otlphttp/prometheus": 78336}

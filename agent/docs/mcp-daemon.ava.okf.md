@@ -30,7 +30,7 @@ This replaced the previous design where each agent spawned its own ~12MB daemon 
 - `ava/mcps/_daemon.py:main()` — daemon entry; no args = shared socket, one arg = explicit path (tests)
 - `ava/mcps/_daemon.py:run_daemon(socket_path)` — bind + serve; per-connection `_handle_connection`
 - `ava/mcps/_browser.py:connect_browser_direct()` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` path; no subprocess)
-- `ava/mcps/_daemon.py:_connect_http()` — remote Streamable HTTP / OAuth connect (no child process)
+- `ava/mcps/_daemon.py:connect_http()` — remote Streamable HTTP / OAuth connect (no child process)
 - `services/supervision/healthchecks/mcp_daemon.py` — 60s watchdog probe (ping) + `respawn_service` restart
 
 ## Notes

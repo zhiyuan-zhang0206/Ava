@@ -18,7 +18,7 @@ from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.otlp.identity_inputs import allow_identity, machine_identity
 
-_AGENT = 8902
+AGENT = 8902
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +34,7 @@ def _event(
     category: str = "telemetry",
     level: str = "info",
     attributes: dict[str, Any] | None = None,
-    agent_id: int | None = _AGENT,
+    agent_id: int | None = AGENT,
     trace_id: str | None = "abcd" * 8,
     span_id: str | None = "ef01" * 4,
 ) -> Event:
@@ -73,7 +73,7 @@ def otlp_backend(monkeypatch):
 
     log_exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider()
-    resource_exporter: Any = telemetry_otlp._EventDimensionResourceExporter(log_exporter)
+    resource_exporter: Any = telemetry_otlp.EventDimensionResourceExporter(log_exporter)
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(resource_exporter))
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])
@@ -125,7 +125,7 @@ def _assert_log_record_indexed_attributes(r: Any) -> None:
     assert attrs["cluster"] == ".ava-test"
     assert attrs["process"] == "test-proc"
     assert attrs["source"] == "test"
-    assert attrs["agent_id"] == _AGENT
+    assert attrs["agent_id"] == AGENT
 
 
 def _assert_log_record_json_body(r: Any) -> None:
@@ -220,7 +220,7 @@ def _assert_int_payload_maps_to_counter_without_body_label(metrics: dict[str, An
     a = _attrs_of(dp)
     assert a["model"] == "claude-sonnet"
     assert "ok" not in a  # not in the llm_usage payload declaration
-    assert a["agent_id"] == _AGENT
+    assert a["agent_id"] == AGENT
     assert a["machine"] == "test-mac"
     assert "body" not in a
 
@@ -313,7 +313,7 @@ def test_compaction_completed_maps_size_samples_and_frequency_counter(otlp_backe
 def test_metrics_resource_carries_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(telemetry_otlp, "cluster_label", lambda: ".ava-preview")
 
-    resource = telemetry_otlp._metrics_resource()
+    resource = telemetry_otlp.metrics_resource()
 
     assert resource.attributes["cluster"] == ".ava-preview"
 
@@ -470,13 +470,13 @@ def test_metric_views_shape_latency_histograms() -> None:
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
     reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp._metric_views())
+    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp.metric_views())
     meter = provider.get_meter("ava.telemetry")
     hist = meter.create_histogram("ava_llm_usage_latency", unit="ms")
     hist.record(45000.0, {"model": "m", "agent_id": 7, "machine": "x", "process": "p"})
 
     dp = _metrics(reader)["ava_llm_usage_latency"].data.data_points[0]
-    assert list(dp.explicit_bounds) == list(telemetry_otlp._LLM_LATENCY_BUCKETS_MS)
+    assert list(dp.explicit_bounds) == list(telemetry_otlp.LLM_LATENCY_BUCKETS_MS)
     assert "agent_id" not in _attrs_of(dp)
     assert _attrs_of(dp)["model"] == "m"
 
@@ -487,13 +487,13 @@ def test_metric_views_shape_gateway_event_loop_lag_histogram() -> None:
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
     reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp._metric_views())
+    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp.metric_views())
     meter = provider.get_meter("ava.telemetry")
     hist = meter.create_histogram("ava_gateway_event_loop_lag", unit="ms")
     hist.record(45000.0, {"machine": "x", "process": "gateway"})
 
     dp = _metrics(reader)["ava_gateway_event_loop_lag"].data.data_points[0]
-    assert list(dp.explicit_bounds) == list(telemetry_otlp._EVENT_LOOP_LAG_BUCKETS_MS)
+    assert list(dp.explicit_bounds) == list(telemetry_otlp.EVENT_LOOP_LAG_BUCKETS_MS)
 
 
 def test_gateway_runtime_and_sse_absolute_metrics_use_gauges(otlp_backend) -> None:
@@ -681,11 +681,11 @@ def _bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
         with db_conn.cursor() as cur:
-            cur.execute("INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (_AGENT,))
+            cur.execute("INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (AGENT,))
             cur.execute(
                 "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running') "
                 "ON CONFLICT DO NOTHING",
-                (_AGENT,),
+                (AGENT,),
             )
         db_conn.commit()
         yield

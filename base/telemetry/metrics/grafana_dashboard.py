@@ -77,7 +77,7 @@ class _Section:
     gap_before: int = 0
 
 
-_CORE_SECTIONS_PREFIX = (
+CORE_SECTIONS_PREFIX = (
     _Section("core", 900),
     # The three empty rows before LLM are the as-is file's geometry (core block
     # ends at row 66; the LLM row sits at 69) — historical, not a layout rule.
@@ -85,7 +85,7 @@ _CORE_SECTIONS_PREFIX = (
     _Section("Gateway & execution", 2003),
     _Section("Fleet", 2004),
 )
-_CORE_SECTIONS_SUFFIX = (
+CORE_SECTIONS_SUFFIX = (
     _Section("Host & data plane", 2006),
     _Section("Cost analysis", 2007),
     _Section("PR flow", 2008),
@@ -96,7 +96,7 @@ _CORE_SECTIONS_SUFFIX = (
 # groups (the merged dashboard's as-is order).
 _PLUGIN_ID_BASE = 1001
 _CORE_SECTION_TITLES = frozenset(
-    section.title for section in _CORE_SECTIONS_PREFIX + _CORE_SECTIONS_SUFFIX
+    section.title for section in CORE_SECTIONS_PREFIX + CORE_SECTIONS_SUFFIX
 )
 
 
@@ -367,7 +367,7 @@ def _panel(spec: MetricSpec, panel_id: int, grid: dict[str, int]) -> dict[str, A
 # ── layout ────────────────────────────────────────────────────────────────────
 
 
-class _Layout:
+class Layout:
     """Greedy 24-column flow with the two explicit deviations (pin, gap)."""
 
     def __init__(self) -> None:
@@ -461,7 +461,7 @@ def render_dashboard(
         plugin_groups.setdefault(spec.plugin, []).append(spec)
 
     panels: list[dict[str, Any]] = []
-    layout = _Layout()
+    layout = Layout()
 
     def render_core_section(section: _Section) -> None:
         specs = _ordered(core_by_section.get(section.title, []))
@@ -478,7 +478,7 @@ def render_dashboard(
                 _panel(spec, panel_id, layout.place(width, height, position=spec.position))
             )
 
-    for section in _CORE_SECTIONS_PREFIX:
+    for section in CORE_SECTIONS_PREFIX:
         render_core_section(section)
 
     next_id = _PLUGIN_ID_BASE
@@ -494,7 +494,7 @@ def render_dashboard(
             )
             next_id += 1
 
-    for section in _CORE_SECTIONS_SUFFIX:
+    for section in CORE_SECTIONS_SUFFIX:
         render_core_section(section)
 
     return {

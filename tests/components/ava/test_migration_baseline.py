@@ -18,15 +18,15 @@ from base.deploy.schema.migrations import (
     required_migration_set,
 )
 from base.deploy.schema.tests.migration_support import (
-    _SCHEMA_SQL,
-    _schema_sql_stamped_migration_names,
-    _throwaway_database,
+    SCHEMA_SQL,
+    schema_sql_stamped_migration_names,
+    throwaway_database,
 )
 from base.deploy.schema.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
 
-_MIGRATIONS = _SCHEMA_SQL.parents[1] / "migrations"
+_MIGRATIONS = SCHEMA_SQL.parents[1] / "migrations"
 
 
 def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdentity) -> None:
@@ -38,14 +38,14 @@ def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdenti
     admin_url = f"{base_url}/postgres"
     name = f"ava_test_mig_{os.getpid()}_{int(time.time() * 1_000_000)}"
     url = f"{base_url}/{name}"
-    schema = _SCHEMA_SQL.read_text()
+    schema = SCHEMA_SQL.read_text()
 
     with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
         cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(schema)  # type: ignore[arg-type]  # trusted multi-statement schema
-            expected_stamped = {(name,) for name in _schema_sql_stamped_migration_names()}
+            expected_stamped = {(name,) for name in schema_sql_stamped_migration_names()}
             row = conn.execute("SELECT name FROM schema_migrations").fetchall()
             assert set(row) == expected_stamped
             presets = conn.execute("SELECT name FROM agent_presets").fetchall()
@@ -66,7 +66,7 @@ def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdenti
         with psycopg.connect(url) as conn:
             assert set(
                 apply_pending_migrations(conn, machine_name=machine_identity.name)
-            ) == required_migration_set() - set(_schema_sql_stamped_migration_names())
+            ) == required_migration_set() - set(schema_sql_stamped_migration_names())
         with psycopg.connect(url) as conn:
             assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
             settled = conn.execute("SELECT llm_model FROM cluster_defaults WHERE id = 1").fetchone()
@@ -89,9 +89,9 @@ def test_lifecycle_pointer_done_guard_blocks_torn_commit_and_allows_settle() -> 
     "cleanup" UPDATE that flips a command to done without settling it — crosses
     a commit and fails.
     """
-    with _throwaway_database("lifecycle_guard") as url:
+    with throwaway_database("lifecycle_guard") as url:
         with psycopg.connect(url, autocommit=True) as setup, setup.cursor() as cur:
-            cur.execute(sql.SQL(cast(LiteralString, _SCHEMA_SQL.read_text())), prepare=False)
+            cur.execute(sql.SQL(cast(LiteralString, SCHEMA_SQL.read_text())), prepare=False)
             cur.execute("INSERT INTO agents (id) SELECT generate_series(1, 2)")
             cur.execute(
                 "INSERT INTO agents_meta (id, status) VALUES (1, 'terminated'), (2, 'terminated')"
@@ -138,7 +138,7 @@ def test_schema_sql_has_birth_config_column() -> None:
     folded into the baseline): agents_meta carries birth_config, and the
     CHECK-level comment in schema.sql documents the overlay-vs-default
     precedence the migration used to enforce by hand."""
-    schema = _SCHEMA_SQL.read_text()
+    schema = SCHEMA_SQL.read_text()
     assert "birth_config               JSONB" in schema, (
         "birth_config column missing from agents_meta"
     )
@@ -147,7 +147,7 @@ def test_schema_sql_has_birth_config_column() -> None:
 def test_schema_sql_has_r1_deploy_state_tables() -> None:
     """Terminal-state pin (the pre-reset r1 deploy-state backfill contract):
     the baseline carries both deploy-state tables the rollout machinery reads."""
-    schema = _SCHEMA_SQL.read_text()
+    schema = SCHEMA_SQL.read_text()
     for table in ("host_deploy_state",):
         assert f"CREATE TABLE {table}" in schema, f"{table} missing from baseline"
 
@@ -156,7 +156,7 @@ def test_schema_sql_seeds_presets_without_a_skill_index() -> None:
     """The baseline must agree with the migrated state: a fresh DB's seed presets
     carry no skills_to_inject_into_system_prompt, so fresh and upgraded clusters
     do not disagree about what a `coder` is."""
-    seed_block = _SCHEMA_SQL.read_text().split("INSERT INTO agent_presets")[1]
+    seed_block = SCHEMA_SQL.read_text().split("INSERT INTO agent_presets")[1]
     seed_block = seed_block.split("ON CONFLICT")[0]
     assert "skills_to_inject_into_system_prompt" not in seed_block
 
@@ -184,8 +184,8 @@ def test_the_version_gate_and_posture_paths_survive_the_contraction(
     machine_identity: MachineIdentity,
 ) -> None:
     """Everything a live process still does against the two surviving tables."""
-    with _throwaway_database("retire_paths") as url, psycopg.connect(url) as conn:
-        conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+    with throwaway_database("retire_paths") as url, psycopg.connect(url) as conn:
+        conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
         conn.commit()
         apply_pending_migrations(conn, machine_name=machine_identity.name)
         conn.execute(
@@ -224,9 +224,9 @@ def test_the_version_gate_and_posture_paths_survive_the_contraction(
 def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone(
     machine_identity: MachineIdentity,
 ) -> None:
-    with _throwaway_database("retire_guard") as url:
+    with throwaway_database("retire_guard") as url:
         with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
             _widen_retired_checks(conn)
             conn.execute("INSERT INTO agents (id, label) VALUES (7, 'stuck'), (8, 'ok')")
             conn.execute(
@@ -304,8 +304,8 @@ def _watchdog_state_present(conn: psycopg.Connection) -> tuple[list[str], list[s
 def test_a_fresh_database_has_none_of_the_dead_watchdog_state(
     machine_identity: MachineIdentity,
 ) -> None:
-    with _throwaway_database("watchdog_fresh") as url, psycopg.connect(url) as conn:
-        conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+    with throwaway_database("watchdog_fresh") as url, psycopg.connect(url) as conn:
+        conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
         conn.commit()
         assert _watchdog_state_present(conn) == ([], [])
         apply_pending_migrations(conn, machine_name=machine_identity.name)
@@ -317,9 +317,9 @@ def test_the_contraction_drops_the_state_of_an_upgraded_cluster_and_keeps_its_ro
 ) -> None:
     """An older cluster carries the objects (and rows in them); the migration removes
     them, keeps every other inbound column, and replays as a no-op."""
-    with _throwaway_database("watchdog_upgrade") as url:
+    with throwaway_database("watchdog_upgrade") as url:
         with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
             conn.execute(
                 "ALTER TABLE inbound_messages "
                 "ADD COLUMN dispatch_count INT NOT NULL DEFAULT 0, "

@@ -20,7 +20,7 @@ _NO_DATA_PLANE_IDENTITY_LINES = (
 
 @pytest.fixture(autouse=True)
 def _restore_environ() -> Iterator[None]:
-    """`_enforce_cluster_env_authority` and the CLI entry mutate os.environ directly,
+    """`enforce_cluster_env_authority` and the CLI entry mutate os.environ directly,
     not through monkeypatch: put the whole environment back after each test."""
     snapshot = dict(os.environ)
     yield
@@ -72,7 +72,7 @@ def test_cli_entry_records_launcher_profile_and_keeps_undeclared_projections(
     assert "AVA_PROCESS_PROFILE" not in os.environ
     assert os.environ[dotenv_boot.LAUNCHER_PROFILE_ENV_KEY] == "agent"
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert os.environ["AVA_DB_URL"] == "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
     assert os.environ["AVA_REDIS_URL"] == "redis://ava:runtime-password@127.0.0.1:6380/0"

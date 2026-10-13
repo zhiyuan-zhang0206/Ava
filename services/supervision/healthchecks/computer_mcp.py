@@ -37,7 +37,7 @@ def _is_alive() -> bool:
 
     Same contract as the browser-mcp healthcheck: a bool, not an exception, so
     the watchdog can act on it. The service is gated out where AF_UNIX is
-    absent (`services.supervision.roster.spec._gate_reason`), so that failure class never reaches here;
+    absent (`services.supervision.roster.spec.gate_reason`), so that failure class never reaches here;
     an unforeseen probe failure degrades to "dead" — a decision the caller can
     act on — instead of to no answer at all.
     """

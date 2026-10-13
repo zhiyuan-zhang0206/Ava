@@ -64,7 +64,7 @@ _log = logging.getLogger(__name__)
 # Bound for the per-pass schedule_fire_log retention prune. The tables are
 # small by design; the cap keeps a backlog (e.g. after a long outage) from
 # turning one pass into a multi-minute transaction.
-_FIRE_LOG_PASS_BATCH = 50_000
+FIRE_LOG_PASS_BATCH = 50_000
 
 
 def _reap_expired_notices_blocking(
@@ -110,7 +110,7 @@ def _reap_expired_notices_blocking(
     return reaped
 
 
-def _reap_expired_pages_blocking(
+def reap_expired_pages_blocking(
     pool: ConnectionPool, db: Database, bus: EventBus
 ) -> list[tuple[int, str, int]]:
     """Terminalize page rows past their deadline; return (agent_id, name, id).
@@ -177,7 +177,7 @@ def _reap_expired_pages_blocking(
     return reaped
 
 
-def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
+def reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
     """Delete browser sessions whose authoritative expiry has elapsed."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -190,7 +190,7 @@ def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
         return cur.rowcount
 
 
-def _prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
+def prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
     """Delete ``schedule_fire_log`` claims older than the retention window.
 
     The table is the at-most-once claim ledger of ``fire_slot_once``
@@ -212,7 +212,7 @@ def _prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
                 LIMIT %s
             )
             """,
-            (cutoff, _FIRE_LOG_PASS_BATCH),
+            (cutoff, FIRE_LOG_PASS_BATCH),
         )
         return cur.rowcount
 
@@ -227,7 +227,7 @@ async def _slow_phases(pool: ConnectionPool) -> tuple[int, int]:
         cadence.FIRE_LOG_PRUNE,
         settings.daemon.schedule_fire_log_cleanup_interval_seconds,
     ):
-        pruned = await asyncio.to_thread(_prune_schedule_fire_log_blocking, pool)
+        pruned = await asyncio.to_thread(prune_schedule_fire_log_blocking, pool)
     if await asyncio.to_thread(
         cadence.claim_due, pool, cadence.STUCK_POINTER_SCAN, cadence.HOURLY_S
     ):
@@ -244,9 +244,9 @@ async def sweep_round(
     impersonations = await asyncio.to_thread(reap_impersonations, pool, db, bus)
     await asyncio.to_thread(signal_incomplete_event_logs, pool)
     progress.beat()
-    pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool, db, bus)
+    pages = await asyncio.to_thread(reap_expired_pages_blocking, pool, db, bus)
     progress.beat()
-    sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
+    sessions = await asyncio.to_thread(reap_expired_web_sessions_blocking, pool)
     progress.beat()
     notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool, db, bus)
     for agent_id, nid in notices:

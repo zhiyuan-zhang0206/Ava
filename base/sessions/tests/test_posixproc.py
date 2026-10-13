@@ -43,7 +43,7 @@ def _new(name: str, argv: list[str], cwd: Path) -> bool:
 
 def _pid(name: str) -> int:
     """The recorded pid for a live session (asserts the record exists)."""
-    rec = posixproc._read_record(name)
+    rec = posixproc.read_record(name)
     assert rec is not None
     return rec.pid
 
@@ -83,9 +83,9 @@ def test_process_is_live_treats_zombie_as_dead() -> None:
             lambda: proc.status() == psutil.STATUS_ZOMBIE,
             what="forked child becomes a zombie",
         )
-        assert posixproc._process_is_live(proc) is False
+        assert posixproc.process_is_live(proc) is False
         assert (
-            posixproc._process_for_record(
+            posixproc.process_for_record(
                 SessionRecord(
                     pid=pid,
                     create_time=proc.create_time(),
@@ -117,7 +117,7 @@ def test_new_session_reparents_to_init_no_zombie(
 
     assert _new(name, list(_SLEEP), unit_home) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
-        rec = posixproc._read_record(name)
+        rec = posixproc.read_record(name)
         assert rec is not None
         assert rec.starttime == pid_starttime_ticks(rec.pid)
         child = psutil.Process(rec.pid)
@@ -235,7 +235,7 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
         lambda: _pid_gone_or_zombie(pid),
         what="SIGTERM-ignoring child process exits",
     )
-    assert not posixproc._record_path(name).exists()
+    assert not posixproc.record_path(name).exists()
 
 
 def test_kill_session_reaps_process_tree(unit_home) -> None:
@@ -302,9 +302,9 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:
         lambda: not psutil.pid_exists(pid),
         what="externally killed process disappears",
     )
-    assert posixproc._record_path(name).exists()
+    assert posixproc.record_path(name).exists()
     assert posixproc.list_sessions(prefix="ava-test-agent-") == []
-    assert not posixproc._record_path(name).exists()
+    assert not posixproc.record_path(name).exists()
 
 
 @pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
@@ -327,18 +327,18 @@ def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
             started_at=time.time(),
             starttime=starttime,
         )
-        rec.write(posixproc._record_path(name))
+        rec.write(posixproc.record_path(name))
 
         assert rec.identifies(child.pid) is True
         assert posixproc.has_session(name) is True
         assert posixproc.list_sessions(prefix="ava-test-agent-starttime-") == [name]
-        assert posixproc._record_path(name).exists()
+        assert posixproc.record_path(name).exists()
     finally:
         try:
             child.kill()
             child.wait(timeout=5)
         finally:
-            posixproc._record_path(name).unlink(missing_ok=True)
+            posixproc.record_path(name).unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(
@@ -380,12 +380,12 @@ def test_list_sessions_reaps_starttime_pid_reuse(unit_home: Path) -> None:
         started_at=time.time(),
         starttime=0,
     )
-    rec.write(posixproc._record_path(name))
+    rec.write(posixproc.record_path(name))
 
     assert rec.identifies(os.getpid()) is False
     assert posixproc.has_session(name) is False
     assert posixproc.list_sessions(prefix="ava-test-agent-starttime-") == []
-    assert not posixproc._record_path(name).exists()
+    assert not posixproc.record_path(name).exists()
 
 
 def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
@@ -400,11 +400,11 @@ def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
         cmd="test",
         cwd=str(unit_home),
         started_at=time.time(),
-    ).write(posixproc._record_path(name))
+    ).write(posixproc.record_path(name))
 
     assert posixproc.has_session(name) is False
     assert posixproc.list_sessions(prefix="ava-test-agent-legacy-") == []
-    assert posixproc._record_path(name).exists()
+    assert posixproc.record_path(name).exists()
     assert any(
         "retaining live session record" in str(record["message"]) for record in loguru_records
     )
@@ -439,23 +439,23 @@ def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
             starttime=0,
             pgid=pgid,
         )
-        rec.write(posixproc._record_path(name))
-        assert posixproc._process_for_record(rec) is None
+        rec.write(posixproc.record_path(name))
+        assert posixproc.process_for_record(rec) is None
 
-        reapable, why, occupied_group = posixproc._record_reapable(rec)
+        reapable, why, occupied_group = posixproc.record_reapable(rec)
         assert reapable is False
         assert occupied_group == pgid
         # The group gate decided; the reuse criterion never ran.
         assert "process group" in why and "reused" not in why
         assert posixproc.list_sessions(prefix="ava-test-agent-reuse-") == [name]
-        assert posixproc._record_path(name).exists()
+        assert posixproc.record_path(name).exists()
         assert any(
             "retaining live session record" in str(record["message"]) for record in loguru_records
         )
     finally:
         holder.kill()
         holder.wait(timeout=5)
-        posixproc._record_path(name).unlink(missing_ok=True)
+        posixproc.record_path(name).unlink(missing_ok=True)
 
 
 def test_new_session_idempotent_when_live(unit_home) -> None:
@@ -495,36 +495,36 @@ def test_kill_session_survivor_reports_and_keeps_record(
     )
 
     # Simulate a kill that achieves nothing (SIGKILL raced a D-state process,
-    # or AccessDenied skipped _terminate_tree's whole body).
+    # or AccessDenied skipped terminate_tree's whole body).
     def _noop_kill(*_args, **_kwargs):
         return None
 
-    _real_terminate_tree = posixproc._terminate_tree
-    monkeypatch.setattr(posixproc, "_terminate_tree", _noop_kill)  # pyright: ignore[reportUnknownArgumentType]
+    _real_terminate_tree = posixproc.terminate_tree
+    monkeypatch.setattr(posixproc, "terminate_tree", _noop_kill)  # pyright: ignore[reportUnknownArgumentType]
     ok, mode = posixproc.kill_session(name, graceful=False)
     assert ok is False and mode == "forced"
     assert psutil.pid_exists(pid), "the process must still be alive"
-    assert posixproc._record_path(name).exists(), "record must survive so the reap sees it"
+    assert posixproc.record_path(name).exists(), "record must survive so the reap sees it"
 
-    # Real kill for cleanup (restore the real _terminate_tree first); the
+    # Real kill for cleanup (restore the real terminate_tree first); the
     # record is then reaped normally. NOTE: never monkeypatch.undo() here —
     # it would also undo `unit_home`'s ava_home patch and the cleanup would
     # hit the real $AVA_HOME.
-    monkeypatch.setattr(posixproc, "_terminate_tree", _real_terminate_tree)
+    monkeypatch.setattr(posixproc, "terminate_tree", _real_terminate_tree)
     ok, _mode = posixproc.kill_session(name, graceful=False)
     assert ok is True
     poll_until(
         lambda: not psutil.pid_exists(pid),
         what="survivor test process disappears during cleanup",
     )
-    assert not posixproc._record_path(name).exists()
+    assert not posixproc.record_path(name).exists()
 
 
 def test_kill_session_terminate_error_keeps_record(
     unit_home,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_terminate_tree raising (not just failing silently) must also report
+    """terminate_tree raising (not just failing silently) must also report
     False and keep the record — the raise path is the same lie, one line up."""
     name = "ava-test-agent-err"
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
@@ -538,14 +538,14 @@ def test_kill_session_terminate_error_keeps_record(
     def boom(*a, **k):
         raise OSError("kill failed")
 
-    _real_terminate_tree = posixproc._terminate_tree
-    monkeypatch.setattr(posixproc, "_terminate_tree", boom)  # pyright: ignore[reportUnknownArgumentType]
+    _real_terminate_tree = posixproc.terminate_tree
+    monkeypatch.setattr(posixproc, "terminate_tree", boom)  # pyright: ignore[reportUnknownArgumentType]
     ok, mode = posixproc.kill_session(name, graceful=False)
     assert ok is False and mode == "forced"
     assert psutil.pid_exists(pid)
-    assert posixproc._record_path(name).exists()
+    assert posixproc.record_path(name).exists()
 
-    monkeypatch.setattr(posixproc, "_terminate_tree", _real_terminate_tree)
+    monkeypatch.setattr(posixproc, "terminate_tree", _real_terminate_tree)
     ok, _mode = posixproc.kill_session(name, graceful=False)
     assert ok is True
     poll_until(
@@ -561,7 +561,7 @@ def test_new_session_dead_child_records_sentinel(
     """A child whose create_time cannot be read — it died at spawn, freeing
     the pid at its most reusable moment — gets a sentinel that can never
     match a reused pid, not time.time() (audit 2026-08-08 P2: the old value
-    made `_process_for_record` accept the pid's next innocent occupant, and a
+    made `process_for_record` accept the pid's next innocent occupant, and a
     later kill_session could SIGKILL an unrelated process tree)."""
     name = "ava-test-agent-dying"
     real_process = psutil.Process
@@ -585,8 +585,8 @@ def test_new_session_dead_child_records_sentinel(
     monkeypatch.setattr(posixproc.psutil, "Process", _NoCreateTime)
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
-    rec = posixproc._read_record(name)
-    assert rec is not None and rec.create_time == posixproc._DEAD_CHILD_SENTINEL
+    rec = posixproc.read_record(name)
+    assert rec is not None and rec.create_time == posixproc.DEAD_CHILD_SENTINEL
     assert rec.starttime is None
     assert not posixproc.has_session(name), "sentinel record must read as dead from birth"
 
@@ -598,7 +598,7 @@ def test_new_session_dead_child_records_sentinel(
     monkeypatch.setattr(posixproc.psutil, "Process", real_process)
     with contextlib.suppress(psutil.NoSuchProcess):
         psutil.Process(pid).kill()
-    posixproc._record_path(name).unlink(missing_ok=True)
+    posixproc.record_path(name).unlink(missing_ok=True)
 
 
 def test_kill_session_group_kill_reaps_late_spawned_child(
@@ -786,6 +786,6 @@ def test_kill_session_group_kill_reaps_detached_descendant(
                 psutil.Process(detached_pid).kill()
 
 
-# Tests of `_process_is_live` / public group observation (stubbed and real
+# Tests of `process_is_live` / public group observation (stubbed and real
 # subprocess) live in test_posixproc_liveness.py, split out to stay under the
 # structure-lint's per-file line budget.

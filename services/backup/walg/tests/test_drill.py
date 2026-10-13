@@ -241,7 +241,7 @@ def test_a_long_failure_message_is_cut_for_the_state_file(monkeypatch: pytest.Mo
         database_for_url=_database_factory(),
     )
 
-    assert len(record.detail) == drill._DETAIL_CHARS
+    assert len(record.detail) == drill.DETAIL_CHARS
 
 
 # ── the whole drill, on a real Postgres ──────────────────────────────────────

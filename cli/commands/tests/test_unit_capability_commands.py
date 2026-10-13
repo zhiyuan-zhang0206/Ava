@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 from base import config
-from base.cluster.authority.tests.unit_capability_support import _MACHINE, _issue, _open
+from base.cluster.authority.tests.unit_capability_support import MACHINE, _open, issue
 from base.config.service_read import ConfigAuthority, served_db_endpoint
 from base.host.db_authority import delivery, unit
 from base.packages.plugin_providers import build_model_catalog
@@ -72,11 +72,11 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     endpoint = served_db_endpoint(bootstrap_authority)
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
-    bundle = _issue(born.home, runner, endpoint=endpoint)
+    bundle = issue(born.home, runner, endpoint=endpoint)
     pooler.stop_pgbouncer(force=True)
     # The served endpoint is the arbiter: a login it does not answer never installs.
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
-        unit.install_bundle(runner, _open(bundle), machine=_MACHINE, served_endpoint=endpoint)
+        unit.install_bundle(runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint)
     assert unit.load_unit_capability(runner) is None
     bringup._ensure_pooler(
         born.record,
@@ -86,7 +86,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         machine=command_runtime.machine,
     )
     installed = unit.install_bundle(
-        runner, _open(bundle), machine=_MACHINE, served_endpoint=endpoint
+        runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint
     )
     assert installed.generation.number == 0
     with psycopg.connect(installed.dsn, prepare_threshold=None, connect_timeout=5) as conn:
@@ -94,8 +94,8 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     # A re-issued bundle of the same generation installs again.
     again = unit.install_bundle(
         runner,
-        _open(_issue(born.home, runner, endpoint=endpoint)),
-        machine=_MACHINE,
+        _open(issue(born.home, runner, endpoint=endpoint)),
+        machine=MACHINE,
         served_endpoint=endpoint,
     )
     assert again.generation == installed.generation

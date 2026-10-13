@@ -62,7 +62,7 @@ def candidate_drive_dirs() -> list[Path]:
     return []
 
 
-def _is_writable(d: Path) -> bool:
+def is_writable(d: Path) -> bool:
     """True if a temp file round-trips (write + read + delete) inside `d`."""
     if not d.is_dir():
         return False
@@ -85,6 +85,6 @@ def find_writable_google_drive() -> Path | None:
     them), so directory existence alone is not enough to confirm participation.
     """
     for d in candidate_drive_dirs():
-        if _is_writable(d):
+        if is_writable(d):
             return d
     return None

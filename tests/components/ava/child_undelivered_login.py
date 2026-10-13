@@ -3,13 +3,13 @@
 import os
 from unittest.mock import patch
 
-from ava import external
+from ava import impersonation
 from base.db import NoDatabaseAuthorityError
 
 before = dict(os.environ)
 with patch("psycopg.connect", side_effect=AssertionError("native dial must not run")):
     try:
-        external.attach("lease")
+        impersonation.attach("lease")
     except NoDatabaseAuthorityError as error:
         assert "startup entry" in str(error)
     else:

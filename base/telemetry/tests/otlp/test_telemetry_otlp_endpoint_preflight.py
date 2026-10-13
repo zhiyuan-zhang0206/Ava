@@ -130,11 +130,11 @@ def test_production_otlp_provider_construction_contract(
         "opentelemetry.sdk.metrics.export.PeriodicExportingMetricReader",
         _PeriodicExportingMetricReader,
     )
-    monkeypatch.setattr(telemetry_otlp_metrics, "_metrics_resource", object)
-    monkeypatch.setattr(telemetry_otlp_metrics, "_metric_views", list)
+    monkeypatch.setattr(telemetry_otlp_metrics, "metrics_resource", object)
+    monkeypatch.setattr(telemetry_otlp_metrics, "metric_views", list)
 
-    telemetry_otlp_metrics._build_providers("http://127.0.0.1:4318")
-    timeout_s = telemetry_otlp_metrics._OTLP_HTTP_TIMEOUT_S
+    telemetry_otlp_metrics.build_providers("http://127.0.0.1:4318")
+    timeout_s = telemetry_otlp_metrics.OTLP_HTTP_TIMEOUT_S
 
     assert calls["log_exporter"] == {
         "endpoint": "http://127.0.0.1:4318/v1/logs",
@@ -148,7 +148,7 @@ def test_production_otlp_provider_construction_contract(
     assert calls["metric_reader"][1]["export_timeout_millis"] == timeout_s * 1000
     assert 0 < timeout_s <= 5.0
     # Both providers must NOT register their own atexit shutdown: it would fire
-    # ahead of `base.telemetry._drain_on_exit` (LIFO) and strand every tail
+    # ahead of `base.telemetry.drain_on_exit` (LIFO) and strand every tail
     # record on a shut-down processor (task #4314 triage / #4320).
     assert calls["logger_provider"] == {"shutdown_on_exit": False}
     assert calls["meter_provider"]["shutdown_on_exit"] is False

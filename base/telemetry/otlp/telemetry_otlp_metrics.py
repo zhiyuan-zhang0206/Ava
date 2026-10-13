@@ -11,16 +11,16 @@ from base.telemetry.observability import cluster_label
 # near-live without a per-batch network round-trip; the reader thread owns the
 # timing, the emitter never waits on it.
 _METRICS_INTERVAL_S = 15
-_OTLP_HTTP_TIMEOUT_S = 2.0
+OTLP_HTTP_TIMEOUT_S = 2.0
 
 # Histogram bucket boundaries for LLM-scale latencies (ms). The OTel defaults
 # top out at 10000 — every call slower than 10s fell into +Inf and clipped
 # p95/p50 at exactly 10s on the ops panels.
-_LLM_LATENCY_BUCKETS_MS = (250, 500, 1000, 2000, 4000, 8000, 15000, 30000, 60000, 120000, 300000)
+LLM_LATENCY_BUCKETS_MS = (250, 500, 1000, 2000, 4000, 8000, 15000, 30000, 60000, 120000, 300000)
 
 # A recovered event loop reports the whole stall on its next tick. Preserve
 # minute-scale freezes instead of folding every delay above 10s into +Inf.
-_EVENT_LOOP_LAG_BUCKETS_MS = (
+EVENT_LOOP_LAG_BUCKETS_MS = (
     1,
     5,
     10,
@@ -39,7 +39,7 @@ _EVENT_LOOP_LAG_BUCKETS_MS = (
 )
 
 
-class _EventDimensionResourceExporter:
+class EventDimensionResourceExporter:
     """Give each event its own OTLP resource dimensions before serialization.
 
     A ``LoggerProvider`` has one static Resource, but Loki indexes resource
@@ -80,7 +80,7 @@ class _EventDimensionResourceExporter:
         self._exporter.shutdown()
 
 
-def _unit_for(field: str) -> str:
+def unit_for(field: str) -> str:
     """OTel unit for a payload field, from its name. Durations say what they
     are; everything else is a dimensionless count ("1")."""
     if field.endswith("_ms"):
@@ -90,7 +90,7 @@ def _unit_for(field: str) -> str:
     return "1"
 
 
-def _strip_unit_suffix(field: str) -> str:
+def strip_unit_suffix(field: str) -> str:
     """Instrument name for a payload field: the unit suffix comes off, because
     the OTel unit supplies it on export — `latency_ms` + unit "ms" would
     otherwise render as `ava_..._latency_ms_milliseconds_*` in Prometheus
@@ -101,7 +101,7 @@ def _strip_unit_suffix(field: str) -> str:
     return field
 
 
-def _metric_views() -> list[Any]:
+def metric_views() -> list[Any]:
     """Shape long LLM latencies and recovered gateway event-loop stalls.
 
     LLM percentiles are read per model/fleet, never per agent, so dropping
@@ -111,7 +111,7 @@ def _metric_views() -> list[Any]:
     """
     from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 
-    llm_aggregation = ExplicitBucketHistogramAggregation(list(_LLM_LATENCY_BUCKETS_MS))
+    llm_aggregation = ExplicitBucketHistogramAggregation(list(LLM_LATENCY_BUCKETS_MS))
     views = [
         View(
             instrument_name=name,
@@ -123,14 +123,14 @@ def _metric_views() -> list[Any]:
     views.append(
         View(
             instrument_name="ava_gateway_event_loop_lag",
-            aggregation=ExplicitBucketHistogramAggregation(list(_EVENT_LOOP_LAG_BUCKETS_MS)),
+            aggregation=ExplicitBucketHistogramAggregation(list(EVENT_LOOP_LAG_BUCKETS_MS)),
             attribute_keys={"machine", "process"},
         )
     )
     return views
 
 
-def _metrics_resource() -> Any:
+def metrics_resource() -> Any:
     """The metrics-side OTel Resource: `service.name=ava-<process>` (the
     bounded process dimension) + a per-process-instance `service.instance.id`.
     Without it every series lands as job="unknown_service" and two same-named
@@ -141,7 +141,7 @@ def _metrics_resource() -> Any:
     there would mint a new stream per process start. Per-agent event indexing
     (Task #1327) keeps this resource as-is: the collector promotes the
     per-record agent_id/event_name resource attributes (set in
-    _EventDimensionResourceExporter) to Loki index labels, and the read side
+    EventDimensionResourceExporter) to Loki index labels, and the read side
     era-slices its selector around the cutover (base/telemetry/loki_index_labels.py)
     — no service_name rewrite needed."""
     import uuid
@@ -162,7 +162,7 @@ def _metrics_resource() -> Any:
     )
 
 
-def _build_providers(
+def build_providers(
     endpoint: str,
     *,
     keep_logs: Callable[[Any], None] | None = None,
@@ -185,7 +185,7 @@ def _build_providers(
     install_exporter_drop_observer()
     # `shutdown_on_exit=False` on both providers: the SDK default registers a
     # provider shutdown on atexit at bring-up (mid-life), which sits AFTER
-    # `base.telemetry._drain_on_exit` (registered at import) in the LIFO exit
+    # `base.telemetry.drain_on_exit` (registered at import) in the LIFO exit
     # order and therefore fires FIRST. The emitter's exit flush then lands on a
     # shut-down processor (`force_flush` returns False) and a record emitted
     # inside the drain thread's final batch window — every short-lived
@@ -195,24 +195,24 @@ def _build_providers(
     logs = LoggerProvider(shutdown_on_exit=False)
     if keep_logs is not None:
         keep_logs(logs)
-    log_exporter: Any = _EventDimensionResourceExporter(
-        OTLPLogExporter(endpoint=f"{endpoint}/v1/logs", timeout=_OTLP_HTTP_TIMEOUT_S)
+    log_exporter: Any = EventDimensionResourceExporter(
+        OTLPLogExporter(endpoint=f"{endpoint}/v1/logs", timeout=OTLP_HTTP_TIMEOUT_S)
     )
     logs.add_log_record_processor(
-        BatchLogRecordProcessor(log_exporter, export_timeout_millis=_OTLP_HTTP_TIMEOUT_S * 1000)
+        BatchLogRecordProcessor(log_exporter, export_timeout_millis=OTLP_HTTP_TIMEOUT_S * 1000)
     )
     reader = PeriodicExportingMetricReader(
-        OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics", timeout=_OTLP_HTTP_TIMEOUT_S),
+        OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics", timeout=OTLP_HTTP_TIMEOUT_S),
         export_interval_millis=_METRICS_INTERVAL_S * 1000,
-        export_timeout_millis=_OTLP_HTTP_TIMEOUT_S * 1000,
+        export_timeout_millis=OTLP_HTTP_TIMEOUT_S * 1000,
     )
     if keep_reader is not None:
         keep_reader(reader)
     metrics = MeterProvider(
         shutdown_on_exit=False,
         metric_readers=[reader],
-        resource=_metrics_resource(),
-        views=_metric_views(),
+        resource=metrics_resource(),
+        views=metric_views(),
     )
     if keep_metrics is not None:
         keep_metrics(metrics)

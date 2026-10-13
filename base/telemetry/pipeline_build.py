@@ -21,7 +21,7 @@ from base.telemetry.delivery.reporting import failure_isolated, report_no_pipeli
 from base.telemetry.delivery.state import process_state
 
 
-def _write_batch(
+def write_batch(
     events: list[Event], *, database: Callable[[], Any], export: Callable[[list[Event]], None]
 ) -> None:
     """Mirror first, then the telemetry_events record, the compact metric projection
@@ -57,14 +57,14 @@ def build_pipeline(
     )
 
     return ExportingEventPipeline(
-        writer=lambda events, exporter: _write_batch(
+        writer=lambda events, exporter: write_batch(
             events, database=database, export=exporter.export_batch
         ),
         export_allowed=lambda: observability_export_allowed(machine, home=home),
     )
 
 
-def _drain_on_exit() -> None:
+def drain_on_exit() -> None:
     """Close ordinary admission and finitely join its single writer at normal exit.
 
     The ordered exit seam closes downstream sinks only after the writer finishes.
@@ -87,4 +87,4 @@ def _drain_on_exit() -> None:
         close_store()
 
 
-atexit.register(_drain_on_exit)
+atexit.register(drain_on_exit)

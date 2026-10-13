@@ -18,10 +18,10 @@ from base.native_process.os_platform import LockTimeoutError
 from services.backup import dump as backup
 from services.backup.artifact import offsite
 from services.backup.tests.test_backup import (
-    _await_backup_lock_holder,
-    _disable_offsite,
     _dt,
-    _spawn_backup_lock_holder,
+    await_backup_lock_holder,
+    disable_offsite,
+    spawn_backup_lock_holder,
 )
 from services.backup.tests.test_backup import (
     bdir as bdir,
@@ -41,7 +41,7 @@ def test_run_with_progress_without_a_sink_defers_to_subprocess_run(
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
 
-    result = backup._run_with_progress(
+    result = backup.run_with_progress(
         ["pg_dump", "--version"], timeout_s=5.0, label="pg_dump", progress=None
     )
 
@@ -55,7 +55,7 @@ def test_run_with_progress_heartbeats_while_a_slow_child_runs(
     """A stage allowed to run for minutes narrates itself: one start line, then a
     line per interval carrying the bytes written. This is what keeps a slow
     dump from reading as a stalled rollout (2026-09-14 incident)."""
-    monkeypatch.setattr(backup, "_PROGRESS_INTERVAL_S", 0.2)
+    monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
     out = tmp_path / "slow.dump.partial"
     out.write_bytes(b"")
     stage = tmp_path / "slow_stage.py"
@@ -70,7 +70,7 @@ def test_run_with_progress_heartbeats_while_a_slow_child_runs(
     )
     lines: list[str] = []
 
-    proc = backup._run_with_progress(
+    proc = backup.run_with_progress(
         [sys.executable, str(stage), str(out)],
         timeout_s=120.0,
         label="pg_dump",
@@ -93,7 +93,7 @@ def test_run_with_progress_timeout_still_kills_the_child(
 ) -> None:
     """The progress path keeps subprocess.run's bound: expiry kills the child and
     raises TimeoutExpired, so the scheduler's retry discipline is unchanged."""
-    monkeypatch.setattr(backup, "_PROGRESS_INTERVAL_S", 0.2)
+    monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
     marker = tmp_path / "finished"
     stage = tmp_path / "hung_stage.py"
     stage.write_text(
@@ -107,7 +107,7 @@ def test_run_with_progress_timeout_still_kills_the_child(
     started = time.monotonic()
 
     with pytest.raises(subprocess.TimeoutExpired):
-        backup._run_with_progress(
+        backup.run_with_progress(
             [sys.executable, str(stage)],
             timeout_s=1.0,
             label="pg_dump",
@@ -140,15 +140,15 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
     ) -> subprocess.CompletedProcess[bytes]:
         assert progress is not None, "run_backup must forward the caller's sink"
         _ = env
-        assert timeout_s == backup._DUMP_TIMEOUT_S
+        assert timeout_s == backup.DUMP_TIMEOUT_S
         stages.append((label, size_path))
         progress(f"{label} started (bounded at {timeout_s / 60:.0f} min)")
         if size_path is not None:
             size_path.write_bytes(b"stage output")
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
-    monkeypatch.setattr(backup, "_run_with_progress", _fake_stage)
-    _disable_offsite(monkeypatch)
+    monkeypatch.setattr(backup, "run_with_progress", _fake_stage)
+    disable_offsite(monkeypatch)
     lines: list[str] = []
 
     path = backup.run_backup(
@@ -167,7 +167,7 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
     assert [label for label, _ in stages] == ["pg_dump", "backup encryption"]
     assert stages[0][1] is not None and stages[0][1].name.endswith(".dump.partial")
     assert stages[1][1] is not None and stages[1][1].name.endswith(".dump.enc.partial")
-    minutes = backup._DUMP_TIMEOUT_S / 60
+    minutes = backup.DUMP_TIMEOUT_S / 60
     assert lines == [
         f"pg_dump started (bounded at {minutes:.0f} min)",
         f"backup encryption started (bounded at {minutes:.0f} min)",
@@ -193,9 +193,9 @@ def test_backup_lock_cross_process_excludes(
     ava_home = tmp_path / "ava-home"
     monkeypatch.setenv("AVA_HOME", str(ava_home))
     ready = tmp_path / "ready"
-    holder = _spawn_backup_lock_holder(ava_home, ready, hold_s=2.0)
+    holder = spawn_backup_lock_holder(ava_home, ready, hold_s=2.0)
     try:
-        _await_backup_lock_holder(ready, holder)
+        await_backup_lock_holder(ready, holder)
 
         started = time.monotonic()
         with backup.backup_lock(timeout_s=30):
@@ -214,9 +214,9 @@ def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyP
     ava_home = tmp_path / "ava-home"
     monkeypatch.setenv("AVA_HOME", str(ava_home))
     ready = tmp_path / "ready"
-    holder = _spawn_backup_lock_holder(ava_home, ready, hold_s=30.0)
+    holder = spawn_backup_lock_holder(ava_home, ready, hold_s=30.0)
     try:
-        _await_backup_lock_holder(ready, holder)
+        await_backup_lock_holder(ready, holder)
 
         started = time.monotonic()
         with pytest.raises(LockTimeoutError), backup.backup_lock(timeout_s=0.5):
@@ -260,7 +260,7 @@ def test_run_backup_serializes_dump_creation(
         return record
 
     monkeypatch.setattr(offsite, "publish", _record("publish"))
-    monkeypatch.setattr(backup, "_prune", _record("prune", []))
+    monkeypatch.setattr(backup, "prune", _record("prune", []))
 
     assert (
         backup.run_backup(

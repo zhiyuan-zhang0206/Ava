@@ -84,7 +84,7 @@ def _read_state() -> ServingState | None:
         return None
 
 
-def _observe_root() -> RootBirth:
+def observe_root() -> RootBirth:
     from base.native_process.root_control.client import (
         RootClient,
         RootClientError,
@@ -127,7 +127,7 @@ def born_identity() -> ServingState | None:
     if state is None or state.state != "serving" or state.birth is None:
         return None
     try:
-        if state.birth.same_generation(_observe_root()) and _read_state() == state:
+        if state.birth.same_generation(observe_root()) and _read_state() == state:
             return state
         return None
     except (OSError, psutil.Error, ValueError, RuntimeError) as exc:
@@ -148,7 +148,7 @@ def _sync_parent_or_log(path: Path) -> None:
         _log.warning("[start-serving] directory fsync failed after marker change", exc_info=True)
 
 
-def _write_state(state: ServingState) -> None:
+def write_state(state: ServingState) -> None:
     path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(
@@ -161,7 +161,7 @@ def begin_start() -> str:
     """Invalidate any previous success and return this start's generation."""
     generation = str(uuid.uuid4())
     with file_lock(_lock_path()):
-        _write_state(ServingState(state="starting", generation=generation))
+        write_state(ServingState(state="starting", generation=generation))
     return generation
 
 
@@ -171,10 +171,10 @@ def mark_serving(generation: str, *, runtime: LoadedRuntimeIdentity) -> bool:
         current = _read_state()
         if current is None or current.state != "starting" or current.generation != generation:
             return False
-        birth = _observe_root()
+        birth = observe_root()
         if birth.runtime != runtime:
             raise RuntimeError("serving root differs from the admitted loaded runtime")
-        _write_state(ServingState(state="serving", generation=generation, birth=birth))
+        write_state(ServingState(state="serving", generation=generation, birth=birth))
         return True
 
 

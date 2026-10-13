@@ -43,7 +43,6 @@ from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.backup.artifact import passphrase
-from tests.fixtures.env_bootstrap import distinct_free_ports
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = pytest.mark.skipif(
@@ -122,7 +121,9 @@ def _teardown(born: Born) -> None:
         )
 
 
-def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
+def _configure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, distinct_free_ports: Callable[[int], list[int]]
+) -> Born:
     """A configured-but-unprovisioned single-box home (minted cluster secret)."""
     from cli.start_identity import IdentityInput, _gateway_values
 
@@ -176,7 +177,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
 
 
 def test_configured_roster_survives_kernel_reuse_of_closed_ports(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, distinct_free_ports: Callable[[int], list[int]]
 ) -> None:
     from cli.start_identity import read_intent
 
@@ -201,7 +202,7 @@ def test_configured_roster_survives_kernel_reuse_of_closed_ports(
             held.remove(self.port)
 
     monkeypatch.setattr(socket, "socket", ReusingSocket)
-    configured = _configure(monkeypatch, tmp_path)
+    configured = _configure(monkeypatch, tmp_path, distinct_free_ports)
     intent = read_intent(configured.home)
     assert intent is not None
     assert set(configured.record.ports) == set(cluster.FIXED_PORTS)
@@ -231,11 +232,15 @@ def _birth(
 
 @pytest.fixture
 def configured(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, postgres_access: None, redis_access: None
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    postgres_access: None,
+    redis_access: None,
+    distinct_free_ports: Callable[[int], list[int]],
 ) -> Iterator[Born]:
     # These commands simulate a process entry and deliver its unit environment.
     with patch.dict(os.environ):
-        born = _configure(monkeypatch, tmp_path)
+        born = _configure(monkeypatch, tmp_path, distinct_free_ports)
         try:
             yield born
         finally:

@@ -35,7 +35,7 @@ def owned_config_environment() -> Iterator[None]:
 
 @pytest.mark.usefixtures("owned_config_environment")
 def test_probe_up_when_search_answers_with_hits(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "_post_search", Mock(return_value={"hits": []}))
+    monkeypatch.setattr(hc, "post_search", Mock(return_value={"hits": []}))
     result = hc._probe()
     assert result.alive is True
     assert result.terminal is False
@@ -45,7 +45,7 @@ def test_probe_up_when_search_answers_with_hits(monkeypatch: pytest.MonkeyPatch)
 def test_probe_down_when_search_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         hc,
-        "_post_search",
+        "post_search",
         Mock(return_value=DaemonProbe.down("connection refused")),
     )
     result = hc._probe()
@@ -56,7 +56,7 @@ def test_probe_down_when_search_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.usefixtures("owned_config_environment")
 def test_probe_down_when_payload_lacks_hits(monkeypatch: pytest.MonkeyPatch) -> None:
     """A foreign process answering 200 on the port is not the search service."""
-    monkeypatch.setattr(hc, "_post_search", Mock(return_value={"nope": 1}))
+    monkeypatch.setattr(hc, "post_search", Mock(return_value={"nope": 1}))
     assert hc._probe().alive is False
 
 
@@ -74,7 +74,7 @@ def test_search_probe_uses_metadata_without_constructing_provider(
     response.json.return_value = {"hits": []}
     post = Mock(return_value=response)
     monkeypatch.setattr(httpx, "post", post)
-    assert hc._post_search("http://memory-search", embedding_name_reader=lambda: "gemini") == {
+    assert hc.post_search("http://memory-search", embedding_name_reader=lambda: "gemini") == {
         "hits": []
     }
     assert post.call_args.kwargs["json"] == {"vector": [0.0] * descriptor.dim, "k": 1}
@@ -88,7 +88,7 @@ def test_unknown_provider_fails_before_search_request(monkeypatch: pytest.Monkey
     post = Mock()
     monkeypatch.setattr(httpx, "post", post)
     with pytest.raises(ValueError, match="unknown embedding provider"):
-        hc._post_search("http://memory-search", embedding_name_reader=lambda: "unknown-provider")
+        hc.post_search("http://memory-search", embedding_name_reader=lambda: "unknown-provider")
     post.assert_not_called()
 
 
@@ -96,6 +96,6 @@ def test_probe_reads_startup_configuration_without_redelivering_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     before = dict(os.environ)
-    monkeypatch.setattr(hc, "_post_search", Mock(return_value={"hits": []}))
+    monkeypatch.setattr(hc, "post_search", Mock(return_value={"hits": []}))
     assert hc._probe().alive
     assert dict(os.environ) == before

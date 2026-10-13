@@ -60,7 +60,8 @@ _EXTERNAL_CLI_CHILD = """
 from pathlib import Path
 import os
 import ava
-from ava import external
+from ava import impersonation
+from ava.impersonation import attachment as attachment_module
 from agent.extensions import plugin_state_codec
 from base.packages.plugins.loading.registry import build_registry
 from agent.state import build_agent_state, plugin_state_schema
@@ -83,9 +84,9 @@ def require_active(_db, _lease_id, _caller, *, local_machine):
     assert local_machine == "external-cli-probe"
     return dict(LEASE)
 
-external.control.require_active = require_active
+attachment_module.control.require_active = require_active
 os.environ["AVA_MACHINE_NAME"] = "external-cli-probe"
-external.process_metadata = lambda: {{"pid": 1}}
+attachment_module.process_metadata = lambda: {{"pid": 1}}
 def load_snapshot(_agent_id, **_kwargs):
     state = build_agent_state(build_registry(validate_state=plugin_state_schema))()
     state.ava_code__cwd = str(Path(SAMPLE).parent)
@@ -93,7 +94,7 @@ def load_snapshot(_agent_id, **_kwargs):
 
 plugin_state_codec.load_snapshot = load_snapshot
 
-with external.attach("lease"):
+with impersonation.attach("lease"):
     assert ava.files.read(SAMPLE) == "tail event"
 """
 

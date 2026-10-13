@@ -18,7 +18,7 @@ def test_scan_dir_parses_frontmatter(tmp_path: Path):
         "recap.md",
         "---\ndescription: recap it\ninstruction-hint: a focus\n---\n\nDo the recap.\n",
     )
-    assert composer_commands._scan_dir(tmp_path, ())["recap"] == {
+    assert composer_commands.scan_dir(tmp_path, ())["recap"] == {
         "name": "recap",
         "description": "recap it",
         "instruction_hint": "a focus",
@@ -30,12 +30,12 @@ def test_scan_dir_parses_frontmatter(tmp_path: Path):
 def test_scan_dir_reads_claude_code_argument_hint(tmp_path: Path):
     # CC plugins ship `argument-hint`; we read it into instruction_hint (interop).
     _write(tmp_path, "deploy.md", "---\nargument-hint: env\n---\nDeploy.\n")
-    assert composer_commands._scan_dir(tmp_path, ())["deploy"]["instruction_hint"] == "env"
+    assert composer_commands.scan_dir(tmp_path, ())["deploy"]["instruction_hint"] == "env"
 
 
 def test_scan_dir_no_frontmatter_uses_whole_body(tmp_path: Path):
     _write(tmp_path, "plain.md", "just a prompt, no frontmatter")
-    out = composer_commands._scan_dir(tmp_path, ())["plain"]
+    out = composer_commands.scan_dir(tmp_path, ())["plain"]
     assert out["body"] == "just a prompt, no frontmatter"
     assert out["description"] == ""
     assert out["instruction_hint"] == ""
@@ -44,18 +44,18 @@ def test_scan_dir_no_frontmatter_uses_whole_body(tmp_path: Path):
 def test_scan_dir_skips_malformed_frontmatter(tmp_path: Path):
     _write(tmp_path, "bad.md", "---\ndescription: oops\nno terminator\n")
     _write(tmp_path, "good.md", "fine")
-    out = composer_commands._scan_dir(tmp_path, ())
+    out = composer_commands.scan_dir(tmp_path, ())
     assert "bad" not in out
     assert "good" in out
 
 
 def test_scan_dir_missing_dir_is_empty(tmp_path: Path):
-    assert composer_commands._scan_dir(tmp_path / "nope", ()) == {}
+    assert composer_commands.scan_dir(tmp_path / "nope", ()) == {}
 
 
 def test_scan_dir_namespace_prefixes_name(tmp_path: Path):
     _write(tmp_path, "deploy.md", "ship it")
-    out = composer_commands._scan_dir(tmp_path, ("vercel",))
+    out = composer_commands.scan_dir(tmp_path, ("vercel",))
     assert "vercel:deploy" in out
     assert out["vercel:deploy"]["name"] == "vercel:deploy"
 
@@ -64,8 +64,8 @@ def test_discover_dedups_later_source_wins(tmp_path: Path, monkeypatch: pytest.M
     early, late = tmp_path / "early", tmp_path / "late"
     _write(early, "dup.md", "early body")
     _write(late, "dup.md", "late body")
-    monkeypatch.setattr(composer_commands, "_command_dirs", lambda: [(early, ()), (late, ())])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(composer_commands, "_skill_commands", dict)
+    monkeypatch.setattr(composer_commands, "command_dirs", lambda: [(early, ()), (late, ())])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands, "skill_commands", dict)
     out = {c["name"]: c for c in composer_commands.discover_commands()}
     assert out["dup"]["body"] == "late body"
 
@@ -73,8 +73,8 @@ def test_discover_dedups_later_source_wins(tmp_path: Path, monkeypatch: pytest.M
 def test_discover_sorted_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _write(tmp_path, "zebra.md", "z")
     _write(tmp_path, "alpha.md", "a")
-    monkeypatch.setattr(composer_commands, "_command_dirs", lambda: [(tmp_path, ())])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(composer_commands, "_skill_commands", dict)
+    monkeypatch.setattr(composer_commands, "command_dirs", lambda: [(tmp_path, ())])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands, "skill_commands", dict)
     assert [c["name"] for c in composer_commands.discover_commands()] == ["alpha", "zebra"]
 
 
@@ -111,7 +111,7 @@ def test_scan_dir_renders_canonical_namespace_spelling(tmp_path: Path):
     # An underscore plugin / skill folder must present the dash form outward,
     # `:`-joined like a skill identifier.
     _write(tmp_path, "deploy.md", "ship it")
-    out = composer_commands._scan_dir(tmp_path, ("ava_fleet",))
+    out = composer_commands.scan_dir(tmp_path, ("ava_fleet",))
     assert "ava-fleet:deploy" in out
     assert out["ava-fleet:deploy"]["name"] == "ava-fleet:deploy"
 
@@ -123,10 +123,10 @@ def test_underscore_command_spelling_still_expands(tmp_path: Path, monkeypatch: 
     _write(tmp_path, "ship.md", "write the release note")
     monkeypatch.setattr(
         composer_commands,
-        "_command_dirs",
+        "command_dirs",
         lambda: [(tmp_path, ("ava_fleet",))],
     )
-    monkeypatch.setattr(composer_commands, "_skill_commands", dict)
+    monkeypatch.setattr(composer_commands, "skill_commands", dict)
     dash = composer_commands.expand_command("/ava-fleet:ship fix the tests")
     legacy = composer_commands.expand_command("/ava_fleet.ship fix the tests")
     # Both spellings resolve to the same command (same body); the expansion
@@ -180,7 +180,7 @@ def _fake_skill(name: str, namespace: tuple[str, ...] = ()):
 
 
 def test_skill_as_command_bare(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(composer_commands, "_command_dirs", list)  # no file commands
+    monkeypatch.setattr(composer_commands, "command_dirs", list)  # no file commands
     monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
     out = {c["name"]: c for c in composer_commands.discover_commands()}
     assert out["goal"]["skill_target"] == "goal"
@@ -188,7 +188,7 @@ def test_skill_as_command_bare(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_skill_as_command_namespaced(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(composer_commands, "_command_dirs", list)
+    monkeypatch.setattr(composer_commands, "command_dirs", list)
     monkeypatch.setattr(
         composer_commands.skills, "names", lambda: [_fake_skill("brainstorming", ("demo",))]
     )
@@ -203,7 +203,7 @@ def test_skill_as_command_namespaced(monkeypatch: pytest.MonkeyPatch):
 def test_skill_as_command_dotted_input_still_resolves(monkeypatch: pytest.MonkeyPatch):
     """Backcompat: the pre-colon dotted spelling of a command name still
     expands — matching folds dash/underscore/colon."""
-    monkeypatch.setattr(composer_commands, "_command_dirs", list)
+    monkeypatch.setattr(composer_commands, "command_dirs", list)
     monkeypatch.setattr(
         composer_commands.skills, "names", lambda: [_fake_skill("brainstorming", ("demo",))]
     )
@@ -212,7 +212,7 @@ def test_skill_as_command_dotted_input_still_resolves(monkeypatch: pytest.Monkey
 
 
 def test_skill_as_command_hyphen_maps_to_underscore_target(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(composer_commands, "_command_dirs", list)
+    monkeypatch.setattr(composer_commands, "command_dirs", list)
     monkeypatch.setattr(
         composer_commands.skills,
         "names",
@@ -227,7 +227,7 @@ def test_explicit_command_overrides_skill_as_command(
 ):
     # a skill 'foo' AND an explicit foo.md — the file (source 1-5) wins over source 0
     _write(tmp_path, "foo.md", "explicit prompt body")
-    monkeypatch.setattr(composer_commands, "_command_dirs", lambda: [(tmp_path, ())])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands, "command_dirs", lambda: [(tmp_path, ())])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("foo")])  # pyright: ignore[reportUnknownArgumentType]
     out = {c["name"]: c for c in composer_commands.discover_commands()}
     assert out["foo"]["skill_target"] is None
@@ -239,7 +239,7 @@ def test_explicit_command_overrides_skill_as_command(
 
 def test_discover_empty_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _write(tmp_path, "recap.md", "Recap it.")
-    monkeypatch.setattr(composer_commands, "_command_dirs", lambda: [(tmp_path, ())])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands, "command_dirs", lambda: [(tmp_path, ())])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(composer_commands.settings.agent, "commands_enabled", False)
     assert composer_commands.discover_commands() == []
@@ -300,14 +300,14 @@ def test_single_command_expands_unchanged(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_chain_mixes_file_command_and_skill_as_command(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(composer_commands, "_command_dirs", list)
+    monkeypatch.setattr(composer_commands, "command_dirs", list)
     monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         composer_commands,
         "discover_commands",
         lambda: [
             _file_command("recap", "Recap it."),
-            *composer_commands._skill_commands().values(),
+            *composer_commands.skill_commands().values(),
         ],
     )
     out = composer_commands.expand_command("/recap the week /goal")

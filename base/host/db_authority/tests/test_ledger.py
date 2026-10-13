@@ -94,9 +94,9 @@ def test_secret_published_before_a_crash_is_adopted_not_regenerated(
 
 def test_publication_never_overwrites_an_existing_secret(home: Path) -> None:
     target = home / "db-authority" / "generations" / "5.json"
-    store._publish_exclusive(target, b"first")
+    store.publish_exclusive(target, b"first")
     with pytest.raises(FileExistsError):
-        store._publish_exclusive(target, b"second")
+        store.publish_exclusive(target, b"second")
     assert target.read_bytes() == b"first"
     assert [p.name for p in target.parent.iterdir()] == ["5.json"]
 

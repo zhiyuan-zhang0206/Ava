@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import subprocess
 
-from ._imports import _RUFF_TIMEOUT_SECONDS, _log_ruff_give_up, _ruff_executable
+from ._imports import RUFF_TIMEOUT_SECONDS, log_ruff_give_up, ruff_executable
 
 # ---------------------------------------------------------------------------
 # 4. ruff auto-fix
 # ---------------------------------------------------------------------------
 
 
-def _ruff_fix(code: str) -> str:
+def ruff_fix(code: str) -> str:
     """Run `ruff check --fix` via stdin; return fixed code.
 
     Auto-fixes: unused imports (F401), import ordering (I001),
@@ -25,7 +25,7 @@ def _ruff_fix(code: str) -> str:
     try:
         proc = subprocess.run(  # noqa: S603
             [
-                _ruff_executable(),
+                ruff_executable(),
                 "check",
                 "--fix",
                 "--stdin-filename",
@@ -37,7 +37,7 @@ def _ruff_fix(code: str) -> str:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            timeout=_RUFF_TIMEOUT_SECONDS,
+            timeout=RUFF_TIMEOUT_SECONDS,
             check=False,
         )
         # Guard against ruff crashing / producing empty output
@@ -53,32 +53,32 @@ def _ruff_fix(code: str) -> str:
         # off the deterministic-correctness path: check --fix only applies
         # safe auto-fixes, so leaving the source as-is is a style gap, not a
         # correctness one).
-        _log_ruff_give_up("check --fix", code, exc)
+        log_ruff_give_up("check --fix", code, exc)
         return code
 
 
-def _ruff_format(code: str) -> str:
+def ruff_format(code: str) -> str:
     """Run `ruff format` via stdin; return the formatted code.
 
     Style-only normalization (quotes, spacing, line wrapping, trailing
-    commas) on top of `_ruff_fix`. Gated by the syntax_fix_ruff_format flag.
+    commas) on top of `ruff_fix`. Gated by the syntax_fix_ruff_format flag.
     """
     try:
         proc = subprocess.run(  # noqa: S603
-            [_ruff_executable(), "format", "--stdin-filename", "script.py", "-"],
+            [ruff_executable(), "format", "--stdin-filename", "script.py", "-"],
             input=code,
             capture_output=True,
             text=True,
             encoding="utf-8",
-            timeout=_RUFF_TIMEOUT_SECONDS,
+            timeout=RUFF_TIMEOUT_SECONDS,
             check=False,
         )
         if proc.returncode != 0 or not proc.stdout.strip():
             return code
         return proc.stdout
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
-        # Same contract as _ruff_fix (issue #159): a timeout or OS error is a
+        # Same contract as ruff_fix (issue #159): a timeout or OS error is a
         # visible warning; a missing ruff is logged for each skipped stage. Pass
         # through either way — format only restyles, never fixes an error.
-        _log_ruff_give_up("format", code, exc)
+        log_ruff_give_up("format", code, exc)
         return code

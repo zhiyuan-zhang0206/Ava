@@ -180,7 +180,7 @@ _F821_MSG_RE = re.compile(r"Undefined name `([^`]+)`")
 # only thing that varies is the agent's source, which is piped to stdin and
 # never interpolated into the command. S603 fires solely because the executable
 # is a resolved path rather than a string literal.
-def _ruff_executable() -> str:
+def ruff_executable() -> str:
     """Absolute path to the ``ruff`` that ships in this interpreter's env.
 
     The three ruff-backed fixers below each swallow ``FileNotFoundError`` and
@@ -202,7 +202,7 @@ def _ruff_executable() -> str:
 # used to collapse into silent pass-through (issue #159): the repair stage
 # reported success-by-omission, indistinguishable from "ruff ran and found
 # nothing to fix". Every give-up below now logs — never silent.
-_RUFF_TIMEOUT_SECONDS = 5
+RUFF_TIMEOUT_SECONDS = 5
 
 
 def _warn_ruff_missing() -> None:
@@ -212,12 +212,12 @@ def _warn_ruff_missing() -> None:
     must be visible. Each skipped stage remains observable (issue #159).
     """
     logger.warning(
-        f"ruff executable {_ruff_executable()!r} not found — syntax-fix "
+        f"ruff executable {ruff_executable()!r} not found — syntax-fix "
         "ruff stage skipped (source passed through unchanged)"
     )
 
 
-def _log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
+def log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
     """Log why a ruff subprocess pass gave up, then let the caller pass through.
 
     FileNotFoundError = the optional stage is skipped on a host without ruff —
@@ -263,7 +263,7 @@ def _f821_names(diagnostics: list[dict]) -> set[str]:
     return names
 
 
-def _ruff_undefined_names(code: str) -> set[str]:
+def ruff_undefined_names(code: str) -> set[str]:
     """Run `ruff check --select F821` via stdin; return the undefined names.
 
     Returns an empty set when ruff is unavailable, crashes, or the source does
@@ -272,7 +272,7 @@ def _ruff_undefined_names(code: str) -> set[str]:
     try:
         proc = subprocess.run(  # noqa: S603
             [
-                _ruff_executable(),
+                ruff_executable(),
                 "check",
                 "--select",
                 "F821",
@@ -286,7 +286,7 @@ def _ruff_undefined_names(code: str) -> set[str]:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            timeout=_RUFF_TIMEOUT_SECONDS,
+            timeout=RUFF_TIMEOUT_SECONDS,
             check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
@@ -294,7 +294,7 @@ def _ruff_undefined_names(code: str) -> set[str]:
         # ruff is logged per skipped stage, a timeout / OS error at warning —
         # a detection stage that silently returns "no undefined names" would
         # leave missing imports un-repaired with zero signal.
-        _log_ruff_give_up("check --select F821", code, exc)
+        log_ruff_give_up("check --select F821", code, exc)
         return set()
     # ruff exits 1 when diagnostics were found; >1 means it crashed.
     if proc.returncode > 1 or not proc.stdout.strip():
@@ -333,7 +333,7 @@ def _is_bare_name_usage(name: str, attrs: set[str]) -> bool:
     """True when `name` should resolve to the curated bare-name import: it is
     in the table and, when it is also a stdlib module (`glob`), used as a bare
     function rather than as a module (`glob.glob(...)`)."""
-    return name in _BARE_NAME_IMPORTS and not (attrs and _is_stdlib_module(name))
+    return name in _BARE_NAME_IMPORTS and not (attrs and is_stdlib_module(name))
 
 
 def _imports_for_name(name: str, code: str) -> list[str]:
@@ -354,7 +354,7 @@ def _imports_for_name(name: str, code: str) -> list[str]:
     # its usage: `glob.glob(...)` wants the module, bare `glob(...)` the function.
     if _is_bare_name_usage(name, attrs):
         return [_BARE_NAME_IMPORTS[name]]
-    if _is_stdlib_module(name):
+    if is_stdlib_module(name):
         return _stdlib_module_import(name, attrs)
     if name in _THIRD_PARTY_IMPORTS:
         package, stmt = _THIRD_PARTY_IMPORTS[name]
@@ -363,7 +363,7 @@ def _imports_for_name(name: str, code: str) -> list[str]:
     return []
 
 
-def _detect_missing_imports(code: str) -> list[str]:
+def detect_missing_imports(code: str) -> list[str]:
     """Find names used but never bound; return import statements to prepend.
 
     ruff F821 supplies the undefined names -- scope-aware, so existing imports,
@@ -375,12 +375,12 @@ def _detect_missing_imports(code: str) -> list[str]:
     if not code.strip():
         return []
     stmts: set[str] = set()
-    for name in _ruff_undefined_names(code):
+    for name in ruff_undefined_names(code):
         stmts.update(_imports_for_name(name, code))
     return sorted(stmts)
 
 
-def _is_stdlib_module(name: str) -> bool:
+def is_stdlib_module(name: str) -> bool:
     """Check whether *name* is a Python stdlib module.
 
     Uses ``sys.stdlib_module_names`` (Python 3.10+) for the canonical set.
@@ -429,7 +429,7 @@ def _import_insert_index(lines: list[str]) -> int:
     return insert_at
 
 
-def _insert_imports(code: str, import_stmts: list[str]) -> str:
+def insert_imports(code: str, import_stmts: list[str]) -> str:
     """Insert import statements after module docstring / shebang / comments."""
     lines = code.split("\n")
     insert_at = _import_insert_index(lines)

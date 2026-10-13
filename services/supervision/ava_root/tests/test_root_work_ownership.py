@@ -14,14 +14,14 @@ from typing import cast
 import pytest
 
 from base.daemon.health import DaemonProbe
-from services.supervision.ava_root.daemon import _finish
+from services.supervision.ava_root.daemon import finish
 from services.supervision.ava_root.health import HealthMonitor, ProbeRunner
 from services.supervision.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.ava_root.probes import ProbeRegistry
 from services.supervision.ava_root.server import ControlServer
 from services.supervision.ava_root.singleton import acquire_instance_lock, release_instance_lock
 from services.supervision.ava_root.supervisor import Supervisor, SupervisorConfig
-from services.supervision.ava_root.unit_records import _Generation, _UnitRuntime
+from services.supervision.ava_root.unit_records import Generation, UnitRuntime
 
 
 class WorkerFailure(BaseException):
@@ -58,7 +58,7 @@ async def _wait_error(caplog: pytest.LogCaptureFixture, error: BaseException) ->
     raise AssertionError("original watcher error was not immediately visible")
 
 
-async def _kill_child(generation: _Generation) -> None:
+async def _kill_child(generation: Generation) -> None:
     if generation.proc.returncode is None:
         generation.proc.kill()
     await generation.proc.wait()
@@ -91,7 +91,7 @@ async def test_native_worker_error_cannot_skip_other_root_teardowns(short_tmp: P
     await server.start()
     lock_fd = acquire_instance_lock(short_tmp)
     with pytest.raises(BaseExceptionGroup) as caught:
-        await _finish([Participant("peer"), Participant("probe")], server, owner, lock_fd)
+        await finish([Participant("peer"), Participant("probe")], server, owner, lock_fd)
     assert _leaves(caught.value) == [error]
     assert stopped == ["probe", "peer"]
     assert not (short_tmp / "control.sock").exists()
@@ -162,7 +162,7 @@ async def test_cross_generation_watch_errors_are_visible_and_collected_without_p
     errors = [RuntimeError("first generation"), RuntimeError("second generation")]
     watched = 0
 
-    async def fail_after_reap(runtime: _UnitRuntime, generation: _Generation) -> None:
+    async def fail_after_reap(runtime: UnitRuntime, generation: Generation) -> None:
         nonlocal watched
         error = errors[watched]
         watched += 1
@@ -215,7 +215,7 @@ async def test_failed_watch_never_certifies_an_unreaped_live_child(
     )
     error = RuntimeError("wait implementation failed")
 
-    async def broken_watch(_runtime: _UnitRuntime, _generation: _Generation) -> None:
+    async def broken_watch(_runtime: UnitRuntime, _generation: Generation) -> None:
         raise error
 
     monkeypatch.setattr(owner, "_watch", broken_watch)
@@ -289,7 +289,7 @@ async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
     original = owner._watch
     error = RuntimeError("late reap bookkeeping failed")
 
-    async def fail_after_reap(runtime: _UnitRuntime, generation: _Generation) -> None:
+    async def fail_after_reap(runtime: UnitRuntime, generation: Generation) -> None:
         await original(runtime, generation)
         raise error
 
@@ -337,7 +337,7 @@ async def test_watch_join_has_independent_bound_when_completed_child_watch_resis
     release, entered = asyncio.Event(), asyncio.Event()
     error = RuntimeError("late cancel-resistant watch failure")
 
-    async def resistant(runtime: _UnitRuntime, generation: _Generation) -> None:
+    async def resistant(runtime: UnitRuntime, generation: Generation) -> None:
         await original(runtime, generation)
         entered.set()
         while not release.is_set():

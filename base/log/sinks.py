@@ -76,7 +76,7 @@ class _StdlibInterceptHandler(logging.Handler):
 # libraries (httpx / psycopg / urllib3 / langchain / uvicorn / ...) are
 # deliberately absent, so their un-audited DEBUG volume stays behind the
 # root floor; see `_install_stdlib_intercept`.
-_FIRST_PARTY_LOGGER_NAMES = (
+FIRST_PARTY_LOGGER_NAMES = (
     "ops",
     "services",
     "base",
@@ -102,7 +102,7 @@ _GENAI_LOGGER_NAME = "langchain_google_genai"
 _GENAI_EMPTY_PARTS_MARKER = "converted to no Gemini parts"
 
 
-class _GenaiEmptyPartsWarningFilter(logging.Filter):
+class GenaiEmptyPartsWarningFilter(logging.Filter):
     """Drop those two `_parse_chat_history` warnings, and only those (#3317).
 
     Nothing is lost: the record announces a substitution the library performs
@@ -134,11 +134,11 @@ def _install_stdlib_intercept() -> None:
     handler list rather than appending, so reinit doesn't accumulate.
 
     The handler also carries the one targeted record filter this file needs
-    (`_GenaiEmptyPartsWarningFilter`, #3317).
+    (`GenaiEmptyPartsWarningFilter`, #3317).
 
     Level INFO is the floor for everyone — it keeps third-party DEBUG spam
     (httpx / psycopg / urllib3) out without an extra filter, matching
-    `add_event_sink`'s own threshold. `_FIRST_PARTY_LOGGER_NAMES` then
+    `add_event_sink`'s own threshold. `FIRST_PARTY_LOGGER_NAMES` then
     raises that floor back to DEBUG for our own code only, so a controller's
     or daemon's `_log.debug(...)` still reaches the file sink (which is
     itself level=DEBUG — see `_add_file_sink`) the way a native
@@ -150,11 +150,11 @@ def _install_stdlib_intercept() -> None:
     """
     intercept_handler = _StdlibInterceptHandler()
     # #3317: the langchain-google-genai 'no Gemini parts' chatter is dropped at
-    # this stdlib→loguru boundary — see `_GenaiEmptyPartsWarningFilter`.
-    intercept_handler.addFilter(_GenaiEmptyPartsWarningFilter())
+    # this stdlib→loguru boundary — see `GenaiEmptyPartsWarningFilter`.
+    intercept_handler.addFilter(GenaiEmptyPartsWarningFilter())
     logging.basicConfig(handlers=[intercept_handler], level=logging.INFO, force=True)
 
-    for _name in _FIRST_PARTY_LOGGER_NAMES:
+    for _name in FIRST_PARTY_LOGGER_NAMES:
         logging.getLogger(_name).setLevel(logging.DEBUG)
 
     # psycopg_pool logs benign connection-recycling churn ("discarding closed
@@ -189,7 +189,7 @@ def _install_stdlib_intercept() -> None:
 # multiple agents run concurrently. `{extra[agent_id]:>3}` is
 # right-aligned 3 chars — IDs up to 3 digits stay column-aligned,
 # 4+ digits expand automatically.
-_HUMAN_FORMAT = (
+HUMAN_FORMAT = (
     "<green>{time:HH:mm:ss.SSS}</green> "
     "<level>{level: <5}</level> "
     "<cyan>a={extra[agent_id]:>3}</cyan> "
@@ -226,10 +226,10 @@ def add_sink(sink: Any, /, **kwargs: Any) -> int:
     return logger.add(sink, diagnose=False, **kwargs)
 
 
-_FILE_SINK_SIZE_LIMIT = 100 * 1024 * 1024
+FILE_SINK_SIZE_LIMIT = 100 * 1024 * 1024
 
 
-def _rotate_by_size_or_day(message: Any, file: Any) -> bool:
+def rotate_by_size_or_day(message: Any, file: Any) -> bool:
     """Rotation predicate for the JSONL file sink (Task #434): rotate when
     the file crosses the 100 MB ceiling OR when the message's date moves past
     the file's creation date.
@@ -257,7 +257,7 @@ def _rotate_by_size_or_day(message: Any, file: Any) -> bool:
     """
     with contextlib.suppress(OSError, ValueError):
         file.seek(0, 2)
-        if file.tell() > _FILE_SINK_SIZE_LIMIT:
+        if file.tell() > FILE_SINK_SIZE_LIMIT:
             return True
     try:
         created = datetime.datetime.fromtimestamp(
@@ -291,7 +291,7 @@ def _add_file_sink(path: Path) -> int:
     single write, the lines are still on disk in the rotated file — whereas
     no rotation fills the disk for certain. The daily half of the rotation
     predicate is anchored on the file's own ctime so both processes agree
-    on when the day flips (see `_rotate_by_size_or_day`).
+    on when the day flips (see `rotate_by_size_or_day`).
     """
     # Audit round-2 up-security-trust P1-1: log files carry full agent exec
     # output (including anything an agent printed), so they are owner-only —
@@ -306,7 +306,7 @@ def _add_file_sink(path: Path) -> int:
         path,
         serialize=True,
         level="DEBUG",
-        rotation=_rotate_by_size_or_day,
+        rotation=rotate_by_size_or_day,
         retention="7 days",
     )
     with contextlib.suppress(OSError):

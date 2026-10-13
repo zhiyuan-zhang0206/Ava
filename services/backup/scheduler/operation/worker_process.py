@@ -29,7 +29,7 @@ from services.backup.scheduler.operation.staging import (
 
 _log = logging.getLogger(__name__)
 _CODE_ROOT = Path(__file__).resolve().parents[4]
-_BOOTSTRAP = Path(__file__).with_name("worker_bootstrap.py")
+BOOTSTRAP = Path(__file__).with_name("worker_bootstrap.py")
 
 
 class StopSignal(Protocol):
@@ -247,7 +247,7 @@ def _launch(
                 sys.executable,
                 "-I",
                 "-B",
-                str(_BOOTSTRAP),
+                str(BOOTSTRAP),
                 str(_CODE_ROOT),
                 module,
                 str(work / "request.json"),

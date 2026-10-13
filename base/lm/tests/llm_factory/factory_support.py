@@ -8,7 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.outputs import ChatResult
 
 
-class _FakeLLM(BaseChatModel):
+class FakeLLM(BaseChatModel):
     """Minimal stub that passes the BaseChatModel isinstance check — _resolve_override
     success path must return a BaseChatModel subclass. At runtime LangChain won't
     actually call _generate; it's only used for type checking at the build_chat_model
@@ -22,7 +22,7 @@ class _FakeLLM(BaseChatModel):
         raise NotImplementedError
 
 
-def _install_fake_module(monkeypatch: pytest.MonkeyPatch, name: str) -> types.ModuleType:
+def install_fake_module(monkeypatch: pytest.MonkeyPatch, name: str) -> types.ModuleType:
     """Inject a fake module into sys.modules so that importlib.import_module can find it —
     cleaner than writing a real module to disk and cleaning up; monkeypatch automatically
     restores."""
@@ -48,4 +48,4 @@ class _SpyClient:
         self.closed += 1
 
 
-__all__ = ["_FakeLLM", "_SpyClient"]
+__all__ = ["FakeLLM", "_SpyClient"]

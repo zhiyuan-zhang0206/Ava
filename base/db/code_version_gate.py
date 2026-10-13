@@ -8,7 +8,7 @@ version (`raise_min_code_version`), and every pooled session reads it and
 refuses to work under a lower one.
 
 The check rides the baseline-session restore that every pooled borrow already
-runs (`base.db.connections._restore_pooled_session`): the read of the minimum is
+runs (`base.db.connections.restore_pooled_session`): the read of the minimum is
 one more column of the restore's second statement, so it adds no round trip, and
 the entry-owned gate limits the read to once per `MIN_REFRESH_INTERVAL_S`.
 
@@ -53,7 +53,7 @@ _REFUSAL = (
 )
 
 
-def _has_log_sink() -> bool:
+def has_log_sink() -> bool:
     """Whether loguru has a handler, i.e. whether a record written now goes anywhere."""
     return bool(cast(Any, logger)._core.handlers)  # private `_core`, as `base.log` reads it
 
@@ -66,7 +66,7 @@ def _refuse(version: int, minimum: int, *, process: str) -> NoReturn:
         "code": CODE_BEHIND_MINIMUM_EXIT_CODE,
     }
     logger.critical(_REFUSAL, **fields)
-    if not _has_log_sink():
+    if not has_log_sink():
         # A process that dials before it opens its sinks would otherwise exit
         # without a word: loguru discards a record no handler receives.
         sys.stderr.write(_REFUSAL.format(**fields) + "\n")
