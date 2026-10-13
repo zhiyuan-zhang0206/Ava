@@ -34,7 +34,6 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "tests/namespaces/gateway_client/test_gateway_client_base_url.py -> gateway_client/transport.py#_http" = 7
 "tests/namespaces/gateway_client/test_strong_creation.py -> gateway_client/transport.py#_retry_delay_seconds" = 1
 "tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_Constant" = 1
-"tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_classify_dir_entry" = 1
 "tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_module_attribute_annotations" = 1
 "tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_module_attribute_docs" = 1
 "tests/namespaces/sdk_surface/test_help_renderer.py -> sdk_surface/discovery.py#_module_children" = 1

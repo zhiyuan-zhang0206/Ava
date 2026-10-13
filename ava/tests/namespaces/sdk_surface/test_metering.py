@@ -182,8 +182,8 @@ def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
     fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
     # plain functions, nested-namespace functions, and top-level functions
     assert {"files.read", "shell.run", "shell.sessions.new", "self.compact", "understand"} <= fqs
-    # ava.mcps has no list __all_for_ava__, but its own module helpers are still metered
-    # via the dir() fallback (dynamic tool calls are metered separately at _call_raw).
+    # ava.mcps declares its helpers (and the configured servers) in __all_for_ava__; the
+    # helpers are metered here, while dynamic tool calls are metered at the call funnel.
     assert {"mcps.servers", "mcps.description"} <= fqs
     # classes and constants exposed in __all_for_ava__ are never wrapped
     assert "agents.AgentRow" not in fqs  # a class

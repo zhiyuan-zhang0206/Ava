@@ -88,6 +88,11 @@ class SkillProxy(LazySkillDoc, types.ModuleType):
     def __dir__(self) -> list[str]:
         return []  # leaf skill — no children to list in help view
 
+    @property
+    def __all_for_ava__(self) -> list[str]:
+        """A skill leaf has no members; its body is its `__doc__`."""
+        return []
+
 
 class Namespace(LazySkillDoc, types.ModuleType):
     """Runtime object for a namespace node (`ava.skills.<seg>…`). Marker for
@@ -133,6 +138,11 @@ class Namespace(LazySkillDoc, types.ModuleType):
         return node_to_obj(f"{self._path}.{attr}", self._tree[attr], self._consume)
 
     def __dir__(self) -> list[str]:
+        return sorted(self._tree)
+
+    @property
+    def __all_for_ava__(self) -> list[str]:
+        """The skills and folders directly under this namespace."""
         return sorted(self._tree)
 
 

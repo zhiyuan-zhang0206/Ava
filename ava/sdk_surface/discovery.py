@@ -94,8 +94,7 @@ def _sorted_children(children: list[tuple[str, Any]]) -> list[tuple[str, Any]]:
 
 def _static_agent_surface(container: Any) -> list[str] | None:
     """The explicitly-declared agent surface (`__all_for_ava__`) as a name list,
-    or None when the container declares none — the caller then falls back to its
-    own discovery (help walks `dir()`, metering walks own routines).
+    or None when the container declares none (`agent_visible_names` raises then).
 
     Read via `getattr_static` so a dynamically-served member is never
     force-evaluated. The one exception is a `property` surface: `ava.mcps`'s
@@ -114,117 +113,57 @@ def _static_agent_surface(container: Any) -> list[str] | None:
     return [n for n in surface if isinstance(n, str) and not n.startswith("_")]
 
 
+class UndeclaredSurfaceError(TypeError):
+    """A container reached the agent surface without declaring `__all_for_ava__`."""
+
+
 def agent_visible_names(container: Any) -> list[str]:
-    """Agent-visible member names of an `ava` namespace container — the single
+    """Agent-visible member names of an `ava` namespace container - the single
     source of truth for `help()` rendering, SDK-expand discovery, doc linting,
     and metering instrumentation.
 
-    Prefers the explicit `__all_for_ava__` surface (`_static_agent_surface`); a
-    container that declares none falls back to public vars (a `SimpleNamespace`
-    plugin namespace) or own public routines (a module without a surface list,
-    e.g. `ava.mcps`). The dynamic sub-namespaces a module serves via
-    `__getattr__` are never listed — MCP server proxies are metered at their
-    call funnel, not enumerated here."""
+    Every container declares its surface in `__all_for_ava__` (`_static_agent_surface`): a
+    module, a plugin namespace (the installer writes one from the namespace's public vars when
+    the plugin declares none) or a dynamic proxy that carries it as a property (`ava.mcps`,
+    `ava.skills` and its nodes). A container that declares none is a bug in whoever built it,
+    so this raises instead of guessing from `dir()` or the module's routines. The dynamic
+    sub-namespaces a module serves via `__getattr__` are never listed - MCP server proxies are
+    metered at their call funnel, not enumerated here.
+
+    Raises:
+        UndeclaredSurfaceError: `container` declares no `__all_for_ava__` list.
+    """
     surface = _static_agent_surface(container)
-    if surface is not None:
-        return surface
-    if isinstance(container, SimpleNamespace):
-        return [n for n in vars(container) if not n.startswith("_")]
-    if isinstance(container, ModuleType):
-        return [
-            n
-            for n in vars(container)
-            if not n.startswith("_")
-            and inspect.isroutine(attr := inspect.getattr_static(container, n, None))
-            and getattr(attr, "__module__", "") == container.__name__
-        ]
-    return []
+    if surface is None:
+        raise UndeclaredSurfaceError(
+            f"{getattr(container, '__name__', type(container).__name__)} declares no "
+            "__all_for_ava__ list; every ava namespace must name its agent-visible members"
+        )
+    return surface
 
 
 def _module_children(
     mod: Any, *, hidden_members: frozenset[str] = frozenset()
 ) -> list[tuple[str, Any]]:
-    """`__all_for_ava__` whitelist preferred — required for declared plugin
-    namespaces (`SdkNamespace`) (SimpleNamespace doesn't satisfy the `dir()` fallback's
-    module-prefix check). PEP 224 attribute docstrings discovered alongside via
-    AST; any non-callable/non-class/non-module attr is wrapped as `_Constant` so
-    the renderer can show `## NAME: type` instead of falling back to the
-    underlying class's docstring. `hidden_members` is the render caller's filter
-    (dotted paths, e.g. ``ava.self.attach``)."""
+    """The children named by `mod`'s `__all_for_ava__` (via `agent_visible_names`, which raises
+    when there is none). PEP 224 attribute docstrings are discovered alongside via AST; any
+    non-callable/non-class/non-module attr is wrapped as `_Constant` so the renderer can show
+    `## NAME: type` instead of falling back to the underlying class's docstring.
+    `hidden_members` is the render caller's filter (dotted paths, e.g. ``ava.self.attach``)."""
     annotations = _module_attribute_annotations(mod)
     docs = _module_attribute_docs(mod)
-    surface = _static_agent_surface(mod)
-    if surface is not None:
-        if hidden_members:
-            # Dotted member paths (``ava.self.attach``) passed by the render
-            # caller — the member stays in the surface list (plugin members,
-            # SDK-disable, doc linting all keep working) but never renders.
-            prefix = f"{mod.__name__}."
-            surface = [name for name in surface if f"{prefix}{name}" not in hidden_members]
-        return [
-            (name, child)
-            for name in surface
-            if (child := _resolve_child(mod, name, annotations, docs)) is not None
-        ]
-    return _module_children_from_dir(mod, annotations, docs)
-
-
-def _module_children_from_dir(
-    mod: Any,
-    annotations: dict[str, str],
-    docs: dict[str, str],
-) -> list[tuple[str, Any]]:
-    """Fallback when `mod` has no `__all_for_ava__`: walk `dir(mod)` + filter to entries
-    that originate in this package (avoids leaking re-imports like `os` or
-    `psycopg` into the help view). Constants discovered via PEP 224 still get
-    surfaced — both via `dir()` (when assigned a value) and afterwards by
-    sweeping declared-but-unassigned names from the AST."""
-    seen: set[str] = set()
-    result: list[tuple[str, Any]] = []
-    for name in sorted(dir(mod)):
-        if name.startswith("_"):
-            continue
-        child = _classify_dir_entry(mod, name, annotations, docs)
-        if child is not None:
-            result.append((name, child))
-            seen.add(name)
-    # PEP 224 declarations without a value miss `dir()`; surface them now.
-    for name, doc in docs.items():
-        if not name.startswith("_") and name not in seen:
-            result.append((name, _Constant(type_str=annotations.get(name, ""), doc=doc)))
-    return result
-
-
-def _classify_dir_entry(
-    mod: Any,
-    name: str,
-    annotations: dict[str, str],
-    docs: dict[str, str],
-) -> Any:
-    """`dir()` fallback classifier: keep entries that look like they belong to
-    `mod`'s package, wrap loose constants as `_Constant`."""
-    attr = getattr(mod, name, None)
-    if attr is None:
-        return None
-    if inspect.ismodule(attr):
-        return attr if _belongs_to_module(attr, mod, name) else None
-    if _is_routine_or_class(attr):
-        return attr if _defined_in_package(attr, mod) else None
-    if is_documented_const(attr):
-        return attr
-    if _has_pep224_doc(name, annotations, docs):
-        return _Constant(
-            type_str=annotations.get(name, type(attr).__name__),
-            doc=docs.get(name, ""),
-        )
-    return None
-
-
-def _belongs_to_module(attr: Any, mod: Any, name: str) -> bool:
-    """True when a module attribute is (a submodule of) `mod`'s package —
-    the attribute's name equals or starts with `mod.__name__ + "."`."""
-    prefix = f"{mod.__name__}."
-    return attr.__name__ == prefix + name or attr.__name__.startswith(prefix)
+    surface = agent_visible_names(mod)
+    if hidden_members:
+        # Dotted member paths (``ava.self.attach``) passed by the render
+        # caller - the member stays in the surface list (plugin members,
+        # SDK-disable, doc linting all keep working) but never renders.
+        prefix = f"{mod.__name__}."
+        surface = [name for name in surface if f"{prefix}{name}" not in hidden_members]
+    return [
+        (name, child)
+        for name in surface
+        if (child := resolve_child(mod, name, annotations, docs)) is not None
+    ]
 
 
 def _is_routine_or_class(attr: Any) -> bool:
@@ -232,19 +171,7 @@ def _is_routine_or_class(attr: Any) -> bool:
     return inspect.isfunction(attr) or inspect.isclass(attr)
 
 
-def _defined_in_package(obj: Any, mod: Any) -> bool:
-    """True when `obj` is defined in `mod` or one of its package submodules."""
-    pkg_prefix = mod.__name__.split(".", 1)[0]
-    attr_module = getattr(obj, "__module__", None) or ""
-    return attr_module == mod.__name__ or attr_module.startswith(pkg_prefix + ".")
-
-
-def _has_pep224_doc(name: str, annotations: dict[str, str], docs: dict[str, str]) -> bool:
-    """True when `name` carries a PEP 224 docstring or type annotation."""
-    return name in docs or name in annotations
-
-
-def _resolve_child(
+def resolve_child(
     mod: Any,
     name: str,
     annotations: dict[str, str],
