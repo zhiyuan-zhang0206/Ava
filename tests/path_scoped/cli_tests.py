@@ -135,5 +135,5 @@ def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     ) -> None:
         opened.append(name)
 
-    monkeypatch.setattr("base.log.process.init_cli_process", record)
+    monkeypatch.setattr("base.telemetry.process_logging.init_cli_process", record)
     return opened

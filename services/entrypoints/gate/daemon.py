@@ -402,11 +402,11 @@ def main() -> None:
     from base.daemon.shutdown import install_graceful_shutdown
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
-    from base.log.process import init_gateway_process
     from base.native_process.code_version import CodeVersion
     from base.native_process.loaded_commit import LoadedCommit
     from base.telemetry.delivery.receipts import DrainStatus
     from base.telemetry.emitter import build_pipeline, report_no_pipeline
+    from base.telemetry.process_logging import init_gateway_process
 
     image = LoadedCommit.capture()
     config = ConfigBoot()

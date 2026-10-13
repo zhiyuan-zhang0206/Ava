@@ -27,9 +27,9 @@ from loguru import logger as _global_logger
 from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.db import Database
-from base.log.process import _event_sink, add_event_sink
 from base.paths import ava_home
 from base.telemetry.delivery.receipts import DrainStatus
+from base.telemetry.process_logging import _event_sink, add_event_sink
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

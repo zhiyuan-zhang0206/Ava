@@ -95,7 +95,7 @@ def test_worker_shares_one_gate_with_work_log_and_scratch_url(
     monkeypatch.setattr(worker, "worker_request", Mock(return_value=({"kind": "restore"}, output)))
     monkeypatch.setattr(worker, "Database", create)
     monkeypatch.setattr(worker, "build_pipeline", pipeline)
-    monkeypatch.setattr("base.log.process.init_gateway_process", logging)
+    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", logging)
     publish = Mock()
     monkeypatch.setattr(worker, "publish_result", publish)
 

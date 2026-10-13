@@ -34,7 +34,7 @@ from schedules.catchup import cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
-from base.log.process import init_gateway_process
+from base.telemetry.process_logging import init_gateway_process
 
 
 CRON = "0 5 * * *"

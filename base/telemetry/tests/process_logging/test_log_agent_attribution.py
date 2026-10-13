@@ -12,10 +12,10 @@ import pytest
 
 import ava
 from base.agents.context.identity import AgentIdentity
-from base.log.process import _message_to_params
 from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
+from base.telemetry.process_logging import _message_to_params
 
 
 class _FakeMessage:
@@ -70,6 +70,7 @@ def test_transport_source_preserves_usage_payload_source() -> None:
 
 def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     import base.log.process as slog
+    import base.telemetry.process_logging as plog
 
     def producer() -> EventPipeline:
         raise AssertionError("the mocked sink must not construct a pipeline")
@@ -79,16 +80,16 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
     with (
         mock.patch.object(slog.logger, "add"),
         mock.patch.object(slog, "_add_file_sink"),
-        mock.patch.object(slog, "add_event_sink") as init_pipeline,
+        mock.patch.object(plog, "add_event_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
         mock.patch.object(slog.logger, "info") as boot_log,
         mock.patch.object(slog.logger, "configure") as configure,
     ):
-        slog.init_gateway_process(
+        plog.init_gateway_process(
             name="agent_host",
             producer=producer,
             machine_reader=lambda: "machine-a",
-            image=LoadedCommit(Path(__file__).resolve().parents[3], "loaded-generation"),
+            image=LoadedCommit(Path(__file__).resolve().parents[4], "loaded-generation"),
         )
 
     configure.assert_called_once_with(extra={"agent_id": "-"})
@@ -106,6 +107,7 @@ def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import base.log.process as slog
+    import base.telemetry.process_logging as plog
 
     monkeypatch.setattr(slog, "_init_done", False)
     producer = mock.Mock(side_effect=AssertionError("the logger must pass its root's factory"))
@@ -114,14 +116,14 @@ def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
     with (
         mock.patch.object(slog.logger, "add"),
         mock.patch.object(slog, "_add_file_sink"),
-        mock.patch.object(slog, "add_event_sink") as init_pipeline,
+        mock.patch.object(plog, "add_event_sink") as init_pipeline,
         mock.patch.object(slog, "_install_stdlib_intercept"),
         mock.patch.object(
             loaded_commit, "capture_commit", side_effect=AssertionError("no recapture")
         ) as read_late_version,
         mock.patch.object(slog.logger, "info") as boot_log,
     ):
-        slog.init_gateway_process(
+        plog.init_gateway_process(
             name="agent_host", producer=producer, machine_reader=machine, image=image
         )
     init_pipeline.assert_called_once_with(

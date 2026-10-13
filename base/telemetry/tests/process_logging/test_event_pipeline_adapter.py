@@ -16,8 +16,8 @@ import pytest
 from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.db import Database
-from base.log import process as slog
 from base.paths import logs_dir
+from base.telemetry import process_logging as slog
 
 _AGENT = 8901
 
@@ -58,9 +58,9 @@ def test_production_loguru_sink_routes_through_the_emitter() -> None:
     import inspect
 
     src = inspect.getsource(slog._event_sink)
-    assert "telemetry.emit" in src
+    assert "emit(" in src
     wiring = inspect.getsource(slog.add_event_sink)
-    assert "telemetry.init_telemetry" in wiring
+    assert "init_telemetry(" in wiring
     assert "_event_sink" in wiring  # the adapter is the loguru handler
 
 
@@ -183,7 +183,7 @@ def test_loguru_adapter_sets_source_from_extra(
     'system')."""
     from loguru import logger as _g
 
-    from base.log.process import _event_sink
+    from base.telemetry.process_logging import _event_sink
 
     sink_id = _g.add(_event_sink, level="INFO", enqueue=False, catch=False)
     try:

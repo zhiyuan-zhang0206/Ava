@@ -175,6 +175,27 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
         },
     )
 
+    maintenance_hold_alert_after_s: int = Field(
+        default=1800,
+        gt=0,
+        alias="AVA_MAINTENANCE_HOLD_ALERT_AFTER_S",
+        description=(
+            "Age, in seconds since its acquisition, after which a still-held local "
+            "maintenance hold raises the `maintenance_hold_overdue` alert. A hold freezes "
+            "every wake on its machine until `ava start` releases it, and an ordinary "
+            "stop, restart or start completes well inside this window; 1800 (30 minutes) "
+            "leaves room for a slow drain without letting a forgotten hold go unnoticed. "
+            "The alert reports only: nothing releases the hold."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     im_bridge_enabled: bool = Field(
         default=True,
         alias="AVA_IM_BRIDGE_ENABLED",

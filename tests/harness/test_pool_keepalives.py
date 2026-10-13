@@ -45,7 +45,8 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-import base.log.process
+import base.log
+import base.telemetry.process_logging
 from base import db, telemetry
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -178,7 +179,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive(
     pipeline = telemetry.build_pipeline(
         database=lambda: database, machine=machine_identity, home=unit_home
     )
-    sink_id = base.log.process.add_event_sink(
+    sink_id = base.telemetry.process_logging.add_event_sink(
         producer=lambda: pipeline, machine_reader=machine_identity.name
     )
     try:

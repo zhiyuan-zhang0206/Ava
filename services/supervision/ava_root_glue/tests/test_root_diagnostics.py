@@ -54,7 +54,7 @@ def _no_op(**_kwargs: object) -> None:
 @pytest.fixture
 def events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
-    monkeypatch.setattr("base.log.process.init_gateway_process", _no_op)
+    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", _no_op)
     monkeypatch.setattr("base.telemetry.sync", _no_op)
     monkeypatch.setattr("base.log.logger", _EventLog(records))
     return records
@@ -302,7 +302,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
         assert producer() is clients.event_pipeline()
         seen.append(image)
 
-    monkeypatch.setattr("base.log.process.init_gateway_process", initialize)
+    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
@@ -336,7 +336,7 @@ async def test_logging_startup_error_stops_its_constructed_writer(
         clients.event_pipeline()
         raise error
 
-    monkeypatch.setattr("base.log.process.init_gateway_process", initialize)
+    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
@@ -363,12 +363,16 @@ def test_helper_diagnostics_are_macos_only(
             set(), database=_unused_database, machine=machine_identity
         )
     }
-    assert names == {"venv"}
+    assert names == {"venv", "maintenance-hold"}
     monkeypatch.setattr(probes, "is_macos", lambda: True)
     monkeypatch.setattr(
         probes,
         "settings",
-        SimpleNamespace(services=SimpleNamespace(permissions_helper_enabled=False)),
+        SimpleNamespace(
+            services=SimpleNamespace(
+                permissions_helper_enabled=False, maintenance_hold_alert_after_s=1800
+            )
+        ),
     )
     names = {
         check.name
@@ -376,7 +380,50 @@ def test_helper_diagnostics_are_macos_only(
             set(), database=_unused_database, machine=machine_identity
         )
     }
-    assert names == {"venv", "brew-pin", "permissions-helper"}
+    assert names == {"venv", "brew-pin", "maintenance-hold", "permissions-helper"}
+
+
+@pytest.mark.parametrize("role", ["gateway", "agent-runner"])
+def test_every_root_watches_its_maintenance_hold_with_the_configured_age(
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[dict[str, object]],
+    tmp_path: Path,
+    role: str,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    from datetime import UTC, datetime
+
+    from base.deploy.maintenance import pause_owner
+
+    monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
+    monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
+    monkeypatch.setattr(probes, "is_macos", lambda: False)
+    monkeypatch.setattr(
+        probes,
+        "settings",
+        SimpleNamespace(
+            services=SimpleNamespace(maintenance_hold_alert_after_s=60),
+            data_plane=SimpleNamespace(is_remote=True),
+            observability=SimpleNamespace(observability_url=""),
+        ),
+    )
+    machine_identity.set(role=role)
+    check = next(
+        check
+        for check in probes.build_diagnostics(
+            set(), database=_unused_database, machine=machine_identity
+        )
+        if check.name == "maintenance-hold"
+    )
+    assert check.report is not None
+    pause_owner.begin_maintenance("ava-restart-3", datetime(2026, 10, 12, tzinfo=UTC))
+    result = check.probe()
+    assert not result.alive  # the hold is far older than the 60-second configured age
+    check.report(result)
+    assert [
+        event["holder"] for event in events if event.get("event") == "maintenance_hold_overdue"
+    ] == ["ava-restart-3"]
 
 
 def test_station_no_credential_is_unknown_and_does_not_send(

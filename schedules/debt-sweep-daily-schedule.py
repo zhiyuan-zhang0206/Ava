@@ -33,7 +33,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
-from base.log.process import init_gateway_process
+from base.telemetry.process_logging import init_gateway_process
 from base.paths.home import resolve_ava_home
 from base.paths import ava_home
 from base.daemon.schedules.watcher import next_fire

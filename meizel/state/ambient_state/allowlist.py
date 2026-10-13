@@ -52,8 +52,12 @@ SINK_FACADES: dict[str, str] = {
         "written by node exits, read only by the flush that emits them"
     ),
     "base/log/process.py": (
-        "the concrete loguru startup and sink facade: its idempotency guard, sample counter "
-        "and registered sink handle are read only by process logging initialization and delivery"
+        "the concrete loguru startup and sink facade: its idempotency guard is read only by "
+        "process logging initialization"
+    ),
+    "base/telemetry/process_logging.py": (
+        "the loguru event-sink adapter: its sample counter and registered sink handle are read "
+        "only by sink registration and the record filter"
     ),
     "base/telemetry/emitter.py": (
         "the telemetry event pipeline: its state, failure counters and exit hook are written by "

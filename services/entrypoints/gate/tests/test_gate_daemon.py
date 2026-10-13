@@ -81,7 +81,7 @@ def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
 
     setup.pipeline.stop.side_effect = stop
     monkeypatch.setattr("base.telemetry.emitter.build_pipeline", build_pipeline)
-    monkeypatch.setattr("base.log.process.init_gateway_process", logging)
+    monkeypatch.setattr("base.telemetry.process_logging.init_gateway_process", logging)
     monkeypatch.setattr("base.daemon.shutdown.install_graceful_shutdown", install_shutdown)
     monkeypatch.setattr(daemon, "Gate", gate)
     monkeypatch.setattr(daemon, "ThreadingHTTPServer", server)
