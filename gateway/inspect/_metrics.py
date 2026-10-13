@@ -35,6 +35,7 @@ _SUM_FIELDS = (
     "tokens_in",
     "tokens_out",
     "tokens_cached",
+    "tokens_cache_input",
     "tokens_reasoning",
     "cost_usd",
     "turn_total",
@@ -45,8 +46,8 @@ _SUM_FIELDS = (
     "active_seconds",
     "exec_seconds",
 )
-_COST_FIELDS = _SUM_FIELDS[:7]
-_TURN_FIELDS = _SUM_FIELDS[7:12]
+_COST_FIELDS = _SUM_FIELDS[:8]
+_TURN_FIELDS = _SUM_FIELDS[8:13]
 
 
 @dataclass(frozen=True)
@@ -116,9 +117,12 @@ def _observed_days(
             continue
         merged_edges.append((lo, hi))
     # Fixed column vocabulary, never request-derived SQL identifiers.
+    expressions = {
+        "turn_duration_sum": "turn_duration_seconds",
+        "tokens_cache_input": "coalesce(tokens_cache_input, tokens_in)",
+    }
     sums = ", ".join(
-        f"COALESCE(sum({('turn_duration_seconds' if name == 'turn_duration_sum' else name)}),0) AS {name}"
-        for name in _SUM_FIELDS
+        f"COALESCE(sum({expressions.get(name, name)}),0) AS {name}" for name in _SUM_FIELDS
     )
     for lo, hi in merged_edges:
         days.extend(
@@ -149,6 +153,7 @@ def _legacy_days(
         conn,
         "SELECT day, sum(llm_calls) AS usage_calls, sum(unpriced_calls) AS unpriced_calls, "
         "sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out, "
+        "sum(tokens_in) AS tokens_cache_input, "
         "sum(tokens_cached) AS tokens_cached, sum(tokens_reasoning) AS tokens_reasoning, "
         "sum(cost_usd) AS cost_usd FROM agent_model_tokens_daily "
         "WHERE agent_id=%s AND day>=%s AND day<%s GROUP BY day",
@@ -249,6 +254,8 @@ def _sum_days(
         ):
             for key in keys:
                 value = selected.get(key, 0)
+                if key == "tokens_cache_input" and value is None:
+                    value = selected["tokens_in"]
                 totals[key] += (
                     Decimal(str(value))
                     if key == "cost_usd"
@@ -325,9 +332,11 @@ def _cost_and_turns(
             tokens_out=int(totals["tokens_out"]),
             tokens_cached=int(totals["tokens_cached"]),
             tokens_reasoning=int(totals["tokens_reasoning"]),
-            cache_hit_pct=min(100, round(totals["tokens_cached"] / totals["tokens_in"] * 100, 2))
-            if totals["tokens_in"]
-            else 0,
+            cache_hit_pct=min(
+                100, round(totals["tokens_cached"] / totals["tokens_cache_input"] * 100, 2)
+            )
+            if totals["tokens_cache_input"]
+            else (None if totals["tokens_in"] else 0),
         )
     )
     stats = (

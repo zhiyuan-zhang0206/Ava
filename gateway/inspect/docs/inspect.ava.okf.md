@@ -13,7 +13,12 @@ tags:
 + `/inspect/widgets` — per-agent LLM cost/token/TPS + neighbor graph.
 
 Statistics read persisted compact metric observations and day summaries from
-Postgres. Pre-cutover full days preserve the existing cost/turn ledgers without
+Postgres. Cache-hit rates divide reported cache reads by `tokens_cache_input`,
+the input from calls with cache metering. Unmetered decision and embedding
+calls remain in usage and cost totals, but not in the cache-rate denominator.
+Nonzero input without metering yields a null rate (the UI renders N/A).
+A null stored denominator identifies a legacy observation/day and preserves
+its historical input denominator; new unmetered calls contribute zero. Pre-cutover full days preserve the existing cost/turn ledgers without
 adding the same observed day twice. Exact duration observations feed quantiles;
 older ledger-only histograms retain their declared integer-second precision.
 The panel renders the observed metrics only: coverage verdicts (availability,
