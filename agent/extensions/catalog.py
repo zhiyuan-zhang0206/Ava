@@ -19,7 +19,7 @@ fact to report, and inventing one from its source would be the docs-drift this
 catalog exists to replace.
 
 `declared_vs_registered` is the same computation `build_registry()` enforces as a
-load-time gate (`agent/extensions/registry.py`). Here it only reports, on every
+load-time gate (`base/packages/plugins/loading/registry.py`). Here it only reports, on every
 surface with a manifest key: `declared-not-registered` is the warning shape (a manifest
 promising a surface the code never declared), `registered-not-declared` the flagged
 one (a surface the manifest failed to mention). Surfaces the manifest grammar cannot express are
@@ -34,7 +34,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from agent.extensions._discovery import enabled_plugin_dirs, pkg_of
 from base.lm.provider_api import DecisionProviderContribution, ProviderContribution
 from base.packages.plugins import enable_config
 from base.packages.plugins.contributions import Contribution
@@ -45,6 +44,7 @@ from base.packages.plugins.extensions import (
     SdkNamespace,
     SdkWrap,
 )
+from base.packages.plugins.loading.discovery import enabled_plugin_dirs, pkg_of
 from base.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
 from base.packages.skills import names
 
@@ -358,10 +358,11 @@ def build_catalog() -> Catalog:
     config is bound from disk. Call it from a short-lived process (the CLI), not
     from one that must keep a pristine `ava`.
     """
-    from agent.extensions import load_extensions
-    from agent.extensions.registry import declarations
+    from agent.state import plugin_state_schema
+    from ava.sdk_surface.extensions import load_extensions
+    from base.packages.plugins.loading.registry import declarations
 
-    config = load_extensions().config
+    config = load_extensions(validate_state=plugin_state_schema).config
     declared = {name: contributions for name, _dir, contributions in declarations()}
     data_records = _data_records()
     discovered = enable_config.installed_plugin_dirs()
@@ -397,8 +398,8 @@ def _data_records() -> dict[str, tuple[Contribution, ...]]:
     Loaded here only to be described — the processes that serve these surfaces (the gateway, the
     Grafana supply) load them on their own, into their own registries.
     """
-    from ava.sdk_surface.plugin_loader import safe_load_plugin_module
     from base.packages.plugins import data_registry
+    from base.packages.plugins.loading.plugin_loader import safe_load_plugin_module
 
     records: dict[str, tuple[Contribution, ...]] = {}
     for name, directory in enabled_plugin_dirs():

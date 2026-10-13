@@ -55,8 +55,8 @@ passes straight through records nothing: it always runs once installed, so
 counting it would measure the installation rather than the shim.
 
 The plugin *loader* (by-path import, fail-soft containment, the external
-`plugins/` directory scan) is a separate concern — framework API for the
-agent kernel — and lives in `ava/sdk_surface/plugin_loader.py`.
+`plugins/` directory scan) is a separate concern and lives in
+`base/packages/plugins/loading/plugin_loader.py`.
 """
 
 from __future__ import annotations

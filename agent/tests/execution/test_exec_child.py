@@ -595,6 +595,7 @@ def test_child_overlay_phases_framework_then_plugin(
         producer: object,
         context: object,
         machine: object,
+        validate_state: object = None,
     ) -> None:
         # Stateless request (fake_read_request: state=None) -> the surface load.
         assert all(

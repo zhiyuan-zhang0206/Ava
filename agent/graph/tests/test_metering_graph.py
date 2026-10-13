@@ -20,8 +20,9 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     `install()` the test above covers.
     """
     import ava.mcps
-    from agent.extensions import load_extensions
+    from agent.state import plugin_state_schema
     from ava.sdk_surface import install
+    from ava.sdk_surface.extensions import load_extensions
     from ava.sdk_surface.installation import installed
     from ava.sdk_surface.metering import is_recorder
 
@@ -30,7 +31,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     install.uninstall()  # clean baseline (also restores any leftover recorder ledger)
     bare_funnel = ava.mcps._call_raw
 
-    load_extensions()
+    load_extensions(validate_state=plugin_state_schema)
     metered = {fq for p, a, fq in metering._instrument_targets() if is_recorder(getattr(p, a))}
     assert metered, "the leak this guards is gone"
     assert is_recorder(ava.mcps._call_raw)
@@ -55,7 +56,8 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     a real `load_extensions()`, and its reset leaves namespaces and members
     removed together.
     """
-    from agent.extensions import load_extensions
+    from agent.state import plugin_state_schema
+    from ava.sdk_surface.extensions import load_extensions
     from ava.sdk_surface.installation import installed
     from tests.fixtures.plugin_registrations import (
         drop_plugin_registrations,
@@ -65,7 +67,7 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     assert "_restore_plugin_registrations" in request.fixturenames
     assert not plugin_registrations_present()
 
-    load_extensions()
+    load_extensions(validate_state=plugin_state_schema)
     assert plugin_registrations_present()
     installation = installed()
     assert installation is not None

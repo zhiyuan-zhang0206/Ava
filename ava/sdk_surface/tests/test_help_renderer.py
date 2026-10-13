@@ -34,7 +34,7 @@ from ava.sdk_surface.help import (
     _format_signature,
     render,
 )
-from ava.sdk_surface.plugin_loader import load_plugin_module
+from base.packages.plugins.loading.plugin_loader import load_plugin_module
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 

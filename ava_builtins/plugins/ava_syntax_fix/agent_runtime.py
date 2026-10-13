@@ -2,7 +2,7 @@
 
 A before_exec hook that auto-fixes common Python syntax errors before the
 subprocess exec.
-Loaded only in the agent process: `agent.extensions` imports this
+Loaded only in the agent process: the plugin loader (`base.packages.plugins.loading`) imports this
 module after `plugin.py` on the full path (host boot / graph build); the
 surface module carries only the description (task #3633).
 """
