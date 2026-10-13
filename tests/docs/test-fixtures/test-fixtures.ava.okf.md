@@ -14,8 +14,8 @@ tags:
 Every test runs with a private `AVA_HOME`, lightweight autouse host guards and
 default driver refusal. Native Postgres and Redis have independent standard
 fixture dependencies; a pure test requests neither. Plugins under
-`tests/fixtures/`, loaded by the repo-root `conftest.py` (which holds only
-`pytest_plugins`), apply to every package's tests. Suite overview: [[tests.ava.okf.md]].
+`tests/fixtures/`, loaded by the repo-root `conftest.py` (`pytest_plugins` and a
+fixture re-export: [[root-conftest.ava.okf.md]]), apply to every package's tests. Suite overview: [[tests.ava.okf.md]].
 
 ## Core mechanisms
 
