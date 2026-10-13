@@ -71,7 +71,7 @@ def gateway_test_client(
     Startup-delivery tests and local FastAPI stand-ins keep their own roots.
     Borrowed entries retain their configuration and writer; only the outer
     context closes resources it constructed. The client is authenticated by
-    default (`tests.fixtures.unit.gateway_auth`).
+    default (`gateway.tests.agents.gateway_auth`).
     """
     with (
         gateway_test_process(application, machine=machine, process=process),

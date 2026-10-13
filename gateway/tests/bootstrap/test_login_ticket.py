@@ -18,7 +18,7 @@ from base import config
 from base.host.net.auth import bearer_header, cookie_name
 from gateway.app import app
 from gateway.http.auth.session_store import LOGIN_TICKET_TTL_SECONDS
-from tests.fixtures.unit.gateway_auth import disable_default_gateway_credentials
+from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _ISSUE = "/api/auth/login-ticket"
