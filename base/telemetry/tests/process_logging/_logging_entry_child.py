@@ -76,9 +76,10 @@ def role_initialization(role: str, root: str) -> None:
         agent_ids.append(message.record["extra"]["agent_id"])  # type: ignore[attr-defined]
 
     sink = base_logger.add(observe, diagnose=False)
-    from base.log.process import init_cli_process, init_gateway_process, init_subprocess_logger
+    from base.log.process import init_subprocess_logger
     from base.native_process.loaded_commit import LoadedCommit
     from base.telemetry.delivery.pipeline import EventPipeline
+    from base.telemetry.process_logging import init_cli_process, init_gateway_process
 
     rows: list[object] = []
     pipeline = EventPipeline(writer=rows.extend)

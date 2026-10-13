@@ -85,11 +85,11 @@ from base.host.permissions_helper import client as helper
 from base.host.permissions_helper import client_stateful as stateful
 from base.host.permissions_helper.client import PermissionsHelperError
 from base.log import logger
-from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home, computer_mcp_socket
 from base.telemetry import audit_events, build_pipeline
+from base.telemetry.process_logging import init_gateway_process
 
 from .ax_ids import AxSession
 from .config import ComputerUseConfig

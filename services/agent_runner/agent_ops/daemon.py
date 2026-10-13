@@ -73,11 +73,11 @@ from base.db.transaction import write_transaction
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.lm.plugin_providers import build_model_catalog
-from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.config_registration import InvalidConfigOverlay
 from base.telemetry import build_pipeline
+from base.telemetry.process_logging import init_gateway_process
 from ops import lifecycle
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpEnvelope, OpStatus, is_op_kind

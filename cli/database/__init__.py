@@ -88,7 +88,7 @@ class OperatorEventPipeline:
 
     def initialize_logging(self, name: str) -> None:
         """Bind logging to this command's lazy writer and identity reader."""
-        from base.log.process import init_cli_process
+        from base.telemetry.process_logging import init_cli_process
 
         init_cli_process(name=name, producer=self, machine_reader=self._machine.name)
 
