@@ -19,7 +19,7 @@ async def test_successful_syntax_repair_call_emits_chat_billing(
     The regression this catches is a rare provider call in the syntax repair
     fallback being omitted from the per-call ledger.
     """
-    from ava_builtins.plugins.ava_syntax_fix._llm_repair import _repair_once
+    from ava_builtins.plugins.ava_syntax_fix._llm_repair import repair_once
 
     emitted: list[tuple[AIMessage, dict[str, Any]]] = []
     response = AIMessage(
@@ -36,7 +36,7 @@ async def test_successful_syntax_repair_call_emits_chat_billing(
 
     monkeypatch.setattr(usage, "emit_billing_from_message", _emit)
 
-    assert await _repair_once(_LLM(), [], catalog=model_catalog) == "fixed = True"
+    assert await repair_once(_LLM(), [], catalog=model_catalog) == "fixed = True"
     assert len(emitted) == 1
     assert emitted[0][0] is response
     assert emitted[0][1]["model"] == "deepseek-flash"

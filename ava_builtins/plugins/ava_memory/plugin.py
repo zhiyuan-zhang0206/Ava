@@ -114,19 +114,19 @@ from .written_notes import record_written_note
 # and its exception propagates untouched; the note is recorded only after a write that succeeded.
 # Recording never raises (`record_written_note`). None of the wraps carries a docstring, so the rendered
 # SDK keeps the original `files.*` contracts.
-def _wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
+def wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
     result = inner(path, content)
     record_written_note(path)
     return result
 
 
-def _wrapped_append(inner: Callable[..., None], path: str | Path, content: str) -> None:
+def wrapped_append(inner: Callable[..., None], path: str | Path, content: str) -> None:
     result = inner(path, content)
     record_written_note(path)
     return result
 
 
-def _wrapped_edit(
+def wrapped_edit(
     inner: Callable[..., None], path: str | Path, old: str, new: str, *, replace_all: bool = False
 ) -> None:
     result = inner(path, old, new, replace_all=replace_all)
@@ -139,8 +139,8 @@ def contribute() -> PluginContributions:
     return PluginContributions(
         sdk_namespaces=(SdkNamespace("memory", _memory_sdk, expand=False),),
         sdk_wraps=(
-            SdkWrap("files.write", _wrapped_write),
-            SdkWrap("files.append", _wrapped_append),
-            SdkWrap("files.edit", _wrapped_edit),
+            SdkWrap("files.write", wrapped_write),
+            SdkWrap("files.append", wrapped_append),
+            SdkWrap("files.edit", wrapped_edit),
         ),
     )

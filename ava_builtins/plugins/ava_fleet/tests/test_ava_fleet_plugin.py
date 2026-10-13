@@ -119,9 +119,9 @@ def test_enabled_fleet_preserves_workflow_choice(_load_activity_plugin: None):
 
 def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
     """Fleet adds collaboration guidance without owning the core lifecycle."""
-    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import fleet_self_section
 
-    section = _fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
     prompt = build_system_prompt(
         fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
     )
@@ -153,9 +153,9 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin:
     """When the user has already answered in the dialog, the agent must
     actively dismiss the pending notice instead of leaving it open — and the
     rule is phrased semantically (no dismiss_notice call name)."""
-    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import fleet_self_section
 
-    section = _fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
     assert "Dismiss a pending notice" in section
     assert "when the dialog resolves it" in section
     assert "dismiss_notice" not in section
@@ -163,9 +163,9 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin:
 
 def test_prompt_section_queue_delivery_mandate(_load_activity_plugin: None):
     """Keep asynchronous delivery and resolved-notice semantics resident."""
-    from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
+    from ava_builtins.plugins.ava_fleet.agent_runtime import fleet_self_section
 
-    section = _fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
     assert "queue necessary decisions and results" in section
     assert "even while they are offline" in section
     assert "offline" in section
@@ -181,16 +181,16 @@ def test_prompt_section_reduce_context_switch_gating(
     FleetConfig.reduce_context_switch toggle is on; off is the escape hatch
     back to the pre-platform behavior (empty section)."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
-        _reduce_context_switch_section,
+        reduce_context_switch_section,
     )
 
     set_fleet_configuration(reduce_context_switch=True)
-    assert "Queue, never push" in _reduce_context_switch_section(
+    assert "Queue, never push" in reduce_context_switch_section(
         _fleet_slices(), catalog=build_model_catalog()
     )
 
     set_fleet_configuration(reduce_context_switch=False)
-    assert _reduce_context_switch_section(_fleet_slices(), catalog=build_model_catalog()) == ""
+    assert reduce_context_switch_section(_fleet_slices(), catalog=build_model_catalog()) == ""
 
 
 def test_prompt_section_reduce_context_switch_content(
@@ -198,11 +198,11 @@ def test_prompt_section_reduce_context_switch_content(
 ):
     """Keep interruption limits resident and route procedures to the skill."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
-        _reduce_context_switch_section,
+        reduce_context_switch_section,
     )
 
     set_fleet_configuration(reduce_context_switch=True)
-    section = _reduce_context_switch_section(_fleet_slices(), catalog=build_model_catalog())
+    section = reduce_context_switch_section(_fleet_slices(), catalog=build_model_catalog())
 
     assert "Queue, never push" in section
     assert "irreversible risk in motion" in section
@@ -237,7 +237,7 @@ def test_fleet_operating_contract_is_loaded_on_demand(_load_activity_plugin: Non
     """The prompt routes chosen capabilities to complete, preserved procedures."""
     from ava_builtins.plugins.ava_fleet import agent_runtime
 
-    section = agent_runtime._fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    section = agent_runtime.fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
     skill_directory = Path(agent_runtime.__file__).parent / "skills" / "ava-fleet"
     skill = (skill_directory / "SKILL.md").read_text()
     contract = (skill_directory / "reference" / "operating-contract.md").read_text()

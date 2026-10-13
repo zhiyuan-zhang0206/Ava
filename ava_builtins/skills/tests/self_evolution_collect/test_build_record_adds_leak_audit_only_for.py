@@ -8,7 +8,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from ava_builtins.skills.tests.test_self_evolution_collect import _build_minimal_record
+from ava_builtins.skills.tests.test_self_evolution_collect import build_minimal_record
 from ava_builtins.skills.tests.test_self_evolution_collect import (
     test_fetch_exhausted_diagnostics_are_bounded as test_fetch_exhausted_diagnostics_are_bounded,
 )
@@ -27,7 +27,7 @@ def test_build_record_adds_leak_audit_only_for_eval_collection(
         workspaces_root=str(tmp_path / "workspaces"),
         agent_workspace=str(tmp_path / "workspaces" / "1"),
     )
-    weekly = _build_minimal_record(
+    weekly = build_minimal_record(
         collect_mod,
         monkeypatch,
         [("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],

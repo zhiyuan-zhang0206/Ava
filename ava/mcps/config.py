@@ -275,7 +275,7 @@ def server_cwd(name: str) -> Path | None:
     installed = installed_mcp_dir(name)
     if installed is not None:
         return installed
-    for path in _plugin_config_paths():
+    for path in plugin_config_paths():
         if name in read_servers(path):
             return None
     for path in builtin_mcp_paths():
@@ -284,7 +284,7 @@ def server_cwd(name: str) -> Path | None:
     return None
 
 
-def _plugin_config_paths() -> list[Path]:
+def plugin_config_paths() -> list[Path]:
     """Plugin-bundled `.mcp.json` files, in apply order.
 
     Built-in plugins (`<repo>/ava_builtins/plugins/*/.mcp.json`) first, then installed ones
@@ -325,7 +325,7 @@ def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, An
     merged: dict[str, dict[str, Any]] = {}
     for path in builtin_mcp_paths():
         merged.update(read_servers(path))
-    for path in _plugin_config_paths():
+    for path in plugin_config_paths():
         merged.update(read_servers(path))
     for path in _installed_mcp_paths():
         merged.update(read_servers(path))

@@ -76,7 +76,7 @@ def _load_config() -> dict[str, dict[str, Any]]:
 #   stateful servers must stay per-connection.
 
 
-def _shared_kind(server: str) -> Any:
+def shared_kind(server: str) -> Any:
     """The server's `shared` declaration: `"browser"`, True, or falsy (none)."""
     cfg = _load_config()
     spec = cfg.get(server)
@@ -84,7 +84,7 @@ def _shared_kind(server: str) -> Any:
 
 
 @dataclass
-class _Buckets:
+class Buckets:
     """One set of cached MCP sessions: the session per server, the transport stack
     that closes it, and the lock that serializes its (re)connect."""
 
@@ -107,10 +107,10 @@ class _Buckets:
 
 
 @dataclass
-class _Scope:
+class Scope:
     """What one client connection reaches: its own buckets, plus the daemon-wide
     state every connection shares. `run_daemon` builds the shared half once;
-    `_handle_connection` pairs it with a fresh `local` per connection.
+    `handle_connection` pairs it with a fresh `local` per connection.
 
     `"shared": true` servers use `shared` (one child for every agent connection,
     released only at daemon shutdown). Everything else, including
@@ -126,26 +126,26 @@ class _Scope:
     tokens).
     """
 
-    local: _Buckets
-    shared: _Buckets
+    local: Buckets
+    shared: Buckets
     oauth_locks: dict[str, asyncio.Lock]
     timeout_seconds: Callable[[], float]
 
-    def buckets_for(self, shared: Any) -> _Buckets:
+    def buckets_for(self, shared: Any) -> Buckets:
         """Which buckets a server's sessions live in, from its `shared` declaration."""
         return self.shared if shared is True else self.local
 
 
 @dataclass
-class _DaemonWide:
+class DaemonWide:
     """The state every connection of one daemon shares; `run_daemon` builds it once."""
 
     timeout_seconds: Callable[[], float]
-    shared: _Buckets = field(default_factory=_Buckets)
+    shared: Buckets = field(default_factory=Buckets)
     oauth_locks: dict[str, asyncio.Lock] = field(default_factory=dict[str, asyncio.Lock])
 
 
-class _SerialSession:
+class SerialSession:
     """Serialize every call on a daemon-wide shared MCP session.
 
     Concurrent calls from different agent connections would interleave on the
@@ -180,14 +180,14 @@ def _is_transport_error(exc: BaseException) -> bool:
     return is_transport_error(exc)
 
 
-async def _invalidate_session(
+async def invalidate_session(
     server: str,
-    scope: _Scope,
+    scope: Scope,
 ) -> None:
     """Remove *server*'s dead cached session and close its resources (under
     the session lock to avoid racing a concurrent reconnect). Resolves the
     shared daemon-wide buckets for shared servers, per-connection otherwise."""
-    buckets = scope.buckets_for(_shared_kind(server))
+    buckets = scope.buckets_for(shared_kind(server))
     lock = buckets.locks.get(server)
     if lock is None:
         return
@@ -205,7 +205,7 @@ async def _invalidate_session(
                 )
 
 
-async def _connect_server(
+async def connect_server(
     server: str,
     oauth_locks: dict[str, asyncio.Lock],
     *,
@@ -230,7 +230,7 @@ async def _connect_server(
     assert_requirements(spec)
     url = server_url(spec)
     if url is not None:
-        return await _connect_http(
+        return await connect_http(
             url,
             spec.get("headers"),
             oauth=bool(spec.get("oauth")),
@@ -279,7 +279,7 @@ async def _connect_server(
     return session, local_stack
 
 
-async def _connect_http(
+async def connect_http(
     url: str,
     headers: dict[str, str] | None,
     *,
@@ -327,7 +327,7 @@ async def _connect_http(
     return session, local_stack
 
 
-async def _handle_ping(req_id: Any) -> dict[str, Any]:
+async def handle_ping(req_id: Any) -> dict[str, Any]:
     """Return the daemon watchdog healthcheck response without opening a session."""
     # Lock-free liveness probe for the watchdog healthcheck: no server session
     # involved, so a slow MCP server can never false-kill a busy daemon.
@@ -337,10 +337,10 @@ async def _handle_ping(req_id: Any) -> dict[str, Any]:
 async def _handle_list_tools(
     req_id: Any,
     server: str,
-    scope: _Scope,
+    scope: Scope,
 ) -> dict[str, Any]:
     """List the configured server's tools in the daemon wire format."""
-    session = await _get_session(server, scope)
+    session = await get_session(server, scope)
     result = await session.list_tools()
     tools = [
         {
@@ -358,12 +358,12 @@ async def _handle_call_tool(
     req_id: Any,
     params: dict[str, Any],
     server: str,
-    scope: _Scope,
+    scope: Scope,
 ) -> dict[str, Any]:
     """Call one MCP tool and serialize its result for the daemon wire protocol."""
     tool = params.get("tool", "")
     args = params.get("args") or {}
-    session = await _get_session(server, scope)
+    session = await get_session(server, scope)
     # The computer-mcp direct-dial session carries the calling agent's identity
     # to the computer daemon (governance + audit). Duck-typed: only
     # ComputerLineSession has the attribute.
@@ -374,7 +374,7 @@ async def _handle_call_tool(
     except Exception as e:
         if not _is_transport_error(e):
             raise
-        await _invalidate_session(server, scope)
+        await invalidate_session(server, scope)
         raise MCPCallError(
             f"MCP tool result unknown for {server}.{tool}; request may have executed: "
             f"{type(e).__name__}: {e}"
@@ -411,11 +411,11 @@ async def _dispatch_request(
     method: Any,
     params: dict[str, Any],
     server: str,
-    scope: _Scope,
+    scope: Scope,
 ) -> dict[str, Any]:
     """Dispatch one parsed client request to its protocol method handler."""
     if method == "ping":
-        return await _handle_ping(req_id)
+        return await handle_ping(req_id)
     if method == "list_tools":
         return await _handle_list_tools(req_id, server, scope)
     if method == "call_tool":
@@ -423,9 +423,9 @@ async def _dispatch_request(
     return {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}
 
 
-async def _dispatch_with_retry(
+async def dispatch_with_retry(
     req: dict[str, Any],
-    scope: _Scope,
+    scope: Scope,
 ) -> dict[str, Any]:
     """Serve one request; one bad call becomes an error response, not a dropped connection."""
     req_id = req.get("id")
@@ -447,17 +447,17 @@ async def _dispatch_with_retry(
                     server,
                     _attempt + 1,
                 )
-                await _invalidate_session(server, scope)
+                await invalidate_session(server, scope)
                 await asyncio.sleep(min(2**_attempt, 8))
     except Exception as e:
         return {"id": req_id, "ok": False, "error": f"{type(e).__name__}: {e}"}
     raise AssertionError("unreachable: the last attempt returns or raises")  # pragma: no cover
 
 
-async def _handle_client(
+async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
-    scope: _Scope,
+    scope: Scope,
 ) -> None:
     """Handle one Unix socket client connection."""
     try:
@@ -472,7 +472,7 @@ async def _handle_client(
                     writer.write((json.dumps(resp) + "\n").encode())
                     await writer.drain()
                     continue
-                resp = await _dispatch_with_retry(req, scope)
+                resp = await dispatch_with_retry(req, scope)
                 writer.write((json.dumps(resp, ensure_ascii=False) + "\n").encode())
                 await writer.drain()
     finally:
@@ -481,9 +481,9 @@ async def _handle_client(
             await writer.wait_closed()
 
 
-async def _get_session(
+async def get_session(
     server: str,
-    scope: _Scope,
+    scope: Scope,
 ) -> Any:
     """Get or create MCP server session (thread-safe).
 
@@ -511,18 +511,18 @@ async def _get_session(
         if server in buckets.sessions:
             return buckets.sessions[server]
 
-        session, stack = await _connect_server(
+        session, stack = await connect_server(
             server, scope.oauth_locks, timeout_seconds=scope.timeout_seconds
         )
         if shared is True:
-            session = _SerialSession(session, lock)
+            session = SerialSession(session, lock)
         buckets.sessions[server] = session
         buckets.stacks[server] = stack
         return session
 
 
-async def _handle_connection(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, daemon: _DaemonWide
+async def handle_connection(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, daemon: DaemonWide
 ) -> None:
     """One client connection = one agent's session space.
 
@@ -534,14 +534,14 @@ async def _handle_connection(
     `"shared"` servers live in the daemon-wide buckets instead: they outlive
     the connection by design and are released at daemon shutdown.
     """
-    scope = _Scope(
-        local=_Buckets(),
+    scope = Scope(
+        local=Buckets(),
         shared=daemon.shared,
         oauth_locks=daemon.oauth_locks,
         timeout_seconds=daemon.timeout_seconds,
     )
     try:
-        await _handle_client(reader, writer, scope)
+        await handle_client(reader, writer, scope)
     finally:
         await scope.local.close()
 
@@ -563,7 +563,7 @@ async def _handle_connection(
 _SOCKET_PROBE_TIMEOUT_S = 1.0
 
 
-def _socket_is_live(socket_path: str) -> bool:
+def socket_is_live(socket_path: str) -> bool:
     """True when a daemon answers a ping over `socket_path`.
 
     Mirrors the healthcheck's probe (connect + ping + reply). A socket that
@@ -594,7 +594,7 @@ def _socket_is_live(socket_path: str) -> bool:
 _DAEMON_MODULE = "ava.mcps._daemon"
 
 
-def _is_daemon_cmdline(cmdline: list[str]) -> bool:
+def is_daemon_cmdline(cmdline: list[str]) -> bool:
     """True when *cmdline* is an actual ``python -m ava.mcps._daemon`` launch.
 
     Substring matching is NOT enough: the session backend wraps the launch in
@@ -613,7 +613,7 @@ def _is_daemon_cmdline(cmdline: list[str]) -> bool:
     return False
 
 
-def _reap_stale_daemons(project_root: Path | None) -> None:
+def reap_stale_daemons(project_root: Path | None) -> None:
     """Kill every OTHER mcp-daemon process belonging to this unit.
 
     A fresh bind must be the only listener; ghosts from earlier respawn storms
@@ -639,7 +639,7 @@ def _reap_stale_daemons(project_root: Path | None) -> None:
             if proc.pid == me:
                 continue
             cmdline = proc.cmdline() or []
-            if not _is_daemon_cmdline(cmdline):
+            if not is_daemon_cmdline(cmdline):
                 continue
             cwd = proc.cwd()
             env_home = proc.environ().get("AVA_HOME", "")
@@ -662,12 +662,12 @@ def _reap_stale_daemons(project_root: Path | None) -> None:
 
 def _prepare_socket(socket_path: str) -> None:
     """Clear the way for a fresh bind: reap stale daemons, drop a stale file."""
-    _reap_stale_daemons(settings.services.project_root)
+    reap_stale_daemons(settings.services.project_root)
     with suppress(OSError):
         Path(socket_path).unlink()
 
 
-def _unlink_own_socket(socket_path: str, self_ino: int) -> None:
+def unlink_own_socket(socket_path: str, self_ino: int) -> None:
     """Unlink `socket_path` only while it is still the inode this daemon bound.
 
     A ghost's exit must not sever the live socket of a later occupant (Task
@@ -690,10 +690,10 @@ async def run_daemon(socket_path: str, *, timeout_seconds: Callable[[], float]) 
     # `socket_path` here is a dead file, safe to clear.
     _prepare_socket(socket_path)
 
-    daemon = _DaemonWide(timeout_seconds=timeout_seconds)
+    daemon = DaemonWide(timeout_seconds=timeout_seconds)
 
     async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await _handle_connection(reader, writer, daemon)
+        await handle_connection(reader, writer, daemon)
 
     server = await asyncio.start_unix_server(_serve, path=socket_path)
     # The inode WE bound: an exit cleanup must not unlink a later occupant's
@@ -722,11 +722,11 @@ async def run_daemon(socket_path: str, *, timeout_seconds: Callable[[], float]) 
         logger.info("MCP daemon shutting down...")
         server.close()
         await server.wait_closed()
-        # Per-connection buckets are cleaned by _handle_connection as each
+        # Per-connection buckets are cleaned by handle_connection as each
         # client disconnects; the daemon-wide shared buckets outlive every
         # connection and are released only here.
         await daemon.shared.close()
-        _unlink_own_socket(socket_path, self_ino)
+        unlink_own_socket(socket_path, self_ino)
 
 
 def main() -> None:
@@ -751,7 +751,7 @@ def main() -> None:
     # instance's exit (Task #1142). The healthcheck's probe answers a ping, so
     # an alive daemon keeps the watchdog from ever respawning over it — a
     # stray launch therefore exits cleanly instead of stealing the socket.
-    if Path(socket_path).exists() and _socket_is_live(socket_path):
+    if Path(socket_path).exists() and socket_is_live(socket_path):
         logger.error(
             "MCP daemon already serving {} — refusing to start over it; exiting",
             socket_path,

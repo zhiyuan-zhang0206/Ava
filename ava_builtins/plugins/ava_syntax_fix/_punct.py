@@ -16,7 +16,7 @@ import tokenize
 # 1. Chinese punctuation -> ASCII
 # ---------------------------------------------------------------------------
 
-_PUNCT_MAP: dict[int, int | str] = str.maketrans(
+PUNCT_MAP: dict[int, int | str] = str.maketrans(
     {
         "\uff0c": ",",
         "\u3002": ".",
@@ -47,7 +47,7 @@ _PUNCT_MAP: dict[int, int | str] = str.maketrans(
     }
 )
 
-_PUNCT_CHARS = {chr(k) for k in _PUNCT_MAP}
+_PUNCT_CHARS = {chr(k) for k in PUNCT_MAP}
 
 
 _PROTECTED_PUNCT_TOKENS = (
@@ -58,13 +58,13 @@ _PROTECTED_PUNCT_TOKENS = (
     tokenize.COMMENT,
 )
 
-# Fullwidth/curly quotes -- the subset of _PUNCT_MAP that can act as a
+# Fullwidth/curly quotes -- the subset of PUNCT_MAP that can act as a
 # string delimiter. Fixed in a first pass so a fullwidth-delimited string turns
 # into a real STRING token before the second pass touches its interior.
-_FULLWIDTH_QUOTE_MAP: dict[int, int | str] = {0x201C: '"', 0x201D: '"', 0x2018: "'", 0x2019: "'"}
+FULLWIDTH_QUOTE_MAP: dict[int, int | str] = {0x201C: '"', 0x201D: '"', 0x2018: "'", 0x2019: "'"}
 
 
-def _line_starts(code: str) -> list[int]:
+def line_starts(code: str) -> list[int]:
     """Absolute char offset of every (1-indexed) line start, plus one past the
     end -- shared by the tokenize-based fixers to convert (row, col) token
     positions into absolute offsets."""
@@ -102,7 +102,7 @@ def _protected_at(protected: list[tuple[int, int]], p: int, idx: int) -> bool:
     return p < len(protected) and protected[p][0] <= idx < protected[p][1]
 
 
-_MAX_TOKENIZE_LINE_LENGTH = 1_000_000
+MAX_TOKENIZE_LINE_LENGTH = 1_000_000
 """Lines longer than this are never tokenized by the syntax fixers. The C
 tokenizer that tokenize.generate_tokens drives tracks some column offsets in
 ``int``, so pathologically long lines are refused up front; no model-generated
@@ -110,7 +110,7 @@ line of valid Python comes close, and skipping a fixer leaves the code
 unchanged (downstream compile() / LLM repair still run)."""
 
 
-def _tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
+def tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
     """Tokenize code for the syntax fixers, or return None when it cannot be
     tokenized safely. Shared by the punctuation and escape fixers: both degrade
     to a no-op on None (broken syntax -- leave it for compile()).
@@ -131,7 +131,7 @@ def _tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
     if memory is truly gone, the unfixed code proceeds to compile() where the
     same condition surfaces anyway.
     """
-    if any(len(line) > _MAX_TOKENIZE_LINE_LENGTH for line in code.split("\n")):
+    if any(len(line) > MAX_TOKENIZE_LINE_LENGTH for line in code.split("\n")):
         return None
     try:
         # utf-8 encode rejects lone surrogates before the C tokenizer sees
@@ -149,16 +149,16 @@ def _tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
         return None
 
 
-def _translate_outside_strings(code: str, charmap: dict[int, int | str]) -> tuple[str, int]:
+def translate_outside_strings(code: str, charmap: dict[int, int | str]) -> tuple[str, int]:
     """Translate characters via charmap everywhere except inside string /
     f-string literals and comments. Returns (new_code, num_changes), or
     (code, 0) when tokenization fails (broken syntax -- leave it for compile()).
     """
-    tokens = _tokenize_fix_safe(code)
+    tokens = tokenize_fix_safe(code)
     if tokens is None:
         return code, 0
 
-    protected = _protected_token_spans(tokens, _line_starts(code))
+    protected = _protected_token_spans(tokens, line_starts(code))
 
     out = list(code)
     changes = 0
@@ -174,7 +174,7 @@ def _translate_outside_strings(code: str, charmap: dict[int, int | str]) -> tupl
     return ("".join(out), changes) if changes else (code, 0)
 
 
-def _fix_chinese_punctuation(code: str) -> tuple[str, int]:
+def fix_chinese_punctuation(code: str) -> tuple[str, int]:
     """Replace fullwidth / Chinese punctuation with ASCII equivalents in code
     positions only -- never inside string / f-string literals or comments.
 
@@ -193,7 +193,7 @@ def _fix_chinese_punctuation(code: str) -> tuple[str, int]:
     """
     if not any(c in code for c in _PUNCT_CHARS):
         return code, 0
-    after_quotes, n_quotes = _translate_outside_strings(code, _FULLWIDTH_QUOTE_MAP)
-    fixed, n_rest = _translate_outside_strings(after_quotes, _PUNCT_MAP)
+    after_quotes, n_quotes = translate_outside_strings(code, FULLWIDTH_QUOTE_MAP)
+    fixed, n_rest = translate_outside_strings(after_quotes, PUNCT_MAP)
     total = n_quotes + n_rest
     return (fixed, total) if total else (code, 0)

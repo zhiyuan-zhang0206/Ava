@@ -1,6 +1,6 @@
 """The daemon-start ghost reap survives a process-table read failure.
 
-`_reap_stale_daemons` walks psutil's process table before binding; a cmdline
+`reap_stale_daemons` walks psutil's process table before binding; a cmdline
 read that raises (psutil 7.2.2 on macOS raised SystemError mid-iteration) must
 skip that process, never the reap — ghosts of earlier respawn storms must not
 survive because one unrelated process was unreadable (task #4964).
@@ -67,7 +67,7 @@ def test_reap_stale_daemons_skips_a_process_whose_cmdline_read_fails() -> None:
         _FakeProc(3002, argv, "/elsewhere", {"AVA_HOME": home}),
     ]
     with patch("psutil.process_iter", return_value=procs):
-        daemon_mod._reap_stale_daemons(Path(root))
+        daemon_mod.reap_stale_daemons(Path(root))
 
     assert procs[1].killed and procs[2].killed
     assert not procs[0].killed

@@ -21,14 +21,14 @@ from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
     fix_unterminated_to_triple,
 )
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
-    _extract_text,
-    _fix_invalid_escapes,
-    _is_stdlib_module,
-    _render_syntax_error,
-    _strip_code_fence,
+    extract_text,
+    fix_invalid_escapes,
+    is_stdlib_module,
+    render_syntax_error,
+    strip_code_fence,
     syntax_fix_before_exec,
 )
-from ava_builtins.plugins.ava_syntax_fix.tests.test_syntax_fix import _is_broken
+from ava_builtins.plugins.ava_syntax_fix.tests.test_syntax_fix import is_broken
 from base.agents.context import AvaContext
 from base.config import settings
 from base.db import Database
@@ -42,7 +42,7 @@ class TestFixInvalidEscapes:
     def test_no_invalid_escape_no_change(self):
         """Valid Python source — no edits."""
         code = 'print("hello\\n")\n'
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert fixed == code
         assert n == 0
 
@@ -51,7 +51,7 @@ class TestFixInvalidEscapes:
         code = (
             'import subprocess\nsubprocess.run(["grep", "-n", "float16\\|dtype.*cast", "/x.py"])\n'
         )
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert n == 1
         assert "\\\\|" in fixed
         # `compile()` should produce no SyntaxWarning afterwards
@@ -66,14 +66,14 @@ class TestFixInvalidEscapes:
     def test_multiple_invalid_escapes_in_one_string(self):
         """`\\|x\\|y\\.z` — three invalid escapes in one literal."""
         code = 's = "foo\\|bar\\|baz\\."\n'
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert n == 3
         assert fixed == 's = "foo\\\\|bar\\\\|baz\\\\."\n'
 
     def test_valid_escape_preserved(self):
         """`\\n` is valid — keep as-is; only `\\|` gets escaped."""
         code = 's = "line1\\nline2 with \\| and \\."\n'
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert n == 2  # only the two invalid pairs
         # `\n` (newline escape) must remain a single `\n`, not become `\\n`
         assert "\\n" in fixed
@@ -84,42 +84,42 @@ class TestFixInvalidEscapes:
     def test_raw_string_skipped(self):
         """`r"\\|"` is valid raw — never modify."""
         code = 'pattern = r"foo\\|bar"\n'
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert fixed == code
         assert n == 0
 
     def test_byte_string_fixed_like_str(self):
         """`b"..."` uses the same escape rules — `b"\\|"` is also invalid."""
         code = 'data = b"foo\\|bar"\n'
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert n == 1
         assert 'b"foo\\\\|bar"' in fixed
 
     def test_triple_quoted_string(self):
         """Triple-quoted strings still scan correctly."""
         code = 'code = """\nimport re\nm = re.match("foo\\|bar", text)\n"""\n'
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert n == 1
         assert "foo\\\\|bar" in fixed
 
     def test_fstring_fixed(self):
         """f-strings honor the same escape rules."""
         code = 'log = f"got {x} \\| {y}"\n'
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert n == 1
         assert 'f"got {x} \\\\| {y}"' in fixed
 
     def test_raw_fstring_skipped(self):
         """rf"..." (raw f-string) — no escape interpretation."""
         code = 'log = rf"got \\| {x}"\n'
-        fixed, n = _fix_invalid_escapes(code)
+        fixed, n = fix_invalid_escapes(code)
         assert fixed == code
         assert n == 0
 
     def test_tokenize_error_returns_original(self):
         """Code that can't be tokenized (unterminated string) → no-op."""
         code = 'broken = "no end'  # unterminated
-        _, n = _fix_invalid_escapes(code)
+        _, n = fix_invalid_escapes(code)
         # Either returns unchanged or no edits — must not raise.
         assert n == 0
 
@@ -304,7 +304,7 @@ class TestSyntaxFixBeforeExec:
         )
         with patch.object(
             agent_runtime,
-            "_llm_repair_syntax",
+            "llm_repair_syntax",
             new=AsyncMock(return_value=None),
         ):
             result = await syntax_fix_before_exec(
@@ -335,7 +335,7 @@ class TestSyntaxFixBeforeExec:
         repaired = "x = 'fixed'\nprint(x)"
         with patch.object(
             agent_runtime,
-            "_llm_repair_syntax",
+            "llm_repair_syntax",
             new=AsyncMock(return_value=repaired),
         ):
             result = await syntax_fix_before_exec(
@@ -353,7 +353,7 @@ class TestSyntaxFixBeforeExec:
         broken = "if True print('x')"
         with patch.object(
             agent_runtime,
-            "_llm_repair_syntax",
+            "llm_repair_syntax",
             new=AsyncMock(return_value=None),
         ):
             result = await syntax_fix_before_exec(
@@ -393,25 +393,25 @@ class TestSyntaxFixBeforeExec:
 
 class TestIsStdlibModule:
     def test_known_stdlib(self):
-        assert _is_stdlib_module("os")
-        assert _is_stdlib_module("sys")
-        assert _is_stdlib_module("json")
-        assert _is_stdlib_module("collections")
+        assert is_stdlib_module("os")
+        assert is_stdlib_module("sys")
+        assert is_stdlib_module("json")
+        assert is_stdlib_module("collections")
 
     def test_not_stdlib(self):
-        assert not _is_stdlib_module("numpy")
-        assert not _is_stdlib_module("pandas")
-        assert not _is_stdlib_module("nonexistent")
+        assert not is_stdlib_module("numpy")
+        assert not is_stdlib_module("pandas")
+        assert not is_stdlib_module("nonexistent")
 
     def test_submodules_not_in_top_level(self):
         """os.path, urllib.parse are not top-level module names."""
-        assert not _is_stdlib_module("os.path")
-        assert _is_stdlib_module("os")
+        assert not is_stdlib_module("os.path")
+        assert is_stdlib_module("os")
 
 
 class TestExtractText:
     def test_plain_string_passthrough(self):
-        assert _extract_text("hello") == "hello"
+        assert extract_text("hello") == "hello"
 
     def test_thinking_blocks_keep_only_text(self):
         content = [
@@ -419,21 +419,21 @@ class TestExtractText:
             {"type": "text", "text": "x = 1"},
             {"type": "text", "text": "\nprint(x)"},
         ]
-        assert _extract_text(content) == "x = 1\nprint(x)"
+        assert extract_text(content) == "x = 1\nprint(x)"
 
     def test_non_text_blocks_ignored(self):
-        assert _extract_text([{"type": "thinking", "thinking": "only thinking"}]) == ""
+        assert extract_text([{"type": "thinking", "thinking": "only thinking"}]) == ""
 
 
 class TestStripCodeFence:
     def test_no_fence_returns_stripped(self):
-        assert _strip_code_fence("  x = 1  ") == "x = 1"
+        assert strip_code_fence("  x = 1  ") == "x = 1"
 
     def test_strips_python_fence(self):
-        assert _strip_code_fence("```python\nx = 1\nprint(x)\n```") == "x = 1\nprint(x)"
+        assert strip_code_fence("```python\nx = 1\nprint(x)\n```") == "x = 1\nprint(x)"
 
     def test_strips_bare_fence(self):
-        assert _strip_code_fence("```\nx = 1\n```") == "x = 1"
+        assert strip_code_fence("```\nx = 1\n```") == "x = 1"
 
 
 class TestRenderSyntaxError:
@@ -442,7 +442,7 @@ class TestRenderSyntaxError:
         try:
             compile("if True print('x')", "<agent_code>", "exec")
         except SyntaxError as e:
-            rendered = _render_syntax_error(e, "if True print('x')")
+            rendered = render_syntax_error(e, "if True print('x')")
         assert "SyntaxError:" in rendered
         assert "line 1" in rendered
         assert "<agent_code>" in rendered
@@ -456,18 +456,18 @@ class TestLlmRepairSyntax:
         fake = MagicMock()
         fake.ainvoke = AsyncMock(return_value=MagicMock(content="x = 1"))
         with patch.object(factory, "build_chat_model", return_value=fake):
-            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
+            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import llm_repair_syntax
 
-            out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
+            out = await llm_repair_syntax("x = 'broken", "SyntaxError: ...")
         assert out == "x = 1"
 
     async def test_model_unavailable_returns_none(self):
         from unittest.mock import patch
 
         with patch.object(factory, "build_chat_model", side_effect=RuntimeError("no key")):
-            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
+            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import llm_repair_syntax
 
-            out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
+            out = await llm_repair_syntax("x = 'broken", "SyntaxError: ...")
         assert out is None
 
     async def test_empty_output_returns_none(self):
@@ -476,9 +476,9 @@ class TestLlmRepairSyntax:
         fake = MagicMock()
         fake.ainvoke = AsyncMock(return_value=MagicMock(content="   "))
         with patch.object(factory, "build_chat_model", return_value=fake):
-            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
+            from ava_builtins.plugins.ava_syntax_fix.agent_runtime import llm_repair_syntax
 
-            out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
+            out = await llm_repair_syntax("x = 'broken", "SyntaxError: ...")
         assert out is None
 
 
@@ -644,7 +644,7 @@ class TestFixUnterminatedToTriple:
     def test_multiline_double_quoted_command(self):
         # A double-quoted shell command whose commit message spans newlines.
         code = 'r = run("git commit -m \'fix\nbody\nmore")'
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_unterminated_to_triple(code)
         assert n == 1
         compile(fixed, "<t>", "exec")
@@ -652,7 +652,7 @@ class TestFixUnterminatedToTriple:
     def test_multiline_fstring_command(self):
         # An f-string command spanning newlines; the offset points at the f prefix.
         code = 'r = run(f"cd {d} && commit -m \'msg\nbody")'
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_unterminated_to_triple(code)
         assert n == 1
         compile(fixed, "<t>", "exec")
@@ -663,7 +663,7 @@ class TestFixUnterminatedToTriple:
         # as the closer and mis-fires; the offset-driven closer search tries
         # candidates until one compiles, landing on the real closer.
         code = "r = run('git commit -m msg\nadd a 'quoted' word\nmore')"
-        assert _is_broken(code)
+        assert is_broken(code)
         fixed, n = fix_unterminated_to_triple(code)
         assert n == 1
         compile(fixed, "<t>", "exec")
