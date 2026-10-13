@@ -16,6 +16,7 @@ from agent.extensions import plugin_state_codec
 from ava import external
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
+from base.agents.impersonation import manifest
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
@@ -149,9 +150,7 @@ def attached_runtime(
     def no_local_participant(_db: object, *_args: Any, **_kwargs: Any) -> bool:
         return False
 
-    monkeypatch.setattr(
-        "base.agents.impersonation.manifest.open_local_participant", no_local_participant
-    )
+    monkeypatch.setattr(manifest, "open_local_participant", no_local_participant)
     return lease, snapshot, staged
 
 

@@ -29,7 +29,9 @@ import httpx
 import numpy as np
 import pytest
 
+from base import config
 from base.config import settings
+from base.lm import usage
 from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer.embeddings import gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
@@ -157,7 +159,7 @@ def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
     from base.telemetry import tracing as tracing_mod
 
     tracer = _RecordingTracer()
-    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     return tracer
@@ -403,7 +405,7 @@ def test_embed_usage_failure_propagates(
     def _boom(**_kwargs: object) -> None:
         raise failure
 
-    monkeypatch.setattr("base.lm.usage.log_usage_fields", _boom)
+    monkeypatch.setattr(usage, "log_usage_fields", _boom)
     provider = _provider()
     with pytest.raises(error_type) as caught:
         if mode == "batch":
@@ -427,7 +429,7 @@ def test_factory_passes_same_catalog_to_all_embedding_paths(
     def record_usage(*, catalog: object, **_kwargs: object) -> None:
         seen.append(catalog)
 
-    monkeypatch.setattr("base.lm.usage.log_usage_fields", record_usage)
+    monkeypatch.setattr(usage, "log_usage_fields", record_usage)
     fake = _AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     _patch_client(monkeypatch, fake)
     provider = factory.get_provider(
