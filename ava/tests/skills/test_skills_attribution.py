@@ -10,8 +10,8 @@ import ava.skills as skills_mod
 from ava.sdk_surface import agent_identity
 from ava.sdk_surface.installation import Installation
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
-from ava.tests.skills._skills_helpers import _write_skill
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
+from ava.tests.skills._skills_helpers import write_skill
 from base import telemetry
 from base.agents.context import AvaContext
 from base.cluster.machine import MachineIdentity
@@ -46,10 +46,10 @@ def test_all_for_ava_is_the_live_top_level_index(fake_skills_dir: Path) -> None:
     module `__getattr__`."""
     import ava
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
     d = fake_skills_dir / "grp"
     d.mkdir()
-    _write_skill(d, "beta", "name: beta\ndescription: b")
+    write_skill(d, "beta", "name: beta\ndescription: b")
 
     # The surface is skill and namespace names only: no utility member sits
     # beside the index.
@@ -71,7 +71,7 @@ def test_help_on_skills_module_is_index_only(
 
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
-    _write_skill(
+    write_skill(
         fake_skills_dir,
         "alpha",
         "name: alpha\ndescription: Alpha desc",
@@ -99,16 +99,16 @@ def test_resolution_is_not_consumption(
 
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
     d.mkdir()
-    _write_skill(d, "beta", "name: beta\ndescription: b", body="# B\n")
+    write_skill(d, "beta", "name: beta\ndescription: b", body="# B\n")
     root = fake_skills_dir / "guide"
     root.mkdir()
     (root / "SKILL.md").write_text(
         "---\nname: guide\ndescription: g\n---\n\n# Guide body\n", encoding="utf-8"
     )
-    _write_skill(root, "sub", "name: sub\ndescription: s", body="# Sub\n")
+    write_skill(root, "sub", "name: sub\ndescription: s", body="# Sub\n")
 
     recorded: list[tuple[str, str]] = []
 
@@ -164,17 +164,17 @@ def test_index_render_records_no_loaded_attribution(
 
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
     d.mkdir()
-    _write_skill(d, "beta", "name: beta\ndescription: b", body="# B\n")
+    write_skill(d, "beta", "name: beta\ndescription: b", body="# B\n")
     # Root skill: SKILL.md at the folder level plus a child skill underneath.
     root = fake_skills_dir / "guide"
     root.mkdir()
     (root / "SKILL.md").write_text(
         "---\nname: guide\ndescription: g\n---\n\n# Guide body\n", encoding="utf-8"
     )
-    _write_skill(root, "sub", "name: sub\ndescription: s", body="# Sub\n")
+    write_skill(root, "sub", "name: sub\ndescription: s", body="# Sub\n")
 
     recorded: list[tuple[str, str]] = []
 
@@ -209,7 +209,7 @@ def test_files_read_skill_md_records_consumption(
     (measured: 68 agents / 3 days used the pattern, 13 with zero rows)."""
     import ava
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     skill_dir = fake_skills_dir / "alpha"
     (skill_dir / "notes.md").write_text("# notes\n", encoding="utf-8")
 
@@ -244,7 +244,7 @@ def test_files_read_other_files_do_not_record(
 
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     skill_dir = fake_skills_dir / "alpha"
     (skill_dir / "notes.md").write_text("# notes\n", encoding="utf-8")
 
@@ -287,7 +287,7 @@ def test_every_consumption_records_one_event_and_nothing_is_remembered(
 
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
 
     written: list[Any] = []
@@ -311,7 +311,7 @@ def test_files_read_skill_md_silent_outside_agent(db_url: str, fake_skills_dir: 
     attribution is telemetry, and this helper must never break a file read)."""
     import ava
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     out = ava.files.read(ava.skills.alpha.path + "/SKILL.md")
     assert out.endswith("# A\n")  # no raise; body still returned
 
@@ -326,10 +326,10 @@ def test_proxy_doc_consumes_and_records(
     records the attribution, for a top-level skill and a nested one alike."""
     import ava
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
     d.mkdir()
-    _write_skill(d, "beta", "name: beta\ndescription: b", body="# B\n")
+    write_skill(d, "beta", "name: beta\ndescription: b", body="# B\n")
 
     recorded: list[tuple[str, str]] = []
 
@@ -371,7 +371,7 @@ def test_consuming_a_skill_lands_a_skill_invoked_row(
     consumption, written at the call, with nothing held in this process."""
     from tests.fixtures.units import spawn_agent
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     agent_id = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -409,7 +409,7 @@ def test_a_failed_write_is_reported_and_does_not_fail_the_read(
     an `audit_write_failed` anomaly event)."""
     import ava
 
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
 
     def _boom(*_a: object, **_k: object) -> None:

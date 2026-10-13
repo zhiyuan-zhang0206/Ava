@@ -533,7 +533,7 @@ class TestRemind:
             _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
             for _ in range(2)
         ]
-        real = daemon._advance_reminder_counters
+        real = daemon.advance_reminder_counters
         failed = False
 
         def flaky(cur: psycopg.Cursor, task_id: int) -> None:
@@ -543,7 +543,7 @@ class TestRemind:
                 raise psycopg.OperationalError("crash after first counter")
             real(cur, task_id)
 
-        monkeypatch.setattr(daemon, "_advance_reminder_counters", flaky)
+        monkeypatch.setattr(daemon, "advance_reminder_counters", flaky)
         with pytest.raises(psycopg.OperationalError):
             _run_reminders(pool, database, event_bus, 3600.0)
         assert deliver == []

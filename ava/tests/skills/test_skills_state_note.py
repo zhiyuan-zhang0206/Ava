@@ -20,8 +20,8 @@ import ava
 from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.installation import Installation
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
-from ava.tests.skills._skills_helpers import _write_skill
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
+from ava.tests.skills._skills_helpers import write_skill
 from base import telemetry
 from base.agents.context import AvaContext
 from base.db import Database
@@ -58,10 +58,10 @@ def _exec_turn(
 
 
 def _skills(root: Path) -> None:
-    _write_skill(root, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    write_skill(root, "alpha", "name: alpha\ndescription: a", body="# A\n")
     group = root / "grp"
     group.mkdir()
-    _write_skill(group, "beta", "name: beta\ndescription: b", body="# B\n")
+    write_skill(group, "beta", "name: beta\ndescription: b", body="# B\n")
 
 
 @pytest.mark.parametrize(

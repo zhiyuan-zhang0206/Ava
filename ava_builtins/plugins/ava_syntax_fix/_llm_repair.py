@@ -40,7 +40,7 @@ _REPAIR_SYSTEM = (
 _FENCE_RE = re.compile(r"^\s*```[^\n]*\n(.*?)\n```\s*$", re.DOTALL)
 
 
-def _render_syntax_error(e: SyntaxError, source: str) -> str:
+def render_syntax_error(e: SyntaxError, source: str) -> str:
     """Render a SyntaxError as Python's native traceback would -- a
     `File ... line N` header, the offending source line, a caret, and the
     `SyntaxError: msg` line. Reused for both the LLM repair prompt and the
@@ -64,7 +64,7 @@ def _render_syntax_error(e: SyntaxError, source: str) -> str:
     return "\n".join(lines)
 
 
-def _extract_text(content: Any) -> str:
+def extract_text(content: Any) -> str:
     """Flatten an LLM response content into plain text. A thinking model returns
     a list of blocks (thinking + text); keep only the text blocks."""
     if isinstance(content, str):
@@ -78,14 +78,14 @@ def _extract_text(content: Any) -> str:
     return ""
 
 
-def _strip_code_fence(text: str) -> str:
+def strip_code_fence(text: str) -> str:
     """Strip one surrounding markdown code fence if the model wrapped its output
     despite instructions not to."""
     m = _FENCE_RE.match(text)
     return m.group(1) if m else text.strip()
 
 
-async def _repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) -> str | None:
+async def repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) -> str | None:
     """One LLM repair attempt: invoke with timeout, then flatten + strip the
     response. Returns the candidate source, or None when the model is
     unavailable (missing key, timeout, empty output)."""
@@ -112,10 +112,10 @@ async def _repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) 
         usage_kind="chat",
         start_time_ns=time.time_ns() - int((time.monotonic() - started) * 1_000_000_000),
     )
-    return _strip_code_fence(_extract_text(resp.content)).strip() or None
+    return strip_code_fence(extract_text(resp.content)).strip() or None
 
 
-async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
+async def llm_repair_syntax(code: str, rendered_error: str) -> str | None:
     """Fast-model repair for a syntax error the deterministic pipeline could
     not fix, running deepseek-flash (delimiter repair
     needs to infer the author's intent). Single-shot output is probabilistic, so
@@ -162,7 +162,7 @@ async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
             model=_REPAIR_MODEL,
             lines=len(code.splitlines()),
         )
-        candidate = await _repair_once(llm, messages, catalog=catalog)
+        candidate = await repair_once(llm, messages, catalog=catalog)
         if candidate is None:
             return None
         try:
@@ -174,7 +174,7 @@ async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
                 HumanMessage(
                     content=(
                         "That still fails to compile:\n"
-                        f"{_render_syntax_error(retry_err, candidate)}\n"
+                        f"{render_syntax_error(retry_err, candidate)}\n"
                         "Return the full corrected source again, code only."
                     )
                 )

@@ -167,9 +167,9 @@ def test_the_wrap_returns_what_the_layer_below_returns() -> None:
         calls.append((path, content))
         return sentinel
 
-    wrapped_write = cast("Callable[..., Any]", plugin._wrapped_write)
-    wrapped_append = cast("Callable[..., Any]", plugin._wrapped_append)
-    wrapped_edit = cast("Callable[..., Any]", plugin._wrapped_edit)
+    wrapped_write = cast("Callable[..., Any]", plugin.wrapped_write)
+    wrapped_append = cast("Callable[..., Any]", plugin.wrapped_append)
+    wrapped_edit = cast("Callable[..., Any]", plugin.wrapped_edit)
     assert wrapped_write(inner, "x.md", "c") is sentinel
     assert wrapped_append(inner, "x.md", "c") is sentinel
     edit_calls: list[tuple[Any, ...]] = []
@@ -192,7 +192,7 @@ def test_the_exception_of_the_layer_below_propagates_as_is() -> None:
         raise failure
 
     with pytest.raises(PermissionError) as raised:
-        plugin._wrapped_write(inner, "x.md", "c")
+        plugin.wrapped_write(inner, "x.md", "c")
     assert raised.value is failure
 
 

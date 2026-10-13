@@ -59,7 +59,7 @@ class ComputerLineSession:
         await self.close()
         if self._sock is None:
             return
-        reader, writer = await _dial_computer_mcp(self._sock)
+        reader, writer = await dial_computer_mcp(self._sock)
         self._reader = reader
         self._writer = writer
         self._id = 0
@@ -115,7 +115,7 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
         await writer.wait_closed()
 
 
-async def _dial_computer_mcp(
+async def dial_computer_mcp(
     sock: str,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     policy = Policy(
@@ -152,5 +152,5 @@ async def connect_computer_direct(
         from base.paths import computer_mcp_socket
 
         sock = str(computer_mcp_socket())
-    reader, writer = await _dial_computer_mcp(sock)
+    reader, writer = await dial_computer_mcp(sock)
     return ComputerLineSession(reader, writer, sock=sock), AsyncExitStack()

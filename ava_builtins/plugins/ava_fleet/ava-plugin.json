@@ -13,8 +13,8 @@
       "agents.spawn"
     ],
     "systemPromptSections": [
-      "_fleet_self_section",
-      "_reduce_context_switch_section"
+      "fleet_self_section",
+      "reduce_context_switch_section"
     ],
     "metrics": [
       "ava_fleet_task_done_rate",

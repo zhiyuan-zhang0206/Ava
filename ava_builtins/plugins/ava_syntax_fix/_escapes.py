@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import tokenize
 
-from ._punct import _line_starts, _tokenize_fix_safe
+from ._punct import line_starts, tokenize_fix_safe
 
 # ---------------------------------------------------------------------------
 # 3. Invalid-escape-sequence fix
@@ -133,7 +133,7 @@ def _collect_escape_edits(
     return edits
 
 
-def _fix_invalid_escapes(code: str) -> tuple[str, int]:
+def fix_invalid_escapes(code: str) -> tuple[str, int]:
     """Double-escape every invalid-escape `\\X` inside non-raw string literals
     (regular, byte, and f-strings). Returns (fixed_code, num_replacements).
 
@@ -143,14 +143,14 @@ def _fix_invalid_escapes(code: str) -> tuple[str, int]:
     comments preserved verbatim.
 
     Returns the original code unchanged when tokenization fails (broken
-    syntax, or inputs that crash the C tokenizer -- see _tokenize_fix_safe)
+    syntax, or inputs that crash the C tokenizer -- see tokenize_fix_safe)
     -- that's compile()'s job to surface downstream.
     """
-    tokens = _tokenize_fix_safe(code)
+    tokens = tokenize_fix_safe(code)
     if tokens is None:
         return code, 0
 
-    edits = _collect_escape_edits(tokens, _line_starts(code))
+    edits = _collect_escape_edits(tokens, line_starts(code))
     if not edits:
         return code, 0
 
