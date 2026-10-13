@@ -672,7 +672,7 @@ def test_config_audit_local_reads_newest_first_and_filters(
     machine_identity: MachineIdentity,
 ) -> None:
     """No --machine: reads this unit's own JSONL; --key keeps one alias's records."""
-    from base.host.env.audit import record_env_write
+    from ops.env_audit import record_env_write
 
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
     env_path = tmp_path / ".env"

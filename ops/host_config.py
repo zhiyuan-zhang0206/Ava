@@ -28,6 +28,7 @@ from base.packages.plugin_config_admin import (
 )
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+from ops.env_audit import EnvWriteAudit, read_env_write_records
 from ops.rpc_schemas import (
     ConfigAuditReadResult,
     ConfigReadResult,
@@ -89,8 +90,6 @@ def config_read_op(*, authority: ConfigAuthority, local_machine: str) -> ConfigR
 
 def config_audit_read_op(last: int, *, local_machine: str) -> ConfigAuditReadResult:
     """Read this machine's most recent `.env`-write audit records (newest first)."""
-    from base.host.env.audit import read_env_write_records
-
     return ConfigAuditReadResult(machine=local_machine, records=read_env_write_records(last))
 
 
@@ -168,9 +167,7 @@ def _apply_patch(
                 writes,
                 removals,
                 expected_digest=candidate.expected_digest,
-                audit_site="ops_config_write",
-                actor=actor,
-                trace_id=trace_id,
+                audit=EnvWriteAudit(site="ops_config_write", actor=actor, trace_id=trace_id),
             )
         except RuntimeError as exc:
             if str(exc) != ".env changed before owned runtime-config write":

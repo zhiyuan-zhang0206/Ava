@@ -30,6 +30,7 @@ from base.api_contracts.config import (
     ConfigWriteResult,
 )
 from base.cluster.machine import MachineIdentity
+from ops.env_audit import EnvWriteAudit, read_env_write_records
 
 _HTTP_TIMEOUT_S = 15.0
 
@@ -411,8 +412,6 @@ def cmd_config_audit(
     if not 1 <= last <= 200:
         print("[ava config audit] --last must be between 1 and 200", file=sys.stderr)
         return 1
-    from base.host.env.audit import read_env_write_records
-
     if machine is None:
         records = [
             {**record, "machine": identity.name()} for record in read_env_write_records(last)
@@ -560,8 +559,7 @@ def _edit_local_config(
             writes,
             removals,
             expected_digest=candidate.expected_digest,
-            audit_site="cli_config_local",
-            actor=f"cli:{getpass.getuser()}",
+            audit=EnvWriteAudit(site="cli_config_local", actor=f"cli:{getpass.getuser()}"),
         )
     except RuntimeError as e:
         print(f"[ava config {verb}] {e}; retry against the current .env", file=sys.stderr)

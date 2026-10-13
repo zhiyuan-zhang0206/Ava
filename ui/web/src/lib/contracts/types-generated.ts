@@ -2272,7 +2272,7 @@ export interface paths {
          *     Omitted `last` returns the configured default count
          *     (``display.config_audit_default_last`` - 20 out of the box); an explicit
          *     `last` stays capped at 200. Records are the raw
-         *     audit-JSONL entries (`base/host/env/audit.py`), each tagged with its `machine`;
+         *     audit-JSONL entries (`ops/env_audit.py`), each tagged with its `machine`;
          *     values were redacted at write time (non-sensitive fields only), and records
          *     from before record v2 lack `actor` / `trace_id` / `changed`.
          */
@@ -5117,7 +5117,7 @@ export interface components {
          * ConfigAuditView
          * @description GET /api/config/audit response — merged `.env`-write audit records, newest first.
          *
-         *     Each record is the raw audit-JSONL entry (`base/host/env/audit.py`, record v2:
+         *     Each record is the raw audit-JSONL entry (`ops/env_audit.py`, record v2:
          *     ts / site / pid / process / cmdline / actor / trace_id / keys_written /
          *     keys_removed / digest_after / changed), tagged with its `machine`. Values were
          *     redacted when the record was written (non-sensitive fields only); records from

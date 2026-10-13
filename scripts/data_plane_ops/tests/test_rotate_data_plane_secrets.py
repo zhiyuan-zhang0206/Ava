@@ -178,7 +178,7 @@ def test_write_env_syncs_the_redis_url_with_the_active_passwords(
     state = _state("runner")
     writes: list[dict[str, str]] = []
 
-    def _upsert_env(_path: Path, values: dict[str, str], *, audit_site: str | None = None) -> None:
+    def _upsert_env(_path: Path, values: dict[str, str], *, audit: object = None) -> None:
         writes.append(values)
 
     monkeypatch.setattr(rotate, "upsert_env", _upsert_env)

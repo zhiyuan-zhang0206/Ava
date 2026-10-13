@@ -47,7 +47,6 @@ from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.env import runtime_config
-from base.host.env.audit import check_env_integrity
 from base.packages.plugin_config_admin import (
     panel_metadata,
     panel_overrides,
@@ -58,6 +57,7 @@ from base.packages.plugin_config_images import PluginConfigChangedError, PluginC
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from ops import host_config
 from ops.cluster import rpc as _cluster_rpc
+from ops.env_audit import EnvWriteAudit, check_env_integrity
 from ops.host_config import SENSITIVE_MASK
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
 
@@ -446,7 +446,7 @@ async def get_config_audit(
     Omitted `last` returns the configured default count
     (``display.config_audit_default_last`` - 20 out of the box); an explicit
     `last` stays capped at 200. Records are the raw
-    audit-JSONL entries (`base/host/env/audit.py`), each tagged with its `machine`;
+    audit-JSONL entries (`ops/env_audit.py`), each tagged with its `machine`;
     values were redacted at write time (non-sensitive fields only), and records
     from before record v2 lack `actor` / `trace_id` / `changed`.
     """
@@ -650,9 +650,7 @@ async def _write_cluster_fields(
             plan.cluster_writes,
             plan.cluster_removals,
             expected_digest=candidate.expected_digest,
-            audit_site="gateway_config_put",
-            actor=actor,
-            trace_id=trace_id,
+            audit=EnvWriteAudit(site="gateway_config_put", actor=actor, trace_id=trace_id),
         )
     except RuntimeError as exc:
         if str(exc) != ".env changed before owned runtime-config write":
