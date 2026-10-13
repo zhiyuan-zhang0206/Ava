@@ -43,7 +43,7 @@ def _launched(roster: tuple[ServiceSpec, ...], *_args: object, **_kwargs: object
     return LaunchOutcome(roster, ())
 
 
-def _roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None], ...]) -> None:
+def roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None], ...]) -> None:
     specs = tuple(
         (
             ServiceSpec(
@@ -93,19 +93,19 @@ def _hermetic_start(
 
     monkeypatch.setattr(service_selection, "selection_path", lambda: tmp_path / "selection.json")
     monkeypatch.setattr(start, "prod_service_checkout_error", _ignoring_args(lambda: None))
-    monkeypatch.setattr(start, "_ensure_gateway_data_plane", _ignoring_retention(lambda: 0))
+    monkeypatch.setattr(start, "ensure_gateway_data_plane", _ignoring_retention(lambda: 0))
     monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda: None)
     monkeypatch.setattr(bringup, "complete_gateway_data_plane", _ignoring_args(lambda: None))
     monkeypatch.setattr(materialize, "adopt_local_extensions", _ignoring_args(lambda: None))
     monkeypatch.setattr(materialize, "materialize_cluster_extensions", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "cmd_migrations_apply", _ignoring_args(list[str]))
-    monkeypatch.setattr(start, "_refuse_occupied_health_ports", _ignoring_args(lambda: 0))
-    monkeypatch.setattr(start, "_record_running_sha", _ignoring_args(lambda: None))
+    monkeypatch.setattr(start, "refuse_occupied_health_ports", _ignoring_args(lambda: 0))
+    monkeypatch.setattr(start, "record_running_sha", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "cmd_status", _ignoring_args(lambda: 0))
     monkeypatch.setattr(command_runtime.machine, "role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
         _setup_commands,
-        "_collect_setup_values",
+        "collect_setup_values",
         _ignoring_args(
             lambda: (
                 {
@@ -119,9 +119,9 @@ def _hermetic_start(
     )
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: False))
     monkeypatch.setattr(converge_host, "converge_host", _ignoring_args(lambda: None))
-    monkeypatch.setattr(_repo_commands, "_register_machine_or_die", _ignoring_args(lambda: 0))
-    monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 0)
-    monkeypatch.setattr(_repo_commands, "_probe_gateway_or_die", _ignoring_args(lambda: 0))
+    monkeypatch.setattr(_repo_commands, "register_machine_or_die", _ignoring_args(lambda: 0))
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 0)
+    monkeypatch.setattr(_repo_commands, "probe_gateway_or_die", _ignoring_args(lambda: 0))
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", _launched)
     monkeypatch.setattr(
         _probe_commands,
@@ -137,7 +137,7 @@ def _hermetic_start(
         )
 
     monkeypatch.setattr(_root_driver_commands, "wait_for_service_tree", wait)
-    _roster(monkeypatch, (("gateway", None), ("frontend", None)))
+    roster(monkeypatch, (("gateway", None), ("frontend", None)))
 
 
 def test_unready_frontend_is_failure_and_never_serving(
@@ -176,7 +176,7 @@ def test_live_repeat_start_never_runs_mutating_preparation(
         pytest.fail("live repeat start must not converge or migrate")
 
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: True))
-    monkeypatch.setattr(start, "_prepare_cold_start", no_prepare)
+    monkeypatch.setattr(start, "prepare_cold_start", no_prepare)
     monkeypatch.setattr(cluster, "assert_checkpoint_schema_current", _ignoring_args(lambda: None))
     assert (
         _start_commands.cmd_start(
@@ -257,7 +257,7 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
     command_runtime: CommandRuntime,
 ) -> None:
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: True))
-    monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 1)
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 1)
     monkeypatch.setattr(
         start, "cmd_migrations_apply", _ignoring_args(lambda: pytest.fail("no live DDL"))
     )
@@ -317,7 +317,7 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
     from base.deploy.lifecycle import service_selection
 
     prepared: list[frozenset[str]] = []
-    _roster(monkeypatch, (("gateway", None), ("otel-collector", None)))
+    roster(monkeypatch, (("gateway", None), ("otel-collector", None)))
 
     def prepare(
         _repo: Path,
@@ -438,7 +438,7 @@ def test_storage_schema_migration_grants_pooler_precede_application(
     steps: list[str] = []
     monkeypatch.setattr(
         start,
-        "_ensure_gateway_data_plane",
+        "ensure_gateway_data_plane",
         _ignoring_retention(lambda: steps.append("storage") or 0),
     )
     monkeypatch.setattr(
@@ -481,7 +481,7 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
 ) -> None:
     from cli.commands.lifecycle import root_driver
 
-    _roster(monkeypatch, (("frontend", None),))
+    roster(monkeypatch, (("frontend", None),))
     monkeypatch.setattr(
         _probe_commands,
         "probe_service",

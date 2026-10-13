@@ -191,7 +191,7 @@ def test_gateway_probe_preserves_degraded_schema_status(
 
     monkeypatch.setattr(roster_probe, "dispatch_status_probe", probe)
     row = asyncio.run(
-        status_route._probe_agent_runner(
+        status_route.probe_agent_runner(
             roster_probe.IdentityMismatchLog(),
             "gateway",
             ["gateway"],

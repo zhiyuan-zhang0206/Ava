@@ -65,7 +65,7 @@ def _gateway_base() -> str:
     home_base = _home_gateway_base()
     if home_base is not None:
         return home_base
-    raise _ConfigError(
+    raise ConfigError(
         "gateway_url unset — this home carries no gateway identity yet: "
         "run `ava init` for it, or "
         "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly."
@@ -83,12 +83,12 @@ def _guard_gateway_write(target: str) -> None:
     innocuous command away (2026-09-07 incident)."""
     home_base = _home_gateway_base()
     if home_base is None:
-        raise _ConfigError(
+        raise ConfigError(
             "refusing to write gateway config: this home carries no gateway "
             "identity yet. Run `ava start` for it first."
         )
     if target != home_base:
-        raise _ConfigError(
+        raise ConfigError(
             f"refusing to write gateway config: resolved target {target!r} "
             f"does not match this home's gateway {home_base!r} — a config write "
             "must target this process's own home."
@@ -117,7 +117,7 @@ def _auth_headers() -> dict[str, str]:
     return bearer_header(bearer) if bearer else {}
 
 
-def _get_config(machine: str | None) -> ConfigView:
+def get_config(machine: str | None) -> ConfigView:
     from base.host.net.http_dial import get as dial_get
 
     params = {"machine": machine} if machine else None
@@ -131,7 +131,7 @@ def _get_config(machine: str | None) -> ConfigView:
     return ConfigView.model_validate(resp.json())
 
 
-def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
+def get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
     from base.host.net.http_dial import get as dial_get
 
     params: dict[str, str] = {"last": str(last)}
@@ -147,7 +147,7 @@ def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
     return ConfigAuditView.model_validate(resp.json())
 
 
-def _put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
+def put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
     from base.host.net.http_dial import put as dial_put
 
     _guard_gateway_write(_gateway_base())
@@ -161,12 +161,12 @@ def _put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
     )
     if resp.status_code == 400:
         # The gateway rejects unknown / read-only fields with a 400 + detail.
-        raise _ConfigError(resp.json().get("detail", resp.text))
+        raise ConfigError(resp.json().get("detail", resp.text))
     resp.raise_for_status()
     return ConfigWriteResult.model_validate(resp.json())
 
 
-class _ConfigError(Exception):
+class ConfigError(Exception):
     """A user-facing config error (bad key, read-only field, gateway 400)."""
 
 
@@ -230,7 +230,7 @@ def _index_local_fields(
 def _resolve_local_field(key: str, index: dict[str, _LocalConfigField]) -> _LocalConfigField:
     field = index.get(key)
     if field is None:
-        raise _ConfigError(
+        raise ConfigError(
             f"unknown config key: {key!r} (use the env-var name like AVA_MODEL or the field name)"
         )
     return field
@@ -244,17 +244,17 @@ def _config_source_is_local() -> bool:
 
 def _check_local_writable(field: _LocalConfigField) -> None:
     if not field.writable:
-        raise _ConfigError(f"{field.env_var} is read-only")
+        raise ConfigError(f"{field.env_var} is read-only")
     if field.scope == "host":
         return
     if field.scope in ("cluster-pinned", "cluster-default"):
         if _config_source_is_local():
             return
-        raise _ConfigError(
+        raise ConfigError(
             f"{field.env_var} is cluster config fetched from the gateway on this unit; "
             "use `ava config set` without `--local` to edit it there"
         )
-    raise _ConfigError(f"{field.env_var} is not writable on this unit")
+    raise ConfigError(f"{field.env_var} is not writable on this unit")
 
 
 def _local_shown_value(field: _LocalConfigField, aliases: dict[str, str]) -> object:
@@ -279,7 +279,7 @@ def _local_get(key: str | None) -> int:
     if key is not None:
         try:
             field = _resolve_local_field(key, _index_local_fields(fields))
-        except _ConfigError as e:
+        except ConfigError as e:
             print(f"[ava config get] {e}", file=sys.stderr)
             return 1
         print(f"{field.env_var} ({field.name}) = {_local_shown_value(field, aliases)}")
@@ -306,13 +306,13 @@ def _index_fields(view: ConfigView) -> dict[str, ConfigFieldView]:
 def _resolve_field(key: str, index: dict[str, ConfigFieldView]) -> ConfigFieldView:
     field = index.get(key)
     if field is None:
-        raise _ConfigError(
+        raise ConfigError(
             f"unknown config key: {key!r} (use the env-var name like AVA_MODEL or the field name)"
         )
     return field
 
 
-def _field_editable(field: ConfigFieldView, *, remote: bool) -> bool:
+def field_editable(field: ConfigFieldView, *, remote: bool) -> bool:
     # Mirrors base.config.admin.editing.field_editable. The CLI has the wire view,
     # not ConfigFieldMeta, so these two definitions must stay in lockstep.
     return field.remote_writable if remote and field.scope == "host" else field.writable
@@ -325,19 +325,19 @@ def _coerce(field_type: str, raw: str) -> Any:
         try:
             return int(raw)
         except ValueError:
-            raise _ConfigError(f"invalid int value: {raw!r}") from None
+            raise ConfigError(f"invalid int value: {raw!r}") from None
     if field_type == "float":
         try:
             return float(raw)
         except ValueError:
-            raise _ConfigError(f"invalid float value: {raw!r}") from None
+            raise ConfigError(f"invalid float value: {raw!r}") from None
     if field_type == "bool":
         low = raw.strip().lower()
         if low in ("true", "1", "yes", "on"):
             return True
         if low in ("false", "0", "no", "off"):
             return False
-        raise _ConfigError(f"invalid bool value: {raw!r} (use true/false)")
+        raise ConfigError(f"invalid bool value: {raw!r} (use true/false)")
     return raw
 
 
@@ -420,8 +420,8 @@ def cmd_config_audit(
         import httpx
 
         try:
-            records = _get_config_audit(machine, last).records
-        except _ConfigError as e:
+            records = get_config_audit(machine, last).records
+        except ConfigError as e:
             print(f"[ava config audit] {e}", file=sys.stderr)
             return 1
         except httpx.HTTPError as e:
@@ -445,8 +445,8 @@ def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False)
     import httpx
 
     try:
-        view = _get_config(machine)
-    except _ConfigError as e:
+        view = get_config(machine)
+    except ConfigError as e:
         print(f"[ava config get] {e}", file=sys.stderr)
         return 1
     except httpx.HTTPError as e:
@@ -457,7 +457,7 @@ def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False)
         index = _index_fields(view)
         try:
             field = _resolve_field(key, index)
-        except _ConfigError as e:
+        except ConfigError as e:
             print(f"[ava config get] {e}", file=sys.stderr)
             return 1
         value = field.current_value
@@ -492,19 +492,19 @@ def _build_delta(
     an omission. `view` is used only to resolve key aliases and gate read-only edits.
 
     Raises:
-        _ConfigError: an unknown key, or an edit of a read-only field.
+        ConfigError: an unknown key, or an edit of a read-only field.
     """
     index = _index_fields(view)
     body: dict[str, Any] = {}
     for key, raw in (pairs or {}).items():
         field = _resolve_field(key, index)
-        if not _field_editable(field, remote=machine is not None):
-            raise _ConfigError(f"{field.env_var} is read-only")
+        if not field_editable(field, remote=machine is not None):
+            raise ConfigError(f"{field.env_var} is read-only")
         body[field.name] = _coerce(field.field_type, raw)
     for key in unset_keys or []:
         field = _resolve_field(key, index)
-        if not _field_editable(field, remote=machine is not None):
-            raise _ConfigError(f"{field.env_var} is read-only")
+        if not field_editable(field, remote=machine is not None):
+            raise ConfigError(f"{field.env_var} is read-only")
         body[field.name] = None
     return body
 
@@ -525,7 +525,7 @@ def _build_local_patch(
         try:
             writes[field.name] = coerce_config_scalar(field.field_type, raw, field.choices)
         except (TypeError, ValueError):
-            raise _ConfigError(f"invalid {field.field_type} value: {raw!r}") from None
+            raise ConfigError(f"invalid {field.field_type} value: {raw!r}") from None
         changed.append(field)
     for key in unset_keys or []:
         field = _resolve_local_field(key, index)
@@ -544,7 +544,7 @@ def _edit_local_config(
 
     try:
         writes, removals, changed = _build_local_patch(pairs, unset_keys)
-    except _ConfigError as e:
+    except ConfigError as e:
         print(f"[ava config {verb}] {e}", file=sys.stderr)
         return 1
 
@@ -585,8 +585,8 @@ def _edit_config(
     import httpx
 
     try:
-        view = _get_config(machine)
-    except _ConfigError as e:
+        view = get_config(machine)
+    except ConfigError as e:
         print(f"[ava config {verb}] {e}", file=sys.stderr)
         return 1
     except httpx.HTTPError as e:
@@ -595,13 +595,13 @@ def _edit_config(
 
     try:
         body = _build_delta(view, pairs, unset_keys, machine=machine)
-    except _ConfigError as e:
+    except ConfigError as e:
         print(f"[ava config {verb}] {e}", file=sys.stderr)
         return 1
 
     try:
-        result = _put_config(body, machine)
-    except _ConfigError as e:
+        result = put_config(body, machine)
+    except ConfigError as e:
         print(f"[ava config {verb}] {e}", file=sys.stderr)
         return 1
     except httpx.HTTPError as e:

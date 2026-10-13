@@ -73,7 +73,7 @@ class Inbox:
     async def reserve(self, ids: list[int]) -> frozenset[int]:
         for i in ids:
             count, _ = self.attempts.get(i, (0, 0))
-            self.attempts[i] = (count + 1, relay._loop_time())
+            self.attempts[i] = (count + 1, relay.loop_time())
         return frozenset(ids)
 
     async def read(self) -> relay.InboxSnapshot:
@@ -81,7 +81,7 @@ class Inbox:
         if any(
             i in self.pending
             and count >= self.max_delivery_attempts
-            and relay._loop_time() - at >= self.ack_window_seconds
+            and relay.loop_time() - at >= self.ack_window_seconds
             for i, (count, at) in self.attempts.items()
         ):
             self.status = ImpersonationStatus.EXPIRED
@@ -93,7 +93,7 @@ class Inbox:
                     self.messages[i],
                     delivery_attempts=self.attempts.get(i, (0, 0))[0],
                     delivery_due=i not in self.attempts
-                    or relay._loop_time() - self.attempts[i][1] >= self.ack_window_seconds,
+                    or relay.loop_time() - self.attempts[i][1] >= self.ack_window_seconds,
                 )
                 for i in page
             },
@@ -307,7 +307,7 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     assert relay.ack_command(0, [5], agent_id=42) in push
     body_line = [line for line in push.splitlines() if line.startswith("x" * 10)]
     assert body_line
-    assert len(body_line[0]) <= relay._PUSH_MAX_CHARS + len(
+    assert len(body_line[0]) <= relay.PUSH_MAX_CHARS + len(
         " (truncated — run the inbox command to read the full body before acknowledging)"
     )
     assert listener.closed

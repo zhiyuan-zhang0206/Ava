@@ -15,18 +15,18 @@ from scripts.ci.pull_requests import commands as ci_utils
 from scripts.ci.pull_requests import monitor, owner_operations, status
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     CIStatus,
-    _aged,
+    TrunkResponse,
     _check,
-    _diag_check,
-    _diag_job,
-    _diag_jobs_payload,
-    _diag_pr_view,
-    _diag_runs,
-    _install_probe,
-    _install_results_poller,
-    _limbo_result,
-    _TrunkResponse,
-    _urlopen_sequence,
+    aged,
+    diag_check,
+    diag_job,
+    diag_jobs_payload,
+    diag_pr_view,
+    diag_runs,
+    install_probe,
+    install_results_poller,
+    limbo_result,
+    urlopen_sequence,
 )
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     diag_gh as diag_gh,
@@ -59,7 +59,7 @@ def test_queue_ops_exclusive_with_merge_wait() -> None:
 def test_diagnose_merge_conflict(diag_gh, monkeypatch, capsys) -> None:
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(mergeable="CONFLICTING")),
+            ("--json mergeable", diag_pr_view(mergeable="CONFLICTING")),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
@@ -77,12 +77,12 @@ def test_diagnose_lint_hard_limit(diag_gh, monkeypatch, capsys) -> None:
     check = "backend structure (pre-commit lint + codegen freshness)"
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json mergeable", diag_pr_view(checks=[diag_check(check)])),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", _diag_runs()),
-            ("/jobs", _diag_jobs_payload(_diag_job(check))),
+            ("head_sha=", diag_runs()),
+            ("/jobs", diag_jobs_payload(diag_job(check))),
             ("/logs", "scripts/host.py file is 812 lines, over the 800-line hard ceiling"),
             ("state=all", "[]"),
         ]
@@ -97,12 +97,12 @@ def test_diagnose_first_load_budget(diag_gh, monkeypatch, capsys) -> None:
     check = "Production build + first-load JavaScript budget"
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json mergeable", diag_pr_view(checks=[diag_check(check)])),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", _diag_runs()),
-            ("/jobs", _diag_jobs_payload(_diag_job(check))),
+            ("head_sha=", diag_runs()),
+            ("/jobs", diag_jobs_payload(diag_job(check))),
             ("/logs", "First Load JS shared by all is 512 kB (budget 500 kB)"),
             ("state=all", "[]"),
         ]
@@ -115,12 +115,12 @@ def test_diagnose_visual_regression(diag_gh, monkeypatch, capsys) -> None:
     check = "e2e shard (3/4)"
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json mergeable", diag_pr_view(checks=[diag_check(check)])),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", _diag_runs()),
-            ("/jobs", _diag_jobs_payload(_diag_job(check))),
+            ("head_sha=", diag_runs()),
+            ("/jobs", diag_jobs_payload(diag_job(check))),
             ("/logs", "toMatchImageSnapshot failed: baseline image differs"),
             ("state=all", "[]"),
         ]
@@ -135,12 +135,12 @@ def test_diagnose_truncate_lint_delta_case(diag_gh, monkeypatch, capsys) -> None
     check = "lint truncate isolation"
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json mergeable", diag_pr_view(checks=[diag_check(check)])),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", _diag_runs()),
-            ("/jobs", _diag_jobs_payload(_diag_job(check))),
+            ("head_sha=", diag_runs()),
+            ("/jobs", diag_jobs_payload(diag_job(check))),
             (
                 "/logs",
                 "truncate-isolation lint: comment-stripping regex captured CREATE TABLE delta",
@@ -157,12 +157,12 @@ def test_diagnose_clock_lattice_gateway_case(diag_gh, monkeypatch, capsys) -> No
     check = "lint clock lattice"
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json mergeable", diag_pr_view(checks=[diag_check(check)])),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", _diag_runs()),
-            ("/jobs", _diag_jobs_payload(_diag_job(check))),
+            ("head_sha=", diag_runs()),
+            ("/jobs", diag_jobs_payload(diag_job(check))),
             ("/logs", "lattice-vocabulary clock constant defined outside its family module"),
             ("state=all", "[]"),
         ]
@@ -179,16 +179,16 @@ def test_diagnose_test_failure_uses_native_evidence(diag_gh, monkeypatch, capsys
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        _urlopen_sequence([_TrunkResponse({"state": "testing"})], calls),
+        urlopen_sequence([TrunkResponse({"state": "testing"})], calls),
     )
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json mergeable", diag_pr_view(checks=[diag_check(check)])),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", _diag_runs()),
-            ("/jobs", _diag_jobs_payload(_diag_job(check))),
+            ("head_sha=", diag_runs()),
+            ("/jobs", diag_jobs_payload(diag_job(check))),
             (
                 "/logs",
                 "FAILED tests/components/agent/test_consumer_guard.py::test_consumer_guard_queue_backpressure",
@@ -210,12 +210,12 @@ def test_diagnose_runner_network_flake(diag_gh, monkeypatch, capsys) -> None:
     check = "backend (pytest + pyright)"
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json mergeable", diag_pr_view(checks=[diag_check(check)])),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", _diag_runs()),
-            ("/jobs", _diag_jobs_payload(_diag_job(check))),
+            ("head_sha=", diag_runs()),
+            ("/jobs", diag_jobs_payload(diag_job(check))),
             ("/logs", "apt-get install failed: archive cache is empty — no offline fallback"),
             ("state=all", "[]"),
         ]
@@ -227,7 +227,7 @@ def test_diagnose_runner_network_flake(diag_gh, monkeypatch, capsys) -> None:
 def test_diagnose_reports_synthetic_test_pr(diag_gh, monkeypatch, capsys) -> None:
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view()),
+            ("--json mergeable", diag_pr_view()),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
@@ -257,7 +257,7 @@ def test_diagnose_reports_synthetic_test_pr(diag_gh, monkeypatch, capsys) -> Non
 def test_diagnose_stale_base(diag_gh, monkeypatch, capsys) -> None:
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view()),
+            ("--json mergeable", diag_pr_view()),
             ("--json baseRefOid --jq", "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
@@ -272,7 +272,7 @@ def test_diagnose_stale_base(diag_gh, monkeypatch, capsys) -> None:
 def test_diagnose_json_machine_readable(diag_gh, monkeypatch, capsys) -> None:
     diag_gh(
         [
-            ("--json mergeable", _diag_pr_view(checks=[_diag_check("lint clock lattice")])),
+            ("--json mergeable", diag_pr_view(checks=[diag_check("lint clock lattice")])),
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
@@ -297,7 +297,7 @@ def test_diagnose_exclusive_and_requires_pr() -> None:
 def test_diagnose_merged_pr_reports_no_conflict_or_stale_base(diag_gh, monkeypatch, capsys) -> None:
     """A merged PR has mergeable=UNKNOWN and a base behind main by definition —
     neither may be reported as a diagnosable problem."""
-    view = json.loads(_diag_pr_view(mergeable="UNKNOWN"))
+    view = json.loads(diag_pr_view(mergeable="UNKNOWN"))
     view["state"] = "MERGED"
     diag_gh(
         [
@@ -368,13 +368,13 @@ def test_ci_usage_exclusive_and_no_pr() -> None:
 
 def test_limbo_runs_flags_aged_queued_zero_job_run(monkeypatch) -> None:
     calls: list[list[str]] = []
-    _install_probe(
+    install_probe(
         monkeypatch,
-        [{"id": 91, "name": "Native root lifetime proof", "created_at": _aged(910)}],
+        [{"id": 91, "name": "Native root lifetime proof", "created_at": aged(910)}],
         {91: 0},
         calls=calls,
     )
-    got = status._limbo_runs("abc1234", "o/r")
+    got = status.limbo_runs("abc1234", "o/r")
     assert got is not None
     assert [r["id"] for r in got] == [91]
     assert got[0]["name"] == "Native root lifetime proof"
@@ -385,50 +385,50 @@ def test_limbo_runs_flags_aged_queued_zero_job_run(monkeypatch) -> None:
 
 
 def test_limbo_runs_skips_fresh_and_progressing_runs(monkeypatch) -> None:
-    _install_probe(
+    install_probe(
         monkeypatch,
         [
-            {"id": 92, "name": "fresh", "created_at": _aged(120)},  # below the age bound
-            {"id": 93, "name": "progressing", "created_at": _aged(1200)},  # has jobs
-            {"id": 94, "name": "stuck", "created_at": _aged(1200)},
+            {"id": 92, "name": "fresh", "created_at": aged(120)},  # below the age bound
+            {"id": 93, "name": "progressing", "created_at": aged(1200)},  # has jobs
+            {"id": 94, "name": "stuck", "created_at": aged(1200)},
         ],
         {93: 3, 94: 0},
     )
-    result = status._limbo_runs("abc1234", "o/r")
+    result = status.limbo_runs("abc1234", "o/r")
     assert result is not None
     assert [r["id"] for r in result] == [94]
 
 
 def test_limbo_runs_probe_failures_never_read_as_limbo(monkeypatch) -> None:
     # An unanswerable runs probe is None (missing evidence), never [].
-    _install_probe(monkeypatch, [], {}, runs_rc=1)
-    assert status._limbo_runs("abc1234", "o/r") is None
+    install_probe(monkeypatch, [], {}, runs_rc=1)
+    assert status.limbo_runs("abc1234", "o/r") is None
     # Unreadable output is the same: not evidence of limbo.
-    _install_probe(monkeypatch, "not json", {}, runs_rc=0)
-    assert status._limbo_runs("abc1234", "o/r") is None
+    install_probe(monkeypatch, "not json", {}, runs_rc=0)
+    assert status.limbo_runs("abc1234", "o/r") is None
     # A candidate whose job count cannot be read is skipped, not assumed stuck.
-    _install_probe(
+    install_probe(
         monkeypatch,
-        [{"id": 95, "name": "stuck", "created_at": _aged(1200)}],
+        [{"id": 95, "name": "stuck", "created_at": aged(1200)}],
         {95: 0},
         jobs_rc={95: 1},
     )
-    assert status._limbo_runs("abc1234", "o/r") == []
+    assert status.limbo_runs("abc1234", "o/r") == []
 
 
 def test_limbo_runs_skips_unparseable_created_at_and_non_int_id(monkeypatch) -> None:
     calls: list[list[str]] = []
-    _install_probe(
+    install_probe(
         monkeypatch,
         [
             {"id": 96, "name": "no-created", "created_at": None},
-            {"id": "97", "name": "str-id", "created_at": _aged(1200)},
+            {"id": "97", "name": "str-id", "created_at": aged(1200)},
             {"id": 98, "name": "garbage-created", "created_at": "yesterday"},
         ],
         {},
         calls=calls,
     )
-    assert status._limbo_runs("abc1234", "o/r") == []
+    assert status.limbo_runs("abc1234", "o/r") == []
     assert len(calls) == 1  # no jobs probe ran for any candidate
 
 
@@ -439,7 +439,7 @@ def test_check_ci_attaches_limbo_to_pending(gh: Any, has_workflows: Any, monkeyp
     )
     has_workflows(True)
     stuck = [{"id": 91, "name": "Example proof A", "age_s": 1500}]
-    monkeypatch.setattr(status, "_limbo_runs", lambda *_a, **_k: stuck)
+    monkeypatch.setattr(status, "limbo_runs", lambda *_a, **_k: stuck)
     r = status.check_ci("1")
     assert r.verdict is CIStatus.PENDING
     assert r.pending == ["Example proof A"]
@@ -453,7 +453,7 @@ def test_check_ci_empty_rollup_with_scheduled_run_probes_limbo(
     gh([], scheduled=["CI"])
     has_workflows(True)
     monkeypatch.setattr(
-        status, "_limbo_runs", lambda *_a, **_k: [{"id": 92, "name": "CI", "age_s": 1200}]
+        status, "limbo_runs", lambda *_a, **_k: [{"id": 92, "name": "CI", "age_s": 1200}]
     )
     r = status.check_ci("1")
     assert r.verdict is CIStatus.PENDING
@@ -465,7 +465,7 @@ def test_check_ci_limbo_probe_none_stays_plain_pending(
 ) -> None:
     gh([_check("backend", "SUCCESS")], scheduled=["CI"])
     has_workflows(True)
-    monkeypatch.setattr(status, "_limbo_runs", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "limbo_runs", lambda *_a, **_k: None)
     r = status.check_ci("1")
     assert r.verdict is CIStatus.PENDING
     assert r.limbo == []
@@ -475,7 +475,7 @@ def test_query_once_json_includes_limbo(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         status,
         "check_ci",
-        lambda *_a, **_k: _limbo_result(
+        lambda *_a, **_k: limbo_result(
             pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 700}]
         ),
     )
@@ -485,21 +485,21 @@ def test_query_once_json_includes_limbo(monkeypatch, capsys) -> None:
 
 
 def test_report_limbo_names_once_per_key(capsys) -> None:
-    result = _limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 660}])
-    key = monitor._report_limbo(result, None)
+    result = limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 660}])
+    key = monitor.report_limbo(result, None)
     first = capsys.readouterr()
     assert key == (91,)
     assert "GitHub limbo" in first.err
     assert "(#91," in first.err
     # The same state does not re-print on every poll.
-    assert monitor._report_limbo(result, key) == key
+    assert monitor.report_limbo(result, key) == key
     assert capsys.readouterr().err == ""
 
 
 def test_wait_names_limbo_runs_and_says_the_block(no_sleep, monkeypatch, capsys) -> None:
-    _install_results_poller(
+    install_results_poller(
         monkeypatch,
-        _limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
+        limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
     )
     assert ci_utils.main(["1243", "--wait", "--timeout", "1"]) == 1
     err = capsys.readouterr().err
@@ -526,15 +526,15 @@ def test_limbo_never_enqueues_or_claims_green(
     pending: list[str],
 ) -> None:
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    _install_results_poller(
+    install_results_poller(
         monkeypatch,
-        _limbo_result(pending=pending, limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
+        limbo_result(pending=pending, limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
     )
     clock = iter([0.0, 0.0, 2.0])
     monkeypatch.setattr(status.time, "monotonic", lambda: next(clock))
     submissions: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
-        owner_operations, "_submit_trunk", lambda *a, **_k: submissions.append(a) or 0
+        owner_operations, "submit_trunk", lambda *a, **_k: submissions.append(a) or 0
     )
     assert ci_utils.main(["42", "--merge", "--timeout", "1"]) == 1
     assert submissions == []
@@ -551,13 +551,13 @@ def test_owner_rechecks_genuine_green_before_submission(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], next_verdict: CIStatus
 ) -> None:
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    _install_results_poller(
+    install_results_poller(
         monkeypatch, status.CIResult(CIStatus.ALL_PASSED), status.CIResult(next_verdict)
     )
-    monkeypatch.setattr(owner_operations, "_queue_cooldown_seconds", lambda *_a: 0)
+    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", lambda *_a: 0)
     submissions: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
-        owner_operations, "_submit_trunk", lambda *a, **_k: submissions.append(a) or 0
+        owner_operations, "submit_trunk", lambda *a, **_k: submissions.append(a) or 0
     )
     assert ci_utils.main(["42", "--merge"]) == (3 if next_verdict is CIStatus.ERROR else 1)
     assert submissions == []

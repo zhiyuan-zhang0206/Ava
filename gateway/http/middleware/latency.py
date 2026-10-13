@@ -88,7 +88,7 @@ MAX_DISTINCT_ROUTES = 1_000
 
 # ── accumulator ────────────────────────────────────────────────────────────
 
-_accumulator: dict[str, list[float]] = {}
+accumulator: dict[str, list[float]] = {}
 
 
 def _route_pattern(request: Request) -> str:
@@ -107,14 +107,14 @@ def _route_pattern(request: Request) -> str:
 
 def record(route: str, duration_ms: float) -> None:
     """Append one sample to the accumulator (event-loop thread only)."""
-    samples = _accumulator.get(route)
+    samples = accumulator.get(route)
     if samples is None:
-        if len(_accumulator) >= MAX_DISTINCT_ROUTES and route not in _accumulator:
+        if len(accumulator) >= MAX_DISTINCT_ROUTES and route not in accumulator:
             route = "_unmatched:other"
-            samples = _accumulator.get(route)
+            samples = accumulator.get(route)
         if samples is None:
             samples = []
-            _accumulator[route] = samples
+            accumulator[route] = samples
     if len(samples) < MAX_SAMPLES_PER_ROUTE:
         samples.append(duration_ms)
 
@@ -134,8 +134,8 @@ def drain() -> dict[str, list[float]]:
     request cannot interleave: the snapshot is the whole bucket and the next
     request starts a fresh one.
     """
-    batch = dict(_accumulator)
-    _accumulator.clear()
+    batch = dict(accumulator)
+    accumulator.clear()
     return batch
 
 

@@ -13,7 +13,7 @@ from base.config import settings
 from gateway.agents.notice_operations import current as current_notice_receipts
 from gateway.agents.notice_operations import router as guarded_notices
 from gateway.app import app
-from gateway.tests.events.test_notices_endpoint import _insert_notice, _seed_agent
+from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
 
 SECRET = "guarded-notice-test-secret"  # noqa: S105 -- isolated credential
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
@@ -56,8 +56,8 @@ def _send(
 def test_original_snapshot_survives_replacement_and_deletion(
     client: TestClient, db_conn: psycopg.Connection, dismiss: bool
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     first = _send(client, agent, notice, dismiss)
     assert first.status_code == 200, first.text
     later = client.post(
@@ -87,8 +87,8 @@ def test_original_snapshot_survives_replacement_and_deletion(
 def test_concurrent_duplicate_has_one_acceptance(
     client: TestClient, db_conn: psycopg.Connection, dismiss: bool
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = [executor.submit(_send, client, agent, notice, dismiss) for _ in range(4)]
         replies = [future.result() for future in futures]
@@ -104,8 +104,8 @@ def test_concurrent_duplicate_has_one_acceptance(
 def test_receipt_failure_rolls_back_mutation(
     client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, dismiss: bool
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     original = current_notice_receipts.save_receipt
 
     def fail(*args: object) -> None:
@@ -125,8 +125,8 @@ def test_receipt_failure_rolls_back_mutation(
 def test_lost_post_commit_response_replays_without_old_hint(
     client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, dismiss: bool
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     calls: list[tuple[object, ...]] = []
 
     async def fail(*args: object) -> None:
@@ -154,8 +154,8 @@ def test_lost_post_commit_response_replays_without_old_hint(
 def test_required_identity_has_no_effect(
     client: TestClient, db_conn: psycopg.Connection, headers: dict[str, str]
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     response = client.patch(
         _path(agent, False), json={"observed_notice_id": notice, "title": "B"}, headers=headers
     )
@@ -189,8 +189,8 @@ def test_invalid_input_precedes_receipt(
 def test_omitted_content_differs_from_explicit_null(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A", content="keep")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A", content="keep")
     first = _send(client, agent, notice, False, title="B")
     assert first.status_code == 200
     assert first.json()["content"] == "keep"
@@ -199,8 +199,8 @@ def test_omitted_content_differs_from_explicit_null(
 
 
 def test_paths_do_not_share_receipts(client: TestClient, db_conn: psycopg.Connection) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     assert _send(client, agent, notice, False).status_code == 200
     assert _send(client, agent, notice, True).status_code == 200
     assert db_conn.execute("SELECT count(*) FROM notice_operation_receipts").fetchone() == (2,)
@@ -209,8 +209,8 @@ def test_paths_do_not_share_receipts(client: TestClient, db_conn: psycopg.Connec
 def test_authentication_is_rechecked_on_replay(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     assert _send(client, agent, notice, False).status_code == 200
     response = client.patch(
         _path(agent, False),
@@ -223,8 +223,8 @@ def test_authentication_is_rechecked_on_replay(
 def test_reply_concurrent_with_guarded_edit_has_no_lock_cycle(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A", require_response=True)
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A", require_response=True)
     with ThreadPoolExecutor(max_workers=2) as executor:
         edit = executor.submit(_send, client, agent, notice, False)
         reply = executor.submit(
@@ -245,8 +245,8 @@ def test_creation_waits_for_guarded_owner_lock(
 ) -> None:
     from threading import Event
 
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     locked = Event()
     release = Event()
     original = current_notice_receipts.save_receipt
@@ -288,8 +288,8 @@ def test_creation_waits_for_guarded_owner_lock(
 def test_receipt_survives_expiration_and_changed_body_conflicts(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     first = _send(client, agent, notice, False, title="accepted")
     assert first.status_code == 200
     db_conn.execute(
@@ -301,8 +301,8 @@ def test_receipt_survives_expiration_and_changed_body_conflicts(
 
 
 def test_fyi_cannot_become_blocking(client: TestClient, db_conn: psycopg.Connection) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A")
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A")
     assert _send(client, agent, notice, False, blocking=True).status_code == 422
     assert db_conn.execute("SELECT count(*) FROM notice_operation_receipts").fetchone() == (0,)
 
@@ -310,8 +310,8 @@ def test_fyi_cannot_become_blocking(client: TestClient, db_conn: psycopg.Connect
 def test_reply_fk_is_compatible_with_guarded_agent_lock(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _seed_agent(db_conn)
-    notice = _insert_notice(db_conn, agent, "A", require_response=True)
+    agent = seed_agent(db_conn)
+    notice = insert_notice(db_conn, agent, "A", require_response=True)
     with ThreadPoolExecutor(max_workers=1) as executor, db_conn.transaction():
         db_conn.execute("SELECT id FROM agents WHERE id=%s FOR NO KEY UPDATE", (agent,))
         reply = executor.submit(

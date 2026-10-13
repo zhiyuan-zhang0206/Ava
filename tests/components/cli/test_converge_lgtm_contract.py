@@ -79,7 +79,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     assert "address: 127.0.0.1" in loki
     assert (
         "--web.listen-address={lgtm_listen_host}:{lgtm_prometheus_port}"
-        in lgtm_native._NATIVE_CONSTANTS["prometheus"].arguments
+        in lgtm_native.NATIVE_CONSTANTS["prometheus"].arguments
     )
 
     repo = Path(__file__).resolve().parents[3]

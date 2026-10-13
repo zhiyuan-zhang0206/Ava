@@ -57,19 +57,19 @@ def redis_bridge_verdict(
 
 @pytest.fixture
 def all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(cluster_health, "_agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cluster_health, "_schema_health", healthy)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
+    monkeypatch.setattr(cluster_health, "agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster_health, "schema_health", healthy)
     monkeypatch.setattr(
-        cluster_health, "_service_probes", partial(service_probe_verdict, failures=[])
+        cluster_health, "service_probes", partial(service_probe_verdict, failures=[])
     )
     monkeypatch.setattr(
-        cluster_health, "_redis_bridge_probe", partial(redis_bridge_verdict, result=None)
+        cluster_health, "redis_bridge_probe", partial(redis_bridge_verdict, result=None)
     )
-    monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: None)
-    monkeypatch.setattr(cluster_health, "_editable_install_failure", lambda: None)
+    monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: None)
+    monkeypatch.setattr(cluster_health, "editable_install_failure", lambda: None)
     # Source-tree cases below supply their own checkout outcomes.
-    monkeypatch.setattr(cluster_health, "_source_tree_failure", lambda: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster_health, "source_tree_failure", lambda: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture

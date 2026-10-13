@@ -69,7 +69,7 @@ class Inbox:
     async def reserve(self, ids: list[int]) -> frozenset[int]:
         for i in ids:
             count, _ = self.attempts.get(i, (0, 0))
-            self.attempts[i] = (count + 1, relay._loop_time())
+            self.attempts[i] = (count + 1, relay.loop_time())
         return frozenset(ids)
 
     async def read(self) -> relay.InboxSnapshot:
@@ -82,7 +82,7 @@ class Inbox:
                     self.messages[i],
                     delivery_attempts=self.attempts.get(i, (0, 0))[0],
                     delivery_due=i not in self.attempts
-                    or relay._loop_time() - self.attempts[i][1] >= self.ack_window_seconds,
+                    or relay.loop_time() - self.attempts[i][1] >= self.ack_window_seconds,
                 )
                 for i in page
             },
@@ -137,7 +137,7 @@ class Listener:
 
 
 class FakeClock:
-    """Monotonic test clock patched onto relay._loop_time and relay.asyncio.sleep."""
+    """Monotonic test clock patched onto relay.loop_time and relay.asyncio.sleep."""
 
     def __init__(self) -> None:
         self.t = 0.0
@@ -152,7 +152,7 @@ class FakeClock:
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     clock = FakeClock()
-    monkeypatch.setattr(relay, "_loop_time", clock.time)
+    monkeypatch.setattr(relay, "loop_time", clock.time)
 
     async def fake_sleep(delay: float) -> None:
         clock.t += delay
@@ -254,13 +254,13 @@ def test_stdio_notice_uses_immutable_historical_snapshot() -> None:
     )
     emitted: list[str] = []
     # A delayed old snapshot must not borrow the caller's replacement lease scope.
-    assert relay._ended(snapshot, 999, 1, emitted.append)
+    assert relay.ended(snapshot, 999, 1, emitted.append)
     assert f"lease 0 ({LEASE_ID}) for agent 42" in emitted[0]
     assert ended_at in emitted[0]
     assert f"Notice ID: impersonation-ended:{LEASE_ID}" in emitted[0]
     assert "does not end or cancel any newer" in emitted[0]
     assert "no active native runtime is implied" in emitted[0]
-    assert relay._ended(
+    assert relay.ended(
         replace(snapshot, status=ImpersonationStatus.RELEASED), 42, 0, emitted.append
     )
     assert len(emitted) == 1  # A released lease sends no notice: the releaser knows.

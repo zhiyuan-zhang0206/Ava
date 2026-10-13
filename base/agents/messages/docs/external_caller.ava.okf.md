@@ -37,7 +37,7 @@ cannot become its Ava parent merely by inheriting `AVA_AGENT_ID`.
 
 `ava agents send <id> <text> --source external_agent:<subject>[:<instance>]`
 delivers the message as coming from that external agent; `--source user` delivers
-it as the user. See [[base/events/docs/caller_identity.ava.okf.md]] for
+it as the user. See [[base/api_contracts/docs/caller_identity.ava.okf.md]] for
 when to use which. The SDK path (`ava.agents.send_message` from a process whose
 environment carries the profile) stamps the profile's source the same way.
 

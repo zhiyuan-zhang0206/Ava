@@ -14,7 +14,7 @@ import subprocess
 from functools import partial
 
 
-def _h_init(args: argparse.Namespace) -> int:
+def h_init(args: argparse.Namespace) -> int:
     from cli.init_intent import run_init
 
     return run_init(args)
@@ -117,7 +117,7 @@ def _h_trace_ship(args: argparse.Namespace) -> int:
     )
 
 
-def _add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava init` — the home's identity, recorded once. NO TTY prompt — agent-first
     # design, agent has no TTY, missing values fail loud. Settings-free: it starts
     # nothing; the first `ava start` provisions the data plane and launches.
@@ -188,10 +188,10 @@ def _add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "AVA_DB_CAPABILITY_KEY. The bundle file is deleted once installed. A later bundle "
         "goes to `ava cluster db-authority install-unit`.",
     )
-    init_p.set_defaults(func=_h_init)
+    init_p.set_defaults(func=h_init)
 
 
-def _add_start_parser(
+def add_start_parser(
     sub: argparse._SubParsersAction[argparse.ArgumentParser],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -241,7 +241,7 @@ def _add_start_parser(
     )
 
 
-def _add_stop_parser(
+def add_stop_parser(
     sub: argparse._SubParsersAction[argparse.ArgumentParser],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -291,7 +291,7 @@ def _add_stop_parser(
     )
 
 
-def _add_restart_parser(
+def add_restart_parser(
     sub: argparse._SubParsersAction[argparse.ArgumentParser],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -315,7 +315,7 @@ def _add_restart_parser(
     )
 
 
-def _add_status_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_status_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     status_p = sub.add_parser(
         "status",
         help="[host] one-screen view of sessions / pidfile / curl / infra / cron "
@@ -330,7 +330,7 @@ def _add_status_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     status_p.set_defaults(func=_h_status)
 
 
-def _add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     converge_p = sub.add_parser(
         "converge",
         help="[host] re-apply idempotent host wiring (symlink/PATH/dirs/plugin images/memory pool); "
@@ -339,7 +339,7 @@ def _add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     converge_p.set_defaults(func=_h_converge)
 
 
-def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     firewall_p = sub.add_parser(
         "firewall",
         help="macOS Application Firewall allowlist manifest (status / sync)",
@@ -389,7 +389,7 @@ def _h_lgtm(
     return cmd_lgtm_status(machine=args.runtime.machine)
 
 
-def _add_lgtm_parser(
+def add_lgtm_parser(
     sub: argparse._SubParsersAction[argparse.ArgumentParser],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -435,7 +435,7 @@ def _add_lgtm_parser(
     render_p.set_defaults(func=_h_lgtm)
 
 
-def _add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava trace ship` — replay the local OTel trace mirror to Tempo over OTLP
     trace_p = sub.add_parser("trace", help="trace mirror subcommands")
     trace_sub = trace_p.add_subparsers(dest="trace_cmd", required=True)

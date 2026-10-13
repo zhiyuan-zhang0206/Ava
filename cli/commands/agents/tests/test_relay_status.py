@@ -49,7 +49,7 @@ def test_wire_lease_status_restores_shared_enum(
 
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     assert (
-        relay._Lease.model_validate(
+        relay.Lease.model_validate(
             get(
                 database,
                 event_bus,

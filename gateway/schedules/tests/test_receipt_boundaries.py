@@ -34,7 +34,7 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(RuntimeError, match="receipt write failed"),
     ):
-        router._control_blocking(pool, sid, "restart", "restart")
+        router.control_blocking(pool, sid, "restart", "restart")
     assert db_conn.execute(
         "SELECT desired_revision FROM schedules WHERE id = %s", (sid,)
     ).fetchone() == (0,)
@@ -77,5 +77,5 @@ def test_delete_cleanup_enqueue_failure_preserves_schedule(
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(RuntimeError, match="cleanup unavailable"),
     ):
-        router._delete_blocking(pool, sid)
+        router.delete_blocking(pool, sid)
     assert db_conn.execute("SELECT id FROM schedules WHERE id = %s", (sid,)).fetchone() == (sid,)

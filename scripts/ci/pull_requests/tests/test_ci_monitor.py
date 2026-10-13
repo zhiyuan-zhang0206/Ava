@@ -45,15 +45,15 @@ def _check(
     }
 
 
-_APP_CHECK = _check("GitGuardian Security Checks", "SUCCESS", workflow="")
+APP_CHECK = _check("GitGuardian Security Checks", "SUCCESS", workflow="")
 
 
-class _TrunkResponse:
+class TrunkResponse:
     def __init__(self, payload: dict[str, object], *, status: int = 200) -> None:
         self.payload = payload
         self.status = status
 
-    def __enter__(self) -> _TrunkResponse:
+    def __enter__(self) -> TrunkResponse:
         return self
 
     def __exit__(self, *_: object) -> None:
@@ -63,13 +63,13 @@ class _TrunkResponse:
         return json.dumps(self.payload).encode()
 
 
-def _urlopen_sequence(
-    responses: list[_TrunkResponse | urllib.error.URLError],
+def urlopen_sequence(
+    responses: list[TrunkResponse | urllib.error.URLError],
     seen_requests: list[urllib.request.Request],
 ):
     response_iter = iter(responses)
 
-    def urlopen(request: urllib.request.Request, *, timeout: float) -> _TrunkResponse:
+    def urlopen(request: urllib.request.Request, *, timeout: float) -> TrunkResponse:
         seen_requests.append(request)
         response = next(response_iter)
         if isinstance(response, urllib.error.URLError):
@@ -79,7 +79,7 @@ def _urlopen_sequence(
     return urlopen
 
 
-def _gh_runner(calls: list[list[str]]):
+def gh_runner(calls: list[list[str]]):
     def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
@@ -148,7 +148,7 @@ def gh(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def has_workflows(monkeypatch: pytest.MonkeyPatch):
     def _set(value: bool) -> None:
-        monkeypatch.setattr(status, "_repo_has_workflows", lambda: value)
+        monkeypatch.setattr(status, "repo_has_workflows", lambda: value)
 
     return _set
 
@@ -158,7 +158,7 @@ def has_workflows(monkeypatch: pytest.MonkeyPatch):
 
 def test_app_check_alone_is_not_green(gh: Any, has_workflows: Any) -> None:
     """The 2026-07-28 shape: Actions never ran, an app check passed."""
-    gh([_APP_CHECK], scheduled=[])
+    gh([APP_CHECK], scheduled=[])
     has_workflows(True)
     r = status.check_ci("886")
     assert r.verdict is CIStatus.NO_WORKFLOW_RUNS
@@ -168,14 +168,14 @@ def test_app_check_alone_is_not_green(gh: Any, has_workflows: Any) -> None:
 
 def test_app_check_alone_is_green_when_repo_has_no_workflows(gh: Any, has_workflows: Any) -> None:
     """A repo with no workflow files is legitimately green on app checks alone."""
-    gh([_APP_CHECK])
+    gh([APP_CHECK])
     has_workflows(False)
     assert status.check_ci("1").verdict is CIStatus.ALL_PASSED
 
 
 def test_one_workflow_check_is_enough_to_be_green(gh: Any, has_workflows: Any) -> None:
     """The guard asks whether the suite ran at all — not how many jobs it has."""
-    gh([_APP_CHECK, _check("backend (pytest + pyright)", "SUCCESS")])
+    gh([APP_CHECK, _check("backend (pytest + pyright)", "SUCCESS")])
     has_workflows(True)
     r = status.check_ci("1")
     assert r.verdict is CIStatus.ALL_PASSED
@@ -191,7 +191,7 @@ def test_full_green_suite(gh: Any, has_workflows: Any) -> None:
             _check("changes (path filter)", "SUCCESS"),
             _check("backend (pytest + pyright)", "SUCCESS"),
             _check("docs-only (pass-through)", "SKIPPED"),
-            _APP_CHECK,
+            APP_CHECK,
         ]
     )
     has_workflows(True)
@@ -202,7 +202,7 @@ def test_full_green_suite(gh: Any, has_workflows: Any) -> None:
 
 def test_failure_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> None:
     """A real failure must report FAILED, never the did-not-run verdict."""
-    gh([_APP_CHECK, _check("backend (pytest + pyright)", "FAILURE")])
+    gh([APP_CHECK, _check("backend (pytest + pyright)", "FAILURE")])
     has_workflows(True)
     r = status.check_ci("1")
     assert r.verdict is CIStatus.FAILED
@@ -211,7 +211,7 @@ def test_failure_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> No
 
 def test_pending_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> None:
     """Still-running checks mean wait, not did-not-run."""
-    gh([_APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
+    gh([APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
     has_workflows(True)
     assert status.check_ci("1").verdict is CIStatus.PENDING
 
@@ -322,7 +322,7 @@ def test_empty_rollup_with_an_unanswerable_probe_is_error(
     """The runs probe failing must not read as a settled NO_CHECKS — the exact
     verdict this probe exists to rule out when checks may still be attaching."""
     gh([])
-    monkeypatch.setattr(status, "_runs_not_yet_reporting", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
     r = status.check_ci("2249")
     assert r.verdict is CIStatus.ERROR
@@ -346,7 +346,7 @@ def test_gh_failure_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_this_repo_has_workflows() -> None:
     """The guard is only armed where workflows exist; here they do."""
-    assert status._repo_has_workflows() is True
+    assert status.repo_has_workflows() is True
 
 
 # --- the false negative: scheduled but not yet reporting ---
@@ -359,7 +359,7 @@ def test_this_repo_has_workflows() -> None:
 def test_queued_run_with_no_check_yet_is_pending_not_did_not_run(
     gh: Any, has_workflows: Any
 ) -> None:
-    gh([_APP_CHECK], scheduled=["CI"])
+    gh([APP_CHECK], scheduled=["CI"])
     has_workflows(True)
 
     r = status.check_ci("901")
@@ -416,7 +416,7 @@ def test_partial_suite_green_with_an_unanswerable_probe_is_error(
         ]
     )
     has_workflows(True)
-    monkeypatch.setattr(status, "_runs_not_yet_reporting", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
     r = status.check_ci("776")
     assert r.verdict is CIStatus.ERROR
@@ -427,7 +427,7 @@ def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workf
     """PR #3137 had only passing app/proof checks before CI registered; wait it
     out until the main run is visible rather than calling that narrow window green."""
     checks = [
-        _APP_CHECK,
+        APP_CHECK,
         _check("prove-example-a", "SKIPPED", workflow="Example proof A"),
         _check("prove-example-b", "SKIPPED", workflow="Example proof B"),
     ]
@@ -449,7 +449,7 @@ def test_main_workflow_probe_failure_is_error(
     """An unanswerable main-workflow probe is unknown, never a green verdict."""
     gh([_check("backend", "SUCCESS")], scheduled=[], main_completed=True)
     has_workflows(True)
-    monkeypatch.setattr(status, "_main_workflow_run_completed", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "main_workflow_run_completed", lambda *_a, **_k: None)
 
     r = status.check_ci("3137")
     assert r.verdict is CIStatus.ERROR
@@ -472,18 +472,18 @@ def test_main_workflow_probe_reads_completed_runs_of_the_main_workflow(
         return _R()
 
     monkeypatch.setattr(status.subprocess, "run", _run)
-    assert status._main_workflow_run_completed("abc123", None) is True
+    assert status.main_workflow_run_completed("abc123", None) is True
     joined = " ".join(seen["cmd"])
     assert "head_sha=abc123" in joined
     assert "status=completed" in joined
     assert 'select(.name == "CI" and .conclusion != "skipped")' in joined
     _R.stdout = "0"
-    assert status._main_workflow_run_completed("abc123", None) is False
+    assert status.main_workflow_run_completed("abc123", None) is False
 
 
-def _core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
+def core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
     return [
-        _APP_CHECK,
+        APP_CHECK,
         _check("classify change", classify),
         _check("backend shard (${{ matrix.group }}/16)", conclusion),
         _check("e2e shard (${{ matrix.group }}/4)", conclusion),
@@ -493,23 +493,23 @@ def _core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
 
 
 def test_draft_pr_with_skipped_core_suite_is_not_ready(gh: Any, has_workflows: Any) -> None:
-    gh(_core_rollup("SKIPPED"), is_draft=True, scheduled=[], main_completed=True)
+    gh(core_rollup("SKIPPED"), is_draft=True, scheduled=[], main_completed=True)
     has_workflows(True)
     result = status.check_ci("3313")
     assert result.verdict is CIStatus.NOT_READY
     assert "NOT READY" in result.summary() and "draft" in result.summary()
     assert "all green" not in result.summary()
-    assert result.core_skipped == [c["name"] for c in _core_rollup("SKIPPED")[2:4]]
+    assert result.core_skipped == [c["name"] for c in core_rollup("SKIPPED")[2:4]]
 
 
 def test_draft_pr_whose_core_suite_ran_stays_green(gh: Any, has_workflows: Any) -> None:
-    gh(_core_rollup("SUCCESS"), is_draft=True, main_completed=True)
+    gh(core_rollup("SUCCESS"), is_draft=True, main_completed=True)
     has_workflows(True)
     assert status.check_ci("3313").verdict is CIStatus.ALL_PASSED
 
 
 def test_ready_transition_with_draft_skipped_core_is_pending(gh: Any, has_workflows: Any) -> None:
-    gh(_core_rollup("SKIPPED"), is_draft=False, scheduled=[], main_completed=False)
+    gh(core_rollup("SKIPPED"), is_draft=False, scheduled=[], main_completed=False)
     has_workflows(True)
     result = status.check_ci("3313")
     assert result.verdict is CIStatus.PENDING
@@ -522,7 +522,7 @@ def test_path_filtered_core_skip_with_a_ran_main_run_stays_green(
     gh: Any, has_workflows: Any
 ) -> None:
     checks = [
-        *_core_rollup("SKIPPED", classify="SUCCESS"),
+        *core_rollup("SKIPPED", classify="SUCCESS"),
         _check("repo language (no raw CJK)", "SUCCESS"),
     ]
     gh(checks, is_draft=False, main_completed=True)
@@ -531,13 +531,13 @@ def test_path_filtered_core_skip_with_a_ran_main_run_stays_green(
 
 
 def test_core_suite_skipped_reads_only_the_shard_families() -> None:
-    skipped = _core_rollup("SKIPPED")
+    skipped = core_rollup("SKIPPED")
     names = [c["name"] for c in skipped[2:4]]
-    assert status._core_suite_skipped([]) is None
-    assert status._core_suite_skipped([_APP_CHECK]) is None
-    assert status._core_suite_skipped([_check("backend selected subset", "SKIPPED")]) is None
-    assert status._core_suite_skipped(skipped) == names
-    assert status._core_suite_skipped([*skipped, _check("backend shard (1/16)", "SUCCESS")]) is None
+    assert status.core_suite_skipped([]) is None
+    assert status.core_suite_skipped([APP_CHECK]) is None
+    assert status.core_suite_skipped([_check("backend selected subset", "SKIPPED")]) is None
+    assert status.core_suite_skipped(skipped) == names
+    assert status.core_suite_skipped([*skipped, _check("backend shard (1/16)", "SUCCESS")]) is None
 
 
 def test_main_workflow_probe_returns_none_when_unanswerable(
@@ -551,10 +551,10 @@ def test_main_workflow_probe_returns_none_when_unanswerable(
         stderr = "boom"
 
     monkeypatch.setattr(status.subprocess, "run", lambda *_a, **_k: _R())
-    assert status._main_workflow_run_completed("abc123", None) is None
+    assert status.main_workflow_run_completed("abc123", None) is None
     _R.returncode = 0
     _R.stdout = "not a number"
-    assert status._main_workflow_run_completed("abc123", None) is None
+    assert status.main_workflow_run_completed("abc123", None) is None
 
 
 def test_runs_api_failure_keeps_the_conservative_verdict(
@@ -565,9 +565,9 @@ def test_runs_api_failure_keeps_the_conservative_verdict(
     workflow check the not-green NO_WORKFLOW_RUNS verdict is kept, exactly as
     when the probe answered []; only the all-passed path (below) has to tell
     None from []."""
-    gh([_APP_CHECK])
+    gh([APP_CHECK])
     has_workflows(True)
-    monkeypatch.setattr(status, "_runs_not_yet_reporting", lambda *_a, **_k: None)
+    monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
     assert status.check_ci("886").verdict == CIStatus.NO_WORKFLOW_RUNS
 
@@ -645,7 +645,7 @@ def diag_gh(monkeypatch):
     return _install
 
 
-def _diag_pr_view(mergeable: str = "MERGEABLE", checks: list[dict] | None = None) -> str:
+def diag_pr_view(mergeable: str = "MERGEABLE", checks: list[dict] | None = None) -> str:
     return json.dumps(
         {
             "mergeable": mergeable,
@@ -656,16 +656,16 @@ def _diag_pr_view(mergeable: str = "MERGEABLE", checks: list[dict] | None = None
     )
 
 
-def _diag_check(name: str, conclusion: str = "FAILURE") -> dict:
+def diag_check(name: str, conclusion: str = "FAILURE") -> dict:
     return {"name": name, "conclusion": conclusion, "status": "COMPLETED"}
 
 
-def _diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
+def diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
     """Real-shaped REST job object: numeric `.id`, lowercase conclusion."""
     return {"name": name, "id": job_id, "run_id": 10, "conclusion": conclusion.lower()}
 
 
-def _diag_runs(run_id: int = 10) -> str:
+def diag_runs(run_id: int = 10) -> str:
     """Real-shaped REST runs payload with one CI run (issue #1945).
 
     The run carries `status: completed`, which `job_rerun` reads to decide whether a re-run is
@@ -685,7 +685,7 @@ def _diag_runs(run_id: int = 10) -> str:
     )
 
 
-def _diag_jobs_payload(job: dict) -> str:
+def diag_jobs_payload(job: dict) -> str:
     """Real-shaped REST jobs payload wrapping one projected job (issue #1945)."""
     return json.dumps({"total_count": 1, "jobs": [job]})
 
@@ -705,12 +705,12 @@ class _ProbeResponse:
         self.stderr = ""
 
 
-def _aged(seconds: float = 900.0) -> str:
+def aged(seconds: float = 900.0) -> str:
     """A GitHub RFC3339 `created_at` that is `seconds` old."""
     return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
 
 
-def _install_probe(
+def install_probe(
     monkeypatch: pytest.MonkeyPatch,
     runs: object,
     jobs: dict[int, int],
@@ -736,7 +736,7 @@ def _install_probe(
     monkeypatch.setattr(status.subprocess, "run", run)
 
 
-def _limbo_result(
+def limbo_result(
     *,
     pending: list[str] | None = None,
     limbo: list[status.LimboRun] | None = None,
@@ -750,7 +750,7 @@ def _limbo_result(
     )
 
 
-def _install_results_poller(monkeypatch: pytest.MonkeyPatch, *results: Any) -> None:
+def install_results_poller(monkeypatch: pytest.MonkeyPatch, *results: Any) -> None:
     calls = {"n": 0}
 
     def fake_check(pr, *, repo):

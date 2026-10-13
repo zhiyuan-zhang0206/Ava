@@ -35,11 +35,11 @@ from base.events.live.projection import (
     LabelUpdated,
 )
 from gateway.app import app
-from gateway.events.sse import _decode_frames_for_test, event_stream
+from gateway.events.sse import decode_frames_for_test, event_stream
 
 
 @dataclass
-class _FakeRequest:
+class FakeRequest:
     """Minimal Request stub — `event_stream` only calls `await is_disconnected()`.
 
     `disconnected` flag is explicitly set True by tests to stop stream.
@@ -82,7 +82,7 @@ async def _collect_frames(
     keep streaming, per-frame `timeout` never fires; must have overall deadline to fail loud
     (90s same as e2e wait_for_status ceiling: covers worst-case observation recovery).
     """
-    req = _FakeRequest()
+    req = FakeRequest()
     gen = event_stream(  # type: ignore[arg-type]
         EventBus.from_settings(),
         agent_id,
@@ -147,7 +147,7 @@ def test_sse_forwards_matching_thread_events(
         ChatDelta(agent_id=tid, item_id="5.0", content="done").model_dump_json(),
     ]
     frames = asyncio.run(_collect_frames(tid, redis_client, payloads, n_data_frames=3))
-    decoded = _decode_frames_for_test(frames)
+    decoded = decode_frames_for_test(frames)
     assert [d["role"] for d in decoded] == ["code_delta", "code_delta", "chat_delta"]
     assert decoded[0]["content"] == "pri"
     assert decoded[1]["content"] == "nt(1)"
@@ -166,7 +166,7 @@ def test_sse_filters_by_agent_id(
         ChatDelta(agent_id=tid_a, item_id="5.0", content="for A").model_dump_json(),
     ]
     frames = asyncio.run(_collect_frames(tid_a, redis_client, payloads, n_data_frames=1))
-    decoded = _decode_frames_for_test(frames)
+    decoded = decode_frames_for_test(frames)
     assert len(decoded) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert decoded[0]["content"] == "for A"
 
@@ -187,7 +187,7 @@ def test_sse_drops_invalid_payload_as_comment(
     text = b"".join(frames).decode()
     assert "dropped unparseable payload" in text
     # valid event still passes through — the bad one earlier didn't break the whole stream
-    decoded = _decode_frames_for_test(frames)
+    decoded = decode_frames_for_test(frames)
     assert [d["role"] for d in decoded] == ["chat_delta"]
     assert decoded[0]["content"] == "after"
 
@@ -250,7 +250,7 @@ def test_sse_role_filter_system_passes_code_delta(
             role_filter=SYSTEM_ROLES,
         )
     )
-    decoded = _decode_frames_for_test(frames)
+    decoded = decode_frames_for_test(frames)
     assert len(decoded) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert decoded[0]["role"] == "code_delta"
 
@@ -276,7 +276,7 @@ def test_sse_role_filter_system_passes_chat_streaming(
             role_filter=SYSTEM_ROLES,
         )
     )
-    decoded = _decode_frames_for_test(frames)
+    decoded = decode_frames_for_test(frames)
     assert len(decoded) == 2  # pyright: ignore[reportUnknownArgumentType]
     assert {d["role"] for d in decoded} == {"chat_delta", "code_delta"}
 
@@ -317,7 +317,7 @@ def test_broadcast_drops_high_frequency_deltas_keeps_global_roles(
             broadcast=True,
         )
     )
-    decoded = _decode_frames_for_test(frames)
+    decoded = decode_frames_for_test(frames)
     # Both label_updated come through (broadcast = all agents); zero chat_delta.
     assert [d["role"] for d in decoded] == ["label_updated", "label_updated"]
     assert {d["agent_id"] for d in decoded} == {tid_a, tid_b}
@@ -352,7 +352,7 @@ def test_per_agent_stream_carries_full_roles_for_one_agent_only(
             role_filter=SYSTEM_ROLES,
         )
     )
-    decoded = _decode_frames_for_test(frames)
+    decoded = decode_frames_for_test(frames)
     assert [d["role"] for d in decoded] == ["chat_delta", "label_updated"]
     assert all(d["agent_id"] == tid_a for d in decoded)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -403,7 +403,7 @@ def test_sse_emits_heartbeat_data_event_when_idle(
     frames = asyncio.run(
         _collect_frames(tid, redis_client, [], n_data_frames=1, count_heartbeats=True)
     )
-    decoded = _decode_frames_for_test(frames)
+    decoded = decode_frames_for_test(frames)
     assert decoded[0] == {"role": "heartbeat"}
 
 
@@ -422,7 +422,7 @@ def test_busy_channel_still_emits_keepalive_comments(
     tid = create_agent(db_conn)  # this subscriber's agent
     other = create_agent(db_conn)  # whose events flood the channel
 
-    req = _FakeRequest()
+    req = FakeRequest()
     gen = event_stream(  # type: ignore[arg-type]
         EventBus.from_settings(),
         tid,
@@ -467,7 +467,7 @@ def test_sse_survives_redis_typeerror(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_RedisPubSub, "get_message", _boom)
 
     async def _drive() -> list[bytes]:
-        req = _FakeRequest()
+        req = FakeRequest()
         gen = event_stream(  # type: ignore[arg-type]
             EventBus.from_settings(),
             4242,

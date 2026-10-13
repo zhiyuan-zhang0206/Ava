@@ -240,7 +240,7 @@ def test_aggregate_dials_run_under_the_aggregate_budget(monkeypatch: pytest.Monk
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     assert resp.json()["unreachable"] == ["B"]
-    budget = inventory_router._AGGREGATE_READ_TIMEOUT_S
+    budget = inventory_router.AGGREGATE_READ_TIMEOUT_S
     assert seen["A"] == (budget, 1) and seen["B"] == (budget, 1)
 
 

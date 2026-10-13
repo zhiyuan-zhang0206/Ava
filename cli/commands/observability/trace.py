@@ -55,13 +55,13 @@ class TraceShipError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class _ShipTarget:
+class ShipTarget:
     endpoint: str
     headers: dict[str, str]
     label: str
 
 
-def _require_ship_config(*, machine: MachineIdentity) -> _ShipTarget:
+def _require_ship_config(*, machine: MachineIdentity) -> ShipTarget:
     """Validate config and return the role-correct OTLP replay target.
 
     Raises:
@@ -92,12 +92,12 @@ def _require_ship_config(*, machine: MachineIdentity) -> _ShipTarget:
             base = gateway_otel_ingress_endpoint()
         except RuntimeError as exc:
             raise TraceShipError(str(exc)) from exc
-        return _ShipTarget(
+        return ShipTarget(
             endpoint=base + _OTLP_V1_PATH,
             headers=bearer_header(token),
             label="gateway OTLP relay",
         )
-    return _ShipTarget(
+    return ShipTarget(
         endpoint=settings.observability.telemetry_tempo_endpoint.rstrip("/") + _OTLP_V1_PATH,
         headers={},
         label="tempo",
@@ -119,7 +119,7 @@ def _file_day(path: Path) -> date:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).date()
 
 
-def _load_watermark() -> dict[str, int]:
+def load_watermark() -> dict[str, int]:
     path = traces_dir() / _WATERMARK_NAME
     if not path.exists():
         return {}
@@ -162,7 +162,7 @@ def _correct_span_ids(request: Any) -> None:
                         setattr(span, attribute, corrected)
 
 
-def _post_line(client: httpx.Client, target: _ShipTarget, line: str) -> int:
+def post_line(client: httpx.Client, target: ShipTarget, line: str) -> int:
     """POST one OTLP/JSON line as protobuf; return the span count in it.
 
     Reconstructs the OTLP `ExportTraceServiceRequest` from the stored JSON and
@@ -195,7 +195,7 @@ def _ship_files(
     files: list[Path],
     marks: dict[str, int],
     *,
-    target: _ShipTarget | None,
+    target: ShipTarget | None,
     windowed: bool,
     dry_run: bool,
 ) -> tuple[int, int, int]:
@@ -254,7 +254,7 @@ def _ship_files(
                         # _require_ship_config ran above when not dry_run; keep the
                         # narrowing honest instead of casting None to str.
                         raise TraceShipError("ship config required for a real ship")
-                    file_spans += _post_line(client, target, line)
+                    file_spans += post_line(client, target, line)
                     file_lines += 1
                     # Advance the watermark per line so a crash never re-sends or
                     # skips. Windowed re-imports are idempotent, so skip the bump.
@@ -294,7 +294,7 @@ def cmd_trace_ship(
     if windowed:
         files = [p for p in files if lo <= _file_day(p) <= hi]
 
-    marks = _load_watermark()
+    marks = load_watermark()
     total_lines, total_spans, shipped_files = _ship_files(
         files, marks, target=target, windowed=windowed, dry_run=dry_run
     )

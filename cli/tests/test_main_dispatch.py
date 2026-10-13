@@ -371,7 +371,7 @@ def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> Non
             "https://ava.example.com",
         ]
     )
-    assert args.func is _host._h_init
+    assert args.func is _host.h_init
     assert args.machine_name == "mac"
     assert args.serve_gateway is True
     assert args.serve_agent_runner is None  # unset: no flag given

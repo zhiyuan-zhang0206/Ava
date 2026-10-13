@@ -34,7 +34,7 @@ from scripts.content_lint import lint_ava_okf as _lint
 def _layout_is_not_under_test(monkeypatch):
     """These tests exercise other rules on constructed trees whose layout is not the
     subject; rule 14 (docs layer) has its own tests in scripts/content_lint/tests/test_lint_ava_okf.py."""
-    monkeypatch.setattr(_lint, "_layer_error", lambda *_args: None)
+    monkeypatch.setattr(_lint, "layer_error", lambda *_args: None)
 
 
 def _node(tmp_path: Path, rel: str, body: str = "") -> Path:

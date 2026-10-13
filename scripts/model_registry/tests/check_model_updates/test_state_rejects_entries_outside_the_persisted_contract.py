@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 
 from scripts.model_registry.tests.test_check_model_updates import (
-    _known_models,
-    _missing_environment_value,
-    _stub_fetcher,
-    _write_env_file,
+    known_models,
+    missing_environment_value,
+    stub_fetcher,
+    write_env_file,
 )
 from scripts.model_registry.tests.test_check_model_updates import (
     test_fetch_json_raises_after_the_retry_budget_is_exhausted as test_fetch_json_raises_after_the_retry_budget_is_exhausted,
@@ -118,19 +118,19 @@ def test_single_round_transient_error_and_its_recovery_stay_silent(
     silent on both sides: its pending record clears without anything having
     been announced."""
     env_file = tmp_path / ".env"
-    _write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", _missing_environment_value)
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", _stub_fetcher(bare_tracker))
+    write_env_file(bare_tracker, env_file)
+    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
+    monkeypatch.setattr(bare_tracker, "fetch_provider_models", stub_fetcher(bare_tracker))
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
     assert bare_tracker.main(args) == 0
-    _write_env_file(bare_tracker, env_file, missing="GEMINI_API_KEY")
+    write_env_file(bare_tracker, env_file, missing="GEMINI_API_KEY")
     assert bare_tracker.main(args) == 0
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["pending"]["rounds"] == 1
     assert state["providers"]["gemini"]["announced"] == "ok"
 
-    _write_env_file(bare_tracker, env_file)
+    write_env_file(bare_tracker, env_file)
     assert bare_tracker.main(args) == 0
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"] == "ok"
@@ -141,17 +141,17 @@ def test_persistent_status_change_announces_once_and_recovery_announces_too(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bare_tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
-    _write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", _missing_environment_value)
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", _stub_fetcher(bare_tracker))
+    write_env_file(bare_tracker, env_file)
+    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
+    monkeypatch.setattr(bare_tracker, "fetch_provider_models", stub_fetcher(bare_tracker))
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
     assert bare_tracker.main(args) == 0
-    _write_env_file(bare_tracker, env_file, missing="XAI_API_KEY")
+    write_env_file(bare_tracker, env_file, missing="XAI_API_KEY")
     assert bare_tracker.main(args) == 0  # first failing round: pending, not announced
     assert bare_tracker.main(args) == 2  # second failing round: announced once
     assert bare_tracker.main(args) == 0  # a continuing error never re-announces
-    _write_env_file(bare_tracker, env_file)
+    write_env_file(bare_tracker, env_file)
     assert bare_tracker.main(args) == 0  # the first healthy round is pending too
     assert bare_tracker.main(args) == 2  # the recovery is announced
     state = json.loads((tmp_path / "state" / "state.json").read_text())
@@ -168,9 +168,9 @@ def test_legacy_state_upgrade_baselines_the_loaded_status(
     it was left in: the upgrade itself announces nothing, and a resolution
     still walks the two-round window."""
     env_file = tmp_path / ".env"
-    _write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", _missing_environment_value)
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", _stub_fetcher(bare_tracker))
+    write_env_file(bare_tracker, env_file)
+    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
+    monkeypatch.setattr(bare_tracker, "fetch_provider_models", stub_fetcher(bare_tracker))
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     (state_dir / "state.json").write_text(
@@ -191,13 +191,13 @@ def test_empty_fetch_error_still_produces_a_valid_persisted_status(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bare_tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
-    _write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", _missing_environment_value)
+    write_env_file(bare_tracker, env_file)
+    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
 
     def fetch(source: Any, api_key: str) -> list[str]:
         if source.provider == "glm":
             raise ValueError
-        return _known_models(bare_tracker, source)
+        return known_models(bare_tracker, source)
 
     monkeypatch.setattr(bare_tracker, "fetch_provider_models", fetch)
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
@@ -213,9 +213,9 @@ def test_write_report_persists_markdown_and_json(
 ) -> None:
     env_file = tmp_path / ".env"
     report_dir = tmp_path / "reports"
-    _write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", _missing_environment_value)
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", _stub_fetcher(bare_tracker))
+    write_env_file(bare_tracker, env_file)
+    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
+    monkeypatch.setattr(bare_tracker, "fetch_provider_models", stub_fetcher(bare_tracker))
 
     assert (
         bare_tracker.main(

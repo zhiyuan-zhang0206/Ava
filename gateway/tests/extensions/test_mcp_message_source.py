@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.app import app
-from gateway.tests.extensions.test_mcp_endpoint import _initialize, _tool_call, _tool_result
+from gateway.tests.extensions.test_mcp_endpoint import initialize, tool_call, tool_result
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -25,9 +25,9 @@ def _failed(result: dict[str, Any]) -> bool:
 
 def _client_and_agent(client: TestClient) -> tuple[dict[str, Any], int]:
     credential = create_mcp_client(client, "peer", "write").json()
-    _initialize(client, credential["token"])
-    spawned = _tool_result(
-        _tool_call(
+    initialize(client, credential["token"])
+    spawned = tool_result(
+        tool_call(
             client,
             credential["token"],
             "spawn_agent_guarded_v1",
@@ -50,7 +50,7 @@ def test_send_message_defaults_to_the_user(
     with gateway_test_client(app, machine=machine_identity) as client:
         credential, agent_id = _client_and_agent(client)
         args = {"agent_id": agent_id, "content": "as the user"}
-        assert not _failed(_tool_call(client, credential["token"], "send_message", args))
+        assert not _failed(tool_call(client, credential["token"], "send_message", args))
     assert _stored(db_conn, agent_id, "as the user") == [("user", None)]
 
 
@@ -62,7 +62,7 @@ def test_send_message_as_external_agent_uses_the_client_identity(
     with gateway_test_client(app, machine=machine_identity) as client:
         credential, agent_id = _client_and_agent(client)
         args = {"agent_id": agent_id, "content": "as a peer", "as_external_agent": True}
-        assert not _failed(_tool_call(client, credential["token"], "send_message", args))
+        assert not _failed(tool_call(client, credential["token"], "send_message", args))
     assert _stored(db_conn, agent_id, "as a peer") == [
         (
             f"external_agent:mcp:{credential['id']}",
@@ -94,5 +94,5 @@ def test_the_caller_cannot_choose_the_source(
             "as_external_agent": as_external_agent,
             argument: "user" if argument == "source" else "spoofed",
         }
-        assert _failed(_tool_call(client, credential["token"], "send_message", args))
+        assert _failed(tool_call(client, credential["token"], "send_message", args))
     assert _stored(db_conn, agent_id, "must not insert") == []

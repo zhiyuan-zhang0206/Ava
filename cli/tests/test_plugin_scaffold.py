@@ -328,7 +328,7 @@ def test_memory_init_parser_binds_the_explicit_handler() -> None:
     from cli.commands.extensions.parsers import mcp
 
     args = parsers.parse_args(["memory", "init"])
-    assert args.func is mcp._h_memory_init
+    assert args.func is mcp.h_memory_init
 
 
 def test_scaffolds_borrow_the_same_invocation_machine(command_runtime: CommandRuntime) -> None:

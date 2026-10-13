@@ -28,7 +28,7 @@ SLOW_TICK_THRESHOLD_MS = 100.0
 
 SseMode = Literal["filtered", "throttled"]
 _SSE_MODES: tuple[SseMode, ...] = ("filtered", "throttled")
-_sse_active_connections: dict[SseMode, int] = dict.fromkeys(_SSE_MODES, 0)
+sse_active_connections: dict[SseMode, int] = dict.fromkeys(_SSE_MODES, 0)
 
 
 class _Cancelable(Protocol):
@@ -48,8 +48,8 @@ class _LoopClock(Protocol):
 
 def sse_opened(mode: SseMode) -> None:
     """Record one established SSE stream and its new active depth."""
-    active = _sse_active_connections.get(mode, 0) + 1
-    _sse_active_connections[mode] = active
+    active = sse_active_connections.get(mode, 0) + 1
+    sse_active_connections[mode] = active
     telemetry.emit(
         "telemetry",
         "sse",
@@ -59,10 +59,10 @@ def sse_opened(mode: SseMode) -> None:
 
 def sse_closed(mode: SseMode) -> None:
     """Record one closed SSE stream and its remaining active depth."""
-    active = _sse_active_connections[mode] - 1
+    active = sse_active_connections[mode] - 1
     if active < 0:
         raise RuntimeError(f"SSE active connection count became negative for mode {mode!r}")
-    _sse_active_connections[mode] = active
+    sse_active_connections[mode] = active
     telemetry.emit(
         "telemetry",
         "sse",
@@ -73,8 +73,8 @@ def sse_closed(mode: SseMode) -> None:
 def initialize_sse_metrics() -> None:
     """Reset the active-connection gauge to zero for every mode and publish it, so an idle
     gateway still has series."""
-    _sse_active_connections.clear()
-    _sse_active_connections.update(dict.fromkeys(_SSE_MODES, 0))
+    sse_active_connections.clear()
+    sse_active_connections.update(dict.fromkeys(_SSE_MODES, 0))
     for mode in _SSE_MODES:
         telemetry.emit(
             "telemetry",

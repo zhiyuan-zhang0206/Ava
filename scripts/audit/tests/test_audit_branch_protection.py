@@ -170,7 +170,7 @@ def test_cli_reports_declaration_mismatch_as_drift_without_calling_github(
 ) -> None:
     trunk_file = tmp_path / "trunk.yaml"
     trunk_file.write_text(_TRUNK_BAD_FIXTURE)
-    monkeypatch.setattr(audit, "_TRUNK_FILE", trunk_file)
+    monkeypatch.setattr(audit, "TRUNK_FILE", trunk_file)
 
     def unexpected_gh(_args: list[str]) -> NoReturn:
         raise AssertionError("declaration drift must not depend on the GitHub API")

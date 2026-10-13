@@ -12,8 +12,8 @@ from math import ceil
 
 from scripts.ci.pull_requests import status, trunk_api
 from scripts.ci.pull_requests.job_rerun import CiJobRerunError, list_failed_jobs, rerun_failed_jobs
-from scripts.ci.pull_requests.monitor import _deadline_hit
-from scripts.ci.pull_requests.status import MAX_CONSECUTIVE_ERRORS, CIStatus, _parse_ts
+from scripts.ci.pull_requests.monitor import deadline_hit
+from scripts.ci.pull_requests.status import MAX_CONSECUTIVE_ERRORS, CIStatus, parse_ts
 
 QUEUE_COOLDOWN_SECONDS = 300
 RETRY_BACKOFF_SECONDS = 300
@@ -22,7 +22,7 @@ _QUEUE_NAMES = frozenset(_QUEUE_CHOICES)
 _TRUNK_PRIORITIES = {"urgent": 0, "high": 10, "medium": 100, "low": 200}
 
 
-def _resolve_queue(queue: str | None) -> str:
+def resolve_queue(queue: str | None) -> str:
     """Return the CLI-selected queue, then CI_QUEUE, then the Trunk default."""
     resolved = queue or os.environ.get("CI_QUEUE") or "trunk"
     if resolved not in _QUEUE_NAMES:
@@ -30,12 +30,12 @@ def _resolve_queue(queue: str | None) -> str:
     return resolved
 
 
-def _trunk_priority(priority: str) -> int:
+def trunk_priority(priority: str) -> int:
     """Map the user-facing Trunk priority to its REST API integer."""
     return _TRUNK_PRIORITIES[priority]
 
 
-def _last_head_update(pr: str, repo: str) -> float | None:
+def last_head_update(pr: str, repo: str) -> float | None:
     """Best-effort newest force-push event or head-commit committer date."""
     probes = (
         (
@@ -53,21 +53,21 @@ def _last_head_update(pr: str, repo: str) -> float | None:
             text=True,
             check=False,
         )
-        parsed = _parse_ts(r.stdout) if r.returncode == 0 else None
+        parsed = parse_ts(r.stdout) if r.returncode == 0 else None
         if parsed is not None:
             timestamps.append(parsed)
     return max(timestamps, default=None)
 
 
-def _queue_cooldown_seconds(pr: str, repo: str) -> int:
-    last = _last_head_update(pr, repo)
+def queue_cooldown_seconds(pr: str, repo: str) -> int:
+    last = last_head_update(pr, repo)
     return 0 if last is None else max(0, ceil(QUEUE_COOLDOWN_SECONDS - (time.time() - last)))
 
 
-def _submit_trunk(pr: str, repo: str, priority: str, *, token: str) -> int:
+def submit_trunk(pr: str, repo: str, priority: str, *, token: str) -> int:
     """Submit a green PR to Trunk, retrying one failed submission."""
     payload = trunk_api.pr_payload(pr, repo)
-    payload.update({"priority": _trunk_priority(priority), "noBatch": False})
+    payload.update({"priority": trunk_priority(priority), "noBatch": False})
     for attempt in range(2):
         _, error = trunk_api.post("submitPullRequest", payload, token)
         if error is None:
@@ -223,7 +223,7 @@ def _rerun_command(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     return 3 if errors else 5 if waiting else 0
 
 
-def _watch_trunk_enqueue(
+def watch_trunk_enqueue(
     pr: str,
     repo: str,
     *,
@@ -274,12 +274,12 @@ def _watch_trunk_enqueue(
                 )
                 return 1
             print(f"[ci] Trunk queue state: {state or 'unknown'}", file=sys.stderr, flush=True)
-        if _deadline_hit(deadline, pr, timeout, "still in the Trunk merge queue"):
+        if deadline_hit(deadline, pr, timeout, "still in the Trunk merge queue"):
             return 1
         time.sleep(every)
 
 
-def _trunk_merge_flow(
+def trunk_merge_flow(
     pr: str,
     repo: str,
     priority: str,
@@ -291,8 +291,8 @@ def _trunk_merge_flow(
 ) -> int:
     """Apply the standard cooldown/green recheck, then submit and watch Trunk."""
     deadline = time.monotonic() + timeout if timeout else None
-    while (remaining := _queue_cooldown_seconds(pr, repo)) > 0:
-        if _deadline_hit(deadline, pr, timeout, "queue cooldown not finished"):
+    while (remaining := queue_cooldown_seconds(pr, repo)) > 0:
+        if deadline_hit(deadline, pr, timeout, "queue cooldown not finished"):
             return 1
         print(
             f"PR #{pr} head updated {remaining}s ago — queue cooldown, waiting",
@@ -338,10 +338,10 @@ def _trunk_merge_flow(
             flush=True,
         )
 
-    rc = _submit_trunk(pr, repo, priority, token=token)
+    rc = submit_trunk(pr, repo, priority, token=token)
     if rc != 0:
         return rc
-    return _watch_trunk_enqueue(
+    return watch_trunk_enqueue(
         pr, repo, every=every, deadline=deadline, timeout=timeout, token=token
     )
 
@@ -349,7 +349,7 @@ def _trunk_merge_flow(
 def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """Run an explicitly selected owner command, validating credentials before waiting."""
     try:
-        _resolve_queue(args.queue)
+        resolve_queue(args.queue)
     except ValueError as error:
         parser.error(str(error))
     operator_rc = _trunk_operator_command(args, parser)
@@ -377,7 +377,7 @@ def dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         rc = wait_for_verdict(args.pr, args.repo, args.every, args.timeout)
         if rc != 0:
             return rc
-        return _trunk_merge_flow(
+        return trunk_merge_flow(
             args.pr,
             args.repo,
             args.priority,

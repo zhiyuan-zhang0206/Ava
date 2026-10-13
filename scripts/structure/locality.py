@@ -49,7 +49,7 @@ def reset_caches() -> None:
     _entries.cache_clear()
 
 
-def _exists_exact(path: Path, *, directory: bool) -> bool:
+def exists_exact(path: Path, *, directory: bool) -> bool:
     """Case-exact existence, so a case-folding filesystem (macOS) agrees with CI."""
     found = path.is_dir() if directory else path.is_file()
     return found and path.name in _entries(path.parent, path.parent.stat().st_mtime_ns)
@@ -57,7 +57,7 @@ def _exists_exact(path: Path, *, directory: bool) -> bool:
 
 def _is_module(dotted: str, repo_root: Path) -> bool:
     path = repo_root / dotted.replace(".", "/")
-    return _exists_exact(path.with_name(f"{path.name}.py"), directory=False) or _exists_exact(
+    return exists_exact(path.with_name(f"{path.name}.py"), directory=False) or exists_exact(
         path, directory=True
     )
 
@@ -81,7 +81,7 @@ def _attribute_target(node: ast.Attribute, aliases: dict[str, str], repo_root: P
     return None
 
 
-def _private_target(dotted: str, roots: tuple[str, ...], repo_root: Path) -> tuple[str, str] | None:
+def private_target(dotted: str, roots: tuple[str, ...], repo_root: Path) -> tuple[str, str] | None:
     """(`target`, `owner package`) for the first private component, if any.
 
     Resolved the way Python does: when `<prefix>.py` exists the prefix is a module,
@@ -96,7 +96,7 @@ def _private_target(dotted: str, roots: tuple[str, ...], repo_root: Path) -> tup
         if _is_private(part):
             prefix = parts[:index]
             module_file = repo_root / f"{'/'.join(prefix)}.py"
-            owner = prefix[:-1] if _exists_exact(module_file, directory=False) else prefix
+            owner = prefix[:-1] if exists_exact(module_file, directory=False) else prefix
             return ".".join(parts[: index + 1]), ".".join(owner)
     return None
 
@@ -113,7 +113,7 @@ class _Reach:
         targets = {
             found
             for dotted in candidates
-            if (found := _private_target(dotted, self.roots, self.repo_root)) is not None
+            if (found := private_target(dotted, self.roots, self.repo_root)) is not None
         }
         for target, owner in sorted(targets):
             inside = self.importer == owner or self.importer.startswith(f"{owner}.")

@@ -30,23 +30,23 @@ from scripts.model_registry.plugin_price_rates import (
 )
 
 
-class _WindowDeclaration(NamedTuple):
+class WindowDeclaration(NamedTuple):
     start: str
     end: str
     rates: FlatRates
 
 
-class _TierDeclaration(NamedTuple):
+class TierDeclaration(NamedTuple):
     input_tokens_min: int
     input_tokens_max: int | None
     rates: FlatRates
-    windows: tuple[_WindowDeclaration, ...]
+    windows: tuple[WindowDeclaration, ...]
 
 
-class _PeriodDeclaration(NamedTuple):
+class PeriodDeclaration(NamedTuple):
     effective_from: str | None
     effective_until: str | None
-    tiers: tuple[_TierDeclaration, ...]
+    tiers: tuple[TierDeclaration, ...]
 
 
 class PluginSyncResult(NamedTuple):
@@ -62,7 +62,7 @@ class _PriceDeclaration(NamedTuple):
     source_url: str
     source_checked_at: str
     vendor: str | None
-    periods: tuple[_PeriodDeclaration, ...]
+    periods: tuple[PeriodDeclaration, ...]
 
 
 class _ProviderManifest(NamedTuple):
@@ -165,7 +165,7 @@ def _tuple_items(node: ast.expr, *, context: str) -> tuple[ast.expr, ...]:
     return tuple(node.elts)
 
 
-def _window_declaration(node: ast.expr, *, context: str) -> _WindowDeclaration:
+def _window_declaration(node: ast.expr, *, context: str) -> WindowDeclaration:
     _call, fields = _call_fields(
         node,
         "PriceWindow",
@@ -173,14 +173,14 @@ def _window_declaration(node: ast.expr, *, context: str) -> _WindowDeclaration:
         optional={"cache_write_5m", "cache_write_1h"},
         context=context,
     )
-    return _WindowDeclaration(
+    return WindowDeclaration(
         start=_literal(fields["start"], str, context=f"{context} start"),
         end=_literal(fields["end"], str, context=f"{context} end"),
         rates=rates_from_nodes(fields, context=context),
     )
 
 
-def _tier_declaration(node: ast.expr, *, context: str) -> _TierDeclaration:
+def _tier_declaration(node: ast.expr, *, context: str) -> TierDeclaration:
     _call, fields = _call_fields(
         node,
         "PriceTier",
@@ -195,7 +195,7 @@ def _tier_declaration(node: ast.expr, *, context: str) -> _TierDeclaration:
         _window_declaration(item, context=f"{context} window {index}")
         for index, item in enumerate(window_nodes)
     )
-    return _TierDeclaration(
+    return TierDeclaration(
         input_tokens_min=_integer_literal(
             fields["input_tokens_min"], context=f"{context} input_tokens_min"
         ),
@@ -207,14 +207,14 @@ def _tier_declaration(node: ast.expr, *, context: str) -> _TierDeclaration:
     )
 
 
-def _period_declaration(node: ast.expr, *, context: str) -> _PeriodDeclaration:
+def _period_declaration(node: ast.expr, *, context: str) -> PeriodDeclaration:
     _call, fields = _call_fields(
         node,
         "PricePeriod",
         required={"effective_from", "effective_until", "tiers"},
         context=context,
     )
-    return _PeriodDeclaration(
+    return PeriodDeclaration(
         effective_from=_optional_string_literal(
             fields["effective_from"], context=f"{context} effective_from"
         ),
@@ -343,7 +343,7 @@ def _add_fast_prices(
         prices[fast], price_nodes[fast] = _price_declaration(value, context=f"{path}: {fast}")
 
 
-def _provider_manifest(source: str, path: Path) -> _ProviderManifest:
+def provider_manifest(source: str, path: Path) -> _ProviderManifest:
     tree = ast.parse(source, filename=str(path))
     registrations = [
         statement.value
@@ -401,11 +401,11 @@ def _clock(value: object, *, context: str) -> str:
     return value
 
 
-def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[_WindowDeclaration, ...]:
+def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[WindowDeclaration, ...]:
     if not isinstance(windows_raw, list):
         raise TypeError(f"{tier_context} utc_daily_overrides must be an array")
     windows = tuple(
-        _WindowDeclaration(
+        WindowDeclaration(
             start=_clock(window["start"], context=f"{tier_context} window {index} start"),
             end=_clock(window["end"], context=f"{tier_context} window {index} end"),
             rates=archive_rates(window["rates"], context=f"{tier_context} window {index} rates"),
@@ -420,7 +420,7 @@ def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[_Window
 
 def _archive_tier(
     model: str, tier_raw: object, *, tier_context: str, expected_min: int
-) -> _TierDeclaration:
+) -> TierDeclaration:
     if not isinstance(tier_raw, dict):
         raise TypeError(f"{tier_context} must be an object")
     lower = tier_raw["input_tokens_min"]
@@ -432,7 +432,7 @@ def _archive_tier(
     if lower != expected_min or (upper is not None and upper < lower):
         raise RuntimeError(f"archive {model!r} has a gap or overlap in tiers")
     windows = _archive_windows(tier_raw["utc_daily_overrides"], tier_context=tier_context)
-    return _TierDeclaration(
+    return TierDeclaration(
         input_tokens_min=lower,
         input_tokens_max=upper,
         rates=archive_rates(tier_raw["rates"], context=f"{tier_context} rates"),
@@ -440,10 +440,10 @@ def _archive_tier(
     )
 
 
-def _archive_tiers(model: str, tiers_raw: object, *, context: str) -> tuple[_TierDeclaration, ...]:
+def _archive_tiers(model: str, tiers_raw: object, *, context: str) -> tuple[TierDeclaration, ...]:
     if not isinstance(tiers_raw, list) or not tiers_raw:
         raise RuntimeError(f"{context} must contain tiers")
-    tiers: list[_TierDeclaration] = []
+    tiers: list[TierDeclaration] = []
     expected_min = 0
     for tier_index, tier_raw in enumerate(tiers_raw):
         tier = _archive_tier(
@@ -456,10 +456,10 @@ def _archive_tiers(model: str, tiers_raw: object, *, context: str) -> tuple[_Tie
     return tuple(tiers)
 
 
-def _archive_periods(model: str, raw: object) -> tuple[_PeriodDeclaration, ...]:
+def _archive_periods(model: str, raw: object) -> tuple[PeriodDeclaration, ...]:
     if not isinstance(raw, list) or not raw:
         raise RuntimeError(f"archive {model!r} must contain periods")
-    periods: list[_PeriodDeclaration] = []
+    periods: list[PeriodDeclaration] = []
     previous_until: str | None = None
     for period_index, period_raw in enumerate(raw):
         context = f"archive {model!r} period {period_index}"
@@ -476,27 +476,27 @@ def _archive_periods(model: str, raw: object) -> tuple[_PeriodDeclaration, ...]:
         if start is not None and end is not None and end <= start:
             raise RuntimeError(f"{context} is empty")
         tiers = _archive_tiers(model, period_raw["tiers"], context=context)
-        periods.append(_PeriodDeclaration(effective_from, effective_until, tiers))
+        periods.append(PeriodDeclaration(effective_from, effective_until, tiers))
         previous_until = effective_until
     if periods[-1].effective_until is not None:
         raise RuntimeError(f"archive {model!r} must cover the present")
     return tuple(periods)
 
 
-def _base_rates(period: _PeriodDeclaration, *, context: str) -> FlatRates:
+def _base_rates(period: PeriodDeclaration, *, context: str) -> FlatRates:
     base = [tier.rates for tier in period.tiers if tier.input_tokens_min == 0]
     if len(base) != 1:
         raise RuntimeError(f"{context} must contain exactly one zero-input base tier")
     return base[0]
 
 
-def _archive_price(
+def archive_price(
     model: str,
     entry: dict[str, Any],
     now: datetime,
 ) -> tuple[_PriceDeclaration, tuple[tuple[str, FlatRates], ...]]:
     periods = _archive_periods(model, entry["periods"])
-    covering: list[_PeriodDeclaration] = []
+    covering: list[PeriodDeclaration] = []
     upcoming: list[tuple[str, FlatRates]] = []
     for index, period in enumerate(periods):
         context = f"archive {model!r} period {index}"
@@ -519,7 +519,7 @@ def _archive_price(
     return _PriceDeclaration(current, source_url, checked_at, vendor, periods), tuple(upcoming)
 
 
-def _render_window(window: _WindowDeclaration, indent: int) -> list[str]:
+def _render_window(window: WindowDeclaration, indent: int) -> list[str]:
     outer = " " * indent
     inner = " " * (indent + 4)
     return [
@@ -534,7 +534,7 @@ def _render_window(window: _WindowDeclaration, indent: int) -> list[str]:
     ]
 
 
-def _render_tier(tier: _TierDeclaration, indent: int) -> list[str]:
+def _render_tier(tier: TierDeclaration, indent: int) -> list[str]:
     outer = " " * indent
     inner = " " * (indent + 4)
     lines = [
@@ -559,7 +559,7 @@ def _string_or_none_literal(value: str | None) -> str:
     return "None" if value is None else json.dumps(value)
 
 
-def _render_period(period: _PeriodDeclaration, indent: int) -> list[str]:
+def _render_period(period: PeriodDeclaration, indent: int) -> list[str]:
     outer = " " * indent
     inner = " " * (indent + 4)
     lines = [
@@ -610,7 +610,7 @@ def _entry_indent(source: str, node: ast.Call) -> int:
     return len(line) - len(line.lstrip(" "))
 
 
-def _period_label(period: _PeriodDeclaration, index: int) -> str:
+def _period_label(period: PeriodDeclaration, index: int) -> str:
     return f"period {index} [{period.effective_from!r}, {period.effective_until!r})"
 
 
@@ -631,7 +631,7 @@ def _drift_labels(
     return tuple(labels)
 
 
-def _rewrite_provider(
+def rewrite_provider(
     source: str,
     path: Path,
     manifest: _ProviderManifest,
@@ -655,7 +655,7 @@ def _rewrite_provider(
     rewritten = source
     for start, end, replacement in sorted(replacements, reverse=True):
         rewritten = rewritten[:start] + replacement + rewritten[end:]
-    round_trip = _provider_manifest(rewritten, path)
+    round_trip = provider_manifest(rewritten, path)
     if round_trip.models != manifest.models or round_trip.prices.keys() != manifest.prices.keys():
         raise RuntimeError(f"{path}: rewrite changed the registered model or pricing set")
     for model, target in targets.items():
@@ -698,7 +698,7 @@ def sync_plugin_rates(
     for candidate in provider_paths:
         path = _regular_file(candidate, root, label="provider source")
         source = path.read_text(encoding="utf-8")
-        manifest = _provider_manifest(source, path)
+        manifest = provider_manifest(source, path)
         duplicate = seen_models & manifest.prices.keys()
         if duplicate:
             raise RuntimeError(f"plugin prices registered more than once: {sorted(duplicate)}")
@@ -707,14 +707,14 @@ def sync_plugin_rates(
         for model in manifest.prices:
             if model not in archive_models:
                 raise RuntimeError(f"archive has no entry for plugin-priced model {model!r}")
-            target, upcoming = _archive_price(model, archive_models[model], now)
+            target, upcoming = archive_price(model, archive_models[model], now)
             targets[model] = target
             future_notes.extend(
                 (model, effective_from, rates)
                 for effective_from, rates in upcoming
                 if rates != target.rates
             )
-        rewritten, drifted, differing_periods = _rewrite_provider(source, path, manifest, targets)
+        rewritten, drifted, differing_periods = rewrite_provider(source, path, manifest, targets)
         drifted_models.extend(drifted)
         drifted_periods.extend(differing_periods)
         if drifted:

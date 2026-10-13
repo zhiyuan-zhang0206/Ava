@@ -189,13 +189,13 @@ def test_every_conflicting_port_is_reported_not_just_the_first(
 # ─── what the start does with a conflict ─────────────────────────────────────
 
 
-_REAL_GATE = start_mod._refuse_occupied_health_ports
+_REAL_GATE = start_mod.refuse_occupied_health_ports
 
 
 @pytest.fixture
 def _hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
     request.getfixturevalue("_base_start")
-    monkeypatch.setattr(start_mod, "_refuse_occupied_health_ports", _REAL_GATE)
+    monkeypatch.setattr(start_mod, "refuse_occupied_health_ports", _REAL_GATE)
     monkeypatch.setattr(
         _root_driver_commands,
         "wait_for_service_tree",

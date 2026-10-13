@@ -102,7 +102,7 @@ def _inspector_names() -> set[str]:
     from gateway.inspect import _plugin_metrics
 
     names: set[str] = set()
-    for spec in _plugin_metrics._load_plugin_metrics():
+    for spec in _plugin_metrics.load_plugin_metrics():
         if "inspector" not in spec.output:
             continue
         names.add(spec.event_name)

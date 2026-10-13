@@ -193,7 +193,7 @@ def test_data_plane_gateway_cold_start_skipped(
         lambda _home: SimpleNamespace(ports={"postgres": _free_port(), "redis": _free_port()}),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _hp._data_plane_warnings(ctx) == []
+    assert _hp.data_plane_warnings(ctx) == []
     assert _upstream["pg"] == [] and _upstream["redis"] == []
 
 
@@ -229,7 +229,7 @@ def test_data_plane_gateway_partial_up_probes(
         # proving both were dialed on a partially-up plane.
         monkeypatch.setattr(_hp, "probe_postgres", lambda _url: "Connection refused")  # pyright: ignore[reportUnknownArgumentType]
 
-        warnings = _hp._data_plane_warnings(ctx)
+        warnings = _hp.data_plane_warnings(ctx)
         assert any(w.startswith("postgres") and "Connection refused" in w for w in warnings)
         assert _upstream["redis"] == [_REDIS_URL]
     finally:
@@ -255,7 +255,7 @@ def test_data_plane_runner_probes_unconditionally(
         command_runtime=command_runtime,
     )
 
-    assert _hp._data_plane_warnings(ctx) == []  # probes pass → silent
+    assert _hp.data_plane_warnings(ctx) == []  # probes pass → silent
     assert _upstream["pg"] == [_PG_URL]
     assert _upstream["redis"] == [_REDIS_URL]
 
@@ -279,7 +279,7 @@ def test_data_plane_unconfigured_skipped(
     )
 
     was_prepared = ctx.config.prepared
-    assert _hp._data_plane_warnings(ctx) == []
+    assert _hp.data_plane_warnings(ctx) == []
     assert _upstream["pg"] == [] and _upstream["redis"] == []
     assert ctx.config.prepared == was_prepared
 
@@ -298,12 +298,12 @@ def test_preflight_keeps_reading_its_owners_live_urls(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    assert _hp._data_plane_warnings(ctx) == []
+    assert _hp.data_plane_warnings(ctx) == []
     changed_pg = "postgresql://ava:changed@127.0.0.1:5434/other"
     changed_redis = "redis://:changed@127.0.0.1:6381/1"
     ctx.config.set_field("db_url", changed_pg)
     ctx.config.set_field("redis_url", changed_redis)
-    assert _hp._data_plane_warnings(ctx) == []
+    assert _hp.data_plane_warnings(ctx) == []
     assert _upstream["pg"] == [_PG_URL, changed_pg]
     assert _upstream["redis"] == [_REDIS_URL, changed_redis]
 
@@ -324,7 +324,7 @@ def test_probe_redis_reports_refused(redis_access: None):
 
 
 def test_redact_strips_userinfo():
-    assert _hp._redact("postgresql://user:sekret@127.0.0.1:5433/db") == (
+    assert _hp.redact("postgresql://user:sekret@127.0.0.1:5433/db") == (
         "postgresql://127.0.0.1:5433/db"
     )
 
@@ -408,7 +408,7 @@ def test_checkout_dirty_warns(
     )
     (tmp_path / "repo" / "stray.txt").write_text("uncommitted\n")
 
-    warnings = _hp._checkout_warnings(ctx)
+    warnings = _hp.checkout_warnings(ctx)
 
     assert any("dirty (1 changed file" in w for w in warnings)
 
@@ -431,7 +431,7 @@ def test_checkout_clean_is_silent(
         command_runtime=command_runtime,
     )
 
-    assert _hp._checkout_warnings(ctx) == []
+    assert _hp.checkout_warnings(ctx) == []
 
 
 def test_checkout_worktree_skipped(
@@ -456,4 +456,4 @@ def test_checkout_worktree_skipped(
     )
     (wt / "stray.txt").write_text("dirty\n")
 
-    assert _hp._checkout_warnings(ctx) == []
+    assert _hp.checkout_warnings(ctx) == []

@@ -84,9 +84,9 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_DOCS_CONVENTIONS = _REPO_ROOT / "docs" / "conventions"
-_DEV_SKILLS = _REPO_ROOT / ".agents" / "skills"
-_BUILTIN_SKILLS = _REPO_ROOT / "ava_builtins" / "skills"
+DOCS_CONVENTIONS = _REPO_ROOT / "docs" / "conventions"
+DEV_SKILLS = _REPO_ROOT / ".agents" / "skills"
+BUILTIN_SKILLS = _REPO_ROOT / "ava_builtins" / "skills"
 
 # Inline-code span: text between single backticks, no embedded backtick or
 # newline. Same span definition as `lint_doc_symbols.py`.
@@ -205,7 +205,7 @@ def _scanned_docs() -> list[tuple[Path, Path]]:
     the caller dedupes by resolved path so each doc is scanned once.
     """
     targets: list[tuple[Path, Path]] = []
-    for root in (_DOCS_CONVENTIONS, _DEV_SKILLS, _BUILTIN_SKILLS):
+    for root in (DOCS_CONVENTIONS, DEV_SKILLS, BUILTIN_SKILLS):
         if not root.is_dir():
             continue
         # Display paths relative to the repo root on the real run; fall back to

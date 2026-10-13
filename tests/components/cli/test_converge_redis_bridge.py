@@ -144,7 +144,7 @@ def test_converge_retires_the_standalone_launchd_job_and_installed_copy(
 
     bridge.retire_launchd_redis_bridge(ctx)
 
-    assert ("bootout", f"gui/{bridge.os.getuid()}/{bridge._LABEL}") in calls
+    assert ("bootout", f"gui/{bridge.os.getuid()}/{bridge.LABEL}") in calls
     assert not plist.exists()
     assert not installed.exists()
 
@@ -166,7 +166,7 @@ def test_retire_preserves_artifacts_when_launchd_job_does_not_exit(
     monkeypatch.setattr(bridge, "bootout_and_wait", lambda: False)
 
     with pytest.raises(RuntimeError, match="remained loaded"):
-        bridge._retire_launchd_bridge(home)
+        bridge.retire_launchd_bridge(home)
 
     assert plist.exists()
     assert installed.exists()

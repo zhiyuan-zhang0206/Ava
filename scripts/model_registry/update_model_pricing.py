@@ -410,7 +410,7 @@ def _detected_at_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _now_utc() -> datetime:
+def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
@@ -421,7 +421,7 @@ def sync_plugin_rates(
     write: bool = True,
 ) -> PluginSyncResult:
     """Synchronize built-in providers to the archive's complete price semantics."""
-    return _sync_plugin_rates(archive_path, repo_root, now=_now_utc(), write=write)
+    return _sync_plugin_rates(archive_path, repo_root, now=now_utc(), write=write)
 
 
 def _fetch_deepseek_html() -> str:

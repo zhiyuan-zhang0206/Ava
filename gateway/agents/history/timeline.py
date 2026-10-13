@@ -196,7 +196,7 @@ def _parse_cursor_index(value: str) -> int | None:
         return None
 
 
-def _window_before(
+def window_before(
     items: list[TimelineItem], before: str, limit: int
 ) -> tuple[list[TimelineItem], bool]:
     """Return up to `limit` items immediately older than the `before` item_id.
@@ -247,7 +247,7 @@ def _older_segment_available(rank: int, boundary_count: int, depth: int) -> bool
     return older_rank <= boundary_count and _depth_allows(older_rank, depth)
 
 
-def _item_sort_key(item_id: str) -> tuple[int, int]:
+def item_sort_key(item_id: str) -> tuple[int, int]:
     """Order items by their logical append position (msg_idx, block_idx) parsed
     from item_id — numeric, so "10.0" follows "2.0". This is the order
     build_timeline_items already emits in; sorting by created_at would reorder
@@ -466,7 +466,7 @@ def _current_items(
     policy: TimelineReadPolicy = request.app.state.timeline_policy
     items, msg_count = build_timeline_items(messages, inputs=policy.rendering)
     items = hydrate(db, items, agent_id, limit=limit, before=before)
-    items.sort(key=lambda it: _item_sort_key(it.item_id))
+    items.sort(key=lambda it: item_sort_key(it.item_id))
     return items, msg_count
 
 
@@ -524,7 +524,7 @@ def _current_page_before(
     # segment paging rule, including pages that contain standing context.
     # No boundary query or history branch runs.
     if depth == 0:
-        window, has_more = _window_before(items, cursor.item_id(), limit)
+        window, has_more = window_before(items, cursor.item_id(), limit)
         return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
     older_available = bool(boundary_ids) and _depth_allows(1, depth)
     window, has_more, cross = _window_or_cross(

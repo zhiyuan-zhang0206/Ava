@@ -110,7 +110,7 @@ async def _subscribe_error_frame(
     except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
         _log.warning("sse pubsub subscribe failed: %r agent_id=%s", exc, agent_id)
         payload = _error_payload(agent_id, exc)
-        return _sse_batch_frame([payload]) if batched else _sse_frame(payload)
+        return sse_batch_frame([payload]) if batched else sse_frame(payload)
     return None
 
 
@@ -218,7 +218,7 @@ async def event_stream(
                 )
             except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
                 _log.warning("sse pubsub read failed: %r agent_id=%s", exc, agent_id)
-                yield _sse_frame(_error_payload(agent_id, exc))
+                yield sse_frame(_error_payload(agent_id, exc))
                 return
 
             now = time.monotonic()
@@ -231,7 +231,7 @@ async def event_stream(
                     continue
                 # broadcast mode: do not filter by agent_id
                 if _matches_filter(event, agent_id, broadcast=broadcast, role_filter=role_filter):
-                    yield _sse_frame(msg["data"])
+                    yield sse_frame(msg["data"])
                     data_frames += 1
                     last_data_frame = now
                     last_comment = now
@@ -379,7 +379,7 @@ async def throttled_event_stream(
                 )
             except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
                 _log.warning("sse throttle pubsub read failed: %r", exc)
-                yield _sse_batch_frame([_error_payload(0, exc)])
+                yield sse_batch_frame([_error_payload(0, exc)])
                 return
 
             if disconnected:
@@ -387,7 +387,7 @@ async def throttled_event_stream(
 
             now = time.monotonic()
             if buffer:
-                yield _sse_batch_frame(buffer)
+                yield sse_batch_frame(buffer)
                 data_frames += 1
                 total_events += len(buffer)
                 last_flush = now
@@ -416,7 +416,7 @@ async def throttled_event_stream(
                 _log.warning("sse throttle cleanup %s failed: %r", step, exc)
 
 
-def _sse_frame(payload: str) -> bytes:
+def sse_frame(payload: str) -> bytes:
     """Wrap a data frame per the SSE protocol.
 
     Multi-line payloads must prefix each line with `data:` to be
@@ -432,7 +432,7 @@ def _sse_frame(payload: str) -> bytes:
     return ("".join(f"data: {line}\n" for line in lines) + "\n").encode()
 
 
-def _sse_batch_frame(events: list[str]) -> bytes:
+def sse_batch_frame(events: list[str]) -> bytes:
     """Wrap a batch of already-serialized event JSON strings into ONE SSE
     frame carrying a JSON array of objects: `data: [{...},{...}]`.
 
@@ -446,13 +446,13 @@ def _sse_batch_frame(events: list[str]) -> bytes:
     while only the separate `/api/system` object-stream (last-active) keeps
     working. Join raw so the client folds real objects.
     """
-    return _sse_frame("[" + ",".join(events) + "]")
+    return sse_frame("[" + ",".join(events) + "]")
 
 
 # --- For tests only ---
 
 
-def _decode_frames_for_test(chunks: list[bytes]) -> list[dict]:
+def decode_frames_for_test(chunks: list[bytes]) -> list[dict]:
     """Test helper: slice an SSE byte stream into frames + parse the JSON
     on data lines, the way the browser does: split lines on "\n" only
     (str.splitlines() would also break on U+0085 / U+2028 / U+2029 and

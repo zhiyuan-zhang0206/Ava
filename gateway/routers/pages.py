@@ -440,7 +440,7 @@ def _log_proxy_failure(
 _PAGE_KEY_RE = _re.compile(r"^(\d+)-(.*)$")
 
 
-def _parse_page_key(page_key: str) -> tuple[int, str] | None:
+def parse_page_key(page_key: str) -> tuple[int, str] | None:
     """Split `<agent_id>-<name>` on the first dash → (agent_id, name).
 
     None for a malformed key (non-numeric prefix, no dash).
@@ -464,7 +464,7 @@ async def proxy_page_get_new(page_key: str, rest: str, request: Request) -> Resp
 
     404 for a malformed key, unknown/closed page, or missing agent.
     """
-    parsed = _parse_page_key(page_key)
+    parsed = parse_page_key(page_key)
     if parsed is None:
         raise HTTPException(
             status_code=404, detail=f"invalid page key {page_key!r} (expected <agent_id>-<name>)"

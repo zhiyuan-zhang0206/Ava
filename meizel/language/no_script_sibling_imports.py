@@ -186,7 +186,7 @@ def _nested_blocks(stmt: ast.stmt) -> list[list[ast.stmt]] | None:
     return None
 
 
-def _scan_file(path: Path) -> list[str]:
+def scan_file(path: Path) -> list[str]:
     """Return one error string per unguarded sibling import in a script-mode file."""
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
@@ -309,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if any(p.search(rel) for p in _TEST_PATTERNS):
             continue
-        for violation in _scan_file(path):
+        for violation in scan_file(path):
             total += 1
             print(violation)
     if total:

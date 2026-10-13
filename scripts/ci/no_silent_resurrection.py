@@ -270,7 +270,7 @@ def _candidate_texts(runs: list[Run]) -> set[str]:
     return {line.text for run in runs for line in run.lines if line.strong and line.text}
 
 
-def _alive_candidates(candidates: set[str], base: str, cwd: Path) -> set[str]:
+def alive_candidates(candidates: set[str], base: str, cwd: Path) -> set[str]:
     """Candidate texts still present anywhere in the base tree (skipped paths excluded)."""
     if not candidates:
         return set()
@@ -595,7 +595,7 @@ def _looks_like_file(token: str) -> bool:
     return _EXTENSION.fullmatch(extension) is not None and any(char.isalpha() for char in extension)
 
 
-def _declared_targets(reason: str) -> tuple[list[str], list[str]]:
+def declared_targets(reason: str) -> tuple[list[str], list[str]]:
     shas: list[str] = []
     paths: list[str] = []
     for raw_token in reason.split():
@@ -623,7 +623,7 @@ def _collect_allowances(merge_base: str, head: str, cwd: Path) -> list[Allowance
             continue
         match = _RESURRECTS_LINE.match(raw)
         if match:
-            shas, paths = _declared_targets(match.group(1))
+            shas, paths = declared_targets(match.group(1))
             allowances.append(
                 Allowance(commit, raw.strip(), tuple(shas), tuple(paths), not shas and not paths)
             )
@@ -725,7 +725,7 @@ def main(argv: list[str] | None = None) -> int:
         merge_base = _merge_base(args.base, args.head, cwd)
         runs = _added_runs(merge_base, args.head, cwd)
         candidates = _candidate_texts(runs)
-        alive = _alive_candidates(candidates, args.base, cwd)
+        alive = alive_candidates(candidates, args.base, cwd)
         dead, scanned = _deleted_candidates(args.base, args.days, candidates, cwd)
         hits = _find_hits(runs, alive, dead)
         retained = _retained_candidates(hits, merge_base, args.head, cwd)

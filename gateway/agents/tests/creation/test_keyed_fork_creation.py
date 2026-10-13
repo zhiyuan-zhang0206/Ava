@@ -15,7 +15,7 @@ from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
 from gateway.agents.tests.creation.test_guarded_creation import client as client
-from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
+from gateway.agents.tests.creation.test_sdk_strong_creation import _response, sdk
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 
@@ -56,7 +56,7 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
     http.post.side_effect = submit
     with transport.use_client(http):
         with pytest.raises(GatewayUnavailable):
-            _sdk(fork_from=parent_id, idempotency_key="fork-intent")
+            sdk(fork_from=parent_id, idempotency_key="fork-intent")
         lost_attempts = http.post.call_count
         assert lost_attempts > 1
         lose = False
@@ -78,7 +78,7 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
             raise AssertionError("fork replay must precede mutable source preflight")
 
         monkeypatch.setattr(agent_creation, "spawn_prechecks_blocking", unexpected)
-        assert _sdk(fork_from=parent_id, idempotency_key="fork-intent") == child_id
+        assert sdk(fork_from=parent_id, idempotency_key="fork-intent") == child_id
 
     assert http.post.call_count == lost_attempts + 1
     assert all(call == http.post.call_args_list[0] for call in http.post.call_args_list)

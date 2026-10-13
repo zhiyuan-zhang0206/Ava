@@ -116,7 +116,7 @@ def test_agent_skill_view_inputs_read_checkpointed_cwd_and_pinned_narrowing(
         new_versions={"ava_code__cwd": "1"},
     )
 
-    cwd, wanted = cluster._agent_skill_view_inputs(_OneConnectionPool(db_conn), agent_id)
+    cwd, wanted = cluster.agent_skill_view_inputs(_OneConnectionPool(db_conn), agent_id)
 
     assert cwd == tmp_path
     assert wanted == ["overlay-skill"]
@@ -136,7 +136,7 @@ def test_agent_skill_view_includes_project_skills_for_persisted_cwd(
 ) -> None:
     """A cwd inside a git repository contributes its project-local skill command."""
     repo, _ = _project_with_skill(tmp_path)
-    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
+    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(repo, ["*"]))
 
     view = cluster.agent_skill_view_op(42, object())
 
@@ -147,12 +147,12 @@ def test_agent_skill_view_without_cwd_or_repo_is_load_dir_only(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
 ) -> None:
     """Missing cwd and non-repository cwd never add a project-local root."""
-    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
     missing_cwd_view = cluster.agent_skill_view_op(42, object())
 
     monkeypatch.setattr(
         cluster,
-        "_agent_skill_view_inputs",
+        "agent_skill_view_inputs",
         _view_inputs(tmp_path / "not-a-repo", ["*"]),
     )
     non_repo_view = cluster.agent_skill_view_op(42, object())
@@ -166,12 +166,12 @@ def test_agent_skill_view_clears_project_provider_after_each_op(
 ) -> None:
     """One agent's project root cannot leak into the next op's command view."""
     repo, _ = _project_with_skill(tmp_path)
-    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
+    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(repo, ["*"]))
     assert "project-skill" in {
         command.name for command in cluster.agent_skill_view_op(42, object()).commands
     }
 
-    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
     assert "project-skill" not in {
         command.name for command in cluster.agent_skill_view_op(43, object()).commands
     }
@@ -189,7 +189,7 @@ def test_agent_skill_view_honors_per_agent_skill_narrowing(
     )
     monkeypatch.setattr(
         cluster,
-        "_agent_skill_view_inputs",
+        "agent_skill_view_inputs",
         _view_inputs(None, ["load_skill"]),
     )
 
@@ -208,7 +208,7 @@ def test_agent_skill_view_includes_sorted_enabled_mcp_names(
         _mcp_source({"zeta": {"command": "z"}, "alpha": {"command": "a"}}),
     )
     monkeypatch.setattr(mcp_enabled, "read_enabled", lambda: {"zeta": True})
-    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
 
     view = cluster.agent_skill_view_op(42, object())
 
@@ -225,7 +225,7 @@ def test_agent_skill_view_excludes_disabled_mcp_names(
         _mcp_source({"disabled": {"command": "off"}, "enabled": {"command": "on"}}),
     )
     monkeypatch.setattr(mcp_enabled, "read_enabled", lambda: {"disabled": False})
-    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
 
     view = cluster.agent_skill_view_op(42, object())
 
@@ -236,7 +236,7 @@ def test_agent_skill_view_without_mcp_config_returns_empty_names(
     monkeypatch: pytest.MonkeyPatch, load_dir: Path
 ) -> None:
     """An empty merged MCP map leaves the command op successful."""
-    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
 
     view = cluster.agent_skill_view_op(42, object())
 

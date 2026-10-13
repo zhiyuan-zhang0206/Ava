@@ -16,7 +16,7 @@ from base.telemetry import EventPipeline
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _hermetic_start,
 )
-from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import _roster
+from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import roster
 from cli.database.runtime import CommandRuntime
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from gateway.app import app
@@ -42,7 +42,7 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
     command_runtime: CommandRuntime,
 ) -> None:
 
-    _roster(monkeypatch, (("gateway", None),))
+    roster(monkeypatch, (("gateway", None),))
     measurements: list[int] = []
     with TestClient(app) as client:
 

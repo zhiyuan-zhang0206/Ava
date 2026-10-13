@@ -17,9 +17,9 @@ VISUAL_DRIFT_EXIT_CODE = 10
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _VISUAL_TEST_MODULE = "tests/e2e/visual/test_visual_regression.py"
-_VISUAL_TEST_COMMAND = ["uv", "run", "pytest", _VISUAL_TEST_MODULE]
-_GIT_STATUS_COMMAND = ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"]
-_BASELINE_PATHS_BY_TEST = {
+VISUAL_TEST_COMMAND = ["uv", "run", "pytest", _VISUAL_TEST_MODULE]
+GIT_STATUS_COMMAND = ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"]
+BASELINE_PATHS_BY_TEST = {
     "test_home_visual_regression": Path(
         "tests/e2e/visual/__snapshots__/test_visual_regression/test_home_visual_regression/home.png"
     ),
@@ -59,7 +59,7 @@ def _capture(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def _run_visual_tests() -> subprocess.CompletedProcess[str]:
-    result = _capture(_VISUAL_TEST_COMMAND)
+    result = _capture(VISUAL_TEST_COMMAND)
     if result.stdout:
         sys.stdout.write(result.stdout)
     return result
@@ -82,7 +82,7 @@ def _is_pixel_drift(result: subprocess.CompletedProcess[str]) -> bool:
         return False
     failures, has_error = _failure_summaries(result.stdout or "")
     expected_nodeids = {
-        f"{_VISUAL_TEST_MODULE}::{test_name}" for test_name in _BASELINE_PATHS_BY_TEST
+        f"{_VISUAL_TEST_MODULE}::{test_name}" for test_name in BASELINE_PATHS_BY_TEST
     }
     return (
         bool(failures)
@@ -109,7 +109,7 @@ def _candidate_generation_succeeded(result: subprocess.CompletedProcess[str]) ->
     output = _ANSI_ESCAPE.sub("", result.stdout or "")
     failures, has_error = _failure_summaries(output)
     expected_nodeids = {
-        f"{_VISUAL_TEST_MODULE}::{test_name}" for test_name in _BASELINE_PATHS_BY_TEST
+        f"{_VISUAL_TEST_MODULE}::{test_name}" for test_name in BASELINE_PATHS_BY_TEST
     }
     if has_error or {nodeid for nodeid, _reason in failures} != expected_nodeids:
         return False
@@ -121,7 +121,7 @@ def _candidate_generation_succeeded(result: subprocess.CompletedProcess[str]) ->
             "Review and commit it before rerunning the test."
         )
         in output
-        for relative_path in _BASELINE_PATHS_BY_TEST.values()
+        for relative_path in BASELINE_PATHS_BY_TEST.values()
     )
 
 
@@ -185,7 +185,7 @@ def _require_png_only_status(status: subprocess.CompletedProcess[str]) -> None:
 
 
 def _regenerate() -> int:
-    references = [_REPO_ROOT / path for path in _BASELINE_PATHS_BY_TEST.values()]
+    references = [_REPO_ROOT / path for path in BASELINE_PATHS_BY_TEST.values()]
     missing_originals = [path for path in references if not path.is_file()]
     if missing_originals:
         missing = ", ".join(str(path.relative_to(_REPO_ROOT)) for path in missing_originals)
@@ -202,7 +202,7 @@ def _regenerate() -> int:
 
             result = _run_visual_tests()
             _require_complete_candidate_generation(result, references)
-            _require_png_only_status(_capture(_GIT_STATUS_COMMAND))
+            _require_png_only_status(_capture(GIT_STATUS_COMMAND))
         except BaseException:
             _restore_originals(backups)
             raise

@@ -274,7 +274,7 @@ def test_stall_report_names_the_predecessor_owner_fence(
     owner mismatch, which is the fence that requires explicit resolution.
     """
     from base.deploy.maintenance.state import MaintenanceHold
-    from ops.agent_pause import _stall_report
+    from ops.agent_pause import stall_report
     from ops.agent_pause.probe import HostIdentity
 
     agent = create_agent(db_conn)
@@ -292,7 +292,7 @@ def test_stall_report_names_the_predecessor_owner_fence(
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     monkeypatch.setattr(agent_pause, "host_identity", lambda: HostIdentity(successor, frozenset()))
 
-    report = _stall_report(
+    report = stall_report(
         database,
         MaintenanceHold(MaintenancePhase.DRAINING, {agent: command}),
         [agent],

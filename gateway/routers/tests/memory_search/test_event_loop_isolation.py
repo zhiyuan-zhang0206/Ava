@@ -14,13 +14,13 @@ from fastapi.testclient import TestClient
 from base.cluster.machine import MachineRoles
 from gateway.app import app
 from gateway.routers.tests.test_memory_search import (
-    _SEARCH_PERMITS,
+    SEARCH_PERMITS,
     _asgi_client,
-    _assert_semaphore_locked,
-    _never_returns,
     _patch_provider,
     _search,
-    _stub_search_backend,
+    assert_semaphore_locked,
+    never_returns,
+    stub_search_backend,
 )
 from gateway.routers.tests.test_memory_search import (
     _app_db as _app_db,
@@ -119,7 +119,7 @@ class TestWedgedBackendReleasesPermits:
     async def test_wedged_backend_answers_503_instead_of_hanging(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
+        stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
         async with _asgi_client() as client:
             resp = await asyncio.wait_for(_search(client), timeout=10)
@@ -132,15 +132,15 @@ class TestWedgedBackendReleasesPermits:
     ) -> None:
         """The overflow request never reaches the backend — it waits in
         `acquire`, which the deadline has to cover too."""
-        _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
+        stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
         async with _asgi_client() as client:
             responses = await asyncio.wait_for(
-                asyncio.gather(*(_search(client) for _ in range(_SEARCH_PERMITS + 1))),
+                asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
             )
 
-        assert [r.status_code for r in responses] == [503] * (_SEARCH_PERMITS + 1)
+        assert [r.status_code for r in responses] == [503] * (SEARCH_PERMITS + 1)
 
     async def test_a_wedged_embed_is_covered_too(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -155,18 +155,18 @@ class TestWedgedBackendReleasesPermits:
         class _StuckProvider:
             dim = 768
             fingerprint = "fake:provider:dim=768"
-            embed_query_async = _never_returns
+            embed_query_async = never_returns
 
-        _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
+        stub_search_backend(monkeypatch, tmp_path, search=never_returns)
         _patch_provider(monkeypatch, _StuckProvider)
 
         async with _asgi_client() as client:
             responses = await asyncio.wait_for(
-                asyncio.gather(*(_search(client) for _ in range(_SEARCH_PERMITS + 1))),
+                asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
             )
 
-        assert [r.status_code for r in responses] == [503] * (_SEARCH_PERMITS + 1)
+        assert [r.status_code for r in responses] == [503] * (SEARCH_PERMITS + 1)
 
     async def test_a_cancelled_holder_gives_its_permit_back(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -186,13 +186,13 @@ class TestWedgedBackendReleasesPermits:
         """
         import services.derived.memory_indexer.backends.factory as _factory
 
-        sem = _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
+        sem = stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
         async with _asgi_client() as client:
-            holders = [asyncio.create_task(_search(client)) for _ in range(_SEARCH_PERMITS)]
+            holders = [asyncio.create_task(_search(client)) for _ in range(SEARCH_PERMITS)]
             # Without this the test could pass vacuously, cancelling requests
             # that had not yet taken a permit.
-            await _assert_semaphore_locked(sem)
+            await assert_semaphore_locked(sem)
             for task in holders:
                 task.cancel()
             for task in holders:
@@ -221,11 +221,11 @@ class TestWedgedBackendReleasesPermits:
         """Enough wedged requests to pin every permit, then a healthy one."""
         import services.derived.memory_indexer.backends.factory as _factory
 
-        _stub_search_backend(monkeypatch, tmp_path, search=_never_returns)
+        stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
         async with _asgi_client() as client:
             await asyncio.wait_for(
-                asyncio.gather(*(_search(client) for _ in range(_SEARCH_PERMITS + 1))),
+                asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
             )
 
@@ -263,7 +263,7 @@ class TestAcquireFastFail:
         acquire budget, well before the search deadline."""
         from base.config import settings
 
-        sem = _stub_search_backend(monkeypatch, tmp_path, search=_never_returns, permits=1)
+        sem = stub_search_backend(monkeypatch, tmp_path, search=never_returns, permits=1)
         # A tiny acquire budget so the failure is provably the fast-fail, and a
         # deadline far above it so the deadline is NOT what answered.
         monkeypatch.setattr(settings.services, "memory_search_acquire_timeout_seconds", 0.05)
@@ -271,7 +271,7 @@ class TestAcquireFastFail:
 
         async with _asgi_client() as client:
             holder = asyncio.create_task(_search(client))
-            await _assert_semaphore_locked(sem)
+            await assert_semaphore_locked(sem)
             start = time.monotonic()
             overflow = await asyncio.wait_for(_search(client), timeout=3.0)
             elapsed = time.monotonic() - start

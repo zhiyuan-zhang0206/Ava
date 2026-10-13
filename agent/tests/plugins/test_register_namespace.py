@@ -4,7 +4,7 @@ A plugin declares `SdkNamespace` / `SdkMember` values; `ava.sdk_surface.install`
 `install_namespace` / `install_member`, which attach to the `ava` module and return the undo that
 reverses it. These tests drive the primitives directly (one declaration, one undo) so a failure points
 at the primitive; the whole-registry behavior (rollback, ordering, uninstall) is in
-`ava/sdk_surface/tests/test_install.py`.
+`ava/tests/namespaces/sdk_surface/test_install.py`.
 
 Coverage matrix:
 - attach + __all_for_ava__ + help(ava) visible (ModuleType and SimpleNamespace equivalent)

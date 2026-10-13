@@ -23,7 +23,7 @@ from base.agents.impersonation.status import (
     parse_lease,
 )
 from base.api_contracts.agent_contract import AgentStatus
-from base.events.caller_identity import caller_payload
+from base.api_contracts.caller_identity import caller_payload
 from base.native_process import native_boot_id
 from base.native_process.ownership import OwnedProcess
 from base.native_process.runtime_incarnation import RuntimeIncarnation

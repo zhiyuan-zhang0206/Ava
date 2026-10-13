@@ -22,9 +22,9 @@ import sys
 from base.cluster.machine import MachineIdentity
 from base.host.system import macos_firewall as fw
 from cli.commands.converge.firewall import (
-    _report_missing,
     audit_this_host,
     configured_machine_name,
+    report_missing,
 )
 
 
@@ -95,7 +95,7 @@ def cmd_firewall_sync(*, machine: MachineIdentity) -> int:
     for path in repair.allowed:
         print(f"  · allowed {path}")
     if repair.failed:
-        _report_missing(repair.failed, len(required))
+        report_missing(repair.failed, len(required))
         return 1
     if not repair.allowed and not pruned.removed:
         print("  already converged — nothing to do")

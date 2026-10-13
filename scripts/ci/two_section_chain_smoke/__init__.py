@@ -33,9 +33,9 @@ on macOS, from a checkout that contains services/supervision/ava_root (dev/CI on
 # module's own surface before the split) — re-exported unchanged.
 from .cli import main as main  # noqa: I001 - one re-export block, kept as written
 from .f12 import (
-    _f12_attribution_summary as _f12_attribution_summary,
-    _f12_expect_attribution as _f12_expect_attribution,
-    _f12_join as _f12_join,
-    _f12_parse_window as _f12_parse_window,
+    f12_attribution_summary as f12_attribution_summary,
+    f12_expect_attribution as f12_expect_attribution,
+    f12_join as f12_join,
+    f12_parse_window as f12_parse_window,
 )
 from .support import SmokeError as SmokeError
