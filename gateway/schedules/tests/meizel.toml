@@ -21,3 +21,6 @@ exports = ["runner_inputs.py"]
 "test_session_control.py#monkeypatch.setattr gateway.schedules.session_control.get_shell_backend" = 2
 "test_update_delivery.py#monkeypatch.setattr gateway.schedules.session_control.enqueue_in_transaction" = 1
 "test_update_delivery.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 1
+
+[debt.stdlib-patch]
+"test_runner_lifecycle.py#monkeypatch.setattr runpy.run_path" = 2

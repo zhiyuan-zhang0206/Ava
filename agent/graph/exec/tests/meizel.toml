@@ -4,6 +4,12 @@
 "test_exec_output_cap.py" = ["output_inputs.py"]
 "test_exec_output_crop.py" = ["output_inputs.py"]
 
+[debt.env-patch]
+"test_exec_protocol.py#patch.dict os.environ" = 1
+"test_exec_turn_config.py#monkeypatch.setenv os.environ.AVA_AGENT_BIRTH_CONFIG" = 1
+"test_exec_turn_config.py#monkeypatch.setenv os.environ.AVA_AGENT_CONFIG_OVERLAY" = 1
+"test_exec_turn_config.py#monkeypatch.setitem os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "admission_fixture.py#monkeypatch.setattr agent.graph.exec._owned_run.validate_native_ready" = 1
 "test_cancel.py#monkeypatch.setattr agent.graph.exec.node.run_in_subprocess" = 10
@@ -29,3 +35,16 @@
 "test_multiple_tool_calls.py#monkeypatch.setattr agent.graph.exec.node.build_attach_message" = 1
 "test_multiple_tool_calls.py#monkeypatch.setattr agent.graph.exec.node.run_agent_code" = 7
 "test_multiple_tool_calls.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2
+
+[debt.stdlib-patch]
+"test_exec_editable_guard.py#monkeypatch.setattr os.environ" = 1
+"test_exec_output_crop.py#monkeypatch.setattr pathlib.Path.chmod" = 1
+"test_exec_output_crop.py#monkeypatch.setattr pathlib.Path.open" = 1
+"test_exec_output_crop.py#monkeypatch.setattr pathlib.Path.unlink" = 1
+"test_exec_turn_config.py#monkeypatch.setattr asyncio.wait_for" = 1
+
+[debt.unresolved-patch]
+"test_exec_output_crop.py#monkeypatch.setattr crop_config.exec_output_crop_after_lines" = 2
+"test_exec_output_crop.py#monkeypatch.setattr crop_config.exec_output_crop_archive_max_bytes" = 5
+"test_exec_output_crop.py#monkeypatch.setattr crop_config.exec_output_crop_head_lines" = 1
+"test_exec_output_crop.py#monkeypatch.setattr crop_config.exec_output_crop_tail_lines" = 1

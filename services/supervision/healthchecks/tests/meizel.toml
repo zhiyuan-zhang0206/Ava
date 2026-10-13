@@ -1,3 +1,10 @@
+[debt.env-patch]
+"test_healthcheck_memory_search.py#patch.dict os.environ" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.delitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_healthcheck_otel_collector.py#monkeypatch.setitem os.environ.AVA_TELEMETRY_OTLP_ENDPOINT" = 1
+"test_prod_venv.py#monkeypatch.setenv os.environ.PYTHONPATH" = 2
+"test_prod_venv.py#monkeypatch.setenv os.environ.VIRTUAL_ENV" = 1
+
 [debt.first-party-patch]
 "test_healthcheck_browser_mcp.py#monkeypatch.setattr services.supervision.healthchecks.browser_mcp._probe" = 3
 "test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.canary_async" = 1
@@ -52,3 +59,12 @@
 "test_protocol_probe.py#monkeypatch.setattr base.native_process.root_control.client.owned_process" = 1
 "test_protocol_probe.py#monkeypatch.setattr base.paths.mcp_daemon_shared_socket" = 1
 "test_redis_acl_healthcheck.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.redis.Redis.from_url" = 2
+
+[debt.stdlib-patch]
+"test_healthcheck_gateway.py#monkeypatch.setattr urllib.request.urlopen" = 3
+"test_healthcheck_otel_collector.py#monkeypatch.setattr urllib.request.urlopen" = 6
+
+[debt.third-party-patch]
+"test_healthcheck_frontend.py#monkeypatch.setattr psutil.process_iter" = 1
+"test_healthcheck_memory_search.py#monkeypatch.setattr httpx.post" = 2
+"test_protocol_probe.py#monkeypatch.setattr psutil.process_iter" = 2

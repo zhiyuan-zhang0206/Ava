@@ -15,3 +15,6 @@
 "test_validation_agents.py#monkeypatch.setattr ava.gateway_client.spawn" = 4
 "test_validation_agents.py#monkeypatch.setattr ava.gateway_client.terminate" = 1
 "test_validation_agents.py#monkeypatch.setattr ava.sdk_surface.agent_identity.require_actor" = 3
+
+[debt.unresolved-patch]
+"test_adversarial_eval_schedule.py#monkeypatch.setattr mod.ava.agents.get_last_message" = 1

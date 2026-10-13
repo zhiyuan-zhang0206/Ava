@@ -1,3 +1,6 @@
+[debt.env-patch]
+"test_impersonation_config.py#monkeypatch.setenv os.environ" = 1
+
 [debt.first-party-patch]
 "test_bootstrap_credential_free.py#monkeypatch.setattr base.config.service_read.ConfigAuthority.read_env_aliases" = 1
 "test_bootstrap_credential_free.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1

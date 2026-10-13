@@ -1,4 +1,4 @@
-exports = ["adapters", "daemon.py", "ingress", "tests", "types.py"]
+exports = ["daemon.py", "ingress", "tests", "types.py"]
 
 [uses]
 "adapters" = ["config.py", "ingress", "state.py", "types.py"]

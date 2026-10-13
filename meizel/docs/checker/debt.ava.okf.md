@@ -38,9 +38,9 @@ A baseline sits in the directory that judges the violation, like a declared
 edge, so concurrent repayments touch different files:
 
 - an edge violation (`undeclared-edge`, `not-exported`, `private-module`,
-  `private-name`) belongs to the lowest common directory `L` of the fact edge;
-- `restricted-python` belongs to the directory of the file;
-- a cycle belongs to the directory whose declared graph has it.
+  `private-name`, `cycle-edge`) belongs to the lowest common directory `L` of
+  the fact edge;
+- `restricted-python` belongs to the directory of the file.
 
 ```toml
 [debt.private-name]
@@ -49,18 +49,21 @@ edge, so concurrent repayments touch different files:
 [debt.restricted-python]
 "loader.py#importlib.import_module" = 1
 
-[debt.manifest-cycle]
-"b.py -> a.py" = 1
+[debt.cycle-edge]
+"x/m.py -> y/n.py" = 2
 ```
 
 Paths are relative to the owning directory. A key carries no line number, so
 moving code inside a file leaves the baseline alone; the count is how many
 occurrences are allowed. Tables are sorted and one debt takes one line, so a
 repayment is a one-line diff. `[debt]` does not count toward the directory
-budget. A `manifest-cycle` entry is a declared edge that is allowed to close a
-cycle: the declared graph minus those edges must be acyclic, and an entry
-whose edge is gone or closes no cycle is `debt-paid`. A malformed `[debt]` is
-`manifest-debt`. Unresolved imports, stale declarations and manifest syntax
+budget. `cycle-edge` records the facts on the declared edges that close a cycle.
+The edges are the ones some entry projects onto; the declared graph without them
+must be acyclic, or `manifest-cycle` fails. Each fact on such an edge counts
+like any other: a new import file, or another import line, in the pair is a new
+violation, so the recorded facts can only shrink. When an edge closes no cycle
+any more, or is no longer declared, its entries are `debt-paid`. A malformed
+`[debt]` is `manifest-debt`. Unresolved imports, stale declarations and manifest syntax
 errors cannot be recorded.
 
 ## Commands
@@ -72,7 +75,8 @@ errors cannot be recorded.
   their owners' manifests, creating a manifest where there is none (stage it:
   `check` reads tracked files). It is the only way a baseline grows: `check`
   and `bootstrap` never write one, and `record` never lowers a count. Cycle
-  back-edges are chosen greedily and then thinned to the ones needed. Violations
+  back-edges are chosen greedily and thinned to the ones needed, and the facts on
+  them are recorded. Violations
   that cannot be recorded are printed and the exit code is 1.
 - `debt prune` lowers counts and drops entries to what still occurs.
 - `debt carry [--base ref]` follows a move. A baseline names files, so a

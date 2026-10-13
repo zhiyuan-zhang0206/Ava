@@ -12,3 +12,6 @@
 "test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.vendored_pg_bin_dir" = 1
 "test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.vendored_pg_supported" = 1
 "test_pg_runtime_converge.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+
+[debt.unresolved-patch]
+"test_pg_runtime_converge.py#monkeypatch.setattr type(pg_runtime.get_backend()).pg_binary_path" = 1

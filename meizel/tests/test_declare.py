@@ -255,7 +255,7 @@ def test_a_flipped_direction_is_declared_in_one_run(make_repo: RepoFactory) -> N
 def test_a_flipped_direction_that_was_a_recorded_back_edge_is_declared_in_one_run(
     make_repo: RepoFactory,
 ) -> None:
-    manifest = '[uses]\n"b.py" = ["a.py"]\n\n[debt.manifest-cycle]\n"b.py -> a.py" = 1\n'
+    manifest = '[uses]\n"b.py" = ["a.py"]\n\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
     files = {
         "pkg/__init__.py": "",
         "pkg/a.py": "from pkg import b\n",

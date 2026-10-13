@@ -1,5 +1,8 @@
 exports = ["external_attachment.py", "external_skills.py", "maintenance.py", "secret_argv.py"]
 
+[debt.env-patch]
+"secret_argv.py#monkeypatch.setenv os.environ" = 1
+
 [debt.first-party-patch]
 "external_attachment.py#monkeypatch.setattr agent.extensions.plugin_state_codec.load_snapshot" = 1
 "external_attachment.py#monkeypatch.setattr ava.__plugin_installation__" = 1
@@ -11,3 +14,6 @@ exports = ["external_attachment.py", "external_skills.py", "maintenance.py", "se
 "external_attachment.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "maintenance.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
 "maintenance.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+
+[debt.stdlib-patch]
+"secret_argv.py#monkeypatch.setattr os.environ" = 1

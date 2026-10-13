@@ -7,6 +7,13 @@ exports = ["identity_inputs.py"]
 "test_telemetry_otlp_child_defer.py" = ["identity_inputs.py"]
 "test_telemetry_otlp_endpoint_preflight.py" = ["test_telemetry_otlp.py"]
 
+[debt.env-patch]
+"test_telemetry_otlp.py#monkeypatch.delenv os.environ.AVA_EXEC_REQUEST_FILE" = 1
+"test_telemetry_otlp_child_defer.py#monkeypatch.delenv os.environ.AVA_TELEMETRY_OTLP_CHILD_DEFER" = 1
+"test_telemetry_otlp_child_defer.py#monkeypatch.delenv os.environ.AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S" = 1
+"test_telemetry_otlp_child_defer.py#monkeypatch.setenv os.environ.AVA_TELEMETRY_OTLP_CHILD_DEFER" = 1
+"test_telemetry_otlp_child_defer.py#monkeypatch.setenv os.environ.AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S" = 1
+
 [debt.first-party-patch]
 "test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_sink_failure" = 1
 "test_otlp_worker_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.OtlpBackend" = 2
@@ -29,3 +36,24 @@ exports = ["identity_inputs.py"]
 "telemetry_otlp/test_backend_init_failure_isolated_and_waits_before.py -> test_telemetry_otlp.py#_production_process_by_default" = 1
 "test_otlp_worker_lifecycle.py -> test_telemetry_otlp.py#_event" = 1
 "test_telemetry_otlp_endpoint_preflight.py -> test_telemetry_otlp.py#_production_process_by_default" = 1
+
+[debt.stdlib-patch]
+"test_telemetry_otlp_child_defer.py#monkeypatch.setattr sys.is_finalizing" = 2
+
+[debt.third-party-patch]
+"test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr opentelemetry.exporter.otlp.proto.http._log_exporter.OTLPLogExporter" = 1
+"test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr opentelemetry.exporter.otlp.proto.http.metric_exporter.OTLPMetricExporter" = 1
+"test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr opentelemetry.sdk._logs.LoggerProvider" = 1
+"test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr opentelemetry.sdk._logs.export.BatchLogRecordProcessor" = 1
+"test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr opentelemetry.sdk.metrics.MeterProvider" = 1
+"test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr opentelemetry.sdk.metrics.export.PeriodicExportingMetricReader" = 1
+
+[debt.unresolved-patch]
+"test_otlp_worker_lifecycle.py#monkeypatch.setattr backend._emit_log" = 6
+"test_otlp_worker_lifecycle.py#monkeypatch.setattr backend._enabled" = 3
+"test_otlp_worker_lifecycle.py#monkeypatch.setattr backend._endpoint_reachable" = 3
+"test_otlp_worker_lifecycle.py#monkeypatch.setattr backend._initialize_worker" = 5
+"test_otlp_worker_lifecycle.py#monkeypatch.setattr backend._record_metrics" = 4
+"test_otlp_worker_lifecycle.py#monkeypatch.setattr logs.force_flush" = 1
+"test_otlp_worker_lifecycle.py#monkeypatch.setattr logs.shutdown" = 5
+"test_telemetry_otlp_child_defer.py#monkeypatch.setattr backend" = 1

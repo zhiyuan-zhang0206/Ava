@@ -1,6 +1,12 @@
 [uses]
 "test_machines.py" = ["machines"]
 
+[debt.env-patch]
+"test_machine.py#monkeypatch.delenv os.environ.AVA_API_TOKEN" = 1
+"test_machine.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_machines.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_native_layout.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_cluster_identity.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 3
 "test_cluster_identity.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
@@ -40,3 +46,9 @@
 "test_machines.py -> machines/setup.py#_db" = 1
 "test_machines.py -> machines/setup.py#_machine_setup" = 1
 "test_machines.py -> machines/setup.py#_truncate_machines" = 1
+
+[debt.third-party-patch]
+"test_cluster_provision.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.setup" = 1
+"test_cluster_provision.py#monkeypatch.setattr psycopg.connect" = 2
+"test_listener_discovery_failure.py#monkeypatch.setattr psutil.net_connections" = 3
+"test_port_preflight.py#monkeypatch.setattr psutil.net_connections" = 8

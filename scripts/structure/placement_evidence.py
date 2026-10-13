@@ -12,8 +12,6 @@ from scripts.structure.imports import executed
 
 __all__ = [
     "IncompleteReferenceEvidenceError",
-    "LegacyPlacement",
-    "Placement",
     "Ref",
     "ReferenceEvidence",
     "RepoRoots",
@@ -147,29 +145,6 @@ class IncompleteReferenceEvidenceError(ValueError):
         self.evidence = evidence
         details = "; ".join(f"{u.path}:{u.line}: {u.reason}" for u in evidence.unresolved)
         super().__init__(details)
-
-
-@dataclass(frozen=True)
-class Placement:
-    """The package a test file belongs to: `home` is a code directory such as `base/host`."""
-
-    home: str | None
-    unit: str | None = None
-    fallback: bool = False  # the patch-evidence fallback applied
-    ambiguous: bool = False  # no unit could legally import all the others
-
-
-@dataclass(frozen=True)
-class LegacyPlacement:
-    """Existing patch-gate inference paired with its complete or incomplete facts.
-
-    This adapter is only for the existing private-patch consumer during cleanup.
-    New locality checks must consume ReferenceEvidence directly; an inferred home
-    from incomplete facts does not certify placement or grant new private access.
-    """
-
-    placement: Placement
-    evidence: ReferenceEvidence
 
 
 @dataclass(frozen=True)

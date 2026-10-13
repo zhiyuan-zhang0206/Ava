@@ -1,0 +1,5 @@
+[debt.env-patch]
+"test_jev_provider.py#monkeypatch.delenv os.environ.TYPESAFE_API_KEY" = 1
+"test_jev_provider.py#monkeypatch.setenv os.environ.TYPESAFE_API_KEY" = 1
+"test_openai_decisions_provider.py#monkeypatch.delenv os.environ.OPENAI_API_KEY" = 1
+"test_openai_decisions_provider.py#monkeypatch.setenv os.environ.OPENAI_API_KEY" = 1

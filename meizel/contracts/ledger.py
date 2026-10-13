@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 
-from meizel.contracts.debt import CYCLE, owner_hint, source_of, total
+from meizel.contracts.debt import owner_hint, source_of, total
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic
 
@@ -48,12 +48,10 @@ def _paid(
 ) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     for code, rows in sorted(manifest.debt.items(), key=lambda item: str(item[0])):
-        if code is CYCLE:
-            continue
         for key, recorded in sorted(rows.items()):
             source = source_of(manifest.directory, code, key)
             remaining = len(groups.get((manifest.directory, code, key), ()))
-            if remaining >= recorded or (source is not None and not in_scope(source)):
+            if remaining >= recorded or not in_scope(source):
                 continue
             found.append(
                 Diagnostic(

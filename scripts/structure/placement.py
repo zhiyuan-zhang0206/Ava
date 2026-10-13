@@ -1,68 +1,16 @@
-"""Where a test file belongs: the package its own first-party references allow.
+"""The module index and reference collector behind the tests-location proof and test selection.
 
-The placement rule (one owner, reused by every test-locality lint):
+A test file's first-party references are collected from import statements (also inside functions),
+string targets of `importlib.import_module` / `importorskip` and friends, paths below the
+repository root naming a source file (`ROOT / "scripts" / "lint" / "x.py"`) and imports in source
+strings the file runs. Evidence that exists only because the file patches something, or only
+because it carries sample data, does not count: a patched module is not the subject, and a path
+counts only as a chain from the repository root. `imports/executed.py` retains unknown inputs and
+`placement_evidence.py` owns root paths.
 
-1. Collect the first-party modules the file *tests*: import statements (also inside
-   functions), string targets of `importlib.import_module` / `importorskip` and friends,
-   paths below the repository root naming a source file (`ROOT / "scripts" / "lint" /
-   "x.py"`) and imports in source strings the file runs. Evidence that exists only because
-   the file *patches* something, or only because it carries sample data, does not count
-   (see "Patch evidence" and "Data is not evidence").
-2. Each module belongs to a *unit*: a top-level package, except `services.<x>`, which is a
-   unit of its own (import-linter says `services` is not a layer).
-3. The home unit is the referenced unit that may legally import every other referenced
-   unit: the import-linter layers and forbidden contracts in `pyproject.toml` decide, and a
-   pair the contracts are silent about falls back to the direction the non-test source
-   already imports (computed lazily, only when a pair needs it). A set of units with no
-   legal top is ambiguous; the pick prefers the unit of the module the file is named after
-   (`test_<module>.py`), then the unit that may import the most others.
-4. Inside the home unit the home package is the deepest package P that holds or directly
-   depends on every referenced module of that unit: each such module lies in P's subtree,
-   or the non-test code in P's subtree imports it (or something below it) directly, function-level
-   imports included. Candidates are the packages on the ancestor chains of the referenced
-   modules, never above their nearest common ancestor directory (the bound). Only direct
-   imports count (a dependency of a dependency does not), and `tests.*`/`<pkg>.tests.*` references
-   are test support, not modules of the unit: a shared helper never raises or lowers the home. If no single
-   package is the deepest (a dependency cycle between two packages), the home stays at the
-   bound. Layer legality stays with step 3: only the home unit's own packages are
-   candidates, so a production import running against the contracts moves no home. A file
-   whose evidence spans packages that no one package depends on therefore lives high: it
-   is an integration test of those packages, not a unit test of one.
-
-Files that stay at the top level by policy (`TOP_LEVEL_*`: e2e, shared fixtures and
-factories, the root conftest, the real-process integration proofs) have no home: there is
-no package below the top level they belong to. A file with no first-party reference has
-none either.
-
-## Patch evidence
-
-The home is where the file's *subject* lives. A module that is imported only to be
-replaced is not its subject, so two kinds of evidence are dropped:
-
-- the string target of a patch (`monkeypatch.setattr("a.b.c", ...)`, `patch("a.b.c")`,
-  `patch.dict`, `patch.multiple`);
-- an import whose bound name is only ever read as the first argument of a patch call
-  (`monkeypatch.setattr(mod, "x", v)`, `patch.object(mod, "x")`, `setitem(mod.d, ...)`).
-
-Without this, a test in package X that patches a private name of a descendant package Y
-would have the placement rule move its home up to a package that owns Y, and the reach-in
-would read as "own package". Fallback (documented, tested): when every strong first-party
-reference of a file is patch evidence, nothing is dropped, so such a file keeps the home
-its patch targets give it rather than losing its home.
-
-## Data is not evidence
-
-A test of a linter or a gate carries sample paths and sample source: the input of its subject,
-not the subject. A path counts only as a chain from the repository root (`repo_root()`, a name
-bound only to it, a climb from `Path(__file__)` ending exactly there): `tmp_path / "scripts"`
-and a bare `"scripts/x.py"` name no root. Source strings count only as actual Python `-c`
-inputs: `imports/executed.py` retains unknown inputs; `placement_evidence.py` owns root paths.
-
-## What a home depends on
-
-The legacy home follows current code and import contracts. Dependency changes can
-change it; commit checks are scoped, while push and CI rescan the tree. It grants
-no private authority under component contracts.
+What this module no longer does is decide a home or a layer: placing a test by the former import-linter
+contracts, and judging private patches by that placement, were replaced by meizel
+(`meizel/docs/checker/checker.ava.okf.md`).
 """
 
 from __future__ import annotations
@@ -70,42 +18,26 @@ from __future__ import annotations
 import ast
 import collections
 import functools
-import itertools
 import re
-import tomllib
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
 
 from meizel.roles import packages
-from scripts.structure import imports, placement_evidence, service_units
+from scripts.structure import placement_evidence, service_units
 from scripts.structure.imports import cache, executed, facts
 from scripts.structure.placement_evidence import (
     IncompleteReferenceEvidenceError,
-    LegacyPlacement,
-    Placement,
     Ref,
     ReferenceEvidence,
 )
 
 __all__ = [
     "CODE_TOPS",
-    "STRONG_KINDS",
-    "TOP_LEVEL_FILES",
-    "TOP_LEVEL_PREFIXES",
     "ModuleIndex",
-    "UnitGraph",
     "collect_reference_evidence",
     "collect_references",
     "common_dir",
-    "is_top_level",
-    "legacy_patch_placement",
-    "place",
-    "placement_references",
-    "unit_graph",
     "unit_of",
-    "unit_root",
     "without_patch_evidence",
 ]
 
@@ -132,20 +64,7 @@ _ROOT_FILES = (
 )
 _PATH_ROOTS = (*CODE_TOPS, *_ARTIFACT_TOPS, *_ROOT_FILES)
 
-# Tests that belong at the top level: no package below it is their home.
-TOP_LEVEL_PREFIXES = ("tests/e2e/", "tests/fixtures/", "tests/factories/")
-TOP_LEVEL_FILES = frozenset(
-    {
-        "conftest.py",
-        "tests/conftest.py",
-        # Real-process integration proofs with their own CI wiring.
-        "tests/integration/test_grafana_native_runtime.py",
-        "tests/integration/test_cluster_instance.py",
-        "tests/integration/test_schedule_runner_cleanup.py",
-    }
-)
 
-STRONG_KINDS = frozenset({"import", "string-target", "embedded-import", "path-file"})
 # The subset of string-target callees whose target is *replaced*, not imported.
 _PATCH_CALLEES = frozenset({"setattr", "delattr", "patch", "dict", "multiple"})
 # `<receiver>.setattr(...)` is a monkeypatch call unless the receiver is one of these.
@@ -161,10 +80,6 @@ def unit_of(module: str) -> str | None:
     if parts[0] == "services" and len(parts) > 1:
         return service_units.unit_of(parts)
     return parts[0]
-
-
-def unit_root(unit: str) -> str:
-    return unit.replace(".", "/")
 
 
 # --------------------------------------------------------------------------- module index
@@ -264,144 +179,6 @@ class ModuleIndex:
 
 
 # --------------------------------------------------------------------------- unit graph
-
-
-@dataclass
-class UnitGraph:
-    """Which unit may import which: contracts first, then per-pair source evidence."""
-
-    repo_root: Path
-    units: list[str]
-    forbidden: set[tuple[str, str]] = field(default_factory=set[tuple[str, str]])
-    reach: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
-
-    @functools.cached_property
-    def empirical(self) -> collections.Counter[tuple[str, str]]:
-        """Import edges between units in the non-test source (computed on first need)."""
-        edges: collections.Counter[tuple[str, str]] = collections.Counter()
-        index = ModuleIndex(self.repo_root)
-        for top in CODE_TOPS:
-            for path in (self.repo_root / top).rglob("*.py"):
-                rel = path.relative_to(self.repo_root)
-                if "tests" in rel.parts or "docs" in rel.parts:
-                    continue
-                source = unit_of(".".join(rel.with_suffix("").parts)) or top
-                try:
-                    tree = ast.parse(path.read_text(encoding="utf-8"))
-                except (SyntaxError, UnicodeDecodeError):
-                    continue
-                for module in _imported_modules(tree, index, rel.as_posix()):
-                    target = unit_of(module)
-                    if target and target != source:
-                        edges[source, target] += 1
-        return edges
-
-    def can_import(self, a: str, b: str) -> bool:
-        """May code in unit `a` import unit `b`?"""
-        if a == b:
-            return True
-        if (a, b) in self.forbidden:
-            return False
-        if b in self.reach[a]:
-            return True
-        if a in self.reach[b]:
-            return False
-        forward, backward = self.empirical[a, b], self.empirical[b, a]
-        return forward > 0 and forward > backward
-
-    def blocked(self, a: str, b: str) -> bool:
-        """Config says code in `a` must not import `b`."""
-        return (a, b) in self.forbidden or a in self.reach[b]
-
-
-def _imported_modules(tree: ast.AST, index: ModuleIndex, rel_path: str) -> Iterable[str]:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import | ast.ImportFrom):
-            clause = imports.normalize(node, rel_path)
-            yield from (ref.module for ref in imports.dependencies(clause, index, CODE_TOPS))
-
-
-def _matching_units(name: str, units: list[str]) -> list[str]:
-    return [unit for unit in units if unit == name or unit.startswith(name + ".")]
-
-
-def _build_units(repo_root: Path) -> list[str]:
-    units = {top for top in CODE_TOPS if top != "services"}
-    units.add("services")
-    units |= service_units.build(repo_root / "services")
-    return sorted(units)
-
-
-def _unit_pairs(graph: UnitGraph, higher: list[str], lower: list[str]) -> set[tuple[str, str]]:
-    """Every (unit matching a `higher` name, unit matching a `lower` name) pair."""
-    return {
-        (hu, lu)
-        for hi in higher
-        for lo in lower
-        for hu in _matching_units(hi, graph.units)
-        for lu in _matching_units(lo, graph.units)
-    }
-
-
-def _layers_contract(graph: UnitGraph, contract: dict[str, object]) -> set[tuple[str, str]]:
-    """Register one layers contract; returns its (higher, lower) edges."""
-    layers = [[part.strip() for part in entry.split("|")] for entry in _strings(contract["layers"])]
-    for group in layers:  # `a | b` siblings are independent: neither may import the other
-        for a, b in itertools.permutations(group, 2):
-            graph.forbidden |= _unit_pairs(graph, [a], [b])
-    edges: set[tuple[str, str]] = set()
-    for index, higher in enumerate(layers):
-        for lower in layers[index + 1 :]:
-            edges |= _unit_pairs(graph, higher, lower)
-    return edges
-
-
-def _forbidden_contract(graph: UnitGraph, contract: dict[str, object]) -> None:
-    exempt: set[str] = set()
-    for ignore in _strings(contract.get("ignore_imports", [])):
-        left = ignore.split("->")[0].strip()
-        exempt.add(left.split(".*")[0].rstrip("*").rstrip("."))
-    for source in _strings(contract["source_modules"]):
-        for source_unit in _matching_units(source, graph.units):
-            if source_unit in exempt or any(source_unit.startswith(e + ".") for e in exempt):
-                continue
-            for forbidden in _strings(contract["forbidden_modules"]):
-                graph.forbidden.update(
-                    (source_unit, target) for target in _matching_units(forbidden, graph.units)
-                )
-
-
-def _strings(value: object) -> list[str]:
-    if not isinstance(value, list):
-        raise TypeError(f"import-linter contract field must be a list, got {type(value).__name__}")
-    return [str(item) for item in cast("list[object]", value)]
-
-
-@functools.cache
-def unit_graph(repo_root: Path) -> UnitGraph:
-    """The unit graph derived from `[tool.importlinter]` in pyproject.toml (read once)."""
-    config = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
-    contracts: list[dict[str, object]] = config["tool"]["importlinter"]["contracts"]
-    graph = UnitGraph(repo_root, _build_units(repo_root))
-    edges: set[tuple[str, str]] = set()
-    for contract in contracts:
-        if contract["type"] == "layers":
-            edges |= _layers_contract(graph, contract)
-        elif contract["type"] == "forbidden":
-            _forbidden_contract(graph, contract)
-    adjacency: dict[str, set[str]] = {unit: set() for unit in graph.units}
-    for higher, lower in edges:
-        adjacency[higher].add(lower)
-    for unit in graph.units:  # transitive closure over the CONFIG edges only
-        seen: set[str] = set()
-        stack = list(adjacency[unit])
-        while stack:
-            current = stack.pop()
-            if current not in seen:
-                seen.add(current)
-                stack.extend(adjacency[current])
-        graph.reach[unit] = seen - {unit}
-    return graph
 
 
 # --------------------------------------------------------------------------- references
@@ -594,10 +371,6 @@ def _patch_only_names(nodes: Sequence[ast.AST]) -> set[str]:
     return {name for name in patched if other[name] == 0}
 
 
-def _has_strong(refs: Iterable[Ref]) -> bool:
-    return any(ref.kind in STRONG_KINDS for ref in refs)
-
-
 def without_patch_evidence(nodes: Sequence[ast.AST], refs: list[Ref]) -> list[Ref]:
     """`refs` minus what exists only because the file patches it (see the module docstring)."""
     patch_only = _patch_only_names(nodes)
@@ -609,84 +382,7 @@ def without_patch_evidence(nodes: Sequence[ast.AST], refs: list[Ref]) -> list[Re
     ]
 
 
-def placement_references(
-    tree: ast.AST, index: ModuleIndex, nodes: Sequence[ast.AST] | None = None, rel_path: str = ""
-) -> tuple[list[Ref], bool]:
-    """(the references that decide the home, whether the patch-evidence fallback applied).
-
-    Fallback: a file whose every strong reference is patch evidence keeps all of them.
-    """
-    return _subject_references(
-        collect_references(tree, index, rel_path), list(ast.walk(tree)) if nodes is None else nodes
-    )
-
-
-def _subject_references(refs: list[Ref], nodes: Sequence[ast.AST]) -> tuple[list[Ref], bool]:
-    pruned = without_patch_evidence(nodes, refs)
-    if _has_strong(refs) and not _has_strong(pruned):
-        return refs, True
-    return pruned, False
-
-
 # --------------------------------------------------------------------------- placement
-
-
-def _pick_unit(
-    units: list[str], graph: UnitGraph, weight: collections.Counter[str], stem: str, refs: list[Ref]
-) -> tuple[str, bool]:
-    """(home unit, ambiguous)."""
-    unique = sorted(set(units))
-    if len(unique) == 1:
-        return unique[0], False
-    maximal = [u for u in unique if all(graph.can_import(u, v) for v in unique if v != u)]
-    if len(maximal) == 1:
-        return maximal[0], False
-    if maximal:  # mutual reachability: break the tie by the heavier source edge balance
-
-        def balance(unit: str) -> tuple[int, int]:
-            out = sum(graph.empirical[unit, v] for v in unique if v != unit)
-            into = sum(graph.empirical[v, unit] for v in unique if v != unit)
-            return out - into, weight[unit]
-
-        return max(maximal, key=balance), False
-    return _ambiguous_pick(unique, graph, weight, stem, refs), True
-
-
-def _ambiguous_pick(
-    unique: list[str],
-    graph: UnitGraph,
-    weight: collections.Counter[str],
-    stem: str,
-    refs: list[Ref],
-) -> str:
-    def fits(unit: str) -> bool:
-        return not any(graph.blocked(unit, other) for other in unique if other != unit)
-
-    def rank(unit: str) -> tuple[int, int, int]:
-        others = [v for v in unique if v != unit]
-        return (
-            sum(graph.can_import(unit, v) for v in others),
-            sum(graph.empirical[unit, v] for v in others),
-            weight[unit],
-        )
-
-    pool = [unit for unit in unique if fits(unit)] or unique
-    named = _unit_named_after(stem, unique, graph, refs)
-    return named or max(pool, key=rank)  # max: the first maximum, as a stable sort would give
-
-
-def _unit_named_after(
-    stem: str, unique: list[str], graph: UnitGraph, refs: list[Ref]
-) -> str | None:
-    """The unit of the referenced module the file is named after (`test_<module>.py`)."""
-    for ref in refs:
-        legal = ref.unit in unique and ref.kind in STRONG_KINDS
-        if legal and not any(graph.blocked(ref.unit, v) for v in unique if v != ref.unit):
-            leaf = ref.module.split(".")[-1].lstrip("_")
-            named = stem == leaf or stem.endswith("_" + leaf) or stem.startswith(leaf + "_")
-            if len(leaf) >= 4 and named:
-                return ref.unit
-    return None
 
 
 def common_dir(dirs: list[str]) -> str:
@@ -697,95 +393,3 @@ def common_dir(dirs: list[str]) -> str:
             break
         common.append(parts[0])
     return "/".join(common)
-
-
-def is_top_level(rel_path: str) -> bool:
-    """A file that stays at the top level by policy."""
-    return rel_path in TOP_LEVEL_FILES or rel_path.startswith(TOP_LEVEL_PREFIXES)
-
-
-def _inside(directory: str, package: str) -> bool:
-    return directory == package or directory.startswith(package + "/")
-
-
-def _chain(directories: Iterable[str], bound: str) -> set[str]:
-    """`bound` and every package below it on an ancestor chain of one of `directories`."""
-    floor = bound.count("/")
-    parts = [directory.split("/") for directory in directories]
-    return {
-        "/".join(chain[:depth]) for chain in parts for depth in range(floor + 1, len(chain) + 1)
-    }
-
-
-def _serves(index: ModuleIndex, package: str, dirs: dict[str, str]) -> bool:
-    """Does `package` hold or directly import every module (`dirs`: module -> its directory)?"""
-    return all(
-        _inside(directory, package) or package in index.importers.get(module, ())
-        for module, directory in dirs.items()
-    )
-
-
-def _home_dir(index: ModuleIndex, unit: str, modules: list[str]) -> str:
-    """The deepest package of the unit that holds or directly depends on every module.
-
-    The bound is the nearest common ancestor directory of the modules; a package on a module's
-    ancestor chain below it qualifies when each module is in its subtree or imported by its
-    non-test code. One deepest package is the home; none (a dependency cycle) leaves the bound.
-    """
-    dirs = {module: index.dir_of(module) for module in sorted(set(modules))}
-    bound = common_dir(list(dirs.values()))
-    root = unit_root(unit)
-    if not (index.repo_root / root).is_dir():  # a loose module file such as services/pidfile.py
-        root = str(Path(root).parent)
-    if not bound.startswith(root):
-        return root
-    fits = [package for package in _chain(dirs.values(), bound) if _serves(index, package, dirs)]
-    deepest = [
-        package for package in fits if not any(o != package and _inside(o, package) for o in fits)
-    ]
-    return deepest[0] if len(deepest) == 1 else bound
-
-
-def place(
-    rel_path: str, tree: ast.AST, index: ModuleIndex, nodes: Sequence[ast.AST] | None = None
-) -> Placement:
-    """Where the file at `rel_path` (repo-relative, POSIX) belongs.
-
-    `nodes` is `list(ast.walk(tree))` when the caller already has it (saves one traversal).
-    """
-    if is_top_level(rel_path):
-        return Placement(None)
-    found, fallback = placement_references(tree, index, nodes, rel_path)
-    return _place_subjects(rel_path, index, found, fallback=fallback)
-
-
-def _place_subjects(
-    rel_path: str, index: ModuleIndex, refs: list[Ref], *, fallback: bool
-) -> Placement:
-    basis = [ref for ref in refs if ref.kind in STRONG_KINDS] or refs  # loose evidence last
-    if not basis:
-        return Placement(None)
-    weight = collections.Counter(ref.unit for ref in refs)
-    stem = Path(rel_path).name.removeprefix("test_").removesuffix(".py")
-    graph = unit_graph(index.repo_root)
-    unit, ambiguous = _pick_unit(sorted({ref.unit for ref in basis}), graph, weight, stem, refs)
-    home = _home_dir(index, unit, [ref.module for ref in basis if ref.unit == unit])
-    return Placement(home, unit, fallback, ambiguous)
-
-
-def legacy_patch_placement(
-    rel_path: str, tree: ast.AST, index: ModuleIndex, nodes: Sequence[ast.AST]
-) -> LegacyPlacement:
-    """Retain the current patch gate's inference, visibly carrying every gap.
-
-    The root integration owner coordinates the private-policy design. Remove
-    this adapter only after that design and its real consumer/seam closure are
-    verified with no exemptions; locality acceptance does not choose that rule.
-    It shares the collector and placement calculation; it does not parse again
-    with another grammar or suppress IncompleteReferenceEvidenceError.
-    """
-    evidence = collect_reference_evidence(tree, index, rel_path)
-    if is_top_level(rel_path):
-        return LegacyPlacement(Placement(None), evidence)
-    refs, fallback = _subject_references(evidence.refs, nodes)
-    return LegacyPlacement(_place_subjects(rel_path, index, refs, fallback=fallback), evidence)

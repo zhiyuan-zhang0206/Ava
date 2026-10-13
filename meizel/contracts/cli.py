@@ -14,13 +14,15 @@ from meizel.contracts.bootstrap import bootstrap
 from meizel.contracts.debt_carry import carry as carry_debt
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
-from meizel.contracts.debt_report import diff, summarize
+from meizel.contracts.debt_report import changed_under, diff, summarize
 from meizel.contracts.declare import declare
 from meizel.contracts.explain import explain
 from meizel.contracts.ledger import debts_in
+from meizel.contracts.policy import changes as policy_changes
+from meizel.contracts.policy import load_policy, policy_at
 from meizel.contracts.sync import prune
 from meizel.graph.model import Diagnostic, MeizelError
-from meizel.graph.universe import toplevel
+from meizel.graph.universe import load_universe, toplevel
 
 __all__ = ["main", "relative_target"]
 
@@ -126,6 +128,10 @@ def build_parser() -> argparse.ArgumentParser:
     seed = commands.add_parser("bootstrap", help="generate manifests from current facts")
     seed.add_argument("--out", type=Path, required=True, help="directory to mirror manifests into")
     add_debt_parser(commands)
+    policy = commands.add_parser("policy", help="the allowance lists in meizel.policy.toml")
+    policy_modes = policy.add_subparsers(dest="policy_mode", required=True)
+    policy_diff = policy_modes.add_parser("diff", help="list the entries changed against a git ref")
+    policy_diff.add_argument("--against", required=True, metavar="ref")
     declared = commands.add_parser("roles", help="the declared top-level packages and their copies")
     modes = declared.add_subparsers(dest="mode", required=True)
     listing = modes.add_parser("list", help="print the top-level directories of the given roles")
@@ -150,6 +156,13 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
     modes.add_parser("prune", help="remove recorded debt that no longer occurs")
     moving = modes.add_parser("carry", help="move recorded debt to where renamed files now are")
     moving.add_argument(
+        "--rename-target",
+        action="append",
+        default=[],
+        metavar="OLD=NEW",
+        help="a patch target that was renamed (a symbol, not a file); repeatable",
+    )
+    moving.add_argument(
         "--base",
         metavar="ref",
         help="compare with this ref (default: the branch point with origin/main)",
@@ -157,14 +170,27 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
     growth = modes.add_parser("diff", help="compare recorded totals with a git ref")
     growth.add_argument("--against", required=True, metavar="ref")
     growth.add_argument("--on-growth", required=True, choices=["fail", "warn"])
+    growth.add_argument(
+        "--waive-if-changed",
+        nargs="+",
+        default=[],
+        metavar="pathspec",
+        help="treat growth as a warning when the change touches these git pathspecs (the rules)",
+    )
 
 
-def _run_diff(root: Path, ref: str, on_growth: str) -> int:
+def _run_diff(root: Path, ref: str, on_growth: str, waive_if_changed: list[str]) -> int:
     lines, grew = diff(root, ref)
     print("\n".join(lines))
     if not grew:
         print(f"meizel: no growth against {ref}")
         return 0
+    rules = changed_under(root, ref, waive_if_changed) if waive_if_changed else []
+    if rules and on_growth == "fail":
+        print(
+            f"meizel: growth is reported, not failed: this change edits the rules ({', '.join(rules[:3])})"
+        )
+        on_growth = "warn"
     warning = "" if on_growth == "fail" else " warning:"
     print(f"meizel:{warning} recorded debt grew against {ref}", file=sys.stderr)
     return 1 if on_growth == "fail" else 0
@@ -202,9 +228,9 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
             print(line)
         return 0
     if mode == "diff":
-        return _run_diff(root, args.against, args.on_growth)
+        return _run_diff(root, args.against, args.on_growth, args.waive_if_changed)
     if mode == "carry":
-        lines = carry_debt(root, args.base)
+        lines = carry_debt(root, args.base, args.rename_target)
         for line in lines:
             print(f"meizel: carried {line}")
         if not lines:
@@ -267,6 +293,12 @@ def main(argv: list[str] | None = None) -> int:
             return run_check(root, base, args.paths, args.limit, args.jobs, args.changed)
         if args.command == "debt":
             return run_debt(root, base, args, args.jobs)
+        if args.command == "policy":
+            for line in policy_changes(
+                policy_at(root, args.against), load_policy(load_universe(root))[0]
+            ):
+                print(line)
+            return 0
         if args.command == "explain":
             print(explain(analyze(root, jobs=args.jobs), relative_target(root, base, args.path)))
             return 0

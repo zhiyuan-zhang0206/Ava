@@ -1,3 +1,7 @@
+[debt.env-patch]
+"test_manager_pty.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_manager_pty.py#monkeypatch.setitem os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_daemon.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1
 "test_daemon.py#monkeypatch.setattr services.wake.schedule_manager.daemon.Database.pool" = 1
@@ -21,3 +25,7 @@
 "test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.telemetry.emit" = 1
 "test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.manager.time.monotonic" = 1
 "test_revision_recovery.py#monkeypatch.setattr services.wake.schedule_manager.revisions.client.list_sessions" = 3
+
+[debt.unresolved-patch]
+"test_manager_pty.py#monkeypatch.setattr mgr._mark_running" = 1
+"test_revision_recovery.py#monkeypatch.setattr backend.new_session" = 3

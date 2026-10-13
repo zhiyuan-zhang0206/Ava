@@ -22,3 +22,6 @@
 "test_cluster_status_fields.py#monkeypatch.setattr base.sessions.backend.get_shell_backend" = 8
 "test_cluster_status_fields.py#monkeypatch.setattr ops.cluster_status.agent_shell_sessions" = 4
 "test_cluster_status_fields.py#monkeypatch.setattr ops.cluster_status.collect_sessions" = 1
+
+[debt.stdlib-patch]
+"test_cluster_status_fields.py#monkeypatch.setattr os.kill" = 1

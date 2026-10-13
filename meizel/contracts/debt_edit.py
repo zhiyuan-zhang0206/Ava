@@ -9,9 +9,10 @@ import tomllib
 from pathlib import Path
 
 from meizel.contracts.analysis import Analysis, analyze
-from meizel.contracts.debt import CYCLE, TABLE_KEY, DebtTable, set_debt, total
+from meizel.contracts.debt import CYCLE_EDGE, TABLE_KEY, DebtTable, local_edge, set_debt, total
 from meizel.contracts.ledger import tally
 from meizel.contracts.manifest import Manifest, manifest_path
+from meizel.contracts.rule import cycle_edge
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
 
@@ -52,14 +53,31 @@ def write_baseline(root: Path, owner: str, table: DebtTable) -> str | None:
     return manifest_path(owner)
 
 
-def _back_edges(manifest: Manifest) -> dict[str, int]:
-    """The recorded back-edges plus the fewest more that leave the declared graph acyclic."""
+def _new_back_edges(manifest: Manifest) -> set[tuple[str, str]]:
+    """The fewest declared edges, beyond the recorded ones, to treat as back-edges so the graph is acyclic."""
     uses = manifest.graph()
     carried = set(manifest.back_edges())
     base = {src: [t for t in targets if (src, t) not in carried] for src, targets in uses.items()}
     chosen = carried | set(feedback_edges(base))
-    needed = chosen - set(unneeded_back_edges(uses, chosen))
-    return {f"{src} -> {dst}": 1 for src, dst in sorted(needed)}
+    return (chosen - set(unneeded_back_edges(uses, chosen))) - carried
+
+
+def _cycle_facts(analysis: Analysis, manifest: Manifest) -> dict[str, int]:
+    """Per `source -> target` key, the facts on the edges newly chosen as back-edges."""
+    new = _new_back_edges(manifest)
+    if not new:
+        return {}
+    seen: dict[tuple[str, int, str], str] = {}
+    for proj in analysis.projections:
+        if proj.exempt or proj.lca != manifest.directory or (proj.cf, proj.ct) not in new:
+            continue
+        diagnostic = cycle_edge(proj)
+        if diagnostic.debt is not None:
+            seen[(diagnostic.path, diagnostic.line, diagnostic.message)] = diagnostic.debt.key
+    counts: dict[str, int] = {}
+    for key in seen.values():
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _recordable(analysis: Analysis, targets: list[str]) -> list[Diagnostic]:
@@ -85,7 +103,9 @@ def record(
         rows[key] = max(rows.get(key, 0), len(found))
     for owner, manifest in analysis.manifests.items():
         if _within(owner, targets):
-            tables[owner][CYCLE] = _back_edges(manifest)
+            facts = _cycle_facts(analysis, manifest)
+            if facts:
+                tables[owner].setdefault(CYCLE_EDGE, {}).update(facts)
     written: list[str] = []
     created: list[str] = []
     for owner, table in sorted(tables.items()):
@@ -96,7 +116,9 @@ def record(
     unrecordable = [
         d
         for d in analysis.diagnostics
-        if d.debt is None and d.code not in {CYCLE, Code.DEBT_PAID} and _within(d.path, targets)
+        if d.debt is None
+        and d.code not in {Code.MANIFEST_CYCLE, Code.DEBT_PAID}
+        and _within(d.path, targets)
     ]
     return written, created, unrecordable
 
@@ -110,18 +132,14 @@ def prune(root: Path, jobs: int | None = None) -> list[str]:
     for owner, manifest in sorted(analysis.manifests.items()):
         if not manifest.debt:
             continue
+        unneeded = set(unneeded_back_edges(manifest.graph(), manifest.back_edges()))
         table: DebtTable = {}
         for code, rows in manifest.debt.items():
-            if code is CYCLE:
-                gone = {
-                    f"{s} -> {d}"
-                    for s, d in unneeded_back_edges(manifest.graph(), manifest.back_edges())
-                }
-                kept = {key: n for key, n in rows.items() if key not in gone}
-            else:
-                kept = {
-                    key: min(n, len(found.get((owner, code, key), ()))) for key, n in rows.items()
-                }
+            kept = {
+                key: min(n, len(found.get((owner, code, key), ())))
+                for key, n in rows.items()
+                if not (code is CYCLE_EDGE and local_edge(key) in unneeded)
+            }
             table[code] = {key: n for key, n in kept.items() if n > 0}
         if write_baseline(root, owner, table):
             lines.append(

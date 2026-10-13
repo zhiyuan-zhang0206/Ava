@@ -20,9 +20,18 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "telemetry" = ["api_contracts", "clock", "cluster", "config", "db", "events", "host", "log", "native_process", "paths"]
 "tests" = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "db", "deploy", "events", "host", "lm", "log", "native_process", "packages", "paths", "sessions", "telemetry"]
 
-[debt.manifest-cycle]
-"host -> config" = 1
-"paths -> config" = 1
+[debt.cycle-edge]
+"host/env/tests/_env_import_child.py -> config/__init__.py" = 2
+"host/env/tests/test_agent_slices.py -> config/__init__.py" = 1
+"host/env/tests/test_agent_slices.py -> config/agent_pins.py" = 1
+"host/env/tests/test_agent_slices.py -> config/config_registry.py" = 3
+"host/env/tests/test_config_refresh.py -> config/__init__.py" = 7
+"host/env/tests/test_dotenv_boot.py -> config/__init__.py" = 1
+"host/env/tests/test_file_lock_bounded.py -> config/runtime_config.py" = 6
+"host/env/tests/test_registry.py -> config/__init__.py" = 1
+"host/system/tests/test_packages_job.py -> config/__init__.py" = 3
+"host/system/tests/test_walg_job.py -> config/__init__.py" = 1
+"paths/__init__.py -> config/__init__.py" = 2
 
 [debt.private-module]
 "tests/config/bootstrap/_lite_parity_child.py -> config/_full.py" = 1

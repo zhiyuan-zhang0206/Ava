@@ -4,6 +4,12 @@ exports = ["test_mcp_endpoint.py"]
 "test_mcp_guarded_creation.py" = ["test_mcp_endpoint.py"]
 "test_mcp_message_source.py" = ["test_mcp_endpoint.py"]
 
+[debt.env-patch]
+"test_mcp_endpoint.py#patch.dict os.environ" = 1
+"test_plugin_ui.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_schedule_runner.py#monkeypatch.delenv os.environ.AVA_SCHEDULE_ID" = 1
+"test_ui_contributions.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_guide.py#monkeypatch.setattr gateway.routers.guide.create_and_launch_agent" = 1
 "test_mcp_endpoint.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
@@ -41,3 +47,6 @@ exports = ["test_mcp_endpoint.py"]
 
 [debt.private-name]
 "test_mcp_guarded_creation.py -> test_mcp_endpoint.py#_enable_endpoint" = 1
+
+[debt.stdlib-patch]
+"test_schedule_runner.py#monkeypatch.setattr sys.argv" = 1

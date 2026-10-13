@@ -1,3 +1,6 @@
+[debt.env-patch]
+"test_cluster_drift.py#monkeypatch.setenv os.environ.AVA_HOME" = 5
+
 [debt.first-party-patch]
 "test_cluster_drift.py#monkeypatch.setattr base.deploy.git.cluster_drift.prod_source_dir" = 2
 "test_cluster_drift.py#monkeypatch.setattr base.paths.ava_home" = 1
@@ -23,3 +26,9 @@
 "test_memory_repo_pool_snapshot.py#monkeypatch.setattr base.deploy.git.memory_repo.POOL_SNAPSHOT_MAX_BYTES" = 2
 "test_source_tree_guard.py#monkeypatch.setattr base.deploy.git.source_tree_guard.git" = 2
 "test_source_tree_guard.py#monkeypatch.setattr base.paths.ava_home" = 10
+
+[debt.stdlib-patch]
+"test_memory_repo.py#monkeypatch.setattr subprocess.run" = 2
+
+[debt.third-party-patch]
+"test_memory_repo_pool_snapshot.py#monkeypatch.setattr httpx.Client" = 3

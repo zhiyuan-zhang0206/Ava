@@ -2,6 +2,10 @@
 "subreaper_probe.py" = ["process_evidence.py"]
 "test_posixproc.py" = ["process_evidence.py"]
 
+[debt.env-patch]
+"test_coding_session_owner.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_env_forwarding.py#monkeypatch.setenv os.environ.PATH" = 2
+
 [debt.first-party-patch]
 "test_backend.py#monkeypatch.setattr base.paths.repo_root" = 1
 "test_coding_session_owner.py#monkeypatch.setattr base.sessions.coding_session_owner.Path" = 1
@@ -20,3 +24,9 @@
 "test_posixproc_liveness.py#monkeypatch.setattr base.sessions.posixproc.os.killpg" = 2
 "test_posixproc_liveness.py#monkeypatch.setattr base.sessions.posixproc.psutil.process_iter" = 2
 "test_pty_backend.py#monkeypatch.setattr base.sessions.pty.client.CONNECT_WAIT_S" = 1
+
+[debt.stdlib-patch]
+"test_env_forwarding.py#monkeypatch.setattr os.environ" = 4
+
+[debt.unresolved-patch]
+"test_posixproc.py#monkeypatch.setattr psosx.INIT_BOOT_TIME" = 2

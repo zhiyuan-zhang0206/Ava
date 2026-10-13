@@ -715,16 +715,33 @@ jobs:
       - name: Locality gate (meizel check, whole repository)
         run: env -u VIRTUAL_ENV uv run python -m meizel check
 
-      - name: Recorded locality debt against the base (warns on growth)
+      - name: Recorded locality debt against the base (fails on growth)
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
+        # Strict-to-be debt may only shrink. The one waiver is decided by path: a change that edits
+        # meizel's rule code (Python under meizel/ outside tests) may grow the baselines, because
+        # widening a rule does. The tool applies it (--waive-if-changed); nobody judges it by eye.
         run: |
-          set +e
-          out="$(env -u VIRTUAL_ENV uv run python -m meizel debt diff --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=warn 2>&1)"
-          status=$?
-          echo "$out"
-          if [ "$status" -ne 0 ]; then exit "$status"; fi
-          if grep -q "debt grew" <<<"$out"; then
-            echo "::warning title=Recorded locality debt grew::Strict-to-be debt may only shrink. Fix the new violation instead of running 'meizel debt record'; see docs/contributing.md (Locality gate)."
+          env -u VIRTUAL_ENV uv run python -m meizel debt diff \
+            --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
+            --waive-if-changed ':(glob)meizel/**/*.py' ':(exclude,glob)meizel/**/tests/**'
+
+      - name: Allowance policy changes (informational)
+        if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
+        # meizel.policy.toml is the one closed list of allowances. A change to it is listed here and
+        # in the check summary so a reviewer sees it at once; this step reports and never fails.
+        run: |
+          changes="$(env -u VIRTUAL_ENV uv run python -m meizel policy diff --against "$LINT_STRUCTURE_BASELINE_BASE")"
+          if [ -n "$changes" ]; then
+            echo "::warning title=meizel.policy.toml changed::The allowance list changed. Read the entries in the log or the check summary."
+            echo "meizel.policy.toml changed:"
+            echo "$changes"
+            {
+              echo "### meizel.policy.toml changed"
+              echo
+              echo '```'
+              echo "$changes"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Save pre-commit environments

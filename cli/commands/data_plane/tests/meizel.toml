@@ -1,6 +1,17 @@
 [uses]
 "test_native_storage_diagnostics.py" = ["test_pooler_stop.py"]
 
+[debt.env-patch]
+"test_cluster_instance_bind.py#monkeypatch.setenv os.environ" = 2
+"test_cluster_instance_bind.py#patch.dict os.environ" = 1
+"test_pg_stop_escalation.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_pg_stop_escalation.py#patch.dict os.environ" = 1
+"test_pgbouncer_reachable_bind_wait.py#monkeypatch.setenv os.environ" = 1
+"test_pgbouncer_stop_isolation.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
+"test_pooler_stop.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_storage_ownership_data_plane.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_walg_cmd.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_cluster_instance_bind.py#monkeypatch.setattr base.cluster.ownership.redis_data_dir" = 4
 "test_cluster_instance_bind.py#monkeypatch.setattr base.cluster.port_preflight.bind_addrs" = 5
@@ -165,3 +176,10 @@
 "test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.tick.run_drill_now" = 1
 "test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.tick.run_tick" = 1
 "test_walg_cmd.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 3
+
+[debt.stdlib-patch]
+"test_pg_socket_dir.py#monkeypatch.setattr os.geteuid" = 1
+"test_pg_stop_escalation.py#monkeypatch.setattr time.monotonic" = 1
+
+[debt.third-party-patch]
+"test_pgbouncer_stop_isolation.py#monkeypatch.setattr psutil.Process" = 2

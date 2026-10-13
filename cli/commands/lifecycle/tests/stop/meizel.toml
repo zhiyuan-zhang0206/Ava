@@ -8,6 +8,15 @@ exports = ["stop_support.py"]
 "test_stop_escalation_report.py" = ["stop_support.py"]
 "test_stop_terminals.py" = ["stop_support.py"]
 
+[debt.env-patch]
+"stop_support.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"stop_support.py#monkeypatch.setenv os.environ.HOME" = 2
+"stop_support.py#monkeypatch.setitem os.environ.AVA_HOME" = 1
+"test_stop.py#monkeypatch.setenv os.environ.HOME" = 4
+"test_stop.py#monkeypatch.setitem os.environ.AVA_HOME" = 4
+"test_stop_terminals.py#monkeypatch.setenv os.environ.AVA_HOME" = 4
+"test_stop_terminals.py#monkeypatch.setitem os.environ.AVA_HOME" = 2
+
 [debt.first-party-patch]
 "stop_support.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
 "stop_support.py#monkeypatch.setattr base.sessions.hosting.hosting_supervised_session" = 1
@@ -76,3 +85,9 @@ exports = ["stop_support.py"]
 "test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.close_via_service" = 1
 "test_stop_terminals.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.live_terminals" = 2
 "test_stop_terminals.py#monkeypatch.setattr services.agent_runner.pty_sessions.ledger.SWEEP_HANGUP_WAIT_S" = 1
+
+[debt.stdlib-patch]
+"test_data_plane_stop.py#monkeypatch.setattr pathlib.Path.read_text" = 1
+
+[debt.unresolved-patch]
+"test_stop.py#monkeypatch.setattr command_runtime.machine.role" = 2

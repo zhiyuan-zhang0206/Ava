@@ -46,12 +46,19 @@ class Code(StrEnum):
     MANIFEST_DUPLICATE = "manifest-duplicate"
     MANIFEST_SELF_EDGE = "manifest-self-edge"
     MANIFEST_CYCLE = "manifest-cycle"
+    CYCLE_EDGE = "cycle-edge"
     MANIFEST_EXPORT_PRIVATE = "manifest-export-private"
     MANIFEST_STALE_EDGE = "manifest-stale-edge"
     MANIFEST_ROLES = "manifest-roles"
     MANIFEST_DEBT = "manifest-debt"
+    POLICY_SYNTAX = "policy-syntax"
+    UNLISTED_ALLOWANCE = "unlisted-allowance"
     DEBT_PAID = "debt-paid"
     FIRST_PARTY_PATCH = "first-party-patch"
+    STDLIB_PATCH = "stdlib-patch"
+    THIRD_PARTY_PATCH = "third-party-patch"
+    ENV_PATCH = "env-patch"
+    UNRESOLVED_PATCH = "unresolved-patch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,11 +87,12 @@ class Restricted:
 
 @dataclass(frozen=True, slots=True)
 class Patch:
-    """A test (or fixture) patching first-party code: `form` applied to `target`, a dotted name."""
+    """A patch: `form` applied to `target` (a dotted name, or the source text when it is unresolved)."""
 
     line: int
     form: str
     target: str
+    code: Code
 
 
 @dataclass(frozen=True, slots=True)

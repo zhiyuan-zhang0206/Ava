@@ -5,3 +5,8 @@ exports = ["test_continuation.py", "test_return_boundaries.py"]
 
 [debt.private-name]
 "test_return_boundaries.py -> test_continuation.py#_install_faults" = 1
+
+[debt.unresolved-patch]
+"test_authority.py#monkeypatch.setattr graph.aupdate_state" = 1
+"test_authority.py#monkeypatch.setattr host._run_turn" = 1
+"test_no_execution_replay.py#monkeypatch.setattr saver.aput" = 1

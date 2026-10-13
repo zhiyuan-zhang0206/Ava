@@ -12,7 +12,9 @@ from pathlib import Path
 from meizel.contracts.debt import file_key
 from meizel.contracts.ledger import reconcile
 from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
-from meizel.contracts.rule import Projection, judge, project
+from meizel.contracts.policy import check as check_policy
+from meizel.contracts.policy import load_policy
+from meizel.contracts.rule import Projection, judge, project, relative
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
@@ -144,8 +146,41 @@ def _source_diagnostics(
     return found
 
 
+_PATCH_WHAT = {
+    Code.FIRST_PARTY_PATCH: "first-party",
+    Code.STDLIB_PATCH: "standard-library",
+    Code.THIRD_PARTY_PATCH: "third-party",
+    Code.ENV_PATCH: "the environment",
+    Code.UNRESOLVED_PATCH: "an unresolved target",
+}
+_PATCH_HINT = {
+    Code.FIRST_PARTY_PATCH: (
+        "do not patch first-party code: split the code under test into a public facade and an "
+        "implementation whose dependencies are explicit parameters, and let the test pass the "
+        "fake in directly"
+    ),
+    Code.STDLIB_PATCH: (
+        "do not patch the standard library: the code under test takes the dependency (a clock, a "
+        "sleeper, a file opener) as an explicit parameter, and the test passes the fake in directly"
+    ),
+    Code.THIRD_PARTY_PATCH: (
+        "do not patch a third-party package: wrap it behind a first-party seam whose dependency is "
+        "an explicit parameter, and let the test pass the fake in directly"
+    ),
+    Code.ENV_PATCH: (
+        "do not patch the environment: read the setting once at the boundary and pass the value "
+        "in as an explicit parameter"
+    ),
+    Code.UNRESOLVED_PATCH: (
+        "the target of this patch is not an imported module or object, so what it replaces is "
+        "invisible to the checker: inject the dependency as an explicit parameter instead of "
+        "patching it"
+    ),
+}
+
+
 def _patch_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
-    """Patching first-party code: the dependency was not injected."""
+    """Patching: the dependency was not injected."""
     found: list[Diagnostic] = []
     for scan in scans:
         owner = scan.path.rpartition("/")[0]
@@ -154,13 +189,9 @@ def _patch_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
                 Diagnostic(
                     scan.path,
                     patch.line,
-                    Code.FIRST_PARTY_PATCH,
-                    f"{patch.form} on first-party {patch.target}",
-                    (
-                        "do not patch first-party code: split the code under test into a public "
-                        "facade and an implementation whose dependencies are explicit parameters, "
-                        "and let the test pass the fake in directly",
-                    ),
+                    patch.code,
+                    f"{patch.form} on {_PATCH_WHAT[patch.code]} {patch.target}",
+                    (_PATCH_HINT[patch.code],),
                     DebtKey(owner, file_key(owner, scan.path, f"{patch.form} {patch.target}")),
                 )
             )
@@ -274,8 +305,10 @@ def _judge_facts(
     needed: dict[tuple[str, str, str], list[Fact]] = defaultdict(list)
     for proj in projections:
         found.extend(judge(proj, manifests))
-        if not proj.exempt:
-            needed[proj.local_edge].append(proj.fact)
+        manifest = manifests.get(proj.lca)
+        if not proj.exempt and manifest is not None:
+            for source, target in manifest.covering(*relative(proj)):
+                needed[(proj.lca, source, target)].append(proj.fact)
     return projections, found, dict(needed)
 
 
@@ -290,6 +323,9 @@ def analyze(
     """
     universe = load_universe(root)
     manifests, diagnostics = load_manifests(universe)
+    policy, policy_problems = load_policy(universe)
+    diagnostics.extend(policy_problems)
+    diagnostics.extend(check_policy(manifests, policy))
     scope = None if changed is None else frozenset(changed)
     scans = scan_all(universe, jobs) if scope is None else _scan_changed(universe, scope, jobs)
     judged = sorted(scans if scope is None else scope & scans.keys())

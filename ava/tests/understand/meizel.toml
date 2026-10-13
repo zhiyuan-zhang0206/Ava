@@ -4,6 +4,10 @@
 "test_understand_batch.py" = ["provider_support.py"]
 "test_understand_injection.py" = ["provider_support.py"]
 
+[debt.env-patch]
+"test_understand.py#patch.dict os.environ" = 1
+"test_understand_autosave.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 1
+
 [debt.first-party-patch]
 "provider_support.py#monkeypatch.setattr ava.context" = 1
 "provider_support.py#monkeypatch.setattr base.config.settings.lm.gemini_api_key" = 1

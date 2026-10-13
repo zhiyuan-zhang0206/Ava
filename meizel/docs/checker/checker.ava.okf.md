@@ -129,22 +129,22 @@ discovered content that core does not depend on.
 
 ## Manifest
 
-`meizel.toml` keys are `exports` (list), `[uses]` and `[loads]` (tables of
-lists), `[external]` (reason strings) and `[debt.<code>]` (recorded debt). Names
-are direct children: files with extension, directories by name.
-`meizel.toml` itself is not a child and does not count toward the directory
-budget. A directory without a manifest has no local edges and exports its door.
+`meizel.toml` keys are `exports` (list), `[uses]` (endpoints may name deeper paths:
+[[meizel/docs/checker/narrowing.ava.okf.md|narrowed endpoints]]), `[loads]` and `[external]`
+(only for sites listed in [[meizel/docs/checker/policy.ava.okf.md|the policy file]]) and
+`[debt.<code>]`. Names are direct children: files with extension, directories by name.
+`meizel.toml` is not a child and does not count toward the directory budget. A directory
+without a manifest has no local edges and exports its door.
 
 ## When it fails
 
-Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`,
-`private-name`, `restricted-python`, `first-party-patch` ([[meizel/docs/checker/patching.ava.okf.md|patching]]), `unresolved-import` (a first-party import
-naming no tracked module), `stale-load`, `stale-external`, and the manifest codes
-`manifest-syntax`, `manifest-unknown-key`, `manifest-unknown-child`,
-`manifest-duplicate`, `manifest-self-edge`, `manifest-cycle`,
-`manifest-export-private`, `manifest-stale-edge` (a declared edge no fact
-needs), `manifest-debt` and `debt-paid`. An undeclared edge that would close a
-cycle says so; the way out is a public door or an injected collaborator.
+Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
+`cycle-edge`, `restricted-python`, the patch codes ([[meizel/docs/checker/patching.ava.okf.md|patching]]),
+`unresolved-import`, `unlisted-allowance`,
+`stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
+(`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,
+stale-edge, debt, roles). An undeclared edge that would close a cycle says so; the way out is
+a public door or an injected collaborator.
 
 ## Layout
 

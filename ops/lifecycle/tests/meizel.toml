@@ -3,6 +3,10 @@
 "test_agents_internals_lifecycle.py" = ["resurrection_setup.py"]
 "test_resurrection_fences.py" = ["resurrection_setup.py"]
 
+[debt.env-patch]
+"test_termination_message.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_termination_message.py#monkeypatch.setenv os.environ.HOME" = 1
+
 [debt.first-party-patch]
 "test_agent_launch_runner.py#monkeypatch.setattr base.lm.factory.validate_model_config" = 1
 "test_agent_launch_runner.py#monkeypatch.setattr ops.lifecycle.launch.publish_inbound_wake" = 1
@@ -32,3 +36,7 @@
 
 [debt.private-name]
 "operations/test_resurrect_if_terminated_placement.py -> test_operations.py#_db" = 1
+
+[debt.third-party-patch]
+"test_agents_internals_lifecycle.py#monkeypatch.setattr psycopg.Cursor.execute" = 1
+"test_agents_internals_lifecycle.py#monkeypatch.setattr psycopg.Cursor.fetchone" = 1

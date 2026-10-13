@@ -12,8 +12,8 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "service_read.py" = ["config_registry.py", "domains", "runtime_config.py"]
 "tests" = ["__init__.py", "_full.py", "_lite.py", "admin", "base.py", "config_registry.py", "runtime_config.py", "service_read.py"]
 
-[debt.manifest-cycle]
-"runtime_config.py -> __init__.py" = 1
+[debt.cycle-edge]
+"runtime_config.py -> __init__.py" = 2
 
 [debt.private-name]
 "tests/_boot_lite_child.py -> __init__.py#_FIELDS" = 1

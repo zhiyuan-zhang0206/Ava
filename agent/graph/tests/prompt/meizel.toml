@@ -1,3 +1,8 @@
+[debt.env-patch]
+"test_agent_id_note.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
+"test_timezone_note.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 2
+"test_timezone_note.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_agent_id_note.py#monkeypatch.setattr agent.graph.prompt.context_notes.machine_clause" = 3
 "test_agent_id_note.py#monkeypatch.setattr agent.graph.prompt.context_notes.own_label" = 5
@@ -47,3 +52,6 @@
 "test_system_prompt_sections.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 10
 "test_system_prompt_sections.py#monkeypatch.setattr base.packages.plugins.activation.record" = 1
 "test_timezone_note.py#monkeypatch.setattr base.config.settings.general.timezone" = 3
+
+[debt.unresolved-patch]
+"test_agent_id_note.py#monkeypatch.setattr ctx.clients._sql" = 1

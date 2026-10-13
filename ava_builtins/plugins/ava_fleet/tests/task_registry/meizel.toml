@@ -18,3 +18,10 @@ exports = ["notes.py", "seeds.py"]
 "test_update_non_owner_notifies_owner.py#monkeypatch.setattr base.events.live.announce.publish_task_created_sync" = 1
 "test_update_non_owner_notifies_owner.py#monkeypatch.setattr base.events.live.announce.publish_task_updated_sync" = 1
 "test_update_receipts.py#monkeypatch.setattr base.telemetry.emit_prepared" = 3
+
+[debt.third-party-patch]
+"test_update_non_owner_notifies_owner.py#patch.object psycopg.Cursor.execute" = 2
+
+[debt.unresolved-patch]
+"test_creation_receipts.py#monkeypatch.setattr module" = 1
+"test_update_receipts.py#monkeypatch.setattr module" = 1

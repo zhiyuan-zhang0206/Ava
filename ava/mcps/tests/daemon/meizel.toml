@@ -16,3 +16,13 @@
 "test_run_daemon_clears_stale_socket_on_startup.py#monkeypatch.setattr ava.mcps.config.display_available" = 1
 "test_run_daemon_clears_stale_socket_on_startup.py#patch.object ava.mcps._daemon.asyncio.run" = 5
 "test_run_daemon_clears_stale_socket_on_startup.py#patch.object ava.mcps._daemon.socket_is_live" = 2
+
+[debt.stdlib-patch]
+"test_run_daemon_clears_stale_socket_on_startup.py#monkeypatch.setattr sys.argv" = 5
+
+[debt.third-party-patch]
+"test_handle_client_retry_sleeps_exponential_backoff.py#monkeypatch.setattr mcp.ClientSession" = 3
+"test_handle_client_retry_sleeps_exponential_backoff.py#monkeypatch.setattr mcp.client.streamable_http.create_mcp_http_client" = 1
+"test_handle_client_retry_sleeps_exponential_backoff.py#monkeypatch.setattr mcp.client.streamable_http.streamable_http_client" = 4
+"test_run_daemon_clears_stale_socket_on_startup.py#monkeypatch.setattr mcp.client.stdio.stdio_client" = 1
+"test_run_daemon_clears_stale_socket_on_startup.py#patch psutil.process_iter" = 2

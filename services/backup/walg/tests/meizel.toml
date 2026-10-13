@@ -14,6 +14,15 @@ exports = ["support.py"]
 "test_tick.py" = ["support.py"]
 "test_verify.py" = ["support.py"]
 
+[debt.env-patch]
+"support.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+"test_runner.py#monkeypatch.setenv os.environ.AVA_API_TOKEN" = 1
+"test_runner.py#monkeypatch.setenv os.environ.AVA_TEST_ONLY_SECRET" = 1
+"test_runner.py#monkeypatch.setenv os.environ.OSS_ACCESS_KEY_SECRET" = 1
+"test_walg_config_boot_owner.py#monkeypatch.delenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_walg_config_boot_owner.py#monkeypatch.setenv os.environ.AVA_PROCESS_PROFILE" = 1
+"test_walg_config_boot_owner.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "support.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.installed_problem" = 1
 "support.py#monkeypatch.setattr base.config.settings.walg.walg_config_file" = 1

@@ -4,6 +4,9 @@
 "test_page_server_daemon.py" = ["page_shell.py"]
 "test_page_server_quiesced.py" = ["slices.py"]
 
+[debt.env-patch]
+"test_daemon_entry.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
+
 [debt.first-party-patch]
 "test_daemon_entry.py#monkeypatch.setattr base.config.settings.general.machine_name" = 1
 "test_daemon_entry.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
@@ -48,3 +51,6 @@
 [debt.private-name]
 "page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py -> test_page_server_daemon.py#_identity" = 1
 "page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py -> test_page_server_daemon.py#_reconcile" = 1
+
+[debt.unresolved-patch]
+"test_daemon_entry.py#monkeypatch.setattr fields.page_server_health_port" = 2

@@ -1,6 +1,9 @@
 [uses]
 "test_entry_config_failure.py" = ["test_reconcile_embed_error_truncates_and_returns_false.py"]
 
+[debt.env-patch]
+"test_reconcile_embed_error_truncates_and_returns_false.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_entry_config_failure.py#monkeypatch.setattr services.derived.memory_indexer.daemon._is_running" = 1
 "test_entry_config_failure.py#monkeypatch.setattr services.derived.memory_indexer.daemon._write_pidfile" = 1
@@ -10,3 +13,6 @@
 "test_reconcile_embed_error_truncates_and_returns_false.py#monkeypatch.setattr services.derived.memory_indexer.daemon.asyncio.sleep" = 1
 "test_reconcile_embed_error_truncates_and_returns_false.py#monkeypatch.setattr services.derived.memory_indexer.daemon.memory_root" = 1
 "test_reconcile_embed_error_truncates_and_returns_false.py#monkeypatch.setattr services.derived.memory_indexer.daemon.process_paths" = 1
+
+[debt.unresolved-patch]
+"test_entry_config_failure.py#monkeypatch.setattr boot.view.services.embedding_backend" = 1

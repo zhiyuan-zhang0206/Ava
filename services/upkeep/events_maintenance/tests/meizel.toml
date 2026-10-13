@@ -71,3 +71,8 @@
 
 [debt.private-name]
 "test_auto_dismiss_cadence.py -> test_events_maintenance_resolution.py#_record" = 1
+
+[debt.unresolved-patch]
+"test_events_maintenance_config.py#monkeypatch.setattr process_config.view.daemon.events_resolution_burst_threshold" = 1
+"test_events_maintenance_config.py#monkeypatch.setattr process_config.view.general.timezone" = 1
+"test_events_maintenance_daemon.py#monkeypatch.setattr progress.beat" = 4

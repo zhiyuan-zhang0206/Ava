@@ -9,6 +9,14 @@ exports = ["claim"]
 [external]
 "test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 
+[debt.env-patch]
+"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONIOENCODING" = 1
+"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONPATH" = 1
+"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONUTF8" = 1
+"test_external.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_external_integration_agent.py#monkeypatch.setenv os.environ.AVA_CALLER_IDENTITY" = 1
+"test_resource_admission.py#patch.dict os.environ" = 1
+
 [debt.first-party-patch]
 "test_compact_part2.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
 "test_external.py#monkeypatch.setattr ava.boot.ensure_plugins_loaded" = 1
@@ -32,3 +40,13 @@ exports = ["claim"]
 
 [debt.restricted-python]
 "test_compact.py#string patch target 'agent.graph.hooks.compact.resolve_context_budget'" = 1
+
+[debt.stdlib-patch]
+"test_exec_subprocess.py#monkeypatch.setattr time.monotonic" = 1
+
+[debt.third-party-patch]
+"test_checkpoint_serde.py#monkeypatch.setattr langgraph.checkpoint.serde.jsonplus._warned_unregistered_types" = 1
+"test_exec_subprocess.py#monkeypatch.setattr psutil.Process" = 2
+
+[debt.unresolved-patch]
+"test_external.py#monkeypatch.setattr attachment.flush" = 4
