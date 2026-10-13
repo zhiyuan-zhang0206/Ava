@@ -29,29 +29,29 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT
 from typing import Any
 
-_REPO = Path(__file__).resolve().parents[1]
-_HOME = 'H="$HOME/.ava"; S="$H/source"; cd "$S" || exit 1'
-_AVA = 'AVA_HOME="$H" "$S/.venv/bin/ava"'
-_PYTHON = f'{_HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
-_STATUS = f"{_HOME}; {_AVA} status --json"
+REPO = Path(__file__).resolve().parents[1]
+HOME = 'H="$HOME/.ava"; S="$H/source"; cd "$S" || exit 1'
+AVA = 'AVA_HOME="$H" "$S/.venv/bin/ava"'
+_PYTHON = f'{HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
+_STATUS = f"{HOME}; {AVA} status --json"
 _FREE = ("inactive", "resumed")  # maintenance statuses with no hold
-_POLL_S = 5  # roster re-read interval
+POLL_S = 5  # roster re-read interval
 _STOP_HINT = (
     '\nOn that host retry "ava stop -y --timeout 600", confirm the maintenance hold is '
     "paused/stopped (`ava status`), then rerun `down`."
 )
 # Reports a dirty tree, never cleans it: untracked files are the operator's to move.
-_CLEAN = (
+CLEAN = (
     'd=$(git status --porcelain | head -n 20); [ -z "$d" ] || { echo "$d"; echo "Untracked files '
     "are not caused by this update (a changed .gitignore can reveal them): check them, then "
     'move them away (do not delete) and rerun down."; exit 1; }'
 )
-_PROBE = f"""{_HOME}
+PROBE = f"""{HOME}
 printf '%s\\n' "head=$(git rev-parse HEAD)"
 printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
-printf '%s\\n' "hold=$({_AVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
+printf '%s\\n' "hold=$({AVA} status --json 2>/dev/null | grep '^{{' | tail -n 1)\""""
 # Early converge passes left these 0555; `uv sync` cannot write through them.
 _VENV_DIRS = (
     "find .venv/bin .venv/lib -maxdepth 3 -type d \\( -path .venv/bin "
@@ -66,7 +66,7 @@ _SECRETS = (
     (re.compile(rf"(?i)(\b{_SECRET_NAME}[\"']?\s*[=:]\s*[\"']?)[^\s\"',;}}]+"), r"\1<redacted>"),
     (re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^/\s:@]*:)[^@\s/]+@"), r"\1<redacted>@"),
 )
-_GATEWAY_PROGRAM = """\
+GATEWAY_PROGRAM = """\
 import json, sys, time, uuid
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
@@ -116,20 +116,20 @@ sys.exit(0 if out["completed"] and out["terminate"] < 300 else 2)
 #   throwaway AVA_HOME (the rows file makes it offline, so no real home is needed and the
 #   home-ownership guard has nothing to refuse), never `cmd_schedules_verify` directly, whose
 #   keyword-only parameters change between versions.
-_VERIFY_SCRIPTS = Path(__file__).parent / "commands" / "management"
+VERIFY_SCRIPTS = Path(__file__).parent / "commands" / "management"
 
 
-def _read_rows_py() -> str:
+def read_rows_py() -> str:
     """The read step; a real file (so its imports are visible) whose text the host receives."""
-    return (_VERIFY_SCRIPTS / "schedules_verify_read_rows.py").read_text(encoding="utf-8")
+    return (VERIFY_SCRIPTS / "schedules_verify_read_rows.py").read_text(encoding="utf-8")
 
 
-def _check_rows_py() -> str:
+def check_rows_py() -> str:
     """The check step; a real file (so its imports are visible) whose text the host receives."""
-    return (_VERIFY_SCRIPTS / "schedules_verify_check_rows.py").read_text(encoding="utf-8")
+    return (VERIFY_SCRIPTS / "schedules_verify_check_rows.py").read_text(encoding="utf-8")
 
 
-_PRE_VERIFY = """{home}
+PRE_VERIFY = """{home}
 W="$H/pre-update-verify"; R="$W.rows"; T=""
 trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"; [ -z "$T" ] || rm -rf "$T"' EXIT
 git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
@@ -167,7 +167,7 @@ def _hold(text: str) -> tuple[str, str | None]:
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
-    command = ["git", "-C", str(_REPO), *args]
+    command = ["git", "-C", str(REPO), *args]
     return subprocess.run(command, capture_output=True, text=True, check=False)  # noqa: S603
 
 
@@ -229,7 +229,7 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> list[str]:
     reasons: list[str] = []
     heads: dict[str, str] = {}
     for alias in [args.gateway, *args.runner]:
-        probe = s.run(alias, _PROBE, effect=False).splitlines()
+        probe = s.run(alias, PROBE, effect=False).splitlines()
         facts = {key: value for key, _, value in (line.partition("=") for line in probe)}
         heads[alias] = facts["head"]
         reasons += _host_refusals(alias, facts)
@@ -237,7 +237,7 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> list[str]:
     if len(old) > 1:
         return [*reasons, f"hosts disagree on HEAD: {heads}"]
     if old and _git("cat-file", "-e", f"{next(iter(old))}^{{commit}}").returncode:
-        return [*reasons, f"OLD {next(iter(old))} is not in {_REPO}: git fetch origin"]
+        return [*reasons, f"OLD {next(iter(old))} is not in {REPO}: git fetch origin"]
     if old:
         stat = _git("diff", "--stat", next(iter(old)), new, "--", *_WATCHED).stdout.rstrip()
         s.say(stat or "no change under " + " ".join(_WATCHED))
@@ -256,11 +256,11 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     Run NEW's verify first."""
     out = s.run(
         args.gateway,
-        _PRE_VERIFY.format(
-            home=_HOME,
+        PRE_VERIFY.format(
+            home=HOME,
             new=new,
-            read_rows=shlex.quote(_read_rows_py()),
-            check_rows=shlex.quote(_check_rows_py()),
+            read_rows=shlex.quote(read_rows_py()),
+            check_rows=shlex.quote(check_rows_py()),
         ),
         effect=False,
     )
@@ -284,7 +284,7 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
     )
 
 
-def _silence_program() -> str:
+def silence_program() -> str:
     """The silence program's source, shipped to the gateway on stdin."""
     return Path(__file__).with_name("fleet_alert_silence.py").read_text()
 
@@ -296,7 +296,7 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
     lines; a window without a silence is noisy, not unsafe."""
     hours = getattr(args, "silence_hours", 0)
     tail = f" --hours {hours:g} --comment {shlex.quote(comment)}" if verb == "open" else ""
-    out = s.run(args.gateway, f"{_PYTHON} - {verb}{tail}", stdin=_silence_program())
+    out = s.run(args.gateway, f"{_PYTHON} - {verb}{tail}", stdin=silence_program())
     for line in out.splitlines():
         if line.startswith(("SILENCE failed", "SILENCE skipped")):
             s.say(f"WARNING: alert silence not {verb}: {line.removeprefix('SILENCE ')}")
@@ -305,19 +305,19 @@ def _silence(s: Session, args: argparse.Namespace, verb: str, comment: str = "")
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
-        raise FailedError(f"refused: {args.new} is not a commit in {_REPO}; git fetch origin")
+        raise FailedError(f"refused: {args.new} is not a commit in {REPO}; git fetch origin")
     if reasons := _preflight(s, args, new):
         raise FailedError("refused: " + "; ".join(reasons))
     everyone = [args.gateway, *args.runner]
     for alias in everyone:  # before any stop: a missing NEW must not strand a stopped cluster
-        s.run(alias, f'{_HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
+        s.run(alias, f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
     _stored_schedules(s, args, new)
     _silence(
         s, args, "open", f"fleet update to {new[:12]}: planned outage; `up` expires this silence"
     )
     for alias in [*args.runner, args.gateway]:
         try:
-            s.run(alias, f"{_HOME}; {_AVA} stop -y --timeout {args.stop_timeout}")
+            s.run(alias, f"{HOME}; {AVA} stop -y --timeout {args.stop_timeout}")
             if not s.dry_run:
                 status, phase = _hold(s.run(alias, _STATUS, effect=False))
                 if (status, phase) != ("paused", "stopped"):
@@ -327,8 +327,8 @@ def down(s: Session, args: argparse.Namespace) -> None:
     for alias in everyone:
         s.run(
             alias,
-            f"{_HOME}; git checkout -q --detach {new} && {_VENV_DIRS} && "
-            f"env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode && {_CLEAN}",
+            f"{HOME}; git checkout -q --detach {new} && {_VENV_DIRS} && "
+            f"env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode && {CLEAN}",
         )
     s.say(f"down complete: every host is stopped on {new[:12]}; run `up` when ready")
 
@@ -338,7 +338,7 @@ def gui_oneshot(alias: str, timeout_s: int) -> str:
     stamp = f"{datetime.now(UTC):%Y%m%dT%H%M%S}"
     label = f"com.ava.fleet-update.{re.sub(r'[^A-Za-z0-9.-]', '-', alias)}.{stamp}"
     log = f"/tmp/{label}/oneshot.log"  # noqa: S108 — remote path in a fresh 0700 directory
-    start = f"{_HOME}; {_AVA} start"
+    start = f"{HOME}; {AVA} start"
     job = {
         "Label": label,
         "ProgramArguments": ["/bin/zsh", "-lc", f'({start}); echo "ONESHOT_RC=$?"'],
@@ -360,7 +360,7 @@ launchctl bootout "gui/$(id -u)/{label}" || echo "bootout of {label} failed"
 rm -rf "$D"; exit "$rc\""""
 
 
-def _machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
+def machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
     """Each listed host's own machine name (what the roster calls it), asked of the host.
 
     Asked with `-c`, so it takes `_PYTHON`, not the `python -` program that reads stdin."""
@@ -383,11 +383,11 @@ def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[di
     that is off) is reported and left alone. A listed host is matched to its row by the
     machine name it reports, not by its SSH alias; no row for it is an error.
     `online` follows the heartbeat: a machine just started is re-read until --roster-timeout."""
-    names = _machine_names(s, [args.gateway, *args.runner])
+    names = machine_names(s, [args.gateway, *args.runner])
     wanted = set(names.values())
     deadline = time.monotonic() + args.roster_timeout
     while True:
-        out = s.run(args.gateway, f"{program} roster", effect=False, stdin=_GATEWAY_PROGRAM)
+        out = s.run(args.gateway, f"{program} roster", effect=False, stdin=GATEWAY_PROGRAM)
         rows = json.loads(out.splitlines()[-1])
         if missing := sorted(wanted - {row["name"] for row in rows}):
             raise FailedError(f"no roster row for {missing} (host aliases to names: {names})")
@@ -403,7 +403,7 @@ def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[di
             raise FailedError(
                 f"roster after {args.roster_timeout}s: offline {offline}; commits {commits}"
             )
-        time.sleep(_POLL_S)
+        time.sleep(POLL_S)
 
 
 def _report_unlisted(s: Session, rows: list[dict[str, Any]], wanted: set[str]) -> None:
@@ -418,7 +418,7 @@ def _report_unlisted(s: Session, rows: list[dict[str, Any]], wanted: set[str]) -
 def _refresh(s: Session, args: argparse.Namespace) -> None:
     """Skills follow their channel, not the checkout; a differing local copy is replaced."""
     for alias in [args.gateway, *args.runner]:
-        out = s.run(alias, f"{_HOME}; {_AVA} packages refresh")
+        out = s.run(alias, f"{HOME}; {AVA} packages refresh")
         if out:  # empty on a dry run
             s.say(f"packages refresh [{alias}] {out.splitlines()[-1].strip()}")
 
@@ -438,7 +438,7 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
     for alias, verb in checks:
         try:
             # effect=True so a dry run lists the check without running it.
-            s.run(alias, f"{_HOME}; {_AVA} {verb}", effect=True)
+            s.run(alias, f"{HOME}; {AVA} {verb}", effect=True)
         except FailedError as exc:
             failed.append(f"`ava {verb}` {exc}")
     if failed:
@@ -448,7 +448,7 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
 def up(s: Session, args: argparse.Namespace) -> None:
     for alias in [args.gateway, *args.runner]:
         macos = s.os[alias] == "Darwin"
-        s.run(alias, gui_oneshot(alias, args.start_timeout) if macos else f"{_HOME}; {_AVA} start")
+        s.run(alias, gui_oneshot(alias, args.start_timeout) if macos else f"{HOME}; {AVA} start")
         if not s.dry_run and (hold := _hold(s.run(alias, _STATUS, effect=False)))[0] not in _FREE:
             raise FailedError(f"{alias}: start left maintenance {hold}")
     program = f"{_PYTHON} -"
@@ -461,7 +461,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
     rows, commit = _roster(s, args, program)
     for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
-        s.run(args.gateway, smoke, stdin=_GATEWAY_PROGRAM)
+        s.run(args.gateway, smoke, stdin=GATEWAY_PROGRAM)
     _refresh(s, args)
     _drift_checks(s, args)  # last, so a false red never skips the smoke or the refresh
     _silence(s, args, "close")

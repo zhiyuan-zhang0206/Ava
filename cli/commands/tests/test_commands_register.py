@@ -16,7 +16,7 @@ from base.daemon.tests.fakes import pin_endpoints
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.schema import migrations
-from cli.commands._repo import _register_machine_or_die
+from cli.commands._repo import register_machine_or_die
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
 from cli.tests._commands_helpers import _assert_named_commands_parse
@@ -149,7 +149,7 @@ def test_register_gateway_advertises_without_gateway_url(
     command_runtime.config.set_field("gateway_port", 8000)
     command_runtime.machine.set(host="10.0.0.2")
 
-    rc = _register_machine_or_die(
+    rc = register_machine_or_die(
         Database.from_settings(gate=database_gate),
         cast(SetupValues, {"machine_name": "control"}),
         frozenset({"gateway"}),
@@ -191,7 +191,7 @@ def test_register_gateway_only_advertises_reachable_host(
     command_runtime.config.set_field("gateway_url", "https://ava.example:8000")
     command_runtime.machine.set(host="10.0.0.2")
 
-    rc = _register_machine_or_die(
+    rc = register_machine_or_die(
         Database.from_settings(gate=database_gate),
         cast(SetupValues, {"machine_name": "control"}),
         frozenset({"gateway"}),
@@ -231,7 +231,7 @@ def test_register_agent_runner_advertises_ops_url(
     command_runtime.machine.set(host="10.0.0.2")
     pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
 
-    rc = _register_machine_or_die(
+    rc = register_machine_or_die(
         Database.from_settings(gate=database_gate),
         cast(SetupValues, {"machine_name": "runner-a"}),
         frozenset({"agent-runner"}),
@@ -275,7 +275,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(
     command_runtime.machine.set(host="127.0.0.1")
     pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
 
-    rc = _register_machine_or_die(
+    rc = register_machine_or_die(
         Database.from_settings(gate=database_gate),
         cast(SetupValues, {"machine_name": "runner-a"}),
         frozenset({"agent-runner"}),
@@ -315,7 +315,7 @@ def test_register_schema_behind_hint_names_working_commands(
     monkeypatch.setattr(machines, "register_self", _missing_table)
     command_runtime.machine.set(host="10.0.0.2")
 
-    rc = _register_machine_or_die(
+    rc = register_machine_or_die(
         Database.from_settings(gate=database_gate),
         cast(SetupValues, {"machine_name": "gw"}),
         frozenset({"gateway"}),
@@ -339,7 +339,7 @@ def test_code_behind_schema_hint_names_working_commands(
 
     monkeypatch.setattr(migrations, "assert_schema_current", _ahead)
 
-    assert _repo_commands._assert_schema_current_or_die() == 1
+    assert _repo_commands.assert_schema_current_or_die() == 1
     err = capsys.readouterr().err
     assert "gateway's revision" in err
     _assert_named_commands_parse(err)

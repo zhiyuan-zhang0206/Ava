@@ -382,7 +382,7 @@ def _apply_env_overrides(dest: Path, name: str, overrides: dict[str, str]) -> No
 _UV_LOCK_POLICY_ENV = ("UV_FROZEN", "UV_LOCKED")
 
 
-def _uv_sync(pkg_dir: Path) -> None:
+def uv_sync(pkg_dir: Path) -> None:
     """Build the package's isolated venv (`<pkg>/.venv`) so its relative
     `.venv/bin/python` command resolves at spawn time. `uv sync` is the only uv
     invocation an installed MCP triggers — never `uv run` (a resident wrapper).
@@ -661,7 +661,7 @@ def cmd_mcp_install(
             _write_mcp_json(dest, name, auto_spec)
         _apply_env_overrides(dest, name, overrides)
         try:
-            _uv_sync(dest)
+            uv_sync(dest)
         except subprocess.CalledProcessError as e:
             shutil.rmtree(dest, ignore_errors=True)
             print(f"[ava mcp install] uv sync failed: {e.stderr.strip()}", file=sys.stderr)
@@ -765,7 +765,7 @@ def cmd_mcp_upgrade(name: str) -> int:
         _land_package(acq.cloned, pkg_dir, dest)
         _apply_env_overrides(dest, name, carried)
         try:
-            _uv_sync(dest)
+            uv_sync(dest)
         except subprocess.CalledProcessError as e:
             print(f"[ava mcp upgrade] uv sync failed: {e.stderr.strip()}", file=sys.stderr)
             return 1

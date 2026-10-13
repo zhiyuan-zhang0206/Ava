@@ -68,19 +68,19 @@ def test_macos_redis_binaries_use_versioned_formula(monkeypatch: pytest.MonkeyPa
     # Exercise formula discovery independently of this machine's explicit pin.
     monkeypatch.setattr(settings.data_plane, "redis_bin_dir", "")
 
-    assert _ci._redis_server_bin() == "/opt/homebrew/opt/redis@8.2/bin/redis-server"
+    assert _ci.redis_server_bin() == "/opt/homebrew/opt/redis@8.2/bin/redis-server"
     assert _ci.redis_cli_bin() == "/opt/homebrew/opt/redis@8.2/bin/redis-cli"
     assert formulae == ["redis@8.2", "redis@8.2"]
 
 
 def test_addr_assigned_loopback_is_true() -> None:
-    assert _ci._addr_assigned("127.0.0.1") is True
+    assert _ci.addr_assigned("127.0.0.1") is True
 
 
 def test_addr_assigned_unassigned_ip_is_false() -> None:
     """192.0.2.0/24 (RFC 5737 TEST-NET-1) is never assigned to a real interface, so
     binding it raises EADDRNOTAVAIL — the exact 'address not up yet' signal."""
-    assert _ci._addr_assigned("192.0.2.1") is False
+    assert _ci.addr_assigned("192.0.2.1") is False
 
 
 def test_wait_returns_immediately_for_loopback_only_host(
@@ -90,7 +90,7 @@ def test_wait_returns_immediately_for_loopback_only_host(
     command_machine.set(host="localhost")
     monkeypatch.setattr(
         _ci,
-        "_addr_assigned",
+        "addr_assigned",
         lambda _a: pytest.fail("must not probe on a loopback-only host"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert _ci.wait_for_reachable_bind(machine=command_machine) is True
@@ -109,7 +109,7 @@ def test_wait_returns_true_once_address_appears(
         seen.append(1)
         return len(seen) >= 2
 
-    monkeypatch.setattr(_ci, "_addr_assigned", _appears)
+    monkeypatch.setattr(_ci, "addr_assigned", _appears)
     assert _ci.wait_for_reachable_bind(machine=command_machine) is True
     assert len(seen) == 2
 
@@ -121,7 +121,7 @@ def test_wait_returns_false_on_timeout(
     command_machine.set(host="10.0.0.5")
     monkeypatch.setattr(_ci, "BIND_WAIT_TIMEOUT_S", 0.0)
     monkeypatch.setattr(_ci.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ci, "_addr_assigned", lambda _a: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "addr_assigned", lambda _a: False)  # pyright: ignore[reportUnknownArgumentType]
     assert _ci.wait_for_reachable_bind(machine=command_machine) is False
 
 
@@ -141,12 +141,12 @@ def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[l
         "wait_for_reachable_bind",
         fake_wait_for_reachable_bind,
     )
-    monkeypatch.setattr(_ci, "_redis_server_bin", lambda: "redis-server")
+    monkeypatch.setattr(_ci, "redis_server_bin", lambda: "redis-server")
     monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     redis_answers = iter([False, True])  # not running before start, up after
     monkeypatch.setattr(
         _ci,
-        "_redis_running",
+        "redis_running",
         lambda *_a, **_kw: next(redis_answers),  # pyright: ignore[reportUnknownArgumentType]
     )
     started: list[list[str]] = []
@@ -156,7 +156,7 @@ def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[l
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
     monkeypatch.setattr(_ci.subprocess, "run", _run)
-    monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "ensure_redis_acl", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     return started
 
 
@@ -237,7 +237,7 @@ def test_start_redis_refuses_missing_credentials_before_effects(
     started = _wire_redis_start(monkeypatch, tmp_path)
     monkeypatch.setattr(
         _ci,
-        "_ensure_redis_acl",
+        "ensure_redis_acl",
         lambda *_a, **_kw: pytest.fail("ACL effect without credentials"),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(ValueError, match="password"):
@@ -248,7 +248,7 @@ def test_start_redis_refuses_missing_credentials_before_effects(
 
 def test_redis_admin_helpers_refuse_an_empty_password(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="admin password"):
-        _ci._write_redis_conf(tmp_path, "")
+        _ci.write_redis_conf(tmp_path, "")
     with pytest.raises(ValueError, match="admin password"):
         _ci.redis_cli_env("")
     assert not (tmp_path / "redis.conf").exists()
@@ -341,8 +341,8 @@ def test_running_redis_persists_the_authenticated_password_to_its_config(
 ) -> None:
     """A journal retry repairs config after an old-password false-down probe."""
     monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
     (tmp_path / "redis.conf").write_text('requirepass "stale-old-password"\n')
 
     assert _ci.start_redis(6380, "journal-password", "runtime", "ava", machine=command_machine) == 0
@@ -365,7 +365,7 @@ def test_redis_config_keeps_previous_complete_value_when_replace_fails(
     monkeypatch.setattr(private_storage.os, "replace", _fail_replace)
 
     with pytest.raises(OSError, match="injected replace failure"):
-        _ci._write_redis_conf(tmp_path, "new-complete")
+        _ci.write_redis_conf(tmp_path, "new-complete")
 
     assert conf.read_text() == 'requirepass "old-complete"\n'
 
@@ -380,8 +380,8 @@ def test_redis_conf_always_renders_rdb_save_schedule(
     schedule and requirepass survive every conf render, or a restart silently
     loses persistence (task #2027) or comes back without a password."""
     monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _ci.start_redis(6380, "admin", "runtime", "ava", machine=command_machine) == 0
     assert (tmp_path / "redis.conf").read_text() == (
@@ -442,9 +442,9 @@ def test_start_probes_receive_the_url_hosts(
         return 0
 
     monkeypatch.setattr(_ci, "pg_running", pg_running)
-    monkeypatch.setattr(_ci, "_redis_running", _redis_running)
-    monkeypatch.setattr(_ci, "_ensure_redis_acl", _ensure_redis_acl)
-    monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_running", _redis_running)
+    monkeypatch.setattr(_ci, "ensure_redis_acl", _ensure_redis_acl)
+    monkeypatch.setattr(_ci, "ensure_pg_data", lambda: tmp_path)
     monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []
@@ -457,7 +457,7 @@ def test_start_probes_receive_the_url_hosts(
     monkeypatch.setattr(_ci.owned_postgres, "start", _no_native_effect)
     monkeypatch.setattr(_ci.subprocess, "run", _run)
 
-    assert _ci._start_pg(15433, retained_children=retained_children, machine=command_machine) == 0
+    assert _ci.start_pg(15433, retained_children=retained_children, machine=command_machine) == 0
     assert _ci.start_redis(16380, "admin", "runtime", "ava", machine=command_machine) == 0
     assert seen == {"redis": (16380, "10.0.0.7")}
 
@@ -468,9 +468,9 @@ def _wire_pg_start(
     *,
     running: bool = False,
 ) -> list[list[str]]:
-    """Common mocks for _start_pg: a not-running pg on a scratch data dir, with
+    """Common mocks for start_pg: a not-running pg on a scratch data dir, with
     subprocess.run captured."""
-    monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "ensure_pg_data", lambda: tmp_path)
 
     def captured(*_args: object, **_kwargs: object) -> SimpleNamespace | None:
         return SimpleNamespace(pid=123, live=lambda: True) if running else None
@@ -506,12 +506,12 @@ def test_start_pg_on_a_single_box_never_probes_an_address(
     command_machine.set(host="localhost")
     monkeypatch.setattr(
         _ci,
-        "_addr_assigned",
+        "addr_assigned",
         lambda _a: pytest.fail("loopback-only bind must never probe an address"),  # pyright: ignore[reportUnknownArgumentType]
     )
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
+    assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
     assert calls != [], "the start must proceed without waiting"
 
 
@@ -525,7 +525,7 @@ def test_start_pg_sets_owner_only_socket_permissions(
     """Postgres itself creates local trust sockets without group/world access."""
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
+    assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
     assert "unix_socket_permissions=0700" in calls[0]
     assert Path(calls[0][0]).name == "postgres"
     assert "pg_ctl" not in calls[0]
@@ -556,7 +556,7 @@ def test_start_pg_waits_and_fails_fast_on_timeout(
     command_machine.set(host="10.0.0.5")
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    rc = _ci._start_pg(5433, retained_children=retained_children, machine=command_machine)
+    rc = _ci.start_pg(5433, retained_children=retained_children, machine=command_machine)
 
     assert rc == 1
     assert calls == [], "postgres must not be launched when the bind address is absent"
@@ -593,7 +593,7 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     )
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
+    assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
     assert waited == [True]
     assert calls != []
 
@@ -608,7 +608,7 @@ def test_start_pg_adds_no_archive_arguments_while_wal_g_is_off(
     monkeypatch.setattr(settings.walg, "walg_config_file", None)
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
+    assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
 
     assert not [arg for arg in calls[0] if arg.startswith("archive_")]
 
@@ -632,7 +632,7 @@ def test_start_pg_launches_with_the_archive_arguments_when_wal_g_is_on(
     monkeypatch.setattr(_ci, "warn_archive_inactive", record_archive_warning)
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
-    assert _ci._start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
+    assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
 
     args = archive_pg_args(path_reader=lambda: settings.walg.walg_config_file)
     assert args and args[1] == "archive_mode=on"
@@ -669,7 +669,7 @@ def test_the_postmaster_inherits_no_ava_authority(
         return ["127.0.0.1"]
 
     monkeypatch.setattr(port_preflight, "bind_addrs", fake_bind_addrs)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "ensure_pg_data", lambda: tmp_path)
     monkeypatch.setattr(_ci, "pg_running", lambda _port, _host: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "pg_socket_dir", lambda: tmp_path)
     envs: list[dict[str, str]] = []
@@ -682,7 +682,7 @@ def test_the_postmaster_inherits_no_ava_authority(
     monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", start)
 
-    assert _ci._start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
+    assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
     [env] = envs
     assert env["PATH"] == "/usr/bin:/bin" and env["TZ"] == "Asia/Shanghai"
     assert not [key for key in env if key.startswith("AVA_")]
@@ -705,7 +705,7 @@ def test_start_pg_hands_the_built_start_env_to_owned_launch(
         return ["127.0.0.1"]
 
     monkeypatch.setattr(port_preflight, "bind_addrs", fake_bind_addrs)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "ensure_pg_data", lambda: tmp_path)
     monkeypatch.setattr(_ci, "pg_running", lambda _port, _host: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "pg_socket_dir", lambda: tmp_path)
     sentinel = {"LC_ALL": "en_US.UTF-8", "PATH": "/usr/bin:/bin"}
@@ -720,7 +720,7 @@ def test_start_pg_hands_the_built_start_env_to_owned_launch(
     monkeypatch.setattr(_ci, "_pg_bin", Mock(return_value="/test/postgres"))
     monkeypatch.setattr(_ci.owned_postgres, "start", start)
 
-    assert _ci._start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
+    assert _ci.start_pg(5433, retained_children=retained_children, machine=command_machine) == 0
     assert envs == [sentinel]
 
 

@@ -125,7 +125,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
     stamp.write_text(want)
 
 
-def _assert_schema_current_or_die() -> int:
+def assert_schema_current_or_die() -> int:
     """Verify the DB's applied migration set == the code's required set. Targeted
     hints for the two failure shapes (DB behind code / code behind DB)."""
     from base.deploy.schema.migrations import (
@@ -175,7 +175,7 @@ class GatewayProbe(NamedTuple):
     (connection refused / timeout — nothing is listening). `detail` is the exception
     text in that case, else the truncated response body.
 
-    The agent-runner preflight (`_probe_gateway_or_die`) uses this result to
+    The agent-runner preflight (`probe_gateway_or_die`) uses this result to
     distinguish an unavailable gateway from a rejected request.
     """
 
@@ -213,7 +213,7 @@ def probe_gateway_once(gateway_url: str, *, timeout_s: float = 10.0) -> GatewayP
 _PREFLIGHT_RETRY_INTERVAL_S = 5.0
 
 
-def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIGHT_BUDGET_S) -> int:
+def probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIGHT_BUDGET_S) -> int:
     """Probe the gateway from an agent-runner over the private network.
 
     The agent-runner's ops server is dialed *by* the gateway, but the host
@@ -276,7 +276,7 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
         time.sleep(wait_s)
 
 
-def _register_machine_or_die(
+def register_machine_or_die(
     db: Database, resolved: SetupValues, roles: MachineRoles, *, command: CommandRuntime
 ) -> int:
     """UPSERT this host into the machines table with typed error handling.
@@ -342,7 +342,7 @@ def _register_machine_or_die(
     return 0
 
 
-def _preflight_probes(db: Database, *, command: CommandRuntime) -> int:
+def preflight_probes(db: Database, *, command: CommandRuntime) -> int:
     """Run gateway and DB reachability checks BEFORE stopping services.
 
     Designed for `ava restart` and the fleet update (self-update leg): validate
@@ -358,26 +358,26 @@ def _preflight_probes(db: Database, *, command: CommandRuntime) -> int:
     Returns 0 when both checks pass, non-zero otherwise.
     """
 
-    from cli.commands._setup import _collect_setup_values, _missing_setup_message
+    from cli.commands._setup import collect_setup_values, missing_setup_message
 
     # Resolve setup from the home's persisted env/files (read-only, no writes).
-    resolved, missing = _collect_setup_values(config=command.config)
+    resolved, missing = collect_setup_values(config=command.config)
     if missing:
-        print(_missing_setup_message(missing), file=sys.stderr)
+        print(missing_setup_message(missing), file=sys.stderr)
         return 1
 
     roles_raw = resolved.get("machine_role", "")
     roles: MachineRoles = frozenset(roles_raw.split(",")) if roles_raw else frozenset()
 
     print("\n→ preflight: register machine in central DB")
-    rc = _register_machine_or_die(db, resolved, roles, command=command)
+    rc = register_machine_or_die(db, resolved, roles, command=command)
     if rc != 0:
         print("  ✗ preflight failed: cannot register machine — host still serving", file=sys.stderr)
         return rc
 
     if "agent-runner" in roles and "gateway" not in roles:
         print("\n→ preflight: probe gateway")
-        rc = _probe_gateway_or_die(resolved["gateway_url"])
+        rc = probe_gateway_or_die(resolved["gateway_url"])
         if rc != 0:
             print("  ✗ preflight failed: gateway unreachable — host still serving", file=sys.stderr)
             return rc

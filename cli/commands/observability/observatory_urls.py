@@ -22,7 +22,7 @@ from base.host.atomic_io import write_text_atomic
 from base.telemetry.station_endpoint import validated_observability_base
 
 
-def _observability_datasource_urls(*, database_factory: DatabaseFactory) -> tuple[str, str, str]:
+def observability_datasource_urls(*, database_factory: DatabaseFactory) -> tuple[str, str, str]:
     """The (loki, prometheus, pg) datasource URLs for the rendered Grafana tree.
 
     Two-state on AVA_OBSERVABILITY_URL: empty (default) keeps the current
@@ -84,7 +84,7 @@ def _pg_datasource_host_port(*, remote_observatory: bool, database_factory: Data
     return _host_port(host, port)
 
 
-def _alerts_webhook_url(*, machine: MachineIdentity) -> str:
+def alerts_webhook_url(*, machine: MachineIdentity) -> str:
     """The Grafana alert webhook target — the GATEWAY's own reachable address.
 
     Deliberately NOT derived from observability_url: the alert ingest endpoint

@@ -44,7 +44,7 @@ proves it are [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]].
 - **Launch arguments, not `ALTER SYSTEM`** (`archive.py`): `archive_mode=on`,
   `archive_timeout=60s` and `archive_command='<wal-g> --config <file> wal-push %p'`
   (with `%` in paths escaped) are appended to the postmaster's `-c` list by
-  `cli/commands/data_plane/cluster_instance.py:_start_pg`. Nothing is written to the
+  `cli/commands/data_plane/cluster_instance.py:start_pg`. Nothing is written to the
   data directory, so a base backup carries no archive setting and switching off
   leaves nothing behind. `archive_mode` is read only at Postgres launch: a retained
   postmaster keeps its previous arguments, so enabling or disabling needs

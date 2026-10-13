@@ -259,9 +259,7 @@ def tree_manifest(
     return sorted(manifest, key=lambda item: str(item["path"]))
 
 
-def _validate_manifest_subset(
-    current: list[dict[str, Any]], expected: list[dict[str, Any]]
-) -> None:
+def validate_manifest_subset(current: list[dict[str, Any]], expected: list[dict[str, Any]]) -> None:
     expected_by_path = {str(item["path"]): item for item in expected}
     for item in current:
         path = str(item["path"])
@@ -288,7 +286,7 @@ def verify_cleanup_file(path: Path, expected: dict[str, Any]) -> None:
 def remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
     """Refuse path-based deletion after validating the caller's preservation candidate."""
     current = tree_manifest(root)
-    _validate_manifest_subset(current, expected)
+    validate_manifest_subset(current, expected)
     for item in current:
         if item["kind"] == "file":
             verify_cleanup_file(root / str(item["path"]), item)

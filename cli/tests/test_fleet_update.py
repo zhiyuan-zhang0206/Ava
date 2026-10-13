@@ -80,7 +80,7 @@ class Cluster:
             host["up"], host["hold"] = False, ("paused", "stopped")
         elif kind == "switch":
             assert not host["up"] and self.new in command
-            assert fleet_update._CLEAN in shlex.split(command)[2]
+            assert fleet_update.CLEAN in shlex.split(command)[2]
             assert "uv sync --frozen --compile-bytecode" in command
             host["head"] = self.new
         elif kind in ("start", "oneshot"):
@@ -139,10 +139,10 @@ class Cluster:
             emit(self.names[alias])
             return 0
         if " - roster" in command:
-            assert stdin == fleet_update._GATEWAY_PROGRAM
+            assert stdin == fleet_update.GATEWAY_PROGRAM
             emit(self._roster_json())
             return 0
-        if stdin == fleet_update._silence_program():
+        if stdin == fleet_update.silence_program():
             return self._silence(alias, command, emit)
         if "verify" in command:
             return self._verify(alias, command, emit)
@@ -216,7 +216,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Cluster, Calla
         _git(repo, "add", "-A")
         _git(repo, "commit", "-qm", message)
     cluster = Cluster(_git(repo, "rev-parse", "HEAD~1"), _git(repo, "rev-parse", "HEAD"))
-    monkeypatch.setattr(fleet_update, "_REPO", repo)
+    monkeypatch.setattr(fleet_update, "REPO", repo)
     monkeypatch.setattr(fleet_update, "ssh", cluster.ssh)
     monkeypatch.setattr(fleet_update, "time", cluster)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
@@ -436,7 +436,7 @@ def test_the_roster_is_re_read_while_heartbeats_catch_up(
     assert run("down") == 0
     cluster.roster_lag = 3
     assert run("up") == 0
-    assert (cluster.roster_reads, cluster.now) == (4, 3 * fleet_update._POLL_S)
+    assert (cluster.roster_reads, cluster.now) == (4, 3 * fleet_update.POLL_S)
 
 
 def test_a_roster_that_never_agrees_fails_with_its_last_state(
@@ -446,7 +446,7 @@ def test_a_roster_that_never_agrees_fails_with_its_last_state(
     assert run("down") == 0
     cluster.roster_lag = 10**6
     assert run("up", "--roster-timeout", "30") == 1
-    assert cluster.roster_reads == 30 // fleet_update._POLL_S + 1
+    assert cluster.roster_reads == 30 // fleet_update.POLL_S + 1
     assert "roster after 30s: offline ['gw', 'mac', 'lin']" in capsys.readouterr().out
     assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
 
@@ -518,7 +518,7 @@ def test_a_dirty_tree_is_shown_not_cleaned(tmp_path: Path) -> None:
     _git(repo, "init", "-q", "--initial-branch=main")
 
     def check() -> subprocess.CompletedProcess[str]:
-        argv = ["bash", "-c", fleet_update._CLEAN]
+        argv = ["bash", "-c", fleet_update.CLEAN]
         return subprocess.run(argv, cwd=repo, capture_output=True, text=True, check=False)  # noqa: S603
 
     assert check().returncode == 0
@@ -555,7 +555,7 @@ def test_refuses_inside_an_ava_agent(
 
 def test_a_python_change_needs_the_flag(env: tuple[Cluster, Callable[..., int]]) -> None:
     cluster, run = env
-    repo = fleet_update._REPO
+    repo = fleet_update.REPO
     (repo / ".python-version").write_text("3.12.13\n")
     _git(repo, "commit", "-qam", "python")
     cluster.new = _git(repo, "rev-parse", "HEAD")
@@ -609,7 +609,7 @@ def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
     monkeypatch.setenv("HOME", str(tmp_path))
 
     result = subprocess.run(  # noqa: S603
-        [shell, "-c", fleet_update._PROBE], capture_output=True, text=True, check=True
+        [shell, "-c", fleet_update.PROBE], capture_output=True, text=True, check=True
     )
 
     facts = {
@@ -656,7 +656,7 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(
     monkeypatch.setattr(fleet_update, "ssh", ssh)
     args = argparse.Namespace(dry_run=False, log_dir=tmp_path / "logs", half="up")
 
-    names = fleet_update._machine_names(fleet_update.Session(args), ["mac"])
+    names = fleet_update.machine_names(fleet_update.Session(args), ["mac"])
 
     assert names == {"mac": "mac-mini"}
 

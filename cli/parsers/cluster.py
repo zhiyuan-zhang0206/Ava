@@ -119,7 +119,7 @@ def _add_db_authority_parser(
     install_unit_p.set_defaults(func=_h_cluster_db_authority_install_unit)
 
 
-def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava cluster status` — list machines table + per-agent-runner status_probe op
     cluster_p = sub.add_parser(
         "cluster",
