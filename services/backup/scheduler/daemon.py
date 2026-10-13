@@ -154,7 +154,7 @@ def backup_components(state: BackupState) -> list[dict[str, object]]:
     return [record]
 
 
-async def _sleep(seconds: float) -> None:
+async def sleep_in_chunks(seconds: float) -> None:
     """Sleep in bounded chunks so SIGTERM reaches the scheduler promptly."""
     remaining = seconds
     while remaining > 0:
@@ -177,10 +177,10 @@ async def sleep_until_next_backup_hour(now: datetime, *, config: ConfigBoot) -> 
             clock_time(hour=backup_hour),
             tzinfo=local_now.tzinfo,
         )
-    await _sleep((target.astimezone(UTC) - now).total_seconds())
+    await sleep_in_chunks((target.astimezone(UTC) - now).total_seconds())
 
 
-async def _run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> None:
+async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> None:
     """Run one weekly local restore proof without re-running the daily dump."""
     try:
         if not local_dump_restore_due(
@@ -204,7 +204,7 @@ async def _run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> N
         _log.exception("[pg-backup] local restore drill failed")
 
 
-async def _backup_loop(state: BackupState, *, config: ConfigBoot) -> None:
+async def backup_loop(state: BackupState, *, config: ConfigBoot) -> None:
     """Run due dumps; a failed dump is reported and not attempted again before the next backup hour."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
     # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
@@ -223,7 +223,7 @@ async def _backup_loop(state: BackupState, *, config: ConfigBoot) -> None:
         try:
             await run_job("dump", now=now, config=config)
             state.record_success(now)
-            await _run_due_local_dump_restore(now, config=config)
+            await run_due_local_dump_restore(now, config=config)
         except Exception as exc:
             state.record_error(str(exc))
             telemetry.emit(
@@ -258,7 +258,7 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path) -> None
     )
     _log.info("[pg-backup] healthz listening on :%s", endpoint.health_port)
     try:
-        await _backup_loop(state, config=config)
+        await backup_loop(state, config=config)
     finally:
         await stop_health_server(health)
         _remove_pidfile(config, runtime=runtime)

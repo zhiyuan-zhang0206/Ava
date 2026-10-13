@@ -9,7 +9,7 @@ import services.supervision.healthchecks.mcp_daemon as hc
 
 
 def test_alive_true_when_probe_answers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "_probe", lambda: True)
+    monkeypatch.setattr(hc, "mcp_daemon_probe", lambda: True)
     assert hc._is_alive() is True
 
 
@@ -31,7 +31,7 @@ def test_alive_false_on_expected_probe_failures(
     def _boom() -> bool:
         raise exc
 
-    monkeypatch.setattr(hc, "_probe", _boom)
+    monkeypatch.setattr(hc, "mcp_daemon_probe", _boom)
     assert hc._is_alive() is False
 
 
@@ -44,7 +44,7 @@ def test_alive_false_on_any_unexpected_exception(
     def _boom() -> bool:
         raise RuntimeError("something nobody predicted")
 
-    monkeypatch.setattr(hc, "_probe", _boom)
+    monkeypatch.setattr(hc, "mcp_daemon_probe", _boom)
     with caplog.at_level(logging.ERROR, logger="services.supervision.healthchecks.mcp_daemon"):
         assert hc._is_alive() is False
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)

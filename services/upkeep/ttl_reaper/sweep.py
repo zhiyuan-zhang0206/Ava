@@ -56,7 +56,7 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
 from ops import lifecycle
 from services.upkeep.ttl_reaper import cadence
-from services.upkeep.ttl_reaper.lifecycle_fences import _scan_stuck_lifecycle_pointers_blocking
+from services.upkeep.ttl_reaper.lifecycle_fences import scan_stuck_lifecycle_pointers_blocking
 from services.upkeep.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
 
 _log = logging.getLogger(__name__)
@@ -231,7 +231,7 @@ async def _slow_phases(pool: ConnectionPool) -> tuple[int, int]:
     if await asyncio.to_thread(
         cadence.claim_due, pool, cadence.STUCK_POINTER_SCAN, cadence.HOURLY_S
     ):
-        stuck = await asyncio.to_thread(_scan_stuck_lifecycle_pointers_blocking, pool)
+        stuck = await asyncio.to_thread(scan_stuck_lifecycle_pointers_blocking, pool)
     return pruned, stuck
 
 

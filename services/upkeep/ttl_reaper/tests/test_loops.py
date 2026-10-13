@@ -202,7 +202,7 @@ def _count_slow_phases(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
         return 0
 
     monkeypatch.setattr(sweep, "prune_schedule_fire_log_blocking", prune)
-    monkeypatch.setattr(sweep, "_scan_stuck_lifecycle_pointers_blocking", stuck)
+    monkeypatch.setattr(sweep, "scan_stuck_lifecycle_pointers_blocking", stuck)
     return calls
 
 

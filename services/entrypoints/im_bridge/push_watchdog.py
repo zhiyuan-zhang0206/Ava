@@ -31,7 +31,7 @@ _log = logging.getLogger("services.entrypoints.im_bridge.core.push_watchdog")
 
 PUSH_RECOVERED_HINT_SECONDS = 60  # seconds after first success to hint
 
-_sleep = asyncio.sleep  # module-local seam: tests patch this name, not asyncio.sleep
+push_watchdog_sleep = asyncio.sleep  # module-local seam: tests patch this name, not asyncio.sleep
 
 
 def retry_backoff_seconds(config: ImBridgeConfig) -> float:
@@ -57,7 +57,7 @@ async def retry_once_after_backoff(
     path (``send_with_retry``) and the ops-alert fan-out
     (``IMBridgeCore.notify_user``)."""
 
-    await _sleep(retry_backoff_seconds(config))
+    await push_watchdog_sleep(retry_backoff_seconds(config))
     await attempt()
 
 

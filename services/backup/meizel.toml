@@ -6,7 +6,3 @@ exports = ["artifact", "dump.py", "restore_drill.py", "scheduler", "walg"]
 "scheduler" = ["artifact", "dump.py", "restore_drill.py"]
 "tests" = ["artifact", "dump.py", "restore_drill.py", "walg"]
 "walg" = ["artifact", "restore_drill.py"]
-
-[debt.private-name]
-"tests/child_offsite_entry.py -> dump.py#_main" = 1
-"tests/test_backup.py -> dump.py#_main" = 3

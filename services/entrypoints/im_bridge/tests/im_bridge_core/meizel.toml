@@ -4,7 +4,7 @@
 [debt.first-party-patch]
 "test_send_message_retries_through_gateway_rollout.py#monkeypatch.setattr services.entrypoints.im_bridge.core.TYPING_INTERVAL_S" = 3
 "test_send_message_retries_through_gateway_rollout.py#monkeypatch.setattr services.entrypoints.im_bridge.core.TYPING_MAX_S" = 2
-"test_send_message_retries_through_gateway_rollout.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog._sleep" = 3
+"test_send_message_retries_through_gateway_rollout.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog.push_watchdog_sleep" = 3
 
 [debt.unresolved-patch]
 "test_selection_maintenance_restore.py#monkeypatch.setattr core.adapters['telegram'].outbound_account_id" = 1

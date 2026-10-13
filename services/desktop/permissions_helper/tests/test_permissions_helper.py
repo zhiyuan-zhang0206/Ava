@@ -671,7 +671,7 @@ def _install_env(
     monkeypatch.setattr(lifecycle.base.paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(lifecycle, "_refuse_foreign_label_jobs", lambda: None)
     monkeypatch.setattr(lifecycle, "_label", lambda: "com.ava.permissions-helper.test")
-    monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
+    monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
     monkeypatch.setattr(lifecycle, "_plist_path", lambda: plist_path)
     monkeypatch.setattr(lifecycle, "_is_loaded", lambda: loaded)
     monkeypatch.setattr(lifecycle, "logs_dir", lambda: log.parent)
@@ -746,6 +746,6 @@ def _retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 
     run = tmp_path / "run"
     run.mkdir(parents=True)
     monkeypatch.setattr(lifecycle, "_agents_dir", lambda: agents)
-    monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
+    monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
     monkeypatch.setattr(lifecycle, "helper_socket", lambda: run / f"permissions-helper.{port}.sock")
     return agents

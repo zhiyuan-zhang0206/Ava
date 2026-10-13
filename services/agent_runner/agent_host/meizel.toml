@@ -20,7 +20,6 @@ exports = ["daemon.py", "host.py", "invocation", "runtime.py", "settlement.py", 
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_OWNERSHIP_RENEW_TIMEOUT_S" = 3
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_TURN_PROGRESS_PUBLISH_TIMEOUT_S" = 2
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_beat_forever" = 7
-"tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_log" = 8
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_ownership_beat_completion" = 1
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_publish_turn_progress_heartbeat" = 13
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_stop_ownership_beat" = 2

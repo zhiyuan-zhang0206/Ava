@@ -186,7 +186,7 @@ def test_sleep_breaks_long_waits_into_shutdown_responsive_chunks(
 
     monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
 
-    asyncio.run(daemon._sleep(125.0))
+    asyncio.run(daemon.sleep_in_chunks(125.0))
 
     assert slept == [60.0, 60.0, 5.0]
 
@@ -201,7 +201,7 @@ def test_next_backup_hour_uses_the_cluster_timezone(monkeypatch: pytest.MonkeyPa
         return UTC
 
     monkeypatch.setattr(daemon, "cluster_tz", utc_zone)
-    monkeypatch.setattr(daemon, "_sleep", fake_sleep)
+    monkeypatch.setattr(daemon, "sleep_in_chunks", fake_sleep)
 
     backup_hour = settings.services.backup_hour
     asyncio.run(
@@ -231,7 +231,7 @@ def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.Monkey
     monkeypatch.setattr(daemon, "sleep_until_next_backup_hour", stop_after_success)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._backup_loop(state, config=ConfigBoot()))
+        asyncio.run(daemon.backup_loop(state, config=ConfigBoot()))
 
     assert len(ran) == 1
     assert state.running is False
@@ -269,11 +269,11 @@ def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(daemon, "cluster_tz", utc_zone)
     monkeypatch.setattr(daemon, "is_due", _always_due)
     monkeypatch.setattr(daemon, "run_job", run_dump)
-    monkeypatch.setattr(daemon, "_run_due_local_dump_restore", skip_restore)
-    monkeypatch.setattr(daemon, "_sleep", stop_after_sleep)
+    monkeypatch.setattr(daemon, "run_due_local_dump_restore", skip_restore)
+    monkeypatch.setattr(daemon, "sleep_in_chunks", stop_after_sleep)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._backup_loop(daemon.BackupState(), config=ConfigBoot()))
+        asyncio.run(daemon.backup_loop(daemon.BackupState(), config=ConfigBoot()))
 
     assert sleeps == [24 * 3600 - 53 * 60 - 52]
 
@@ -303,12 +303,12 @@ def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
         emitted.append((category, event_name, kwargs))
 
     monkeypatch.setattr(daemon, "run_job", fail)
-    monkeypatch.setattr(daemon, "_sleep", no_short_retry_sleep)
+    monkeypatch.setattr(daemon, "sleep_in_chunks", no_short_retry_sleep)
     monkeypatch.setattr(daemon, "sleep_until_next_backup_hour", stop_at_next_backup_hour)
     monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._backup_loop(state, config=ConfigBoot()))
+        asyncio.run(daemon.backup_loop(state, config=ConfigBoot()))
 
     assert ran == ["dump"]
     assert waits == ["next_backup_hour"]
@@ -365,7 +365,7 @@ async def test_due_local_restore_drill_runs_after_a_successful_dump(
     monkeypatch.setattr(daemon, "run_job", restore)
     monkeypatch.setattr(daemon, "record_local_dump_restore_success", record_success)
 
-    await daemon._run_due_local_dump_restore(now, config=ConfigBoot())
+    await daemon.run_due_local_dump_restore(now, config=ConfigBoot())
 
     assert calls == ["restore", now.isoformat()]
 
@@ -396,7 +396,7 @@ async def test_due_local_restore_drill_reports_failure_without_publishing_succes
     monkeypatch.setattr(daemon, "record_local_dump_restore_success", unexpected_success)
     monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
-    await daemon._run_due_local_dump_restore(now, config=ConfigBoot())
+    await daemon.run_due_local_dump_restore(now, config=ConfigBoot())
 
     assert emitted == [
         (
@@ -431,7 +431,7 @@ async def test_invalid_local_restore_marker_reports_failure_without_running_rest
     )
     monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
-    await daemon._run_due_local_dump_restore(now, config=ConfigBoot())
+    await daemon.run_due_local_dump_restore(now, config=ConfigBoot())
 
     assert emitted == [
         (
@@ -551,7 +551,7 @@ def test_next_backup_hour_reads_its_owner_instead_of_ambient_settings(
     async def record_sleep(seconds: float) -> None:
         slept.append(seconds)
 
-    monkeypatch.setattr(daemon, "_sleep", record_sleep)
+    monkeypatch.setattr(daemon, "sleep_in_chunks", record_sleep)
     asyncio.run(daemon.sleep_until_next_backup_hour(_at(hour=6, minute=30), config=config))
     config.view.services.backup_hour = 8
     asyncio.run(daemon.sleep_until_next_backup_hour(_at(hour=6, minute=30), config=config))

@@ -43,7 +43,7 @@ _STUCK_POINTER = (
 )
 
 
-def _scan_stuck_lifecycle_pointers_blocking(pool: ConnectionPool) -> int:
+def scan_stuck_lifecycle_pointers_blocking(pool: ConnectionPool) -> int:
     """Count lifecycle pointers that nothing will settle on its own; alert when any is found.
 
     Both shapes block every resurrect of the named agent until an operator

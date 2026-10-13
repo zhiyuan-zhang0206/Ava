@@ -1,4 +1,4 @@
-"""`services.supervision.healthchecks.gateway` unit tests — the `_probe` branches.
+"""`services.supervision.healthchecks.gateway` unit tests — the `gateway_probe` branches.
 
 A 2xx is necessary but NOT sufficient: the body must also report this unit's
 `$AVA_HOME`, otherwise the responder is some other cluster's gateway (or an
@@ -58,7 +58,7 @@ def _own_health_body() -> bytes:
 def test_probe_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> None:
     """200 + this unit's home → alive."""
     _respond(monkeypatch, 200, _own_health_body())
-    assert hc._probe().alive is True
+    assert hc.gateway_probe().alive is True
 
 
 def test_probe_rejects_gateway_from_another_home(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,7 +74,7 @@ def test_probe_rejects_gateway_from_another_home(monkeypatch: pytest.MonkeyPatch
         200,
         json.dumps({"status": "ok", "home": str(Path.home() / ".ava-some-other-cluster")}).encode(),
     )
-    probe = hc._probe()
+    probe = hc.gateway_probe()
     assert probe.verdict is ProbeVerdict.PORT_TAKEN
     assert probe.terminal is True
     assert "home=" in probe.detail
@@ -83,20 +83,20 @@ def test_probe_rejects_gateway_from_another_home(monkeypatch: pytest.MonkeyPatch
 def test_probe_rejects_body_without_home(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 200 whose body carries no identity at all is not evidence of our gateway."""
     _respond(monkeypatch, 200, b'{"status": "ok"}')
-    assert hc._probe().alive is False
+    assert hc.gateway_probe().alive is False
 
 
 def test_probe_rejects_non_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
     """Some unrelated HTTP server on the port → dead."""
     _respond(monkeypatch, 200, b"<html>nginx</html>")
-    probe = hc._probe()
+    probe = hc.gateway_probe()
     assert probe.verdict is ProbeVerdict.PORT_TAKEN
     assert "not JSON" in probe.detail
 
 
 def test_probe_dead_on_http_500(monkeypatch: pytest.MonkeyPatch) -> None:
     _respond(monkeypatch, 500, b"")
-    assert hc._probe().alive is False
+    assert hc.gateway_probe().alive is False
 
 
 def test_probe_dead_on_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,10 +106,10 @@ def test_probe_dead_on_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    assert hc._probe().alive is False
+    assert hc.gateway_probe().alive is False
 
 
-# ─── _probe always returns a verdict ─────────────────────────────────────
+# ─── gateway_probe always returns a verdict ─────────────────────────────────────
 
 
 def test_probe_survives_an_http_exception(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
@@ -126,7 +126,7 @@ def test_probe_survives_an_http_exception(monkeypatch: pytest.MonkeyPatch, caplo
 
     monkeypatch.setattr(urllib.request, "urlopen", _boom)
     with caplog.at_level(logging.ERROR, logger="base.daemon.health"):  # pyright: ignore[reportUnknownMemberType]
-        probe = hc._probe()
+        probe = hc.gateway_probe()
     assert probe.alive is False
     assert "IncompleteRead" in probe.detail
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)  # pyright: ignore[reportUnknownMemberType]
@@ -144,5 +144,5 @@ def test_probe_reads_the_gateway_health_url_when_it_runs(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(hc, "probe_home", fake_probe_home)
     monkeypatch.setattr(settings.services, "gateway_health_url", "http://gw.example:1/api/health")
-    hc._probe()
+    hc.gateway_probe()
     assert seen == ["http://gw.example:1/api/health"]

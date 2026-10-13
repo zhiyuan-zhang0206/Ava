@@ -361,7 +361,7 @@ def _get(url: str) -> tuple[int, str]:
         return e.code, e.read().decode()
 
 
-def _request(
+def gate_request(
     url: str,
     *,
     method: str = "GET",
@@ -407,7 +407,7 @@ def test_app_proxy_forwards_browser_security_response_headers(servers: Servers) 
     FakeGateway.authenticated = True
     FakeGateway.down = False
 
-    status, body, headers = _request(servers["gate"] + "/fleet")
+    status, body, headers = gate_request(servers["gate"] + "/fleet")
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
@@ -434,7 +434,7 @@ def test_app_proxy_carries_next_rsc_navigation_contract(servers: Servers) -> Non
         "Next-Router-Segment-Prefetch": "/fleet",
     }
 
-    status, body, headers = _request(
+    status, body, headers = gate_request(
         servers["gate"] + "/fleet?agent_id=1&_rsc=abc123", headers=nav_headers
     )
 
@@ -451,7 +451,7 @@ def test_app_proxy_carries_next_rsc_navigation_contract(servers: Servers) -> Non
     }
 
     # The document path is unchanged: no negotiation headers means HTML.
-    status, body, headers = _request(servers["gate"] + "/fleet")
+    status, body, headers = gate_request(servers["gate"] + "/fleet")
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
@@ -466,7 +466,7 @@ def test_app_proxy_drops_hop_by_hop_and_stray_request_headers(servers: Servers) 
     FakeGateway.authenticated = True
     FakeGateway.down = False
 
-    status, body, _ = _request(
+    status, body, _ = gate_request(
         servers["gate"] + "/fleet",
         headers={
             "Connection": "keep-alive, x-smuggled",
@@ -494,7 +494,7 @@ def test_app_proxy_preserves_browser_host_without_forwarded_origin_headers(
     FakeGateway.authenticated = True
     FakeGateway.down = False
 
-    status, body, _ = _request(servers["gate"] + "/fleet")
+    status, body, _ = gate_request(servers["gate"] + "/fleet")
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
@@ -510,7 +510,7 @@ def test_app_proxy_forwards_browser_origin_headers_only_when_provided(servers: S
     FakeGateway.authenticated = True
     FakeGateway.down = False
 
-    status, body, _ = _request(
+    status, body, _ = gate_request(
         servers["gate"] + "/fleet",
         headers={
             "X-Forwarded-Host": "console.example.test:3109",
@@ -527,7 +527,7 @@ def test_app_proxy_forwards_browser_origin_headers_only_when_provided(servers: S
         }
     ]
 
-    status, body, _ = _request(servers["gate"] + "/fleet")
+    status, body, _ = gate_request(servers["gate"] + "/fleet")
 
     assert status == 200
     assert body == "APP-PAGE /fleet"
@@ -541,7 +541,7 @@ def test_app_proxy_rejects_invalid_browser_origin_headers(servers: Servers) -> N
     FakeGateway.authenticated = True
     FakeGateway.down = False
 
-    status, body, _ = _request(
+    status, body, _ = gate_request(
         servers["gate"] + "/fleet",
         headers={
             "X-Forwarded-Host": "console.example.test/invalid",

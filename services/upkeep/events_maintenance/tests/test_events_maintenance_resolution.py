@@ -91,7 +91,7 @@ def _fake_counts(
 
 def _fresh(conn: psycopg.Connection[Any]) -> None:
     """One recent row, so the record reads as current."""
-    _record(conn, level="info", event_name="heartbeat", minutes_ago=0.1)
+    record_maintenance_event(conn, level="info", event_name="heartbeat", minutes_ago=0.1)
 
 
 def capture_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, object]]]:
@@ -104,7 +104,7 @@ def capture_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict
     return emitted
 
 
-def _record(
+def record_maintenance_event(
     conn: psycopg.Connection[Any],
     *,
     minutes_ago: float = 1,
@@ -140,11 +140,13 @@ def _window(minutes: float) -> tuple[datetime, datetime]:
 def test_class_counts_group_the_warning_error_and_critical_rows_of_the_window(
     db_conn: psycopg.Connection[Any],
 ) -> None:
-    _record(db_conn, level="warning", event_name="a")
-    _record(db_conn, level="warning", event_name="a")
-    _record(db_conn, level="critical", event_name="b", process="q", category="log")
-    _record(db_conn, level="info", event_name="a")  # not a problem level
-    _record(db_conn, level="error", event_name="old", minutes_ago=400)  # outside the window
+    record_maintenance_event(db_conn, level="warning", event_name="a")
+    record_maintenance_event(db_conn, level="warning", event_name="a")
+    record_maintenance_event(db_conn, level="critical", event_name="b", process="q", category="log")
+    record_maintenance_event(db_conn, level="info", event_name="a")  # not a problem level
+    record_maintenance_event(
+        db_conn, level="error", event_name="old", minutes_ago=400
+    )  # outside the window
 
     start, end = _window(360)
     counts = resolution.class_counts(db_conn, start=start, end=end)
@@ -158,13 +160,13 @@ def test_class_counts_group_the_warning_error_and_critical_rows_of_the_window(
 def test_alert_classes_tally_one_class_per_identity_with_first_and_last_seen(
     db_conn: psycopg.Connection[Any],
 ) -> None:
-    _record(db_conn, event_name="a", minutes_ago=50, category="log")
-    _record(db_conn, event_name="a", minutes_ago=10, category="telemetry")
-    _record(db_conn, event_name="a", minutes_ago=5)
-    _record(db_conn, event_name="a", process="q", minutes_ago=3)
-    _record(db_conn, level="critical", event_name="b", minutes_ago=2)
-    _record(db_conn, level="info", event_name="a")  # not a problem level
-    _record(db_conn, event_name="old", minutes_ago=400)  # outside the window
+    record_maintenance_event(db_conn, event_name="a", minutes_ago=50, category="log")
+    record_maintenance_event(db_conn, event_name="a", minutes_ago=10, category="telemetry")
+    record_maintenance_event(db_conn, event_name="a", minutes_ago=5)
+    record_maintenance_event(db_conn, event_name="a", process="q", minutes_ago=3)
+    record_maintenance_event(db_conn, level="critical", event_name="b", minutes_ago=2)
+    record_maintenance_event(db_conn, level="info", event_name="a")  # not a problem level
+    record_maintenance_event(db_conn, event_name="old", minutes_ago=400)  # outside the window
 
     start, end = _window(360)
     classes = resolution.alert_classes(db_conn, start=start, end=end)
@@ -183,9 +185,9 @@ def test_alert_classes_tally_one_class_per_identity_with_first_and_last_seen(
 def test_alert_classes_cluster_filter_keeps_the_home_cluster_and_unlabelled_rows(
     db_conn: psycopg.Connection[Any],
 ) -> None:
-    _record(db_conn, cluster="home", event_name="a")
-    _record(db_conn, cluster="", event_name="b")
-    _record(db_conn, cluster="elsewhere", event_name="c")
+    record_maintenance_event(db_conn, cluster="home", event_name="a")
+    record_maintenance_event(db_conn, cluster="", event_name="b")
+    record_maintenance_event(db_conn, cluster="elsewhere", event_name="c")
 
     start, end = _window(10)
 
@@ -351,9 +353,9 @@ def test_auto_dismiss_picks_the_classes_present_in_every_six_hour_slice(
     db_conn: psycopg.Connection[Any],
 ) -> None:
     for slot in range(4):  # one day of six-hour slices
-        _record(db_conn, event_name="steady", minutes_ago=slot * 360 + 30)
+        record_maintenance_event(db_conn, event_name="steady", minutes_ago=slot * 360 + 30)
         if slot != 2:
-            _record(db_conn, event_name="gappy", minutes_ago=slot * 360 + 30)
+            record_maintenance_event(db_conn, event_name="gappy", minutes_ago=slot * 360 + 30)
     now = datetime.now(UTC)
     current = {
         event_class(event_name="steady", process="p"): 1,

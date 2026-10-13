@@ -13,7 +13,7 @@ _log = logging.getLogger("services.supervision.healthchecks.browser_mcp")
 _TIMEOUT_S = 5.0
 
 
-def _probe() -> bool:
+def browser_mcp_probe() -> bool:
     """True when the daemon answers a lock-free ping over its socket."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_TIMEOUT_S)
@@ -42,7 +42,7 @@ def _is_alive() -> bool:
     so nothing is silently swallowed.
     """
     try:
-        return _probe()
+        return browser_mcp_probe()
     except (OSError, json.JSONDecodeError):
         return False
     except Exception:
