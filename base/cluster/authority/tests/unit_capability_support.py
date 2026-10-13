@@ -14,11 +14,11 @@ from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env import dotenv_boot
 
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
-_MACHINE = "mini"
-_HUMAN = "gateway-human-secret-" + "s" * 32
+MACHINE = "mini"
+HUMAN = "gateway-human-secret-" + "s" * 32
 
 
-def _no_probe(_dsn: str) -> None:
+def no_probe(_dsn: str) -> None:
     return None
 
 
@@ -37,16 +37,16 @@ def runner_home(tmp_path: Path) -> Path:
     return home
 
 
-def _issue(
+def issue(
     gateway: Path,
     home: Path,
     *,
     endpoint: str = _ENDPOINT,
-    cluster_secret: str = _HUMAN,
+    cluster_secret: str = HUMAN,
     ttl_s: float = 600.0,
     now: float | None = None,
 ) -> unit.IssuedBundle:
-    identity = unit.UnitIdentity(machine=_MACHINE, home=str(home))
+    identity = unit.UnitIdentity(machine=MACHINE, home=str(home))
     return unit.issue_bundle(
         gateway,
         unit=identity,
@@ -61,10 +61,10 @@ def _open(issued: unit.IssuedBundle) -> unit.Bundle:
     return unit.open_bundle(issued.envelope, issued.transport_key)
 
 
-def _install(home: Path, issued: unit.IssuedBundle, **kwargs: Any) -> unit.UnitCapability:
+def install(home: Path, issued: unit.IssuedBundle, **kwargs: Any) -> unit.UnitCapability:
     kwargs.setdefault("served_endpoint", _ENDPOINT)
-    kwargs.setdefault("probe", _no_probe)
-    return unit.install_bundle(home, _open(issued), machine=_MACHINE, **kwargs)
+    kwargs.setdefault("probe", no_probe)
+    return unit.install_bundle(home, _open(issued), machine=MACHINE, **kwargs)
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ def runner_boot(
         API_TOKEN_ENV,
     ):
         os.environ.pop(key, None)
-    capability = _install(runner_home, _issue(gateway, runner_home))
+    capability = install(runner_home, issue(gateway, runner_home))
     try:
         yield capability
     finally:

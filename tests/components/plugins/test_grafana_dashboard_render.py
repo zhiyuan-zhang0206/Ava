@@ -59,10 +59,10 @@ from base.packages.dashboard_supply import (
 )
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.grafana_dashboard import (
-    _CORE_SECTIONS_PREFIX,
-    _CORE_SECTIONS_SUFFIX,
+    CORE_SECTIONS_PREFIX,
+    CORE_SECTIONS_SUFFIX,
     DashboardRenderError,
-    _Layout,
+    Layout,
     render_dashboard,
     render_to_json,
 )
@@ -268,9 +268,9 @@ def test_layout_engine_reproduces_the_full_fixture_geometry(
         for spec in [*core_specs, *plugin_specs]
         if "grafana" in spec.output
     }
-    sections = {section.title: section for section in _CORE_SECTIONS_PREFIX + _CORE_SECTIONS_SUFFIX}
+    sections = {section.title: section for section in CORE_SECTIONS_PREFIX + CORE_SECTIONS_SUFFIX}
 
-    layout = _Layout()
+    layout = Layout()
     mismatches: list[str] = []
     for entry in fixture["panels"]:
         grid = entry["gridPos"]

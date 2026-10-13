@@ -8,7 +8,7 @@ helpers carries: a session under a lower code version than
 `deployment_state.min_code_version` terminates its process. Termination is
 `os._exit`, replaced there by a function that raises `_Exited`, so a refusal that
 would end a process ends only the test. The gate rides the baseline-session
-restore, so most of those tests drive `_restore_pooled_session` (and its async
+restore, so most of those tests drive `restore_pooled_session` (and its async
 twin) directly, against a fake connection for the read schedule and a real
 Postgres for what the SQL actually does.
 """
@@ -207,7 +207,7 @@ def test_a_process_that_dials_before_opening_its_sinks_still_says_why(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """loguru discards a record no handler receives; the refusal then goes to stderr."""
-    monkeypatch.setattr(gate, "_has_log_sink", lambda: False)
+    monkeypatch.setattr(gate, "has_log_sink", lambda: False)
     with pytest.raises(_Exited):
         process_gate.observe_minimum(_VERSION + 1)
     assert f"below the cluster minimum {_VERSION + 1}" in capsys.readouterr().err
@@ -261,7 +261,7 @@ def test_the_restore_reads_the_minimum_at_most_every_interval(
     except on the borrow that also reads the minimum."""
     now = _clock(monkeypatch)
     conn = _FakeConn(minimum=0)
-    restore: Any = connections._restore_pooled_session
+    restore: Any = connections.restore_pooled_session
 
     restore(conn, gate=process_gate)
     restore(conn, gate=process_gate)
@@ -287,7 +287,7 @@ def test_the_restore_refuses_when_the_read_minimum_is_above_this_process(
     _gated_process: list[int],
 ) -> None:
     conn = _FakeConn(minimum=_VERSION + 10)
-    restore: Any = connections._restore_pooled_session
+    restore: Any = connections.restore_pooled_session
     with pytest.raises(_Exited):
         restore(conn, gate=process_gate)
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
@@ -325,7 +325,7 @@ async def test_the_async_restore_follows_the_same_schedule_and_verdict(
 ) -> None:
     now = _clock(monkeypatch)
     conn = _FakeAsyncConn(minimum=0)
-    restore: Any = connections._restore_pooled_session_async
+    restore: Any = connections.restore_pooled_session_async
 
     await restore(conn, gate=process_gate)
     await restore(conn, gate=process_gate)
@@ -356,7 +356,7 @@ def test_an_exempt_process_keeps_the_plain_restore(monkeypatch: pytest.MonkeyPat
         process="cli", version=lambda: pytest.fail("the CLI needs no version"), exempt=True
     )
     conn = _FakeConn(minimum=10**9)
-    restore: Any = connections._restore_pooled_session
+    restore: Any = connections.restore_pooled_session
 
     restore(conn, gate=process_gate)
 
@@ -498,7 +498,7 @@ async def test_the_async_restore_reads_the_stored_minimum(
 ) -> None:
     now = _clock(monkeypatch)
     _set_minimum(_VERSION)
-    restore: Any = connections._restore_pooled_session_async
+    restore: Any = connections.restore_pooled_session_async
     async with await psycopg.AsyncConnection.connect(settings.data_plane.db_url) as aconn:
         await restore(aconn, gate=process_gate)
         cur = await aconn.execute("SHOW statement_timeout")

@@ -21,7 +21,7 @@ from base.agents.history.checkpoint_postgres_walks import (
 )
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import (
-    _fold_history,
+    fold_history,
     wrap_saver_reads_with_delta_reconstruction,
 )
 from base.config import settings
@@ -144,8 +144,8 @@ async def test_suffix_matches_upstream_and_skips_dead_blobs(
         )
         with _record_bodies(saver, monkeypatch) as bodies:
             actual = saver.get_delta_channel_history(config=target, channels=["messages"])
-        assert _fold_history(actual["messages"]) == _fold_history(baseline["messages"])
-        assert [m.id for m in _fold_history(actual["messages"])] == [
+        assert fold_history(actual["messages"]) == fold_history(baseline["messages"])
+        assert [m.id for m in fold_history(actual["messages"])] == [
             "summary",
             "same-step-new",
             "recent",
@@ -154,11 +154,11 @@ async def test_suffix_matches_upstream_and_skips_dead_blobs(
         assert len(actual["messages"]["writes"]) == 3
         assert sum(len(blob) for batch in bodies for blob in batch) < 310_000
         assert all(
-            sum(map(len, batch)) <= history._BODY_BATCH_BYTES or len(batch) == 1 for batch in bodies
+            sum(map(len, batch)) <= history.BODY_BATCH_BYTES or len(batch) == 1 for batch in bodies
         )
         # A historical request before compaction still gets its original seed.
         past = saver.get_delta_channel_history(config=reset, channels=["messages"])
-        assert [m.id for m in _fold_history(past["messages"])] == ["seed", "old"]
+        assert [m.id for m in fold_history(past["messages"])] == ["seed", "old"]
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as async_saver:
         async_result = await async_saver.aget_delta_channel_history(
             config=target, channels=["messages"]

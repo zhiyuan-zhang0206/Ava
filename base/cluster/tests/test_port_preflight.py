@@ -81,7 +81,7 @@ def test_listener_addrs_falls_back_to_lsof_name_fields(
     # A restricted PATH hides lsof, so resolution lands on the candidate list.
     monkeypatch.setattr(psutil, "net_connections", _net_connections)
     monkeypatch.setattr(proc, "run_bounded", _run)
-    monkeypatch.setattr(port_preflight, "_lsof_argv", _resolve)
+    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
 
     assert port_preflight.listener_addrs(6433) == {
         "10.0.0.72",
@@ -131,7 +131,7 @@ def test_lsof_argv_prefers_path_then_absolute_candidates(
         return False
 
     monkeypatch.setattr(port_preflight.os, "access", _access)
-    assert port_preflight._lsof_argv("-nP") == ["/opt/tools/lsof", "-nP"]
+    assert port_preflight.lsof_argv("-nP") == ["/opt/tools/lsof", "-nP"]
     assert access_calls == []
 
 
@@ -146,7 +146,7 @@ def test_lsof_argv_scans_candidates_in_order(monkeypatch: pytest.MonkeyPatch) ->
         return path == "/usr/bin/lsof"
 
     monkeypatch.setattr(port_preflight.os, "access", _access)
-    assert port_preflight._lsof_argv("-nP") == ["/usr/bin/lsof", "-nP"]
+    assert port_preflight.lsof_argv("-nP") == ["/usr/bin/lsof", "-nP"]
 
 
 def test_lsof_argv_none_when_lsof_is_nowhere(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,13 +155,13 @@ def test_lsof_argv_none_when_lsof_is_nowhere(monkeypatch: pytest.MonkeyPatch) ->
         return None
 
     def _access(path: str, mode: int) -> bool:
-        assert path in port_preflight._LSOF_CANDIDATE_PATHS
+        assert path in port_preflight.LSOF_CANDIDATE_PATHS
         assert mode == os.X_OK
         return False
 
     monkeypatch.setattr(port_preflight.shutil, "which", _which)
     monkeypatch.setattr(port_preflight.os, "access", _access)
-    assert port_preflight._lsof_argv("-nP") is None
+    assert port_preflight.lsof_argv("-nP") is None
 
 
 def test_strict_listeners_returns_conclusive_psutil_without_lsof(
@@ -226,7 +226,7 @@ def test_strict_listeners_falls_back_when_psutil_cannot_attribute(
 
     monkeypatch.setattr(psutil, "net_connections", _net_connections)
     monkeypatch.setattr(proc, "run_bounded", _run)
-    monkeypatch.setattr(port_preflight, "_lsof_argv", _resolve)
+    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
 
     assert port_preflight.strict_listeners_on(6433) == [101]
 
@@ -250,7 +250,7 @@ def test_strict_listeners_raises_when_sightings_disagree(
 
     monkeypatch.setattr(psutil, "net_connections", _net_connections)
     monkeypatch.setattr(proc, "run_bounded", _run)
-    monkeypatch.setattr(port_preflight, "_lsof_argv", _resolve)
+    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
 
     with pytest.raises(port_preflight.ListenerDiscoveryError, match="neither psutil nor lsof"):
         port_preflight.strict_listeners_on(6433)
@@ -275,7 +275,7 @@ def test_strict_listeners_raises_when_lsof_is_unreachable(
 
     monkeypatch.setattr(psutil, "net_connections", _net_connections)
     monkeypatch.setattr(proc, "run_bounded", _fail_lsof)
-    monkeypatch.setattr(port_preflight, "_lsof_argv", _resolve)
+    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
 
     with pytest.raises(port_preflight.ListenerDiscoveryError, match="lsof is not on PATH"):
         port_preflight.strict_listeners_on(6433)

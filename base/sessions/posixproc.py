@@ -69,16 +69,16 @@ _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 _CREATE_TIME_TOLERANCE_S = 2.0
 
 # create_time stamped on a session whose child died before the record was
-# written. No real process start time is negative, so `_process_for_record`'s
+# written. No real process start time is negative, so `process_for_record`'s
 # start-time check can never match it — the record reads as dead from birth
 # instead of claiming the pid's next occupant (see new_session).
-_DEAD_CHILD_SENTINEL = -1.0
+DEAD_CHILD_SENTINEL = -1.0
 
 # The reparent helper double-forks + execs in microseconds; it must never hang
 # the spawner. A generous ceiling that only trips on a genuinely wedged fork.
 _SPAWN_HELPER_TIMEOUT_S = 30.0
 
-# Poll interval for the graceful group-empty wait in _terminate_tree.
+# Poll interval for the graceful group-empty wait in terminate_tree.
 # (Name avoids the clock-lattice vocabulary; this is a polling cadence, not a clock.)
 _KILL_POLL_S = 0.05
 
@@ -89,7 +89,7 @@ def _sessions_dir() -> Path:
     return d
 
 
-def _record_path(name: str) -> Path:
+def record_path(name: str) -> Path:
     return _sessions_dir() / f"{name}.json"
 
 
@@ -98,11 +98,11 @@ def session_log_path(name: str) -> Path:
     return logs_dir() / f"{name}.out.log"
 
 
-def _read_record(name: str) -> SessionRecord | None:
-    return SessionRecord.read(_record_path(name))
+def read_record(name: str) -> SessionRecord | None:
+    return SessionRecord.read(record_path(name))
 
 
-def _process_is_live(proc: psutil.Process) -> bool:
+def process_is_live(proc: psutil.Process) -> bool:
     """True when `proc` is genuinely running — a zombie counts as dead.
 
     `is_running()` alone is zombie-blind: a zombie's status is not DEAD, so a
@@ -116,12 +116,12 @@ def _process_is_live(proc: psutil.Process) -> bool:
         return False
 
 
-def _process_for_record(rec: SessionRecord) -> psutil.Process | None:
+def process_for_record(rec: SessionRecord) -> psutil.Process | None:
     """Return the live psutil.Process named by `rec`, or None if it is gone or a
     different (recycled) process now holds the pid."""
     try:
         proc = psutil.Process(rec.pid)
-        if not _process_is_live(proc):
+        if not process_is_live(proc):
             return None
         if rec.starttime is not None:
             return proc if rec.identifies(rec.pid) is True else None
@@ -136,10 +136,10 @@ def _process_for_record(rec: SessionRecord) -> psutil.Process | None:
 
 def has_session(name: str) -> bool:
     """True if the named session's process is still alive."""
-    rec = _read_record(name)
+    rec = read_record(name)
     if rec is None:
         return False
-    return _process_for_record(rec) is not None
+    return process_for_record(rec) is not None
 
 
 def new_session(
@@ -214,11 +214,11 @@ def new_session(
         # The child already exited (instant failure). Record a sentinel that
         # can never match a real process start time: a pid freed by an
         # instantly-dead child is at its most reusable, and recording
-        # time.time() would make `_process_for_record`'s create-time check
+        # time.time() would make `process_for_record`'s create-time check
         # accept the pid's next innocent occupant — a later kill_session
         # could then SIGKILL an unrelated process tree (audit 2026-08-08 P2).
         # The record still forms (the caller's readiness probe sees it die).
-        create_time = _DEAD_CHILD_SENTINEL
+        create_time = DEAD_CHILD_SENTINEL
         starttime = None
     else:
         starttime = pid_starttime_ticks(child_pid)
@@ -234,7 +234,7 @@ def new_session(
         started_at=time.time(),
         starttime=starttime,
         pgid=pgid,
-    ).write(_record_path(name))
+    ).write(record_path(name))
     return True
 
 
@@ -248,15 +248,15 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
     wait on all of them under one shared deadline before force-killing stragglers
     — so the teardown is O(slowest agent), not O(sum of agents).
     """
-    rec = _read_record(name)
+    rec = read_record(name)
     if rec is None or (expected is not None and rec != expected):
         return False
-    proc = _process_for_record(rec)
+    proc = process_for_record(rec)
     if proc is None:
         return False
     with contextlib.suppress(*_GONE):
         if expected is not None:
-            if _read_record(name) != expected:
+            if read_record(name) != expected:
                 return False
             if expected.starttime is not None:
                 # A btime step can move the epoch birth of this same process. The
@@ -266,7 +266,7 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
                     return False
             # Start-time fallback: keep the record-resolution tolerance — a
             # reading may drift (whole-second wall-clock corrections), so a
-            # drifted reading must not refuse the process `_process_for_record`
+            # drifted reading must not refuse the process `process_for_record`
             # just resolved.
             elif abs(stable_create_time(proc) - expected.create_time) > _CREATE_TIME_TOLERANCE_S:
                 return False
@@ -333,7 +333,7 @@ def process_group_has_live_members(pgid: int | None) -> bool:
     return False
 
 
-def _terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> bool:
+def terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> bool:
     """Terminate `proc` and its whole process group.
 
     The session process runs in its own process group (``base.native_process.reparent``
@@ -375,9 +375,9 @@ def _terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if (
-                not _process_is_live(proc)
+                not process_is_live(proc)
                 and not process_group_has_live_members(pgid)
-                and all(not _process_is_live(c) for c in children)
+                and all(not process_is_live(c) for c in children)
             ):
                 return True
             time.sleep(_KILL_POLL_S)
@@ -404,16 +404,16 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
 
     Idempotent: an absent/dead session is a noop.
     """
-    rec = _read_record(name)
+    rec = read_record(name)
     if rec is None:
         return True, "noop"
-    proc = _process_for_record(rec)
+    proc = process_for_record(rec)
     if proc is None:
-        _record_path(name).unlink(missing_ok=True)
+        record_path(name).unlink(missing_ok=True)
         return True, "noop"
     ended_on_signal = False
     try:
-        ended_on_signal = _terminate_tree(proc, graceful=graceful, timeout=timeout)
+        ended_on_signal = terminate_tree(proc, graceful=graceful, timeout=timeout)
     except Exception as exc:
         logger.warning("posixproc kill {name} hit {exc}", name=name, exc=exc)
     mode = "graceful" if ended_on_signal else "forced"
@@ -423,7 +423,7 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
     # means the session is confirmed gone; on a survivor we keep the record —
     # the no-DB reap's only view of the process — and say so. A zombie is not
     # a survivor: it is dead, just awaiting its parent's reap.
-    if _process_is_live(proc):
+    if process_is_live(proc):
         logger.error(
             "posixproc kill {name}: pid {pid} is still running after the kill — leaving "
             "its session record in place so the survivor stays visible",
@@ -431,7 +431,7 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
             pid=proc.pid,
         )
         return False, mode
-    _record_path(name).unlink(missing_ok=True)
+    record_path(name).unlink(missing_ok=True)
     return True, mode
 
 
@@ -442,15 +442,15 @@ def session_started_at(name: str) -> float | None:
     Read off the on-disk record — the same source has_session / list_sessions
     judge — so a liveness consumer can render an uptime without a second probe.
     """
-    rec = _read_record(name)
+    rec = read_record(name)
     if rec is None:
         return None
-    if _process_for_record(rec) is None:
+    if process_for_record(rec) is None:
         return None
     return rec.started_at
 
 
-def _record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
+def record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
     """Whether a failed liveness check proves a record can be discarded.
 
     A dead leader whose recorded process group still has live members keeps
@@ -476,7 +476,7 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
         retention case `list_sessions` lists — so the caller does not have to
         scan the group a second time; None in every other outcome.
     """
-    if _process_for_record(rec) is not None:
+    if process_for_record(rec) is not None:
         return False, "process is still live", None
     if rec.pgid is not None and process_group_has_live_members(rec.pgid):
         return (
@@ -487,7 +487,7 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
         )
     try:
         proc = psutil.Process(rec.pid)
-        if not proc.is_running() or not _process_is_live(proc):
+        if not proc.is_running() or not process_is_live(proc):
             return True, "pid is no longer running", None
     except psutil.NoSuchProcess:
         return True, "pid is gone", None
@@ -506,7 +506,7 @@ def list_sessions(prefix: str = "") -> list[str]:
     name stays listed because its surviving descendants are still owned and a
     stop must converge them, not lose them (issue #2123). A retained record
     warns on every listing — the incident state stays loud until a stop
-    converges the group; `_record_reapable` documents the pid-reuse ordering
+    converges the group; `record_reapable` documents the pid-reuse ordering
     boundary that warning can surface.
     """
     out: list[str] = []
@@ -517,10 +517,10 @@ def list_sessions(prefix: str = "") -> list[str]:
         rec = SessionRecord.read(rec_file)
         if rec is None:
             rec_file.unlink(missing_ok=True)
-        elif _process_for_record(rec) is not None:
+        elif process_for_record(rec) is not None:
             out.append(name)
         else:
-            reapable, why, occupied_group = _record_reapable(rec)
+            reapable, why, occupied_group = record_reapable(rec)
             if not reapable:
                 logger.warning(
                     "posixproc retaining live session record {name}: {why}",
@@ -531,7 +531,7 @@ def list_sessions(prefix: str = "") -> list[str]:
                 # durable ownership proof a stop must converge. A live pid
                 # with an uncertain identity stays invisible — nothing
                 # provable may be claimed from it. The group occupancy was
-                # already read inside _record_reapable; never scan it again
+                # already read inside record_reapable; never scan it again
                 # per listing (task #2898).
                 if occupied_group is not None:
                     out.append(name)

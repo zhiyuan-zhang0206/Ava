@@ -165,7 +165,7 @@ def test_live_submit_reports_a_refused_turn(short_socket: Path) -> None:
 
 
 def test_live_submit_skips_interleaved_server_traffic(short_socket: Path) -> None:
-    spoof = {"id": codex_app_server._TURN_REQUEST_ID, "method": "item/requestApproval"}
+    spoof = {"id": codex_app_server.TURN_REQUEST_ID, "method": "item/requestApproval"}
     server = FakeAppServer(
         interleave=[
             {"method": "remoteControl/status/changed", "params": {"status": "disabled"}},
@@ -186,7 +186,7 @@ def test_live_submit_does_not_mistake_a_server_request_for_its_reply(
     short_socket: Path,
 ) -> None:
     """An id collision without result/error is not a reply: the client times out."""
-    spoof = {"id": codex_app_server._TURN_REQUEST_ID, "method": "item/requestApproval"}
+    spoof = {"id": codex_app_server.TURN_REQUEST_ID, "method": "item/requestApproval"}
     server = FakeAppServer(interleave=[spoof], hold_reply=True)
     server.start(short_socket)
     started = time.monotonic()

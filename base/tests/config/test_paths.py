@@ -18,10 +18,10 @@ def test_daemon_pidfile_uses_run_directory_only(
     assert current == tmp_path / "run" / "agent_host.pid"
     (tmp_path / current.name).write_text(str(os.getpid()))
 
-    assert health._recorded_pid(current) is None
+    assert health.recorded_pid(current) is None
 
     current.write_text(str(os.getpid()))
-    assert health._recorded_pid(current) == os.getpid()
+    assert health.recorded_pid(current) == os.getpid()
 
 
 def test_workspace_dir_creates_per_agent_dir(unit_home: Path) -> None:
@@ -97,4 +97,4 @@ def test_file_anchored_roots_resolve_to_the_checkout_root() -> None:
     checkout = Path(__file__).resolve().parents[3]
     assert (checkout / "base" / "__init__.py").is_file()
     assert paths.repo_root() == checkout
-    assert checkout / "ava_builtins" / "plugins" == dashboard_supply._REPO_PLUGINS_DIR
+    assert checkout / "ava_builtins" / "plugins" == dashboard_supply.REPO_PLUGINS_DIR

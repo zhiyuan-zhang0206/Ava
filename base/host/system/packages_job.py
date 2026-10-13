@@ -28,7 +28,7 @@ _CRON_MARKER = "# ava-packages-refresh"
 _LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.packages-refresh"
 
 
-def _launchd_plist_path() -> Path:
+def launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
@@ -45,7 +45,7 @@ def _tick_seconds(*, tick_reader: Callable[[], int]) -> int:
     return tick_reader()
 
 
-def _launchd_plist_content(*, tick_reader: Callable[[], int]) -> str:
+def launchd_plist_content(*, tick_reader: Callable[[], int]) -> str:
     log_file = _log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -74,14 +74,14 @@ def _launchd_plist_content(*, tick_reader: Callable[[], int]) -> str:
 """
 
 
-def _register_macos(*, tick_reader: Callable[[], int]) -> int:
+def register_macos(*, tick_reader: Callable[[], int]) -> int:
     """Rewrite and reload the refresh LaunchAgent."""
     label = _LABEL
-    plist_path = _launchd_plist_path()
+    plist_path = launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(_launchd_plist_content(tick_reader=tick_reader), encoding="utf-8")
+    plist_path.write_text(launchd_plist_content(tick_reader=tick_reader), encoding="utf-8")
 
     if base.host.system.cron.reload_launchd_job(label, plist_path) != 0:
         return 1
@@ -91,12 +91,12 @@ def _register_macos(*, tick_reader: Callable[[], int]) -> int:
     return 0
 
 
-def _unregister_macos() -> int:
-    base.host.system.cron.remove_launchd_job(_LABEL, _launchd_plist_path())
+def unregister_macos() -> int:
+    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path())
     return 0
 
 
-def _register_linux(*, tick_reader: Callable[[], int]) -> int:
+def register_linux(*, tick_reader: Callable[[], int]) -> int:
     """Replace the refresh line in the user crontab.
 
     Lines are matched by the marker as a substring.
@@ -130,7 +130,7 @@ def _register_linux(*, tick_reader: Callable[[], int]) -> int:
     return 0
 
 
-def _unregister_linux() -> int:
+def unregister_linux() -> int:
     return base.host.system.cron.remove_crontab_entry(
         _CRON_MARKER, write_failure_rc=1, on_removed=None
     )
@@ -164,8 +164,8 @@ def register_packages_job(
         return
     base.host.system.cron.register_platform_job(
         "packages-refresh",
-        macos=lambda: _register_macos(tick_reader=tick_reader),
-        linux=lambda: _register_linux(tick_reader=tick_reader),
+        macos=lambda: register_macos(tick_reader=tick_reader),
+        linux=lambda: register_linux(tick_reader=tick_reader),
     )
 
 
@@ -174,4 +174,4 @@ def unregister_packages_job() -> None:
     outside the default home."""
     if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
-    base.host.system.cron.unregister_platform_job(macos=_unregister_macos, linux=_unregister_linux)
+    base.host.system.cron.unregister_platform_job(macos=unregister_macos, linux=unregister_linux)

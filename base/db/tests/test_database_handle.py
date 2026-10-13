@@ -68,7 +68,7 @@ def dialed(database_gate: ProcessDbGate, monkeypatch: pytest.MonkeyPatch) -> _Di
     def no_restore(_conn: object, *, gate: ProcessDbGate) -> None:
         assert gate is database_gate
 
-    monkeypatch.setattr(connections, "_restore_pooled_session", no_restore)
+    monkeypatch.setattr(connections, "restore_pooled_session", no_restore)
     return rec
 
 

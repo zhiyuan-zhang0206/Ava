@@ -5,7 +5,7 @@ sums, distributions, per-key counters, position buckets). `fetch_aggregate` read
 from `telemetry_events` (`base.telemetry.metrics.aggregate_sql`, a few statements in one
 connection, nothing materialized per row) and returns an `EventAggregate`;
 `build_report_from_aggregate` / `agent_rollups_from_aggregate` rebuild the report from it, reusing
-the helper functions (`pctiles`, `third_of`, `_fix_kinds`) so the math cannot drift.
+the helper functions (`pctiles`, `third_of`, `fix_kinds`) so the math cannot drift.
 """
 
 from __future__ import annotations
@@ -20,13 +20,13 @@ import psycopg
 
 from base.telemetry.metrics import (
     MetricSection,
-    _fix_kinds,
-    _render_agent_activity,
-    _render_exec,
-    _render_llm_turns,
-    _render_plugin_activation,
-    _render_syntax_fix,
+    fix_kinds,
     pctiles,
+    render_agent_activity,
+    render_exec,
+    render_llm_turns,
+    render_plugin_activation,
+    render_syntax_fix,
     third_of,
 )
 from base.telemetry.metrics.aggregate_sql import (
@@ -257,7 +257,7 @@ def _data_syntax_fix(agg: EventAggregate) -> dict[str, Any]:
     for _agent_id, blk, fixes in agg.fix_events:
         if blk <= 0:
             continue
-        kinds = set(_fix_kinds(fixes))
+        kinds = set(fix_kinds(fixes))
         kind_counts.update(kinds)
         b = third_of(blk - 1, agg.code_blocks_per_agent.get(_agent_id, 0))
         if "ruff_format" in kinds:
@@ -379,11 +379,11 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
     data_plugin = _data_plugin_activation(agg)
 
     return [
-        MetricSection("syntax_fix", _render_syntax_fix(data_syntax), data_syntax),
-        MetricSection("exec", _render_exec(data_exec), data_exec),
-        MetricSection("llm_turns", _render_llm_turns(data_llm), data_llm),
-        MetricSection("agent_activity", _render_agent_activity(data_activity), data_activity),
-        MetricSection("plugin_activation", _render_plugin_activation(data_plugin), data_plugin),
+        MetricSection("syntax_fix", render_syntax_fix(data_syntax), data_syntax),
+        MetricSection("exec", render_exec(data_exec), data_exec),
+        MetricSection("llm_turns", render_llm_turns(data_llm), data_llm),
+        MetricSection("agent_activity", render_agent_activity(data_activity), data_activity),
+        MetricSection("plugin_activation", render_plugin_activation(data_plugin), data_plugin),
     ]
 
 

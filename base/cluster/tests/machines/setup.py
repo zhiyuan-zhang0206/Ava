@@ -55,7 +55,7 @@ def _machine_setup(monkeypatch: pytest.MonkeyPatch, process_config: ConfigBoot) 
     return MachineSetup(machine_from_boot(process_config))
 
 
-def _read_machine(name: str) -> tuple:
+def read_machine(name: str) -> tuple:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT gateway_url, role, description, stopped_at FROM machines WHERE name = %s",
@@ -66,7 +66,7 @@ def _read_machine(name: str) -> tuple:
     return row
 
 
-def _read_description(name: str) -> str | None:
+def read_description(name: str) -> str | None:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT description FROM machines WHERE name = %s", (name,))
         row = cur.fetchone()
@@ -74,7 +74,7 @@ def _read_description(name: str) -> str | None:
     return row[0]
 
 
-def _read_up_since(name: str):
+def read_up_since(name: str):
     """machines.up_since_at for `name`."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT up_since_at FROM machines WHERE name = %s", (name,))
@@ -83,7 +83,7 @@ def _read_up_since(name: str):
     return row
 
 
-def _read_unit_up_since(name: str, home: str):
+def read_unit_up_since(name: str, home: str):
     """machine_units.up_since_at for one unit."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(

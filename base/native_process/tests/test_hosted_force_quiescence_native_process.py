@@ -13,7 +13,7 @@ from base.native_process import exec_domain
 def test_unreadable_group_member_is_not_an_empty_domain(
     monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
 ) -> None:
-    from base.native_process.exec_domain import _process_group_has_live_member
+    from base.native_process.exec_domain import process_group_has_live_member
 
     process = Mock(info={"pid": 123, "status": psutil.STATUS_RUNNING})
 
@@ -27,4 +27,4 @@ def test_unreadable_group_member_is_not_an_empty_domain(
 
     monkeypatch.setattr(exec_domain.os, "getpgid", unreadable)
     with pytest.raises(failure):
-        _process_group_has_live_member(123)
+        process_group_has_live_member(123)

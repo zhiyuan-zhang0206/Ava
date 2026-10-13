@@ -21,16 +21,16 @@ _MARKERS = (
 )
 _WALG_MARKER = "# ava-walg"
 _REGISTERS = (
-    logs_job._register_linux,
-    lambda: packages_job._register_linux(tick_reader=lambda: 900),
-    pr_flow_job._register_linux,
-    lambda: walg_job._register_linux(backup_hour_reader=lambda: 3),
+    logs_job.register_linux,
+    lambda: packages_job.register_linux(tick_reader=lambda: 900),
+    pr_flow_job.register_linux,
+    lambda: walg_job.register_linux(backup_hour_reader=lambda: 3),
 )
 _UNREGISTERS = (
-    logs_job._unregister_linux,
-    packages_job._unregister_linux,
-    pr_flow_job._unregister_linux,
-    walg_job._unregister_linux,
+    logs_job.unregister_linux,
+    packages_job.unregister_linux,
+    pr_flow_job.unregister_linux,
+    walg_job.unregister_linux,
 )
 
 
@@ -62,7 +62,7 @@ def crontab(default_home: Path, monkeypatch: pytest.MonkeyPatch) -> _Crontab:
 
 
 def _register_all() -> None:
-    assert cron._register_linux(300) == 0
+    assert cron.register_linux(300) == 0
     for register in _REGISTERS:
         assert register() == 0
 
@@ -88,7 +88,7 @@ def test_registering_again_changes_nothing(crontab: _Crontab) -> None:
 def test_unregister_removes_the_ava_lines_and_only_them(crontab: _Crontab) -> None:
     _register_all()
 
-    assert cron._unregister_linux() == 0
+    assert cron.unregister_linux() == 0
     for unregister in _UNREGISTERS:
         assert unregister() == 0
 

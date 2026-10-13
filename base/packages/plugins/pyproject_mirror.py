@@ -22,13 +22,13 @@ from typing import Any, cast
 
 from base.host.git.host_version import Version, parse_version
 from base.packages.plugins.manifest import (
-    _CLAUSE_SPLIT_RE,
-    _LOWER_OPS,
-    _NAME_RE,
-    _UPPER_OPS,
+    CLAUSE_SPLIT_RE,
+    LOWER_OPS,
+    NAME_RE,
+    UPPER_OPS,
+    Clause,
     ManifestError,
     PluginManifest,
-    _Clause,
     parse_range,
 )
 
@@ -54,7 +54,7 @@ def _parse_py_spec(spec: str) -> tuple[list[_Bounds], list[_Bounds]]:
     """
     lowers: list[_Bounds] = []
     uppers: list[_Bounds] = []
-    for part in [p for p in _CLAUSE_SPLIT_RE.split(spec.strip()) if p]:
+    for part in [p for p in CLAUSE_SPLIT_RE.split(spec.strip()) if p]:
         if part.startswith("==") and part.endswith(".*"):
             lower, upper = _wildcard_bounds(spec, part)
         else:
@@ -166,7 +166,7 @@ def _dependency_entry(pyproject: Path, raw_entry: object, seen: dict[str, str]) 
     if not isinstance(raw_entry, str) or not raw_entry.strip():
         raise ManifestError(f"{pyproject}: bad dependency entry {raw_entry!r}")
     entry = raw_entry.strip()
-    m = _NAME_RE.match(entry)
+    m = NAME_RE.match(entry)
     if m is None:
         raise ManifestError(f"{pyproject}: cannot read a package name from {entry!r}")
     name = m[1]
@@ -195,25 +195,25 @@ def _dependency_entry(pyproject: Path, raw_entry: object, seen: dict[str, str]) 
 # ── the mirror check ────────────────────────────────────────────────────
 
 
-def _pick_bound(clauses: tuple[_Clause, ...], side: str) -> _Clause | None:
+def _pick_bound(clauses: tuple[Clause, ...], side: str) -> Clause | None:
     """The declared-range bound admitting the fewest versions on `side`.
 
     Lower: highest version, ties to the exclusive form (`>`). Upper: lowest
     version, ties to `<`. `==` counts as a bound on both sides (it pins the
     version exactly).
     """
-    best: _Clause | None = None
+    best: Clause | None = None
     for clause in clauses:
-        if side == "lower" and clause.op not in _LOWER_OPS:
+        if side == "lower" and clause.op not in LOWER_OPS:
             continue
-        if side == "upper" and clause.op not in _UPPER_OPS:
+        if side == "upper" and clause.op not in UPPER_OPS:
             continue
         if best is None or _tighter(clause, best, side):
             best = clause
     return best
 
 
-def _tighter(clause: _Clause, best: _Clause, side: str) -> bool:
+def _tighter(clause: Clause, best: Clause, side: str) -> bool:
     """Whether `clause` admits fewer versions than `best` on `side` (ties go to the exclusive op)."""
     if side == "lower":
         return clause.version > best.version or (
@@ -276,7 +276,7 @@ def _side_error(
     raw_range: str,
     side: str,
     py_bound: _Bounds | None,
-    d_bound: _Clause | None,
+    d_bound: Clause | None,
 ) -> str | None:
     """None when the pyproject bound sits inside the declared range on `side`."""
     if d_bound is None:

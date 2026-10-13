@@ -107,7 +107,7 @@ class GroupingModels(Protocol):
     def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> Any: ...
 
 
-def _group_model(
+def group_model(
     db: Database, agent_id: int, *, catalog: ModelCatalog, inputs: UnderstandingReadInputs
 ) -> tuple[str, ModelOverrides]:
     """The configured grouping model, else the agent's own with its overrides."""
@@ -138,7 +138,7 @@ def check_threshold(level: int, *, inputs: UnderstandingReadInputs) -> int:
     return max(MIN_CHECK_OPEN, round(base / decay ** (level - 1)))
 
 
-def _generate(
+def generate(
     models: GroupingModels,
     model: str,
     overrides: ModelOverrides,
@@ -193,12 +193,12 @@ async def _check_level(
         ) + check_threshold(level, inputs=inputs):
             return False
         model, overrides = await asyncio.to_thread(
-            _group_model, db, agent_id, catalog=models.catalog, inputs=inputs
+            group_model, db, agent_id, catalog=models.catalog, inputs=inputs
         )
         try:
             groups = await run_blocking(
                 executor,
-                _generate,
+                generate,
                 models,
                 model,
                 overrides,

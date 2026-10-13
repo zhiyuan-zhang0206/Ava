@@ -13,15 +13,15 @@ from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import (
-    _assert_root_once_with_child_parented_under_it,
-    _assert_turn_root_exported_at_start,
-    _capture_otlp_json_posts,
-    _FakeSpan,
-    _FakeTracer,
-    _NodeFakeSpan,
-    _spans_received,
-    _under_watermark,
-    _wait_init_resolved,
+    FakeSpan,
+    FakeTracer,
+    NodeFakeSpan,
+    assert_root_once_with_child_parented_under_it,
+    assert_turn_root_exported_at_start,
+    capture_otlp_json_posts,
+    spans_received,
+    under_watermark,
+    wait_init_resolved,
 )
 from base.telemetry.tests.test_tracing import (
     _collector_up as _collector_up,
@@ -52,7 +52,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     """
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
     calls: list[int] = []
 
     def _exit_sdk(**_kw: object) -> None:
@@ -62,7 +62,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _exit_sdk)
 
     initialize_tracing(machine=machine_identity(), home=Path(".ava"))
-    _wait_init_resolved()
+    wait_init_resolved()
 
     assert tracing_mod._state["arm_failed"] is True
     assert tracing_mod._state["initialized"] is False
@@ -84,8 +84,8 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
     timeout does not block the late-armed turn from opening its span."""
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
-    monkeypatch.setattr(tracing_mod, "_INIT_RESOLVED_TIMEOUT_S", 0.05)
+    under_watermark(monkeypatch)
+    monkeypatch.setattr(tracing_mod, "INIT_RESOLVED_TIMEOUT_S", 0.05)
 
     entered = threading.Event()
     release = threading.Event()
@@ -117,7 +117,7 @@ def test_timeout_then_late_arm_recording_comes_up_midlife(
 
     # ...the arm completes late: recording comes up mid-life...
     release.set()
-    _wait_init_resolved()
+    wait_init_resolved()
     assert tracing_mod._state["initialized"] is True
 
     # ...and later calls skip the wait entirely, so the span opens for real.
@@ -138,7 +138,7 @@ def test_ensure_init_resolved_instant_without_arming(
 
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
-    _under_watermark(monkeypatch)
+    under_watermark(monkeypatch)
     monkeypatch.setattr(
         tracing_mod,
         "endpoint_reachable",
@@ -146,7 +146,7 @@ def test_ensure_init_resolved_instant_without_arming(
     )
     # Skip the daemon collector retry loop: this test asserts the instant
     # no-wait contract, not the loop (that is the retry-loop test above).
-    monkeypatch.setattr(tracing_mod, "_start_collector_retry", ignore_arguments)
+    monkeypatch.setattr(tracing_mod, "start_collector_retry", ignore_arguments)
 
     initialize_tracing(
         machine=machine_identity(), home=Path(".ava")
@@ -166,7 +166,7 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     monkeypatch.setattr(config.settings.observability, "trace_strip_content", True)
-    posts = _capture_otlp_json_posts(monkeypatch)
+    posts = capture_otlp_json_posts(monkeypatch)
 
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
     provider = TracerProvider()
@@ -211,8 +211,8 @@ def test_otlp_exporter_timeout_is_bounded_and_returns_failure(
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
 
     assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
-    assert timeouts == [tracing_mod._TRACE_EXPORT_TIMEOUT_S]
-    assert 0 < tracing_mod._TRACE_EXPORT_TIMEOUT_S <= 5.0
+    assert timeouts == [tracing_mod.TRACE_EXPORT_TIMEOUT_S]
+    assert 0 < tracing_mod.TRACE_EXPORT_TIMEOUT_S <= 5.0
 
 
 def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
@@ -230,7 +230,7 @@ def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
         nonlocal posts
         del content, headers, timeout
         posts += 1
-        if posts <= tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD:
+        if posts <= tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD:
             raise httpx.ConnectError("collector unavailable")
         return _Resp()
 
@@ -238,21 +238,21 @@ def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
     monkeypatch.setattr("httpx.post", _post)
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
 
-    for _ in range(tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD):
+    for _ in range(tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD):
         assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
-    assert posts == tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD
+    assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD
 
     assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
-    assert posts == tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD
+    assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD
     assert exporter._dropped_batches == 1
 
-    clock["now"] += tracing_mod._TRACE_EXPORT_COOLDOWN_S
+    clock["now"] += tracing_mod.TRACE_EXPORT_COOLDOWN_S
     assert exporter.export([]) is tracing_mod.SpanExportResult.SUCCESS
-    assert posts == tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD + 1
+    assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD + 1
     assert exporter._consecutive_failures == 0
 
     assert exporter.export([]) is tracing_mod.SpanExportResult.SUCCESS
-    assert posts == tracing_mod._TRACE_EXPORT_FAILURE_THRESHOLD + 2
+    assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD + 2
 
 
 def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPatch):
@@ -275,7 +275,7 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     tracing_mod._state["initialized"] = True
-    posts = _capture_otlp_json_posts(monkeypatch)
+    posts = capture_otlp_json_posts(monkeypatch)
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -284,7 +284,7 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
     try:
         with turn_span(name="ava-agent-7", session_id="7", turn=3):
             # Assertion 1: the root is exported BEFORE the turn ends.
-            root = _assert_turn_root_exported_at_start(_spans_received(posts))
+            root = assert_turn_root_exported_at_start(spans_received(posts))
 
             # A child created inside the turn must parent under the ended root.
             with otel_trace.get_tracer("ava.session").start_as_current_span("child"):
@@ -292,7 +292,7 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
 
         # Assertion 2: exiting the turn does not re-export the root (and the
         # child arrived, parented under the root).
-        _assert_root_once_with_child_parented_under_it(_spans_received(posts), root)
+        assert_root_once_with_child_parented_under_it(spans_received(posts), root)
     finally:
         otel_trace.set_tracer_provider(previous)
 
@@ -300,10 +300,10 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
 def test_prune_old_mirror_removes_stale_keeps_recent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """_prune_old_mirror deletes the collector's rotated `spans-<ISO>-size.jsonl`
+    """prune_old_mirror deletes the collector's rotated `spans-<ISO>-size.jsonl`
     files older than retention_days, keeps recent ones, and never touches the
     unstamped ACTIVE `spans.jsonl` or non-mirror files."""
-    from base.telemetry.tracing import _prune_old_mirror
+    from base.telemetry.tracing import prune_old_mirror
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"  # well before any cutoff
@@ -314,7 +314,7 @@ def test_prune_old_mirror_removes_stale_keeps_recent(
     for p in (old, old_gz, recent, active, other):
         p.write_text("{}\n", encoding="utf-8")
 
-    _prune_old_mirror(retention_days=14)
+    prune_old_mirror(retention_days=14)
 
     assert not old.exists()
     assert not old_gz.exists()
@@ -370,10 +370,10 @@ def test_mirror_sort_key_orders_suffixed_rotated_and_cut_files(
 def test_prune_old_mirror_removes_stale_suffixed_and_gz(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """_prune_old_mirror deletes stale files regardless of the rotation
+    """prune_old_mirror deletes stale files regardless of the rotation
     naming era — timberjack-suffixed (`-size`), manual cuts, and gzipped
     segments — and keeps the ACTIVE `spans.jsonl` untouched."""
-    from base.telemetry.tracing import _prune_old_mirror
+    from base.telemetry.tracing import prune_old_mirror
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     old_suffixed = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
@@ -384,7 +384,7 @@ def test_prune_old_mirror_removes_stale_suffixed_and_gz(
     for p in (old_suffixed, old_gz, old_cut, recent, active):
         p.write_text("{}\n", encoding="utf-8")
 
-    _prune_old_mirror(retention_days=14)
+    prune_old_mirror(retention_days=14)
 
     assert not old_suffixed.exists()
     assert not old_gz.exists()
@@ -401,7 +401,7 @@ def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
     `spans.jsonl` even when every other file carries an unrecognized-era
     name (the pre-fix bug: suffixed backups sorted with the active file and
     could be deleted in either order)."""
-    from base.telemetry.tracing import _enforce_dir_cap
+    from base.telemetry.tracing import enforce_dir_cap
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     oldest = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
@@ -410,7 +410,7 @@ def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
     for p in (oldest, newest, active):
         p.write_bytes(b"x" * (1024 * 1024))
 
-    removed = _enforce_dir_cap(max_mb=2)
+    removed = enforce_dir_cap(max_mb=2)
     assert removed == 1
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl*"))
     assert remaining == ["spans-2026-01-02T00-00-00.000-time.jsonl.gz", "spans.jsonl"]
@@ -419,12 +419,12 @@ def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
 def test_gzip_old_mirror_compresses_rotated_keeps_active(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """_gzip_old_mirror compresses every non-active mirror file (rotated,
+    """gzip_old_mirror compresses every non-active mirror file (rotated,
     suffixed, cut) to `.jsonl.gz` with lossless content, leaves the
     ACTIVE `spans.jsonl` alone, and is idempotent on re-run."""
     import gzip as gz
 
-    from base.telemetry.tracing import _gzip_old_mirror
+    from base.telemetry.tracing import gzip_old_mirror
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     rotated = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
@@ -434,7 +434,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(
     cut.write_text('{"b":1}\n', encoding="utf-8")
     active.write_text('{"c":1}\n', encoding="utf-8")
 
-    assert _gzip_old_mirror(grace_seconds=-1) == 2
+    assert gzip_old_mirror(grace_seconds=-1) == 2
     assert rotated.exists() is False
     assert cut.exists() is False
     gz_rotated = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz"
@@ -448,7 +448,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(
     with gz.open(gz_cut, "rt", encoding="utf-8") as fh:
         assert fh.read() == '{"b":1}\n'
     # Idempotent: already-compressed files are skipped.
-    assert _gzip_old_mirror(grace_seconds=-1) == 0
+    assert gzip_old_mirror(grace_seconds=-1) == 0
 
 
 def test_gzip_old_mirror_skips_recently_written_files(
@@ -459,7 +459,7 @@ def test_gzip_old_mirror_skips_recently_written_files(
     rotation); the next pass with no grace compresses it."""
     import time
 
-    from base.telemetry.tracing import _gzip_old_mirror
+    from base.telemetry.tracing import gzip_old_mirror
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     fresh = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl"
@@ -470,11 +470,11 @@ def test_gzip_old_mirror_skips_recently_written_files(
 
     os.utime(fresh, (now, now))
 
-    assert _gzip_old_mirror(grace_seconds=3600) == 0
+    assert gzip_old_mirror(grace_seconds=3600) == 0
     assert fresh.exists()
     assert not (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz").exists()
 
-    assert _gzip_old_mirror(grace_seconds=-1) == 1
+    assert gzip_old_mirror(grace_seconds=-1) == 1
     assert not fresh.exists()
 
 
@@ -482,12 +482,12 @@ def test_prune_old_mirror_disabled_when_nonpositive(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """retention_days <= 0 disables pruning entirely."""
-    from base.telemetry.tracing import _prune_old_mirror
+    from base.telemetry.tracing import prune_old_mirror
 
     monkeypatch.setattr(trace_mirror, "traces_dir", lambda: tmp_path)
     old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
     old.write_text("{}\n", encoding="utf-8")
-    _prune_old_mirror(retention_days=0)
+    prune_old_mirror(retention_days=0)
     assert old.exists()
 
 
@@ -526,8 +526,8 @@ def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     tracing_mod._state["initialized"] = True
 
-    span = _FakeSpan()
-    tracer = _FakeTracer(span)
+    span = FakeSpan()
+    tracer = FakeTracer(span)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     with turn_span(name="ava-agent-42", session_id="42", turn=3):
@@ -585,9 +585,9 @@ def test_claim_idle_wait_span_ends_node_span_and_opens_idle_wait(
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     tracing_mod._state["initialized"] = True
 
-    node_span = _NodeFakeSpan("execute_task claim")
+    node_span = NodeFakeSpan("execute_task claim")
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
-    tracer = _FakeTracer(_FakeSpan())
+    tracer = FakeTracer(FakeSpan())
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     with claim_idle_wait_span():
@@ -607,9 +607,9 @@ def test_claim_idle_wait_span_never_ends_non_node_span(
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     tracing_mod._state["initialized"] = True
 
-    root_span = _NodeFakeSpan("ava-agent-42")
+    root_span = NodeFakeSpan("ava-agent-42")
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: root_span)
-    tracer = _FakeTracer(_FakeSpan())
+    tracer = FakeTracer(FakeSpan())
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     with claim_idle_wait_span():
@@ -628,9 +628,9 @@ def test_claim_idle_wait_span_skips_non_recording_span(
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     tracing_mod._state["initialized"] = True
 
-    node_span = _NodeFakeSpan("execute_task claim", recording=False)
+    node_span = NodeFakeSpan("execute_task claim", recording=False)
     monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
-    tracer = _FakeTracer(_FakeSpan())
+    tracer = FakeTracer(FakeSpan())
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     with claim_idle_wait_span():

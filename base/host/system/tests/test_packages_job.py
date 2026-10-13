@@ -42,7 +42,7 @@ def _ok() -> types.SimpleNamespace:
 def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None:
     from base.config import settings
 
-    content = job._launchd_plist_content(tick_reader=lambda: 900)
+    content = job.launchd_plist_content(tick_reader=lambda: 900)
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
@@ -68,10 +68,10 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
 
-    assert job._register_macos(tick_reader=lambda: 900) == 0
-    plist = job._launchd_plist_path()
+    assert job.register_macos(tick_reader=lambda: 900) == 0
+    plist = job.launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
-    assert job._register_macos(tick_reader=lambda: 900) == 0
+    assert job.register_macos(tick_reader=lambda: 900) == 0
 
     assert plist.read_text(encoding="utf-8") == first
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootstrap"]
@@ -99,7 +99,7 @@ def test_linux_registration_replaces_only_its_own_lines(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
 
-    assert job._register_linux(tick_reader=lambda: 900) == 0
+    assert job.register_linux(tick_reader=lambda: 900) == 0
     assert other in written["body"]
     assert f"{other}\n\n" in written["body"]
     assert old not in written["body"]
@@ -119,7 +119,7 @@ def test_linux_crontab_failures_and_empty_table(
         return "/usr/bin/crontab"
 
     monkeypatch.setattr(cron.shutil, "which", missing)
-    assert job._register_linux(tick_reader=lambda: 900) == 1
+    assert job.register_linux(tick_reader=lambda: 900) == 1
     assert capsys.readouterr().err == (
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered\n"
@@ -140,7 +140,7 @@ def test_linux_crontab_failures_and_empty_table(
         return _ok()
 
     monkeypatch.setattr(cron.subprocess, "run", run)
-    assert job._register_linux(tick_reader=lambda: 900) == 1
+    assert job.register_linux(tick_reader=lambda: 900) == 1
     assert writes == []
     assert capsys.readouterr().err == (
         "  * crontab -l failed (permission denied); "
@@ -148,7 +148,7 @@ def test_linux_crontab_failures_and_empty_table(
     )
 
     read.stderr = "no crontab for user"
-    assert job._register_linux(tick_reader=lambda: 900) == 0
+    assert job.register_linux(tick_reader=lambda: 900) == 0
     assert (
         len(writes),
         writes[0].startswith("*/15 * * * * "),
@@ -158,17 +158,17 @@ def test_linux_crontab_failures_and_empty_table(
 
     read.returncode = 0
     assert (
-        job._unregister_linux(),
+        job.unregister_linux(),
         writes[-1],
-        job._unregister_linux(),
+        job.unregister_linux(),
         len(writes),
     ) == (0, "\n", 0, 2)
 
     read.stdout = writes[0]
     write_failure = True
-    assert job._register_linux(tick_reader=lambda: 900) == 1
+    assert job.register_linux(tick_reader=lambda: 900) == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
-    assert job._unregister_linux() == 1
+    assert job.unregister_linux() == 1
     assert len(writes) == 2
 
 
@@ -187,16 +187,16 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
     monkeypatch.setattr(cron.subprocess, "run", run)
     monkeypatch.setattr(job.logger, "error", record_error)
-    assert job._register_macos(tick_reader=lambda: 900) == 1
+    assert job.register_macos(tick_reader=lambda: 900) == 1
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
     assert errors == [
         ("launchctl bootstrap failed for {}: {}", "com.ava.packages-refresh", "denied")
     ]
 
-    plist = job._launchd_plist_path()
+    plist = job.launchd_plist_path()
     assert plist.exists()
-    assert job._unregister_macos() == 0
-    assert job._unregister_macos() == 0
+    assert job.unregister_macos() == 0
+    assert job.unregister_macos() == 0
     assert not plist.exists()
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
 

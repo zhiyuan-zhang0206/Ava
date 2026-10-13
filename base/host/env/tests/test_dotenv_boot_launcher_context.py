@@ -22,8 +22,8 @@ import pytest
 
 from base.host.env import dotenv_boot
 from base.host.env.tests.test_dotenv_boot import (
-    _point_env_at_without_db_url,
     _restore_authority_env,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
+    point_env_at_without_db_url,
 )
 from base.paths.home import resolve_ava_home
 from tests.fixtures.units import use_env_files
@@ -36,7 +36,7 @@ _NO_DATA_PLANE_IDENTITY_LINES = (
 
 @pytest.fixture(autouse=True)
 def _restore_environ() -> Iterator[None]:
-    """`_enforce_cluster_env_authority` and the CLI entry mutate os.environ directly,
+    """`enforce_cluster_env_authority` and the CLI entry mutate os.environ directly,
     not through monkeypatch: put the whole environment back after each test."""
     snapshot = dict(os.environ)
     yield
@@ -62,12 +62,12 @@ def test_recorded_launcher_profile_drops_undeclared_owner_url(
     profile must not widen the exemption."""
     monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(
         os.environ, "AVA_DB_URL", "postgresql://ava_main:owner-password@127.0.0.1:5433/ava"
     )
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_DB_URL" not in os.environ
 
@@ -79,10 +79,10 @@ def test_recorded_launcher_profile_drops_malformed_db_url(
     rejects the value (invalid IPv6), so it drops instead of raising."""
     monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
     monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
+    point_env_at_without_db_url(monkeypatch, tmp_path)
     monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://[::1")
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_DB_URL" not in os.environ
 
@@ -99,6 +99,6 @@ def test_recorded_launcher_profile_drops_unparseable_redis_url(
     _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
     monkeypatch.setitem(os.environ, "AVA_REDIS_URL", value)
 
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     assert "AVA_REDIS_URL" not in os.environ

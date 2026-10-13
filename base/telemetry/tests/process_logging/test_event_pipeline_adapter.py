@@ -126,7 +126,7 @@ def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
     log-file line is the death-analysis source). Anything else — including
     `node_exit`, which agent_inspect reads — passes."""
 
-    f = slog._event_pipeline_filter
+    f = slog.event_pipeline_filter
     assert f(_rec({"event": "node_exit"}))
     assert f(_rec({"event": "llm_usage"}))
     assert f(_rec({}))
@@ -150,8 +150,8 @@ def _rec_level(extra: dict[str, Any], level: str = "INFO") -> Any:
 def test_event_pipeline_filter_samples_info_log_one_in_ten() -> None:
     """Bare INFO `log` records are level-graded-sampled: exactly one in ten
     passes; the counter is per-process and resettable for tests."""
-    f = slog._event_pipeline_filter
-    slog._log_info_sample_counter = itertools.count()
+    f = slog.event_pipeline_filter
+    slog.log_info_sample_counter = itertools.count()
     kept = [f(_rec_level({"event": "log"})) for _ in range(10)]
     assert kept.count(True) == 1
     assert kept[0] is True  # the first record of each block is the survivor
@@ -160,8 +160,8 @@ def test_event_pipeline_filter_samples_info_log_one_in_ten() -> None:
 def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
     """WARNING+ bare logs and every named event pass unchanged — the alerts /
     unresolved surfaces depend on them; only bare INFO logs are sampled."""
-    f = slog._event_pipeline_filter
-    slog._log_info_sample_counter = itertools.count()
+    f = slog.event_pipeline_filter
+    slog.log_info_sample_counter = itertools.count()
     assert f(_rec_level({"event": "log"}, "WARNING"))
     assert f(_rec_level({"event": "log"}, "ERROR"))
     assert f(_rec_level({"event": "log"}, "CRITICAL"))
@@ -169,7 +169,7 @@ def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
     assert f(_rec_level({"event": "node_exit"}))
     assert f(_rec_level({"event": "llm_usage"}))
     # A label is payload metadata and follows the ordinary bare-log sample rate.
-    slog._log_info_sample_counter = itertools.count()
+    slog.log_info_sample_counter = itertools.count()
     assert sum(f(_rec_level({"label": "exec"})) for _ in range(10)) == 1
     # a record without a level passes unsampled (test-records / tolerant path)
     assert f(_rec({}))

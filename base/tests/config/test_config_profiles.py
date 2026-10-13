@@ -448,7 +448,7 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     from typing import Any, cast
 
     from base.config import _FIELDS
-    from base.config.config_registry import _ALLOWED_RESTART_REQUIRED, _RESTART_REQUIRED_PROFILE
+    from base.config.config_registry import ALLOWED_RESTART_REQUIRED, RESTART_REQUIRED_PROFILE
     from base.config.profiles import PROCESS_PROFILES
 
     def _extra(ref: object) -> dict[str, Any]:
@@ -459,17 +459,17 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     bad_value: list[tuple[str, str]] = [
         (name, str(_extra(ref).get("restart_required", ""))) for name, ref in _FIELDS.items()
     ]
-    bad_value = [(n, v) for n, v in bad_value if v not in _ALLOWED_RESTART_REQUIRED]
+    bad_value = [(n, v) for n, v in bad_value if v not in ALLOWED_RESTART_REQUIRED]
     assert not bad_value, f"fields with invalid restart_required: {bad_value}"
 
     wrong_kind: list[tuple[str, str, str]] = []
     for name, ref in _FIELDS.items():
         restart = str(_extra(ref).get("restart_required", ""))
-        kind = _RESTART_REQUIRED_PROFILE.get(restart)
+        kind = RESTART_REQUIRED_PROFILE.get(restart)
         if kind is not None and ref.domain not in PROCESS_PROFILES[kind]:  # type: ignore[index]
             wrong_kind.append((name, ref.domain, restart))
     assert not wrong_kind, (
         f"fields whose restart_required names a process kind that does not consume "
         f"them: {wrong_kind}"
     )
-    assert "schedule" in _ALLOWED_RESTART_REQUIRED
+    assert "schedule" in ALLOWED_RESTART_REQUIRED

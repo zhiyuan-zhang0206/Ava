@@ -205,7 +205,7 @@ def _message_count_from_blob_header(blob_type: object, header: object) -> int:
     return _msgpack_array_length(bytes(cast(bytes, header)))
 
 
-def _is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
+def is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
     """True when the messages version is a delta snapshot instead of a plain
     array.
 
@@ -267,7 +267,7 @@ def load_checkpoint_message_count(db: Database, agent_id: int) -> int:
             # written yet reconstructs to nothing and still counts 0.
             return _reconstructed_message_count(db, agent_id)
         blob_type, header = row
-        if _is_delta_snapshot_blob(blob_type, header):
+        if is_delta_snapshot_blob(blob_type, header):
             return _reconstructed_message_count(db, agent_id)
         return _message_count_from_blob_header(blob_type, header)
     except Exception as exc:

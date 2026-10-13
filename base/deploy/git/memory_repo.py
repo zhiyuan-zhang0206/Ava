@@ -135,11 +135,11 @@ def pull_main(*, machine: MachineIdentity) -> str:
     from base.config import settings
 
     if settings.general.memory_keep_local:
-        return _run_git("rev-parse", "HEAD", cwd=cwd)
+        return run_git("rev-parse", "HEAD", cwd=cwd)
     branch = settings.general.track_branch
-    _run_git("fetch", "origin", branch, cwd=cwd)
-    _run_git("merge", "--ff-only", f"origin/{branch}", cwd=cwd)
-    return _run_git("rev-parse", "HEAD", cwd=cwd)
+    run_git("fetch", "origin", branch, cwd=cwd)
+    run_git("merge", "--ff-only", f"origin/{branch}", cwd=cwd)
+    return run_git("rev-parse", "HEAD", cwd=cwd)
 
 
 def is_initialized() -> bool:
@@ -163,15 +163,15 @@ def gateway_is_initialized(*, machine: MachineIdentity) -> bool:
 # dead remote holds the whole daemon's exit open long after SIGTERM arrived,
 # until the stop path's SIGKILL fallback. The bound is what keeps a delivered
 # signal equal to a prompt exit.
-_GIT_TIMEOUT_S = 120.0
+GIT_TIMEOUT_S = 120.0
 
 
-def _run_git(*args: str, cwd: Path | None = None) -> str:
+def run_git(*args: str, cwd: Path | None = None) -> str:
     """git wrapper; raise on non-zero or timeout, return stripped stdout.
 
     Raises:
         subprocess.CalledProcessError: git exited non-zero.
-        subprocess.TimeoutExpired: git ran past `_GIT_TIMEOUT_S`. The process
+        subprocess.TimeoutExpired: git ran past `GIT_TIMEOUT_S`. The process
             tree is already dead when this is raised.
     """
     cwd_path = cwd if cwd is not None else memory_dir()
@@ -180,7 +180,7 @@ def _run_git(*args: str, cwd: Path | None = None) -> str:
     # the direct child and leaves its descendants running (base/host/proc.py).
     result = run_bounded(
         argv,
-        timeout=_GIT_TIMEOUT_S,
+        timeout=GIT_TIMEOUT_S,
         cwd=str(cwd_path),
         capture_output=True,
         text=True,
@@ -194,7 +194,7 @@ def _run_git(*args: str, cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
-def _init_local_repo(branch: str, cwd: Path) -> None:
+def init_local_repo(branch: str, cwd: Path) -> None:
     """git-init a local-only memory checkout (no remote) at `cwd` on `branch`,
     with an initial .gitignore commit. Used for the offline / keep-local path
     where the pool never connects to a central remote."""
@@ -202,12 +202,12 @@ def _init_local_repo(branch: str, cwd: Path) -> None:
     subprocess.run(  # noqa: S603
         ["git", "init", "-q", "-b", branch, str(cwd)], check=True
     )
-    _run_git("config", "user.email", "ava@local", cwd=cwd)
-    _run_git("config", "user.name", "Ava Local", cwd=cwd)
+    run_git("config", "user.email", "ava@local", cwd=cwd)
+    run_git("config", "user.name", "Ava Local", cwd=cwd)
     gitignore = cwd / ".gitignore"
     gitignore.write_text(_DEFAULT_GITIGNORE)
-    _run_git("add", ".gitignore", cwd=cwd)
-    _run_git("commit", "-q", "-m", f"init: local memory on {branch}", cwd=cwd)
+    run_git("add", ".gitignore", cwd=cwd)
+    run_git("commit", "-q", "-m", f"init: local memory on {branch}", cwd=cwd)
 
 
 def _strip_remotes(cwd: Path) -> None:
@@ -215,14 +215,14 @@ def _strip_remotes(cwd: Path) -> None:
     never sync off-box, so a leftover remote (e.g. a host flipped to keep-local
     after being set up against a central remote) is dropped on every explicit
     memory initialization."""
-    for name in _run_git("remote", cwd=cwd).split():
-        _run_git("remote", "remove", name, cwd=cwd)
+    for name in run_git("remote", cwd=cwd).split():
+        run_git("remote", "remove", name, cwd=cwd)
 
 
 # The gateway's pool snapshot is small (markdown notes); the cap is a tripwire,
 # not a sizing target — a corrupted or unexpectedly large body must fail the
 # bootstrap, never fill the runner's disk.
-_POOL_SNAPSHOT_MAX_BYTES = 256 * 1024 * 1024
+POOL_SNAPSHOT_MAX_BYTES = 256 * 1024 * 1024
 _POOL_FETCH_TIMEOUT_S = 120.0
 
 
@@ -237,22 +237,22 @@ def _stream_pool(client: Any, url: str, headers: dict[str, str]) -> tuple[str | 
         if resp.status_code != 200:
             raise MemoryPoolBootstrapFailed(f"GET {url} -> HTTP {resp.status_code}")
         declared = resp.headers.get("Content-Length")
-        if declared and int(declared) > _POOL_SNAPSHOT_MAX_BYTES:
+        if declared and int(declared) > POOL_SNAPSHOT_MAX_BYTES:
             raise MemoryPoolBootstrapFailed(
-                f"pool snapshot declared at {declared} bytes, over the {_POOL_SNAPSHOT_MAX_BYTES}-byte cap"
+                f"pool snapshot declared at {declared} bytes, over the {POOL_SNAPSHOT_MAX_BYTES}-byte cap"
             )
         buf = bytearray()
         for chunk in resp.iter_bytes():
             buf += chunk
-            if len(buf) > _POOL_SNAPSHOT_MAX_BYTES:
+            if len(buf) > POOL_SNAPSHOT_MAX_BYTES:
                 raise MemoryPoolBootstrapFailed(
-                    f"pool snapshot exceeds the {_POOL_SNAPSHOT_MAX_BYTES}-byte cap"
+                    f"pool snapshot exceeds the {POOL_SNAPSHOT_MAX_BYTES}-byte cap"
                 )
         head = resp.headers.get("X-Pool-Head")
         return head, bytes(buf)
 
 
-def _download_pool_snapshot(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
+def download_pool_snapshot(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
     """Fetch the gateway-served pool bundle, wrapping transport errors.
 
     Raises:
@@ -304,7 +304,7 @@ def bootstrap_from_gateway(*, machine: MachineIdentity) -> None:
     ) as e:  # GatewayApiBaseMissing (base.cluster.machine) — wrap into the guided failure
         raise MemoryPoolBootstrapFailed(f"gateway URL unavailable: {e}") from e
     url = f"{base}/api/memory/pool"
-    head, bundle_bytes = _download_pool_snapshot(url, gateway_auth_headers())
+    head, bundle_bytes = download_pool_snapshot(url, gateway_auth_headers())
     target = memory_dir()
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix=".memory-bootstrap-", dir=str(target.parent)))
@@ -335,7 +335,7 @@ def _unpack_bundle(
     checkout_dir = tmp_dir / "pool"
     result = run_bounded(
         ["git", "clone", "-q", str(bundle_path), str(checkout_dir)],
-        timeout=_GIT_TIMEOUT_S,
+        timeout=GIT_TIMEOUT_S,
         capture_output=True,
         text=True,
     )
@@ -344,15 +344,15 @@ def _unpack_bundle(
             f"git clone from bundle failed: {(result.stderr or '').strip()[:200]}"
         )
     if head:
-        actual = _run_git("rev-parse", "HEAD", cwd=checkout_dir)
+        actual = run_git("rev-parse", "HEAD", cwd=checkout_dir)
         if actual != head:
             raise MemoryPoolBootstrapFailed(
                 f"bundle HEAD {actual} does not match the advertised pool HEAD {head}"
             )
     # The bundle-path origin the clone records is junk (a temp file) —
     # a remote is only ever attached by explicit memory-remote setup.
-    _run_git("remote", "remove", "origin", cwd=checkout_dir)
-    _run_git("checkout", "-q", "-b", branch_name(machine=machine), cwd=checkout_dir)
+    run_git("remote", "remove", "origin", cwd=checkout_dir)
+    run_git("checkout", "-q", "-b", branch_name(machine=machine), cwd=checkout_dir)
     return checkout_dir
 
 
@@ -370,7 +370,7 @@ class RepoStatus:
 
 def _reconcile_initialized(branch: str, *, keep_local: bool, machine: MachineIdentity) -> None:
     """`init()` on an already-initialized checkout: settle the branch, strip remotes if local-only."""
-    current = _run_git("rev-parse", "--abbrev-ref", "HEAD")
+    current = run_git("rev-parse", "--abbrev-ref", "HEAD")
     if current != branch:
         if "gateway" in machine.role() and "agent-runner" not in machine.role():
             # gateway-only unit: the memory checkout is the consolidated
@@ -378,8 +378,8 @@ def _reconcile_initialized(branch: str, *, keep_local: bool, machine: MachineIde
             # is safe to move onto main (it never authors, so there is no
             # unpushed authored work to lose).
             if not keep_local:
-                _run_git("fetch", "origin", "main")
-            _run_git("checkout", "main")
+                run_git("fetch", "origin", "main")
+            run_git("checkout", "main")
             if keep_local:
                 _strip_remotes(memory_dir())
             return
@@ -414,7 +414,7 @@ def _init_without_remote(branch: str, *, machine: MachineIdentity) -> None:
     # A gateway-capable unit (single-box fresh install): on first boot its
     # own gateway half is not serving yet, so there is nothing to fetch
     # from — a local repo is the only option and stays silent, as before.
-    _init_local_repo(branch, memory_dir())
+    init_local_repo(branch, memory_dir())
 
 
 def init(*, machine: MachineIdentity) -> None:
@@ -462,7 +462,7 @@ def init(*, machine: MachineIdentity) -> None:
 
     if keep_local:
         # local-only pool: a git repo with no remote, never synced off-box
-        _init_local_repo(branch, memory_dir())
+        init_local_repo(branch, memory_dir())
         return
 
     memory_dir().parent.mkdir(parents=True, exist_ok=True)
@@ -480,22 +480,22 @@ def init(*, machine: MachineIdentity) -> None:
 
     # Whether the remote already has this branch (another host or our
     # previous setup pushed it)
-    remote_branches = _run_git("ls-remote", "--heads", "origin", branch)
+    remote_branches = run_git("ls-remote", "--heads", "origin", branch)
     if remote_branches:
-        _run_git("checkout", branch)
+        run_git("checkout", branch)
     else:
         # Fresh branch — based on the HEAD of the clone (could be
         # main, could be empty repo)
-        _run_git("checkout", "-b", branch)
-        _run_git("push", "-u", "origin", branch)
+        run_git("checkout", "-b", branch)
+        run_git("push", "-u", "origin", branch)
 
     # Write .gitignore (if missing, commit + push)
     gitignore = memory_dir() / ".gitignore"
     if not gitignore.exists():
         gitignore.write_text(_DEFAULT_GITIGNORE)
-        _run_git("add", ".gitignore")
-        _run_git("commit", "-m", f"init: .gitignore on {branch}")
-        _run_git("push")
+        run_git("add", ".gitignore")
+        run_git("commit", "-m", f"init: .gitignore on {branch}")
+        run_git("push")
 
 
 def init_gateway(*, machine: MachineIdentity) -> None:
@@ -528,18 +528,18 @@ def init_gateway(*, machine: MachineIdentity) -> None:
     gmd = gateway_memory_dir(roles=machine.role())
     keep_local = settings.general.memory_keep_local
     if gateway_is_initialized(machine=machine):
-        current = _run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=gmd)
+        current = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=gmd)
         if current != branch:
             if not keep_local:
-                _run_git("fetch", "origin", "main", cwd=gmd)
-            _run_git("checkout", "main", cwd=gmd)
+                run_git("fetch", "origin", "main", cwd=gmd)
+            run_git("checkout", "main", cwd=gmd)
         if keep_local:
             _strip_remotes(gmd)
         return
 
     if keep_local:
         # local-only pool: a git repo with no remote, never synced off-box
-        _init_local_repo(branch, gmd)
+        init_local_repo(branch, gmd)
         return
 
     gmd.parent.mkdir(parents=True, exist_ok=True)
@@ -547,7 +547,7 @@ def init_gateway(*, machine: MachineIdentity) -> None:
         remote = memory_remote()
     except MemoryRemoteMissing:
         # No remote: local empty repo (bench / offline dev), no origin
-        _init_local_repo(branch, gmd)
+        init_local_repo(branch, gmd)
         return
 
     # `git clone` into a non-existent directory — cwd is the parent
@@ -557,21 +557,21 @@ def init_gateway(*, machine: MachineIdentity) -> None:
     )
 
     # Whether the remote already has `main`
-    remote_branches = _run_git("ls-remote", "--heads", "origin", branch, cwd=gmd)
+    remote_branches = run_git("ls-remote", "--heads", "origin", branch, cwd=gmd)
     if remote_branches:
-        _run_git("checkout", branch, cwd=gmd)
+        run_git("checkout", branch, cwd=gmd)
     else:
         # Fresh remote — push an initial main
-        _run_git("checkout", "-b", branch, cwd=gmd)
-        _run_git("push", "-u", "origin", branch, cwd=gmd)
+        run_git("checkout", "-b", branch, cwd=gmd)
+        run_git("push", "-u", "origin", branch, cwd=gmd)
 
     # Write .gitignore (if missing, commit + push)
     gitignore = gmd / ".gitignore"
     if not gitignore.exists():
         gitignore.write_text(_DEFAULT_GITIGNORE)
-        _run_git("add", ".gitignore", cwd=gmd)
-        _run_git("commit", "-m", f"init: .gitignore on {branch}", cwd=gmd)
-        _run_git("push", cwd=gmd)
+        run_git("add", ".gitignore", cwd=gmd)
+        run_git("commit", "-m", f"init: .gitignore on {branch}", cwd=gmd)
+        run_git("push", cwd=gmd)
 
 
 def status() -> RepoStatus:
@@ -586,9 +586,9 @@ def status() -> RepoStatus:
             f"{memory_dir()} is not yet a git repo — run `ava memory init` first."
         )
 
-    branch = _run_git("rev-parse", "--abbrev-ref", "HEAD")
-    is_clean = _run_git("status", "--porcelain") == ""
-    local_commits = int(_run_git("rev-list", "--count", "HEAD"))
+    branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
+    is_clean = run_git("status", "--porcelain") == ""
+    local_commits = int(run_git("rev-list", "--count", "HEAD"))
 
     # ahead/behind origin/main — origin/main may not exist (fresh
     # remote / only machine branch pushed); then 0/0 (no reference
@@ -597,7 +597,7 @@ def status() -> RepoStatus:
     with contextlib.suppress(subprocess.CalledProcessError):
         from base.config import settings
 
-        counts = _run_git(
+        counts = run_git(
             "rev-list", "--left-right", "--count", f"HEAD...origin/{settings.general.track_branch}"
         )
         ahead_s, behind_s = counts.split()

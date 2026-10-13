@@ -160,7 +160,7 @@ def test_runner_refreshes_an_outdated_admission_snapshot(
         )
     )
     monkeypatch.setattr(bootstrap, "os", SimpleNamespace(**{**vars(bootstrap.os), "environ": env}))
-    assert bootstrap._read_config_snapshot("http://gateway") is None
+    assert bootstrap.read_config_snapshot("http://gateway") is None
 
     def dial(url: str, *, timeout: float, headers: dict[str, str]) -> httpx2.Response:
         return gateway_client.get(url, headers=headers)
@@ -168,5 +168,5 @@ def test_runner_refreshes_an_outdated_admission_snapshot(
     monkeypatch.setattr(bootstrap, "dial_get", dial)
     bootstrap.inject_config_from_gateway()
     assert env[_TURN_LIMIT] == "0"
-    written = bootstrap._read_config_snapshot("http://gateway")
+    written = bootstrap.read_config_snapshot("http://gateway")
     assert written is not None and written[0][_TURN_LIMIT] == "0"
