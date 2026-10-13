@@ -1,6 +1,6 @@
 [uses]
 "daemon" = ["test_daemon.py"]
-"test_external_lease.py" = ["_mcps_helpers.py"]
+"test_call_identity_check.py" = ["_mcps_helpers.py"]
 "test_mcps.py" = ["_mcps_helpers.py"]
 "test_mcps_remote.py" = ["_mcps_helpers.py"]
 "test_remote_timeout.py" = ["_mcps_helpers.py"]
