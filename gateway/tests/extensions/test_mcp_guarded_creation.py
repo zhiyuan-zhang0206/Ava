@@ -11,15 +11,8 @@ from psycopg import sql
 
 from gateway.agents import creation
 from gateway.app import app
-from gateway.tests.extensions.test_mcp_endpoint import (
-    ACCEPT,
-    create_token,
-    tool_call,
-    tool_result,
-)
-from gateway.tests.extensions.test_mcp_endpoint import (
-    _enable_endpoint as _enable_endpoint,
-)
+from gateway.tests.mcp_calls import ACCEPT, create_token, tool_call, tool_result
+from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
 from tests.fixtures.gateway_config import create_mcp_client
 
 TOOL = "spawn_agent_guarded_v1"

@@ -41,5 +41,3 @@
 "test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.collect_one" = 2
 "test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.poll" = 2
 "test_self_evolution_evaluate.py#monkeypatch.setattr evaluate.scores" = 2
-"test_validation_ava.py#monkeypatch.setattr understand_module._understand_one" = 1
-"test_validation_ava.py#monkeypatch.setattr understand_module.run_batch" = 1

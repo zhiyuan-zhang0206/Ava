@@ -2,6 +2,7 @@ exports = ["test_notices_endpoint.py"]
 
 [uses]
 "test_notices_resolve_history_live.py" = ["test_notices_endpoint.py"]
+"test_sse_throttled.py" = ["test_sse.py"]
 "test_weixin_ingress_command_http.py" = ["test_notices_endpoint.py"]
 
 [debt.first-party-patch]
@@ -16,7 +17,13 @@ exports = ["test_notices_endpoint.py"]
 "test_notices_resolve_history_live.py#monkeypatch.setattr base.config.settings.display.notices_open_default_limit" = 2
 "test_notices_resolve_history_live.py#monkeypatch.setattr base.config.settings.display.notices_resolved_default_page" = 1
 "test_notices_resolve_history_live.py#monkeypatch.setattr ops.lifecycle.publish_notice_resolved" = 1
+"test_sse.py#monkeypatch.setattr gateway.events.sse.time" = 1
+"test_sse.py#monkeypatch.setattr gateway.events.system.event_stream" = 1
 "test_sse_throttled.py#monkeypatch.setattr gateway.events.system.throttled_event_stream" = 1
 
 [debt.stdlib-patch]
 "test_messages.py#monkeypatch.setattr pathlib.Path.home" = 4
+
+[debt.third-party-patch]
+"test_sse.py#monkeypatch.setattr redis.asyncio.client.PubSub.get_message" = 1
+"test_sse.py#monkeypatch.setattr redis.asyncio.client.PubSub.subscribe" = 1
