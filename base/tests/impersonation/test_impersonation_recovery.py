@@ -9,11 +9,11 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_announcements
 from base.native_process.runtime_incarnation import RuntimeIncarnation

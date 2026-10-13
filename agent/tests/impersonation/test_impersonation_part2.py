@@ -102,7 +102,7 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
     survive the successor's admission: it is closed, not re-asked."""
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
-    from base.events.caller_identity import CallerIdentity
+    from base.api_contracts.caller_identity import CallerIdentity
     from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(
