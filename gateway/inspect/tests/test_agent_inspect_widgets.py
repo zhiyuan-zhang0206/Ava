@@ -307,7 +307,7 @@ def _fixture_plugins_importable(
     """Let the loader (which imports by dotted name) find fixture plugins written under `tmp_path`,
     and forget their modules afterwards."""
     shipped_path = shipped_plugins.__path__
-    monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
+    monkeypatch.setattr(shipped_plugins, "__path__", [*shipped_path, str(tmp_path)])
 
     def _forget() -> None:
         for name in [m for m in sys.modules if m.startswith("ava_builtins.plugins.fx_")]:

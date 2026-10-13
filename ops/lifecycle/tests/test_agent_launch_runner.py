@@ -13,6 +13,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.lm import factory
 from base.packages.plugin_providers import build_model_catalog
 from ops import lifecycle
 from ops.agents.spawn import create_agent_row
@@ -48,7 +49,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
     def _validate_model(**_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr("base.lm.factory.validate_model_config", _validate_model)
+    monkeypatch.setattr(factory, "validate_model_config", _validate_model)
     monkeypatch.setattr(launch, "publish_inbound_wake", _wake)
     body = LaunchAgentRequest(
         agent_id=agent_id, launch_attempt_id=attempt, birth_config=birth_config
