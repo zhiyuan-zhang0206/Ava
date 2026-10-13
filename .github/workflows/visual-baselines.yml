@@ -248,7 +248,10 @@ jobs:
             exit 1
           fi
           mkdir -p "tests/e2e/visual/__snapshots__/$PREVIEW_CAPTURES"
-          cp "$ARTIFACT_ROOT/$PREVIEW_CAPTURES"/*-golden-[12].png "tests/e2e/visual/__snapshots__/$PREVIEW_CAPTURES/"
+          # Captures stay nested by route domain (captures/<surface>/<crop>-golden-N.png);
+          # the exact-set checks above already bound the artifact's captures tree to the
+          # 44 golden PNGs, so copy it as it sits rather than flattening it to a fixed depth.
+          cp -R "$ARTIFACT_ROOT/$PREVIEW_CAPTURES"/. "tests/e2e/visual/__snapshots__/$PREVIEW_CAPTURES/"
           cp "$ARTIFACT_ROOT/preview-gate/meta.json" "tests/e2e/visual/__snapshots__/preview-gate/meta.json"
 
       - name: Commit and push to the dispatched PR head
