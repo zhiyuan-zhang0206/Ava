@@ -3,6 +3,11 @@ exports = ["setup.py"]
 [uses]
 "test_mark_stopping_preserves_description.py" = ["setup.py"]
 
+[debt.first-party-patch]
+"setup.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 1
+"test_unit_dial_urls.py#monkeypatch.setattr base.config.settings.gateway.gateway_port" = 1
+"test_unit_dial_urls.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 5
+
 [debt.private-name]
 "test_mark_stopping_preserves_description.py -> setup.py#_db" = 1
 "test_mark_stopping_preserves_description.py -> setup.py#_machine_setup" = 1

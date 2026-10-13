@@ -1,0 +1,6 @@
+[debt.first-party-patch]
+"test_changed_port_or_directory_kills_then_recreates.py#monkeypatch.setattr services.agent_runner.page_server.daemon.kill_pid" = 1
+"test_changed_port_or_directory_kills_then_recreates.py#monkeypatch.setattr services.agent_runner.page_server.daemon.page_server_occupants" = 1
+"test_changed_port_or_directory_kills_then_recreates.py#monkeypatch.setattr services.agent_runner.page_server.daemon.page_session_owner" = 1
+"test_changed_port_or_directory_kills_then_recreates.py#monkeypatch.setattr services.agent_runner.page_server.daemon.psutil.Process" = 1
+"test_changed_port_or_directory_kills_then_recreates.py#monkeypatch.setattr services.agent_runner.page_server.daemon.server_is_healthy" = 2

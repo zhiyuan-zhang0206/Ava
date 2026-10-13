@@ -314,3 +314,37 @@ The tool provides mechanisms: `record` can raise a baseline, and `diff` leaves
 fail-or-warn to its caller (the flag is required). How a repository wires the
 depths into hooks and CI, and whether growth fails or warns, is repository
 policy and is decided with the gate that turns meizel on, not here.
+
+## Addendum (2026-10-13): patching first-party code is a diagnostic
+
+The Decision says that tests "inject collaborators or patch through the object
+form", and keeps the object forms legal. That is withdrawn. A test that needs
+`monkeypatch` or `patch` to replace first-party code shows a dependency that was
+not injected: the code under test reaches its collaborator through a module or
+class attribute instead of receiving it. A better patch does not fix that. The
+fix is structural: a public facade over an implementation whose dependencies are
+explicit parameters, and a test that passes the fake in directly.
+
+Meizel therefore reports `first-party-patch` for these calls when their target
+resolves, through the file's imports, to a first-party module or object:
+
+- `mock.patch.object`, `mock.patch.multiple` (one site per patched name) and
+  `mock.patch.dict`;
+- `monkeypatch.setattr` and `monkeypatch.delattr`.
+
+String targets stay `restricted-python`, since they hide the dependency from
+the checker; they are not counted twice.
+
+**Boundary.** The rule covers first-party targets only. Patching the standard
+library or a third-party package (`time.sleep`, `requests.get`, `os.environ`),
+`monkeypatch.setenv`/`delenv`, `setitem`/`delitem` on first-party dicts, and
+targets the file cannot resolve to an import (a class defined in the same file,
+an argument, `self.attr`) are not reported. Whether to widen the rule to any of
+these is a separate decision.
+
+The diagnostic is recorded and repaid like any other. Its debt is owned by the
+directory of the patching file and keyed by form and dotted target without a line
+number, so the existing patches enter the baselines of their directories and the
+rule fails every new one. Widening a rule is the one case in which a baseline
+legitimately grows at the moment the rule is introduced; the gate's `debt diff`
+step reports that growth like any other.

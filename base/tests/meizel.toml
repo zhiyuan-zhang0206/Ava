@@ -1,1 +1,17 @@
 exports = ["impersonation"]
+
+[debt.first-party-patch]
+"test_activation.py#monkeypatch.setattr base.packages.plugins.activation.emit" = 1
+"test_activation.py#monkeypatch.setattr base.packages.plugins.activation.logger" = 2
+"test_alert_shadow.py#monkeypatch.setattr base.telemetry.alerts.shadow.Jsonb" = 1
+"test_alerts.py#monkeypatch.setattr base.config.settings.general" = 2
+"test_alerts.py#monkeypatch.setattr base.telemetry.alerts.ALERT_JUMP_LINK" = 2
+"test_alerts.py#monkeypatch.setattr base.telemetry.alerts.frontend_base_url" = 1
+"test_delivery.py#monkeypatch.setattr base.db.config.settings" = 1
+"test_delivery.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
+"test_packages_refresh_base.py#monkeypatch.setattr base.paths.repo_root" = 1
+"test_qwen_live_smoke.py#monkeypatch.setattr base.config.settings.lm.dashscope_api_key" = 1
+"test_qwen_live_smoke.py#monkeypatch.setattr base.config.settings.lm.dashscope_base_url" = 1
+"test_qwen_live_smoke.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 1
+"test_url_secret.py#monkeypatch.setattr base.config.domains.storage.data_plane.unit_home" = 4
+"test_url_secret.py#monkeypatch.setattr base.config.settings.general.machine_host" = 2

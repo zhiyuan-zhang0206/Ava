@@ -5,3 +5,39 @@ exports = ["cursor_fixture.py", "test_llm_helpers.py"]
 
 [external]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
+
+[debt.first-party-patch]
+"cursor_fixture.py#monkeypatch.setattr agent.graph.node_log.SNAPSHOT_CURSOR" = 1
+"test_build_with_extensions.py#monkeypatch.setattr ava.sdk_surface.metering.install" = 1
+"test_build_with_extensions.py#monkeypatch.setattr base.packages.plugin_providers.build_model_catalog" = 1
+"test_build_with_extensions.py#monkeypatch.setattr base.packages.plugins.loading.plugin_loader.load_plugin_module" = 2
+"test_build_with_extensions.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_build_with_extensions.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_build_with_extensions.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 2
+"test_build_with_extensions.py#monkeypatch.setattr base.telemetry.emit" = 1
+"test_callbacks.py#monkeypatch.setattr agent.graph._callbacks.time" = 1
+"test_claim_attach_drain.py#monkeypatch.setattr agent.graph.claim.node.claim_inbound_batch" = 2
+"test_exec_timeout_note.py#monkeypatch.setattr base.config.settings.sandbox.exec_timeout_seconds" = 1
+"test_graph_stream.py#monkeypatch.setattr agent.graph.exec.output.overflow_dir" = 1
+"test_graph_stream.py#monkeypatch.setattr base.config.settings.sandbox.exec_output_crop_archive_max_bytes" = 1
+"test_init_context.py#monkeypatch.setattr agent.graph._init_context.context_notes" = 1
+"test_init_context.py#monkeypatch.setattr agent.graph.hooks.compact.generate_summary" = 1
+"test_init_context.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
+"test_init_context.py#monkeypatch.setattr base.config.settings.agent.skills_to_inject_into_system_prompt" = 3
+"test_init_context.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 3
+"test_interrupt.py#monkeypatch.setattr agent.graph._init_context.build_system_prompt" = 1
+"test_interrupt.py#monkeypatch.setattr agent.graph._init_context.context_notes" = 1
+"test_interrupt.py#monkeypatch.setattr agent.graph.hooks.compact.generate_summary" = 2
+"test_interrupt.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 2
+"test_interrupt.py#monkeypatch.setattr agent.graph.interrupt.INTERRUPT_POLL_S" = 3
+"test_interrupt.py#monkeypatch.setattr agent.graph.interrupt.WATCHER_EXIT_TIMEOUT_S" = 3
+"test_interrupt.py#monkeypatch.setattr agent.graph.interrupt.pending_interrupt_reason" = 2
+"test_interrupt.py#monkeypatch.setattr agent.graph.interrupt.watch_for_interrupt" = 3
+"test_llm_helpers.py#monkeypatch.setattr base.config.settings.lm.llm_silent_idle_max_output_tokens" = 1
+"test_llm_understanding_wiring.py#monkeypatch.setattr agent.hooks.understanding_chunks.chunk_threshold" = 1
+"test_llm_understanding_wiring.py#monkeypatch.setattr agent.hooks.understanding_chunks.enqueue_chunk" = 1
+"test_llm_understanding_wiring.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 1
+"test_model_interrupt_owner.py#monkeypatch.setattr agent.graph.interrupt.WATCHER_EXIT_TIMEOUT_S" = 2
+"test_model_interrupt_owner.py#monkeypatch.setattr agent.graph.interrupt.watch_for_interrupt" = 4
+"test_node_log.py#monkeypatch.setattr agent.graph.node_log.build_timeline_items" = 2
+"test_node_log.py#monkeypatch.setattr base.config.settings.agent.node_stall_dump_seconds" = 5

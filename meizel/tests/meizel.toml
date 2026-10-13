@@ -7,6 +7,7 @@
 "test_debt_report.py" = ["synthetic.py"]
 "test_declare.py" = ["synthetic.py"]
 "test_facts.py" = ["synthetic.py"]
+"test_first_party_patch.py" = ["synthetic.py"]
 "test_fixtures.py" = ["synthetic.py"]
 "test_generated.py" = ["synthetic.py"]
 "test_manifest.py" = ["synthetic.py"]

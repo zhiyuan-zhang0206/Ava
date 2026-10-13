@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_send_message_retries_through_gateway_rollout.py#monkeypatch.setattr services.entrypoints.im_bridge.core.TYPING_INTERVAL_S" = 3
+"test_send_message_retries_through_gateway_rollout.py#monkeypatch.setattr services.entrypoints.im_bridge.core.TYPING_MAX_S" = 2
+"test_send_message_retries_through_gateway_rollout.py#monkeypatch.setattr services.entrypoints.im_bridge.push_watchdog._sleep" = 3

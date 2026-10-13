@@ -1,2 +1,12 @@
 [external]
 "test_register_namespace.py" = "imports SDK namespaces that plugins install at run time; they have no module file"
+
+[debt.first-party-patch]
+"test_plugin_catalog.py#monkeypatch.setattr base.packages.plugin_providers.build_model_catalog" = 1
+"test_plugin_catalog.py#monkeypatch.setattr base.packages.plugins.load_report.report_plugin_load_failure" = 1
+"test_plugin_catalog.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_plugin_catalog.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_plugin_catalog.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
+"test_plugin_load_containment.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_plugin_load_containment.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_plugin_load_containment.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1

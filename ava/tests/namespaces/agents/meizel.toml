@@ -1,2 +1,7 @@
 [uses]
 "test_work_restart.py" = ["test_work.py"]
+
+[debt.first-party-patch]
+"test_compaction.py#monkeypatch.setattr ava.sdk_surface.agent_identity.validate_external_identity" = 1
+"test_work.py#monkeypatch.setattr ava.sdk_surface.agent_identity.validate_external_identity" = 1
+"test_work_restart.py#monkeypatch.setattr ava.sdk_surface.agent_identity.validate_external_identity" = 1

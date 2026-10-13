@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_stats.py#monkeypatch.setattr base.config.settings.display.plugin_stats_max_detail_chars" = 1

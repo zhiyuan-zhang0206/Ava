@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_quiesced.py#monkeypatch.setattr base.daemon.round_loop.sleep_with_progress" = 1
+"test_quiesced.py#monkeypatch.setattr base.deploy.maintenance.admission.quiesced" = 1

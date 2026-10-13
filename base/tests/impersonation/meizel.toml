@@ -6,3 +6,10 @@ exports = ["support.py"]
 "test_impersonation_recovery.py" = ["support.py"]
 "test_impersonation_relay.py" = ["support.py"]
 "test_impersonation_reminders.py" = ["support.py"]
+
+[debt.first-party-patch]
+"test_impersonation.py#monkeypatch.setattr base.agents.impersonation.wake_agent" = 2
+"test_impersonation.py#monkeypatch.setattr base.events.live.bus.EventBus.publish_best_effort_sync" = 1
+"test_impersonation_recovery.py#monkeypatch.setattr base.agents.impersonation.maintenance.publish_inbound_wake" = 1
+"test_impersonation_relay.py#monkeypatch.setattr base.agents.impersonation.wake.logger" = 1
+"test_impersonation_roster_wakes.py#monkeypatch.setattr base.agents.impersonation.wake.publish_inbound_wake" = 1

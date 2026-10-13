@@ -1,0 +1,8 @@
+[debt.first-party-patch]
+"test_resurrect_if_terminated_placement.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 7
+"test_resurrect_if_terminated_placement.py#monkeypatch.setattr ops.lifecycle.clear_wake_suppression" = 3
+"test_resurrect_if_terminated_placement.py#monkeypatch.setattr ops.lifecycle.get_agent_machine" = 9
+"test_resurrect_if_terminated_placement.py#monkeypatch.setattr ops.lifecycle.get_agent_status" = 10
+"test_resurrect_if_terminated_placement.py#monkeypatch.setattr ops.lifecycle.recovery_halted" = 3
+"test_resurrect_if_terminated_placement.py#monkeypatch.setattr ops.lifecycle.resurrect_agent_op" = 3
+"test_resurrect_if_terminated_placement.py#monkeypatch.setattr ops.lifecycle.system_notice_source_of_trigger" = 3

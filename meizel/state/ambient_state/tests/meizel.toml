@@ -1,3 +1,16 @@
 [external]
 "test_task_owner.py" = "executes sample source the lint rule is exercised on"
 "test_thread_owner.py" = "executes sample source the lint rule is exercised on"
+
+[debt.first-party-patch]
+"test_ambient_bus.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.BUS_PACKAGES" = 2
+"test_ambient_clock.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.CLOCK_PACKAGES" = 2
+"test_ambient_dbhandle.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.DB_HANDLE_PACKAGES" = 2
+"test_ambient_effects.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.ALLOWED" = 2
+"test_ambient_effects.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.PURE_REPO_CALLEES" = 2
+"test_ambient_effects.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.SINK_FACADES" = 3
+"test_ambient_endpoints.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.ENDPOINT_PACKAGES" = 2
+"test_ambient_sliced.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.SLICED_PACKAGES" = 2
+"test_ambient_state.py#monkeypatch.setattr meizel.state.ambient_state.allowlist.ALLOWED" = 1
+"test_handle_ratchet.py#monkeypatch.setattr meizel.state.ambient_state.handle_ratchet._REPO_ROOT" = 2
+"test_handle_ratchet.py#monkeypatch.setattr meizel.state.ambient_state.handle_ratchet.lint_common.tracked_files" = 2

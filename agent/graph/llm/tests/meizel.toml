@@ -2,3 +2,23 @@ exports = ["cancel_fixture.py"]
 
 [uses]
 "conftest.py" = ["cancel_fixture.py"]
+
+[debt.first-party-patch]
+"cancel_fixture.py#monkeypatch.setattr agent.graph.exec.node.subscribe_interrupt" = 1
+"cancel_fixture.py#monkeypatch.setattr agent.graph.hooks.compact.subscribe_interrupt" = 1
+"cancel_fixture.py#monkeypatch.setattr agent.graph.llm._cancel.subscribe_interrupt" = 1
+"test_explicit_retry_inputs.py#monkeypatch.setattr agent.graph.llm._retry.random.uniform" = 1
+"test_llm_decode_ms.py#monkeypatch.setattr agent.graph.llm._stream.time.monotonic" = 3
+"test_llm_retry.py#monkeypatch.setattr agent.graph.llm._retry.NEVER_RETRIED" = 1
+"test_llm_retry.py#monkeypatch.setattr agent.graph.llm._retry.random.uniform" = 2
+"test_llm_retry.py#monkeypatch.setattr agent.graph.llm.node.asyncio.sleep" = 2
+"test_llm_retry.py#monkeypatch.setattr agent.graph.llm.node.llm_attempt" = 3
+"test_llm_retry.py#monkeypatch.setattr base.lm.registry.resolve_setting" = 3
+"test_llm_stream_stall.py#monkeypatch.setattr agent.graph.llm._stream.consume_stream_with_stall_timeout" = 1
+"test_llm_stream_stall.py#monkeypatch.setattr agent.graph.llm._stream.time.monotonic" = 3
+"test_llm_stream_stall.py#monkeypatch.setattr base.config.settings.lm.llm_stream_inter_chunk_timeout_seconds" = 3
+"test_llm_stream_stall.py#monkeypatch.setattr base.config.settings.lm.llm_stream_total_timeout_seconds" = 1
+"test_llm_stream_stall.py#monkeypatch.setattr base.config.settings.lm.llm_stream_ttft_timeout_seconds" = 4
+"test_llm_turn_end.py#monkeypatch.setattr agent.graph.llm.node._llm_node_impl" = 2
+"test_transport_boundary.py#monkeypatch.setattr base.config.settings.lm.llm_stream_inter_chunk_timeout_seconds" = 2
+"test_transport_boundary.py#monkeypatch.setattr base.config.settings.lm.llm_stream_ttft_timeout_seconds" = 2

@@ -14,6 +14,9 @@ exports = ["components", "e2e", "factories", "fixtures", "impersonation_support.
 "skills" = ["fixtures"]
 "ui" = ["e2e"]
 
+[debt.first-party-patch]
+"impersonation_support.py#monkeypatch.setattr base.agents.impersonation.event_protocol_for_new_lease" = 1
+
 [debt.manifest-cycle]
 "path_scoped -> fixtures" = 1
 

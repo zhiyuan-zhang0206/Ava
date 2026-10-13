@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_resource_admission_exec.py#monkeypatch.setattr agent.graph.exec._owned_run.register_attached" = 1

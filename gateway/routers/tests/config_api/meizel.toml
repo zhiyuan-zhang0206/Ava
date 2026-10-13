@@ -1,0 +1,12 @@
+[debt.first-party-patch]
+"test_app_resources.py#monkeypatch.setattr base.cluster.machines.list_agent_runners" = 1
+"test_app_resources.py#monkeypatch.setattr base.cluster.machines.lookup_role" = 1
+"test_app_resources.py#monkeypatch.setattr gateway.routers.configuration.runtime.check_env_integrity" = 1
+"test_app_resources.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 1
+"test_get_explicit_self_is_host_view_not.py#monkeypatch.setattr base.cluster.machines.list_agent_runners" = 1
+"test_get_explicit_self_is_host_view_not.py#monkeypatch.setattr base.cluster.machines.lookup_role" = 3
+"test_get_explicit_self_is_host_view_not.py#monkeypatch.setattr base.config.settings.display.config_audit_default_last" = 1
+"test_get_explicit_self_is_host_view_not.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 6
+"test_plugin_write_errors.py#monkeypatch.setattr base.packages.plugin_config_admin.config_owners" = 1
+"test_plugin_write_errors.py#monkeypatch.setattr base.packages.plugin_config_images.file_lock" = 1
+"test_plugin_write_errors.py#monkeypatch.setattr base.packages.plugin_config_images.write_bytes_atomic" = 1
