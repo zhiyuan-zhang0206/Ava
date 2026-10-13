@@ -1,5 +1,4 @@
-exports = ["router.py"]
+exports = ["batches.py", "router.py"]
 
 [uses]
 "router.py" = ["batches.py"]
-"tests" = ["batches.py", "router.py"]
