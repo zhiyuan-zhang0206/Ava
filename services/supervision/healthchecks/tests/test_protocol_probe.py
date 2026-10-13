@@ -11,7 +11,9 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.daemon.health import DaemonProbe
+from base.native_process.root_control import client
 from services.supervision.healthchecks import protocol_probe as probe
 
 
@@ -51,7 +53,7 @@ def test_unix_pong_needs_no_root_or_native_inspection(monkeypatch: pytest.Monkey
         pytest.fail("read-only protocol health must not inspect native ownership")
 
     monkeypatch.setattr("psutil.process_iter", forbidden)
-    monkeypatch.setattr("base.native_process.root_control.client.owned_process", forbidden)
+    monkeypatch.setattr(client, "owned_process", forbidden)
     with unix_server(b'{"id":0,"ok":true}\n') as path:
         assert probe.ping(path).alive
 
@@ -79,5 +81,5 @@ def test_protocol_specific_failure_detail_is_preserved() -> None:
 
 
 def test_missing_unix_endpoint_is_down(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("base.paths.mcp_daemon_shared_socket", lambda: tmp_path / "missing")
+    monkeypatch.setattr(paths, "mcp_daemon_shared_socket", lambda: tmp_path / "missing")
     assert probe.probe("mcp-daemon").verdict.value == "down"

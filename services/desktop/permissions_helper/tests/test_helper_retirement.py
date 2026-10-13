@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.native_process.ownership import OwnedProcess
 from services.desktop.permissions_helper import lifecycle
 from services.desktop.permissions_helper.tests.support import stopped_helper_plist
@@ -29,7 +30,7 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
     sentinel = installed / "build-state.json"
     sentinel.write_text("unchanged installed state")
     candidate = tmp_path / "candidate"
-    monkeypatch.setattr("base.paths.permissions_helper_app_dir", lambda: installed)
+    monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "_source_content_hash", lambda: "source")
     monkeypatch.setattr(lifecycle, "_expected_dr", lambda: "stable-dr")
 
@@ -62,7 +63,7 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
 def test_isolated_helper_rejects_installed_destination_before_signing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("base.paths.permissions_helper_app_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: tmp_path)
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="outside the installed"):
         lifecycle.build_and_sign(destination=tmp_path)
 
@@ -88,9 +89,9 @@ def _stale_installed_helper(
     state = {"source_hash": "old", "dr": dr, "signed_at": "2026-09-29T00:00:00+00:00"}
     (installed / "build-state.json").write_text(json.dumps(state))
     (tmp_path / "agents").mkdir()
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "home")
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "home")
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path / "agents")
-    monkeypatch.setattr("base.paths.permissions_helper_app_dir", lambda: installed)
+    monkeypatch.setattr(paths, "permissions_helper_app_dir", lambda: installed)
     monkeypatch.setattr(lifecycle, "_source_content_hash", lambda: "new")
     monkeypatch.setattr(lifecycle, "_expected_dr", lambda: "stable-dr")
     monkeypatch.setattr(lifecycle, "_is_valid_stable_app", Path.exists)  # present = validly signed

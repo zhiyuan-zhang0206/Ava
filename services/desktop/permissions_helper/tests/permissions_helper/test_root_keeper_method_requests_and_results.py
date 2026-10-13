@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.config import settings
 from base.host.converge.accessibility import AccessibilityState
 from base.host.converge.screen_capture import ScreenCaptureState
@@ -319,7 +320,7 @@ def test_label_is_per_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.cluster import home_slug
     from services.desktop.permissions_helper import lifecycle
 
-    monkeypatch.setattr("base.paths.ava_home", lambda: Path("/x/.ava-demo"))
+    monkeypatch.setattr(paths, "ava_home", lambda: Path("/x/.ava-demo"))
     assert lifecycle._label() == f"com.ava.permissions-helper.{home_slug(Path('/x/.ava-demo'))}"
 
 

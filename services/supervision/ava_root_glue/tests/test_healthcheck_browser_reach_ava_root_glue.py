@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from base.daemon.health import DaemonProbe
+from services.desktop.browser import probe
 from services.supervision.ava_root_glue import diagnostic_probes as probes
 from services.supervision.healthchecks import browser_reach as hc
 
@@ -43,7 +44,7 @@ def test_canary_distinguishes_browser_failure_from_unknown(
             )
         ),
     )
-    monkeypatch.setattr("services.desktop.browser.probe.probe_browser", _fake_probe_browser)
+    monkeypatch.setattr(probe, "probe_browser", _fake_probe_browser)
     monkeypatch.setattr(hc, "canary", _fake_canary)
     monkeypatch.setattr(hc, "host_probe", _fake_host_probe)
     assert probes.browser_reach().verdict.value == expected

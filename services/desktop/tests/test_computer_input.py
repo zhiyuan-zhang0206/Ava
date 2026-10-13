@@ -13,6 +13,7 @@ from typing import Any, cast
 import jsonschema
 import pytest
 
+from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper import client
@@ -195,7 +196,7 @@ def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) ->
     def record(_db: object, event: Any) -> None:
         target.events.append(event)
 
-    monkeypatch.setattr("base.agents.impersonation.manifest.emit_recorded_central_event", record)
+    monkeypatch.setattr(manifest, "emit_recorded_central_event", record)
     with tempfile.TemporaryDirectory(prefix="ava-input-", dir="/tmp") as directory:
         path = Path(directory) / "helper.sock"
         monkeypatch.setattr(client, "permissions_helper_socket", lambda: path)

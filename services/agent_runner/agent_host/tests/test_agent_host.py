@@ -37,8 +37,10 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import ava
+import services.agent_runner.agent_host.host as agent_host_host
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
+from base.agents.incarnation import hosted_force
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.cluster.machine import MachineIdentity
 from base.db import Database
@@ -46,7 +48,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host import settlement
+from services.agent_runner.agent_host import invocation, settlement
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import HostPolicy, TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import (
@@ -394,11 +396,10 @@ def wired(
     # This suite's agents/ownership live exclusively in _FakePool. Real lease
     # SQL is covered by takeover integration tests, so its no-lease baseline
     # must be fake too instead of querying a second, empty database.
+    monkeypatch.setattr(agent_host_host, "active_lease", AsyncMock(return_value=False))
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.active_lease", AsyncMock(return_value=False)
-    )
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.invocation.settle_checkpoint",
+        invocation,
+        "settle_checkpoint",
         AsyncMock(return_value=False),
     )
     import services.agent_runner.agent_host.host as host_mod
@@ -439,25 +440,21 @@ def wired(
 
     _stub_host_transitions(monkeypatch, _flip_hosted_status)
 
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.release_hosted_owner", _noop_reconcile
-    )
+    monkeypatch.setattr(agent_host_host, "release_hosted_owner", _noop_reconcile)
 
     async def _apply_lifecycle(_pool: object, _incarnation: object, **_kwargs: object) -> str:
         """Host orchestration fake; real durable effects use the PG contract tests."""
         return "terminate"
 
     monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", _apply_lifecycle)
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle", _apply_lifecycle
-    )
+    monkeypatch.setattr(invocation, "apply_hosted_lifecycle", _apply_lifecycle)
 
     async def _no_force(*_args: object, **_kwargs: object) -> bool:
         # These cache/context fixtures carry no force command. Real owner/pointer
         # settlement and refusal are covered by test_hosted_force_quiescence.
         return False
 
-    monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", _no_force)
+    monkeypatch.setattr(hosted_force, "original_host_force", _no_force)
 
     machine_identity.set(name="this-box")
 

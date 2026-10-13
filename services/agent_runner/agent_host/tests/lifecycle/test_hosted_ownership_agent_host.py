@@ -8,11 +8,14 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+import services.agent_runner.agent_host.host as agent_host_host
+from agent.ownership import hosted
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
@@ -58,9 +61,10 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
             announce_entered.set()
             await announce_release.wait()
 
-    monkeypatch.setattr("agent.ownership.hosted.publish_agent_updated", half_open_publish)
+    monkeypatch.setattr(hosted, "publish_agent_updated", half_open_publish)
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.publish_agent_updated",
+        agent_host_host,
+        "publish_agent_updated",
         half_open_publish,
         raising=False,
     )
@@ -72,9 +76,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         assert catalog is model_catalog
         del llm_override
 
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.runtime.validate_model_config", allow_model_config
-    )
+    monkeypatch.setattr(runtime, "validate_model_config", allow_model_config)
 
     host = AgentHost(
         policy=configured_policy(),

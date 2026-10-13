@@ -9,6 +9,7 @@ from typing import cast
 
 import pytest
 
+import base.native_process.root_control.client as root_control_client
 from base.host.permissions_helper import client
 from base.native_process.ownership import OwnedProcess
 from services.supervision.healthchecks import permissions_helper as hc
@@ -278,7 +279,7 @@ def test_connected_helper_peer_must_be_root_native_parent(
     monkeypatch.setattr(root_client, "root_process", lambda: root)
     monkeypatch.setattr(hc.psutil, "Process", _fake_process)
     monkeypatch.setattr(hc.OwnedProcess, "capture", _fake_capture)
-    monkeypatch.setattr("base.native_process.root_control.client.peer_pid", _fake_peer_pid)
+    monkeypatch.setattr(root_control_client, "peer_pid", _fake_peer_pid)
     with pytest.raises(hc._ParentEvidenceError, match="not the captured root parent"):
         hc._helper_parent(cast(socket.socket, object()))
 

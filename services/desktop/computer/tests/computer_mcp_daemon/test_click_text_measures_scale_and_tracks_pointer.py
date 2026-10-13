@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperError
@@ -392,7 +393,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
             }
         )  # pyright: ignore[reportUnknownMemberType]
 
-    monkeypatch.setattr("base.agents.impersonation.manifest.emit_recorded_central_event", _stage)
+    monkeypatch.setattr(manifest, "emit_recorded_central_event", _stage)
     d = _daemon(database_gate=database_gate)
     resp = await _call(d, "click", {"x": 1, "y": 2, "task_id": 42})
     assert resp["ok"] is True  # the action itself executed

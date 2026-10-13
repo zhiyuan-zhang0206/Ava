@@ -173,7 +173,7 @@ def test_run_skips_outside_window(
         def now(cls, tz=None):  # noqa: ARG003 — the frozen instant carries its own tz
             return datetime(2026, 8, 10, 10, 0, tzinfo=UTC)  # 03:00 PDT — outside window
 
-    monkeypatch.setattr("services.upkeep.events_maintenance.blob_vacuum.datetime", _Frozen)
+    monkeypatch.setattr(blob_vacuum, "datetime", _Frozen)
     result = run_blob_vacuum(
         events_maintenance_db(process_config, local_machine=machine_identity), timezone=cluster_tz
     )

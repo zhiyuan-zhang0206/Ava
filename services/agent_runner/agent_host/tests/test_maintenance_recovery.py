@@ -37,6 +37,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
+from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -286,9 +287,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         clock_factory=configured_policy().clock_factory,
     )
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
-    )
+    monkeypatch.setattr(runtime, "validate_model_config", MagicMock())
 
     async def drive(
         _agent: int,
@@ -556,9 +555,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         catalog=model_catalog,
         clock_factory=configured_policy().clock_factory,
     )
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
-    )
+    monkeypatch.setattr(runtime, "validate_model_config", MagicMock())
     host = _host_driving_invoke_until_done(
         monkeypatch,
         aops_pool,

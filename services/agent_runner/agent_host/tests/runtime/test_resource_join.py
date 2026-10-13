@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import services.agent_runner.agent_host.host as agent_host_host
 from ava.sdk_surface.installation import Installation
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
@@ -91,7 +92,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
     host._resource_service.record_failure(scope, failure, name="original")
     events: list[str] = []
     monkeypatch.setattr(host._clients, "close", lambda: events.append("clients"))
-    monkeypatch.setattr("services.agent_runner.agent_host.host.release_hosted_owner", AsyncMock())
+    monkeypatch.setattr(agent_host_host, "release_hosted_owner", AsyncMock())
 
     async def close_pools(*_args: object) -> None:
         events.append("pools")
