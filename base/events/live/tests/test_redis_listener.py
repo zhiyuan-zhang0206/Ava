@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
@@ -35,6 +36,38 @@ async def _publish_inbound(agent_id: int, inbound_id: int = 42) -> None:
         r.publish(inbound_channel(agent_id), str(inbound_id))  # pyright: ignore[reportUnknownMemberType]
     finally:
         r.close()
+
+
+async def _until(condition: Callable[[], bool], what: str, timeout: float = 10.0) -> None:
+    """Wait for a condition instead of sleeping and hoping: fail loudly if it never holds.
+
+    A fixed sleep before a publish races the listener's connect and SUBSCRIBE; under CI load the
+    publish lands first, Redis pub/sub keeps nothing for a channel with no subscriber, and the
+    wait then runs out its whole budget.
+    """
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            pytest.fail(f"timed out after {timeout:.0f}s waiting for {what}")
+        await asyncio.sleep(0.01)
+
+
+async def _subscribed(agent_id: int) -> None:
+    """Wait until Redis itself reports a subscriber on the agent's inbound channel."""
+    channel = inbound_channel(agent_id)
+    probe = EventBus.from_settings().sync_redis()
+    try:
+        await _until(
+            lambda: int(probe.pubsub_numsub(channel)[0][1]) > 0,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            f"a subscriber on {channel}",
+        )
+    finally:
+        probe.close()
+
+
+def _consuming(listener: RedisInboundListener) -> bool:
+    """Whether a `wait_one` of this listener is parked in its consume phase."""
+    return any(":consume:" in name for name in listener.unfinished_work)
 
 
 @pytest.mark.usefixtures("redis_url")
@@ -59,8 +92,9 @@ class TestRedisInboundListener:
             started = time.monotonic()
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
 
-            # Give it a moment to subscribe, then publish
-            await asyncio.sleep(0.1)
+            # Publish only once Redis reports the subscription: pub/sub drops a message that
+            # has no subscriber yet.
+            await _subscribed(agent_id)
             await _publish_inbound(agent_id)
 
             await asyncio.wait_for(wait_task, timeout=5.0)
@@ -130,7 +164,7 @@ class TestRedisInboundListener:
 
             # Next wait_one should transparently reconnect
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
-            await asyncio.sleep(0.1)
+            await _subscribed(agent_id)
             await _publish_inbound(agent_id)
             await asyncio.wait_for(wait_task, timeout=5.0)
         finally:
@@ -166,8 +200,8 @@ class TestRedisInboundListener:
         try:
             # First wait_one: let it subscribe and enter the consume phase.
             t1 = asyncio.create_task(listener.wait_one(timeout=5.0))
-            # Give t1 time to subscribe and enter pubsub.get_message.
-            await asyncio.sleep(0.15)
+            # Wait until t1 is blocked in pubsub.get_message.
+            await _until(lambda: _consuming(listener), "the first wait_one to enter its consume")
 
             # Second wait_one: before the fix, once past _ensure_subscribed it would
             # enter _consume_one -> pubsub.get_message() on the same connection while
@@ -293,7 +327,7 @@ class TestWaitOneBudgetAndCancel:
         try:
             await listener.ensure_listening()
             waiter = asyncio.create_task(listener.wait_one(timeout=30.0))
-            await asyncio.sleep(0.3)  # settle into the consume
+            await _until(lambda: _consuming(listener), "the waiter to enter its consume")
             waiter.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await waiter
@@ -302,7 +336,7 @@ class TestWaitOneBudgetAndCancel:
             # A fresh wait on the same listener still wakes on publish — proof the
             # cancelled consume released the shared pubsub instead of leaking.
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
-            await asyncio.sleep(0.1)
+            await _until(lambda: _consuming(listener), "the fresh wait_one to enter its consume")
             t0 = time.monotonic()
             await _publish_inbound(agent_id)
             await asyncio.wait_for(wait_task, timeout=5.0)
@@ -328,6 +362,10 @@ class TestWakeHealth:
         """
         listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=6988)
         try:
+            # Open first: `wait_one` spends its budget on connecting too, and under load a
+            # 0.3s budget can end before the subscription is up, which is a different
+            # (open-abandon) episode than the clean idle timeout this test is about.
+            await listener.ensure_listening()
             await listener.wait_one(timeout=0.3)
             assert listener.wake_state is WakeState.HEALTHY
             assert listener.wake_degrade_reason is None
@@ -366,6 +404,7 @@ class TestWakeHealth:
             assert listener._pubsub is None
 
             await listener.ensure_listening()
+            await _subscribed(agent_id)
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
             await _publish_inbound(agent_id)
             await asyncio.wait_for(wait_task, timeout=5.0)
@@ -491,7 +530,7 @@ class TestAclScopedChannel:
         listener = RedisInboundListener(_scoped_user_url("acl_dev2"), agent_id)
         try:
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
-            await asyncio.sleep(0.1)
+            await _subscribed(agent_id)
             # Default user publishes; the channel is the same prefixed name.
             await _publish_inbound(agent_id)
             await asyncio.wait_for(wait_task, timeout=5.0)
@@ -556,7 +595,7 @@ class TestDeadTransportSurvival:
             assert writer is not None
             transport = writer.transport
             transport.abort()
-            await asyncio.sleep(0.1)
+            await _until(transport.is_closing, "the aborted transport to report closing")
             conn.next_health_check = 0.0  # force the health-check PING write path
 
             # Must not raise — before the fix this was TypeError (the crash).
@@ -564,7 +603,7 @@ class TestDeadTransportSurvival:
 
             # Recovery: a publish wakes the re-subscribed listener.
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
-            await asyncio.sleep(0.1)
+            await _subscribed(agent_id)
             await _publish_inbound(agent_id)
             await asyncio.wait_for(wait_task, timeout=5.0)
         finally:
