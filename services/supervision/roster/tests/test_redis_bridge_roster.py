@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -27,8 +28,11 @@ def test_the_bridge_is_a_gateway_unit_run_by_the_system_interpreter() -> None:
 
 
 def test_a_macos_gateway_with_a_private_address_is_not_gated(
-    monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity, tmp_path: Path
 ) -> None:
+    # A home of its own: the session's AVA_HOME is shared by every later test in the worker,
+    # and a partial-ports start intent left there makes their direct dials raise KeyError.
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     home = ava_home()
     home.mkdir(parents=True, exist_ok=True)
     (home / "start-intent.json").write_text(
