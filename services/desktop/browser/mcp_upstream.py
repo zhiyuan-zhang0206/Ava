@@ -5,7 +5,7 @@ this module owns the one upstream session behind it: creating it (raced
 against the stop event and the connect timeout), every teardown await
 bounded so a wedged child or SDK cleanup can never hold the daemon past the
 operator's stop budget (2026-09-09 #2043), and the stop-aware sleep
-(`_await_stop_or_timeout`) every loop in this family waits on.
+(`await_stop_or_timeout`) every loop in this family waits on.
 """
 
 from __future__ import annotations
@@ -47,11 +47,11 @@ _READ_TIMEOUT = timedelta(seconds=180)
 # reported as stopped (2026-09-09 #2043).
 
 
-class _StoppingError(Exception):
+class StoppingError(Exception):
     """The stop event fired while the upstream was connecting."""
 
 
-async def _bounded(awaitable: Awaitable[object], what: str) -> None:
+async def bounded(awaitable: Awaitable[object], what: str) -> None:
     """Await a cleanup step within ``SHUTDOWN_STEP_TIMEOUT_S``.
 
     A cleanup step that wedges (a stack close waiting on a stuck child, a
@@ -69,12 +69,12 @@ async def _bounded(awaitable: Awaitable[object], what: str) -> None:
         )
 
 
-async def _bounded_stack_close(stack: AsyncExitStack | None, what: str) -> None:
+async def bounded_stack_close(stack: AsyncExitStack | None, what: str) -> None:
     """Close an upstream stack within the shutdown budget; a failure is logged, not raised."""
     if stack is None:
         return
     try:
-        await _bounded(stack.aclose(), what)
+        await bounded(stack.aclose(), what)
     except Exception:
         logger.opt(exception=True).warning(
             "[browser-mcp] {} failed; its child processes may linger until the daemon exits",
@@ -82,13 +82,13 @@ async def _bounded_stack_close(stack: AsyncExitStack | None, what: str) -> None:
         )
 
 
-async def _await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:
+async def await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:
     """Sleep for *timeout* seconds, waking early if *stop* is set."""
     with suppress(asyncio.TimeoutError):
         await asyncio.wait_for(stop.wait(), timeout=timeout)
 
 
-async def _create_upstream(
+async def create_upstream(
     browser_url: str, stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
 ) -> tuple[ClientSession, AsyncExitStack]:
     """Create a new chrome-devtools-mcp upstream session.
@@ -127,7 +127,7 @@ async def _create_upstream(
     except BaseException:
         # The failed connect's stack close is bounded too: a stuck child
         # termination must not wedge the reconnect loop (2026-09-09 #2043).
-        await _bounded_stack_close(stack, "upstream stack close after failed connect")
+        await bounded_stack_close(stack, "upstream stack close after failed connect")
         raise
 
 
@@ -156,7 +156,7 @@ async def initialize_until_stop_or_timeout(
             init_task.cancel()
     # Raised after the group: an exception leaving the body would arrive wrapped.
     if stop.is_set():
-        raise _StoppingError
+        raise StoppingError
     if init_task.cancelled():
         raise TimeoutError("upstream session.initialize() timed out")
     outcome = init_task.result()

@@ -26,7 +26,7 @@ from services.agent_runner.agent_host.invocation.native_work import (
     settle_native_invocation,
 )
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
-    _prepare_graph,
+    prepare_graph,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
@@ -46,7 +46,7 @@ async def test_force_observation_waits_for_actual_projection_continuation(
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 100, [])
+    graph, saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 100, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(accept_native_cancel, pool, "pump-barrier", target.agent_id, target)
     entered, release = asyncio.Event(), asyncio.Event()

@@ -267,7 +267,7 @@ class TestReconnectExhaustion:
         with pytest.raises(dispatcher.DispatcherReconnectExhaustedError) as raised:
             await asyncio.wait_for(disp.run(), timeout=5.0)
 
-        limit = dispatcher._MAX_CONSECUTIVE_RECONNECT_FAILURES
+        limit = dispatcher.MAX_CONSECUTIVE_RECONNECT_FAILURES
         assert opened == limit, "the run must stop reconnecting at the limit"
         assert isinstance(raised.value.__cause__, ConnectionError)
         exhausted = [e for e in errors if e.get("event") == "host_dispatcher_reconnect_exhausted"]
@@ -277,7 +277,7 @@ class TestReconnectExhaustion:
     async def test_a_completed_read_resets_the_failure_count(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        limit = dispatcher._MAX_CONSECUTIVE_RECONNECT_FAILURES
+        limit = dispatcher.MAX_CONSECUTIVE_RECONNECT_FAILURES
         # The failures before and after the completed read total well past the
         # limit, but never `limit` in a row: without the reset this run would end.
         script = ["fail"] * (limit - 1) + ["read_then_drop"] + ["fail"] * (limit - 2) + ["healthy"]

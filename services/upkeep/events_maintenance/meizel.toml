@@ -9,7 +9,6 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 "token_totals.py" = ["config.py"]
 
 [debt.private-name]
-"tests/test_alert_reconciler.py -> alert_reconciler.py#_reconcile_once" = 1
 "tests/test_auto_dismiss_cadence.py -> daemon.py#_sleep_with_liveness" = 1
 "tests/test_events_maintenance_daemon.py -> daemon.py#_dispatch_loop" = 5
 "tests/test_events_maintenance_daemon.py -> daemon.py#_endpoint" = 2

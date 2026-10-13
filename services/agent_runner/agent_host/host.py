@@ -89,10 +89,10 @@ from services.agent_runner.agent_host.invocation.native_work import (
 from services.agent_runner.agent_host.lifecycle import maintenance as maintenance_receipts
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
 from services.agent_runner.agent_host.runtime import (
+    AgentRuntime,
     HostPolicy,
     HostStats,
     TurnOutcome,
-    _AgentRuntime,
     admit_stored_model,
     build_runtime,
     cached_runtime,
@@ -165,7 +165,7 @@ class AgentHost:
         self._machine_identity = machine
         self._machine = machine.name()
         self._owner = uuid4()
-        self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
+        self._runtimes: OrderedDict[int, AgentRuntime] = OrderedDict()
         self._rejected_configs: dict[int, str] = {}
         self._normalized_configs: dict[int, str] = {}
         # Eviction preserves in-flight runtimes so the next turn can reuse the same build.
@@ -486,7 +486,7 @@ class AgentHost:
         *,
         incarnation: RuntimeIncarnation,
         checkpoints: TurnCheckpoints | None = None,
-    ) -> _AgentRuntime:
+    ) -> AgentRuntime:
         """Build a cold/stale model from this turn's slices, or retain its cache."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         return await cached_runtime(
@@ -507,7 +507,7 @@ class AgentHost:
         *,
         incarnation: RuntimeIncarnation | None,
         checkpoints: TurnCheckpoints | None = None,
-    ) -> _AgentRuntime:
+    ) -> AgentRuntime:
         """Reconcile claimed inbounds, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         await consume_claimed_inbounds(self._pool, agent_id, incarnation=incarnation)
@@ -543,7 +543,7 @@ class AgentHost:
     async def _drive_turns(
         self,
         agent_id: int,
-        runtime: _AgentRuntime,
+        runtime: AgentRuntime,
         slices: AgentSlices,
         *,
         incarnation: RuntimeIncarnation,

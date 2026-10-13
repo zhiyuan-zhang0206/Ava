@@ -24,8 +24,8 @@ from services.agent_runner.agent_host.invocation.native_work import (
     settle_native_invocation,
 )
 from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure import (
-    _prepare_graph,
     cold_reader,
+    prepare_graph,
 )
 from services.agent_runner.agent_host.tests.managed_work import managed_work
 
@@ -35,7 +35,7 @@ async def test_checkpoint_flush_ack_and_retained_terminal_receipt(
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, saver, config, history = await _prepare_graph(aops_pool, target.agent_id, 100, [])
+    graph, saver, config, history = await prepare_graph(aops_pool, target.agent_id, 100, [])
     saver.serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accepted = await asyncio.to_thread(
@@ -78,7 +78,7 @@ async def test_superseded_checkpoint_cannot_ack_old_marker(
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
+    graph, saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 1, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accepted = await asyncio.to_thread(
             accept_native_cancel, pool, "superseded", target.agent_id, target
@@ -111,7 +111,7 @@ async def test_cold_original_without_marker_or_transfer_is_uncertain(
 ) -> None:
     pool: ConnectionPool
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, _saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
+    graph, _saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 1, [])
     original = await graph.aget_state(config)
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(
@@ -133,7 +133,7 @@ async def test_no_protected_command_never_adds_cold_startup_hold(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    _graph, _saver, _config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
+    _graph, _saver, _config, _history = await prepare_graph(aops_pool, target.agent_id, 1, [])
     assert await recover_native_cancel(aops_pool, incarnation)
 
 
@@ -148,7 +148,7 @@ async def test_empty_database_set_does_not_override_live_continuation_resource(
     from base.native_process.turn_identity import HostedTurnResources
 
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
+    graph, saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 1, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         accepted = await asyncio.to_thread(
             accept_native_cancel, pool, "live-resource", target.agent_id, target
@@ -180,7 +180,7 @@ async def test_lost_or_misaligned_pointer_holds_pending_original_command(
     )
 
     incarnation, target = await managed_work(db_conn, aops_pool, database_gate=database_gate)
-    graph, _saver, config, _history = await _prepare_graph(aops_pool, target.agent_id, 1, [])
+    graph, _saver, config, _history = await prepare_graph(aops_pool, target.agent_id, 1, [])
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn) as pool:
         await asyncio.to_thread(accept_native_cancel, pool, "pointer-gap", target.agent_id, target)
     db_conn.execute(

@@ -83,12 +83,12 @@ from base.telemetry.process_logging import init_gateway_process
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.gateway_session import GatewaySession, stop_on_signals
 from services.desktop.browser.mcp_upstream import (
-    _await_stop_or_timeout,
-    _bounded,
-    _bounded_stack_close,
-    _create_upstream,
-    _StoppingError,
+    StoppingError,
+    await_stop_or_timeout,
+    bounded,
+    bounded_stack_close,
     contained,
+    create_upstream,
 )
 from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
@@ -556,7 +556,7 @@ async def _upstream_watchdog(daemon: ChromeMcpDaemon, stop: asyncio.Event) -> No
             if stop.is_set():
                 return
             logger.warning(f"[browser-mcp] upstream watchdog ping failed: {e!r}; retrying")
-        await _await_stop_or_timeout(stop, _UPSTREAM_WATCHDOG_INTERVAL_S)
+        await await_stop_or_timeout(stop, _UPSTREAM_WATCHDOG_INTERVAL_S)
 
 
 async def _socket_in_use(path: Path) -> bool:
@@ -629,10 +629,10 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
         current_stack: AsyncExitStack | None = None
         try:
             try:
-                session, current_stack = await _create_upstream(
+                session, current_stack = await create_upstream(
                     browser_url, stop, connect_timeout_reader=connect_timeout_reader
                 )
-            except _StoppingError:
+            except StoppingError:
                 return
             daemon = ChromeMcpDaemon(session, pages, tab_groups)
             daemon_ref[0] = daemon
@@ -647,9 +647,9 @@ async def run(*, browser_cdp_port: int, connect_timeout_reader: Callable[[], flo
             # Two bounded steps, so the daemon may keep closing for up to
             # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
             # is derived from that total.
-            await _bounded_stack_close(current_stack, "upstream stack close during shutdown")
+            await bounded_stack_close(current_stack, "upstream stack close during shutdown")
             server.close()
-            await _bounded(server.wait_closed(), "server close")
+            await bounded(server.wait_closed(), "server close")
             with suppress(OSError):
                 sock.unlink()
 

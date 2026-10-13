@@ -28,7 +28,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.runtime import _AgentRuntime
+from services.agent_runner.agent_host.runtime import AgentRuntime
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
@@ -113,6 +113,6 @@ async def make_host(
     monkeypatch.setattr(
         host,
         "_runtime_for",
-        AsyncMock(return_value=_AgentRuntime("test", SummaryModel(responses=["unused"]))),
+        AsyncMock(return_value=AgentRuntime("test", SummaryModel(responses=["unused"]))),
     )
     return host, saver, config

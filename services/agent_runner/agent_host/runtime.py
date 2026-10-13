@@ -26,13 +26,13 @@ from base.lm.registry import resolve_available_model
 from base.log import logger
 
 __all__ = [
+    "AgentRuntime",
     "HostCachePolicy",
     "HostPolicy",
     "HostStats",
     "StoredConfig",
-    "_AgentRuntime",
-    "_config_fingerprint",
     "admit_stored_model",
+    "config_fingerprint",
 ]
 
 
@@ -73,7 +73,7 @@ class HostPolicy:
         )
 
 
-def _config_fingerprint(
+def config_fingerprint(
     config_overlay: dict[str, object] | None, birth_config: dict[str, object] | None
 ) -> str:
     """A stable digest of the two stored config maps — the runtime cache key.
@@ -103,11 +103,11 @@ class StoredConfig:
 
     @property
     def fingerprint(self) -> str:
-        return _config_fingerprint(self.config_overlay, self.birth_config)
+        return config_fingerprint(self.config_overlay, self.birth_config)
 
 
 @dataclass
-class _AgentRuntime:
+class AgentRuntime:
     """The per-agent half of a turn, cached across turns.
 
     `fingerprint` is what makes the cache honest: it records the config this
@@ -277,14 +277,14 @@ class TurnOutcome:
 
 
 async def cached_runtime(
-    runtimes: OrderedDict[int, _AgentRuntime],
+    runtimes: OrderedDict[int, AgentRuntime],
     stats: HostStats,
     agent_id: int,
     fingerprint: str,
     slices: AgentSlices,
-    build: Callable[[int, str, AgentSlices], Awaitable[_AgentRuntime]],
+    build: Callable[[int, str, AgentSlices], Awaitable[AgentRuntime]],
     evict: Callable[[], None],
-) -> _AgentRuntime:
+) -> AgentRuntime:
     """Build and retain the existing cache entry; the host owns its lifetime."""
     cached = runtimes.get(agent_id)
     if cached is not None and cached.fingerprint == fingerprint:
@@ -311,7 +311,7 @@ async def cached_runtime(
 
 
 def evict_runtimes(
-    runtimes: OrderedDict[int, _AgentRuntime],
+    runtimes: OrderedDict[int, AgentRuntime],
     in_flight: set[int],
     *,
     policy: HostCachePolicy,
@@ -364,7 +364,7 @@ async def build_runtime(
     *,
     catalog: ModelCatalog,
     llm_override: str,
-) -> _AgentRuntime:
+) -> AgentRuntime:
     """Build the retained model after the host repaired its original admission."""
     llm, _binding = await boot_agent_scope(
         agent_id,
@@ -373,11 +373,11 @@ async def build_runtime(
         catalog=catalog,
         llm_override=llm_override,
     )
-    return _AgentRuntime(fingerprint=fingerprint, llm=llm)
+    return AgentRuntime(fingerprint=fingerprint, llm=llm)
 
 
 def refresh_cached_runtime(
-    runtimes: OrderedDict[int, _AgentRuntime],
+    runtimes: OrderedDict[int, AgentRuntime],
     in_flight: set[int],
     agent_id: int,
     evict: Callable[[], None],

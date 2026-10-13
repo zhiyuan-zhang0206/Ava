@@ -17,8 +17,8 @@ from base.daemon.loop_health import LoopProgress
 from base.db.code_version_gate import ProcessDbGate
 from services.upkeep.events_maintenance.alert_reconciler import (
     GrafanaSnapshotError,
-    _reconcile_once,
     grafana_active_alert_keys,
+    reconcile_once,
     reconcile_open_grafana_alerts,
     reconciliation_round,
 )
@@ -213,7 +213,7 @@ async def test_reconcile_once_fetches_truth_and_publishes_resolved_rows(
     db_pool = base.db.pool(gate=database_gate)
     try:
         async with httpx.AsyncClient(transport=httpx.MockTransport(_grafana)) as client:
-            resolved = await _reconcile_once(db_pool, client, published.extend, config)
+            resolved = await reconcile_once(db_pool, client, published.extend, config)
     finally:
         db_pool.close()
 
