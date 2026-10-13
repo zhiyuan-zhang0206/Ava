@@ -20,7 +20,7 @@ from langchain_core.messages import AIMessage
 from base import config
 from base.config import get_field, settings
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import call, factory
+from base.lm import call
 from base.lm.call import answer_text, extract_text, invoke_text
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
@@ -276,7 +276,6 @@ def test_answer_text_happy_path(
         captured["effort"] = reasoning_effort
         return _FakeLLM(_FakeResponse("answer"))
 
-    monkeypatch.setattr(factory, "build_chat_model", _fake_build)
     out = answer_text(
         "the prompt",
         "the material",
@@ -289,6 +288,7 @@ def test_answer_text_happy_path(
         overrides=ModelOverrides.from_pins(
             {field.name: get_field(field.name) for field in fields(ModelOverrides)}
         ),
+        build_chat_model=_fake_build,
     )
     assert out == "answer"
     assert captured == {"model": "m1", "effort": ReasoningEffort.HIGH}
@@ -311,7 +311,6 @@ def test_answer_text_build_failure_raises_error_type(
     ) -> Any:
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
-    monkeypatch.setattr(factory, "build_chat_model", _fail)
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
         answer_text(
             "p",
@@ -325,6 +324,7 @@ def test_answer_text_build_failure_raises_error_type(
             overrides=ModelOverrides.from_pins(
                 {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
+            build_chat_model=_fail,
         )
 
 
@@ -345,8 +345,6 @@ def test_answer_text_build_failure_uses_build_error_when_given(
     ) -> Any:
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
-    monkeypatch.setattr(factory, "build_chat_model", _fail)
-
     def _wrap(model: str, e: Exception) -> Exception:
         seen["model"] = model
         return KeyError(f"Building model {model!r} for <url> failed: {e}")
@@ -365,6 +363,7 @@ def test_answer_text_build_failure_uses_build_error_when_given(
             overrides=ModelOverrides.from_pins(
                 {field.name: get_field(field.name) for field in fields(ModelOverrides)}
             ),
+            build_chat_model=_fail,
         )
     assert seen["model"] == "m1"
 

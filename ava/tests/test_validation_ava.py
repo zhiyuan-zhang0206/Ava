@@ -203,25 +203,17 @@ class TestWatcherEntries:
 
 
 class TestWebEntries:
-    def test_fetch_effort_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import web
+    def test_fetch_effort_unwraps(self) -> None:
+        from ava.web import plans
 
-        async def fake_batch(
-            targets: list[tuple[str, str]], fn: Any, max_concurrent: int | None
-        ) -> list[Any]:
-            return [fn(t) for t in targets]
-
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(web, "run_batch", fake_batch)
-        monkeypatch.setattr(
-            web,
-            "_fetch_one",
-            lambda *a: seen.update(max_chars=a[2], effort=a[3]) or "answer",  # pyright: ignore[reportUnknownArgumentType]
-        )  # pyright: ignore[reportUnknownArgumentType]
-
-        out = web.fetch([("https://example.com", "summarize")], effort=("low",))  # pyright: ignore[reportArgumentType]
-        assert out == ["answer"]
-        assert seen["effort"] == "low"
+        plan = plans.plan_fetch(
+            [("https://example.com", "summarize")],
+            50_000,
+            ("low",),  # pyright: ignore[reportArgumentType]
+            None,
+        )
+        assert plan.effort == "low"
+        assert plan.max_chars == 50_000
 
     def test_fetch_effort_multi_element_type_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava import web
@@ -229,16 +221,11 @@ class TestWebEntries:
         with pytest.raises(TypeError, match="effort must be a string"):
             web.fetch([("https://example.com", "summarize")], effort=("low", "high"))  # pyright: ignore[reportArgumentType]
 
-    def test_search_count_never_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import web
+    def test_search_count_never_unwraps(self) -> None:
+        from ava.web import plans
 
-        async def fake_batch(items: list[str], fn: Any, max_concurrent: int | None) -> list[Any]:
-            return [fn(i) for i in items]
-
-        monkeypatch.setattr(web, "run_batch", fake_batch)
-        monkeypatch.setattr(web, "_search_one", lambda *_a, **_k: [])  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="count must be int"):
-            web.search(["q"], count=(5,))  # pyright: ignore[reportArgumentType]
+            plans.plan_search(["q"], (5,), None)  # pyright: ignore[reportArgumentType]
 
 
 class TestUnderstandEntries:

@@ -106,7 +106,7 @@ def test_proven_readers_reject_invalid_literal_contracts(expression: str) -> Non
 def test_real_sdk_and_agent_consumers_supply_display_and_web() -> None:
     root = Path(__file__).resolve().parents[5]
     for path, domain in (
-        ("ava/web.py", "web"),
+        ("ava/web/wiring.py", "web"),
         ("ava/agents/__init__.py", "display"),
         ("ava/shell/sessions.py", "display"),
         ("agent/graph/_init_context.py", "display"),

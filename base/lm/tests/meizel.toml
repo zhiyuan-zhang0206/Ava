@@ -40,7 +40,6 @@ exports = ["providers"]
 "test_lm_attach.py#monkeypatch.setattr base.lm.attach.packing.ATTACH_MAX_FILES_PER_TURN" = 1
 "test_lm_call.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 1
 "test_lm_call.py#monkeypatch.setattr base.lm.call.jittered" = 7
-"test_lm_call.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 3
 "test_lm_call.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 1
 "test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.anthropic_api_key" = 2
 "test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.dashscope_api_key" = 1

@@ -2,7 +2,7 @@ exports = ["attach", "call.py", "catalog", "compat", "content.py", "context_budg
 
 [uses]
 "attach" = ["catalog", "factory.py", "provider_api.py"]
-"call.py" = ["effort.py", "errors.py", "factory.py", "usage.py"]
+"call.py" = ["effort.py", "errors.py", "usage.py"]
 "catalog" = ["compat", "pricing", "registry.py"]
 "compat" = ["content.py"]
 "context_budget.py" = ["catalog", "registry.py"]

@@ -26,7 +26,7 @@ There is no single-call form — one question is a one-element list:
 [answer] = ava.understand([{"prompt": "summarize this", "paths": ["notes.md"]}])
 ```
 
-Targets run with a default ceiling of 12; pass a positive `max_concurrent=N` to choose another in-flight limit. The shared DeepSeek cap queues excess provider calls, and terminal typed provider failures surface as `UnderstandError`. Same batch shape as [[ava/docs/web.ava.okf.md]]'s `search` / `fetch`.
+Targets run with a default ceiling of 12; pass a positive `max_concurrent=N` to choose another in-flight limit. The shared DeepSeek cap queues excess provider calls, and terminal typed provider failures surface as `UnderstandError`. Same batch shape as [[ava/web/docs/web.ava.okf.md]]'s `search` / `fetch`.
 
 ## Constraints & Errors
 - `TypeError` — `targets` is not a list, or an element is not a dict.
