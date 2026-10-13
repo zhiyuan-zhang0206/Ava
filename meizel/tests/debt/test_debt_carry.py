@@ -150,7 +150,7 @@ def test_carry_does_nothing_without_a_rename_and_says_so(
 ) -> None:
     root = moved_repo(make_repo)
     assert carry(root) == 0
-    assert "no renamed file carries recorded debt" in capsys.readouterr().out
+    assert "nothing to carry" in capsys.readouterr().out
 
 
 def test_a_move_git_cannot_see_is_not_carried(make_repo: RepoFactory) -> None:
