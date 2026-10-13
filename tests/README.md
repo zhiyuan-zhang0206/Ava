@@ -172,7 +172,7 @@ see the [hook runbook](../docs/conventions/runbook.md#git-hooks-pre-commit--pre-
 
 ## `.test_durations` — pytest-split duration data
 
-The backend shards (16 whole-file groups) and the e2e shards (`--splits 4`) are
+The backend shards (8 whole-file groups) and the e2e shards (`--splits 4`) are
 balanced by per-test durations from the repo-root `.test_durations`, an untracked
 file: the daily measurement saves it as a GitHub Actions cache and CI restores it
 (a run without one splits by test count and warns). A test without an entry is

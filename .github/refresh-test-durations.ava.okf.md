@@ -11,12 +11,12 @@ tags:
 # Nightly Test Duration Refresh
 
 `workflows/refresh-test-durations.yml` runs daily at 19:30 UTC and on manual
-dispatch. It re-measures the 16 backend and four e2e CI shard shapes on isolated
+dispatch. It re-measures the 8 backend and four e2e CI shard shapes on isolated
 runners, each shard seeded with the current timings and using the matching CI pytest
 arguments, recording a clean duration artifact and retrying independently when a
 timing-sensitive failure occurs.
 
-The publish job accepts only the complete 20-artifact set, merges it into
+The publish job accepts only the complete 12-artifact set, merges it into
 `.test_durations` and saves that file as the Actions cache
 `test-durations-<date>-<run id>-<attempt>` on main; a verify job lists the newest
 cache, restores its exact key and checks the contents. Nothing is committed and no

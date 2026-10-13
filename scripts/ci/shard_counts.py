@@ -13,7 +13,7 @@ collected a second time:
         summary, and writes them as JSON (the workflow uploads it as an artifact). It fails
         when the shard left no JUnit report or executed fewer than `--min-tests` tests;
 
-    shard_counts.py total --dir counts/ --expected "1 2 ... 16 serial" [--baseline b.json] \\
+    shard_counts.py total --dir counts/ --expected "1 2 ... 8 serial" [--baseline b.json] \\
                           --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY" \\
                           --leak-report test-leak-report.json \\
                           --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"

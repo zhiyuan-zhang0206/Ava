@@ -209,7 +209,7 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
             "-n",
             "4",
             "--splits",
-            "16",
+            "8",
             "--group",
             "3",
             "--splitting-algorithm",
@@ -270,7 +270,7 @@ def test_measure_e2e_uses_the_ci_pytest_arguments(
 
 def _write_complete_measurements(durations_dir: Path) -> None:
     """Write one unique timing record for every CI-shaped measurement shard."""
-    for group in range(1, 17):
+    for group in range(1, 9):
         (durations_dir / f"backend-{group}.json").write_text(
             json.dumps({f"tests/components/agent/test_{group}.py::test_one": 1.0})
         )
@@ -347,9 +347,9 @@ def test_merge_all_ci_shards_writes_the_compact_combined_durations(
 
     assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 0
     combined = json.loads(target.read_text())
-    assert len(combined) == 20
+    assert len(combined) == 12
     assert combined["tests/components/agent/test_1.py::test_one"] == 0.019
-    assert combined["tests/components/agent/test_12.py::test_one"] == 1.0
+    assert combined["tests/components/agent/test_8.py::test_one"] == 1.0
     assert combined["tests/e2e/test_4.py::test_one"] == 1.0
 
 
