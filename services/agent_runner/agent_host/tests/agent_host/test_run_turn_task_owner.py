@@ -6,9 +6,9 @@ from collections.abc import Awaitable
 import pytest
 
 from services.agent_runner.agent_host.invocation.compact import source as compact_source
-from services.agent_runner.agent_host.tests.test_agent_host import _Build, _Row
-from services.agent_runner.agent_host.tests.test_agent_host import host_plugin as host_plugin
-from services.agent_runner.agent_host.tests.test_agent_host import wired as wired
+from services.agent_runner.agent_host.tests.runtime.host_support import _Build, _Row
+from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
+from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
 
 
 async def test_business_error_remains_primary_when_settlement_also_fails(

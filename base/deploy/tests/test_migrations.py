@@ -23,14 +23,14 @@ from base.deploy.schema.migrations import (
     check_schema_version,
     required_migration_set,
 )
-from base.deploy.tests.migration_support import (
+from base.deploy.schema.tests.migration_support import (
     _SYN,
     _SYN2,
     _init_repo,
     _set_table_to,
     _try_lock_from_other_conn,
 )
-from base.deploy.tests.migration_support import (
+from base.deploy.schema.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -268,7 +268,7 @@ def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices(
 
     from psycopg import sql
 
-    from base.deploy.tests.migration_support import _SCHEMA_SQL, _throwaway_database
+    from base.deploy.schema.tests.migration_support import _SCHEMA_SQL, _throwaway_database
 
     root = Path(__file__).resolve().parents[3]
     delta = (
