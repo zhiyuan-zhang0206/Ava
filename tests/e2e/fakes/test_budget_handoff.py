@@ -41,9 +41,9 @@ def test_readers_keep_the_previous_snapshot_until_publication(
     state = tmp_path / "1.json"
     state.write_text(json.dumps(initial))
     code = (
-        budget_handoff._pause_code(1, 1)
+        budget_handoff.pause_code(1, 1)
         if transition == "pause"
-        else budget_handoff._prepare_code(transition, 1)
+        else budget_handoff.prepare_code(transition, 1)
     )
     process = subprocess.Popen(  # noqa: S603 — fixed interpreter and generated fixture code
         [sys.executable, str(_WRITER), str(tmp_path), code],

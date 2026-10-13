@@ -23,9 +23,9 @@ from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from tests.components.ops.resurrection_support import force, status, unowned_receipt
 from tests.components.ops.test_resurrection_admission import (
     _admitted,
-    _managed_restarted,
-    _resources,
-    _restarted,
+    managed_restarted,
+    resources,
+    restarted,
 )
 from tests.components.ops.test_resurrection_admission import wakes as wakes
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -84,7 +84,7 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     the drain parks; a terminated row carrying a receipt is outside its cohort."""
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
-    resurrected = await _restarted(
+    resurrected = await restarted(
         db_conn,
         aops_pool,
         config_authority=config_authority,
@@ -139,7 +139,7 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    aid = await _managed_restarted(
+    aid = await managed_restarted(
         db_conn,
         aops_pool,
         config_authority=config_authority,
@@ -163,9 +163,9 @@ async def test_unowned_force_cannot_invent_predecessor_restart_closure(
     wake.resurrect_agent(
         database, event_bus, aid, resurrected_by="user", local_machine=machine_identity.name()
     )
-    before = _resources(db_conn, aid)
+    before = resources(db_conn, aid)
     with pytest.raises(ResourceEvidenceError, match="predecessor resource/lifecycle closure"):
         await _admitted(
             aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
         )
-    assert _resources(db_conn, aid) == before
+    assert resources(db_conn, aid) == before

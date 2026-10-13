@@ -11,14 +11,14 @@ from base.cluster.dataplane import pooler
 from base.cluster.machine import MachineIdentity
 from tests._containers import postgres
 from tests.components.cli.test_pgbouncer_wire import (
-    _SECRET,
-    _pgbouncer_available,
-    _pgbouncer_in_front,
+    SECRET,
+    pgbouncer_available,
+    pgbouncer_in_front,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 pytestmark = pytest.mark.skipif(
-    not _pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
+    not pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
 )
 
 
@@ -27,7 +27,7 @@ def test_lists_the_open_clients_and_leaves_out_the_console(
 ) -> None:
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
     ):
         info = conninfo_to_dict(pooled)
         port = int(str(info["port"]))
@@ -38,9 +38,9 @@ def test_lists_the_open_clients_and_leaves_out_the_console(
             first.execute("SELECT 1")
             second.execute("SELECT 1")
 
-            found = pooler.clients(port, _SECRET)
+            found = pooler.clients(port, SECRET)
 
-        assert pooler.clients(port, _SECRET) == []
+        assert pooler.clients(port, SECRET) == []
 
     assert sorted(client.application for client in found) == ["probe-a", "probe-b"]
     assert {client.database for client in found} == {str(info["dbname"])}
@@ -54,7 +54,7 @@ def test_an_unreadable_console_raises_instead_of_reading_as_no_clients(
 ) -> None:
     with (
         postgres(machine_name=machine_identity.name) as pg_url,
-        _pgbouncer_in_front(pg_url) as pooled,
+        pgbouncer_in_front(pg_url) as pooled,
     ):
         port = int(str(conninfo_to_dict(pooled)["port"]))
         with pytest.raises(Exception, match=r"."):
