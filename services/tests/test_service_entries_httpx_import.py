@@ -1,7 +1,8 @@
 """Service entry cold imports retain their ordinary HTTPX dependency.
 
 Each probe uses the process profile supplied by the roster and a fresh home.
-ENTRIES names service entries that reach HTTPX while importing their modules.
+ENTRIES names service entries that reach HTTPX while importing their modules. The gateway
+entry is probed by `gateway/tests/observability/test_gateway_entry_imports_httpx.py`.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ ENTRIES: dict[str, str] = {
     "heartbeat": "gateway",
     "memory-indexer": "gateway",
     "memory-search": "gateway",
-    "gateway": "gateway",
     "ops": "runner",
     "browser-mcp": "runner",
     "agent-host": "agent",
