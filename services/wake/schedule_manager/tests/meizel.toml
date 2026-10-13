@@ -1,0 +1,11 @@
+[debt.first-party-patch]
+"test_manager.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
+"test_manager.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.current_generation" = 4
+"test_manager.py#monkeypatch.setattr services.wake.schedule_manager.manager.get_shell_backend" = 1
+"test_manager.py#monkeypatch.setattr services.wake.schedule_manager.manager.telemetry.emit" = 1
+"test_manager.py#monkeypatch.setattr services.wake.schedule_manager.manager.time.monotonic" = 3
+"test_manager_state.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
+"test_manager_state.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.current_generation" = 1
+"test_manager_state.py#monkeypatch.setattr services.wake.schedule_manager.manager.get_shell_backend" = 1
+"test_manager_state.py#monkeypatch.setattr services.wake.schedule_manager.manager.telemetry.emit" = 3
+"test_secret_argv.py#monkeypatch.setattr services.wake.schedule_manager.manager.REPO_ROOT" = 1

@@ -1,1 +1,34 @@
 exports = ["providers"]
+
+[debt.first-party-patch]
+"test_context_budget.py#monkeypatch.setattr base.config.settings.agent.auto_compact_ceiling_tokens" = 3
+"test_context_budget.py#monkeypatch.setattr base.config.settings.agent.auto_compact_fraction" = 3
+"test_context_budget.py#monkeypatch.setattr base.config.settings.agent.compact_reminder_fraction" = 3
+"test_llm_factory.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 7
+"test_llm_factory.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 11
+"test_llm_factory.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 1
+"test_llm_factory_new_models.py#monkeypatch.setattr base.config.settings.lm.claude_thinking_budget_tokens" = 1
+"test_llm_factory_new_models.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 5
+"test_llm_factory_new_models.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 5
+"test_lm_attach.py#monkeypatch.setattr base.lm.attach.packing.ATTACH_MAX_FILES_PER_TURN" = 1
+"test_lm_call.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 1
+"test_lm_call.py#monkeypatch.setattr base.lm.call.jittered" = 7
+"test_lm_call.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 3
+"test_lm_call.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 1
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.anthropic_api_key" = 2
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.dashscope_api_key" = 1
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.deepseek_api_key" = 2
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.gemini_api_key" = 1
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 9
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.moonshot_api_key" = 1
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.openai_api_key" = 1
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.xiaomi_api_key" = 1
+"test_lm_factory.py#monkeypatch.setattr base.config.settings.lm.zhipu_api_key" = 1
+"test_lm_factory.py#monkeypatch.setattr base.host.env.dotenv_file.env_file_path" = 1
+"test_lm_factory.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 8
+"test_model_registry.py#monkeypatch.setattr base.config.settings.lm.llm_stream_total_timeout_seconds" = 2
+"test_model_registry.py#monkeypatch.setattr base.config.settings.lm.llm_stream_ttft_timeout_seconds" = 2
+"test_per_agent_overrides.py#monkeypatch.setattr base.config.settings.lm.claude_thinking_budget_tokens" = 1
+"test_per_agent_overrides.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 3
+"test_single_attempt.py#monkeypatch.setattr base.config.settings.lm.llm_override" = 1
+"test_single_attempt.py#monkeypatch.setattr base.lm.factory.resolve_available_model" = 1

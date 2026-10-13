@@ -4,3 +4,9 @@ exports = ["test_provider_plugins.py"]
 "test_provider_loader_fail_fast.py" = ["provider_plugin_support.py"]
 "test_provider_plugin_gate.py" = ["provider_plugin_support.py"]
 "test_provider_plugins.py" = ["provider_plugin_support.py"]
+
+[debt.first-party-patch]
+"test_lm_billing.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 2
+"test_lm_billing.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 1
+"test_provider_plugins.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 2
+"test_provider_plugins.py#monkeypatch.setattr base.lm.factory.resolve_available_model" = 1

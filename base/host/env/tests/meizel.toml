@@ -1,5 +1,16 @@
 [uses]
 "test_dotenv_boot_launcher_context.py" = ["test_dotenv_boot.py"]
 
+[debt.first-party-patch]
+"test_agent_slices.py#monkeypatch.setattr base.config.settings.agent.history_dump_keep" = 1
+"test_bootstrap_fetch.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 4
+"test_bootstrap_fetch.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 18
+"test_bootstrap_values.py#monkeypatch.setattr base.config.settings.agent.skills_to_inject_into_system_prompt" = 1
+"test_bootstrap_values.py#monkeypatch.setattr base.config.settings.general.machine_host" = 3
+"test_bootstrap_values.py#monkeypatch.setattr base.config.settings.observability.trace_retention_days" = 1
+"test_bootstrap_values.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 5
+"test_config_refresh.py#monkeypatch.setattr base.config.settings.env_boot" = 1
+"test_file_lock_bounded.py#monkeypatch.setattr base.host.env.dotenv_file.env_file_path" = 2
+
 [debt.private-name]
 "test_dotenv_boot_launcher_context.py -> test_dotenv_boot.py#_restore_authority_env" = 1

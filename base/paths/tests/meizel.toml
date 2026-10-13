@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_preloaded_skills_paths.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 1
+"test_private_dir.py#monkeypatch.setattr base.paths.private_dir.os.geteuid" = 1

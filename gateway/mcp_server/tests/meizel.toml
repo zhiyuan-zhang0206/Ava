@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_guarded_tool_admission.py#monkeypatch.setattr gateway.mcp_server.endpoint.build_manager" = 1
+"test_tool_call_audit.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_standalone" = 1
+"test_tool_call_audit.py#monkeypatch.setattr base.telemetry.emit" = 1

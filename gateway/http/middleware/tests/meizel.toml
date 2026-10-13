@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_runtime_metrics.py#monkeypatch.setattr gateway.http.middleware.runtime_metrics.sse_active_connections" = 1
+"test_runtime_metrics.py#monkeypatch.setattr gateway.http.middleware.runtime_metrics.telemetry.emit" = 2

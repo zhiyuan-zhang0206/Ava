@@ -3,3 +3,21 @@ exports = ["runner_inputs.py"]
 [uses]
 "test_runner_admission.py" = ["runner_inputs.py"]
 "test_runner_lifecycle.py" = ["runner_inputs.py"]
+
+[debt.first-party-patch]
+"test_builtin_schedules_schedules.py#monkeypatch.setattr base.config.settings.gateway.provision_builtin_schedules" = 1
+"test_receipt_boundaries.py#monkeypatch.setattr gateway.schedules.receipts.finish" = 1
+"test_receipt_boundaries.py#monkeypatch.setattr gateway.schedules.session_control.enqueue_in_transaction" = 1
+"test_runner_lifecycle.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 2
+"test_runner_lifecycle.py#monkeypatch.setattr base.config.settings.gateway.schedule_stall_timeout_seconds" = 1
+"test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.StallGuard" = 2
+"test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.StallGuard._sample" = 7
+"test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.base.host.proc.kill_process_tree" = 2
+"test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.faulthandler.dump_traceback_later" = 1
+"test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.os._exit" = 2
+"test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.record_error" = 1
+"test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.record_run_end" = 1
+"test_runner_lifecycle.py#monkeypatch.setattr services.wake.schedule_manager.engine.stall_action" = 2
+"test_session_control.py#monkeypatch.setattr gateway.schedules.session_control.get_shell_backend" = 2
+"test_update_delivery.py#monkeypatch.setattr gateway.schedules.session_control.enqueue_in_transaction" = 1
+"test_update_delivery.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 1

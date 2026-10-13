@@ -1,0 +1,12 @@
+[debt.first-party-patch]
+"test_watcher.py#monkeypatch.setattr ava.shell.background.cli_path" = 4
+"test_watcher.py#monkeypatch.setattr ava.shell.background.output_dir" = 1
+"test_watcher.py#monkeypatch.setattr ava.shell.sessions.forward_env_dict" = 1
+"test_watcher.py#monkeypatch.setattr ava.shell.sessions.send" = 6
+"test_watcher.py#monkeypatch.setattr ava.watcher._spawn" = 3
+"test_watcher.py#monkeypatch.setattr ava.watcher._watchers_dir" = 1
+"test_watcher_commands.py#monkeypatch.setattr ava.watcher._spawn" = 6
+"test_watcher_commands.py#monkeypatch.setattr base.config.settings.general" = 3
+"test_watcher_files.py#monkeypatch.setattr ava.shell.sessions.create_session" = 1
+"test_watcher_files.py#monkeypatch.setattr ava.shell.sessions.list" = 3
+"test_watcher_files.py#monkeypatch.setattr ava.shell.sessions.send" = 4

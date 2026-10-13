@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_lint_no_ava_in_hooks.py#monkeypatch.setattr scripts.lint.plugins.no_ava_in_hooks._REPO_ROOT" = 1
+"test_lint_no_plugin_wrap.py#monkeypatch.setattr scripts.lint.plugins.no_plugin_wrap._REPO_ROOT" = 3

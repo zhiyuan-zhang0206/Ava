@@ -1,1 +1,5 @@
 exports = ["retry_waits.py", "stdlib_logging.py"]
+
+[debt.first-party-patch]
+"retry_waits.py#monkeypatch.setattr base.host.net.resilience.retry_asleep" = 1
+"retry_waits.py#monkeypatch.setattr base.host.net.resilience.retry_sleep" = 1

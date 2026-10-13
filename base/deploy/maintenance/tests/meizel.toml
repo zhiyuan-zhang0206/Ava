@@ -1,1 +1,10 @@
 exports = ["test_admission.py"]
+
+[debt.first-party-patch]
+"test_admission.py#monkeypatch.setattr base.deploy.maintenance.admission.snapshot" = 1
+"test_admission.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"test_admission.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.read" = 1
+"test_admission.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+"test_pause_owner.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.lock_path" = 1
+"test_pause_owner.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.state_path" = 1
+"test_pause_owner_read.py#monkeypatch.setattr base.paths.ava_home" = 1

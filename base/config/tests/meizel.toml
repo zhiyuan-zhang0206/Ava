@@ -1,0 +1,7 @@
+[debt.first-party-patch]
+"test_config_boot_owner.py#monkeypatch.setattr base.config._full.build" = 2
+"test_config_boot_owner.py#monkeypatch.setattr base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 1
+"test_config_boot_owner.py#monkeypatch.setattr base.config._lite.load_ava_env" = 1
+"test_config_boot_owner.py#monkeypatch.setattr base.config.settings" = 1
+"test_runtime_config.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
+"test_seed_guard.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2

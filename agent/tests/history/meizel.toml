@@ -1,0 +1,7 @@
+[debt.first-party-patch]
+"test_fork_notes.py#monkeypatch.setattr base.packages.extensions.install_registry.loadable_skill_names" = 1
+"test_history_dump.py#monkeypatch.setattr agent.graph.hooks.compact.resolve_context_budget" = 1
+"test_history_dump.py#monkeypatch.setattr agent.hooks.history_dump.datetime" = 1
+"test_history_dump.py#monkeypatch.setattr agent.hooks.history_dump.workspace_dir" = 3
+"test_history_dump.py#monkeypatch.setattr base.config.settings.agent.history_dump_enabled" = 1
+"test_history_dump.py#monkeypatch.setattr base.config.settings.agent.history_dump_keep" = 1

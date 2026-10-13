@@ -1,0 +1,7 @@
+[debt.first-party-patch]
+"test_api_tokens.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 8
+"test_api_tokens.py#monkeypatch.setattr base.config.settings.general.machine_name" = 2
+"test_api_tokens.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 2
+"test_api_tokens.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 2
+"test_backup_owner.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+"test_backup_owner.py#monkeypatch.setattr services.backup.artifact.offsite.publish" = 1

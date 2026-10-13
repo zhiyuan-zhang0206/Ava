@@ -1,0 +1,4 @@
+[debt.first-party-patch]
+"test_update_disk_images.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_update_disk_images.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_update_disk_images.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1

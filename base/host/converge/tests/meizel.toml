@@ -1,0 +1,8 @@
+[debt.first-party-patch]
+"test_accessibility.py#monkeypatch.setattr base.host.converge.accessibility.ava_home" = 1
+"test_browser_deps.py#monkeypatch.setattr base.host.converge.browser_deps.node_install_command" = 3
+"test_browser_deps.py#monkeypatch.setattr base.host.converge.browser_deps.sys" = 2
+"test_google_drive.py#monkeypatch.setattr base.host.converge.google_drive.candidate_drive_dirs" = 3
+"test_google_drive.py#monkeypatch.setattr base.host.converge.google_drive.is_linux" = 2
+"test_google_drive.py#monkeypatch.setattr base.host.converge.google_drive.is_macos" = 4
+"test_screen_capture.py#monkeypatch.setattr base.host.converge.screen_capture.ava_home" = 1
