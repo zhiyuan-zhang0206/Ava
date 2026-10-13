@@ -1,3 +1,6 @@
+[loads]
+"child_sdk_host_posture.py" = ["services/agent_runner/agent_host"]
+
 [debt.first-party-patch]
 "test_config_rebind.py#monkeypatch.setattr agent.ownership.hosted.renew_hosted_owner" = 3
 "test_config_rebind.py#monkeypatch.setattr base.config.settings.daemon.host_turn_no_progress_timeout_seconds" = 1

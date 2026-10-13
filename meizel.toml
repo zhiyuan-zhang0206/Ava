@@ -1,7 +1,7 @@
 [uses]
 ".agents" = ["base"]
 "agent" = ["ava", "base", "tests"]
-"ava" = ["agent", "ava_builtins", "base", "services", "tests"]
+"ava" = ["agent", "base", "tests"]
 "ava_builtins" = ["agent", "ava", "base", "ops", "services", "tests"]
 "base" = ["tests"]
 "cli" = ["agent", "ava", "ava_builtins", "base", "ops", "scripts", "services", "tests"]
@@ -32,8 +32,6 @@ frontend = ["ui"]
 
 [debt.manifest-cycle]
 "ava -> agent" = 1
-"ava -> ava_builtins" = 1
-"ava -> services" = 1
 "base -> tests" = 1
 "scripts -> cli" = 1
 "scripts -> gateway" = 1

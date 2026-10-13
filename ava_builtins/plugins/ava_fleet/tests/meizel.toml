@@ -4,6 +4,9 @@ exports = ["registry_support.py", "task_registry"]
 "test_ava_fleet_plugin.py" = ["registry_support.py"]
 "test_task_registry.py" = ["task_registry"]
 
+[external]
+"child_launched_boot.py" = "resolves the plugin namespaces (ava.tasks, ava.memory) the SDK installs at run time; they have no module file to import statically"
+
 [debt.first-party-patch]
 "test_ava_fleet_plugin.py#monkeypatch.setattr ava.gateway_client.patch_label" = 1
 "test_ava_fleet_plugin.py#monkeypatch.setattr ava.gateway_client.spawn" = 2

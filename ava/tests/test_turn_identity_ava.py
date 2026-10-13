@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import pytest
 
@@ -12,7 +10,6 @@ import ava
 from ava.sdk_surface import agent_identity, process_context
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
-from base.host.proc import run_bounded
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
@@ -44,27 +41,6 @@ def test_host_identity_requires_the_callers_explicit_context() -> None:
     assert agent_identity.require_agent_id(context) == 33
     assert agent_identity.require_actor(context) == "agent:33"
     assert getattr(ava, "context", None) is None
-
-
-_HOST_POSTURE = Path(__file__).with_name("bootstrap") / "child_sdk_probes.py"
-
-
-def _run_host_posture(scenario: str) -> None:
-    result = run_bounded(
-        [sys.executable, "-I", str(_HOST_POSTURE), scenario],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-
-
-def test_host_startup_refuses_env_context_and_attachment() -> None:
-    _run_host_posture("host_refuses_env_context_and_attachment")
-
-
-def test_executable_host_rejects_inherited_child_identity_before_sdk_import() -> None:
-    _run_host_posture("host_rejects_inherited_child_identity")
 
 
 def test_established_child_context_cannot_become_shared_host() -> None:

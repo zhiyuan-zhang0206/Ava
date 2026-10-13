@@ -1,6 +1,3 @@
-[loads]
-"child_sdk_probes.py" = ["services/agent_runner/agent_host"]
-
 [debt.first-party-patch]
 "test_connect_fail_fast.py#monkeypatch.setattr ava.sdk_surface.agent_identity.agent_id" = 2
 "test_connect_fail_fast.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
