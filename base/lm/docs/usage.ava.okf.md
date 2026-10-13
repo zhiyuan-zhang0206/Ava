@@ -19,7 +19,9 @@ tags:
 - `log_usage_fields()` serves non-LangChain providers such as the Gemini embedding REST adapter and `decide()` (decision models, `tok_out=0`; see [[base/lm/docs/decision-models.ava.okf.md]]). `for_agent_id` explicitly attributes a daemon-generated event to its target agent; `source` labels the shared caller.
 - `usage_kind` distinguishes agent, chat, batch, and embedding consumption. `source` is an optional payload field for shared text callers (`web.fetch`, `understand`, and `understand.media`) and is kept distinct from the transport provenance column.
 - `log_usage_from_message(..., stamp_message=True)` (the main-conversation `log_llm_usage`) also writes the event's figures to `msg.additional_kwargs["ava_usage"]`: one `quote`, one dict, two destinations.
-- Gemini calls use ordinary implicit-cache accounting; `cache_read` is the provider-reported cached input.
+- Gemini chat calls use ordinary implicit-cache accounting; `cache_read` is the provider-reported cached input.
+- Cache fields are absent when a provider supplies no cache metering (including current decision and embedding calls). A reported `cache_read=0` is a measured miss; absence is N/A, never an inferred miss. Usage, price, latency and billing still record every completed call. Cache rates use only input from the calls reporting cache reads in both numerator and denominator.
+- Previously emitted synthetic zeroes remain historical observations; they are not rewritten as unknown. Inspector projections preserve the legacy denominator for old rows without the new measured-input counter.
 
 ## Notes
 

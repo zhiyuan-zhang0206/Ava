@@ -347,14 +347,15 @@ def core_metrics() -> list[MetricSpec]:
             panel="stat",
             query=(
                 f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
+                f'category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
                 f"unwrap {_LLM_ATTR['cache_read']} [$__range]))"
                 f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
+                f'category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
                 f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
             ),
             query_type="logql",
-            field_defaults={"decimals": 2},
+            field_defaults={"decimals": 2, "noValue": "N/A"},
+            description="Cache-read / input tokens over calls reporting cache usage; unmetered calls are excluded from both sums.",
             width=8,
             height=4,
             panel_id=46,
@@ -504,28 +505,28 @@ def core_metrics() -> list[MetricSpec]:
             panel="timeseries",
             query=(
                 f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
+                f'category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
                 f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
                 f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
+                f'category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
                 f"unwrap {_LLM_ATTR['in_total']} [5m]))"
             ),
             targets=[
                 # max agent: per-agent ratio, then the max across agents per bucket
                 (
                     f'100 * max(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                    f"| json | category={{category}} | "
+                    f'| json | category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
                     f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
                     f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                    f"| json | category={{category}} | "
+                    f'| json | category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
                     f"unwrap {_LLM_ATTR['in_total']} [5m])))"
                 ),
                 (
                     f'100 * min(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                    f"| json | category={{category}} | "
+                    f'| json | category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
                     f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
                     f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                    f"| json | category={{category}} | "
+                    f'| json | category={{category}} | {_LLM_ATTR["cache_read"]} != "" | '
                     f"unwrap {_LLM_ATTR['in_total']} [5m])))"
                 ),
             ],

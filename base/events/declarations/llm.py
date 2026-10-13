@@ -34,7 +34,7 @@ class LlmUsage(TypedDict):
     calls: int
     in_total: int
     out_total: int
-    cache_read: int
+    cache_read: NotRequired[int]
     cache_write_5m: NotRequired[int]
     cache_write_1h: NotRequired[int]
     reasoning: int

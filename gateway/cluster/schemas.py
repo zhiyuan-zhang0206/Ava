@@ -161,7 +161,8 @@ class MachineResumeResponse(BaseModel):
 class StatsTokens(BaseModel):
     """`/api/stats/dashboard` token sub-section — windowed LLM usage aggregation.
 
-    `cache_hit_pct` = cache_read / input * 100, rounded to 2 decimals;
+    `cache_hit_pct` uses only input with cache metering, rounded to 2 decimals;
+    nonzero input with no cache metering produces null.
     input=0 degrades to 0 to avoid div-by-zero."""
 
     model_config = ConfigDict(frozen=True)
@@ -169,7 +170,7 @@ class StatsTokens(BaseModel):
     input: NonNegativeInt
     output: NonNegativeInt
     cache_read: NonNegativeInt
-    cache_hit_pct: float = Field(ge=0, le=100)
+    cache_hit_pct: float | None = Field(ge=0, le=100)
 
 
 # The plugin-stats status vocabulary, mirrored from `base.packages.plugins.surface.stats`

@@ -121,10 +121,12 @@ def render_exec(data: dict[str, Any]) -> str:
 
 
 def render_llm_turns(data: dict[str, Any]) -> str:
+    cache_hit = data["cache_hit_pct"]
+    cache_label = f"{cache_hit}%" if cache_hit is not None else "N/A"
     text = (
         f"llm: {data['llm_calls']} calls  in={data['tokens_in']} out={data['tokens_out']} "
         f"cached={data['tokens_cached']} reason={data['tokens_reasoning']}\n"
-        f"  cache hit overall: {data['cache_hit_pct']}%   cost: ${data['cost_usd']}"
+        f"  cache hit overall: {cache_label}   cost: ${data['cost_usd']}"
         + (
             f"  ({data['cost_unpriced_calls']} calls unpriced, excluded)"
             if data["cost_unpriced_calls"]
@@ -133,7 +135,12 @@ def render_llm_turns(data: dict[str, Any]) -> str:
         + "\n  cache hit by turn position:\n"
     )
     for b in ("early", "mid", "late"):
-        text += f"    {b:<6} {data['cache_hit_pct_by_position'][b]:>5.1f}%  {render_bar(int(data['cache_hit_pct_by_position'][b]), 100, 20)}\n"
+        hit = data["cache_hit_pct_by_position"][b]
+        text += (
+            f"    {b:<6} {hit:>5.1f}%  {render_bar(int(hit), 100, 20)}\n"
+            if hit is not None
+            else f"    {b:<6}   N/A\n"
+        )
     text += render_pctiles("turn duration (s):", data["turn_duration_s"])
     text += render_pctiles("turns per agent:", data["turns_per_agent"])
     return text

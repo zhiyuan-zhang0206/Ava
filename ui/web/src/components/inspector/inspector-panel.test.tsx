@@ -541,6 +541,20 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("dev-server")).toBeTruthy();
   });
 
+  it("unmetered cache renders N/A without hiding cost or token usage", async () => {
+    getAgentInspectStatistics.mockResolvedValue(fixture({
+      cost: {
+        cost_usd: 3, unpriced_calls: 0, llm_calls: 2,
+        tokens_in: 6000, tokens_out: 0, tokens_cached: 0,
+        tokens_reasoning: 0, cache_hit_pct: null,
+      },
+    }));
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("N/A")).toBeTruthy());
+    expect(screen.getByText("$3.0000")).toBeTruthy();
+    expect(screen.queryByText("0.00%")).toBeNull();
+  });
+
   it("formats token counts with B/T tiers (task #824): 2176.67M → 2.18B", async () => {
     getAgentInspectStatistics.mockResolvedValue(
       fixture({

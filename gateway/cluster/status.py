@@ -141,7 +141,11 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
                 0
             ]
         )
-    cache_hit_pct = round(totals.cache_read / totals.in_total * 100, 2) if totals.in_total else 0.0
+    cache_hit_pct = (
+        round(totals.cache_read / totals.cache_input * 100, 2)
+        if totals.cache_input
+        else (None if totals.in_total else 0.0)
+    )
     return StatsDashboard(
         live_count=live_count,
         window_hours=hours,

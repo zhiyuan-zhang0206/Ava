@@ -212,9 +212,9 @@ class AgentMetricsItem(BaseModel):
     """One agent's row in the fleet metrics breakdown — headline counters
     aggregated over its events within the report window. `label` is the
     agent's display name (None = unset; frontend falls back to "#id").
-    `cost_usd` prices each call via `base.lm.pricing.cost_usd`; calls on an
-    unpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0
-    degrades to 0). `exec_failed` is every exec outcome other than plain
+    `cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.
+    `cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero
+    input has no cache metering. `exec_failed` is every exec outcome other than plain
     `exec` — same exec-ok/exec-failed split as the metrics report."""
 
     model_config = ConfigDict(frozen=True)
@@ -227,7 +227,7 @@ class AgentMetricsItem(BaseModel):
     tokens_in: NonNegativeInt
     tokens_out: NonNegativeInt
     tokens_cached: NonNegativeInt
-    cache_hit_pct: float = Field(ge=0, le=100)
+    cache_hit_pct: float | None = Field(ge=0, le=100)
     turn_ok: NonNegativeInt
     turn_total: NonNegativeInt
     exec_ok: NonNegativeInt

@@ -86,7 +86,7 @@ def test_collect_core_metrics_includes_statistics_coverage() -> None:
         "core_cache_hit_rate_24h",
         "core_avg_turn_duration_24h",
     }
-    assert by_name["core_cache_hit_rate_24h"].field_defaults == {"decimals": 2}
+    assert by_name["core_cache_hit_rate_24h"].field_defaults == {"decimals": 2, "noValue": "N/A"}
     avg_turn = by_name["core_avg_turn_duration_24h"].query
     assert avg_turn.count('attributes_ok="true"') == 2
     assert "sum(count_over_time(" in avg_turn

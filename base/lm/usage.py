@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -35,6 +36,16 @@ def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) 
         raise ValueError(f"Fast model {requested_model!r} has no served_speed adapter")
     speed = InferenceSpeed(binding.served_speed(msg.response_metadata))
     return requested_model if speed == InferenceSpeed.FAST else spec.fast_of
+
+
+def _metered_cache_read(usage: Mapping[str, Any], cached: int) -> int | None:
+    """Distinguish absent provider metering from an explicitly reported zero."""
+    details: Mapping[str, Any] = usage.get("input_token_details") or {}
+    return (
+        cached
+        if any(key == "cache_read" or key.endswith("_cache_read") for key in details)
+        else None
+    )
 
 
 def log_usage_from_message(
@@ -71,6 +82,7 @@ def log_usage_from_message(
         cache_read = (usage_metadata.get("input_token_details") or {}).get("cache_read", 0) or 0
     if in_total is None or out_total is None or cache_read is None:
         return None
+    cache_read = _metered_cache_read(usage_metadata, cache_read)
     from base.lm.reasoning import extract_reasoning_tokens
 
     reasoning = extract_reasoning_tokens(msg.usage_metadata, content=msg.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -105,7 +117,7 @@ def log_usage_fields(
     *,
     tok_in: int,
     tok_out: int,
-    tok_cached: int = 0,
+    tok_cached: int | None = None,
     cache_write_5m: int = 0,
     cache_write_1h: int = 0,
     tok_reasoning: int = 0,
@@ -115,7 +127,7 @@ def log_usage_fields(
     for_agent_id: int | None = None,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
-    """Log raw provider token counts when no LangChain message exists."""
+    """Log raw provider usage; absent cache metering stays absent, including on decisions."""
     return _log_usage(
         model,
         in_total=tok_in,
@@ -149,12 +161,28 @@ def _price_snapshot(priced: CostQuote) -> dict[str, float]:
     }
 
 
+def _cache_usage(
+    cache_read: int | None, in_total: int, write_5m: int, write_1h: int
+) -> tuple[dict[str, int], str]:
+    """Only measured cache counts enter events or their human-readable usage line."""
+    fields: dict[str, int] = {}
+    text = ""
+    if cache_read is not None:
+        fields["cache_read"] = cache_read
+        text = f" cached={cache_read}"
+        if in_total:
+            text += f" ({cache_read / in_total * 100:.0f}%)"
+    if cache_read is not None or write_5m or write_1h:
+        fields.update(cache_write_5m=write_5m, cache_write_1h=write_1h)
+    return fields, text
+
+
 def _log_usage(
     model: str,
     *,
     in_total: int,
     out_total: int,
-    cache_read: int,
+    cache_read: int | None,
     reasoning: int,
     latency_ms: float | None,
     usage_kind: str,
@@ -170,7 +198,7 @@ def _log_usage(
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
     """Emit one priced or explicitly unpriced usage event and billing span."""
-    cache_pct = f" ({cache_read / in_total * 100:.0f}%)" if in_total else ""
+    cache_fields, cache_text = _cache_usage(cache_read, in_total, cache_write_5m, cache_write_1h)
     reason_pct = f" ({reasoning / out_total * 100:.0f}%)" if out_total else ""
     priced = quote(
         model,
@@ -196,9 +224,7 @@ def _log_usage(
         "model": model,
         "in_total": in_total,
         "out_total": out_total,
-        "cache_read": cache_read,
-        "cache_write_5m": cache_write_5m,
-        "cache_write_1h": cache_write_1h,
+        **cache_fields,
         "reasoning": reasoning,
         **snapshot,
     }
@@ -225,11 +251,10 @@ def _log_usage(
 
     usage_logger = logger.bind(agent_id=for_agent_id) if for_agent_id is not None else logger
     usage_logger.info(
-        "[llm usage] in={in_total} cached={cache_read}{cache_pct}  "
+        "[llm usage] in={in_total}" + cache_text + "  "
         "out={out_total} reason={reasoning}{reason_pct}",
         event="llm_usage",
         calls=1,
-        cache_pct=cache_pct,
         reason_pct=reason_pct,
         **({"requested_model": requested_model} if requested_model is not None else {}),
         latency_ms=latency_ms,
@@ -298,7 +323,7 @@ def emit_billing_event(
     cost_usd: float,
     usage_kind: str,
     line: str = "ava",
-    tok_cached: int = 0,
+    tok_cached: int | None = None,
     cache_write_5m: int = 0,
     cache_write_1h: int = 0,
     unpriced: bool = False,
@@ -333,7 +358,7 @@ def emit_billing_event(
         span.set_attribute(AVA_BILLING_ATTR_COST, round(float(cost_usd), 6))
         span.set_attribute(AVA_BILLING_ATTR_USAGE_KIND, usage_kind)
         span.set_attribute(AVA_BILLING_ATTR_TS, _utc_timestamp())
-        if tok_cached:
+        if tok_cached is not None:
             span.set_attribute(AVA_BILLING_ATTR_CACHE_READ_TOKENS, int(tok_cached))
         if cache_write_5m:
             span.set_attribute(AVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS, cache_write_5m)
@@ -361,6 +386,7 @@ def emit_billing_from_message(
         tok_in, tok_out, tok_cached = tally_tokens([msg])
         if tok_in is None or tok_out is None or tok_cached is None:
             return
+        tok_cached = _metered_cache_read(msg.usage_metadata, tok_cached)
         model = usage_model(msg, model, catalog=catalog)
         resolved_vendor = vendor or vendor_of_model(model, catalog=catalog)
         if resolved_vendor is None:

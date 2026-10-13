@@ -706,7 +706,7 @@ function CostSection({ inspect }: { inspect: AgentInspectStatistics }) {
           />
           <Metric
             label={t("metricCacheHit")}
-            value={`${cost.cache_hit_pct.toFixed(2)}%`}
+            value={cost.cache_hit_pct === null ? "N/A" : `${cost.cache_hit_pct.toFixed(2)}%`}
           />
         </div>
       ) : null}
