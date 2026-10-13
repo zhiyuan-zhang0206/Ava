@@ -12,11 +12,12 @@ import pytest
 
 import ava.mcps as mcps_mod
 import ava.mcps._remote as remote_mod
+from ava.mcps._tools import ServerProxy, call_raw, list_tools, schema_to_signature
+from ava.mcps.tests._mcps_helpers import StoredTools, local_mcp_clients, make_tool, tool_source
 from ava.mcps.tests._mcps_helpers import fake_config as fake_config
-from ava.mcps.tests._mcps_helpers import make_tool
 from ava.mcps.tests._mcps_helpers import mock_session as mock_session
 
-# ─── _RemoteMCPClient (mock Unix socket) ───────────────────────────────────
+# ─── RemoteMCPClient (mock Unix socket) ───────────────────────────────────
 
 
 class _FakeSocket:
@@ -128,7 +129,7 @@ def test_remote_client_list_tools_roundtrip(monkeypatch: pytest.MonkeyPatch) -> 
     ]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     tools = client.list_tools("srv", timeout_seconds=5.0)
 
     assert tools == [{"name": "t1", "description": "d1", "input_schema": {"type": "object"}}]
@@ -153,7 +154,7 @@ def test_remote_client_call_tool_roundtrip(monkeypatch: pytest.MonkeyPatch) -> N
     ]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     out = client.call_tool("srv", "tool_x", {"k": "v"}, timeout_seconds=5.0)
 
     assert out == {"content": [], "isError": False, "structuredContent": None}
@@ -170,7 +171,7 @@ def test_remote_client_raises_on_error_response(monkeypatch: pytest.MonkeyPatch)
     ]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPCallError, match="permission denied"):
         client.list_tools("srv", timeout_seconds=5.0)
 
@@ -181,7 +182,7 @@ def test_remote_client_raises_when_connection_closed(monkeypatch: pytest.MonkeyP
     sock.recv_queue = [b""]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="connection closed"):
         client.list_tools("srv", timeout_seconds=5.0)
 
@@ -192,7 +193,7 @@ def test_remote_client_raises_on_recv_timeout(monkeypatch: pytest.MonkeyPatch) -
     sock.recv_queue = [TimeoutError()]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
         client.list_tools("srv", timeout_seconds=5.0)
 
@@ -204,7 +205,7 @@ def test_remote_client_accumulates_chunked_response(monkeypatch: pytest.MonkeyPa
     sock.recv_queue = [payload[:10], payload[10:]]  # split in half
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     assert client.list_tools("srv", timeout_seconds=5.0) == []
 
 
@@ -217,7 +218,7 @@ def test_remote_client_request_ids_increment(monkeypatch: pytest.MonkeyPatch) ->
     ]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     client.list_tools("srv", timeout_seconds=5.0)
     client.list_tools("srv", timeout_seconds=5.0)
     id1 = json.loads(sock.sent[0].decode().rstrip())["id"]
@@ -244,7 +245,7 @@ def test_remote_client_skips_stale_response_with_foreign_id(
     ]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     # Model request 1 as already sent and timed out client-side: its id slot is
     # consumed and its late response is what sits at the head of the buffer.
     client._req_id = 1
@@ -264,7 +265,7 @@ def test_remote_client_skips_notification_line(monkeypatch: pytest.MonkeyPatch) 
     ]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     assert client.call_tool("srv", "t", {}, timeout_seconds=5.0) == "ok"
 
 
@@ -281,7 +282,7 @@ def test_remote_client_skips_stale_and_notification_then_matches(
     ]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     assert client.call_tool("srv", "t", {}, timeout_seconds=5.0) == "mine"
 
 
@@ -294,7 +295,7 @@ def test_remote_client_closes_socket_on_recv_timeout(monkeypatch: pytest.MonkeyP
     sock.recv_queue = [TimeoutError()]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
         client.list_tools("srv", timeout_seconds=5.0)
     assert sock.closed is True
@@ -309,7 +310,7 @@ def test_remote_client_closes_socket_when_connection_closed(
     sock.recv_queue = [b""]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="connection closed"):
         client.list_tools("srv", timeout_seconds=5.0)
     assert sock.closed is True
@@ -324,7 +325,7 @@ def test_remote_client_raises_on_malformed_response_line(monkeypatch: pytest.Mon
     sock.recv_queue = [b"not json at all\n"]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPConnectError, match="malformed"):
         client.list_tools("srv", timeout_seconds=5.0)
     assert sock.closed is True
@@ -338,7 +339,7 @@ def test_remote_client_error_response_keeps_socket_open(monkeypatch: pytest.Monk
     sock.recv_queue = [json.dumps({"id": 1, "ok": False, "error": "nope"}).encode() + b"\n"]
     _patch_socket(monkeypatch, sock)
 
-    client = mcps_mod._RemoteMCPClient("fake-socket-path")
+    client = remote_mod.RemoteMCPClient("fake-socket-path")
     with pytest.raises(mcps_mod.MCPCallError, match="nope"):
         client.list_tools("srv", timeout_seconds=5.0)
     assert sock.closed is False
@@ -348,20 +349,16 @@ def test_remote_client_error_response_keeps_socket_open(monkeypatch: pytest.Monk
 # ─── _list_tools / _call_raw remote daemon path + cache fallback ─────────────
 
 
-def test_list_tools_falls_back_to_cache_when_remote_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """daemon throws → falls back to disk cache."""
+def test_list_tools_falls_back_to_cache_when_remote_fails() -> None:
+    """daemon throws -> falls back to disk cache."""
     fake_remote = MagicMock()
     fake_remote.list_tools.side_effect = OSError("daemon down")
-    monkeypatch.setattr(mcps_mod, "_get_remote_client", lambda: fake_remote)
-
     cached: list[mcps_mod.ToolInfo] = [
         {"name": "cached_tool", "description": "", "input_schema": {}}
     ]
-    monkeypatch.setattr(mcps_mod, "_read_cache", lambda _s: cached)  # pyright: ignore[reportUnknownArgumentType]
+    source = tool_source(lambda: fake_remote, cache=StoredTools(cached))
 
-    tools = mcps_mod._list_tools("srv")
+    tools = list_tools(source, "srv")
     assert tools == cached
 
 
@@ -370,7 +367,7 @@ def test_list_tools_falls_back_to_cache_when_remote_fails(
 
 def test_proxy_getattr_rejects_underscore_names(mock_session: MagicMock) -> None:
     """`proxy._anything` (dunder / private) goes through AttributeError — not treated as tool call."""
-    proxy = mcps_mod._ServerProxy("fs")
+    proxy = ServerProxy("fs", mock_session.source)
     with pytest.raises(AttributeError):
         proxy._not_a_tool  # noqa: B018 — intentionally trigger __getattr__
 
@@ -386,7 +383,7 @@ def test_proxy_tool_docstring_includes_schema(mock_session: MagicMock) -> None:
             )
         ]
     )
-    proxy = mcps_mod._ServerProxy("fs")
+    proxy = ServerProxy("fs", mock_session.source)
     fn = proxy.read_file
     doc = fn.__doc__ or ""
     assert "Input schema" in doc
@@ -394,39 +391,28 @@ def test_proxy_tool_docstring_includes_schema(mock_session: MagicMock) -> None:
     assert "string" in doc
 
 
-def test_proxy_all_prefers_disk_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`__all_for_ava__` hits disk cache then stops — should not trigger _connect (server startup is expensive)."""
+def test_proxy_all_prefers_disk_cache() -> None:
+    """`__all_for_ava__` hits the cache then stops - it must not ask the daemon (server startup is
+    expensive)."""
     cached: list[mcps_mod.ToolInfo] = [
         {"name": "alpha", "description": "", "input_schema": {}},
         {"name": "beta", "description": "", "input_schema": {}},
     ]
-    monkeypatch.setattr(mcps_mod, "_read_cache", lambda _s: cached)  # pyright: ignore[reportUnknownArgumentType]
 
-    async def _fail_connect(*_a: object, **_kw: object) -> None:
-        raise AssertionError("_connect should not be called when disk cache hits")
+    def fail_remote() -> object:
+        raise AssertionError("the daemon should not be asked when the cache hits")
 
-    monkeypatch.setattr(mcps_mod, "_get_remote_client", _fail_connect)
-
-    proxy = mcps_mod._ServerProxy("fs")
+    proxy = ServerProxy("fs", tool_source(fail_remote, cache=StoredTools(cached)))  # pyright: ignore[reportArgumentType]
     assert proxy.__all_for_ava__ == ["alpha", "beta"]
 
 
-def test_proxy_load_tool_names_uses_in_memory_cache_on_second_call(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Second call to _load_tool_names → directly reads self._tools_cache without hitting disk again."""
-    calls = {"n": 0}
-
-    def _spy_read_cache(_s: str) -> list[mcps_mod.ToolInfo]:
-        calls["n"] += 1
-        return [{"name": "t1", "description": "", "input_schema": {}}]
-
-    monkeypatch.setattr(mcps_mod, "_read_cache", _spy_read_cache)
-
-    proxy = mcps_mod._ServerProxy("fs")
-    proxy._load_tool_names()  # first: disk cache fills _tools_cache
-    proxy._load_tool_names()  # second: uses in-memory cache
-    assert calls["n"] == 1  # disk read only once
+def test_proxy_load_tool_names_uses_in_memory_cache_on_second_call() -> None:
+    """Second call to _load_tool_names -> reads the proxy's own tool table without the cache again."""
+    cache = StoredTools([{"name": "t1", "description": "", "input_schema": {}}])
+    proxy = ServerProxy("fs", tool_source(lambda: None, cache=cache))  # pyright: ignore[reportArgumentType]
+    proxy._load_tool_names()  # first: the cache fills the proxy's table
+    proxy._load_tool_names()  # second: uses the in-memory table
+    assert cache.reads == 1  # cache read only once
 
 
 # ─── _schema_to_signature (display-only, no validation) ───────────────────
@@ -440,7 +426,7 @@ def test_schema_to_signature_renders_required_and_optional() -> None:
         "properties": {"url": {"type": "string"}, "timeout": {"type": "integer"}},
         "required": ["url"],
     }
-    sig = mcps_mod._schema_to_signature(schema)
+    sig = schema_to_signature(schema)
     assert sig is not None
     params = sig.parameters
     assert list(params) == ["url", "timeout"]
@@ -454,19 +440,19 @@ def test_schema_to_signature_renders_required_and_optional() -> None:
 
 def test_schema_to_signature_none_without_properties() -> None:
     """Empty schema / no properties / properties empty dict → None (caller retains (**kwargs))."""
-    assert mcps_mod._schema_to_signature({}) is None
-    assert mcps_mod._schema_to_signature({"type": "object"}) is None
-    assert mcps_mod._schema_to_signature({"properties": {}}) is None
+    assert schema_to_signature({}) is None
+    assert schema_to_signature({"type": "object"}) is None
+    assert schema_to_signature({"properties": {}}) is None
 
 
 def test_schema_to_signature_none_for_non_identifier_name() -> None:
     """Parameter name is not a valid identifier (hyphen / starts with digit) → overall fallback to (**kwargs)."""
-    assert mcps_mod._schema_to_signature({"properties": {"page-size": {"type": "integer"}}}) is None
+    assert schema_to_signature({"properties": {"page-size": {"type": "integer"}}}) is None
 
 
 def test_schema_to_signature_none_for_python_keyword_name() -> None:
     """Parameter name collides with Python keyword (`from`) → fallback (.isidentifier() returns True for keywords)."""
-    assert mcps_mod._schema_to_signature({"properties": {"from": {"type": "string"}}}) is None
+    assert schema_to_signature({"properties": {"from": {"type": "string"}}}) is None
 
 
 def test_schema_to_signature_unknown_type_falls_back_to_any() -> None:
@@ -475,7 +461,7 @@ def test_schema_to_signature_unknown_type_falls_back_to_any() -> None:
         "properties": {"a": {"type": ["string", "null"]}, "b": {}, "c": {"type": "geo"}},
         "required": [],
     }
-    sig = mcps_mod._schema_to_signature(schema)
+    sig = schema_to_signature(schema)
     assert sig is not None
     assert all(p.annotation is Any for p in sig.parameters.values())
 
@@ -495,7 +481,7 @@ def test_make_tool_callable_attaches_signature(mock_session: MagicMock) -> None:
             )
         ]
     )
-    proxy = mcps_mod._ServerProxy("chrome")
+    proxy = ServerProxy("chrome", mock_session.source)
     sig = inspect.signature(proxy.navigate)
     assert list(sig.parameters) == ["url"]
     assert sig.parameters["url"].annotation is str
@@ -504,7 +490,7 @@ def test_make_tool_callable_attaches_signature(mock_session: MagicMock) -> None:
 def test_unknown_tool_keeps_kwargs_signature(mock_session: MagicMock) -> None:
     """No schema (info=None) → no signature attached, retains (**kwargs)."""
     mock_session.list_tools.return_value = MagicMock(tools=[])
-    proxy = mcps_mod._ServerProxy("chrome")
+    proxy = ServerProxy("chrome", mock_session.source)
     params = inspect.signature(proxy.whatever).parameters
     assert list(params) == ["kwargs"]
     assert params["kwargs"].kind is inspect.Parameter.VAR_KEYWORD
@@ -523,7 +509,7 @@ def test_tool_signature_shows_real_params_for_mcp_tool(mock_session: MagicMock) 
             )
         ]
     )
-    proxy = mcps_mod._ServerProxy("chrome")
+    proxy = ServerProxy("chrome", mock_session.source)
     rendered = str(inspect.signature(proxy.navigate))
     assert "url: str" in rendered
     assert "timeout: int" in rendered
@@ -534,8 +520,6 @@ def test_missing_daemon_never_starts_a_local_server(
     fake_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import sys
-
-    from ava.mcps.tests._mcps_helpers import local_mcp_clients
 
     marker = tmp_path / "local-server-started"
     fake_config.write_text(
@@ -550,11 +534,15 @@ def test_missing_daemon_never_starts_a_local_server(
             }
         )
     )
-    clients = local_mcp_clients(monkeypatch, lambda: 0.1)
-    monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: None)
+    clients = local_mcp_clients(lambda: 0.1)
+    monkeypatch.setattr(remote_mod, "daemon_socket_path", lambda: None)
     try:
         with pytest.raises(mcps_mod.MCPConnectError, match="MCP daemon unavailable"):
-            mcps_mod._call_raw("effect", "run")
+            call_raw(
+                tool_source(clients.remote, timeout_seconds=clients.timeout_seconds),
+                "effect",
+                "run",
+            )
         assert not marker.exists()
     finally:
         clients.close()

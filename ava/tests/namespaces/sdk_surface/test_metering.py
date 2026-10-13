@@ -305,18 +305,18 @@ def test_mcp_recorder_derives_fq_from_runtime_args(
     call time, both inside and outside an execution tally."""
     calls = _spy_emit(monkeypatch)
 
-    def _fake_call(server: str, tool: str, **_kw: object) -> dict[str, str]:
+    def _fake_call(source: object, server: str, tool: str, **_kw: object) -> dict[str, str]:
         return {"server": server, "tool": tool}
 
     rec = metering._make_mcp_recorder(_fake_call, sampling_owner)
     with _execution_tally():
-        assert rec("chrome", "navigate", url="x") == {"server": "chrome", "tool": "navigate"}
+        assert rec(None, "chrome", "navigate", url="x") == {"server": "chrome", "tool": "navigate"}
     assert len(calls) == 1
     assert calls[0][:2] == ("mcps.chrome.navigate", {})
     assert calls[0][2] is not None and calls[0][2] >= 0
 
     calls.clear()
-    rec("chrome", "navigate")  # without an execution tally
+    rec(None, "chrome", "navigate")  # without an execution tally
     assert calls[0][0] == "mcps.chrome.navigate"
 
 
@@ -392,7 +392,7 @@ def test_teardown_survives_a_poisoned_dynamic_surface(
     for parent, attr in recorded:
         assert not metering.is_recorder(getattr(parent, attr, None))
     assert not metering.is_recorder(ava.files.read)
-    assert not metering.is_recorder(ava.mcps._call_raw)
+    assert not metering.is_recorder(ava.mcps.call_funnel.call_raw)
 
 
 @pytest.mark.asyncio
@@ -567,7 +567,7 @@ async def test_invalid_identity_snapshot_prevents_sdk_body(
             await metering._make_recorder(body, "probe.async", sampling_owner)()
         elif wrapper == "mcp":
             metering._make_mcp_recorder(lambda *_: executed.append("mcp"), sampling_owner)(
-                "probe", "tool"
+                None, "probe", "tool"
             )
         else:
             metering._make_recorder(lambda: executed.append("sync"), "probe.sync", sampling_owner)()
