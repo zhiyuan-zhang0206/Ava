@@ -378,13 +378,14 @@ def _assert_foreign_targets_render_builtin_help(outputs: dict[str, Any]) -> None
 
 def test_help_is_ava_target_accepts_only_agent_visible_sdk_objects() -> None:
     from ava.sdk_surface.help import is_ava_target
-    from ava.skills import _NS, _Namespace
+    from ava.skills.skill_model import NS
+    from ava.skills.skill_proxies import Namespace
 
     def foreign_function() -> None:
         return None
 
     foreign_function.__module__ = "__main__"
-    skill_namespace = _Namespace("example", _NS())
+    skill_namespace = Namespace("example", NS(), lambda _skill: "")
 
     assert is_ava_target(ava)
     assert is_ava_target(ava.files)
