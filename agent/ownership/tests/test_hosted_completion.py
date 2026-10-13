@@ -12,8 +12,8 @@ from agent.ownership.hosted_completion import (
     pending_hosted_lifecycle_id,
 )
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, observe_hosted_admission
+from agent.ownership.tests.ownership_support import _admit, agent_row
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.claim.test_inbound_ownership import _admit, agent_row
 from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
