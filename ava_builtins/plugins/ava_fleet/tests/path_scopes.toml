@@ -6,6 +6,7 @@
 ]
 "tests.path_scoped.ava_tests" = [
     "test_lazy_plugin_import.py",
+    "test_retry_contracts.py",
 ]
 "tests.fixtures.unit.sdk" = [
     "ava_fleet_plugin/test_dismissing_response_notice_refreshes_inspector_snapshot.py",
