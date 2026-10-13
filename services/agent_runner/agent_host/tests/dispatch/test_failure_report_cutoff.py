@@ -19,6 +19,7 @@ from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure
 from base.agents.context import AvaContext
 from base.agents.recovery.breaker import admit_pending_wake
+from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -35,7 +36,6 @@ from services.agent_runner.agent_host.invocation import finish_pending_failure
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.fixtures.units import spawn_agent
 
 
 def _failure() -> PendingTurnFailure:

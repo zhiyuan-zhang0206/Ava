@@ -599,8 +599,8 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from agent.graph.llm.node import llm_node
     from agent.state import AgentState, checkpoint_msgpack_allowlist
     from base.agents.context import AvaContext
+    from base.agents.tests.units import spawn_agent
     from base.lm.context_budget import ContextBudget
-    from tests.fixtures.units import spawn_agent
 
     def small_budget(
         _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog

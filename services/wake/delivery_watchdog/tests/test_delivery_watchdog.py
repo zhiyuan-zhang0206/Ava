@@ -75,7 +75,7 @@ def idling_agent(
     is the spawn path's job); the alert filter reads owner status, so tests
     spawn then park the agent 'idling' (same pattern as the heartbeat daemon
     tests)."""
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     aid = spawn_agent(
         spawner="user",
@@ -98,7 +98,7 @@ def _make_running_agent(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
 ) -> int:
-    from tests.fixtures.units import spawn_agent
+    from base.agents.tests.units import spawn_agent
 
     aid = spawn_agent(
         spawner="user",
