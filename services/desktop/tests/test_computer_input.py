@@ -16,7 +16,7 @@ import pytest
 from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.permissions_helper import client
+from base.host.permissions_helper.client import PermissionsHelperClient
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
@@ -24,7 +24,7 @@ from ..computer.protocol import Response
 
 
 class Desktop:
-    def __init__(self, *, database_gate: ProcessDbGate) -> None:
+    def __init__(self, *, database_gate: ProcessDbGate, helper: PermissionsHelperClient) -> None:
         self.requests: list[dict[str, Any]] = []
         self.events: list[Any] = []
         self.capable = True
@@ -39,6 +39,7 @@ class Desktop:
             ComputerUseConfig(30, 0.01, 30, 60, 1),
             Database.from_settings(gate=database_gate),
             sock="/unused",
+            helper=helper,
         )
         self.daemon._scale = 2
 
@@ -189,17 +190,16 @@ class Desktop:
 
 @pytest.fixture
 def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) -> Iterator[Desktop]:
-    target = Desktop(database_gate=database_gate)
     errors: list[BaseException] = []
     stopped = threading.Event()
-
-    def record(_db: object, event: Any) -> None:
-        target.events.append(event)
-
-    monkeypatch.setattr(manifest, "emit_recorded_central_event", record)
     with tempfile.TemporaryDirectory(prefix="ava-input-", dir="/tmp") as directory:
         path = Path(directory) / "helper.sock"
-        monkeypatch.setattr(client, "permissions_helper_socket", lambda: path)
+        target = Desktop(database_gate=database_gate, helper=PermissionsHelperClient(path))
+
+        def record(_db: object, event: Any) -> None:
+            target.events.append(event)
+
+        monkeypatch.setattr(manifest, "emit_recorded_central_event", record)
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             listener.bind(str(path))
             listener.listen(1)

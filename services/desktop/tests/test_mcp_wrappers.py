@@ -7,6 +7,7 @@ Tests cover both _Link (request/response framing) and _ReconnectingLink
 import asyncio
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -17,6 +18,12 @@ from services.desktop.browser import mcp_wrapper as browser_wrapper
 from services.desktop.browser.mcp_socket_bridge import NotDeliveredError
 from services.desktop.browser.mcp_wrapper import _Link, _ReconnectingLink
 from services.desktop.computer import mcp_wrapper as computer_wrapper
+
+
+def _link_kwargs(side: str) -> dict[str, Any]:
+    """The browser link is told its socket; the computer link derives its own."""
+    return {"socket_path": Path("/unused.sock")} if side == "browser" else {}
+
 
 _WRAPPERS = {"browser": browser_wrapper, "computer": computer_wrapper}
 
@@ -141,7 +148,9 @@ async def test_reconnecting_link_surfaces_timeout_without_retry(
             return _Link(HangingReader([]), FakeWriter(), timeout_reader=lambda: 0.01)  # type: ignore[arg-type]
         return _ok_link("recovered")
 
-    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 0.01)
+    reconnecting = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=2, base_delay=0.0, timeout_reader=lambda: 0.01
+    )
     reconnecting._connect_once = _fake_connect  # type: ignore[assignment]
 
     with pytest.raises(TimeoutError):
@@ -161,7 +170,9 @@ async def test_reconnecting_link_surfaces_timeout_without_retry(
 
 async def test_reconnecting_link_success_first_try() -> None:
     """Happy path: connect succeeds, request returns."""
-    link = _ReconnectingLink(max_retries=1, base_delay=0.0, timeout_reader=lambda: 1.0)
+    link = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=1, base_delay=0.0, timeout_reader=lambda: 1.0
+    )
     connect_calls = 0
 
     async def _fake_connect():
@@ -178,7 +189,9 @@ async def test_reconnecting_link_success_first_try() -> None:
 
 async def test_reconnecting_link_retries_on_connect_failure() -> None:
     """Connect raises ConnectionRefusedError on first attempt, succeeds on retry."""
-    link = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0)
+    link = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0
+    )
     connect_calls = 0
 
     async def _fake_connect():
@@ -214,7 +227,9 @@ async def test_reconnecting_link_retries_on_not_delivered() -> None:
             return link_
         return _ok_link("recovered")
 
-    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0)
+    reconnecting = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0
+    )
     reconnecting._connect_once = _fake_connect  # type: ignore[assignment]
 
     result = await reconnecting.request({"method": "call_tool", "tool": "x", "args": {}})
@@ -225,7 +240,9 @@ async def test_reconnecting_link_retries_on_not_delivered() -> None:
 async def test_reconnecting_link_exhausts_retries() -> None:
     """All requests fail before delivery; the retry budget is exhausted and
     the last error propagates."""
-    link = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0)
+    link = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0
+    )
     failure = NotDeliveredError("always broken")
     writers: list[FakeWriter] = []
 
@@ -253,7 +270,9 @@ async def test_reconnecting_link_exhausts_retries() -> None:
 async def test_reconnecting_link_does_not_retry_non_transport_error() -> None:
     """RuntimeError from daemon (e.g. bad tool name) is NOT retried."""
     reader = FakeReader([_line({"id": 1, "ok": False, "error": "unknown tool: bad_tool"})])
-    link = _ReconnectingLink(max_retries=3, base_delay=0.0, timeout_reader=lambda: 1.0)
+    link = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=3, base_delay=0.0, timeout_reader=lambda: 1.0
+    )
 
     async def _fake_connect():
         return _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
@@ -285,7 +304,9 @@ async def test_reconnecting_link_closes_old_link_on_reconnect() -> None:
             return link_
         return _ok_link("recovered")
 
-    reconnecting = _ReconnectingLink(max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0)
+    reconnecting = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=2, base_delay=0.0, timeout_reader=lambda: 1.0
+    )
     reconnecting._connect_once = _fake_connect  # type: ignore[assignment]
 
     result = await reconnecting.request({"method": "list_tools"})
@@ -307,7 +328,9 @@ async def test_reconnecting_link_serializes_requests() -> None:
     async def _fake_connect():
         return _Link(reader, FakeWriter(), timeout_reader=lambda: 1.0)  # type: ignore[arg-type]
 
-    link = _ReconnectingLink(max_retries=1, base_delay=0.0, timeout_reader=lambda: 1.0)
+    link = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=1, base_delay=0.0, timeout_reader=lambda: 1.0
+    )
     link._connect_once = _fake_connect  # type: ignore[assignment]
 
     async def req(payload: dict[str, Any]) -> None:
@@ -338,7 +361,9 @@ async def test_reconnecting_link_does_not_retry_after_delivery_loss() -> None:
         link_.request = reset_request  # type: ignore[assignment]
         return link_
 
-    reconnecting = _ReconnectingLink(max_retries=3, base_delay=0.0, timeout_reader=lambda: 1.0)
+    reconnecting = _ReconnectingLink(
+        socket_path=Path("/unused.sock"), max_retries=3, base_delay=0.0, timeout_reader=lambda: 1.0
+    )
     reconnecting._connect_once = _fake_connect  # type: ignore[assignment]
 
     with pytest.raises(ConnectionResetError):
@@ -411,7 +436,7 @@ async def test_shared_socket_bridge_passes_through_unclassified_error(
 @pytest.mark.parametrize("side", ["browser", "computer"])
 async def test_wrapper_retry_budget_and_backoff(retry_waits: list[float], side: str) -> None:
     wrapper = _WRAPPERS[side]
-    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
+    reconnecting = wrapper._ReconnectingLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
     failure = RuntimeError("offline")
     connect = AsyncMock(side_effect=failure)
     reconnecting._connect_once = connect
@@ -447,7 +472,7 @@ async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
         writer = FakeWriter()
         closed: list[bool] = []
         writer.close = lambda closed=closed: closed.append(True)
-        reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
+        reconnecting = wrapper._ReconnectingLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
         connect = AsyncMock(
             return_value=wrapper._Link(FakeReader([line]), writer, timeout_reader=lambda: 1.0)
         )
@@ -482,7 +507,7 @@ async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side
         ),
     ]
     connect = AsyncMock(side_effect=links)
-    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
+    reconnecting = wrapper._ReconnectingLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
     reconnecting._connect_once = connect
     if side == "browser":
         assert await reconnecting.request({"method": "call_tool", "tool": "x"}) == "ok"
@@ -519,7 +544,7 @@ async def test_stalled_drain_is_unknown_delivery_without_retry(
     connect = AsyncMock(
         return_value=wrapper._Link(FakeReader([]), writer, timeout_reader=lambda: 0.01)
     )
-    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 0.01)
+    reconnecting = wrapper._ReconnectingLink(**_link_kwargs(side), timeout_reader=lambda: 0.01)
     reconnecting._connect_once = connect
     with pytest.raises(TimeoutError):
         await reconnecting.request({"method": "call_tool", "tool": "x"})
@@ -559,7 +584,7 @@ async def test_write_or_drain_failure_is_not_retried(
             ),
         ]
     )
-    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
+    reconnecting = wrapper._ReconnectingLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
     reconnecting._connect_once = connect
     with pytest.raises(BrokenPipeError, match="socket broke"):
         await reconnecting.request({"method": "call_tool", "tool": "x"})
@@ -592,7 +617,7 @@ async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) ->
             ),
         ]
     )
-    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
+    reconnecting = wrapper._ReconnectingLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
     reconnecting._connect_once = connect
     with pytest.raises(ConnectionResetError, match="reset during drain"):
         await reconnecting.request({"method": "call_tool", "tool": "click"})
@@ -621,7 +646,7 @@ async def test_closed_before_write_retries_without_sending(
             ),
         ]
     )
-    reconnecting = wrapper._ReconnectingLink(timeout_reader=lambda: 1.0)
+    reconnecting = wrapper._ReconnectingLink(**_link_kwargs(side), timeout_reader=lambda: 1.0)
     reconnecting._connect_once = connect
     assert await reconnecting.request({"method": "call_tool", "tool": "click"}) == "ok"
     assert connect.await_count == 2
@@ -688,7 +713,7 @@ def test_wrapper_main_keeps_its_own_boot_bound_reader(
     monkeypatch.setattr(wrapper, "ConfigBoot", lambda: next(owners))
     seen: list[tuple[float, float]] = []
 
-    async def serve(*, timeout_reader: Callable[[], float]) -> None:
+    async def serve(*, timeout_reader: Callable[[], float], **_kwargs: object) -> None:
         before = timeout_reader()
         owner = first if not seen else second
         owner.set_field("mcp_connect_timeout_seconds", before + 1.0)

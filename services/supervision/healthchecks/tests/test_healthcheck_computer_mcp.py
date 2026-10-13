@@ -16,6 +16,7 @@ import pytest
 
 import services.supervision.healthchecks.computer_mcp as hc
 from base.db import Database
+from base.host.permissions_helper.client import PermissionsHelperClient
 from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
 from services.desktop.computer.tests.slices import computer_use_config
 
@@ -27,7 +28,12 @@ async def daemon_sock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database:
     sock = f"/tmp/computer-hc-test-{os.getpid()}.sock"  # noqa: S108 — test-only short AF_UNIX path
     with suppress(OSError):
         Path(sock).unlink()
-    daemon = ComputerMcpDaemon(computer_use_config(), database, sock=sock)
+    daemon = ComputerMcpDaemon(
+        computer_use_config(),
+        database,
+        sock=sock,
+        helper=PermissionsHelperClient("/unused.sock"),
+    )
     server = await asyncio.start_unix_server(daemon.handle, path=sock)
 
     def _sock() -> Any:

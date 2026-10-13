@@ -238,9 +238,9 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:
         clear_status()
         return
 
-    from base.host.permissions_helper.client import check_screen_capture
+    from base.sessions.helperproc import helper_client
 
-    status = check_screen_capture()
+    status = helper_client().check_screen_capture()
     if status.available:
         # Drop any stale "unavailable" file so a fixed host does not fire a
         # false notification on the next agent startup.
@@ -267,9 +267,9 @@ def _ensure_accessibility(ctx: ConvergeCtx) -> None:
         clear_accessibility_status()
         return
 
-    from base.host.permissions_helper.client import check_accessibility
+    from base.sessions.helperproc import helper_client
 
-    status = check_accessibility()
+    status = helper_client().check_accessibility()
     if status.available:
         clear_accessibility_status()
         return

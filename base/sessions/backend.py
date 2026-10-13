@@ -19,7 +19,7 @@ from typing import Any, Protocol, cast
 
 from base.native_process.os_platform import is_macos
 from base.paths import logs_dir
-from base.sessions.helperproc import HelperProcSessionBackend
+from base.sessions.helperproc import HelperProcSessionBackend, helper_client
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty import client
 from base.sessions.pty.keys import keys_to_bytes
@@ -325,7 +325,7 @@ def get_backend() -> SessionBackend:
     PTY backend (`get_shell_backend()`).
     """
     if helper_spawn_enabled():
-        return HelperProcSessionBackend()
+        return HelperProcSessionBackend(helper_client)
     return PosixProcSessionBackend()
 
 
