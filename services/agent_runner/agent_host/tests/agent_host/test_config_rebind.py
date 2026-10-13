@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership import hosted
 from agent.ownership.corpse_reap import ReapedCorpse
+from services.agent_runner.agent_host import invocation
 from services.agent_runner.agent_host.runtime import _config_fingerprint
 from services.agent_runner.agent_host.tests.test_agent_host import (
     _Build,
@@ -340,9 +341,7 @@ class TestTurnLoop:
             return "restart"
 
         monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
-        monkeypatch.setattr(
-            "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle", apply
-        )
+        monkeypatch.setattr(invocation, "apply_hosted_lifecycle", apply)
 
         await asyncio.wait_for(host.run_turn(1), 2)
 
@@ -387,9 +386,7 @@ class TestTurnLoop:
             return "terminate"
 
         monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
-        monkeypatch.setattr(
-            "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle", apply
-        )
+        monkeypatch.setattr(invocation, "apply_hosted_lifecycle", apply)
         host, graph, _ = wired(
             {1: _Row()},
             {1: [{"exit_requested": True, "turn_idle": False, "restart_requested": False}]},
@@ -423,9 +420,7 @@ class TestTurnLoop:
             return "restart"
 
         monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
-        monkeypatch.setattr(
-            "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle", apply
-        )
+        monkeypatch.setattr(invocation, "apply_hosted_lifecycle", apply)
         host, graph, _ = wired(
             {1: _Row()},
             {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},

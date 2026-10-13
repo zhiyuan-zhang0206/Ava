@@ -18,6 +18,7 @@ from typing import Any, cast
 
 import pytest
 
+import services.entrypoints.im_bridge.core as im_bridge_core
 from base.config import ConfigBoot, get_field, settings
 from base.daemon.health import Liveness
 from base.db import Database
@@ -145,7 +146,7 @@ def test_run_wires_the_liveness_task(
         async def restore_subscriptions(self) -> None:
             pass
 
-    monkeypatch.setattr("services.entrypoints.im_bridge.core.IMBridgeCore", _FakeCore)
+    monkeypatch.setattr(im_bridge_core, "IMBridgeCore", _FakeCore)
 
     loaded_with: list[frozenset[str]] = []
 
@@ -383,7 +384,7 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
             if cleanup_owner == "adapter":
                 raise cleanup_fault
 
-    monkeypatch.setattr("services.entrypoints.im_bridge.core.IMBridgeCore", Core)
+    monkeypatch.setattr(im_bridge_core, "IMBridgeCore", Core)
 
     def load_adapters(_core: Any, _disabled: frozenset[str]) -> list[Adapter]:
         return [Adapter()]

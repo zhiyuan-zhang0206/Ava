@@ -12,7 +12,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from base.cluster import ClusterPorts
+from base import cluster
+from base.cluster import ClusterPorts, authority
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.machine import MachineIdentity
 from base.cluster.record import ClusterRecord
@@ -44,8 +45,8 @@ def test_pooler_protocol_requires_both_authenticated_listeners(
 
     admin = SimpleNamespace(password="pooler-admin-credential")  # noqa: S106 — test fixture
 
-    monkeypatch.setattr("base.cluster.get_record", _fake_get_record)
-    monkeypatch.setattr("base.cluster.authority.read_pooler_admin", Mock(return_value=admin))
+    monkeypatch.setattr(cluster, "get_record", _fake_get_record)
+    monkeypatch.setattr(authority, "read_pooler_admin", Mock(return_value=admin))
     monkeypatch.setattr(ownership, "pooler", owner)
     monkeypatch.setattr(
         diagnostic_probes,
@@ -74,5 +75,5 @@ def test_unknown_pooler_record_is_unavailable(
     def _fake_get_record(_home: Path) -> ClusterRecord | None:
         return None
 
-    monkeypatch.setattr("base.cluster.get_record", _fake_get_record)
+    monkeypatch.setattr(cluster, "get_record", _fake_get_record)
     assert pgbouncer(machine=machine_identity).verdict.value == "unavailable"

@@ -21,6 +21,7 @@ from typing import Any, ClassVar, TypedDict
 import pytest
 
 import services.entrypoints.gate.daemon as gate_daemon
+from base import paths
 from services.entrypoints.gate.daemon import Gate, _Handler
 
 STATIC = (
@@ -588,7 +589,7 @@ def test_a_leftover_update_marker_never_owns_the_entry(
     with the rest of root. A marker file left by the retired updater in the
     home must not pin the entry on "System updating": Gate answers from the live
     gateway/app."""
-    monkeypatch.setattr("base.paths.ava_home", lambda: servers["flag"].parent)
+    monkeypatch.setattr(paths, "ava_home", lambda: servers["flag"].parent)
     _write_v2(servers["flag"])
     _FakeGateway.authenticated = True
     _FakeGateway.down = True

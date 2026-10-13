@@ -18,6 +18,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+import base.cluster.machines as cluster_machines
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -430,7 +431,7 @@ def test_register_boot_announces_this_unit_up(
         assert home == "~/.ava"
         calls.append(url)
 
-    monkeypatch.setattr("base.cluster.machines.register_self", register)
+    monkeypatch.setattr(cluster_machines, "register_self", register)
     boot.register_boot(
         database=ops_database,
         config=snapshot_process_config(),
@@ -468,7 +469,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
         assert roles == frozenset({"agent-runner"})
         raise RuntimeError("central postgres unreachable")
 
-    monkeypatch.setattr("base.cluster.machines.register_self", unreachable)
+    monkeypatch.setattr(cluster_machines, "register_self", unreachable)
     machine_identity.set(name="runner-a", role="agent-runner", host="10.0.0.2")
     boot.register_boot(
         database=ops_database,

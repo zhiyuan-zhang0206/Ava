@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
@@ -267,7 +268,7 @@ def test_ava_binary_path_falls_back_to_path_without_a_venv(
 ) -> None:
     import shutil
 
-    monkeypatch.setattr("base.paths.repo_root", lambda: tmp_path)
+    monkeypatch.setattr(paths, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/local/bin/ava")  # pyright: ignore[reportUnknownArgumentType]
     assert cron.ava_binary_path() == "/usr/local/bin/ava"
 

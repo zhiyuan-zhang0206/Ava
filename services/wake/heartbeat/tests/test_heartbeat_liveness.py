@@ -23,6 +23,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from services.wake.heartbeat import liveness
 from services.wake.heartbeat.liveness import (
     _OFFLINE_AFTER_FAILURES,
     _merge_liveness,
@@ -506,7 +507,8 @@ class TestLivenessPass:
             announced.append(agent_id)
 
         monkeypatch.setattr(
-            "services.wake.heartbeat.liveness.publish_agent_updated_sync",
+            liveness,
+            "publish_agent_updated_sync",
             capture_announcement,
         )
 

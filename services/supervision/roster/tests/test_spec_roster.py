@@ -16,8 +16,10 @@ import pytest
 
 from base.cluster.machine import MachineIdentity, MachineRole
 from base.daemon.endpoints import ServiceEndpoints
+from base.host.system import probes
 from services.supervision import roster
-from services.supervision.roster import service_spec, spec
+from services.supervision.healthchecks import lgtm
+from services.supervision.roster import healthz, service_spec, spec
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _GATEWAY_SESSIONS = {
@@ -140,13 +142,13 @@ def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
         assert machine is machine_identity
         return True
 
-    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", disabled)
+    monkeypatch.setattr(lgtm, "is_lgtm_host", disabled)
     rows = spec.services_for_capabilities_annotated(
         frozenset({"observability-station"}), machine=machine_identity
     )
     assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
     assert all(reason is not None for _service, reason in rows)
-    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", enabled)
+    monkeypatch.setattr(lgtm, "is_lgtm_host", enabled)
     assert {
         service.session
         for service in spec.services_for_capabilities(
@@ -342,12 +344,8 @@ def test_browser_mcp_gated_out_when_browser_is(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """An incapable browser host also drops browser-mcp, with the browser reason."""
-    monkeypatch.setattr(
-        "base.host.system.probes.browser_incapability", lambda: "no display (headless)"
-    )
-    monkeypatch.setattr(
-        "services.supervision.roster.spec.browser_incapability", lambda: "no display (headless)"
-    )
+    monkeypatch.setattr(probes, "browser_incapability", lambda: "no display (headless)")
+    monkeypatch.setattr(spec, "browser_incapability", lambda: "no display (headless)")
     annotated = _agent_runner_annotated(monkeypatch, local_machine=machine_identity)
     assert annotated["browser"] == "no display (headless)"
     assert annotated["browser-mcp"] == "no display (headless)"
@@ -383,7 +381,7 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
 
         return DaemonProbe.up("stub")
 
-    monkeypatch.setattr("services.supervision.roster.healthz.probe_daemon", _capture)
+    monkeypatch.setattr(healthz, "probe_daemon", _capture)
     pidfile = tmp_path / "ops.pid"
     assert roster.daemon_identity("ops", pidfile)().alive is True
     assert seen["name"] == "ops"

@@ -7,7 +7,9 @@ from collections.abc import Callable
 
 import pytest
 
+from base.native_process.root_control import client
 from services.supervision import roster
+from services.supervision.roster import healthz
 
 
 @pytest.mark.parametrize("service", ["gateway", "browser", "task-maintenance"])
@@ -24,14 +26,14 @@ def test_roster_uses_healthy_protocol_without_native_listener_proof(
 
     monkeypatch.setattr(roster, "probe_home", healthy)
     monkeypatch.setattr(roster, "_browser_probe", healthy)
-    monkeypatch.setattr("services.supervision.roster.healthz.probe_daemon", healthy)
+    monkeypatch.setattr(healthz, "probe_daemon", healthy)
 
     def identity(*_args: object) -> Callable[[], DaemonProbe]:
         return healthy
 
     monkeypatch.setattr(roster, "daemon_identity", identity)
     monkeypatch.setattr("psutil.process_iter", forbidden)
-    monkeypatch.setattr("base.native_process.root_control.client.owned_process", forbidden)
+    monkeypatch.setattr(client, "owned_process", forbidden)
     item = next(item for item in roster.build_services() if item.session == service)
     assert item.identity_probe is not None
     assert item.identity_probe().alive
