@@ -236,6 +236,23 @@ input consumers from the same impact graph, using these functions for estimated
 minutes. Census estimates describe static coupling; they are not measured CI
 execution times or proof that a selected subset is faster.
 
+## Skipping e2e for unit-test-only changes
+
+e2e is the integration net for product behavior and normally runs whenever either side
+changed. `classify change` sets `skip_e2e` from `scripts/ci/e2e_scope.py`, and the four e2e
+checks (`e2e shard`, `e2e hosted`, `e2e env guard (serial)`, `e2e (Playwright happy path)`) are
+skipped, which counts as satisfied for the required checks, only when all of these hold:
+
+- the event is a pull request and not a Trunk queue branch (the queue always runs everything);
+- test selection is enforced and its decision is SELECTED;
+- every changed path is a Python file under a package-internal `tests` directory
+  (`<agent|ava|ava_builtins|base|cli|gateway|meizel|ops|scripts|services>/**/tests/**/*.py`).
+
+There is no other input: top-level `tests/` (which e2e imports from), manifests, data files
+and product code all keep e2e. An empty output, as after a selector failure, also keeps it.
+`scripts/ci/tests/test_e2e_scope.py` pins the rule, the wiring and the premise that e2e
+imports nothing from a package-internal tests directory.
+
 ## Selection modes and artifacts
 
 `TEST_SELECTION_MODE` in [ci.yml](../../../.github/workflows/ci.yml) is the single
