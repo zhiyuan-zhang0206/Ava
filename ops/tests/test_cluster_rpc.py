@@ -344,7 +344,7 @@ def _pin_retry(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     async def _fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr(cluster_rpc, "_sleep", _fake_sleep)
+    monkeypatch.setattr(cluster_rpc, "rpc_sleep", _fake_sleep)
     monkeypatch.setattr(cluster_rpc.random, "uniform", lambda _a, _b: 1.0)  # pyright: ignore[reportUnknownArgumentType]
     return sleeps
 

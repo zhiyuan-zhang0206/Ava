@@ -4,7 +4,7 @@
 
 [debt.first-party-patch]
 "test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.MAX_LIST_PAGES" = 1
-"test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export._emit_events" = 1
+"test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.emit_events" = 1
 "test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.run_gh" = 4
 "test_pr_flow_export.py#monkeypatch.setattr scripts.ci.pull_requests.pr_flow_export.trunk_client" = 2
 "test_understanding_replay_entry.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
@@ -12,7 +12,7 @@
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.ConfigBoot" = 1
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.DOCKERENV" = 1
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.Database.from_settings" = 2
-"test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay._report" = 1
+"test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.print_replay_report" = 1
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.process_name" = 1
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.require_preview" = 1
 

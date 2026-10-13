@@ -7,7 +7,3 @@ exports = ["audit", "ci", "codegen", "data_plane_ops", "lint", "model_registry",
 "content_lint" = ["audit", "codegen"]
 "lint" = ["content_lint", "structure"]
 "tests" = ["ci", "lint", "verify"]
-
-[debt.private-name]
-"tests/test_pr_flow_export.py -> ci/pull_requests/pr_flow_export.py#_emit_events" = 1
-"tests/test_understanding_replay_entry.py -> verify/understanding_replay.py#_report" = 1

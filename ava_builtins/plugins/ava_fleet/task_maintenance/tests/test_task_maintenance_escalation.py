@@ -21,7 +21,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import escalation
-from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate
+from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import run_escalate
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -134,8 +134,8 @@ def test_delegator_escalation_at_most_once_per_overdue_window(
     reminder_count sat at the threshold — reminder delivery is backoff-gated
     for up to 24h.)"""
     parent_owner, _owner, tid = stalled_subtask(db_conn)
-    assert _run_escalate(pool, database, event_bus, 3) == 1
-    assert _run_escalate(pool, database, event_bus, 3) == 0
+    assert run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3) == 0
     assert len(inbound_messages(db_conn, parent_owner)) == 1
     assert escalated_at(db_conn, tid) is not None
 
@@ -157,13 +157,13 @@ def test_delegator_escalation_retries_after_delivery_failure(
 
     monkeypatch.setattr(escalation, "insert_inbound_message_in_transaction", unavailable)
     with pytest.raises(psycopg.OperationalError):
-        _run_escalate(pool, database, event_bus, 3)
+        run_escalate(pool, database, event_bus, 3)
     assert inbound_messages(db_conn, parent_owner) == []
     assert escalated_at(db_conn, tid) is None
     monkeypatch.setattr(escalation, "insert_inbound_message_in_transaction", real)
-    assert _run_escalate(pool, database, event_bus, 3) == 1  # retried and delivered
+    assert run_escalate(pool, database, event_bus, 3) == 1  # retried and delivered
     assert len(inbound_messages(db_conn, parent_owner)) == 1
-    assert _run_escalate(pool, database, event_bus, 3) == 0  # marker holds: no third send
+    assert run_escalate(pool, database, event_bus, 3) == 0  # marker holds: no third send
     assert len(inbound_messages(db_conn, parent_owner)) == 1
 
 
@@ -177,8 +177,8 @@ def test_delegator_escalation_rearms_after_owner_update(
     owner re-engages and a later window re-crosses the threshold, the delegator
     is told again."""
     parent_owner, _owner, tid = stalled_subtask(db_conn)
-    assert _run_escalate(pool, database, event_bus, 3) == 1
-    assert _run_escalate(pool, database, event_bus, 3) == 0
+    assert run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3) == 0
     # The owner updates the task: both update() paths reset the bookkeeping
     # (test_update_resets_reminder_count / the gateway PATCH test below cover
     # the real paths; mirror their write here).
@@ -196,5 +196,5 @@ def test_delegator_escalation_rearms_after_owner_update(
             (tid,),
         )
     db_conn.commit()
-    assert _run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3) == 1
     assert len(inbound_messages(db_conn, parent_owner)) == 2

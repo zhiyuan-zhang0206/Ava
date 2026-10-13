@@ -65,7 +65,7 @@ def child_env(
     return env
 
 
-def _spawn(
+def spawn_real_child(
     tmp_path: Path,
     code: str,
     *,
@@ -110,7 +110,7 @@ def _spawn(
 
 
 def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
-    proc, request, result = _spawn(tmp_path, "print('hello exec child')")
+    proc, request, result = spawn_real_child(tmp_path, "print('hello exec child')")
     assert proc.returncode == 0, proc.stderr
     assert "hello exec child" in proc.stdout
     assert request.exists()  # child leaves it; the parent machinery cleans up
@@ -132,7 +132,7 @@ def test_child_context_matches_the_hosts_context(tmp_path: Path) -> None:
         "    seen = list(pool.map(lambda _: ava.context.identity.agent_id, range(3)))\n"
         "print(json.dumps([who.agent_id, who.owns_loop, who.actor, who.lease is None, seen]))\n"
     )
-    proc, _request, result = _spawn(tmp_path, code, context=host.describe())
+    proc, _request, result = spawn_real_child(tmp_path, code, context=host.describe())
     assert proc.returncode == 0, proc.stderr
     assert read_result(result).kind == "done"
     seen = json.loads(proc.stdout.strip().splitlines()[-1])
@@ -154,7 +154,7 @@ if False:
     ava.files.read('/never-executed')
 print('tally done')
 """
-    proc, _request, result = _spawn(tmp_path, code)
+    proc, _request, result = spawn_real_child(tmp_path, code)
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
     assert payload.kind == "done"
@@ -170,7 +170,7 @@ import ava
 ava.files.read({str(sample)!r})
 raise ValueError('boom')
 """
-    proc, _request, result = _spawn(tmp_path, code)
+    proc, _request, result = spawn_real_child(tmp_path, code)
     assert proc.returncode == 0
     payload = read_result(result)
     assert payload.kind == "crashed"
@@ -206,7 +206,7 @@ def test_boot_config_failure_writes_crashed_envelope(
     # every agent-profile process; the unit `.env` owner URL never replaces it.
     # Without it the eager build fails earlier, on DataPlaneSettings refusing an
     # owner URL with the cluster secret but no (agent-stripped) admin password.
-    proc, _request, result = _spawn(
+    proc, _request, result = spawn_real_child(
         tmp_path,
         "pass",
         write_request_file=False,
@@ -243,7 +243,7 @@ def test_lite_boot_config_failure_writes_crashed_envelope(
         encoding="utf-8",
     )
 
-    proc, _request, result = _spawn(tmp_path, "pass", write_request_file=False)
+    proc, _request, result = spawn_real_child(tmp_path, "pass", write_request_file=False)
 
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
@@ -255,7 +255,7 @@ def test_lite_boot_config_failure_writes_crashed_envelope(
 
 def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Path) -> None:
     """A healthy child keeps reporting request-read failures through its envelope."""
-    proc, _request, result = _spawn(tmp_path, "pass", write_request_file=False)
+    proc, _request, result = spawn_real_child(tmp_path, "pass", write_request_file=False)
 
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
@@ -337,7 +337,7 @@ outputs = {
 }
 print("__HELP_OUTPUTS__" + json.dumps(outputs, sort_keys=True))
 """
-    proc, _request, result = _spawn(tmp_path, code)
+    proc, _request, result = spawn_real_child(tmp_path, code)
 
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
@@ -402,7 +402,7 @@ def test_help_is_ava_target_accepts_only_agent_visible_sdk_objects() -> None:
 def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> None:
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
-    proc, _request, result = _spawn(
+    proc, _request, result = spawn_real_child(
         tmp_path,
         f"import ava\nava.self.attach({str(image)!r}, label='render result')",
         # attach is a media-capable-model feature (user ruling 2026-08-28):
@@ -420,7 +420,7 @@ def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> No
 def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
     """A text-only-model child gets the model gate error, not a registration —
     `ava.self.attach` is unavailable to it (user ruling 2026-08-28)."""
-    proc, _request, result = _spawn(
+    proc, _request, result = spawn_real_child(
         tmp_path,
         "import ava\nava.self.attach('/tmp/render.png')",
         config_overlay={"llm_model": "deepseek-flash"},
@@ -435,7 +435,7 @@ def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
 
 
 def test_child_crash_writes_envelope_with_traceback(tmp_path: Path) -> None:
-    proc, _request, result = _spawn(tmp_path, "raise ValueError('boom')")
+    proc, _request, result = spawn_real_child(tmp_path, "raise ValueError('boom')")
     assert proc.returncode == 0
     # agent-facing traceback goes to the output pipe (framework logs do not)
     assert "ValueError: boom" in proc.stdout
@@ -466,7 +466,7 @@ ava.cwd.set({str(proj)!r})
 print("cwd after set:", ava.cwd.get())
 print("process cwd stable:", Path.cwd() == process_cwd)
 """
-    proc, _request, result = _spawn(tmp_path, code, state=state)
+    proc, _request, result = spawn_real_child(tmp_path, code, state=state)
     assert proc.returncode == 0, proc.stderr
     assert "first message: hi from snapshot" in proc.stdout
     assert "cwd after set:" in proc.stdout
@@ -481,7 +481,7 @@ print("process cwd stable:", Path.cwd() == process_cwd)
 def test_child_lifecycle_envelope(tmp_path: Path) -> None:
     """A `LifecycleExit` raised by agent code becomes a lifecycle outcome with
     the class name — the parent reconstructs the exception from it."""
-    proc, _request, result = _spawn(
+    proc, _request, result = spawn_real_child(
         tmp_path, "from base.agents.lifecycle import AgentRestart\nraise AgentRestart()"
     )
     assert proc.returncode == 0
@@ -500,7 +500,7 @@ def test_child_boot_timing_emits_ready_duration(
 
     from base.agents.context.clients import ClientSet
 
-    exec_child._emit_child_boot_timing(exec_child._import_runtime(100.0), clients=ClientSet())
+    exec_child.emit_child_boot_timing(exec_child.import_runtime(100.0), clients=ClientSet())
 
     [record] = [
         record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
@@ -511,7 +511,9 @@ def test_child_boot_timing_emits_ready_duration(
 def test_child_watchdog_hard_exits_124(tmp_path: Path) -> None:
     """With no parent to signal it, the child's own watchdog os._exit(124)s
     past (timeout + grace + margin) — an orphaned exec child cannot run long."""
-    proc, _request, result = _spawn(tmp_path, "import time\ntime.sleep(60)", timeout_s=0.2)
+    proc, _request, result = spawn_real_child(
+        tmp_path, "import time\ntime.sleep(60)", timeout_s=0.2
+    )
     assert proc.returncode == 124
     assert not result.exists()  # hard exit skips the envelope — parent classifies
 
@@ -521,7 +523,7 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
     settings — the child's SDK calls resolve the same configuration the agent
     process booted with. The maps are also popped from the child's env so its
     own children do not inherit them."""
-    proc, _request, result = _spawn(
+    proc, _request, result = spawn_real_child(
         tmp_path,
         (
             "from ava.sdk_surface.settings import agent_setting\n"
@@ -579,7 +581,7 @@ def test_child_overlay_phases_framework_then_plugin(
     def fake_sdk_disable(*, default_reader: object) -> None:
         events.append("sdk_disable")
 
-    def fake_build_state_slot(_child: exec_child._ChildContext, _payload: RequestPayload) -> None:
+    def fake_build_state_slot(_child: exec_child.ChildContext, _payload: RequestPayload) -> None:
         return None
 
     def fake_run_code(_code: str, _payload: ResultPayload) -> None:
@@ -611,10 +613,10 @@ def test_child_overlay_phases_framework_then_plugin(
         events.append("plugins")
 
     monkeypatch.setattr(protocol, "read_request", fake_read_request)
-    monkeypatch.setattr(exec_child, "_init_logger", fake_init_logger)
-    monkeypatch.setattr(process_boot, "_apply_per_agent_sdk_disable", fake_sdk_disable)
-    monkeypatch.setattr(process_boot, "_apply_per_agent_eval_isolation", fake_eval_isolation)
-    monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
+    monkeypatch.setattr(exec_child, "init_logger", fake_init_logger)
+    monkeypatch.setattr(process_boot, "apply_per_agent_sdk_disable", fake_sdk_disable)
+    monkeypatch.setattr(process_boot, "apply_per_agent_eval_isolation", fake_eval_isolation)
+    monkeypatch.setattr(exec_child, "build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr(boot, "ensure_plugins_loaded", fake_plugins_loaded)
@@ -678,7 +680,7 @@ def test_child_help_hides_attach_for_text_only_model(
     """Interactive help in a text-only child omits the attach contract — the
     SDK docs gate matches the system prompt (user ruling 2026-08-28)."""
     _declare_machine_name(tmp_path)
-    proc, _request, _result = _spawn(
+    proc, _request, _result = spawn_real_child(
         tmp_path,
         "import ava, io, contextlib\n"
         "buf = io.StringIO()\n"
@@ -698,7 +700,7 @@ def test_child_help_keeps_attach_for_media_capable_model(
     """A media-capable child's interactive help keeps the attach contract
     (user ruling 2026-08-28)."""
     _declare_machine_name(tmp_path)
-    proc, _request, _result = _spawn(
+    proc, _request, _result = spawn_real_child(
         tmp_path,
         "import ava, io, contextlib\n"
         "buf = io.StringIO()\n"
@@ -717,7 +719,7 @@ def test_child_help_hides_attach_for_withdrawn_model(
 ) -> None:
     """A withdrawn vision model's child gates media on its text-only fallback."""
     _declare_machine_name(tmp_path)
-    proc, _request, _result = _spawn(
+    proc, _request, _result = spawn_real_child(
         tmp_path,
         "import ava, io, contextlib\n"
         "from dataclasses import replace\n"

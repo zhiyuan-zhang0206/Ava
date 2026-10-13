@@ -182,7 +182,7 @@ def _module_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
-def _stale_allowlist_entries() -> list[str]:
+def stale_allowlist_entries() -> list[str]:
     """Allowlist entries whose file or exempted constant no longer exists."""
     errors: list[str] = []
     for rel in _FAMILY_MODULES:
@@ -244,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_FAMILY_MODULES)
     errors = _scan(paths, scope)
     if not argv:
-        errors.extend(_stale_allowlist_entries())
+        errors.extend(stale_allowlist_entries())
     for err in errors:
         print(err, file=sys.stderr)
     return 1 if errors else 0

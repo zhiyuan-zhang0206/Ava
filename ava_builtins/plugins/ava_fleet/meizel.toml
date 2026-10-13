@@ -26,6 +26,4 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 "tests/task_registry/test_creation_receipts.py -> task_registry.py#_create" = 1
 "tests/task_registry/test_update_receipt_identity.py -> task_registry.py#_update" = 1
 "tests/task_registry/test_update_receipts.py -> task_registry.py#_update" = 1
-"tests/test_task_maintenance_daemon.py -> task_maintenance/daemon.py#_run_reminders" = 2
-"tests/test_task_maintenance_daemon_part2.py -> task_maintenance/daemon.py#_run_escalate" = 1
 "tests/test_task_registry.py -> task_registry.py#_is_terminated" = 1

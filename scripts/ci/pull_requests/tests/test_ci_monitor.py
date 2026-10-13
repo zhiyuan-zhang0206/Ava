@@ -26,7 +26,7 @@ from scripts.ci.pull_requests import status
 CIStatus = status.CIStatus
 
 
-def _check(
+def status_check_rollup_entry(
     name: str,
     conclusion: str,
     *,
@@ -45,7 +45,7 @@ def _check(
     }
 
 
-APP_CHECK = _check("GitGuardian Security Checks", "SUCCESS", workflow="")
+APP_CHECK = status_check_rollup_entry("GitGuardian Security Checks", "SUCCESS", workflow="")
 
 
 class TrunkResponse:
@@ -175,7 +175,7 @@ def test_app_check_alone_is_green_when_repo_has_no_workflows(gh: Any, has_workfl
 
 def test_one_workflow_check_is_enough_to_be_green(gh: Any, has_workflows: Any) -> None:
     """The guard asks whether the suite ran at all — not how many jobs it has."""
-    gh([APP_CHECK, _check("backend (pytest + pyright)", "SUCCESS")])
+    gh([APP_CHECK, status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS")])
     has_workflows(True)
     r = status.check_ci("1")
     assert r.verdict is CIStatus.ALL_PASSED
@@ -188,9 +188,9 @@ def test_one_workflow_check_is_enough_to_be_green(gh: Any, has_workflows: Any) -
 def test_full_green_suite(gh: Any, has_workflows: Any) -> None:
     gh(
         [
-            _check("changes (path filter)", "SUCCESS"),
-            _check("backend (pytest + pyright)", "SUCCESS"),
-            _check("docs-only (pass-through)", "SKIPPED"),
+            status_check_rollup_entry("changes (path filter)", "SUCCESS"),
+            status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS"),
+            status_check_rollup_entry("docs-only (pass-through)", "SKIPPED"),
             APP_CHECK,
         ]
     )
@@ -202,7 +202,7 @@ def test_full_green_suite(gh: Any, has_workflows: Any) -> None:
 
 def test_failure_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> None:
     """A real failure must report FAILED, never the did-not-run verdict."""
-    gh([APP_CHECK, _check("backend (pytest + pyright)", "FAILURE")])
+    gh([APP_CHECK, status_check_rollup_entry("backend (pytest + pyright)", "FAILURE")])
     has_workflows(True)
     r = status.check_ci("1")
     assert r.verdict is CIStatus.FAILED
@@ -211,14 +211,14 @@ def test_failure_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> No
 
 def test_pending_wins_over_the_workflow_guard(gh: Any, has_workflows: Any) -> None:
     """Still-running checks mean wait, not did-not-run."""
-    gh([APP_CHECK, _check("backend", "", status="IN_PROGRESS")])
+    gh([APP_CHECK, status_check_rollup_entry("backend", "", status="IN_PROGRESS")])
     has_workflows(True)
     assert status.check_ci("1").verdict is CIStatus.PENDING
 
 
 def test_unknown_conclusion_counts_as_pending(gh: Any, has_workflows: Any) -> None:
     """A COMPLETED check with an unrecognized conclusion must not read as green."""
-    gh([_check("weird", "SOMETHING_NEW")])
+    gh([status_check_rollup_entry("weird", "SOMETHING_NEW")])
     has_workflows(True)
     r = status.check_ci("1")
     assert r.verdict is CIStatus.PENDING
@@ -226,7 +226,7 @@ def test_unknown_conclusion_counts_as_pending(gh: Any, has_workflows: Any) -> No
 
 
 def test_merge_conflict_short_circuits(gh: Any, has_workflows: Any) -> None:
-    gh([_check("backend", "SUCCESS")], mergeable="CONFLICTING")
+    gh([status_check_rollup_entry("backend", "SUCCESS")], mergeable="CONFLICTING")
     has_workflows(True)
     assert status.check_ci("1").verdict is CIStatus.MERGE_CONFLICT
 
@@ -256,7 +256,7 @@ def test_status_context_bucketing(
         "state": state,
         "targetUrl": "",
     }
-    gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
+    gh([status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS"), status_ctx])
     has_workflows(True)
     result = status.check_ci("1")
     assert result.verdict is verdict
@@ -275,19 +275,19 @@ def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
     """cancel-in-progress leaves a CANCELLED run and a SUCCESS run of the same
     name on one SHA; GitHub treats them as one logical check whose state is
     the newest run's (2026-09-04 #1636)."""
-    stale = _check(
+    stale = status_check_rollup_entry(
         "backend serial (flaky)",
         "CANCELLED",
         workflow="CI",
         completed_at="2026-09-03T17:25:42Z",
     )
-    fresh = _check(
+    fresh = status_check_rollup_entry(
         "backend serial (flaky)",
         "SUCCESS",
         workflow="CI",
         completed_at="2026-09-03T18:04:17Z",
     )
-    gh([_check("backend (pytest + pyright)", "SUCCESS"), stale, fresh])
+    gh([status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS"), stale, fresh])
     has_workflows(True)
     r = status.check_ci("1")
     assert r.verdict is CIStatus.ALL_PASSED
@@ -378,9 +378,9 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
     rest is still coming."""
     gh(
         [
-            _check("guardrails (impacted)", "SUCCESS"),
-            _check("e2e (smoke)", "SUCCESS"),
-            _check("contracts", "SUCCESS"),
+            status_check_rollup_entry("guardrails (impacted)", "SUCCESS"),
+            status_check_rollup_entry("e2e (smoke)", "SUCCESS"),
+            status_check_rollup_entry("contracts", "SUCCESS"),
         ],
         scheduled=["CI"],
     )
@@ -392,9 +392,9 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
     assert "guardrails (impacted)" in r.passed
     gh(
         [
-            _check("guardrails (impacted)", "SUCCESS"),
-            _check("e2e (smoke)", "SUCCESS"),
-            _check("contracts", "SUCCESS"),
+            status_check_rollup_entry("guardrails (impacted)", "SUCCESS"),
+            status_check_rollup_entry("e2e (smoke)", "SUCCESS"),
+            status_check_rollup_entry("contracts", "SUCCESS"),
         ],
         scheduled=[],
         main_completed=True,
@@ -411,8 +411,8 @@ def test_partial_suite_green_with_an_unanswerable_probe_is_error(
     persists, instead of ALL_PASSED or a fabricated PENDING."""
     gh(
         [
-            _check("guardrails (impacted)", "SUCCESS"),
-            _check("e2e (smoke)", "SUCCESS"),
+            status_check_rollup_entry("guardrails (impacted)", "SUCCESS"),
+            status_check_rollup_entry("e2e (smoke)", "SUCCESS"),
         ]
     )
     has_workflows(True)
@@ -428,8 +428,8 @@ def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workf
     out until the main run is visible rather than calling that narrow window green."""
     checks = [
         APP_CHECK,
-        _check("prove-example-a", "SKIPPED", workflow="Example proof A"),
-        _check("prove-example-b", "SKIPPED", workflow="Example proof B"),
+        status_check_rollup_entry("prove-example-a", "SKIPPED", workflow="Example proof A"),
+        status_check_rollup_entry("prove-example-b", "SKIPPED", workflow="Example proof B"),
     ]
     has_workflows(True)
     gh(checks, scheduled=[], main_completed=False)
@@ -447,7 +447,7 @@ def test_main_workflow_probe_failure_is_error(
     gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An unanswerable main-workflow probe is unknown, never a green verdict."""
-    gh([_check("backend", "SUCCESS")], scheduled=[], main_completed=True)
+    gh([status_check_rollup_entry("backend", "SUCCESS")], scheduled=[], main_completed=True)
     has_workflows(True)
     monkeypatch.setattr(status, "main_workflow_run_completed", lambda *_a, **_k: None)
 
@@ -484,11 +484,11 @@ def test_main_workflow_probe_reads_completed_runs_of_the_main_workflow(
 def core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
     return [
         APP_CHECK,
-        _check("classify change", classify),
-        _check("backend shard (${{ matrix.group }}/16)", conclusion),
-        _check("e2e shard (${{ matrix.group }}/4)", conclusion),
-        _check("backend selected subset", "SKIPPED"),
-        _check("CI summary", "SKIPPED"),
+        status_check_rollup_entry("classify change", classify),
+        status_check_rollup_entry("backend shard (${{ matrix.group }}/16)", conclusion),
+        status_check_rollup_entry("e2e shard (${{ matrix.group }}/4)", conclusion),
+        status_check_rollup_entry("backend selected subset", "SKIPPED"),
+        status_check_rollup_entry("CI summary", "SKIPPED"),
     ]
 
 
@@ -523,7 +523,7 @@ def test_path_filtered_core_skip_with_a_ran_main_run_stays_green(
 ) -> None:
     checks = [
         *core_rollup("SKIPPED", classify="SUCCESS"),
-        _check("repo language (no raw CJK)", "SUCCESS"),
+        status_check_rollup_entry("repo language (no raw CJK)", "SUCCESS"),
     ]
     gh(checks, is_draft=False, main_completed=True)
     has_workflows(True)
@@ -535,9 +535,17 @@ def test_core_suite_skipped_reads_only_the_shard_families() -> None:
     names = [c["name"] for c in skipped[2:4]]
     assert status.core_suite_skipped([]) is None
     assert status.core_suite_skipped([APP_CHECK]) is None
-    assert status.core_suite_skipped([_check("backend selected subset", "SKIPPED")]) is None
+    assert (
+        status.core_suite_skipped([status_check_rollup_entry("backend selected subset", "SKIPPED")])
+        is None
+    )
     assert status.core_suite_skipped(skipped) == names
-    assert status.core_suite_skipped([*skipped, _check("backend shard (1/16)", "SUCCESS")]) is None
+    assert (
+        status.core_suite_skipped(
+            [*skipped, status_check_rollup_entry("backend shard (1/16)", "SUCCESS")]
+        )
+        is None
+    )
 
 
 def test_main_workflow_probe_returns_none_when_unanswerable(
@@ -572,7 +580,7 @@ def test_runs_api_failure_keeps_the_conservative_verdict(
     assert status.check_ci("886").verdict == CIStatus.NO_WORKFLOW_RUNS
 
 
-def _completed(stdout: str = "", returncode: int = 0) -> Any:
+def completed_process_stub(stdout: str = "", returncode: int = 0) -> Any:
     return status.subprocess.CompletedProcess([], returncode, stdout, "boom")
 
 

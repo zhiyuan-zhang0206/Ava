@@ -49,7 +49,7 @@ def test_the_session_home_links_the_vendored_runtime_the_job_exports() -> None:
     bootstrap = (_REPO_ROOT / "tests/fixtures/env_bootstrap.py").read_text(encoding="utf-8")
     assert 'f"CI_VENDORED_RUNTIME_ROOT={root}' in script
     assert 'os.environ.get("CI_VENDORED_RUNTIME_ROOT")' in bootstrap
-    assert '_TEST_AVA_HOME / "runtime"' in bootstrap
+    assert 'TEST_AVA_HOME / "runtime"' in bootstrap
 
 
 def test_ci_no_longer_installs_an_apt_pgvector() -> None:

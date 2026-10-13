@@ -95,7 +95,7 @@ class _ExecNeverStartedError(OSError):
     """Popen refused before returning a child; preallocated resources closed."""
 
 
-def _spawn(
+def spawn_exec_child(
     request_path: Path,
     result_path: Path,
     agent_id: int | None,
@@ -425,7 +425,7 @@ async def run_legacy_subprocess(
     resources_settled = False
     try:
         try:
-            proc, domain = _spawn(
+            proc, domain = spawn_exec_child(
                 request_path,
                 result_path,
                 agent_id,

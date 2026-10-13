@@ -597,10 +597,10 @@ def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool, pipeline: Any) -> 
     """Emit the daily + run events through the unified telemetry pipeline."""
     if dry_run:
         return
-    _emit_events(snapshot, pipeline=pipeline)
+    emit_events(snapshot, pipeline=pipeline)
 
 
-def _emit_events(snapshot: dict[str, Any], *, pipeline: Any) -> None:
+def emit_events(snapshot: dict[str, Any], *, pipeline: Any) -> None:
     """The pipeline write (separate seam so tests can assert dry-run silence)."""
     from base import telemetry
 

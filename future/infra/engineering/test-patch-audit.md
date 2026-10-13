@@ -119,7 +119,7 @@ patched and the test homes that patch them. This is the injection-seam work list
 | `ops.lifecycle` | 21 | `_recovery_halt_reason` 5, `_wake_suppression_active` 3, `_recovery_halted` 3 | `ops` 21 |
 | `services.desktop.permissions_helper.lifecycle` | 19 | `_BUILD_DIR` 3, `_keychain_lock_reason` 3, `_interactive_signing_reason` 3 | `cli/commands/lifecycle` 19 |
 | `ava.mcps._remote` | 18 | `_remote` 18 | `ava` 18 |
-| `scripts.lint.async_no_sync_blocking` | 18 | `_REPO_ROOT` 9, `_ROOT` 2, `_DEFINITION_DIRS` 2 | `scripts` 18 |
+| `scripts.lint.async_no_sync_blocking` | 18 | `_REPO_ROOT` 9, `_ROOT` 2, `DEFINITION_DIRS` 2 | `scripts` 18 |
 | `agent.startup` | 16 | `_page_server_alive` 9, `_last_reconcile_at` 7 | `agent/graph/claim` 16 |
 | `cli.commands.lifecycle.root_driver` | 16 | `stop_root_service_tree` 8, `root_tree_selection` 4, `_root_tree_plan` 2 | `cli/commands/data_plane` 10, `cli` 4, `cli/commands/observability` 1, `(top-level)` 1 |
 | `cli.commands.lifecycle._temporary_stop` | 15 | `_temporary_stop` 15 | `cli` 15 |

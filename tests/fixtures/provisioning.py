@@ -37,7 +37,7 @@ from gateway.tests.agents.gateway_auth import install_default_gateway_credential
 from tests._os_jobs import host_ava_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
-    _TEST_AVA_HOME,
+    TEST_AVA_HOME,
 )
 from tests.fixtures.static_environment import static_mode
 
@@ -332,7 +332,7 @@ def _clean_db(
 
     monkeypatch.setattr(settings.data_plane, "db_url", provisioned_db)
     monkeypatch.setitem(os.environ, "AVA_DB_URL", provisioned_db)
-    env_file = _TEST_AVA_HOME / ".env"
+    env_file = TEST_AVA_HOME / ".env"
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
     _rewrite_test_env_file_line(env_file, "AVA_DB_URL", provisioned_db)
@@ -404,7 +404,7 @@ def _clean_redis(
 
     monkeypatch.setattr(settings.data_plane, "redis_url", provisioned_redis)
     monkeypatch.setitem(os.environ, "AVA_REDIS_URL", provisioned_redis)
-    env_file = _TEST_AVA_HOME / ".env"
+    env_file = TEST_AVA_HOME / ".env"
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
     _rewrite_test_env_file_line(env_file, "AVA_REDIS_URL", provisioned_redis)
@@ -518,7 +518,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
     _fail_on_leaked_os_jobs(session)
     _fail_on_runaway_memory(session)
-    shutil.rmtree(_TEST_AVA_HOME, ignore_errors=True)
+    shutil.rmtree(TEST_AVA_HOME, ignore_errors=True)
 
 
 @pytest.fixture

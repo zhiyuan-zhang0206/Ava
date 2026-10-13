@@ -79,8 +79,8 @@ def test_zero_record_exit_does_not_import_telemetry_or_otel() -> None:
 def _forbidden_loader_probe(root: str) -> str:
     """Probe body: the real identity-child arm path, then the exporter check.
 
-    `_init_logger` is the exact arm seam (file sink + event-pipeline sink +
-    deferred OTLP arm); `_emit_child_boot_timing` is the record that used to
+    `init_logger` is the exact arm seam (file sink + event-pipeline sink +
+    deferred OTLP arm); `emit_child_boot_timing` is the record that used to
     bring the exporter stack up within the first drain tick. A writer receipt
     observes that tick; the exporter's public flush reports the retained tail.
     """
@@ -103,14 +103,14 @@ def writer(events, backend):
 
 pipeline = telemetry_otlp.ExportingEventPipeline(writer=writer, export_allowed=lambda: True)
 clients = ClientSet(pipeline_factory=lambda: pipeline)
-exec_child._init_logger(
+exec_child.init_logger(
     999999,
     producer=clients.event_pipeline,
     machine_reader=lambda: "lazy-child-probe",
 )  # the real arm path (task #3816 M4b)
 # The boot clock is all the record reads; the SDK modules stay unimported.
-child = exec_child._ChildContext(ava=None, boot_started_at=time.perf_counter())
-exec_child._emit_child_boot_timing(child, clients=clients)
+child = exec_child.ChildContext(ava=None, boot_started_at=time.perf_counter())
+exec_child.emit_child_boot_timing(child, clients=clients)
 assert pipeline.sync(timeout=5.0).status is DrainStatus.COMPLETED
 assert backends
 unfinished = backends[0].flush(timeout=0).status is DrainStatus.UNFINISHED

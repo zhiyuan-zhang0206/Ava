@@ -158,7 +158,7 @@ CASES = [
         clock_lattice,
         "ops/x.py",
         "_SOME_REAP_GRACE_S = 100.0\n",
-        patches={"_stale_allowlist_entries": list},
+        patches={"stale_allowlist_entries": list},
     ),
     Case(
         no_plugin_wrap,
@@ -187,7 +187,7 @@ CASES = [
         async_no_sync_blocking,
         "gateway/x.py",
         "import time\n\n\nasync def f():\n    time.sleep(1)\n",
-        patches={"_stale_repo_helpers": list},
+        patches={"stale_repo_helpers": list},
     ),
     Case(
         time_bomb,

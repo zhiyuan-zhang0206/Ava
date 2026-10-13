@@ -88,14 +88,14 @@ if sys.platform == "darwin":
 # set on a fixture, so the subprocesses tests spawn (`ava` CLI, e2e gateway)
 # inherit the same home.
 _SESSION_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
-_TEST_AVA_HOME = Path(tempfile.mkdtemp(prefix=f"ava_test_home_{_SESSION_SUFFIX}_"))
-os.environ["AVA_HOME"] = str(_TEST_AVA_HOME)
+TEST_AVA_HOME = Path(tempfile.mkdtemp(prefix=f"ava_test_home_{_SESSION_SUFFIX}_"))
+os.environ["AVA_HOME"] = str(TEST_AVA_HOME)
 # CI keeps the vendored Postgres tree (zonky + pgvector, put in place by
 # scripts/ci/vendor_pg_runtime.py) outside the per-session home; linking it in
 # makes `pg_tool` resolve the production server build instead of a host apt one.
 _CI_VENDORED_RUNTIME_ROOT = os.environ.get("CI_VENDORED_RUNTIME_ROOT")
 if _CI_VENDORED_RUNTIME_ROOT:
-    (_TEST_AVA_HOME / "runtime").symlink_to(_CI_VENDORED_RUNTIME_ROOT, target_is_directory=True)
+    (TEST_AVA_HOME / "runtime").symlink_to(_CI_VENDORED_RUNTIME_ROOT, target_is_directory=True)
 # Persist the same worker-local channel through settings refresh and child boot.
 # A mutation of settings.data_plane alone is lost when a rollout rebuilds it.
 _TEST_EVENTS_CHANNEL = f"ava:events:test:{_SESSION_SUFFIX}"
@@ -363,7 +363,7 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
 # test home's .env as well, so the file declares what the env carries and the
 # authority pass takes the force branch. Subprocess tests that spawn the real
 # CLI inherit this home, so they read the same declarations.
-(_TEST_AVA_HOME / ".env").write_text(
+(TEST_AVA_HOME / ".env").write_text(
     "\n".join(
         [
             # Cluster-scope pin carried by both channels (see the block above):
@@ -447,7 +447,7 @@ from dotenv import dotenv_values
 os.environ.update(
     {
         key: value
-        for key, value in dotenv_values(_TEST_AVA_HOME / ".env").items()
+        for key, value in dotenv_values(TEST_AVA_HOME / ".env").items()
         if value is not None
     }
 )
@@ -481,7 +481,7 @@ def _pin_setting(field: str, value: object) -> None:
     """Deliver a session pin before Settings construction, including child boots."""
     key = f"AVA_{field.upper()}"
     os.environ[key] = str(value)
-    tests._test_env_file.rewrite_line(_TEST_AVA_HOME / ".env", key, str(value))
+    tests._test_env_file.rewrite_line(TEST_AVA_HOME / ".env", key, str(value))
 
 
 _HEALTH_PORT_FIELDS = tuple(

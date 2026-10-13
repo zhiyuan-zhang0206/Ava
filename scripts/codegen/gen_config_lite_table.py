@@ -176,7 +176,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
     LiteField(
         "db_pool_acquire_timeout_seconds", "literal", None, "agent/db/__init__.py:28 module level"
     ),
-    LiteField("eval_isolation", "literal", None, "process_boot._apply_per_agent_eval_isolation"),
+    LiteField("eval_isolation", "literal", None, "process_boot.apply_per_agent_eval_isolation"),
     LiteField(
         "eval_network_allowlist",
         "factory_empty_list",
@@ -210,7 +210,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "sdk_disable",
         "factory_empty_list",
         None,
-        "exec child boot: _apply_per_agent_sdk_disable reads it after the overlay",
+        "exec child boot: apply_per_agent_sdk_disable reads it after the overlay",
     ),
 )
 

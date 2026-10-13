@@ -16,7 +16,6 @@ from scripts.ci.pull_requests import monitor, owner_operations, status
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     CIStatus,
     TrunkResponse,
-    _check,
     aged,
     diag_check,
     diag_job,
@@ -26,6 +25,7 @@ from scripts.ci.pull_requests.tests.test_ci_monitor import (
     install_probe,
     install_results_poller,
     limbo_result,
+    status_check_rollup_entry,
     urlopen_sequence,
 )
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
@@ -434,7 +434,7 @@ def test_limbo_runs_skips_unparseable_created_at_and_non_int_id(monkeypatch) -> 
 
 def test_check_ci_attaches_limbo_to_pending(gh: Any, has_workflows: Any, monkeypatch) -> None:
     gh(
-        [_check("backend (pytest + pyright)", "SUCCESS")],
+        [status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS")],
         scheduled=["Example proof A"],
     )
     has_workflows(True)
@@ -463,7 +463,7 @@ def test_check_ci_empty_rollup_with_scheduled_run_probes_limbo(
 def test_check_ci_limbo_probe_none_stays_plain_pending(
     gh: Any, has_workflows: Any, monkeypatch
 ) -> None:
-    gh([_check("backend", "SUCCESS")], scheduled=["CI"])
+    gh([status_check_rollup_entry("backend", "SUCCESS")], scheduled=["CI"])
     has_workflows(True)
     monkeypatch.setattr(status, "limbo_runs", lambda *_a, **_k: None)
     r = status.check_ci("1")
