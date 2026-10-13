@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from meizel.contracts.analysis import Analysis, analyze
+from meizel.contracts.debt import DebtTable, render_debt
 from meizel.contracts.manifest import manifest_path
 from meizel.contracts.rule import Projection
 from meizel.graph.graphs import cycle_through, strongly_connected, transitive_reduction_size
@@ -30,6 +31,7 @@ def render_manifest(
     uses: dict[str, set[str]],
     loads: dict[str, tuple[str, ...]],
     external: dict[str, str],
+    debt: DebtTable | None = None,
 ) -> str:
     def listing(items: list[str]) -> str:
         return "[" + ", ".join(f'"{item}"' for item in items) + "]"
@@ -46,6 +48,8 @@ def render_manifest(
     if external:
         rows = "\n".join(f'"{src}" = {json.dumps(external[src])}' for src in sorted(external))
         blocks.append(f"[external]\n{rows}")
+    if debt:
+        blocks.append(render_debt(debt).rstrip("\n"))
     return "\n\n".join(blocks) + "\n"
 
 
@@ -165,8 +169,11 @@ def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
     exports, _ = _exports(analysis.projections)
     carried = {d: m.loads for d, m in analysis.manifests.items() if m.loads}
     externals = {d: m.external for d, m in analysis.manifests.items() if m.external}
+    debts = {d: m.debt for d, m in analysis.manifests.items() if m.debt}
     written = 0
-    for directory in sorted(set(grouped) | set(exports) | set(carried) | set(externals)):
+    for directory in sorted(
+        set(grouped) | set(exports) | set(carried) | set(externals) | set(debts)
+    ):
         uses: dict[str, set[str]] = defaultdict(set)
         for cf, ct in grouped.get(directory, {}):
             uses[cf].add(ct)
@@ -178,6 +185,7 @@ def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
                 uses,
                 carried.get(directory, {}),
                 externals.get(directory, {}),
+                debts.get(directory),
             ),
             encoding="utf-8",
         )

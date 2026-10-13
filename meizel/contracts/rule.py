@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from meizel.contracts.debt import edge_key
 from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import reachable
-from meizel.graph.model import Code, Diagnostic, Fact, FactKind
+from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
 
 __all__ = ["Projection", "is_private", "judge", "project"]
 
@@ -71,6 +72,12 @@ def _where(directory: str) -> str:
     return directory or "."
 
 
+def _debt(proj: Projection, name: str | None = None) -> DebtKey:
+    """The debt a violation of this projection would be recorded as, owned by its `lca`."""
+    fact = proj.fact
+    return DebtKey(proj.lca, edge_key(proj.lca, fact.src, fact.dst, name))
+
+
 def _undeclared(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic:
     fact, lca = proj.fact, proj.lca
     graph = manifests[lca].graph() if lca in manifests else {}
@@ -88,6 +95,7 @@ def _undeclared(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic:
         Code.UNDECLARED_EDGE,
         f"{fact.edge()} ({fact.detail}) is not declared",
         tuple(hints),
+        _debt(proj),
     )
 
 
@@ -104,6 +112,7 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
                 Code.PRIVATE_MODULE,
                 f"{fact.edge()} ({fact.detail}) goes through the underscore child {child!r}",
                 (hint,),
+                _debt(proj),
             )
         exported = manifests[directory].exports if directory in manifests else ()
         if child not in exported:
@@ -113,6 +122,7 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
                 Code.NOT_EXPORTED,
                 f"{fact.edge()} ({fact.detail}) enters {_where(directory)} through {child!r}, which is not exported",
                 (hint,),
+                _debt(proj),
             )
     return None
 
@@ -136,6 +146,7 @@ def judge(proj: Projection, manifests: dict[str, Manifest]) -> list[Diagnostic]:
             (
                 "underscore names belong to the file that defines them, tests included; use a public name",
             ),
+            _debt(proj, name),
         )
         for name in fact.names
         if is_private(name)
