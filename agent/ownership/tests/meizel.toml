@@ -7,6 +7,3 @@ exports = ["ownership_support.py", "test_lifecycle_intent.py"]
 [debt.first-party-patch]
 "test_hosted_ownership.py#monkeypatch.setattr agent.ownership.corpse_reap.publish_agent_updated" = 1
 "test_hosted_ownership.py#monkeypatch.setattr agent.ownership.corpse_reap.record_audit_async" = 1
-
-[debt.private-name]
-"test_hosted_completion.py -> test_lifecycle_intent.py#_command" = 1

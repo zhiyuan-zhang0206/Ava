@@ -42,8 +42,6 @@
 [debt.private-name]
 "test_context_binding.py -> test_exec_child.py#_spawn" = 1
 "test_exec_slot.py -> test_exec_child.py#_spawn" = 1
-"test_resource_admission.py -> test_exec_owner_entry.py#_context" = 1
-"test_resource_admission.py -> test_exec_owner_entry.py#_ready" = 1
 "test_resource_admission.py -> test_exec_owner_entry.py#_start" = 1
 
 [debt.unresolved-patch]

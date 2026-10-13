@@ -220,7 +220,7 @@ def ended(
     return True
 
 
-def _read_inbox(
+def read_relay_inbox(
     db: Database,
     bus: EventBus,
     agent_id: int,
@@ -610,7 +610,7 @@ def cmd_relay(
         async def run() -> None:
             async def read_inbox() -> InboxSnapshot:
                 return await asyncio.to_thread(
-                    _read_inbox,
+                    read_relay_inbox,
                     db,
                     bus,
                     args.agent_id,

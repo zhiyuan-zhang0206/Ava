@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.graph.claim.node import claim_node
 from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent
-from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import AgentState
 from agent.tests.claim.test_inbound_ownership import insert
@@ -100,7 +100,7 @@ async def test_accepted_cancel_precedes_original_failure_or_lifecycle_settlement
             await asyncio.wait_for(entered.wait(), 5)
             command = None
             if ending != "provider_failure":
-                command = _command(db_conn, initial.agent_id, ending)
+                command = insert_lifecycle_command(db_conn, initial.agent_id, ending)
                 async with async_write_transaction(aops_pool) as conn:
                     assert (
                         await accept_lifecycle_intent(

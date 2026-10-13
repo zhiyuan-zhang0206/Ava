@@ -8,10 +8,10 @@ import yaml
 from tests.scripts.test_alert_rules import (
     INFRA_RULE_METRICS,
     RULES,
-    _exprs,
     assert_latency_query_scopes_to_route_class,
     assert_reduce_keeps_route_label,
     load_rules,
+    rule_query_exprs,
     threshold_params,
 )
 
@@ -26,14 +26,14 @@ def test_billing_rule_fires_on_the_first_occurrence() -> None:
     assert threshold_params(rule) == [[0]]
     assert rule["for"] == "0m"
     assert rule["labels"]["severity"] == "critical"
-    assert any("[15m]" in e for e in _exprs(rule, "loki"))
+    assert any("[15m]" in e for e in rule_query_exprs(rule, "loki"))
 
 
 def test_rate_limit_rule_groups_http_429s_by_provider() -> None:
     """The warning is a provider-level burst, not a page per affected model."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-llm-rate-limit"]
-    expr = _exprs(rule, "loki")[0]
+    expr = rule_query_exprs(rule, "loki")[0]
 
     assert "sum by (attributes_vendor)" in expr
     assert 'attributes_status="429"' in expr
@@ -50,7 +50,7 @@ def test_billing_rule_keys_on_the_billing_flag_not_a_status_list() -> None:
     re-spelled in LogQL: a provider added to that vocabulary must be covered
     here without touching this file."""
     rules = {r["uid"]: r for r in load_rules()}
-    expr = _exprs(rules["ava-ops-llm-billing-quota"], "loki")[0]
+    expr = rule_query_exprs(rules["ava-ops-llm-billing-quota"], "loki")[0]
     assert 'attributes_billing="true"' in expr
     assert "402" not in expr, "the rule must not enumerate provider statuses itself"
 
@@ -61,7 +61,7 @@ def test_billing_rule_names_vendor_and_model_in_the_notification() -> None:
     summary — a bare count would not say whose key to top up."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-llm-billing-quota"]
-    assert "sum by (attributes_vendor, attributes_model)" in _exprs(rule, "loki")[0]
+    assert "sum by (attributes_vendor, attributes_model)" in rule_query_exprs(rule, "loki")[0]
     summary = rule["annotations"]["summary"]
     assert "{{ $labels.attributes_vendor }}" in summary
     assert "{{ $labels.attributes_model }}" in summary
@@ -74,7 +74,7 @@ def test_delivery_stalled_rule_filters_fresh_by_age() -> None:
     """R5's "fresh" discriminator is attributes.age_s < 600 — a numeric
     comparison on the json-flattened label (numbers parse as numbers)."""
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = _exprs(rules["ava-ops-delivery-stalled-backlog"], "loki")
+    exprs = rule_query_exprs(rules["ava-ops-delivery-stalled-backlog"], "loki")
     assert any("attributes_age_s < 600" in e for e in exprs)
 
 
@@ -83,10 +83,10 @@ def test_infra_rule_queries_its_scraped_metric(uid: str, metric: str) -> None:
     """Each infra rule reads Prometheus, and reads the series name the sidecar
     actually produces."""
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = _exprs(rules[uid], "prometheus")
+    exprs = rule_query_exprs(rules[uid], "prometheus")
     assert len(exprs) == 1, f"{uid}: expected exactly one Prometheus query"
     assert metric in exprs[0], f"{uid}: does not read {metric}:\n{exprs[0]}"
-    assert not _exprs(rules[uid], "loki"), f"{uid}: infra rules never query Loki"
+    assert not rule_query_exprs(rules[uid], "loki"), f"{uid}: infra rules never query Loki"
 
 
 @pytest.mark.parametrize("uid", sorted(INFRA_RULE_METRICS))
@@ -94,7 +94,7 @@ def test_infra_rule_groups_by_machine_name(uid: str) -> None:
     """Per the 2026-08-24 user ruling, aggregation keeps the Ava roster
     `machine_name`, so units on one host remain distinct alert instances."""
     rules = {r["uid"]: r for r in load_rules()}
-    expr = _exprs(rules[uid], "prometheus")[0]
+    expr = rule_query_exprs(rules[uid], "prometheus")[0]
     assert "by (machine_name" in expr, f"{uid}: aggregates away the machine name:\n{expr}"
     assert "{{ $labels.machine_name }}" in rules[uid]["annotations"]["summary"]
 
@@ -112,7 +112,7 @@ def test_disk_watermark_rule_is_per_mountpoint(uid: str) -> None:
     LGTM volumes can sit on different filesystems, and a max over all of them
     would name no path to clear."""
     rules = {r["uid"]: r for r in load_rules()}
-    expr = _exprs(rules[uid], "prometheus")[0]
+    expr = rule_query_exprs(rules[uid], "prometheus")[0]
     assert "by (machine_name, mountpoint)" in expr
     assert "{{ $labels.mountpoint }}" in rules[uid]["annotations"]["summary"]
 
@@ -133,7 +133,7 @@ def test_disk_watermark_rule_excludes_non_asset_mounts(uid: str) -> None:
     task #3958). The Ava data plane (root volume, /System/Volumes/Data,
     /Users/*/OrbStack on macOS; / on Linux) stays under the watermark."""
     rules = {r["uid"]: r for r in load_rules()}
-    expr = _exprs(rules[uid], "prometheus")[0]
+    expr = rule_query_exprs(rules[uid], "prometheus")[0]
     assert 'mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"' in expr
     # Read-only installer ISOs can mount under /Users, outside the path exclusion.
     assert 'mode!="ro"' in expr
@@ -156,7 +156,7 @@ def test_infra_ratio_rules_round_for_readability() -> None:
         "ava-ops-host-disk-watermark-95",
         "ava-ops-pg-connection-saturation",
     ):
-        expr = _exprs(rules[uid], "prometheus")[0]
+        expr = rule_query_exprs(rules[uid], "prometheus")[0]
         assert "round(" in expr and "0.001)" in expr, f"{uid} is unrounded:\n{expr}"
         threshold: float = threshold_params(rules[uid])[0][0]
         assert threshold == round(threshold, 2), f"{uid}: threshold finer than the rounding"
@@ -177,7 +177,7 @@ def test_infra_rule_thresholds() -> None:
 
 def test_disk_watermark_escalation_tiers() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    baseline_expr = _exprs(rules["ava-ops-host-disk-watermark"], "prometheus")
+    baseline_expr = rule_query_exprs(rules["ava-ops-host-disk-watermark"], "prometheus")
     expectations = {
         "ava-ops-host-disk-watermark-93": ("warning", "15m"),
         "ava-ops-host-disk-watermark-95": ("critical", "5m"),
@@ -185,7 +185,7 @@ def test_disk_watermark_escalation_tiers() -> None:
 
     for uid, (severity, hold) in expectations.items():
         rule = rules[uid]
-        assert _exprs(rule, "prometheus") == baseline_expr
+        assert rule_query_exprs(rule, "prometheus") == baseline_expr
         assert rule["for"] == hold
         assert rule["labels"] == {
             "severity": severity,
@@ -204,7 +204,7 @@ def test_collector_queue_pressure_is_current_and_per_exporter() -> None:
     both machine_name and exporter so the alert names the blocked route."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-otelcol-queue-pressure"]
-    expr = _exprs(rule, "prometheus")[0]
+    expr = rule_query_exprs(rule, "prometheus")[0]
     assert "otelcol_exporter_queue_size" in expr
     assert "otelcol_exporter_queue_capacity" in expr
     assert "by (machine_name, exporter, data_type)" in expr
@@ -218,7 +218,7 @@ def test_collector_enqueue_failure_rule_uses_window_delta() -> None:
     alerting on their absolute value would warn forever after one outage."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-otelcol-enqueue-failures"]
-    expr = _exprs(rule, "prometheus")[0]
+    expr = rule_query_exprs(rule, "prometheus")[0]
     assert "otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total" in expr
     assert "increase(" in expr
     assert "[5m]" in expr
@@ -231,7 +231,7 @@ def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
     historical/current sets and retain `machine_name` per the 2026-08-24 ruling."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-otelcol-host-silent"]
-    expr = _exprs(rule, "prometheus")[0]
+    expr = rule_query_exprs(rule, "prometheus")[0]
     assert "otelcol_process_uptime_total" in expr
     assert "max_over_time" in expr
     assert "[24h]" in expr
@@ -275,7 +275,7 @@ def test_gateway_latency_rules_scope_to_route_class(
     """R17 and R19 keep fast/slow routes in separately calibrated tiers."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules[uid]
-    assert_latency_query_scopes_to_route_class(_exprs(rule, "loki")[0], route_class)
+    assert_latency_query_scopes_to_route_class(rule_query_exprs(rule, "loki")[0], route_class)
     assert rule["for"] == "5m"
     assert rule["labels"]["notify_im"] == "false"
     assert rule["labels"]["metric"] == metric
@@ -290,7 +290,7 @@ def test_turn_duration_rule_uses_prometheus_histogram() -> None:
     (37.6s on 2026-08-23), sustained 10m, warning-first without IM."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-turn-duration-p95"]
-    exprs = _exprs(rule, "prometheus")
+    exprs = rule_query_exprs(rule, "prometheus")
     assert len(exprs) == 1
     assert "ava_turn_end_duration_seconds_bucket" in exprs[0]
     assert "histogram_quantile(0.95" in exprs[0]
@@ -312,9 +312,9 @@ def test_memory_search_rows_rules() -> None:
     }
     for uid, (severity, threshold) in expectations.items():
         rule = rules[uid]
-        exprs = _exprs(rule, "prometheus")
+        exprs = rule_query_exprs(rule, "prometheus")
         assert exprs == [f"max(ava_memory_search_stats_rows_ratio) > {threshold}"]
-        assert _exprs(rule, "loki") == []
+        assert rule_query_exprs(rule, "loki") == []
         assert rule["for"] == "2h"
         assert rule["noDataState"] == "OK"
         assert rule["execErrState"] == "OK"
@@ -335,7 +335,7 @@ def test_recovery_drill_failure_rule_is_immediate_and_names_the_drill() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-recovery-drill-failed"]
 
-    assert _exprs(rule, "loki") == [
+    assert rule_query_exprs(rule, "loki") == [
         'sum by (attributes_drill) (count_over_time({service_name="unknown_service", '
         'event_name="recovery_drill_failed"} | json | cluster=".ava" | '
         'category="telemetry" | level="error" [1h]))'
@@ -357,7 +357,7 @@ def test_backup_dump_failure_rule_fires_on_any_event_in_a_day() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-backup-dump-failed"]
 
-    assert _exprs(rule, "loki") == [
+    assert rule_query_exprs(rule, "loki") == [
         'sum(count_over_time({service_name="unknown_service", '
         'event_name="backup_dump_failed"} | json | cluster=".ava" | '
         'category="telemetry" | level="error" [24h]))'
@@ -383,8 +383,8 @@ def test_tempo_backend_down_rule_tracks_the_remote_scrape() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-tempo-backend-down"]
 
-    assert _exprs(rule, "prometheus") == ['up{job="tempo"}']
-    assert _exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "prometheus") == ['up{job="tempo"}']
+    assert rule_query_exprs(rule, "loki") == []
     assert rule["for"] == "1h"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"

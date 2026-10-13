@@ -542,7 +542,7 @@ def invest_in_the_future_section(slices: AgentSlices, *, catalog: ModelCatalog) 
     return INVEST_IN_THE_FUTURE_SECTION
 
 
-def _workspace_section(slices: AgentSlices, *, agent_id: int | None) -> str:
+def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str:
     """One-paragraph pointer to the per-agent workspace dir. Empty before a
     process identity is established (snapshot test / dev REPL renders) — the
     note that carries the concrete path is injected beside this prompt, so
@@ -674,7 +674,7 @@ def build_system_prompt(
         parts = [CODE_ACTION_PREAMBLE.format(_SEQUENTIAL_TOOL_CALLS=sequential)]
 
     def workspace_section(agent: AgentSlices) -> str:
-        return _workspace_section(agent, agent_id=agent_id)
+        return agent_workspace_pointer(agent, agent_id=agent_id)
 
     framework_sections: tuple[Callable[..., str], ...] = (
         *FRAMEWORK_SECTIONS,

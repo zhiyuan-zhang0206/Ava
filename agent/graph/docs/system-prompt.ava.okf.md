@@ -44,7 +44,7 @@ The public signature, declaration order and external-plugin migration contract l
 - `_temporal_awareness_section` — Time awareness, including the `ava-workflow.capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
 - `ava_memory.memory_discipline_section` — Cross-session durable-knowledge behavior
 - `_invest_in_the_future_section` — Framework's one cross-domain future-signal rule; `AVA_SYSTEM_PROMPT_INVEST_FUTURE` defaults on and selects the smallest closing action for a signal that could improve later work
-- `_workspace_section` — Workspace description (id-free for fork safety; the concrete path is stated by the agent-ID context note)
+- `agent_workspace_pointer` — Workspace description (id-free for fork safety; the concrete path is stated by the agent-ID context note)
 
 **Capabilities group** (lives in `capabilities.py`, registered by `system_prompt` so the render order stays the reading order):
 - `capabilities_section` — The skill + MCP index. `*` selects the full catalog, but folds descendants under real entry skills with counts and inspection paths. Namespace-only folders retain leaves. Explicit lists render every selected entry; all skills stay reachable through `ava.help(ava.skills)`.

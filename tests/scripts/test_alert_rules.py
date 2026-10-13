@@ -123,7 +123,7 @@ def load_rules() -> list[dict[str, Any]]:
     return [rule for group in groups for rule in group["rules"]]
 
 
-def _exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
+def rule_query_exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
     """The expr strings of one rule's datasource queries (loki/prometheus)."""
     return [
         d["model"]["expr"]
@@ -212,7 +212,7 @@ def test_loki_rules_match_event_labels_in_the_selector() -> None:
     labels expired after the cutover's grace (2026-08-26), so a pipeline-form
     event filter would silently match nothing.)"""
     for rule in load_rules():
-        for expr in _exprs(rule, "loki"):
+        for expr in rule_query_exprs(rule, "loki"):
             assert "| json" in expr, f"{rule['uid']}: no | json stage:\n{expr}"
             assert "unknown_service" in expr, f"{rule['uid']}: wrong stream selector"
             selector = expr.split("| json")[0]
@@ -230,7 +230,7 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
     """The one LGTM host serves prod; co-located cluster events must never
     affect its alerts, including the whole-stream freshness probe."""
     for rule in load_rules():
-        for expr in _exprs(rule, "loki"):
+        for expr in rule_query_exprs(rule, "loki"):
             normalized = " ".join(expr.split())
             assert '| json | cluster=".ava"' in normalized, (
                 f"{rule['uid']}: missing prod cluster filter after json:\n{expr}"
@@ -251,7 +251,7 @@ def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> N
     """The event_name matcher sits in the stream selector (before `| json`);
     category stays a json-stage filter (it is not a stream label)."""
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = _exprs(rules[uid], "loki")
+    exprs = rule_query_exprs(rules[uid], "loki")
     assert any(event_filter in e for e in exprs)
     assert any(event_filter in e.split("| json")[0] for e in exprs), (
         f"{uid}: event_name matcher must be a stream selector, got:\n{exprs}"
@@ -267,7 +267,7 @@ def test_drop_backlog_rule_unwraps_payload_n() -> None:
     the backlog by the aggregation factor (audit-round2 events-obs P1; the
     retired ops_metrics rollup summed the same way)."""
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = _exprs(rules["ava-ops-sse-drop-backlog"], "loki")
+    exprs = rule_query_exprs(rules["ava-ops-sse-drop-backlog"], "loki")
     assert any("unwrap attributes_n" in e for e in exprs), (
         f"R2 must unwrap attributes_n, got:\n{exprs[0]}"
     )
@@ -278,7 +278,7 @@ def test_level_rule_scopes_to_observability_categories() -> None:
     """R1 (level-based) must scope to telemetry+log — audit rows are info-only
     by construction and were never part of the old agent_events alert."""
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = _exprs(rules["ava-ops-warning-error-spike"], "loki")
+    exprs = rule_query_exprs(rules["ava-ops-warning-error-spike"], "loki")
     assert any('category=~"telemetry|log"' in e for e in exprs)
     assert any('level=~"warning|error|critical"' in e for e in exprs)
     # the spike shape: current 5m vs prior-15m, offset window for the prior
@@ -292,7 +292,7 @@ def test_freshness_rule_is_absent_over_time() -> None:
     the events table, and the rule now fires when no event of ANY kind
     reached Loki in 5m (emitter stall or broken export path alike)."""
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = _exprs(rules["ava-ops-events-freshness"], "loki")
+    exprs = rule_query_exprs(rules["ava-ops-events-freshness"], "loki")
     assert any("absent_over_time" in e for e in exprs)
     assert any("[5m]" in e for e in exprs)
     assert threshold_params(rules["ava-ops-events-freshness"]) == [[0]]
@@ -302,7 +302,7 @@ def test_events_low_water_rule_detects_partial_write_loss() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-events-low-water"]
 
-    assert _exprs(rule, "loki") == [
+    assert rule_query_exprs(rule, "loki") == [
         'sum(count_over_time({service_name="unknown_service"} | json | '
         'cluster=".ava" [5m])) or vector(0)'
     ]
@@ -325,7 +325,9 @@ def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
     independently of events reaching Loki."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-gateway-metrics-silent"]
-    assert _exprs(rule, "prometheus") == ["absent_over_time(ava_gateway_latency_count_total[5m])"]
+    assert rule_query_exprs(rule, "prometheus") == [
+        "absent_over_time(ava_gateway_latency_count_total[5m])"
+    ]
     assert threshold_params(rule) == [[0]]
     assert rule["for"] == "5m"
     assert rule["noDataState"] == "OK"
@@ -341,7 +343,7 @@ def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
     """
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-root-health-stale"]
-    expr = _exprs(rule, "prometheus")[0]
+    expr = rule_query_exprs(rule, "prometheus")[0]
     assert "ava_root_health_tick_last_tick_timestamp_seconds" in expr
     assert "max_over_time" in expr
     assert "ava_root_health_expected_expected_since_timestamp_seconds[24h]" in expr
@@ -359,7 +361,7 @@ def test_latency_rule_uses_prometheus_histogram() -> None:
     over the ava_llm_usage_latency_ms histogram (the same read the Ops
     panel uses), threshold 60000 ms."""
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = _exprs(rules["ava-ops-llm-latency-p95"], "prometheus")
+    exprs = rule_query_exprs(rules["ava-ops-llm-latency-p95"], "prometheus")
     assert len(exprs) == 1
     expr = exprs[0]
     assert "histogram_quantile(0.95" in expr
@@ -386,9 +388,9 @@ def test_checkpoint_blobs_high_water_rules() -> None:
 
     for uid, (severity, threshold, expected_expr) in expectations.items():
         rule = rules[uid]
-        exprs = _exprs(rule, "prometheus")
+        exprs = rule_query_exprs(rule, "prometheus")
         assert exprs == [expected_expr]
-        assert _exprs(rule, "loki") == []
+        assert rule_query_exprs(rule, "loki") == []
         assert rule["for"] == "2h"
         assert rule["noDataState"] == "OK"
         assert rule["execErrState"] == "OK"
@@ -416,9 +418,9 @@ def test_checkpoint_blobs_freshness_guard() -> None:
     """
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-checkpoint-blobs-freshness"]
-    exprs = _exprs(rule, "prometheus")
+    exprs = rule_query_exprs(rule, "prometheus")
     assert exprs == ["absent_over_time(ava_checkpoint_table_sizes_blobs_bytes_ratio[2h])"]
-    assert _exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "loki") == []
     assert rule["for"] == "5m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
@@ -441,12 +443,12 @@ def test_checkpoint_blobs_growth_tier() -> None:
     shrink is a negative delta and stays resolved."""
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["ava-ops-checkpoint-blobs-growth"]
-    exprs = _exprs(rule, "prometheus")
+    exprs = rule_query_exprs(rule, "prometheus")
     assert exprs == [
         "max(ava_checkpoint_table_sizes_blobs_bytes_ratio) - "
         "max(ava_checkpoint_table_sizes_blobs_bytes_ratio offset 6h)"
     ]
-    assert _exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "loki") == []
     assert rule["for"] == "1h"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
@@ -654,7 +656,7 @@ def test_trace_watermark_rule_filters_degradation_action() -> None:
     pipeline silently stopped recording. Any occurrence in the trailing 24h
     is the condition (chronic-condition semantics, threshold > 0)."""
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = _exprs(rules["ava-ops-trace-disk-watermark"], "loki")
+    exprs = rule_query_exprs(rules["ava-ops-trace-disk-watermark"], "loki")
     assert any('attributes_action="recording_disabled_disk_watermark"' in e for e in exprs)
     assert any('category="telemetry"' in e for e in exprs)
     assert any("[24h]" in e for e in exprs)

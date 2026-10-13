@@ -132,7 +132,9 @@ def save_document(
     return summary, path
 
 
-def _receipt(db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
+def record_handoff_receipt(
+    db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation
+) -> None:
     from base.agents.impersonation import lock_lease, require_native
 
     with db.write_transaction() as conn:
@@ -211,7 +213,7 @@ async def deliver_handoff(
             },
         )
     await flush_checkpoint(graph.checkpointer, incarnation.agent_id)
-    await asyncio.to_thread(_receipt, db, session, incarnation)
+    await asyncio.to_thread(record_handoff_receipt, db, session, incarnation)
     # The receipt opens the claim gate; this wake drives the note's first turn when
     # nothing else is queued (and re-drives it if this turn ends before that
     # invocation). Best-effort: the host latches wakes per agent.

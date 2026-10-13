@@ -131,7 +131,7 @@ patched and the test homes that patch them. This is the injection-seam work list
 | `gateway.cluster.status` | 10 | `_compute_stats_dashboard` 8, `_probe_agent_runner` 1, `_STATUS_CACHE_TTL_S` 1 | `gateway` 10 |
 | `services.desktop.permissions_helper.launchd_job` | 10 | `_retirement_command` 4, `_executable_pids` 2, `_retirement_owner` 2 | `cli/commands/lifecycle` 10 |
 | `ava.shell.sessions` | 9 | `_next_session_index_from_db` 3, `_shell_prefix` 3, `_record_ttl` 3 | `ava` 6, `cli/commands/data_plane` 3 |
-| `cli.commands.agents.impersonation_relay` | 9 | `_MIN_EMIT_INTERVAL_SECONDS` 2, `_read_inbox` 2, `_write_heartbeat` 2 | `cli/parsers` 9 |
+| `cli.commands.agents.impersonation_relay` | 9 | `_MIN_EMIT_INTERVAL_SECONDS` 2, `read_relay_inbox` 2, `_write_heartbeat` 2 | `cli/parsers` 9 |
 
 ## Class E by module (top 15)
 

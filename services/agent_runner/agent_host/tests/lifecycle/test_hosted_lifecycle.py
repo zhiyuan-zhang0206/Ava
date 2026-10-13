@@ -17,7 +17,7 @@ from agent.ownership.hosted import (
     apply_hosted_lifecycle,
     settle_hosted_runtime,
 )
-from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.context import AvaContext
 from base.config import settings
@@ -106,7 +106,7 @@ async def test_hosted_applies_only_after_continuation_returns(
     async with hosted_scope() as resources:
         agent_id = agent_row(db_conn)
         old = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-        inbound = _command(db_conn, agent_id, kind)
+        inbound = insert_lifecycle_command(db_conn, agent_id, kind)
         entered, release = asyncio.Event(), asyncio.Event()
         host = AgentHost(
             policy=configured_policy(),
@@ -185,7 +185,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
     async with hosted_scope() as resources:
         agent_id = agent_row(db_conn)
         owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-        inbound = _command(db_conn, agent_id, "terminate")
+        inbound = insert_lifecycle_command(db_conn, agent_id, "terminate")
         graph = Mock()
         graph.ainvoke = AsyncMock(
             return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
@@ -298,7 +298,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    inbound = _command(db_conn, agent_id, "restart")
+    inbound = insert_lifecycle_command(db_conn, agent_id, "restart")
     assert [
         row.id
         for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)

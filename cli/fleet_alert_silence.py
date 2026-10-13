@@ -102,7 +102,7 @@ def close_window(base: str, credential: str) -> list[str]:
     return expired
 
 
-def _grafana() -> tuple[str, str] | None:
+def colocated_grafana() -> tuple[str, str] | None:
     """The co-located Grafana's base URL and admin credential; None when this home has no credential."""
     from base.config import settings
 
@@ -120,7 +120,7 @@ def main(argv: list[str]) -> int:
     opened.add_argument("--comment", required=True)
     verbs.add_parser("close")
     args = parser.parse_args(argv)
-    grafana = _grafana()
+    grafana = colocated_grafana()
     if grafana is None:
         print("SILENCE skipped: no Grafana admin credential is configured on this host")
         return 0
