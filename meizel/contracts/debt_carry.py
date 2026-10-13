@@ -10,7 +10,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from meizel.contracts.debt import DebtTable, file_key, total
+from meizel.contracts.debt import PATCH_CODES, DebtTable, file_key, total
 from meizel.contracts.debt_edit import write_baseline
 from meizel.contracts.debt_report import read_baselines
 from meizel.contracts.debt_symbol import (
@@ -109,15 +109,7 @@ def _relocated(
     return parent_of(new), file_key(parent_of(new), new, what)
 
 
-_PATCH_CODES = frozenset(
-    {
-        Code.FIRST_PARTY_PATCH,
-        Code.STDLIB_PATCH,
-        Code.THIRD_PARTY_PATCH,
-        Code.ENV_PATCH,
-        Code.UNRESOLVED_PATCH,
-    }
-)
+_PATCH_CODES = frozenset(PATCH_CODES)
 
 
 def parse_renames(specs: list[str]) -> list[tuple[str, str]]:

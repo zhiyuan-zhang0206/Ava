@@ -20,7 +20,7 @@ from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
 from meizel.language.scan import EXTERNAL_FORMS, FileScan, scan_file
 
-__all__ = ["Analysis", "analyze", "diagnose"]
+__all__ = ["Analysis", "analyze", "diagnose", "scan_all"]
 
 _PARALLEL_FROM = 200
 _WORKER: dict[str, Universe] = {}

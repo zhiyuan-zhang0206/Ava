@@ -14,7 +14,14 @@ from meizel.contracts.bootstrap import bootstrap
 from meizel.contracts.debt_carry import carry as carry_debt
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
-from meizel.contracts.debt_report import changed_outside, changed_under, diff, summarize
+from meizel.contracts.debt_report import (
+    by_target,
+    changed_outside,
+    changed_under,
+    diff,
+    summarize,
+)
+from meizel.contracts.debt_sites import format_sites, sites
 from meizel.contracts.declare import declare
 from meizel.contracts.explain import explain
 from meizel.contracts.ledger import debts_in
@@ -176,9 +183,40 @@ def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser
         metavar="ref",
         help="compare with this ref (default: the branch point with origin/main)",
     )
+    listing = modes.add_parser(
+        "sites", help="list the places in the source that a patch code names"
+    )
+    listing.add_argument("--code", required=True, help="a patch code, e.g. first-party-patch")
+    listing.add_argument(
+        "--target-prefix",
+        action="append",
+        default=[],
+        metavar="prefix",
+        help="only patches whose dotted target is this or inside it; repeatable",
+    )
+    listing.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
+    listing.add_argument("paths", nargs="*", help="only files under these paths")
     growth = modes.add_parser("diff", help="compare recorded totals with a git ref")
     growth.add_argument("--against", required=True, metavar="ref")
     growth.add_argument("--on-growth", required=True, choices=["fail", "warn"])
+    growth.add_argument(
+        "--by-target",
+        action="store_true",
+        help="also list the recorded patch debt per target group: what the change paid down or added",
+    )
+    growth.add_argument(
+        "--target-prefix",
+        action="append",
+        default=[],
+        metavar="prefix",
+        help="with --by-target: a group, as a dotted target prefix; repeatable (default: by --depth)",
+    )
+    growth.add_argument(
+        "--depth",
+        type=int,
+        default=3,
+        help="with --by-target and no prefix: how many dotted names of a target form a group",
+    )
     growth.add_argument(
         "--waive-if-changed",
         nargs="+",
@@ -212,6 +250,10 @@ def _waiver(root: Path, ref: str, touches: list[str], within: list[str]) -> tupl
 def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) -> int:
     lines, grew = diff(root, ref)
     print("\n".join(lines))
+    if args.by_target:
+        print()
+        print("\n".join(by_target(root, ref, args.target_prefix, args.depth)))
+        print()
     if not grew:
         print(f"meizel: no growth against {ref}")
         return 0
@@ -256,6 +298,12 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
     if mode == "prune":
         for line in prune_debt(root, jobs):
             print(line)
+        return 0
+    if mode == "sites":
+        universe = load_universe(root)
+        scopes = [relative_target(root, base, p) for p in args.paths]
+        found = sites(universe, args.code, args.target_prefix, scopes, jobs)
+        print(format_sites(found, as_json=args.as_json))
         return 0
     if mode == "diff":
         return _run_diff(root, args.against, args.on_growth, args)

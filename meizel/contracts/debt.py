@@ -26,6 +26,7 @@ from meizel.graph.model import Code
 __all__ = [
     "CYCLE_EDGE",
     "DEBTABLE",
+    "PATCH_CODES",
     "TABLE_KEY",
     "DebtTable",
     "edge_key",
@@ -37,6 +38,8 @@ __all__ = [
     "render_debt",
     "set_debt",
     "source_of",
+    "target_of",
+    "target_under",
     "total",
 ]
 
@@ -44,16 +47,15 @@ CYCLE_EDGE = Code.CYCLE_EDGE
 _EDGE_CODES = frozenset(
     {Code.UNDECLARED_EDGE, Code.NOT_EXPORTED, Code.PRIVATE_MODULE, Code.PRIVATE_NAME, CYCLE_EDGE}
 )
-_FILE_CODES = frozenset(
-    {
-        Code.RESTRICTED,
-        Code.FIRST_PARTY_PATCH,
-        Code.STDLIB_PATCH,
-        Code.THIRD_PARTY_PATCH,
-        Code.ENV_PATCH,
-        Code.UNRESOLVED_PATCH,
-    }
+# The codes of a patch: the key of an entry is `file#form target`.
+PATCH_CODES = (
+    Code.FIRST_PARTY_PATCH,
+    Code.STDLIB_PATCH,
+    Code.THIRD_PARTY_PATCH,
+    Code.ENV_PATCH,
+    Code.UNRESOLVED_PATCH,
 )
+_FILE_CODES = frozenset({Code.RESTRICTED, *PATCH_CODES})
 DEBTABLE = _EDGE_CODES | _FILE_CODES
 TABLE_KEY = "debt"
 
@@ -84,6 +86,16 @@ def source_of(owner: str, code: Code, key: str) -> str:
     """The repository path of the file a debt is about."""
     head = key.split(_SEPARATOR, 1)[0] if code in _EDGE_CODES else key.split("#", 1)[0]
     return f"{owner}/{head}" if owner else head
+
+
+def target_of(key: str) -> str:
+    """The target of a patch entry `file#form target`."""
+    return key.partition("#")[2].partition(" ")[2]
+
+
+def target_under(target: str, prefix: str) -> bool:
+    """Whether the dotted `target` is `prefix` or inside it (`lib.mod` holds `lib.mod.f`, not `lib.mod2`)."""
+    return target == prefix or target.startswith(f"{prefix}.")
 
 
 def local_edge(key: str) -> tuple[str, str]:

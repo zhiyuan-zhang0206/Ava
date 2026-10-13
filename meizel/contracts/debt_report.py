@@ -13,12 +13,20 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, cast
 
-from meizel.contracts.debt import TABLE_KEY, DebtTable, parse_debt, total
+from meizel.contracts.debt import (
+    PATCH_CODES,
+    TABLE_KEY,
+    DebtTable,
+    parse_debt,
+    target_of,
+    target_under,
+    total,
+)
 from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
 from meizel.graph.universe import MANIFEST, Universe, load_universe, parent_of
 
-__all__ = ["changed_under", "diff", "summarize"]
+__all__ = ["by_target", "changed_outside", "changed_under", "diff", "summarize"]
 
 Baselines = dict[str, DebtTable]
 
@@ -152,14 +160,15 @@ def _totals_in(text: str) -> Counter[str]:
     return counts
 
 
-def _totals_at(root: Path, ref: str) -> Counter[str]:
+def _manifest_texts_at(root: Path, ref: str) -> list[str]:
+    """The text of every `meizel.toml` at a git ref."""
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
     listing = _git(root, "ls-tree", "-r", "-z", "--name-only", ref).decode().split("\0")
     paths = [p for p in listing if p.rsplit("/", 1)[-1] == MANIFEST]
-    totals: Counter[str] = Counter()
+    texts: list[str] = []
     if not paths:
-        return totals
+        return texts
     request = "".join(f"{ref}:{p}\n" for p in paths).encode()
     stream = _git(root, "cat-file", "--batch", stdin=request)
     position = 0
@@ -169,8 +178,15 @@ def _totals_at(root: Path, ref: str) -> Counter[str]:
         if len(header) != 3 or header[1] != b"blob":
             raise MeizelError(f"{ref}:{path}: cannot be read")
         size = int(header[2])
-        totals.update(_totals_in(stream[end + 1 : end + 1 + size].decode()))
+        texts.append(stream[end + 1 : end + 1 + size].decode())
         position = end + 1 + size + 1
+    return texts
+
+
+def _totals_at(root: Path, ref: str) -> Counter[str]:
+    totals: Counter[str] = Counter()
+    for text in _manifest_texts_at(root, ref):
+        totals.update(_totals_in(text))
     return totals
 
 
@@ -212,3 +228,85 @@ def diff(root: Path, ref: str) -> tuple[list[str], bool]:
         f"{'total':<20}{sum(before.values()):>14}{sum(after.values()):>8}{sum(after.values()) - sum(before.values()):>+8}"
     )
     return lines, grew
+
+
+Targets = Counter[tuple[str, str]]
+_OTHER = "(other)"
+
+
+def _targets(tables: list[dict[str, dict[str, object]]]) -> Targets:
+    """Recorded patch counts per `(code, target)`, read leniently from `code -> key -> count`."""
+    counts: Targets = Counter()
+    patch_codes = {code.value for code in PATCH_CODES}
+    for table in tables:
+        for code, rows in table.items():
+            if code in patch_codes:
+                for key, count in rows.items():
+                    if isinstance(count, int):
+                        counts[(code, target_of(key))] += count
+    return counts
+
+
+def _tables_in(text: str) -> list[dict[str, dict[str, object]]]:
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+    table = document.get(TABLE_KEY)
+    if not isinstance(table, dict):
+        return []
+    rows = cast("dict[str, object]", table)
+    return [{c: cast("dict[str, object]", r) for c, r in rows.items() if isinstance(r, dict)}]
+
+
+def _group(target: str, prefixes: list[str], depth: int) -> str:
+    """The row a target is counted under: its longest listed prefix, or its first `depth` names."""
+    if prefixes:
+        inside = [p for p in prefixes if target_under(target, p)]
+        return max(inside, key=len) if inside else _OTHER
+    return ".".join(target.split(".")[:depth])
+
+
+def _grouped(
+    before: Targets, after: Targets, prefixes: list[str], depth: int
+) -> dict[tuple[str, str], list[int]]:
+    """`(code, group) -> [before, after]`, with a row for every listed prefix."""
+    groups: dict[tuple[str, str], list[int]] = {}
+    for side, counts in enumerate((before, after)):
+        for (code, target), n in counts.items():
+            groups.setdefault((code, _group(target, prefixes, depth)), [0, 0])[side] += n
+    for prefix in prefixes:
+        if not any(group == prefix for _, group in groups):
+            groups[("-", prefix)] = [0, 0]
+    return groups
+
+
+def by_target(root: Path, ref: str, prefixes: list[str], depth: int) -> list[str]:
+    """Recorded patch debt per target group against `ref`: what a change paid down or added.
+
+    Counts come from the baselines, keyed by the target of each entry, so debt that moves with
+    its file stays where it was. Without prefixes the groups are the first `depth` dotted names
+    of a target; with them, a target counts under its longest prefix and the rest under `(other)`.
+    Unchanged groups are left out, except the listed prefixes, which always show.
+    """
+    before = _targets([t for text in _manifest_texts_at(root, ref) for t in _tables_in(text)])
+    tree = read_baselines(load_universe(root))
+    after = _targets(
+        [{c.value: dict(rows) for c, rows in table.items()} for table in tree.values()]
+    )
+    groups = _grouped(before, after, prefixes, depth)
+    rows = sorted(
+        (item for item in groups.items() if item[1][0] != item[1][1] or item[0][1] in prefixes),
+        key=lambda item: (item[1][1] - item[1][0], item[0][1], item[0][0]),
+    )
+    width = max([len("target"), *(len(group) for (_, group), _ in rows)])
+    lines = [f"{'target':<{width}}  {'code':<18}{ref[:12]:>12}{'tree':>8}{'change':>8}"]
+    lines.extend(
+        f"{group:<{width}}  {code:<18}{old:>12}{new:>8}{new - old:>+8}"
+        for (code, group), (old, new) in rows
+    )
+    old_total, new_total = sum(before.values()), sum(after.values())
+    lines.append(
+        f"{'all patch debt':<{width}}  {'':<18}{old_total:>12}{new_total:>8}{new_total - old_total:>+8}"
+    )
+    return lines
