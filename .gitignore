@@ -117,3 +117,6 @@ ui/web/junit.xml
 # the source-tree guard stays quiet (the guard's documented contract for
 # gitignored paths).
 /scripts/ci/ci_usage/
+
+# Per-day pytest-split timings, restored from the Actions cache (refresh-test-durations.yml)
+/.test_durations

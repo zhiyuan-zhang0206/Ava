@@ -1,0 +1,37 @@
+name: Resolve the latest test durations
+description: >
+  Names the newest `test-durations-*` Actions cache on main, once per workflow run, so every job
+  of the run restores the same timings (a shard split computed from different timings would
+  drop or duplicate tests). The key is empty when no such cache can be found, with a warning:
+  timings only balance the shards, so the run goes on without them. Needs `actions: read`.
+outputs:
+  key:
+    description: The cache key to restore, or an empty string when none was found.
+    value: ${{ steps.resolve.outputs.key }}
+runs:
+  using: composite
+  steps:
+    - name: Find the newest test-durations cache
+      id: resolve
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        key=""
+        found=false
+        for attempt in 1 2 3; do
+          if key="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?ref=refs/heads/main&key=test-durations-&sort=created_at&direction=desc&per_page=1" --jq '.actions_caches[0].key // ""')"; then
+            found=true
+            break
+          fi
+          sleep $((attempt * 5))
+        done
+        if [ "$found" != true ]; then
+          key=""
+          echo "::warning title=test durations::the cache listing could not be read; this run has no test timings, so its shards are split by test count"
+        elif [ -z "$key" ]; then
+          echo "::warning title=test durations::no test-durations cache exists on main (the daily refresh has not written one); this run has no test timings, so its shards are split by test count"
+        else
+          echo "test durations: ${key}"
+        fi
+        echo "key=${key}" >> "$GITHUB_OUTPUT"

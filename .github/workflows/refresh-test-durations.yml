@@ -1,22 +1,22 @@
 name: Refresh test durations
 
-# Refresh from daily isolated shard measurements, with a two-hour backstop run.
-# (Main runs no CI to borrow timings from: CI runs on pull requests only.)
-# Only a complete published measurement resets the guard; successful no-ops
-# do not. All shards and the publisher share one immutable source SHA. Results
-# go to one generated bot PR, submitted to Trunk after publication. Normal CI
-# and merge-queue readiness remain required before merging.
+# Daily, measure every CI-shaped shard on its own runner, merge the timings and save
+# them as an Actions cache (`test-durations-<date>-<run id>-<attempt>`) on main.
+# ci.yml's `classify` resolves the newest such cache once per run and every shard
+# restores that exact key into `.test_durations`; caches written on main are readable
+# by every pull request, and the daily writes keep the entry from ever going unused for
+# the seven days after which Actions evicts it. Nothing is committed and no pull
+# request is opened, so no workflow needs a maintainer's approval. See
+# scripts/ci/docs/duration-refresh.md.
 
 on:
   schedule:
     - cron: '30 19 * * *'  # UTC — GitHub Actions schedule cron is always UTC
-    - cron: '30 21 * * *'  # UTC — two-hour backstop for a missed primary run
   workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
-  pull-requests: read
 
 env:
   UV_FROZEN: "1"
@@ -26,56 +26,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check-refresh:
+  plan:
     if: github.ref == 'refs/heads/main'
-    name: Plan duration refresh
+    name: Resolve the current test durations
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      mode: ${{ steps.plan.outputs.mode }}
-      source-sha: ${{ steps.plan.outputs.source-sha }}
-      source-run-id: ${{ steps.plan.outputs.source-run-id }}
-      measured-at: ${{ steps.plan.outputs.measured-at }}
+      key: ${{ steps.durations.outputs.key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: '0.12.23'
-          enable-cache: true
-
-      - name: Install locked Python environment
-        run: uv sync --frozen
-
-      - name: Plan from applied and published measurement provenance
-        id: plan
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ava-bot/test-durations
-        run: |
-          PUBLISHED_ARGS=()
-          OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
-          if [ "$OPEN_PR" -gt 1 ]; then
-            echo "Expected at most one open durations PR, found $OPEN_PR" >&2
-            exit 1
-          fi
-          if [ "$OPEN_PR" -eq 1 ]; then
-            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-            PUBLISHED_ARGS=(--published-ref "origin/$BRANCH")
-          fi
-          AVA_HOME="$RUNNER_TEMP/duration-policy-home" AVA_CONFIG_FETCH=skip \
-            uv run python scripts/ci/duration_refresh_policy.py plan \
-              --event "$GITHUB_EVENT_NAME" \
-              --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
-              --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY" \
-              "${PUBLISHED_ARGS[@]}"
+      # The measured shards split with the current model, as CI does; the first run
+      # has none and splits by test count.
+      - name: Resolve the test durations
+        id: durations
+        uses: ./.github/actions/resolve-test-durations
 
   measure-backend:
-    needs: check-refresh
-    if: needs.check-refresh.outputs.mode == 'measure'
+    needs: plan
     name: Measure backend durations (${{ matrix.group }}/16)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -91,8 +59,11 @@ jobs:
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
         with:
-          ref: ${{ needs.check-refresh.outputs.source-sha }}
+          key: ${{ needs.plan.outputs.key }}
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -122,8 +93,7 @@ jobs:
           if-no-files-found: error
 
   measure-e2e:
-    needs: check-refresh
-    if: needs.check-refresh.outputs.mode == 'measure'
+    needs: plan
     name: Measure e2e durations (${{ matrix.group }}/4)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -136,8 +106,11 @@ jobs:
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
         with:
-          ref: ${{ needs.check-refresh.outputs.source-sha }}
+          key: ${{ needs.plan.outputs.key }}
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -199,28 +172,18 @@ jobs:
           path: ${{ runner.temp }}/durations/e2e-${{ matrix.group }}.json
           if-no-files-found: error
 
-  refresh:
-    permissions:
-      actions: write
-      contents: write
-      pull-requests: write
+  publish:
+    needs: [plan, measure-backend, measure-e2e]
     if: >-
-      always() && !cancelled() && needs.check-refresh.result == 'success' &&
-      needs.check-refresh.outputs.mode == 'measure' &&
-      needs.measure-backend.result == 'success' && needs.measure-e2e.result == 'success'
-    needs: [check-refresh, measure-backend, measure-e2e]
-    name: Refresh .test_durations
+      !cancelled() && needs.measure-backend.result == 'success' &&
+      needs.measure-e2e.result == 'success'
+    name: Merge and save the test durations
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
-      changed: ${{ steps.publish.outputs.changed }}
-      head-sha: ${{ steps.publish.outputs.head-sha }}
-      pr-number: ${{ steps.pull-request.outputs.number }}
+      key: ${{ steps.stamp.outputs.key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.check-refresh.outputs.source-sha }}
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -236,141 +199,74 @@ jobs:
           pattern: test-durations-*
           path: ${{ runner.temp }}/durations
           merge-multiple: true
-          run-id: ${{ needs.check-refresh.outputs.source-run-id }}
-          github-token: ${{ github.token }}
 
+      # Fails unless all 20 shard artifacts arrived and none is empty or overlaps another,
+      # so a partial timing model is never saved.
       - name: Merge complete shard measurements
         run: >
           uv run python scripts/ci/refresh_test_durations.py merge
           --durations-dir "$RUNNER_TEMP/durations"
 
-      - name: Record complete measurement provenance
-        env:
-          SOURCE_SHA: ${{ needs.check-refresh.outputs.source-sha }}
-          SOURCE_RUN_ID: ${{ needs.check-refresh.outputs.source-run-id }}
-          MEASURED_AT: ${{ needs.check-refresh.outputs.measured-at }}
+      - name: Name the cache entry
+        id: stamp
         run: |
-          AVA_HOME="$RUNNER_TEMP/duration-policy-home" AVA_CONFIG_FETCH=skip \
-            uv run python scripts/ci/duration_refresh_policy.py stamp \
-              --source-sha "$SOURCE_SHA" --run-id "$SOURCE_RUN_ID" --measured-at "$MEASURED_AT"
+          echo "key=test-durations-$(date -u +%Y-%m-%d)-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare an isolated candidate branch
-        id: candidate
+      - name: Save .test_durations
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .test_durations
+          key: ${{ steps.stamp.outputs.key }}
+
+  verify:
+    needs: publish
+    name: Verify the saved test durations restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The cache listing can trail a save by a few seconds; wait (bounded) until it names
+      # the entry just saved, so the checks below test restoring and not listing latency.
+      - name: Wait for the saved cache to be listed
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ava-bot/test-durations
-          SOURCE_SHA: ${{ needs.check-refresh.outputs.source-sha }}
+          SAVED_KEY: ${{ needs.publish.outputs.key }}
         run: |
-          CANDIDATE="$RUNNER_TEMP/durations-candidate"
-          OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
-          if [ "$OPEN_PR" -gt 1 ]; then
-            echo "Expected at most one open durations PR, found $OPEN_PR" >&2
+          for attempt in $(seq 1 20); do
+            listed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?ref=refs/heads/main&key=${SAVED_KEY}&per_page=1" --jq '.actions_caches[0].key // ""')"
+            [ "$listed" = "$SAVED_KEY" ] && exit 0
+            sleep 10
+          done
+          echo "::error::${SAVED_KEY} was not listed within 200 seconds of being saved"
+          exit 1
+
+      # The same two actions a CI run uses: the newest cache must be the one just saved,
+      # restore from its exact key and hold the merged timings.
+      - name: Resolve the test durations
+        id: durations
+        uses: ./.github/actions/resolve-test-durations
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ steps.durations.outputs.key }}
+
+      - name: Check what was restored
+        env:
+          SAVED_KEY: ${{ needs.publish.outputs.key }}
+          RESOLVED_KEY: ${{ steps.durations.outputs.key }}
+        run: |
+          if [ "$RESOLVED_KEY" != "$SAVED_KEY" ]; then
+            echo "::error::the newest test-durations cache is '${RESOLVED_KEY}', not the one just saved ('${SAVED_KEY}')"
             exit 1
           fi
-          if [ "$OPEN_PR" -eq 1 ]; then
-            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-          fi
-          # Rebuild from the measured code, not an old bot PR's code generation.
-          git worktree add -B "$BRANCH" "$CANDIDATE" "$SOURCE_SHA"
-          echo "path=$CANDIDATE" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
 
-      - name: Stage the refreshed durations
-        env:
-          CANDIDATE: ${{ steps.candidate.outputs.path }}
-        run: cp .test_durations .test_durations.source.json "$CANDIDATE/"
-
-      - name: Push the generated branch
-        id: publish
-        env:
-          BRANCH: ava-bot/test-durations
-          CANDIDATE: ${{ steps.candidate.outputs.path }}
-        run: |
-          git -C "$CANDIDATE" config user.name 'ava-durations-bot'
-          git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C "$CANDIDATE" add .test_durations .test_durations.source.json
-          if git -C "$CANDIDATE" diff --cached --quiet; then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            echo 'Duration data already matches the measured source; nothing to publish.' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if git -C "$CANDIDATE" show-ref --verify --quiet "refs/remotes/origin/$BRANCH" &&
-             git -C "$CANDIDATE" diff --quiet "origin/$BRANCH"; then
-            echo 'changed=true' >> "$GITHUB_OUTPUT"
-            echo "head-sha=$(git -C "$CANDIDATE" rev-parse "origin/$BRANCH")" >> "$GITHUB_OUTPUT"
-            echo 'This complete snapshot is already published; reusing the PR head.' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          git -C "$CANDIDATE" commit -m 'ci: refresh .test_durations'
-          git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
-          echo 'changed=true' >> "$GITHUB_OUTPUT"
-          echo "head-sha=$(git -C "$CANDIDATE" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Open or update the durations PR
-        id: pull-request
-        if: steps.publish.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ava-bot/test-durations
-          SOURCE_SHA: ${{ needs.check-refresh.outputs.source-sha }}
-          SOURCE_RUN_ID: ${{ needs.check-refresh.outputs.source-run-id }}
-        run: |
-          BODY="$RUNNER_TEMP/durations-pr.md"
-          cat > "$BODY" <<EOF
-          Refresh pytest-split timings from all 16 backend and four e2e shards
-          at source commit $SOURCE_SHA, measured by Actions run $SOURCE_RUN_ID.
-          Complete clean artifacts retain fast and zero timings.
-
-          The provenance file records the measured generation. Main uses these
-          weights only after this PR merges. Future refreshes are daily
-          isolated measurements. This generated-data PR is submitted to the Trunk merge
-          queue automatically. A maintainer must approve the bot-created PR's
-          workflow before required CI can run. Required CI and queue checks
-          still gate merging.
-          EOF
-          PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
-          if [ -z "$PR_NUMBER" ]; then
-            gh pr create --base main --head "$BRANCH" \
-              --title 'ci: refresh .test_durations (restore shard balance)' --body-file "$BODY"
-          else
-            gh pr edit "$PR_NUMBER" --body-file "$BODY"
-          fi
-          PR_NUMBER="$(gh pr view "$BRANCH" --json number --jq '.number')"
-          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          # The PR event starts approval-required CI. workflow_dispatch checks
-          # do not satisfy PR required checks, so do not duplicate that suite.
-
-  submit:
-    needs: refresh
-    if: >-
-      !cancelled() && needs.refresh.result == 'success' &&
-      needs.refresh.outputs.changed == 'true' &&
-      needs.refresh.outputs.pr-number != '' && needs.refresh.outputs.head-sha != ''
-    name: Submit generated durations PR
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      # Admission code belongs to this workflow's trusted main revision. A
-      # completed main CI may have measured an older source without this helper.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.workflow_sha }}
-
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: '0.12.23'
-          enable-cache: true
-
-      - name: Install locked Python environment
-        run: uv sync --frozen
-
-      - name: Submit the generated PR to Trunk
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TRUNK_API_TOKEN: ${{ secrets.TRUNK_API_TOKEN }}
-          PR_NUMBER: ${{ needs.refresh.outputs.pr-number }}
-          CANDIDATE_SHA: ${{ needs.refresh.outputs.head-sha }}
-        run: |
-          printf '%s' "$TRUNK_API_TOKEN" | \
-            AVA_HOME="$RUNNER_TEMP/duration-policy-home" AVA_CONFIG_FETCH=skip \
-            uv run python -m scripts.ci.pull_requests.duration_refresh \
-              --repository "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --head-sha "$CANDIDATE_SHA"
+          timings = json.loads(Path(".test_durations").read_text())
+          assert isinstance(timings, dict) and len(timings) > 1000, f"only {len(timings)} entries"
+          assert all(isinstance(v, (int, float)) for v in timings.values())
+          print(f"restored {len(timings)} timings from the saved cache")
+          PY

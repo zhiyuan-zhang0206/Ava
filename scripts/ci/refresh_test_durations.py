@@ -4,7 +4,8 @@
 CI fans the backend pytest suite over 16 shards (see ci.yml backend-shard matrix)
 and tests/e2e over 4 shards;
 pytest-split uses its least_duration (LPT) algorithm to balance them by per-test
-durations loaded from the repo-root `.test_durations`. That file goes stale as
+durations loaded from the repo-root `.test_durations`, an untracked file the daily
+workflow saves as an Actions cache and the CI jobs restore. The timings go stale as
 the suite grows (new tests are costed at the average), which is what produced
 the ~20% shard skew measured
 in the 2026-08-30 CI investigation. This script re-measures BOTH suites the
@@ -26,12 +27,12 @@ retry. Every successful measurement uses `--store-durations --clean-durations`;
 therefore its artifact contains only the tests that ran in that shard.
 `merge` requires all 20 artifacts, combines every measured entry (including
 fast tests), rounds values to three decimals, and atomically rewrites
-`.test_durations` in the committed compact format (sorted keys, no indent,
-trailing newline). An
+`.test_durations` in the compact format (sorted keys, no indent, trailing
+newline), which the workflow then saves as a cache entry. An
 interrupted run can never leave a truncated file behind.
 
-Run it manually after a significant test-suite change, or let the scheduled
-`.github/workflows/refresh-test-durations.yml` do it nightly:
+Run it manually to get timings on a development machine, or let the scheduled
+`.github/workflows/refresh-test-durations.yml` do it daily:
 
     uv run python scripts/ci/refresh_test_durations.py
 
@@ -41,8 +42,8 @@ isolated `measure` + `merge` path. A missing or corrupt `.test_durations`
 reads as empty (and is healed by a successful merge); an unexpected JSON shape
 is an error, not silently rebuilt.
 
-Cadence and measured-versus-applied provenance are owned by
-`duration_refresh_policy.py`; see `scripts/ci/docs/duration-refresh.md`.
+How the timings reach CI (cache key, restore, degradation when none exists) is described
+in `scripts/ci/docs/duration-refresh.md`.
 """
 
 from __future__ import annotations
