@@ -19,7 +19,7 @@ effect (Task #961).
 A central DB pool is shared across all ops; each op manages its connection
 lifetime via `pool.connection()`. Threading: `spawn` / `lifecycle` run on the
 event loop; every other arm is synchronous on this daemon's own pool
-(`_dispatch_sync`, the thin binding of `services.agent_runner.agent_ops.dispatch_sync`) —
+(`bind_dispatch_sync`, the thin binding of `services.agent_runner.agent_ops.dispatch_sync`) —
 none may hold the loop (see that module; `_hard_exit` skips interpreter
 teardown).
 """
@@ -134,7 +134,7 @@ async def run_arm(
         future = loop.run_in_executor(
             executor,
             functools.partial(
-                _dispatch_sync,
+                bind_dispatch_sync,
                 kind,
                 payload,
                 pool=pool,
@@ -151,7 +151,7 @@ async def run_arm(
             active_ops.pop(kind)
 
 
-def _dispatch_sync(
+def bind_dispatch_sync(
     kind: str,
     payload: dict[str, Any],
     *,
