@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ava import watcher
+from ava.watcher import spawn
 from base import paths
 
 
@@ -73,7 +73,7 @@ def test_watcher_child_resolves_plugin_namespace(tmp_path: Path) -> None:
         f"import ava, pathlib\npathlib.Path({str(marker)!r}).write_text(ava.probe.ok())\n"
     )
     boot_path = home / "wboot.py"
-    boot_path.write_text(watcher._build_boot(script_path, None, 900000))
+    boot_path.write_text(spawn.build_boot(script_path, None, 900000))
 
     env = {
         **os.environ,

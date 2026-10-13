@@ -1,0 +1,7 @@
+exports = ["files.py", "plans.py", "spawn.py", "wiring.py"]
+
+[uses]
+"__init__.py" = ["plans.py", "spawn.py", "wiring.py"]
+"plans.py" = ["spawn.py"]
+"spawn.py" = ["files.py"]
+"wiring.py" = ["files.py", "spawn.py"]

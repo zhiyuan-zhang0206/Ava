@@ -10,6 +10,7 @@ pty-sessions service under the tmp test home."""
 from __future__ import annotations
 
 import ast
+import dataclasses
 import datetime
 import os
 import pathlib
@@ -24,6 +25,7 @@ import pytest
 import ava
 from ava import watcher
 from ava.shell import background
+from ava.watcher import plans, spawn, wiring
 from tests.path_scoped.pty_shells import wait_for
 
 pytestmark = [
@@ -39,8 +41,13 @@ def _is_live_watcher(wid: int, name: str = "test-watcher") -> bool:
     return ava.shell.sessions.list().get(wid) == name
 
 
+def _watchers_dir() -> pathlib.Path:
+    """Where the bound agent's generated watcher files go."""
+    return wiring.spawn_deps().watchers_dir
+
+
 def _boot_text(wid: int) -> str:
-    return (watcher._watchers_dir() / f"watcher_{wid}_boot.py").read_text()
+    return (_watchers_dir() / f"watcher_{wid}_boot.py").read_text()
 
 
 def test_launch_creates_watcher_session(_agent_row: int) -> None:
@@ -272,7 +279,7 @@ def test_boot_without_watchdog_has_no_timer(tmp_path: pathlib.Path) -> None:
     # The orphan guard (task #1726) is armed regardless — it is not a
     # watchdog: it only hard-exits a watcher whose session chain died, and
     # never bounds a healthy watcher's lifetime.
-    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
     assert "Timer" not in boot
     assert "os._exit(124)" not in boot
     assert "os._exit(125)" in boot  # the orphan guard's exit code
@@ -285,7 +292,7 @@ def test_boot_arms_orphan_guard(tmp_path: pathlib.Path) -> None:
     seconds of its pty host dying instead of firing cron/at forever as a
     ppid=1 orphan. Armed BEFORE `import ava`: a hung import must not keep an
     orphan alive."""
-    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
     assert "_parent_pid = os.getppid()" in boot
     assert "def _orphan_guard" in boot
     assert "os.getppid() != _parent_pid" in boot
@@ -298,7 +305,7 @@ def test_boot_arms_orphan_guard(tmp_path: pathlib.Path) -> None:
 def test_boot_orphan_guard_message_names_session_gone(tmp_path: pathlib.Path) -> None:
     # The guard's stderr line lands in the watcher's log — a debugger must be
     # able to tell an orphan-guard exit (125) from a watchdog timeout (124).
-    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
     assert "[watcher] session gone (pty session ended)" in boot
     assert "os._exit(125)" in boot
 
@@ -308,7 +315,7 @@ def test_boot_loads_plugins_before_running_script(tmp_path: pathlib.Path) -> Non
     # process's plugin setattrs, so the bootstrap must load plugin namespaces
     # (ava.tasks etc.) before it runpys the watcher script — otherwise the script
     # AttributeErrors on any plugin namespace. Order matters: load then run.
-    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
     assert "ava.ensure_plugins_loaded()" in boot
     assert boot.index("ava.ensure_plugins_loaded()") < boot.index("runpy.run_path")
     ast.parse(boot)  # must be valid Python
@@ -319,7 +326,7 @@ def test_boot_propagates_failures_without_catching(tmp_path: pathlib.Path) -> No
     # anywhere, so a crash still prints its traceback into the log and exits
     # non-zero; the shell-level notice reports the code. Only the cleanup's
     # own OSError is swallowed (unlink failure is harmless).
-    boot = watcher._build_boot(tmp_path / "x.py", 60.0, 42)
+    boot = spawn.build_boot(tmp_path / "x.py", 60.0, 42)
     assert "try:" in boot
     assert "finally:" in boot
     # The runpy try has NO except — a crash propagates (R1-8: only the
@@ -335,7 +342,7 @@ def test_boot_self_cleans_generated_files(tmp_path: pathlib.Path) -> None:
     # reads them exactly once at launch, so normal exits leave the watchers
     # dir empty instead of accumulating a script graveyard.
     script = tmp_path / "watcher_3.py"
-    boot = watcher._build_boot(script, None, 42)
+    boot = spawn.build_boot(script, None, 42)
     assert "finally:" in boot
     assert "os.unlink(_p)" in boot
     assert "except OSError" in boot
@@ -380,70 +387,59 @@ def test_spawn_kills_session_when_send_fails(
     assert captured["session_id"] not in ava.shell.sessions.list()
 
 
-def test_at_builds_and_spawns_without_watchdog(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # at/cron scripts self-terminate, so they spawn with no watchdog (None).
-    captured: dict[str, Any] = {}
-
-    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
-        captured["code"] = code
-        captured["watchdog_secs"] = watchdog_secs
-        captured["name"] = name
-        captured["kind"] = kw.get("kind")
-        return 7
-
-    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
+def test_at_and_cron_plan_without_watchdog() -> None:
+    # at/cron scripts self-terminate, so they plan with no watchdog (None).
+    now = datetime.datetime.now(datetime.UTC)
     # Derived, not a literal year: `at` rejects a past `when`, so a pinned date
     # silently becomes a failing test the moment the clock passes it. Keeps the
     # trailing-Z ISO shape, which is the parse path this test exercises.
-    when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
+    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    at = plans.plan_at(
+        when, "ping later", name="test-at", notify=None, now=now, announce_timezone=None
     )
-    wid = watcher.at(when, "ping later", name="test-at")
-    assert wid == 7
-    assert captured["watchdog_secs"] is None
-    assert "_wake(_MESSAGE)" in captured["code"]
-    assert "ping later" in captured["code"]
-
-
-def test_cron_spawns_without_watchdog(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
-        captured.update(
-            code=code,
-            watchdog_secs=watchdog_secs,
-            name=name,
-            kind=kw.get("kind"),
-            expr=kw.get("cron_expr"),
-        )
-        return 3
-
-    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
-    watcher.cron("0 3 * * *", "daily", name="test-cron")
-    assert captured["watchdog_secs"] is None
-
-
-def test_watcher_apis_forward_failure_notify(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    captured: list[str] = []
-
-    def fake_spawn(_code: str, _watchdog_secs: float | None, _name: str, **kw: object) -> int:
-        notify = kw["notify"]
-        assert isinstance(notify, str)
-        captured.append(notify)
-        return 7
-
-    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
-    when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
+    assert at.watchdog_secs is None
+    assert at.kind == "at"
+    assert "_wake(_MESSAGE)" in at.code
+    assert "ping later" in at.code
+    cron = plans.plan_cron(
+        "0 3 * * *",
+        "daily",
+        timezone=None,
+        end_time=None,
+        name="test-cron",
+        notify=None,
+        now=now,
+        default_timezone="UTC",
     )
-    watcher.launch("pass", timeout="1h", name="test-launch-notify", notify="always")
-    watcher.at(when, "ping later", name="test-at-notify", notify="always")
-    watcher.cron("0 3 * * *", "daily", name="test-cron-notify", notify="always")
-    assert captured == ["always", "always", "always"]
+    assert cron.watchdog_secs is None
+    assert cron.kind == "cron"
+
+
+def test_watcher_plans_forward_failure_notify() -> None:
+    now = datetime.datetime.now(datetime.UTC)
+    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    requests = [
+        plans.plan_launch("pass", "1h", "test-launch-notify", "always"),
+        plans.plan_at(
+            when,
+            "ping later",
+            name="test-at-notify",
+            notify="always",
+            now=now,
+            announce_timezone=None,
+        ),
+        plans.plan_cron(
+            "0 3 * * *",
+            "daily",
+            timezone=None,
+            end_time=None,
+            name="test-cron-notify",
+            notify="always",
+            now=now,
+            default_timezone="UTC",
+        ),
+    ]
+    assert [r.notify for r in requests] == ["always", "always", "always"]
 
 
 def test_watcher_rejects_unknown_notify(_agent_row: int) -> None:
@@ -464,7 +460,7 @@ def test_launch_carries_agent_and_session_to_child(
     captured: dict[str, Any] = {}
     monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
     wid = watcher.launch("import ava\n", timeout="1h", name="test-watcher")
-    launch = (watcher._watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
+    launch = (_watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
     assert f"AVA_WATCHER_SESSION_ID={wid} " in launch
     boot = _boot_text(wid)
     # Identity is inlined; ava is imported for init_globals
@@ -491,7 +487,7 @@ def test_launch_writes_script_verbatim_and_runs_via_runpy(
     code = "from __future__ import annotations\nimport ava\n"
     wid = watcher.launch(code, timeout="1h", name="test-launch")
 
-    script = watcher._watchers_dir() / f"watcher_{wid}.py"
+    script = _watchers_dir() / f"watcher_{wid}.py"
     assert script.read_text() == code  # verbatim, no bootstrap prepended
     boot = _boot_text(wid)
     assert "runpy.run_path" in boot
@@ -501,7 +497,7 @@ def test_launch_writes_script_verbatim_and_runs_via_runpy(
     assert "import ava" in boot
     assert "init_globals" in boot
     assert f"watcher_{wid}.py" in boot
-    launch = (watcher._watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
+    launch = (_watchers_dir() / f"watcher_{wid}_launch.sh").read_text()
     assert f"watcher_{wid}_boot.py" in launch
 
 
@@ -524,8 +520,8 @@ def test_spawn_line_tees_and_notifies(_agent_row: int, monkeypatch: pytest.Monke
     import shlex
 
     sent = captured["cmd"]
-    assert shlex.split(sent) == [".", str(watcher._watchers_dir() / f"watcher_{wid}_launch.sh")]
-    cmd = (watcher._watchers_dir() / f"watcher_{wid}_launch.sh").read_text().splitlines()[1]
+    assert shlex.split(sent) == [".", str(_watchers_dir() / f"watcher_{wid}_launch.sh")]
+    cmd = (_watchers_dir() / f"watcher_{wid}_launch.sh").read_text().splitlines()[1]
     assert ".shell_logs" in cmd  # output is teed to the workspace log dir
     assert "2>&1 | tee" in cmd
     assert "_ec=${PIPESTATUS[0]}" in cmd
@@ -589,7 +585,6 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
     depth = 1 if sys.platform == "darwin" else 6
     carrier_dir = tmp_path / "carrier with 'quotes'"
     carrier_dir.mkdir()
-    monkeypatch.setattr(watcher, "_watchers_dir", lambda: carrier_dir)
     long_dir = tmp_path.joinpath(*("long-path-" + "a" * 180 for _ in range(depth)))
     long_dir.mkdir(parents=True)
     argv_file = long_dir / "argv.txt"
@@ -598,7 +593,10 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
     fake_cli.chmod(0o755)
     monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
     monkeypatch.setattr(background, "output_dir", lambda: long_dir)
-    wid = watcher.launch("raise SystemExit(7)\n", timeout="1h", name="test-long-path")
+    wid = spawn.run(
+        plans.plan_launch("raise SystemExit(7)\n", "1h", "test-long-path", None),
+        dataclasses.replace(wiring.spawn_deps(), watchers_dir=carrier_dir),
+    )
     assert wait_for(argv_file.exists, timeout=15), ava.shell.sessions.capture(wid, lines=30)
     argv = argv_file.read_text().splitlines()
     assert "finished." in argv[3]
@@ -607,9 +605,9 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
     assert f"Full output at {output_path}." in argv[3]
     assert str(output_path) == argv[argv.index("--tail-file") + 1]
     assert wait_for(lambda: wid not in ava.shell.sessions.list(), timeout=10)
-    assert not (watcher._watchers_dir() / f"watcher_{wid}_launch.sh").exists()
-    assert not (watcher._watchers_dir() / f"watcher_{wid}_boot.py").exists()
-    assert not (watcher._watchers_dir() / f"watcher_{wid}.py").exists()
+    assert not (carrier_dir / f"watcher_{wid}_launch.sh").exists()
+    assert not (carrier_dir / f"watcher_{wid}_boot.py").exists()
+    assert not (carrier_dir / f"watcher_{wid}.py").exists()
 
 
 # -- Agent identity in the child (Task #964 regression) ----------------------
@@ -626,7 +624,7 @@ def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
     its first session's env) would otherwise establish the WRONG identity at
     import time (2026-08-09: every watcher child on the shared server woke
     agent 2959 instead of its owner)."""
-    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    boot = spawn.build_boot(tmp_path / "x.py", None, 42)
     assert 'os.environ["AVA_AGENT_ID"] = "42"' in boot
     env_line = boot.index('os.environ["AVA_AGENT_ID"]')
     assert env_line < boot.index("import ava")  # before the ava import, not just before use
@@ -694,7 +692,7 @@ def test_boot_overrides_stale_env_identity(tmp_path: pathlib.Path) -> None:
         f"pathlib.Path({str(out)!r}).write_text(str(ava.self.AGENT_ID))\n"
     )
     boot_path = tmp_path / "probe_boot.py"
-    boot_path.write_text(watcher._build_boot(script, None, 4242))
+    boot_path.write_text(spawn.build_boot(script, None, 4242))
 
     env = {**os.environ, "AVA_AGENT_ID": "9999"}  # stale/wrong identity
     res = subprocess.run(  # noqa: S603 — repo-internal generated boot file

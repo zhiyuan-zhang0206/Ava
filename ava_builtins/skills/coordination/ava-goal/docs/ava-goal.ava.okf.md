@@ -33,4 +33,4 @@ recurring agent to continue.
 
 ## Key dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava/docs/watcher.ava.okf.md|Watcher SDK]] — temporary waits used by the optional supervision pattern
+- [[ava/watcher/docs/watcher.ava.okf.md|Watcher SDK]] — temporary waits used by the optional supervision pattern

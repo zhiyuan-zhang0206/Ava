@@ -1,49 +1,29 @@
-"""Run temporary background waits that can wake you with a message.
+"""Starting one watcher: the generated files, the session, the launch line.
 
-A watcher continues after you end a turn or terminate, and its next message can
-wake you again. Stop unwanted watchers before ending their task. Watchers are
-never restarted automatically after their execution stops; use a schedule for
-recurring work that must recover from interruptions.
-
-Completion reports follow the notification policy and are not liveness signals.
-An explicit cancellation sends no additional report; an abrupt machine failure
-may leave no report. Inspect recorded waits when resuming work.
+The namespace module `ava/watcher/__init__.py` builds a `SpawnRequest` (see `plans.py`) and a
+`SpawnDeps` (see `wiring.py`) and calls `run`. Everything `run` touches that is not its request
+arrives in the deps - the agent id, the directory for generated files, the session and
+background-command ports, the runner env, the interpreter and the clock - so a test hands it
+fakes and reads back what they received.
 """
 
 from __future__ import annotations
 
 import contextlib
 import datetime
-import hashlib
 import logging
-import pathlib as _pl
-import re as _re
-import tempfile
-from typing import Any
+import shlex
+from collections.abc import Callable, Collection
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol
 
-from ava.sdk_surface.validation import coerce_str
-from ava.shell import background
-from ava.shell import sessions as _sessions
-from base.daemon.schedules.watcher import (
-    DEFAULT_STANDING_CRON_MAX_SECONDS,
-    build_at_script,
-    build_cron_script,
-    normalize_when,
-    parse_timeout,
-    session_deadline,
-    validate_cron,
-    validate_timezone,
-)
-from base.daemon.schedules.watcher import (
-    CronExprError as CronExprError,
-)
-from base.host.env.dotenv_boot import watcher_runner_env
+from ava.watcher import files
+from base.daemon.schedules.watcher import session_deadline
 
-__all_for_ava__ = [
-    "at",
-    "cron",
-    "launch",
-]
+__all__ = ["SESSION_ID_ENV", "SpawnDeps", "SpawnRequest", "build_boot", "run"]
+
+logger = logging.getLogger(__name__)
 
 # A watcher runs as a standalone child process, so it does NOT inherit the agent
 # process's in-memory state. The generated bootstrap file establishes identity
@@ -53,99 +33,72 @@ __all_for_ava__ = [
 # (at / cron) can tag their wake-ups with which watcher fired; it names this
 # watcher, not the agent. (Gateway URL / machine auth come from settings;
 # cluster env is forwarded onto the session by the session machinery.)
-_SESSION_ID_ENV = "AVA_WATCHER_SESSION_ID"
-type WatcherTimeout = float | datetime.timedelta | str
+SESSION_ID_ENV = "AVA_WATCHER_SESSION_ID"
 
 
-def _validate_message(message: str) -> None:
-    if not message.strip():
-        raise ValueError("message cannot be empty")
+@dataclass(frozen=True)
+class SpawnRequest:
+    """What one watcher is: its program, how it ends and how it is reported."""
+
+    code: str
+    watchdog_secs: float | None
+    name: str
+    kind: str
+    fires_at: Any = None
+    cron_end_at: Any = None
+    timeout_secs: float | None = None
+    notify: str | None = None
 
 
-def _watchers_dir() -> _pl.Path:
-    # Generated watcher scripts live under the system temp dir, scoped per
-    # cluster + agent — NOT in $AVA_HOME (the old global `watchers/` dir there
-    # accumulated 180+ files and let co-agents overwrite each other's scripts,
-    # 2026-08-02) and NOT in the workspace. A watcher reads its script +
-    # bootstrap exactly once, at launch (runpy), so the files are ephemeral
-    # carriers: temp storage is their natural home, and the OS reclaims
-    # whatever a killed watcher leaves behind.
-    #
-    # The cluster segment matters: session ids are per-agent DB counters, so
-    # two co-located clusters (each its own Postgres) allocate the same ids —
-    # a tmp path keyed only on agent id would collide across clusters. The
-    # cluster's identity IS its home path (AGENTS.md), so the home basename +
-    # a short hash of the full path makes the segment unique per cluster.
-    #
-    # Not a durable index — the session is the source of truth; the file only
-    # needs to outlive launch, and the bootstrap self-deletes both files when
-    # the watcher exits (see _build_boot), so the dir stays empty except while
-    # a watcher is actually running; stale pairs are pruned at the next launch.
-    from base.paths import ava_home
+class SessionsPort(Protocol):
+    """The shell-session calls a spawn makes."""
 
-    home = ava_home()
-    slug = home.name.lstrip(".") or "cluster"
-    # sha1 is fine here: the digest is a directory-name uniquifier, not a
-    # security boundary (S324).
-    digest = hashlib.sha1(str(home).encode()).hexdigest()[:8]  # noqa: S324
-    p = _pl.Path(tempfile.gettempdir()) / "ava" / f"{slug}-{digest}" / str(_agent_id()) / "watchers"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    def create_session(
+        self, name: str, *, ttl: float, system: bool, env_overrides: dict[str, str]
+    ) -> tuple[int, str]: ...
+
+    def send(self, session_id: int, line: str, /) -> None: ...
+
+    def kill(self, session_id: int, /) -> None: ...
 
 
-def _agent_id() -> int:
-    import ava.sdk_surface.agent_identity
+class BackgroundPort(Protocol):
+    """The background-command helpers a spawn uses to build its launch line."""
 
-    return ava.sdk_surface.agent_identity.require_agent_id()
+    def validate_notify(self, notify: str | None) -> str | None: ...
 
+    def allocate_output_path(self, session_id: int, name: str) -> Path: ...
 
-_SCRIPT_FILE_RE = _re.compile(r"^watcher_(\d+)\.py$")
-_BOOT_FILE_RE = _re.compile(r"^watcher_(\d+)_boot\.py$")
-_LAUNCH_FILE_RE = _re.compile(r"^watcher_(\d+)_launch\.sh$")
+    def notified_line(
+        self,
+        cmd: str,
+        *,
+        agent_id: int,
+        label: str,
+        source: str,
+        output_path: Path,
+        keep: bool,
+        notify: str | None,
+    ) -> str: ...
 
-
-def _prune_stale_watcher_files(keep: _pl.Path) -> None:
-    """Delete generated watcher files whose watcher SESSION no longer exists,
-    except the pair about to be written.
-
-    A watcher reads its script + bootstrap exactly once, at launch — but
-    launch is asynchronous: `_spawn` sends the command into a fresh session
-    whose shell takes a moment to come up, so the files must stay on disk
-    until the child has actually started. Deleting every old pair at every
-    launch (the previous behavior) could delete a sibling's not-yet-read
-    files when watchers are created back-to-back, making that sibling's
-    python start fail with "can't open file ... _boot.py" (observed
-    2026-08-08/09: watcher_0_boot.py / watcher_3_boot.py — Bug A, task
-    #1116). So prune only what is provably dead: a pair whose session id is
-    not in the live session list. A running watcher's pair stays on disk (a
-    few KB) and is pruned once its session closes; a hard-killed watcher's
-    pair is pruned once its session is gone too. If the session list is
-    unavailable, delete nothing — a stale file is harmless, a not-yet-read
-    one is fatal. Files that do not match the generated-name patterns are
-    left alone.
-    """
-    from ava.shell import sessions as _sessions
-
-    try:
-        alive = set(_sessions.list())
-    except Exception:
-        logger.warning(
-            "[watcher] listing live sessions failed; skipping the prune of stale watcher files",
-            exc_info=True,
-        )
-        return  # conservative: no session info, no pruning
-    d = keep.parent
-    for pat in (_SCRIPT_FILE_RE, _BOOT_FILE_RE, _LAUNCH_FILE_RE):
-        for f in d.iterdir():
-            if f == keep or not pat.match(f.name):
-                continue
-            m = pat.match(f.name)
-            if m and int(m.group(1)) in alive:
-                continue  # that watcher's session still exists — possibly still launching
-            f.unlink(missing_ok=True)
+    def write_launch_file(self, line: str, path: Path) -> str: ...
 
 
-def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: int) -> str:
+@dataclass(frozen=True)
+class SpawnDeps:
+    """The dependencies of `run`, nothing else."""
+
+    agent_id: int
+    watchers_dir: Path
+    sessions: SessionsPort
+    background: BackgroundPort
+    live_session_ids: Callable[[], Collection[int] | None]
+    runner_env: dict[str, str]
+    python: str
+    now: Callable[[], datetime.datetime]
+
+
+def build_boot(script_path: Path, watchdog_secs: float | None, agent_id: int) -> str:
     """Source of the generated bootstrap file: establish the agent identity,
     arm the optional timeout watchdog, then run the watcher script as
     ``__main__``.
@@ -185,7 +138,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     convention), so a script stuck in a Python-level loop still dies on time
     — the one thing it cannot preempt is native code that never releases the
     GIL; a killed watcher skips the finally and leaves its pair behind, which
-    the next launch prunes (_prune_stale_watcher_files).
+    the next launch prunes (files.prune_stale).
 
     Every bootstrap also arms the ORPHAN GUARD (task #1726): a daemon thread
     that compares ``os.getppid()`` against the parent the process booted
@@ -294,18 +247,8 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     )
 
 
-def _spawn(
-    code: str,
-    watchdog_secs: float | None,
-    name: str,
-    *,
-    kind: str,
-    fires_at: Any = None,
-    cron_end_at: Any = None,
-    timeout_secs: float | None = None,
-    notify: str | None = None,
-) -> int:
-    """Start a watcher child running ``code``; return its watcher id.
+def run(request: SpawnRequest, deps: SpawnDeps) -> int:
+    """Start a watcher child running ``request.code``; return its watcher id.
 
     A watcher is nothing more than a shell session running a generated
     script — there is no separate registry or desired-state record
@@ -329,11 +272,14 @@ def _spawn(
     output); a notice that fails to send leaves the session open as the
     post-mortem site.
     """
-    import shlex
-    import sys
-
-    notify = background.validate_notify(notify)
-    agent_id = _agent_id()
+    code, watchdog_secs, name, kind = (
+        request.code,
+        request.watchdog_secs,
+        request.name,
+        request.kind,
+    )
+    notify = deps.background.validate_notify(request.notify)
+    agent_id = deps.agent_id
     # The session's shell TTL IS this watcher's target deadline (user ruling
     # 2026-09-14, task #3411): launch = created + timeout, cron = cron_end_at,
     # at = fires_at + grace — derived once, here, by
@@ -345,13 +291,13 @@ def _spawn(
     # end (the cron's `_END`, the launch watchdog, the at fire moment), and
     # a renewal call is itself capped at 24h, so it can pull a standing
     # cron's reclaim earlier than its declared end.
-    now = datetime.datetime.now(datetime.UTC)
+    now = deps.now()
     deadline = session_deadline(
         kind,
         created_at=now,
-        timeout_secs=timeout_secs,
-        fires_at=fires_at,
-        cron_end_at=cron_end_at,
+        timeout_secs=request.timeout_secs,
+        fires_at=request.fires_at,
+        cron_end_at=request.cron_end_at,
     )
     if deadline is None or deadline <= now:
         # Callers hand a future target (cron()/at() validate theirs; launch
@@ -362,27 +308,24 @@ def _spawn(
             f"watcher {kind!r} target deadline is not in the future "
             f"({deadline!r}) — refusing to spawn its session"
         )
-    session_id, _session_name = _sessions.create_session(
-        name, ttl=(deadline - now).total_seconds(), system=True, env_overrides=watcher_runner_env()
+    session_id, _session_name = deps.sessions.create_session(
+        name, ttl=(deadline - now).total_seconds(), system=True, env_overrides=deps.runner_env
     )
-    script_path = _watchers_dir() / f"watcher_{session_id}.py"
+    script_path = deps.watchers_dir / f"watcher_{session_id}.py"
     # Prune files from earlier watchers before writing: a watcher reads its
     # script + bootstrap exactly once at launch, so everything already on
-    # disk is dead weight (see _prune_stale_watcher_files). This keeps this
+    # disk is dead weight (see files.prune_stale). This keeps this
     # agent's tmp watchers dir from ever accumulating a graveyard.
-    _prune_stale_watcher_files(script_path)
+    files.prune_stale(script_path, deps.live_session_ids())
     # Write the agent's program verbatim — nothing prepended, so a leading
     # `from __future__` import (which must be the first statement of a file)
     # stays valid. The bootstrap lives in its own generated file.
     script_path.write_text(code)
-    boot_path = _watchers_dir() / f"watcher_{session_id}_boot.py"
-    boot_path.write_text(_build_boot(script_path, watchdog_secs, agent_id))
-    output_path = background.allocate_output_path(session_id, name)
-    cmd = (
-        f"{_SESSION_ID_ENV}={session_id} "
-        f"{shlex.quote(sys.executable)} {shlex.quote(str(boot_path))}"
-    )
-    line = background.notified_line(
+    boot_path = deps.watchers_dir / f"watcher_{session_id}_boot.py"
+    boot_path.write_text(build_boot(script_path, watchdog_secs, agent_id))
+    output_path = deps.background.allocate_output_path(session_id, name)
+    cmd = f"{SESSION_ID_ENV}={session_id} {shlex.quote(deps.python)} {shlex.quote(str(boot_path))}"
+    line = deps.background.notified_line(
         cmd,
         agent_id=agent_id,
         label=f"Watcher '{name}'",
@@ -399,8 +342,8 @@ def _spawn(
     # orphan-guard parent retain their existing semantics.
     launch_path = script_path.with_name(f"watcher_{session_id}_launch.sh")
     try:
-        launch_line = background.write_launch_file(line, launch_path)
-        _sessions.send(session_id, launch_line)
+        launch_line = deps.background.write_launch_file(line, launch_path)
+        deps.sessions.send(session_id, launch_line)
     except Exception:
         # A session whose launch command never sent is not a watcher — it is
         # an idle login shell sitting under the watcher's name until its TTL
@@ -415,7 +358,7 @@ def _spawn(
             exc_info=True,
         )
         try:
-            _sessions.kill(session_id)
+            deps.sessions.kill(session_id)
         except Exception:
             logger.warning(
                 "[watcher] killing session %s after the failed start also failed; "
@@ -425,170 +368,3 @@ def _spawn(
             )
         raise
     return session_id
-
-
-def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str | None = None) -> int:
-    """Run `code` as a background watcher, bounded by `timeout`.
-
-    `code` calls `ava.agents.send_message(ava.self.AGENT_ID, content)` to wake you;
-    the watcher runs until its exit, your kill, or `timeout`. On exit, its code
-    and output are available through the completion policy; timeout exits with code 124.
-
-    Args:
-        timeout: seconds, a `timedelta`, or `"<n>{s,m,h,d}"` (e.g. `"30m"`).
-        name: a lowercase slug like `"ci-monitor"`.
-        notify: omit to use the agent policy; `"always"` delivers every completion immediately.
-    Returns:
-        The watcher's session id — it is one of your shell sessions while running.
-    """
-    code = coerce_str(code, "code")
-    timeout = coerce_str(timeout, "timeout", allow_types=(int, float, datetime.timedelta))
-    name = coerce_str(name, "name")
-    return _spawn(
-        code,
-        parse_timeout(timeout),
-        name,
-        kind="launch",
-        timeout_secs=parse_timeout(timeout),
-        notify=coerce_str(notify, "notify", allow_none=True),
-    )
-
-
-def cron(
-    expr: str,
-    message: str,
-    *,
-    timezone: str | None = None,
-    end_time: datetime.datetime | datetime.timedelta | str | None = None,
-    name: str,
-    notify: str | None = None,
-) -> int:
-    """Runs until `end_time`, or until you kill its session.
-
-    `end_time` defaults to now + 7 days; pass an explicit one for a longer
-    schedule. Calling `cron()` again with the same expression + timezone does
-    NOT replace anything — it starts another, independent session; if you
-    want to renew or replace a schedule, kill the old session yourself
-    (`ava.shell.sessions.kill`) before or after registering the new one.
-
-    Args:
-        expr: 5-field cron expression (`minute hour day-of-month month
-            day-of-week`).
-        timezone: IANA name; defaults to your configured timezone.
-        end_time: same accepted types as `at()`'s `when`; must be in the future.
-        name: a lowercase slug like `"daily-check-in"`.
-        notify: omit to use the agent policy; `"always"` delivers every completion immediately.
-    Returns:
-        The watcher's session id; kill it to stop the schedule.
-    """
-    from base.clock import Clock
-    from base.config import host_tz_name
-
-    expr = coerce_str(expr, "expr")
-    message = coerce_str(message, "message")
-    timezone = coerce_str(timezone, "timezone", allow_none=True)
-    end_time = coerce_str(
-        end_time, "end_time", allow_none=True, allow_types=(datetime.datetime, datetime.timedelta)
-    )
-    name = coerce_str(name, "name")
-    _validate_message(message)
-    validate_cron(expr)
-    # Default to the cluster clock when authoritative; a settings-lite
-    # process (no authoritative cluster timezone) falls back to this host's
-    # own zone — the same wall clock its other displays use.
-    tz = (
-        timezone
-        if timezone is not None
-        else (Clock.from_settings().authoritative_timezone or host_tz_name())
-    )
-    validate_timezone(tz)
-    if end_time is None:
-        # Standing-cron cap (task #2617): no end_time means the DEFAULT
-        # window — 7 days, counted from the current minute — not forever. A
-        # longer schedule must pass an explicit end_time.
-        now = datetime.datetime.now(datetime.UTC)
-        et = now.replace(second=0, microsecond=0) + datetime.timedelta(
-            seconds=DEFAULT_STANDING_CRON_MAX_SECONDS
-        )
-    else:
-        # normalize_when (not normalize_end_time): this branch excludes None,
-        # so the result is a non-optional datetime for the type checker.
-        et = normalize_when(end_time)
-        # Align with at(): a past end must not register.
-        if et < datetime.datetime.now(datetime.UTC):
-            raise ValueError(
-                f"end_time is in the past: {et.isoformat()}. "
-                "Provide a future time, or use a positive timedelta."
-            )
-    code = build_cron_script(
-        expr=expr,
-        message=message,
-        timezone=tz,
-        end_time_iso=et.isoformat(),
-    )
-    # The generated script self-terminates (it stops looping past end_time —
-    # which every registration now carries, the default being now + 7 days),
-    # so no watchdog.
-    return _spawn(
-        code,
-        None,
-        name,
-        kind="cron",
-        cron_end_at=et,
-        notify=coerce_str(notify, "notify", allow_none=True),
-    )
-
-
-def at(
-    when: datetime.datetime | datetime.timedelta | str,
-    message: str,
-    *,
-    name: str,
-    notify: str | None = None,
-) -> int:
-    """Wake you once at a future time, then finish the watcher.
-
-    Args:
-        when: a TZ-aware datetime, a timedelta from now (UTC), or an ISO-8601
-            string with timezone. Must be in the future.
-        name: a lowercase slug like `"stand-up-reminder"`.
-        notify: omit to use the agent policy; `"always"` delivers every completion immediately.
-
-    Returns:
-        The watcher's session id; kill that session to cancel.
-    """
-    from base.clock import Clock
-
-    when = coerce_str(when, "when", allow_types=(datetime.datetime, datetime.timedelta))
-    message = coerce_str(message, "message")
-    name = coerce_str(name, "name")
-    _validate_message(message)
-    due_at = normalize_when(when)
-    if due_at < datetime.datetime.now(datetime.UTC):
-        raise ValueError(
-            f"when is in the past: {due_at.isoformat()}. "
-            "Provide a future time, or use a positive timedelta."
-        )
-    # The announcement's wall clock follows the cluster timezone (user ruling
-    # 2026-08-27: one cluster clock); the sleep is UTC-based regardless. A
-    # settings-lite process (no authoritative cluster timezone) passes None so
-    # the announcement renders in the watcher's own wall clock — the same
-    # degradation every other display path uses.
-    code = build_at_script(
-        when_iso=due_at.isoformat(),
-        message=message,
-        timezone=Clock.from_settings().authoritative_timezone,
-    )
-    # The one-shot script sleeps until `when`, wakes you once, and exits — it
-    # ends itself, so no watchdog.
-    return _spawn(
-        code,
-        None,
-        name,
-        kind="at",
-        fires_at=due_at,
-        notify=coerce_str(notify, "notify", allow_none=True),
-    )
-
-
-logger = logging.getLogger(__name__)

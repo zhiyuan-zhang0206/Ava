@@ -8,6 +8,7 @@ import pytest
 
 import ava
 from ava import watcher
+from ava.watcher import files, wiring
 
 pytestmark = [
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); apply it
@@ -16,6 +17,11 @@ pytestmark = [
     # own kill_all/list calls hit the daemon.
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
+
+
+def _watchers_dir() -> pathlib.Path:
+    """Where the bound agent's generated watcher files go."""
+    return wiring.spawn_deps().watchers_dir
 
 
 def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:
@@ -28,7 +34,7 @@ def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:
 
     from base.paths import ava_home
 
-    d = watcher._watchers_dir()
+    d = _watchers_dir()
     td = pathlib.Path(tempfile.gettempdir())
     assert d.is_relative_to(td / "ava")  # under $TMPDIR/ava/<cluster>/<agent>/
     assert str(ava_home()) not in str(d)  # never under $AVA_HOME
@@ -46,7 +52,7 @@ def test_spawn_prunes_stale_watcher_files(_agent_row: int, monkeypatch: pytest.M
     from ava.shell import sessions as _sessions
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    d = watcher._watchers_dir()
+    d = _watchers_dir()
     stale_script = d / "watcher_999.py"
     stale_boot = d / "watcher_999_boot.py"
     stale_script.write_text("old")
@@ -75,7 +81,7 @@ def test_prune_does_not_touch_other_agents_files(
     from ava.shell import sessions as _sessions
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    d = watcher._watchers_dir()
+    d = _watchers_dir()
     other = d.parent / str(ava.self.AGENT_ID + 1) / "watchers"
     other.mkdir(parents=True, exist_ok=True)
     foreign = other / "watcher_999.py"
@@ -99,7 +105,7 @@ def test_spawn_keeps_sibling_files_while_session_alive(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "list", lambda: {4242: "test-sibling"})
-    d = watcher._watchers_dir()
+    d = _watchers_dir()
     live_script = d / "watcher_4242.py"
     live_boot = d / "watcher_4242_boot.py"
     live_script.write_text("still needed")
@@ -141,7 +147,7 @@ def test_spawn_back_to_back_keeps_all_files(
 
     monkeypatch.setattr(_sessions, "create_session", _fake_create)
     monkeypatch.setattr(_sessions, "list", lambda: dict.fromkeys(alive, "w"))
-    d = watcher._watchers_dir()
+    d = _watchers_dir()
 
     ids: list[int] = []
     for name in ("b2b-1", "b2b-2", "b2b-3"):
@@ -155,20 +161,11 @@ def test_spawn_back_to_back_keeps_all_files(
     assert len(ids) == 3 and len(set(ids)) == 3
 
 
-def test_prune_preserves_all_files_when_session_listing_fails(
-    _agent_row: int,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ava.shell import sessions as _sessions
-
-    d = watcher._watchers_dir()
+def test_prune_preserves_all_files_when_session_listing_fails(_agent_row: int) -> None:
+    d = _watchers_dir()
     paths = [d / "watcher_42.py", d / "watcher_42_boot.py", d / "watcher_42_launch.sh"]
     for path in paths:
         path.write_text("still needed")
 
-    def unavailable() -> dict[int, str]:
-        raise RuntimeError("session backend unavailable")
-
-    monkeypatch.setattr(_sessions, "list", unavailable)
-    watcher._prune_stale_watcher_files(d / "watcher_43.py")
+    files.prune_stale(d / "watcher_43.py", None)
     assert all(path.read_text() == "still needed" for path in paths)

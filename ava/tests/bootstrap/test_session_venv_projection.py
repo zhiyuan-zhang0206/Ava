@@ -12,6 +12,7 @@ import pytest
 from ava.shell import sessions
 from ava.shell.tests.support import FakeDatabase
 from base.host.env import bootstrap, dotenv_boot
+from tests.fixtures.pin_agent import pin_agent
 
 _CHILD = Path(__file__).with_name("child_sdk_probes.py")
 
@@ -90,7 +91,7 @@ def test_watcher_override_reaches_backend_without_changing_generic_sessions(
     monkeypatch.setitem(os.environ, "AVA_REDIS_URL", runner_redis)
     monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "test-secret")
     monkeypatch.setenv("AVA_HOME", str(Path.home() / ".ava"))
-    monkeypatch.setattr(watcher, "_agent_id", lambda: 42)
+    pin_agent(42)
 
     def workspace_for_test(_agent_id: int) -> Path:
         return tmp_path
@@ -134,7 +135,7 @@ def test_watcher_fail_fast_precedes_session_allocation(monkeypatch: pytest.Monke
     monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "test-secret")
     monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://ava_main:owner@127.0.0.1:6433/ava")
     monkeypatch.setitem(os.environ, "AVA_REDIS_URL", "redis://ava:runner@127.0.0.1:6380/0")
-    monkeypatch.setattr(watcher, "_agent_id", lambda: 42)
+    pin_agent(42)
 
     def forbid_session(*_args: object, **_kwargs: object) -> tuple[int, str]:
         raise AssertionError("session allocation started")
