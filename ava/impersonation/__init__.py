@@ -2,13 +2,15 @@
 
 # Package door. This `__init__` is the consent handshake an agent calls
 # (`ava.impersonation.accept` / `reject`); its docstring stays the one-liner the
-# agent can see. The submodules serve the takeover machinery around it and are
-# never agent-facing:
-#   launch   the bootstrap message a launched coding process receives
-#            (`ava.shell.coding_tools`, the use-other-agents skill)
-# It is not imported here: `import ava` loads this module eagerly.
+# agent can see. `attach` is the entry a controller's own Python process uses to
+# borrow the leased identity; it is not agent-facing. The submodules serve the
+# takeover machinery around it and are never agent-facing:
+#   attachment  the attachment `attach` opens (heavy; loaded on first use)
+#   launch      the bootstrap message a launched coding process receives
+#               (`ava.shell.coding_tools`, the use-other-agents skill)
+# Neither is imported here: `import ava` loads this module eagerly.
 
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.validation import coerce_str
@@ -75,3 +77,18 @@ def reject(request_id: str, reason: str = "") -> None:
         incarnation,
         coerce_str(reason, "reason"),
     )
+
+
+def attach(session_id: int | str, *, agent_id: int | None = None) -> Any:
+    """Borrow an active, unexpired agent identity in this local Python process.
+
+    Use the session's integer id together with its owning agent id, or the
+    lease handle. Attaching needs no credential: the caller must descend from
+    the session's recorded controller process tree, rechecked on every lease
+    use. Returns a context manager (`flush`, `close`, `native_snapshot`) that
+    loads the agent's saved configuration and plugin state; attaching never
+    renews the lease.
+    """
+    from ava.impersonation.attachment import attach as open_attachment
+
+    return open_attachment(session_id, agent_id=agent_id)

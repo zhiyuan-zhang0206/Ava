@@ -36,7 +36,7 @@ import ava
 session_id = 0                 # from the activation push
 agent_id = 405                 # the Ava agent you are replacing
 
-with ava.external.attach(session_id, agent_id=agent_id):
+with ava.impersonation.attach(session_id, agent_id=agent_id):
     ava.agents.send_message(406, "Implementation ready for review")
 ```
 
@@ -64,7 +64,7 @@ ava impersonate exec <session_id> --agent <agent_id> --file operation.py
 
 Omit `--file` to read the program from stdin. The file already runs inside
 this session's attachment: call `ava.*` directly. Calling
-`ava.external.attach()` again in it fails with "this process already has an
+`ava.impersonation.attach()` again in it fails with "this process already has an
 external attachment".
 
 Boundaries: `ava.self.compact`, `ava.self.terminate`, and `ava.self.restart`
