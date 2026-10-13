@@ -1,0 +1,8 @@
+[debt.first-party-patch]
+"test_maintenance_cold.py#monkeypatch.setattr base.deploy.maintenance.cold.psutil.process_iter" = 1
+"test_migration_authority.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 5
+"test_migrations.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 10
+"test_timing_topology.py#monkeypatch.setattr base.config.settings.daemon.wedged_agent_inbound_age_seconds" = 1
+"test_timing_topology.py#monkeypatch.setattr base.deploy.progress_timeout.AGENT_LEASE_TTL_S" = 1
+"test_timing_topology.py#monkeypatch.setattr base.deploy.progress_timeout.GATEWAY_PREFLIGHT_BUDGET_S" = 2
+"test_timing_topology.py#monkeypatch.setattr base.deploy.progress_timeout.UNIT_BUNDLE_TTL_S" = 1

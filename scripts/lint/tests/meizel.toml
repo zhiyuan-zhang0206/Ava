@@ -1,0 +1,6 @@
+[debt.first-party-patch]
+"test_ambient_state_gate.py#monkeypatch.setattr meizel.state.ambient_state.allow.ALLOWED" = 1
+"test_ambient_state_gate.py#monkeypatch.setattr meizel.state.ambient_state.allow.SINK_FACADES" = 1
+"test_lint_code_structure.py#monkeypatch.setattr scripts.structure.budgets.quality_budget.ComplexityVisitor.from_ast" = 1
+"test_lint_code_structure.py#monkeypatch.setattr scripts.structure.budgets.quality_budget.measure_quality" = 1
+"test_lint_fixture_scope.py#monkeypatch.setattr scripts.lint.fixture_scope._REPO_ROOT" = 4

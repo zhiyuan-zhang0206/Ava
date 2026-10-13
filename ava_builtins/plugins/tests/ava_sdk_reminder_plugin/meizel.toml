@@ -1,0 +1,3 @@
+[debt.first-party-patch]
+"test_agent_reply_rearms_after_compaction.py#monkeypatch.setattr agent.graph.hooks.compact.generate_summary" = 2
+"test_agent_reply_rearms_after_compaction.py#monkeypatch.setattr base.config.settings.agent.agent_reply_reminder_cadence" = 4

@@ -1,0 +1,5 @@
+[debt.first-party-patch]
+"test_tart_run.py#monkeypatch.setattr scripts.verify.tart_vm.time.sleep" = 1
+"test_understanding_replay.py#monkeypatch.setattr agent.hooks.understanding_chunks.chunk_threshold" = 1
+"test_understanding_replay.py#monkeypatch.setattr agent.hooks.understanding_chunks.enqueue_chunk" = 1
+"test_understanding_replay.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 1

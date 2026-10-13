@@ -4,6 +4,37 @@
 "test_mcps_remote.py" = ["_mcps_helpers.py"]
 "test_remote_timeout.py" = ["_mcps_helpers.py"]
 
+[debt.first-party-patch]
+"_mcps_helpers.py#monkeypatch.setattr ava.mcps._clients" = 1
+"_mcps_helpers.py#monkeypatch.setattr ava.mcps._get_remote_client" = 1
+"_mcps_helpers.py#monkeypatch.setattr ava.mcps._read_cache" = 1
+"_mcps_helpers.py#monkeypatch.setattr ava.mcps._write_cache" = 1
+"_mcps_helpers.py#monkeypatch.setattr ava.mcps.config.builtin_mcp_paths" = 1
+"test_browser.py#monkeypatch.setattr ava.mcps._browser._CONNECT_ATTEMPTS" = 1
+"test_browser.py#monkeypatch.setattr ava.mcps._browser._CONNECT_DELAY_S" = 1
+"test_browser.py#monkeypatch.setattr ava.mcps._browser._RELEASE_TIMEOUT_S" = 1
+"test_browser.py#monkeypatch.setattr ava.mcps._browser.asyncio.open_unix_connection" = 2
+"test_browser.py#monkeypatch.setattr base.paths.chrome_mcp_socket" = 6
+"test_computer.py#monkeypatch.setattr ava.mcps._computer.asyncio.open_unix_connection" = 2
+"test_daemon.py#monkeypatch.setattr ava.mcps._daemon.asyncio.Event" = 1
+"test_daemon.py#monkeypatch.setattr ava.mcps._daemon.connect_server" = 12
+"test_daemon.py#monkeypatch.setattr ava.mcps._daemon.reap_stale_daemons" = 1
+"test_daemon.py#monkeypatch.setattr ava.mcps.config.builtin_mcp_paths" = 1
+"test_external_lease.py#monkeypatch.setattr ava.mcps._get_remote_client" = 1
+"test_mcps.py#monkeypatch.setattr ava.mcps._get_remote_client" = 3
+"test_mcps.py#monkeypatch.setattr ava.mcps._read_cache" = 1
+"test_mcps.py#monkeypatch.setattr ava.mcps._remote._daemon_socket_path" = 3
+"test_mcps.py#monkeypatch.setattr ava.mcps._remote._socket_path_for" = 2
+"test_mcps_remote.py#monkeypatch.setattr ava.mcps._get_remote_client" = 2
+"test_mcps_remote.py#monkeypatch.setattr ava.mcps._read_cache" = 3
+"test_mcps_remote.py#monkeypatch.setattr ava.mcps._remote._daemon_socket_path" = 1
+"test_mcps_remote.py#monkeypatch.setattr ava.mcps._remote.time.time" = 3
+"test_remote_timeout.py#monkeypatch.setattr ava.mcps._get_remote_client" = 2
+"test_retry_classify.py#monkeypatch.setattr ava.mcps._daemon.asyncio.sleep" = 1
+"test_retry_classify.py#monkeypatch.setattr ava.mcps._daemon.get_session" = 1
+"test_retry_classify.py#monkeypatch.setattr ava.mcps._daemon.invalidate_session" = 1
+"test_retry_classify.py#monkeypatch.setattr ava.mcps._get_remote_client" = 1
+
 [debt.private-name]
 "daemon/test_handle_client_agent_id_none_without_identity.py -> test_daemon.py#_content" = 1
 "daemon/test_handle_client_agent_id_none_without_identity.py -> test_daemon.py#_no_reap_stale_daemons" = 1

@@ -3,3 +3,29 @@
 "test_exec_output.py" = ["output_inputs.py"]
 "test_exec_output_cap.py" = ["output_inputs.py"]
 "test_exec_output_crop.py" = ["output_inputs.py"]
+
+[debt.first-party-patch]
+"admission_fixture.py#monkeypatch.setattr agent.graph.exec._owned_run.validate_native_ready" = 1
+"test_cancel.py#monkeypatch.setattr agent.graph.exec.node.run_in_subprocess" = 10
+"test_cross_agent_findings.py#monkeypatch.setattr agent.graph.exec.node.run_agent_code" = 1
+"test_cross_agent_findings.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 1
+"test_exec_attach_drain.py#monkeypatch.setattr agent.graph.exec.node.run_agent_code" = 2
+"test_exec_editable_guard.py#monkeypatch.setattr base.deploy.release.editable_install.current_interpreter_source_root" = 3
+"test_exec_node_timeout.py#monkeypatch.setattr agent.graph.exec.node.run_in_subprocess" = 2
+"test_exec_node_timeout.py#monkeypatch.setattr base.config.settings.sandbox.exec_node_timeout_seconds" = 2
+"test_exec_node_timeout.py#monkeypatch.setattr base.config.settings.sandbox.exec_timeout_seconds" = 1
+"test_exec_output.py#monkeypatch.setattr agent.graph.exec.output.OVERFLOW_KEEP" = 1
+"test_exec_output.py#monkeypatch.setattr agent.graph.exec.output.overflow_dir" = 2
+"test_exec_output_cap.py#monkeypatch.setattr agent.graph.exec.output.logger.info" = 1
+"test_exec_output_cap.py#monkeypatch.setattr agent.graph.exec.output.overflow_dir" = 1
+"test_exec_output_crop.py#monkeypatch.setattr agent.graph.exec.output.overflow_dir" = 1
+"test_exec_process.py#monkeypatch.setattr agent.graph.exec._process.asyncio.to_thread" = 1
+"test_exec_process.py#monkeypatch.setattr agent.graph.exec._process.psutil.Process" = 2
+"test_exec_process.py#monkeypatch.setattr agent.graph.exec._process.settle_resources" = 1
+"test_exec_process.py#monkeypatch.setattr agent.graph.exec._subprocess._spawn" = 1
+"test_exec_process.py#monkeypatch.setattr base.native_process.exec_domain.os.killpg" = 2
+"test_exec_protocol.py#monkeypatch.setattr agent.graph.exec.protocol.os.replace" = 1
+"test_hosted_force_quiescence_exec.py#monkeypatch.setattr agent.graph.exec._subprocess.sys.executable" = 1
+"test_multiple_tool_calls.py#monkeypatch.setattr agent.graph.exec.node.build_attach_message" = 1
+"test_multiple_tool_calls.py#monkeypatch.setattr agent.graph.exec.node.run_agent_code" = 7
+"test_multiple_tool_calls.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2

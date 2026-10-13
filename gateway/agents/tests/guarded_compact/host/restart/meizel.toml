@@ -1,2 +1,6 @@
 [uses]
 "test_cold.py" = ["child_fixture.py"]
+
+[debt.first-party-patch]
+"test_cold.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_return.py#monkeypatch.setattr services.agent_runner.agent_host.invocation.compact.lifecycle.apply_hosted_lifecycle" = 1

@@ -4,5 +4,42 @@ exports = ["data_plane_records.py", "health_port_guard.py", "test_single_box.py"
 "test_maintenance_recovery.py" = ["maintenance_cluster.py"]
 "test_unit_capability_commands.py" = ["test_single_box.py"]
 
+[debt.first-party-patch]
+"data_plane_records.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
+"data_plane_records.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
+"health_port_guard.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1
+"maintenance_cluster.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 1
+"maintenance_cluster.py#monkeypatch.setattr base.deploy.state.host_deploy_state.set_posture" = 1
+"maintenance_cluster.py#monkeypatch.setattr ops.agent_pause.publish_inbound_wake" = 1
+"test_commands_register.py#monkeypatch.setattr base.cluster.machines.register_self" = 5
+"test_commands_register.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
+"test_external_skills.py#monkeypatch.setattr cli.commands.extensions.external_skills.Path.home" = 1
+"test_external_skills.py#monkeypatch.setattr cli.commands.lifecycle.converge_host.is_default_home" = 1
+"test_frontend_deps.py#monkeypatch.setattr base.sessions.env_forwarding.os.environ" = 1
+"test_frontend_deps.py#monkeypatch.setattr cli.commands._repo.subprocess.run" = 2
+"test_gateway_preflight_budget.py#monkeypatch.setattr cli.commands._repo.probe_gateway_once" = 1
+"test_gateway_preflight_budget.py#monkeypatch.setattr cli.commands._repo.time" = 1
+"test_maintenance_recovery.py#monkeypatch.setattr base.deploy.maintenance.pause_owner.change_maintenance" = 3
+"test_maintenance_recovery.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_config" = 2
+"test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.ava_home" = 1
+"test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.plugins_dir" = 1
+"test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
+"test_repo_browser_gate.py#monkeypatch.setattr base.config.settings.services.browser_enabled" = 6
+"test_repo_browser_gate.py#monkeypatch.setattr base.config.settings.services.permissions_helper_enabled" = 4
+"test_repo_browser_gate.py#monkeypatch.setattr services.supervision.roster.spec.browser_incapability" = 6
+"test_repo_browser_gate.py#monkeypatch.setattr services.supervision.roster.spec.permissions_helper_incapability" = 4
+"test_repo_heartbeat_gate.py#monkeypatch.setattr base.config.settings.daemon.heartbeat_enabled" = 5
+"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.gateway.gateway_port" = 1
+"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.app_port" = 4
+"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.browser_enabled" = 1
+"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.frontend_healthcheck_url" = 4
+"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.gateway_health_url" = 1
+"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.memory_search_port" = 1
+"test_single_box.py#monkeypatch.setattr base.cluster.get_record" = 1
+"test_single_box.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 1
+"test_single_box.py#monkeypatch.setattr cli.commands.data_plane.bringup.prove_generation_logins" = 2
+"test_unit_capability_commands.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
+"test_unit_capability_commands.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
+
 [debt.private-name]
 "test_unit_capability_commands.py -> test_single_box.py#_refused" = 1

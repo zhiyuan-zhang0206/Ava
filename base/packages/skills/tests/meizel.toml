@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_index.py#monkeypatch.setattr base.packages.skills.index.SkillIndex.build" = 1

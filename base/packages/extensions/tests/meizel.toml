@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_materialize.py#monkeypatch.setattr base.packages.extensions.materialize.last_written_hash" = 4

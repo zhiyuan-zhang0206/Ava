@@ -1,0 +1,6 @@
+[debt.first-party-patch]
+"test_grouping.py#monkeypatch.setattr services.desktop.browser.tab_groups.grouping.GROUP_TIMEOUT_S" = 1
+"test_grouping.py#monkeypatch.setattr services.desktop.browser.tab_groups.grouping.LISTING_TIMEOUT_S" = 1
+"test_grouping.py#monkeypatch.setattr services.desktop.browser.tab_groups.grouping.WORKER_WAIT_S" = 2
+"test_grouping.py#monkeypatch.setattr services.desktop.browser.tab_groups.grouping.http_json" = 3
+"test_grouping.py#monkeypatch.setattr services.desktop.browser.tab_groups.grouping.websockets.connect" = 5

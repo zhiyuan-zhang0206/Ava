@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_gateway_auth.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1

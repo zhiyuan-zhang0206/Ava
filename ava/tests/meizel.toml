@@ -1,2 +1,23 @@
 [external]
 "test_self_evolution_evaluate.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
+
+[debt.first-party-patch]
+"test_agent_identity.py#monkeypatch.setattr ava.DB.cursor" = 1
+"test_agent_identity.py#monkeypatch.setattr ava.gateway_client.post" = 1
+"test_attachment_transport.py#monkeypatch.setattr ava.__plugin_installation__" = 9
+"test_attachment_transport.py#monkeypatch.setattr ava.files.agent_identity.agent_id" = 1
+"test_attachment_transport.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 6
+"test_core.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_security.py#monkeypatch.setattr ava.security.logger.warning" = 1
+"test_security.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 1
+"test_self_evolution_evaluate.py#monkeypatch.setattr ava.agents.spawn" = 1
+"test_self_machine_spec.py#monkeypatch.setattr ava.ensure_plugins_loaded" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.DB.cursor" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.DB.transaction" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.sdk_surface.agent_identity.assert_self_action" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.ui.page_host" = 3
+"test_validation_ava.py#monkeypatch.setattr ava.watcher._spawn" = 2
+"test_validation_ava.py#monkeypatch.setattr ava.web._fetch_one" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.web._search_one" = 1
+"test_validation_ava.py#monkeypatch.setattr ava.web.run_batch" = 2
+"test_validation_ava.py#monkeypatch.setattr base.telemetry.audit_events.record_audit" = 1

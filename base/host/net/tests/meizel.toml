@@ -1,0 +1,5 @@
+[debt.first-party-patch]
+"test_resilience.py#monkeypatch.setattr base.host.net.resilience.agent_phase" = 3
+"test_resilience.py#monkeypatch.setattr base.host.net.resilience.random.uniform" = 5
+"test_resilience.py#monkeypatch.setattr base.host.net.resilience.retry_asleep" = 1
+"test_resilience.py#monkeypatch.setattr base.host.net.resilience.retry_sleep" = 1

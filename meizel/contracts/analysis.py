@@ -134,11 +134,34 @@ def _source_diagnostics(
                     Code.RESTRICTED,
                     f"{form} is outside the restricted Python subset",
                     (
-                        "use a static import or the object form of patching; a file that genuinely "
+                        "use a static import, and inject a collaborator instead of patching it; a file that genuinely "
                         f"owns a dynamic load declares it under [loads] in {manifest_path(scan.path.rpartition('/')[0])}; "
                         "a file that runs code from outside the repository declares it under [external] with a reason",
                     ),
                     DebtKey(owner, file_key(owner, scan.path, form)),
+                )
+            )
+    return found
+
+
+def _patch_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
+    """Patching first-party code: the dependency was not injected."""
+    found: list[Diagnostic] = []
+    for scan in scans:
+        owner = scan.path.rpartition("/")[0]
+        for patch in scan.patches:
+            found.append(
+                Diagnostic(
+                    scan.path,
+                    patch.line,
+                    Code.FIRST_PARTY_PATCH,
+                    f"{patch.form} on first-party {patch.target}",
+                    (
+                        "do not patch first-party code: split the code under test into a public "
+                        "facade and an implementation whose dependencies are explicit parameters, "
+                        "and let the test pass the fake in directly",
+                    ),
+                    DebtKey(owner, file_key(owner, scan.path, f"{patch.form} {patch.target}")),
                 )
             )
     return found
@@ -278,6 +301,7 @@ def analyze(
     projections, found, needed = _judge_facts(facts, manifests)
     diagnostics.extend(found)
     diagnostics.extend(_source_diagnostics([scans[p] for p in judged], loaders, externals))
+    diagnostics.extend(_patch_diagnostics(scans[p] for p in judged))
     stale = StaleDeclarations()
     if scope is None:
         stale = StaleDeclarations(

@@ -2,3 +2,6 @@ exports = ["job_wait.py"]
 
 [uses]
 "test_pty_job_wait.py" = ["job_wait.py"]
+
+[debt.first-party-patch]
+"test_closure.py#monkeypatch.setattr base.sessions.pty.process_groups.signal" = 2

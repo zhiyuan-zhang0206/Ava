@@ -6,3 +6,6 @@ exports = ["patch_repo.py"]
 "test_placement.py" = ["patch_repo.py"]
 "test_placement_dependencies.py" = ["patch_repo.py"]
 "test_service_units.py" = ["patch_repo.py"]
+
+[debt.first-party-patch]
+"test_placement_dependencies.py#monkeypatch.setattr scripts.structure.imports.cache.CACHE_PATH" = 2

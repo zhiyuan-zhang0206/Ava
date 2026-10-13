@@ -3,3 +3,18 @@
 "test_understand_autosave.py" = ["provider_support.py"]
 "test_understand_batch.py" = ["provider_support.py"]
 "test_understand_injection.py" = ["provider_support.py"]
+
+[debt.first-party-patch]
+"provider_support.py#monkeypatch.setattr ava.context" = 1
+"provider_support.py#monkeypatch.setattr base.config.settings.lm.gemini_api_key" = 1
+"provider_support.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 2
+"test_understand.py#monkeypatch.setattr base.config.settings.lm.gemini_api_key" = 2
+"test_understand.py#monkeypatch.setattr base.config.settings.lm.llm_invoke_retry_attempts" = 1
+"test_understand.py#monkeypatch.setattr base.config.settings.lm.understand_media_base_url" = 1
+"test_understand.py#monkeypatch.setattr base.config.settings.lm.understand_media_model" = 2
+"test_understand.py#monkeypatch.setattr base.config.settings.lm.understand_media_resolution" = 2
+"test_understand.py#monkeypatch.setattr base.config.settings.lm.understand_media_thinking_level" = 1
+"test_understand.py#monkeypatch.setattr base.config.settings.lm.understand_text_model" = 1
+"test_understand.py#monkeypatch.setattr base.lm.factory.build_chat_model" = 2
+"test_understand.py#monkeypatch.setattr base.paths.workspace_dir" = 1
+"test_understand_autosave.py#monkeypatch.setattr base.paths.workspace_dir" = 3
