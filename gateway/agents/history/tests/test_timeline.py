@@ -3,13 +3,12 @@
 Design (2026-05-04 in-place simplification):
   - LangGraph state.messages is the sole source of truth
   - The inbound_messages table does **not** directly enter the timeline (it is already
-    envelope-wrapped into LangGraph state), only used as a ts anchor
+    envelope-wrapped into LangGraph state)
   - AIMessage.content (agent text) / tool_call code / reasoning are all rendered from
     state; adjacent timestamps within the same LLM turn no longer drift apart
 
 Coverage:
-  - endpoint basic contract (404 / empty agent / no orphaned inbounds displayed /
-    lifecycle anchor filtering)
+  - endpoint basic contract (404 / empty agent / no orphaned inbounds displayed)
   - `_ai_message_items` helper unit (TestAiMessageItems): directly feed AIMessage to test
     block splitting
   - dispatch end-to-end (TestTimelineDispatch): truly load mixed state.messages into
@@ -83,7 +82,7 @@ class TestSdkCallsProjection:
                 "sdk_calls": [{"method": "files.read", "count": 3}],
             },
         )
-        items, _ = build_timeline_items([ai, out], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([ai, out], inputs=_TIMELINE_INPUTS)
         code = next(it for it in items if it.kind == "agent_code")
         assert code.sdk_calls is not None
         assert [(c.method, c.count) for c in code.sdk_calls] == [("files.read", 3)]
@@ -100,7 +99,7 @@ class TestSdkCallsProjection:
                 {"name": "execute_code", "args": {"code": "ava.files.read('x')"}, "id": "tc-1"}
             ],
         )
-        items, _ = build_timeline_items([ai], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([ai], inputs=_TIMELINE_INPUTS)
         code = next(it for it in items if it.kind == "agent_code")
         assert code.sdk_calls is None
 
@@ -117,7 +116,7 @@ class TestSdkCallsProjection:
             tool_call_id="tc-9",
             additional_kwargs={"ava_msg_type": "exec_output", "sdk_calls": []},
         )
-        items, _ = build_timeline_items([ai, out], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([ai, out], inputs=_TIMELINE_INPUTS)
         code = next(it for it in items if it.kind == "agent_code")
         assert code.sdk_calls == []
 
@@ -148,7 +147,7 @@ class TestSdkCallsProjection:
                 "sdk_calls": [{"method": "b.fn", "count": 2}],
             },
         )
-        items, _ = build_timeline_items([ai, out_a, out_b], [], inputs=_TIMELINE_INPUTS)
+        items, _ = build_timeline_items([ai, out_a, out_b], inputs=_TIMELINE_INPUTS)
         codes = [it for it in items if it.kind == "agent_code"]
         assert [[(c.method, c.count) for c in (it.sdk_calls or [])] for it in codes] == [
             [("a.fn", 1)],
@@ -175,7 +174,7 @@ class TestAvaMsgTypeDispatch:
     @staticmethod
     def _render(msg: HumanMessage) -> list[TimelineItem]:
 
-        return build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)[0]
+        return build_timeline_items([msg], inputs=_TIMELINE_INPUTS)[0]
 
     @staticmethod
     def _tagged(msg_type: str, **extra: object) -> HumanMessage:

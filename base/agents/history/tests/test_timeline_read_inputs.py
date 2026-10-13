@@ -27,14 +27,14 @@ def test_renderers_are_lazy_isolated_live_and_read_flag_before_clock() -> None:
     second = TimelineReadInputs(lambda: make_clock(1), lambda: flag(1))
     assert reads == []
     message = HumanMessage(content="summary", additional_kwargs={"ava_msg_type": "compact_summary"})
-    rendered, _ = build_timeline_items([message], [], inputs=first)
+    rendered, _ = build_timeline_items([message], inputs=first)
     assert rendered[0].payload == "Compact summary [2026-10-04 12:00:00]:\n\nsummary"
-    rendered, _ = build_timeline_items([message], [], inputs=second)
+    rendered, _ = build_timeline_items([message], inputs=second)
     assert rendered[0].payload == "Compact summary:\n\nsummary"
     assert reads == ["flag0", "clock0", "flag1"]
     flags[0], flags[1] = False, True
-    build_timeline_items([message], [], inputs=first)
-    build_timeline_items([message], [], inputs=second)
+    build_timeline_items([message], inputs=first)
+    build_timeline_items([message], inputs=second)
     assert reads[-3:] == ["flag0", "flag1", "clock1"]
 
 
@@ -46,7 +46,7 @@ def test_plain_messages_skip_policy_and_limit_is_live() -> None:
         raise AssertionError("plain messages construct no clock")
 
     items, count = build_timeline_items(
-        [HumanMessage(content="plain")], [], inputs=TimelineReadInputs(no_clock, unused)
+        [HumanMessage(content="plain")], inputs=TimelineReadInputs(no_clock, unused)
     )
     assert count == 1 and items[0].payload == "plain"
     limit = 7

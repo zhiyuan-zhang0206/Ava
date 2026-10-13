@@ -16,7 +16,6 @@ from agent.ownership.native_cancel import bound_native_cancel
 from base.agents.compaction.models import CompactHeldError
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.live import ALIVE_STATUSES
-from base.agents.inbox.rows import InboundRow
 from base.agents.incarnation.native_work_models import NativeCancelPendingError, NativeWorkTarget
 from base.agents.messages.inbound import InterruptReason
 from base.config import settings
@@ -388,26 +387,6 @@ async def claim_inbound_batch(
             )
     rows.sort(key=lambda r: (r[6], r[0]))  # created_at FIFO, id breaks timestamp ties
     return [ClaimedInbound.from_row(r) for r in rows]
-
-
-async def list_chat_inbound_anchors(pool: AsyncConnectionPool, agent_id: int) -> list[InboundRow]:
-    """Read this agent's kind='chat' inbound rows (any status) in created_at
-    ascending order — ts anchors for rendering inbound HumanMessages in a
-    timeline snapshot.
-
-    These rows commit synchronously when INSERTed / claimed, so reading them
-    never races the async checkpoint commit (the reason the timeline render
-    moved off a checkpoint re-read).
-    """
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT id, content, kind, source, status, created_at, claimed_at "
-            "FROM inbound_messages "
-            "WHERE agent_id = %s AND kind = 'chat' ORDER BY created_at ASC",
-            (agent_id,),
-        )
-        rows = await cur.fetchall()
-    return [InboundRow(*r) for r in rows]
 
 
 async def finalize_claimed_inbounds(

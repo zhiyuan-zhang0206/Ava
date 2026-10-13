@@ -123,8 +123,7 @@ def _finalize_turn_observability(
     - persist the per-block thinking wall-clock onto the message
       (`ava_reasoning_ms_by_block`: {block_idx -> ms}) before it enters
       state.messages, so a timeline reload renders each thinking block's
-      "thought for X seconds" from a real elapsed value rather than the
-      timeline's own synthetic per-turn microsecond offset. Keyed alongside
+      "thought for X seconds" from a real elapsed value. Keyed alongside
       the other ava_* message tags; absent when no thinking streamed.
       base/agents/history/timeline.py reads it back.
     - log standardized token usage (`events.event_name='llm_usage'`).
@@ -134,8 +133,8 @@ def _finalize_turn_observability(
       for the context-window gauge.
     """
     # Stamp the turn's real wall-clock onto the message so the timeline renders
-    # the agent's reply / reasoning / code at their actual time, not the
-    # synthetic anchor+offset fallback. base/agents/history/timeline.py prefers this ts.
+    # the agent's reply / reasoning / code at their actual time.
+    # base/agents/history/timeline.py reads it back.
     kw = read_ava_kwargs(final_msg)
     kw["ava_created_at"] = datetime.now(UTC).isoformat()
     reasoning_ms_by_block = handler.reasoning_ms_by_block
@@ -281,7 +280,6 @@ async def llm_attempt(
     async with node_lifecycle(
         "llm",
         messages=state.messages,
-        ops_pool=runtime.context.ops_pool,
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=runtime.context.turn_progress,

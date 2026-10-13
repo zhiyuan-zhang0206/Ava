@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.db import list_chat_inbound_anchors
 from base.agents.context import AvaContext
 from base.agents.history.timeline import build_timeline_items, tail_window, timeline_default_limit
 from base.agents.history.timeline_inputs import TimelineReadInputs
@@ -26,7 +25,7 @@ async def publish_inbound_committed(ctx: AvaContext, agent_id: int, inbound_ids:
         )
 
 
-async def publish_end_timeline_snapshot(
+def publish_end_timeline_snapshot(
     ctx: AvaContext,
     state: Any,  # AgentState (lazy import to avoid circular)
     agent_id: int,
@@ -41,20 +40,15 @@ async def publish_end_timeline_snapshot(
     frontend sees the markers only after the next manual refresh — publish
     the post-dispatch state now so the frontend renders them immediately.
 
-    Best-effort: ctx.event_publisher / ctx.ops_pool are already narrowed to
-    non-None by the container-mode early-return at the top of claim_node_impl.
+    ctx.event_publisher is already narrowed to non-None by the container-mode
+    early-return at the top of claim_node_impl.
     """
-    assert ctx.ops_pool is not None, (  # noqa: S101
-        "publish_end_timeline_snapshot requires ctx.ops_pool"
-    )
     assert ctx.event_publisher is not None, (  # noqa: S101
         "publish_end_timeline_snapshot requires ctx.event_publisher"
     )
     combined = list(state.messages) + new_msgs
-    anchors = await list_chat_inbound_anchors(ctx.ops_pool, agent_id)
     items, msg_count = build_timeline_items(
         combined,
-        anchors,
         inputs=TimelineReadInputs(
             ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
         ),
