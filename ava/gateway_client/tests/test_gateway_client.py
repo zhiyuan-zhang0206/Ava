@@ -18,7 +18,7 @@ import pytest
 import ava
 from ava.gateway_client.transport import use_client
 from ava.sdk_surface.installation import Installation
-from base.agents import GatewayUnavailable
+from base.api_contracts.agent_contract import GatewayUnavailable
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
@@ -53,7 +53,7 @@ class TestRaiseFromResponse:
         resp.status_code = 404
         resp.json.return_value = {"reason": "agent_not_found", "detail": "agent 99 not found"}
 
-        from base.agents import AgentNotFound
+        from base.api_contracts.agent_contract import AgentNotFound
 
         with pytest.raises(AgentNotFound, match="agent 99 not found"):
             raise_from_response(resp)
@@ -446,7 +446,7 @@ class TestTransientHttpRetry:
         gateway's own deadline has already spent that time, so re-sending only
         re-queues behind the same congestion."""
         from ava import gateway_client as gc
-        from base.agents import IndexerUnavailable
+        from base.api_contracts.agent_contract import IndexerUnavailable
         from base.config import settings
 
         fail = _transient_resp(503, {"reason": "indexer_unavailable", "detail": "busy"})
@@ -529,7 +529,7 @@ class TestTransientHttpRetry:
         with reason indexer_unavailable raises IndexerUnavailable (the error
         callers catch to degrade), not a generic transport error."""
         from ava.gateway_client.transport import post, raise_from_response
-        from base.agents import IndexerUnavailable
+        from base.api_contracts.agent_contract import IndexerUnavailable
 
         fail = _transient_resp(503, {"reason": "indexer_unavailable", "detail": "embed failed"})
         mock_client.post.return_value = fail

@@ -12,7 +12,7 @@ import psycopg
 import pytest
 
 import ava
-from base.agents import InvalidModelConfig
+from base.api_contracts.agent_contract import InvalidModelConfig
 from base.config import settings
 from tests.fixtures.pin_agent import pin_agent
 

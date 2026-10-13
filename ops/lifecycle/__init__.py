@@ -10,7 +10,14 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from base.agents import (
+from base.agents.inbox.insert import insert_inbound_message
+from base.agents.incarnation.native_restart_models import (
+    NativeRestartAccepted,
+    NativeRestartOperation,
+    NativeRestartRefused,
+)
+from base.agents.messages.inbound import WakeTriggerKind
+from base.api_contracts.agent_contract import (
     AgentStatus,
     InvalidModelConfig,
     MachinePaused,
@@ -21,13 +28,6 @@ from base.agents import (
     ShellSessionKillTiming,
     TerminateResult,
 )
-from base.agents.inbox.insert import insert_inbound_message
-from base.agents.incarnation.native_restart_models import (
-    NativeRestartAccepted,
-    NativeRestartOperation,
-    NativeRestartRefused,
-)
-from base.agents.messages.inbound import WakeTriggerKind
 from base.config import settings
 from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync

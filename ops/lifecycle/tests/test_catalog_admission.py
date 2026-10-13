@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from base.agents import InvalidModelConfig
+from base.api_contracts.agent_contract import InvalidModelConfig
 from base.lm.catalog import ModelCatalog
 from base.lm.pricing import PriceBook
 from base.packages.plugins import config_registration

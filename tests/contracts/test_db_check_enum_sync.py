@@ -27,10 +27,10 @@ from typing import get_args
 
 import pytest
 
-from base.agents import AgentStatus, LivenessState, TerminationSource
 from base.agents.impersonation.status import ImpersonationStatus
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.status import TaskStatus
+from base.api_contracts.agent_contract import AgentStatus, LivenessState, TerminationSource
 from base.cluster.machine import MachineRole
 from base.packages.extensions.install_registry import TrustTier
 from base.packages.extensions.registry import ExtensionKind

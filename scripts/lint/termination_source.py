@@ -31,7 +31,7 @@ filter is a read, not a write, and is ignored). If the SET clause assigns `statu
 value that can be `'terminated'` — either the literal, or a `%s` placeholder whose
 corresponding argument mentions `TERMINATED` or is the literal `'terminated'` —
 then the SET clause must also assign `termination_source`. A literal stamped value
-must belong to `base.agents.TerminationSource`, so a typo'd source (which the DB
+must belong to `base.api_contracts.agent_contract.TerminationSource`, so a typo'd source (which the DB
 CHECK would only catch at runtime, against a real database) fails here too.
 
 Literal status/source bind arguments are checked too, including `None` sources.
@@ -102,13 +102,13 @@ _SET_SOURCE_VALUE = re.compile(
 
 
 # Files whose content decides the verdict on files that did not change.
-_RULE_INPUTS = ("base/agents/contract.py",)
+_RULE_INPUTS = ("base/api_contracts/agent_contract.py",)
 
 
 def _termination_source_values() -> frozenset[str]:
     """The legal source values — read from the enum, so adding a member auto-syncs."""
     sys.path.insert(0, str(_REPO_ROOT))
-    from base.agents import TerminationSource
+    from base.api_contracts.agent_contract import TerminationSource
 
     return frozenset(s.value for s in TerminationSource)
 
@@ -182,7 +182,7 @@ def _check_statement(
                 "termination_source in the same statement — the corpse would record "
                 "no cause of death (NULL means a pre-column legacy row). Add `termination_source = "
                 "'<source>'` to this SET clause; pick the value from "
-                "base.agents.TerminationSource"
+                "base.api_contracts.agent_contract.TerminationSource"
             )
         reason = _source_violation(sql, set_clause, m.start("set"), params, legal_sources)
         if reason is not None:
@@ -213,7 +213,7 @@ def _source_violation(
         if value.value not in legal_sources:
             return (
                 f"UPDATE agents_meta binds termination_source = {value.value!r}, "
-                "which is not a base.agents.TerminationSource value. Bind the "
+                "which is not a base.api_contracts.agent_contract.TerminationSource value. Bind the "
                 "canonical enum member; NULL/None is legacy unstamped data"
             )
         return None
@@ -228,7 +228,7 @@ def _source_violation(
     if literal not in legal_sources:
         return (
             f"UPDATE agents_meta stamps termination_source = '{literal}', which is "
-            f"not a base.agents.TerminationSource member "
+            f"not a base.api_contracts.agent_contract.TerminationSource member "
             f"({sorted(legal_sources)}) — the column's CHECK would reject this "
             f"write at runtime"
         )

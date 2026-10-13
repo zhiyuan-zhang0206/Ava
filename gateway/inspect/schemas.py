@@ -10,10 +10,10 @@ from pydantic import (
     NonNegativeInt,
 )
 
-from base.agents import LivenessState
 from base.agents.observation.evidence import AgentObservation
 from base.agents.observation.snapshot import OpenNotice
 from base.agents.tasks.priority import Priority
+from base.api_contracts.agent_contract import LivenessState
 from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
 

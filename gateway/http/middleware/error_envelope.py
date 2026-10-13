@@ -10,7 +10,7 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
 from base import telemetry
-from base.agents import ErrorReason
+from base.api_contracts.agent_contract import ErrorReason
 from gateway.schemas.errors import ErrorEnvelope
 
 

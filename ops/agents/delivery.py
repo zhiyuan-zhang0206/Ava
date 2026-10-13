@@ -17,7 +17,6 @@ from typing import NamedTuple
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.agents import AgentStatus
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.chat_delivery import (
     ChatInboundCommittedError,
@@ -27,6 +26,7 @@ from base.agents.inbox.chat_delivery import (
 )
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
+from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus

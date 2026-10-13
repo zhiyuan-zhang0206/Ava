@@ -171,7 +171,7 @@ def _resolve_birth_overlay(
     birth_config = resolve_birth_config(
         cur, config, inherited=inherited, catalog=catalog, authority=authority
     )
-    from base.agents import InvalidModelConfig
+    from base.api_contracts.agent_contract import InvalidModelConfig
     from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.factory import validate_model_config
 

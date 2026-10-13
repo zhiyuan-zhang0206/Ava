@@ -53,9 +53,9 @@ from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from base import paths
-from base.agents import AvaAgentError, ResurrectRefused
 from base.agents.context.clients import ClientSet
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
+from base.api_contracts.agent_contract import AvaAgentError, ResurrectRefused
 from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity

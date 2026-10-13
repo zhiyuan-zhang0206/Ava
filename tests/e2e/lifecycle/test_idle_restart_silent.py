@@ -10,9 +10,9 @@ import psycopg
 import pytest
 from langchain_core.messages import AIMessage
 
-from base.agents import AgentStatus
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
+from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from tests.e2e._ports import GATEWAY_URL
 

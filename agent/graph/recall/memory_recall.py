@@ -35,8 +35,8 @@ from langchain_core.messages import AnyMessage, HumanMessage
 from agent.graph.recall.conversation_query import build_conversation_query
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
-from base.agents import GatewayUnavailable, IndexerUnavailable
 from base.agents.context import AvaContext
+from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.paths import memory_dir

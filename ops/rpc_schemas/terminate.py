@@ -7,8 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from base.agents import ShellSessionKillTiming, TerminateResult
 from base.agents.messages.envelope import validate_source
+from base.api_contracts.agent_contract import ShellSessionKillTiming, TerminateResult
 from base.events.caller_identity import CallerIdentity, is_caller_source
 from ops.rpc_schemas.content import UserContent
 

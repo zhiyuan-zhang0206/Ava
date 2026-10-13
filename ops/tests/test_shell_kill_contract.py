@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from base.agents import ShellKillMode
+from base.api_contracts.agent_contract import ShellKillMode
 from ops import cluster_status
 from ops.cluster import operations as cluster
 from ops.rpc_schemas import ShellKillResult

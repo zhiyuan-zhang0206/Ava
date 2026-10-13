@@ -209,7 +209,7 @@ def test_explicit_host_transport_failure_keeps_its_own_client_and_error() -> Non
     import httpx
 
     from ava.gateway_client.transport import get
-    from base.agents import GatewayUnavailable
+    from base.api_contracts.agent_contract import GatewayUnavailable
     from tests.fixtures.pin_agent import pin_no_identity
 
     def fail(request: httpx.Request) -> httpx.Response:

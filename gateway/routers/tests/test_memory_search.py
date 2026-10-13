@@ -442,7 +442,7 @@ class TestRerank:
     def test_decision_failure_is_a_clear_503_not_vector_order(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, judge: _Judge
     ) -> None:
-        from base.agents import IndexerUnavailable
+        from base.api_contracts.agent_contract import IndexerUnavailable
 
         self._pool(monkeypatch, tmp_path)
         self._backend(monkeypatch, [_hit(tmp_path / "a.md")])

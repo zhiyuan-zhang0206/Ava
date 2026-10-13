@@ -21,7 +21,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import ava
-from base.agents import AgentNotFound, AgentStatus, GatewayUnavailable
+from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 

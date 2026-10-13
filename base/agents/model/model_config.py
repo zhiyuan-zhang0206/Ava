@@ -4,8 +4,8 @@ from collections.abc import Mapping
 
 import psycopg
 
-from base.agents import AgentNotFound, InvalidModelConfig
 from base.agents.model.birth_config import resolve_birth_config
+from base.api_contracts.agent_contract import AgentNotFound, InvalidModelConfig
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.lm import factory

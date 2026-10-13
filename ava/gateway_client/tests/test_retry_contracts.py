@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from ava.gateway_client import transport
-from base.agents import GatewayUnavailable
+from base.api_contracts.agent_contract import GatewayUnavailable
 
 
 @pytest.mark.parametrize(

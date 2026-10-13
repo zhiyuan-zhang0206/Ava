@@ -7,8 +7,8 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from base.agents.contract import AgentStatus
 from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.api_contracts.agent_contract import AgentStatus
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import Decision, Question
 from gateway.agents.reply_suggestion.service import ReplySuggestionPolicy, ReplySuggestionService

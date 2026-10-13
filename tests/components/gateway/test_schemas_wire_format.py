@@ -24,7 +24,7 @@ from gateway.agents.schemas import (
 
 
 def test_agent_row_wire_shape() -> None:
-    from base.agents import AgentStatus, LivenessState
+    from base.api_contracts.agent_contract import AgentStatus, LivenessState
 
     t = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
     m = AgentRow(

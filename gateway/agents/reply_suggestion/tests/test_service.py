@@ -8,8 +8,7 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from base.agents import AgentNotFound
-from base.agents.contract import AgentStatus
+from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
     DecisionKeyMissingError,

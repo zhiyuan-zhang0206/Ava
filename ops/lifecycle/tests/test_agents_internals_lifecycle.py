@@ -8,8 +8,8 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from base.agents import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
 from base.agents.messages.envelope import EnvelopeReadInputs, wrap_inbound
+from base.api_contracts.agent_contract import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import settings

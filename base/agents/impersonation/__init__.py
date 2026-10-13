@@ -8,7 +8,6 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from base.agents import AgentStatus
 from base.agents.impersonation._store import (
     OPEN as OPEN,
 )
@@ -42,6 +41,7 @@ from base.agents.impersonation._store import (
 from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, ImpersonationStatus, parse_lease
 from base.agents.impersonation.wake import wake_agent as wake_agent
+from base.api_contracts.agent_contract import AgentStatus
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.caller_identity import CallerIdentity

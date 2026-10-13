@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from base.agents import ShellSessionKillTiming
+from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.api_contracts.idempotency import keyed_headers
 
 _TIMEOUT_S = 15.0

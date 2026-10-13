@@ -30,7 +30,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
-from base.agents import IndexerUnavailable
+from base.api_contracts.agent_contract import IndexerUnavailable
 from base.db import Database
 from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
 from base.paths import gateway_memory_dir

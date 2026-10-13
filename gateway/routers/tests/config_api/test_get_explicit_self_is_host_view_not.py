@@ -234,7 +234,7 @@ def test_get_config_audit_default_last_comes_from_display_config(
     """Omitted `last` is ``settings.display.config_audit_default_last``
     (``AVA_CONFIG_AUDIT_DEFAULT_LAST``); the literal 20 is only that field's
     default, not a hard-coded cap."""
-    from base.agents import MachineNotRegistered
+    from base.api_contracts.agent_contract import MachineNotRegistered
 
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
@@ -269,7 +269,7 @@ def test_get_config_audit_reads_own_records(
     _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
     """A self audit read returns this box's newest records, tagged with its machine."""
-    from base.agents import MachineNotRegistered
+    from base.api_contracts.agent_contract import MachineNotRegistered
 
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)

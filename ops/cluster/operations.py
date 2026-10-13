@@ -14,8 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from base.agents import ShellKillMode
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.api_contracts.agent_contract import ShellKillMode
 from base.cluster.machine import MachineIdentity
 from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins

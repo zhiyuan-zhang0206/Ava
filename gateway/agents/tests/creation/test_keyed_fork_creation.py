@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
 from ava.gateway_client import transport
-from base.agents import GatewayUnavailable
+from base.api_contracts.agent_contract import GatewayUnavailable
 from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
 from gateway.agents.tests.creation.test_guarded_creation import client as client

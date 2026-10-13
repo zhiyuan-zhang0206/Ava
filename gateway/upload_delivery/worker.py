@@ -15,7 +15,6 @@ from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from base import telemetry
-from base.agents import AgentNotFound
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.agents.upload_delivery import source, storage
@@ -26,6 +25,7 @@ from base.agents.upload_delivery.models import (
     UploadDeliveryConflictError,
 )
 from base.agents.upload_delivery.paths import agent_upload_dir
+from base.api_contracts.agent_contract import AgentNotFound
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance.admission import business_paused, quiesced
