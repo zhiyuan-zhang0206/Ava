@@ -67,7 +67,7 @@ def _git(cwd: Path, *args: str) -> None:
 
 @pytest.fixture
 def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub `_uv_sync` to drop a fake `.venv/bin/python` — no real resolve."""
+    """Stub `uv_sync` to drop a fake `.venv/bin/python` — no real resolve."""
 
     def _fake(pkg_dir: Path) -> None:
         venv_bin = pkg_dir / ".venv" / "bin"
@@ -76,7 +76,7 @@ def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
         py.write_text("#!/bin/sh\n", encoding="utf-8")
         py.chmod(0o755)
 
-    monkeypatch.setattr(mcp, "_uv_sync", _fake)
+    monkeypatch.setattr(mcp, "uv_sync", _fake)
 
 
 # ─── ava mcp install ───────────────────────────────────────────────────

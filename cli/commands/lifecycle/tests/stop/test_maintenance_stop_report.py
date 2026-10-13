@@ -92,7 +92,7 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
         identity.starttime,
     )
     assert survivor["role"] == "terminal" and survivor["service"] == "private-terminal"
-    command._report_incomplete(failure, [("terminals", 0.25)], owns_journal=True)
+    command.report_incomplete(failure, [("terminals", 0.25)], owns_journal=True)
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert journal["complete"] and journal["result"]["rc"] == 1
     assert journal["result"]["stage"] == "terminals"
@@ -146,11 +146,11 @@ def test_report_reuses_the_native_birth_rule(monkeypatch: pytest.MonkeyPatch) ->
     identity = OwnedProcess.capture(psutil.Process())
     if sys.platform == "linux":
         shifted = OwnedProcess(identity.pid, identity.birth + 3600, identity.starttime)
-        assert report._identity_matches(shifted)
+        assert report.identity_matches(shifted)
     else:
         shifted = OwnedProcess(identity.pid, identity.birth + 0.0001, None)
-        assert not report._identity_matches(shifted)
-    assert report._identity_matches(identity)
+        assert not report.identity_matches(shifted)
+    assert report.identity_matches(identity)
 
 
 def test_unknown_identity_is_retained_without_unrelated_live_facts(

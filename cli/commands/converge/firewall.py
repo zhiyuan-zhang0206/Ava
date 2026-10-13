@@ -156,10 +156,10 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
             file=sys.stderr,
         )
     if repair.failed:
-        _report_missing(repair.failed, len(required))
+        report_missing(repair.failed, len(required))
 
 
-def _report_missing(missing: tuple[Path, ...], total: int) -> None:
+def report_missing(missing: tuple[Path, ...], total: int) -> None:
     """The historical fallback: name the binaries and print the exact commands.
 
     Reached when direct mutation and the older-macOS `sudo -n` fallback both

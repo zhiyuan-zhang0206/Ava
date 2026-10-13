@@ -261,7 +261,7 @@ def test_mirror_reuses_an_environment_on_the_declared_python(
 
 
 def test_venv_removal_refuses_a_link_out_of_the_checkout(tmp_path: Path) -> None:
-    from cli.python_install import _remove_checkout_venv
+    from cli.python_install import remove_checkout_venv
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -270,7 +270,7 @@ def test_venv_removal_refuses_a_link_out_of_the_checkout(tmp_path: Path) -> None
     (outside / "keep").write_text("not the checkout's")
     (repo / ".venv").symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="Refusing to remove"):
-        _remove_checkout_venv(repo)
+        remove_checkout_venv(repo)
     assert (outside / "keep").read_text() == "not the checkout's"
     assert (repo / ".venv").is_symlink()
 
@@ -459,11 +459,11 @@ def test_malformed_pip_file_error_does_not_disclose_content(
 def test_explicit_official_index_overrides_saved_profile_alias(
     tmp_path: Path, environment_key: str, profile_key: str
 ) -> None:
-    from cli.python_install import _configured_env
+    from cli.python_install import configured_env
 
     profile = tmp_path / "mirror.env"
     profile.write_text(f"{profile_key}=https://mirror.example/simple\n")
-    env = _configured_env({environment_key: "https://pypi.org/simple"}, profile)
+    env = configured_env({environment_key: "https://pypi.org/simple"}, profile)
     assert _python_index.python_index(tmp_path, env) == "https://pypi.org/simple"
 
 

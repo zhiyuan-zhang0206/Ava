@@ -117,7 +117,7 @@ def test_the_planned_marker_must_be_immediately_adjacent(tmp_path: Path) -> None
 @pytest.fixture
 def nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        check_doc_references, "_okf_nodes", lambda: frozenset({"pkg/docs/real.ava.okf.md"})
+        check_doc_references, "okf_nodes", lambda: frozenset({"pkg/docs/real.ava.okf.md"})
     )
 
 

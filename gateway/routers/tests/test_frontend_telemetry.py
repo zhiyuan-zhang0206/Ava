@@ -166,7 +166,7 @@ class TestFrontendTelemetryIngest:
         with TestClient(app) as client:
             r = client.post(
                 "/api/frontend-telemetry",
-                content=b"x" * (ft_router._MAX_BODY_BYTES + 1),
+                content=b"x" * (ft_router.MAX_BODY_BYTES + 1),
                 headers={"content-type": "application/json"},
             )
         assert r.status_code == 413
@@ -180,12 +180,12 @@ class TestFrontendTelemetryIngest:
         """Over the per-session budget: accepted up to the cap, the rest
         dropped — the event stream cannot be flooded by one tab."""
         session = _session()
-        events = [_one(element=f"e{i}") for i in range(ft_router._MAX_EVENTS_PER_MINUTE + 10)]
+        events = [_one(element=f"e{i}") for i in range(ft_router.MAX_EVENTS_PER_MINUTE + 10)]
         with TestClient(app) as client:
             r = client.post("/api/frontend-telemetry", json=_payload(events, session=session))
         assert r.status_code == 204
         rows = _rows(session)
-        assert len(rows) == ft_router._MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
+        assert len(rows) == ft_router.MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
 
     def test_second_session_gets_own_budget(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
@@ -193,7 +193,7 @@ class TestFrontendTelemetryIngest:
         with TestClient(app) as client:
             r1 = client.post(
                 "/api/frontend-telemetry",
-                json=_payload([_one()] * (ft_router._MAX_EVENTS_PER_MINUTE + 5), session=session),
+                json=_payload([_one()] * (ft_router.MAX_EVENTS_PER_MINUTE + 5), session=session),
             )
             r2 = client.post(
                 "/api/frontend-telemetry",
@@ -201,5 +201,5 @@ class TestFrontendTelemetryIngest:
             )
         assert r1.status_code == 204
         assert r2.status_code == 204
-        assert len(_rows(session)) == ft_router._MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
+        assert len(_rows(session)) == ft_router.MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
         assert len(_rows(other)) == 3  # pyright: ignore[reportUnknownArgumentType]

@@ -1,7 +1,7 @@
 """`ava mcp install/uninstall/upgrade` — out-of-core MCP package lifecycle.
 
 Sources are local dirs (used in place) and local `file://` git repos (cloned +
-moved). `unit_home` isolates ~/.ava. `_uv_sync` is monkeypatched in the bulk of
+moved). `unit_home` isolates ~/.ava. `uv_sync` is monkeypatched in the bulk of
 tests so the venv build is deterministic + offline; one test exercises the real
 `uv sync` on a zero-dependency package.
 """
@@ -66,7 +66,7 @@ def _make_mcp_git_repo(root: Path, name: str = "acme") -> str:
 
 @pytest.fixture
 def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub `_uv_sync` to drop a fake `.venv/bin/python` — no real resolve."""
+    """Stub `uv_sync` to drop a fake `.venv/bin/python` — no real resolve."""
 
     def _fake(pkg_dir: Path) -> None:
         venv_bin = pkg_dir / ".venv" / "bin"
@@ -75,7 +75,7 @@ def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
         py.write_text("#!/bin/sh\n", encoding="utf-8")
         py.chmod(0o755)
 
-    monkeypatch.setattr(mcp, "_uv_sync", _fake)
+    monkeypatch.setattr(mcp, "uv_sync", _fake)
 
 
 # ─── install ─────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ def test_install_from_local_path_records_and_surfaces(
     assert r is not None and r.type == "mcp" and r.origin == "user" and r.enabled
     dest = unit_home / "mcps" / "acme"
     assert (dest / ".mcp.json").is_file()
-    assert (dest / ".venv" / "bin" / "python").exists()  # _uv_sync ran
+    assert (dest / ".venv" / "bin" / "python").exists()  # uv_sync ran
     # local source is copied, never moved
     assert (pkg / ".mcp.json").is_file()
     # surfaces in the merged config with the relative direct-launch command + cwd

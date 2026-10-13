@@ -31,7 +31,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 CREATED_BY = "ava-fleet-update"
-_SILENCES = "/api/alertmanager/grafana/api/v2/silences"
+SILENCES = "/api/alertmanager/grafana/api/v2/silences"
 _SILENCE = "/api/alertmanager/grafana/api/v2/silence"
 # Every alert but a full disk: the disk fills the same during an update, so the host filesystem rules
 # (`metric=host_disk`) and the health probe's disk check must still page.
@@ -67,7 +67,7 @@ def _call(base: str, credential: str, method: str, path: str, body: object = Non
 
 def _owned(base: str, credential: str) -> list[dict[str, Any]]:
     """Every live silence this program created."""
-    rows = _call(base, credential, "GET", _SILENCES)
+    rows = _call(base, credential, "GET", SILENCES)
     return [
         row
         for row in rows
@@ -89,7 +89,7 @@ def open_window(base: str, credential: str, *, hours: float, comment: str, now: 
     if owned:
         silence["id"] = owned[0]["id"]
         silence["startsAt"] = owned[0]["startsAt"]
-    created = _call(base, credential, "POST", _SILENCES, silence)
+    created = _call(base, credential, "POST", SILENCES, silence)
     return str(created["silenceID"])
 
 

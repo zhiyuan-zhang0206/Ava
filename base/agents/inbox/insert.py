@@ -14,8 +14,8 @@ from base.agents.messages.inbound_provenance import (
     content_sha256,
     source_assertion_match,
 )
+from base.api_contracts.caller_identity import caller_payload
 from base.db import Database, fetch_one
-from base.events.caller_identity import caller_payload
 from base.events.live.bus import EventBus
 from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log, record_audit

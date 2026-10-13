@@ -153,11 +153,11 @@ def test_write_config_preserves_user_edited_config(
     dest_dir.mkdir(parents=True)
     config = dest_dir / "config.yaml"
     rendered = "otelcol: default\n"
-    oc._write_config(config, rendered)
+    oc.write_config(config, rendered)
     assert config.read_text(encoding="utf-8") == rendered
 
     config.write_text("otelcol: user-edit\n", encoding="utf-8")
-    oc._write_config(config, "otelcol: regenerated\n")
+    oc.write_config(config, "otelcol: regenerated\n")
 
     assert config.read_text(encoding="utf-8") == "otelcol: user-edit\n"
     assert "modified locally" in capsys.readouterr().err
@@ -175,8 +175,8 @@ def test_write_config_records_and_accepts_converge_output(
     dest_dir = tmp_path / "otel-collector"
     dest_dir.mkdir(parents=True)
     config = dest_dir / "config.yaml"
-    oc._write_config(config, "v1\n")
-    oc._write_config(config, "v2\n")
+    oc.write_config(config, "v1\n")
+    oc.write_config(config, "v2\n")
     assert config.read_text(encoding="utf-8") == "v2\n"
 
 
@@ -447,7 +447,7 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     assert receivers["postgresql"]["endpoint"] == f"{socket_dir.lstrip('/')}:{_PG_PORT}"
     assert receivers["postgresql"]["transport"] == "unix"
     assert receivers["postgresql"]["username"] == MONITOR_ROLE
-    assert receivers["postgresql"]["password"] == oc._PEER_PLACEHOLDER
+    assert receivers["postgresql"]["password"] == oc.PEER_PLACEHOLDER
     assert receivers["postgresql"]["databases"] == ["ava"]
     assert receivers["redis"]["endpoint"] == "127.0.0.1:6380"
     assert receivers["redis"]["password"] == "abc"  # noqa: S105 — fixture value

@@ -22,7 +22,7 @@ from ops.lifecycle.events import publish_page_closed as publish_page_closed
 from ops.pages import list_open_page_names
 
 
-def _insert_termination_pair(
+def insert_termination_pair(
     conn: psycopg.Connection,
     agent_id: int,
     *,
@@ -64,7 +64,7 @@ def _insert_termination_pair(
     return message_id, int(terminate_row[0])
 
 
-def _insert_pending_termination_message(
+def insert_pending_termination_message(
     conn: psycopg.Connection,
     agent_id: int,
     *,
@@ -101,12 +101,12 @@ def _insert_termination_inbounds(
     """
     kill = kill_all_shell_sessions
     if message is None:
-        return _insert_termination_pair(
+        return insert_termination_pair(
             conn, agent_id, source=source, message=None, kill_all_shell_sessions=kill
         )
     try:
         with conn.transaction():
-            return _insert_termination_pair(
+            return insert_termination_pair(
                 conn, agent_id, source=source, message=message, kill_all_shell_sessions=kill
             )
     except Exception as exc:
@@ -116,13 +116,13 @@ def _insert_termination_inbounds(
             agent_id=agent_id,
             exc=exc,
         )
-    _, terminate_id = _insert_termination_pair(
+    _, terminate_id = insert_termination_pair(
         conn, agent_id, source=source, message=None, kill_all_shell_sessions=kill
     )
     message_id: int | None = None
     try:
         with conn.transaction():
-            message_id = _insert_pending_termination_message(
+            message_id = insert_pending_termination_message(
                 conn,
                 agent_id,
                 source=source,
@@ -207,7 +207,7 @@ def _enqueue_termination_inbounds(
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
     telemetry.emit_prepared(prepared_event)
-    _publish_force_terminate_inbound(db, bus, agent_id, terminate_id, source)
+    publish_force_terminate_inbound(db, bus, agent_id, terminate_id, source)
     return terminate_id, None
 
 
@@ -279,7 +279,7 @@ def _force_terminate_transaction(
     return old_status, pid, page_names, terminate_inbound_id, row[2]
 
 
-def _publish_force_terminate_inbound(
+def publish_force_terminate_inbound(
     db: Database, bus: EventBus, agent_id: int, inbound_id: int, _source: str
 ) -> None:
     """Publish the non-transactional wake after the fenced audit commit."""
@@ -302,5 +302,5 @@ def force_mark_terminated(
         source=source,
         message=message,
     )
-    _publish_force_terminate_inbound(db, bus, agent_id, inbound_id, source)
+    publish_force_terminate_inbound(db, bus, agent_id, inbound_id, source)
     return page_names

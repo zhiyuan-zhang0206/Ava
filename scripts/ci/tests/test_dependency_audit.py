@@ -26,7 +26,7 @@ def test_audit_accepts_complete_findings(
         return CompletedProcess(["npm", "audit"], exit_code, '{"vulnerabilities": {}}', "")
 
     monkeypatch.setattr(audit.subprocess, "run", run)
-    assert audit._run_json(["npm", "audit"], tmp_path) == {"vulnerabilities": {}}
+    assert audit.run_json(["npm", "audit"], tmp_path) == {"vulnerabilities": {}}
 
 
 @pytest.mark.parametrize(
@@ -41,7 +41,7 @@ def test_audit_rejects_registry_and_tool_errors(
 
     monkeypatch.setattr(audit.subprocess, "run", run)
     with pytest.raises(RuntimeError, match="npm reported an audit error") as error:
-        audit._run_json(["npm", "audit"], tmp_path)
+        audit.run_json(["npm", "audit"], tmp_path)
     assert "private registry details" not in str(error.value)
 
 
@@ -105,7 +105,7 @@ def test_npm_findings_flatten_the_package_map() -> None:
 
 
 def test_every_pinned_binary_constant_is_found_in_the_tree() -> None:
-    for name, path, pattern in audit._PINS:
+    for name, path, pattern in audit.PINS:
         assert audit.pinned_version(path, pattern), name
 
 
@@ -134,7 +134,7 @@ def test_report_runs_the_canonical_uv_pin(monkeypatch: MonkeyPatch, tmp_path: Pa
         "--output-format",
         "json",
     ]
-    assert output.read_text().startswith(audit._MARKER)
+    assert output.read_text().startswith(audit.MARKER)
 
 
 def test_zonky_latest_stays_on_the_pinned_major() -> None:
@@ -165,7 +165,7 @@ def test_issue_is_actionable_on_high_unknown_or_a_behind_binary_only() -> None:
 
 def test_report_orders_by_severity_and_carries_the_marker() -> None:
     report = audit.render([_vuln("low"), _vuln("critical")], [_binary("1.0", "1.1")])
-    assert report.startswith(audit._MARKER)
+    assert report.startswith(audit.MARKER)
     assert report.index("| critical |") < report.index("| low |")
     assert "| x | 1.0 | 1.1 | src | behind |" in report
 
@@ -209,4 +209,4 @@ def test_issue_lookup_filters_on_the_marker_and_skips_pull_requests() -> None:
     gh = _FakeGh([])
     audit.sync_issue("o/r", "body", actionable=False, gh=gh)
     jq = gh.calls[0][gh.calls[0].index("--jq") + 1]
-    assert audit._MARKER in jq and 'has("pull_request") | not' in jq
+    assert audit.MARKER in jq and 'has("pull_request") | not' in jq

@@ -287,7 +287,7 @@ def _validate_patch_title(cur: Cursor[Any], task_id: int, title: str | None) -> 
             )
 
 
-def _patch_task_blocking(
+def patch_task_blocking(
     pool: ConnectionPool[Any],
     task_id: int,
     body: TaskUpdateRequest,
@@ -420,7 +420,7 @@ async def patch_task(
     except PrincipalScopeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     task, notes = await asyncio.to_thread(
-        _patch_task_blocking,
+        patch_task_blocking,
         request.app.state.db_pool,
         task_id,
         body,

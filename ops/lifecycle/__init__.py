@@ -71,22 +71,22 @@ from ops.lifecycle.launch import (
 # Re-exported (explicit-alias form) from `resurrect_gates` so the
 # module-qualified callers — tests — keep their call sites.
 from ops.lifecycle.resurrect_gates import (
-    clear_wake_suppression as _clear_wake_suppression,
+    clear_wake_suppression as clear_wake_suppression,
 )
 from ops.lifecycle.resurrect_gates import (
-    recovery_halted as _recovery_halted,
+    recovery_halted as recovery_halted,
 )
 from ops.lifecycle.resurrect_gates import (
-    system_notice_source_of_trigger as _system_notice_source_of_trigger,
+    system_notice_source_of_trigger as system_notice_source_of_trigger,
 )
 from ops.lifecycle.termination import (
     _force_terminate_transaction as _force_terminate_transaction,
 )
 from ops.lifecycle.termination import (
-    _publish_force_terminate_inbound as _publish_force_terminate_inbound,
+    force_mark_terminated as force_mark_terminated,
 )
 from ops.lifecycle.termination import (
-    force_mark_terminated as force_mark_terminated,
+    publish_force_terminate_inbound as publish_force_terminate_inbound,
 )
 from ops.rpc_schemas import (
     RestartAgentRequest,
@@ -122,9 +122,9 @@ async def terminate_agent_op(
     """
     if body.force:
         _old_status, pid, killed_page_names, command_id, cutoff = await asyncio.to_thread(
-            _terminate_force_blocking, db, bus, agent_id, body, db_pool
+            terminate_force_blocking, db, bus, agent_id, body, db_pool
         )
-        await _cancel_hosted_turn_best_effort(agent_id, command_id)
+        await cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
             await publish_page_closed(bus, agent_id, page_name)
         _log.info(
@@ -187,7 +187,7 @@ async def _kill_shell_sessions_now(
     return ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=killed)
 
 
-async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> None:
+async def cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> None:
     """Accelerate a hosted force-terminate by cancelling the agent's turn task.
 
     Dials the local agent-host's loopback health port (`POST /cancel-turn`);
@@ -216,7 +216,7 @@ async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> Non
         )
 
 
-def _terminate_force_blocking(
+def terminate_force_blocking(
     db: Database,
     bus: EventBus,
     agent_id: int,
@@ -231,7 +231,7 @@ def _terminate_force_blocking(
         message=body.message,
         kill_all_shell_sessions=body.kill_all_shell_sessions,
     )
-    _publish_force_terminate_inbound(db, bus, agent_id, inbound_id, body.source)
+    publish_force_terminate_inbound(db, bus, agent_id, inbound_id, body.source)
     publish_agent_updated_sync(bus, agent_id)
     return old_status, pid, killed_page_names, inbound_id, cutoff
 
@@ -313,11 +313,11 @@ async def resurrect_if_terminated(
     status = await asyncio.to_thread(get_agent_status, db, agent_id)
     if status is not AgentStatus.TERMINATED:
         return status
-    if trigger_inbound_kind != "chat" and await asyncio.to_thread(_recovery_halted, db, agent_id):
+    if trigger_inbound_kind != "chat" and await asyncio.to_thread(recovery_halted, db, agent_id):
         _log.warning("automatic wake stopped after a permanent provider error: agent %s", agent_id)
         return status
     notice_source = await asyncio.to_thread(
-        _system_notice_source_of_trigger, db, agent_id, trigger_inbound_id
+        system_notice_source_of_trigger, db, agent_id, trigger_inbound_id
     )
     if notice_source is not None:
         _log.debug(
@@ -364,7 +364,7 @@ async def resurrect_if_terminated(
             else:
                 raise
         if result_status == ResurrectResult.SPAWNED:
-            await asyncio.to_thread(_clear_wake_suppression, db, agent_id)
+            await asyncio.to_thread(clear_wake_suppression, db, agent_id)
             status = await asyncio.to_thread(get_agent_status, db, agent_id)
     except _cluster_rpc.ClusterOpUnreachable as exc:
         _log.info(
@@ -383,7 +383,7 @@ async def resurrect_if_terminated(
     return status
 
 
-def _restart_blocking(
+def restart_blocking(
     db: Database,
     bus: EventBus,
     agent_id: int,
@@ -478,7 +478,7 @@ async def restart_agent_op(
 ) -> RestartAgentResponse:
     """Local-target restart — INSERT one kind='restart' inbound."""
     iid = await asyncio.to_thread(
-        _restart_blocking, db, bus, agent_id, body, db_pool, catalog=catalog
+        restart_blocking, db, bus, agent_id, body, db_pool, catalog=catalog
     )
     if iid is None:
         return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)

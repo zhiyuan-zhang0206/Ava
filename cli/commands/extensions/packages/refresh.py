@@ -107,7 +107,7 @@ class _Delta:
     package: dict[str, object] = field(default_factory=dict[str, object])
 
 
-class _Pass:
+class Pass:
     """One refresh pass. Filesystem work happens before any registry write; the
     write-back is a single locked read-modify-write (`mutate`) at the end."""
 
@@ -734,7 +734,7 @@ def run_refresh(
     lock_path = paths.ava_home() / "packages-refresh.lock"
     try:
         with file_lock(lock_path, timeout_s=_QUEUE_LOCK_TIMEOUT_S):
-            pass_ = _Pass(
+            pass_ = Pass(
                 config=config,
                 check_only=check_only,
                 only=only,

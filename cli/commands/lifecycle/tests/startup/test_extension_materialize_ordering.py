@@ -52,7 +52,7 @@ def test_materialization_is_not_a_converge_step() -> None:
 
 
 def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
-    """Stub every `_prepare_cold_start` seam, recording the ones this invariant
+    """Stub every `prepare_cold_start` seam, recording the ones this invariant
     is about. Mirrors the monkeypatched-seam style of
     `test_release_cold_start_uses_same_storage_readiness_without_source_or_schema_writes`
     in `cli/tests/bootstrap/test_start_runtime.py` rather than inspecting source text."""
@@ -97,11 +97,11 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
         calls.append("materialize")
 
     monkeypatch.setattr(converge_host, "converge_host", skip_converge)
-    monkeypatch.setattr(_start_commands, "_ensure_gateway_data_plane", ensure_gateway_data_plane)
+    monkeypatch.setattr(_start_commands, "ensure_gateway_data_plane", ensure_gateway_data_plane)
     monkeypatch.setattr(bringup, "prepare_gateway_schema", prepare_gateway_schema)
     monkeypatch.setattr(_start_commands, "cmd_migrations_apply", migrate)
     monkeypatch.setattr(bringup, "complete_gateway_data_plane", complete_gateway_data_plane)
-    monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", schema_check)
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", schema_check)
     monkeypatch.setattr(materialize, "adopt_local_extensions", adopt)
     monkeypatch.setattr(materialize, "materialize_cluster_extensions", record_materialize)
 
@@ -113,7 +113,7 @@ def test_start_materializes_after_the_schema_check(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """The ordering inside `_prepare_cold_start`, asserted via monkeypatched seams.
+    """The ordering inside `prepare_cold_start`, asserted via monkeypatched seams.
 
     Brittle-looking on purpose: the invariant IS the order of three calls, and
     nothing else in the process can observe it. If someone moves the
@@ -122,12 +122,12 @@ def test_start_materializes_after_the_schema_check(
     table, and the symptom is a warning that looks transient rather than a
     failure.
     """
-    from cli.commands.lifecycle.start import _prepare_cold_start
+    from cli.commands.lifecycle.start import prepare_cold_start
 
     calls: list[str] = []
     _instrument_cold_start_seams(monkeypatch, calls)
 
-    rc = _prepare_cold_start(
+    rc = prepare_cold_start(
         Path("/repo"),
         frozenset({"gateway"}),
         (),
@@ -183,12 +183,12 @@ def test_start_adopts_before_it_materializes(
     cluster agreeing; materializing first leaves the machine one converge behind
     on the names it just uploaded.
     """
-    from cli.commands.lifecycle.start import _prepare_cold_start
+    from cli.commands.lifecycle.start import prepare_cold_start
 
     calls: list[str] = []
     _instrument_cold_start_seams(monkeypatch, calls)
 
-    rc = _prepare_cold_start(
+    rc = prepare_cold_start(
         Path("/repo"),
         frozenset({"gateway"}),
         (),

@@ -105,7 +105,7 @@ def _warn_preserved(result: SkillsConvergeResult, s: _Source, dest: Path) -> Non
     )
 
 
-def _copy_tree(src: Path, dest: Path) -> None:
+def copy_tree(src: Path, dest: Path) -> None:
     """Replace `dest` with a copy of `src`, minus `IGNORED_NAMES`.
 
     The replacement is staged: the new tree is fully copied to a dot-prefixed
@@ -333,7 +333,7 @@ def _land_new_copy(
     src_hash: str,
 ) -> None:
     """The destination is absent: copy the source in and upsert its registry row."""
-    _copy_tree(s.src, dest)
+    copy_tree(s.src, dest)
     if entry is None:
         entry = InstalledPackage(name=s.name, type="skill", installed_at=now)
         registry.packages.append(entry)
@@ -385,7 +385,7 @@ def _sync_existing(
             entry.updated_at = now
         result.unchanged.append(s.name)
         return
-    _copy_tree(s.src, dest)
+    copy_tree(s.src, dest)
     entry.content_hash = src_hash
     entry.updated_at = now
     result.updated.append(s.name)

@@ -310,7 +310,7 @@ def test_storage_refuses_missing_credentials_before_effects(
     credentials[missing] = ""
     monkeypatch.setattr(
         _ci,
-        "_start_pg",
+        "start_pg",
         lambda *_a: pytest.fail("storage started before validation"),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
     with pytest.raises(ValueError, match=reason):

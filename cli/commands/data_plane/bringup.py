@@ -172,7 +172,7 @@ def remote_redis_reachable() -> tuple[bool, str]:
         return False, f"redis ({host}:{port}) connect failed: {detail}"
 
 
-def _local_listener(port: int) -> bool:
+def local_listener(port: int) -> bool:
     """Whether anything accepts TCP connections on loopback `port`."""
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=1):
@@ -203,7 +203,7 @@ def warn_orphaned_local_instance() -> None:
             leftovers.append("postgres")
         # A plain listener check: the left-behind Redis always requires its admin
         # password, which a remote-managed home no longer carries.
-        if _local_listener(rec.ports["redis"]):
+        if local_listener(rec.ports["redis"]):
             leftovers.append("redis")
         if leftovers:
             print(

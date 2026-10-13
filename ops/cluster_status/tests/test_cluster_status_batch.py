@@ -81,7 +81,7 @@ def snapshot_dependencies(
         return [], 0, 0
 
     monkeypatch.setattr(cluster_status, "check_pidfile", _dead_pidfile)
-    monkeypatch.setattr(cluster_status, "_collect_sessions", _no_sessions)
+    monkeypatch.setattr(cluster_status, "collect_sessions", _no_sessions)
 
     def _no_agents(_conn: object, *, local_machine: str) -> int:
         assert local_machine == machine_identity.name()
@@ -90,7 +90,7 @@ def snapshot_dependencies(
     def _applied(_conn: object) -> set[str]:
         return {"baseline"}
 
-    monkeypatch.setattr(cluster_status, "_count_local_agents", _no_agents)
+    monkeypatch.setattr(cluster_status, "count_local_agents", _no_agents)
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", _applied)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
     machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
@@ -121,7 +121,7 @@ def test_collect_sessions_batches_timestamp_reads(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(backend, "get_backend", lambda: service)
     monkeypatch.setattr(backend, "get_shell_backend", lambda: shell)
 
-    sessions, _, _ = cluster_status._collect_sessions()
+    sessions, _, _ = cluster_status.collect_sessions()
 
     assert [session.name for session in sessions] == sorted([service.name, shell.name])
     assert service.batch_calls == [[service.name]]
@@ -146,7 +146,7 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
         settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
     )
 
-    sessions, _, _ = cluster_status._collect_sessions()
+    sessions, _, _ = cluster_status.collect_sessions()
     created = sessions[0].created_at
     assert created is not None
     # epoch 1000 = 1970-01-01 00:16:40 UTC = 1970-01-01 08:16:40 +08:00
@@ -428,7 +428,7 @@ def test_agent_count_reads_local_retained_identities_without_processes(
             (agent, machine, status),
         )
     db_conn.commit()
-    assert cluster_status._count_local_agents(db_conn, local_machine=machine_identity.name()) == 3
+    assert cluster_status.count_local_agents(db_conn, local_machine=machine_identity.name()) == 3
 
 
 def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
@@ -451,9 +451,9 @@ def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
     def read_state(_db: object, machine: str, **_kwargs: object) -> HostDeployState:
         return state
 
-    monkeypatch.setattr(cluster_status, "_count_local_agents", count)
+    monkeypatch.setattr(cluster_status, "count_local_agents", count)
     monkeypatch.setattr(host_deploy_state, "read", read_state)
-    monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
+    monkeypatch.setattr(cluster_status, "read_resource_sample", lambda: None)
     snapshot = cluster_status.status_snapshot(
         database,
         pool=pool,
@@ -491,8 +491,8 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
         assert local_machine is machine_identity
         return None, 0, None
 
-    monkeypatch.setattr(cluster_status, "_read_deploy_snapshot", no_deploy)
-    monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
+    monkeypatch.setattr(cluster_status, "read_deploy_snapshot", no_deploy)
+    monkeypatch.setattr(cluster_status, "read_resource_sample", lambda: None)
     snapshot = cluster_status.status_snapshot(
         database,
         image=LoadedCommit(source_root=Path(__file__).parent, sha=None),

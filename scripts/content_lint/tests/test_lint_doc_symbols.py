@@ -20,8 +20,8 @@ def lint(monkeypatch, tmp_path):
     docs.mkdir(parents=True)
     skills = tmp_path / ".ava" / "skills"
     skills.mkdir(parents=True)
-    monkeypatch.setattr(mod, "_DOCS_CONVENTIONS", docs)
-    monkeypatch.setattr(mod, "_DEV_SKILLS", skills)
+    monkeypatch.setattr(mod, "DOCS_CONVENTIONS", docs)
+    monkeypatch.setattr(mod, "DEV_SKILLS", skills)
     return mod, docs
 
 
@@ -32,8 +32,8 @@ def dev_skills(monkeypatch, tmp_path):
     docs.mkdir(parents=True)
     skills = tmp_path / ".ava" / "skills" / "example-project-skill"
     skills.mkdir(parents=True)
-    monkeypatch.setattr(mod, "_DOCS_CONVENTIONS", docs)
-    monkeypatch.setattr(mod, "_DEV_SKILLS", tmp_path / ".ava" / "skills")
+    monkeypatch.setattr(mod, "DOCS_CONVENTIONS", docs)
+    monkeypatch.setattr(mod, "DEV_SKILLS", tmp_path / ".ava" / "skills")
     return mod, skills
 
 

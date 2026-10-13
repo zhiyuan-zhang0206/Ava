@@ -51,7 +51,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
         for name in ("tempo", "loki", "prometheus"):
             assert cfg["exporters"][f"otlphttp/{name}"]["endpoint"] == endpoint
         assert cfg["receivers"]["otlp"]["protocols"]["http"]["endpoint"] == "127.0.0.1:4319"
-        assert oc._lgtm_fanout_bases(database_factory=operator_database) == (endpoint, endpoint)
+        assert oc.lgtm_fanout_bases(database_factory=operator_database) == (endpoint, endpoint)
         target = station_probe.resolve_target(database=operator_database)
         assert target is not None and target.advertised and target.url == endpoint
     finally:

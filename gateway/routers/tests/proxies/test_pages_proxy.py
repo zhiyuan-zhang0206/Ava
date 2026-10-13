@@ -555,10 +555,10 @@ def test_new_url_parses_page_key_with_dashes_in_name() -> None:
     """Name charset allows dashes; the composite key splits on the FIRST
     dash only (agent_id is numeric), so `12-my-page` parses to
     (12, "my-page"). The proxy then serves that page."""
-    from gateway.routers.pages import _parse_page_key
+    from gateway.routers.pages import parse_page_key
 
-    assert _parse_page_key("12-my-page") == (12, "my-page")
-    assert _parse_page_key("7-page") == (7, "page")
-    assert _parse_page_key("nope") is None
-    assert _parse_page_key("12-") == (12, "")
-    assert _parse_page_key("12") is None
+    assert parse_page_key("12-my-page") == (12, "my-page")
+    assert parse_page_key("7-page") == (7, "page")
+    assert parse_page_key("nope") is None
+    assert parse_page_key("12-") == (12, "")
+    assert parse_page_key("12") is None

@@ -2,7 +2,7 @@
 
 A fresh host with no ~/.ava/.env (or one missing required fields) makes
 `Settings()` raise pydantic ValidationError on first `cli.commands` import.
-main() catches it and calls `_print_settings_load_failure`, which must turn the
+main() catches it and calls `print_settings_load_failure`, which must turn the
 raw error into a copy-paste list of the missing AVA_* vars plus the first-start
 hint that joins an agent-runner.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ValidationError
 
-from cli.main import _print_settings_load_failure
+from cli.main import print_settings_load_failure
 
 
 def _validation_error(*fields: str) -> ValidationError:
@@ -26,7 +26,7 @@ def _validation_error(*fields: str) -> ValidationError:
 
 
 def test_friendly_template_lists_missing_vars(capsys):
-    rc = _print_settings_load_failure(_validation_error("db_url", "redis_url"))
+    rc = print_settings_load_failure(_validation_error("db_url", "redis_url"))
 
     assert rc == 1
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
@@ -40,7 +40,7 @@ def test_friendly_template_lists_missing_vars(capsys):
 
 def test_already_prefixed_alias_not_double_prefixed(capsys):
     # A loc already shaped like an alias must not become AVA_AVA_X.
-    _print_settings_load_failure(_validation_error("AVA_DB_URL"))
+    print_settings_load_failure(_validation_error("AVA_DB_URL"))
 
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "AVA_DB_URL=<value>" in err

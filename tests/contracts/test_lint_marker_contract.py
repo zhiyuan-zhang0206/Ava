@@ -151,19 +151,19 @@ def test_send_system_note_default_tag_is_live_notetag_value() -> None:
     assert default in _note_tag_members()
 
 
-def test_send_system_note_rejects_unknown_notetag_before_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Changing the SDK guard to forward an unknown tag must fail this test."""
-    from ava import agents
+def test_send_system_note_rejects_unknown_notetag_before_gateway() -> None:
+    """Changing the SDK guard to forward an unknown tag must fail this test: the check runs in
+    `peers.validate_system_note`, which has no gateway client to reach."""
+    from ava.agents import peers
 
-    monkeypatch.setattr(agents.ava.sdk_surface.agent_identity, "require_actor", lambda: 1)
-
-    def unexpected_gateway_call(*_args: object, **_kwargs: object) -> int:
-        pytest.fail("unknown note tag reached the gateway client")
-
-    monkeypatch.setattr(agents._client, "send_system_note", unexpected_gateway_call)
     with pytest.raises(ValueError) as exc_info:
-        agents.send_system_note(7, "note", tag="unrecognized", idempotency_key=str(uuid4()))
+        peers.validate_system_note(
+            7,
+            "note",
+            tag="unrecognized",
+            task_id=None,
+            resurrect=True,
+            idempotency_key=str(uuid4()),
+        )
     assert "task" in str(exc_info.value)
     assert "heartbeat_pause" in str(exc_info.value)

@@ -16,7 +16,7 @@ import psutil
 from base.config import settings
 from base.paths import logs_dir
 
-_MANAGED_LOG_NAME = re.compile(
+MANAGED_LOG_NAME = re.compile(
     r"(?:"
     r"(?P<agent>ava-agent-[0-9]+\.out\.log)"
     r"|(?P<shell>ava-agent-[0-9]+-shell-[0-9]+-[a-z][a-z0-9-]*\.(?:out|host)\.log)"
@@ -35,7 +35,7 @@ _ROTATED_LOG_ARCHIVE = re.compile(r".+\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 _AGENT_SHELL_SERVICE = re.compile(r"agent-[0-9]+-shell-[0-9]+-")
 
-_FAMILY_DEFAULT_DAYS = {
+FAMILY_DEFAULT_DAYS = {
     "agent": 15,
     "shell": 7,
     "gateway": 30,
@@ -75,7 +75,7 @@ def _service_family(service: str) -> str:
     return "other"
 
 
-def _log_family(match: re.Match[str]) -> str:
+def log_family(match: re.Match[str]) -> str:
     """Return the C retention family for one allowlisted filename."""
     if match["snapshot"] is not None:
         return "snapshot"
@@ -139,7 +139,7 @@ def _retention_candidates(
     failures: list[RetentionFailure] = []
     with os.scandir(logs_path) as entries:
         for entry in entries:
-            match = _MANAGED_LOG_NAME.fullmatch(entry.name)
+            match = MANAGED_LOG_NAME.fullmatch(entry.name)
             if match is None:
                 continue
             path = Path(entry.path)
@@ -152,7 +152,7 @@ def _retention_candidates(
             except OSError as exc:
                 failures.append(RetentionFailure(path=path, error=exc))
                 continue
-            family = _log_family(match)
+            family = log_family(match)
             retention_days = family_days[family]
             cutoff = (current - timedelta(days=retention_days)).timestamp()
             if file_stat.st_mtime >= cutoff:
@@ -276,13 +276,13 @@ def _resolve_family_days(
             if older_than_days is None
             else older_than_days
         )
-        return dict.fromkeys(_FAMILY_DEFAULT_DAYS, retention_days)
+        return dict.fromkeys(FAMILY_DEFAULT_DAYS, retention_days)
     overrides = dict(family_days)
     if "default" in overrides:
         if "other" in overrides:
             raise ValueError("--family-days cannot specify both default and other")
         overrides["other"] = overrides.pop("default")
-    return _FAMILY_DEFAULT_DAYS | overrides
+    return FAMILY_DEFAULT_DAYS | overrides
 
 
 def cmd_logs_retention(

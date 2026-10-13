@@ -115,7 +115,7 @@ async def list_presets(request: Request) -> list[PresetView]:
     return await asyncio.to_thread(_list_blocking, request.app.state.db_pool)
 
 
-def _create_blocking(
+def create_blocking(
     pool: ConnectionPool, body: PresetCreate, key: str | None = None
 ) -> tuple[Any, ...]:
     """Sync create INSERT — via to_thread (409 on name clash)."""
@@ -154,7 +154,7 @@ async def create_preset(request: Request, body: PresetCreate) -> PresetView:
     """Create a preset. 409 on a name clash."""
     _validate_config_keys(body.config)
     row = await asyncio.to_thread(
-        _create_blocking, request.app.state.db_pool, body, creation_receipts.operation_key(request)
+        create_blocking, request.app.state.db_pool, body, creation_receipts.operation_key(request)
     )
     return _view(row)
 

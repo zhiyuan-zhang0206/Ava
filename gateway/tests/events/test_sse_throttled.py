@@ -16,12 +16,12 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import ChatDelta, CodeDelta, LabelUpdated
 from gateway.app import app
 from gateway.events.sse import (
-    _decode_frames_for_test,
-    _sse_batch_frame,
-    _sse_frame,
+    decode_frames_for_test,
+    sse_batch_frame,
+    sse_frame,
     throttled_event_stream,
 )
-from gateway.tests.test_sse import _FakeRequest
+from gateway.tests.test_sse import FakeRequest
 from gateway.tests.test_sse import redis_client as redis_client
 
 
@@ -44,7 +44,7 @@ async def _collect_throttled_frames(
     throttle can split near-simultaneous publishes across frames, so stopping on
     a frame count (not an event count) makes a batching assertion flaky.
     """
-    req = _FakeRequest()
+    req = FakeRequest()
     gen = throttled_event_stream(
         EventBus.from_settings(),
         req,  # type: ignore[arg-type]
@@ -318,9 +318,9 @@ def test_throttled_drops_invalid_payload(
 def test_sse_frame_keeps_unicode_line_separators(ch: str) -> None:
     """One frame, one data line; the payload round-trips unchanged."""
     payload = json.dumps({"content": f"a{ch}b"}, ensure_ascii=False)
-    frame = _sse_frame(payload)
+    frame = sse_frame(payload)
     assert frame.decode().count("\ndata: ") == 0
-    assert _decode_frames_for_test([frame]) == [{"content": f"a{ch}b"}]
+    assert decode_frames_for_test([frame]) == [{"content": f"a{ch}b"}]
 
 
 @pytest.mark.parametrize("ch", ("\u0085", "\u2028", "\u2029"), ids=("U+0085", "U+2028", "U+2029"))
@@ -330,7 +330,7 @@ def test_sse_batch_frame_keeps_unicode_line_separators(ch: str) -> None:
         json.dumps({"content": f"a{ch}b"}, ensure_ascii=False),
         json.dumps({"content": "ok"}, ensure_ascii=False),
     ]
-    frame = _sse_batch_frame(events)
+    frame = sse_batch_frame(events)
     assert frame.decode().count("\ndata: ") == 0
     assert _decode_throttled_frames([frame]) == [[{"content": f"a{ch}b"}, {"content": "ok"}]]
 
@@ -341,7 +341,7 @@ def test_decode_frames_for_test_rejects_split_payload() -> None:
     poisoned = json.dumps({"content": "a\u2028b"}, ensure_ascii=False)
     split_frame = ("data: " + poisoned.replace("\u2028", "\ndata: ") + "\n\n").encode()
     with pytest.raises(json.JSONDecodeError):
-        _decode_frames_for_test([split_frame])
+        decode_frames_for_test([split_frame])
 
 
 def test_throttled_stream_keeps_unicode_line_separators(

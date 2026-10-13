@@ -26,7 +26,7 @@ __all__ = ["cmd_grafana_render"]
 _DASHBOARD_FILE = "ava-ops-main.json"
 
 
-def _provisioning_dashboard(home: Path) -> Path:
+def provisioning_dashboard(home: Path) -> Path:
     """The native provisioning copy converge renders into (S3 target)."""
     return home / "lgtm" / "native" / "config" / "provisioning" / "dashboards" / _DASHBOARD_FILE
 
@@ -88,7 +88,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: Databa
     """
     from base.paths import ava_home
 
-    target = _provisioning_dashboard(ava_home())
+    target = provisioning_dashboard(ava_home())
     if not target.parent.is_dir():
         print(
             f"no native Grafana provisioning tree at {target.parent} — this host does not "

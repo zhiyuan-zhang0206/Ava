@@ -34,7 +34,7 @@ def test_parse_window_indexes_by_requesting_pid() -> None:
     no_responsible = _line("2026-09-14 15:30:01.900", 5002, responsible_pid=None)
     garbage = "not a log line requesting={TCCDProcess: identifier=x, pid=5003}"
     no_requesting = "2026-09-14 15:30:02.000 0x1 Default tccd: something else entirely"
-    window = smoke._f12_parse_window("\n".join([good, no_responsible, garbage, no_requesting]))
+    window = smoke.f12_parse_window("\n".join([good, no_responsible, garbage, no_requesting]))
     assert set(window) == {5001, 5002}
     ts, line = window[5001][0]
     assert line == good
@@ -59,7 +59,7 @@ def test_join_filters_window_and_caps_at_three() -> None:
             (ts + 0.02, _line("s", 5001)),  # dropped: the join keeps the first 3
         ]
     }
-    joined = smoke._f12_join(samples, lines)
+    joined = smoke.f12_join(samples, lines)
     assert [row["pid"] for row in joined] == [5001]
     requests = joined[0]["requests"]
     assert [request["line_ts"] for request in requests] == [ts - 0.10, ts, ts + 0.01]
@@ -95,7 +95,7 @@ def test_attribution_summary_counts() -> None:
             },
         ],
     }
-    summary = smoke._f12_attribution_summary(samples)
+    summary = smoke.f12_attribution_summary(samples)
     assert summary["by_point"]["h0"] == {
         "requests": 2,
         "attributed": 1,
@@ -130,24 +130,24 @@ def test_expect_attribution_violations() -> None:
         ]
     }
     # All rows at h0 must resolve to 400; a missing responsible pid is a violation.
-    assert smoke._f12_expect_attribution(samples, [("h0", None, 400)]) == [
+    assert smoke.f12_expect_attribution(samples, [("h0", None, 400)]) == [
         "h0 heartbeat-b pid 2: request has no responsible"
     ]
     # Mismatch against the expected responsible pid.
-    assert smoke._f12_expect_attribution(samples, [("h4", [7], 400)]) == [
+    assert smoke.f12_expect_attribution(samples, [("h4", [7], 400)]) == [
         "h4 heartbeat pid 7: responsible pid 401 != expected 400"
     ]
     # Matching expectation passes; points absent from the expectations are never checked.
-    assert smoke._f12_expect_attribution(samples, [("h4", [7], 401)]) == []
+    assert smoke.f12_expect_attribution(samples, [("h4", [7], 401)]) == []
     # A listed pid with no joined row (dead or silent) is a violation.
-    assert smoke._f12_expect_attribution(samples, [("h4", [7, 8], 401)]) == [
+    assert smoke.f12_expect_attribution(samples, [("h4", [7, 8], 401)]) == [
         "h4: no sampled row for pid 8 (dead or no response)"
     ]
     # A joined row without requests fails loudly too.
     empty = {"unit": "u", "point": "h4", "pid": 7, "requests": []}
-    assert smoke._f12_expect_attribution({"tccd": [empty]}, [("h4", [7], 400)]) == [
+    assert smoke.f12_expect_attribution({"tccd": [empty]}, [("h4", [7], 400)]) == [
         "h4 u pid 7: no requests observed"
     ]
-    assert smoke._f12_expect_attribution({"tccd": []}, [("h0", None, 400)]) == [
+    assert smoke.f12_expect_attribution({"tccd": []}, [("h0", None, 400)]) == [
         "h0: no sampled rows"
     ]

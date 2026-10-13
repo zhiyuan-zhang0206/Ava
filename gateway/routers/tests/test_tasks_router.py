@@ -35,7 +35,7 @@ from gateway.routers.tasks import get_tasks
 from ops import lifecycle as ops_lifecycle
 
 
-def _make_agent(db: psycopg.Connection) -> int:
+def make_agent(db: psycopg.Connection) -> int:
     with db.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         aid = cur.fetchone()[0]  # type: ignore[index]
@@ -47,7 +47,7 @@ def _make_agent(db: psycopg.Connection) -> int:
     return aid
 
 
-def _make_task(
+def make_task(
     db: psycopg.Connection,
     *,
     owner: int,
@@ -70,7 +70,7 @@ def _make_task(
     return tid
 
 
-def _make_root_task(db: psycopg.Connection) -> int:
+def make_root_task(db: psycopg.Connection) -> int:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
@@ -125,8 +125,8 @@ def _priority(db: psycopg.Connection, tid: int) -> str:
 
 class TestRemindInterval:
     def test_null_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -138,8 +138,8 @@ class TestRemindInterval:
         assert _remind_interval_seconds(db_conn, tid) == 1800  # unchanged
 
     def test_over_24h_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -150,8 +150,8 @@ class TestRemindInterval:
         assert _remind_interval_seconds(db_conn, tid) == 1800
 
     def test_non_positive_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -162,8 +162,8 @@ class TestRemindInterval:
         assert _remind_interval_seconds(db_conn, tid) == 1800
 
     def test_valid_value_is_written(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -177,8 +177,8 @@ class TestRemindInterval:
 
 class TestOwner:
     def test_null_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}", json={"owner": None}, headers=keyed_headers(str(uuid4()))
@@ -190,9 +190,9 @@ class TestOwner:
     def test_reassign_notifies_the_new_and_previous_owner(
         self, db_conn: psycopg.Connection
     ) -> None:
-        owner = _make_agent(db_conn)
-        new_owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        new_owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -223,8 +223,8 @@ class TestOwner:
         ]
 
     def test_unchanged_owner_sends_no_notification(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -237,9 +237,9 @@ class TestOwner:
     def test_reassign_to_terminated_owner_requests_resurrection(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        owner = _make_agent(db_conn)
-        new_owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        new_owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (new_owner,))
         db_conn.commit()
@@ -264,9 +264,9 @@ class TestOwner:
         assert len(_task_notes(db_conn, new_owner)) == 1
 
     def test_reassign_skips_terminated_previous_owner(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        new_owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        new_owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (owner,))
         db_conn.commit()
@@ -283,8 +283,8 @@ class TestOwner:
 
 class TestPriority:
     def test_get_exposes_priority(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)  # defaults to P2
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)  # defaults to P2
         with TestClient(app) as client:
             resp = client.get("/api/tasks")
         assert resp.status_code == 200
@@ -292,8 +292,8 @@ class TestPriority:
         assert row["priority"] == "P2"
 
     def test_patch_sets_priority(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -305,8 +305,8 @@ class TestPriority:
         assert _priority(db_conn, tid) == "P0"
 
     def test_patch_rejects_bad_priority(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -322,8 +322,8 @@ class TestPriority:
 
 class TestTitle:
     def test_patch_renames(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -336,9 +336,9 @@ class TestTitle:
     def test_duplicate_in_progress_title_is_rejected(self, db_conn: psycopg.Connection) -> None:
         """Renaming to another in_progress task's title is rejected —
         mirrors the SDK create()/update() invariant."""
-        owner = _make_agent(db_conn)
-        _make_task(db_conn, owner=owner)  # holds title 't'
-        tid = _make_task(db_conn, owner=owner, title="other")
+        owner = make_agent(db_conn)
+        make_task(db_conn, owner=owner)  # holds title 't'
+        tid = make_task(db_conn, owner=owner, title="other")
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}", json={"title": "t"}, headers=keyed_headers(str(uuid4()))
@@ -349,7 +349,7 @@ class TestTitle:
 
 class TestRootTaskImmutable:
     def test_status_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        root_id = _make_root_task(db_conn)
+        root_id = make_root_task(db_conn)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{root_id}",
@@ -361,8 +361,8 @@ class TestRootTaskImmutable:
         assert _status(db_conn, root_id) == "in_progress"  # unchanged
 
     def test_reassign_is_rejected(self, db_conn: psycopg.Connection) -> None:
-        root_id = _make_root_task(db_conn)
-        new_owner = _make_agent(db_conn)
+        root_id = make_root_task(db_conn)
+        new_owner = make_agent(db_conn)
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{root_id}",
@@ -388,8 +388,8 @@ class TestRootTaskImmutable:
         """Removed statuses 422 through the shared TaskStatus enum (user rulings
         2026-08-29 'open', 2026-09-15 'ongoing') — zero shim, and the row is
         untouched."""
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner, title=f"regular-{removed_status}")
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner, title=f"regular-{removed_status}")
         with TestClient(app) as client:
             resp = client.patch(
                 f"/api/tasks/{tid}",
@@ -416,8 +416,8 @@ class TestTimestampOffset:
     instead of drifting with the host OS timezone."""
 
     def test_get_created_at_has_utc_offset(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner)
+        owner = make_agent(db_conn)
+        tid = make_task(db_conn, owner=owner)
         with TestClient(app) as client:
             resp = client.get("/api/tasks")
         assert resp.status_code == 200
@@ -500,10 +500,10 @@ class TestGetTaskFields:
     def test_full_is_backward_compatible_and_summary_is_metadata_only(
         self, db_conn: psycopg.Connection
     ) -> None:
-        owner = _make_agent(db_conn)
+        owner = make_agent(db_conn)
         description = "d" * 301
         results = "r" * 301
-        tid = _make_task(db_conn, owner=owner, description=description, results=results)
+        tid = make_task(db_conn, owner=owner, description=description, results=results)
         with TestClient(app) as client:
             default = _list_tasks_ok(client)
             full = _list_tasks_ok(client, fields="full")
@@ -574,15 +574,15 @@ class TestGetTasksWindow:
     def test_window_keeps_recent_and_in_progress_drops_old_done(
         self, db_conn: psycopg.Connection
     ) -> None:
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        old_ip = _make_task(
+        owner = make_agent(db_conn)
+        root = make_root_task(db_conn)
+        old_ip = make_task(
             db_conn, owner=owner, status="in_progress", parent_id=root, title="old-ip"
         )
-        recent_done = _make_task(
+        recent_done = make_task(
             db_conn, owner=owner, status="done", parent_id=root, title="recent-done"
         )
-        old_done = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-done")
+        old_done = make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-done")
         self._backdate(db_conn, old_ip, 40)
         self._backdate(db_conn, old_done, 40)
         with TestClient(app) as client:
@@ -597,12 +597,12 @@ class TestGetTasksWindow:
     def test_window_delivers_out_of_window_ancestor_as_ghost(
         self, db_conn: psycopg.Connection
     ) -> None:
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        old_done_parent = _make_task(
+        owner = make_agent(db_conn)
+        root = make_root_task(db_conn)
+        old_done_parent = make_task(
             db_conn, owner=owner, status="done", parent_id=root, title="old-parent"
         )
-        child = _make_task(
+        child = make_task(
             db_conn, owner=owner, status="in_progress", parent_id=old_done_parent, title="child"
         )
         self._backdate(db_conn, old_done_parent, 40)
@@ -619,10 +619,10 @@ class TestGetTasksWindow:
     def test_24h_window_keeps_recent_done_and_drops_older(
         self, db_conn: psycopg.Connection
     ) -> None:
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        recent = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="recent-20h")
-        older = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="older-40h")
+        owner = make_agent(db_conn)
+        root = make_root_task(db_conn)
+        recent = make_task(db_conn, owner=owner, status="done", parent_id=root, title="recent-20h")
+        older = make_task(db_conn, owner=owner, status="done", parent_id=root, title="older-40h")
         self._backdate_hours(db_conn, recent, 20)
         self._backdate_hours(db_conn, older, 40)
         with TestClient(app) as client:
@@ -637,11 +637,11 @@ class TestGetTasksWindow:
         # A deep subtree: done grandparent → cancelled parent → in_progress
         # child. Both ancestors sit outside the window and must arrive as
         # ghosts so the child never dangles.
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        gp = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-gp")
-        parent = _make_task(db_conn, owner=owner, status="cancelled", parent_id=gp, title="old-p")
-        child = _make_task(
+        owner = make_agent(db_conn)
+        root = make_root_task(db_conn)
+        gp = make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-gp")
+        parent = make_task(db_conn, owner=owner, status="cancelled", parent_id=gp, title="old-p")
+        child = make_task(
             db_conn, owner=owner, status="in_progress", parent_id=parent, title="child"
         )
         self._backdate(db_conn, gp, 60)
@@ -656,9 +656,9 @@ class TestGetTasksWindow:
         assert rows[parent]["ghost"] is True
 
     def test_30d_window_includes_older_activity(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        mid = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="mid-done")
+        owner = make_agent(db_conn)
+        root = make_root_task(db_conn)
+        mid = make_task(db_conn, owner=owner, status="done", parent_id=root, title="mid-done")
         self._backdate(db_conn, mid, 20)
         with TestClient(app) as client:
             resp7 = client.get("/api/tasks", params={"window": "7d"})
@@ -668,9 +668,9 @@ class TestGetTasksWindow:
         assert mid in self._ids(resp30)
 
     def test_default_and_all_return_everything_unflagged(self, db_conn: psycopg.Connection) -> None:
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        old_done = _make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-done")
+        owner = make_agent(db_conn)
+        root = make_root_task(db_conn)
+        old_done = make_task(db_conn, owner=owner, status="done", parent_id=root, title="old-done")
         self._backdate(db_conn, old_done, 400)
         with TestClient(app) as client:
             plain = client.get("/api/tasks")
@@ -685,9 +685,9 @@ class TestGetTasksWindow:
     def test_summary_preserves_every_window_and_ghost_ancestors(
         self, db_conn: psycopg.Connection, window: str
     ) -> None:
-        owner = _make_agent(db_conn)
-        root = _make_root_task(db_conn)
-        parent = _make_task(
+        owner = make_agent(db_conn)
+        root = make_root_task(db_conn)
+        parent = make_task(
             db_conn,
             owner=owner,
             status="done",
@@ -695,7 +695,7 @@ class TestGetTasksWindow:
             title="old-parent",
             description="old parent description",
         )
-        child = _make_task(
+        child = make_task(
             db_conn,
             owner=owner,
             parent_id=parent,

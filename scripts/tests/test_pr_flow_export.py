@@ -43,9 +43,9 @@ def test_window_days_are_the_complete_days_before_today() -> None:
 
 def test_percentile_linear_interpolation() -> None:
     values = [10.0, 20.0, 30.0, 40.0]
-    assert pr_flow._percentile(values, 0.5) == 25.0
-    assert pr_flow._percentile(values, 0.9) == pytest.approx(37.0)
-    assert pr_flow._percentile([7.0], 0.9) == 7.0
+    assert pr_flow.percentile(values, 0.5) == 25.0
+    assert pr_flow.percentile(values, 0.9) == pytest.approx(37.0)
+    assert pr_flow.percentile([7.0], 0.9) == 7.0
 
 
 # ── record building ─────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ def test_compute_days_groups_by_merge_day_and_omits_empty_samples() -> None:
 
 def test_duration_skips_non_positive_spans() -> None:
     record = _record(9, merged="2026-09-12T01:00:00Z", ready="2026-09-12T02:00:00Z")
-    assert pr_flow._duration_seconds(record) is None
+    assert pr_flow.duration_seconds(record) is None
 
 
 # ── cache-based record collection ───────────────────────────────────────────
@@ -184,7 +184,7 @@ def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window(
         fetched.append(page_no)
         return json.dumps(pages[page_no])
 
-    monkeypatch.setattr(pr_flow, "_run_gh", run_gh)
+    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
     stats = pr_flow.RunStats()
     prs = pr_flow.fetch_closed_prs("r/x", since, stats)
     assert fetched == [1, 2]
@@ -200,7 +200,7 @@ def test_fetch_closed_prs_returns_on_a_short_page(monkeypatch: pytest.MonkeyPatc
         fetched.append(page_no)
         return json.dumps(pages[page_no])
 
-    monkeypatch.setattr(pr_flow, "_run_gh", run_gh)
+    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
     prs = pr_flow.fetch_closed_prs("r/x", datetime(2026, 8, 15, tzinfo=UTC), pr_flow.RunStats())
     assert fetched == [1]
     assert len(prs) == 1
@@ -214,8 +214,8 @@ def test_fetch_closed_prs_raises_when_the_walk_exceeds_its_budget(
     def run_gh(_args: list[str], **_kw: object) -> str:
         return json.dumps(page)
 
-    monkeypatch.setattr(pr_flow, "_run_gh", run_gh)
-    monkeypatch.setattr(pr_flow, "_MAX_LIST_PAGES", 2)
+    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
+    monkeypatch.setattr(pr_flow, "MAX_LIST_PAGES", 2)
     with pytest.raises(pr_flow.PrFlowError, match="budget"):
         pr_flow.fetch_closed_prs("r/x", datetime(2026, 8, 15, tzinfo=UTC), pr_flow.RunStats())
 
@@ -226,11 +226,11 @@ def test_fetch_timeline_bounds_pagination(monkeypatch: pytest.MonkeyPatch) -> No
     def run_gh(_args: list[str], **_kw: object) -> str:
         return json.dumps(page)
 
-    monkeypatch.setattr(pr_flow, "_run_gh", run_gh)
+    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
     stats = pr_flow.RunStats()
     events = pr_flow.fetch_timeline("r/x", 5, stats)
-    assert len(events) == pr_flow._MAX_TIMELINE_PAGES * 100
-    assert stats.gh_api_calls == pr_flow._MAX_TIMELINE_PAGES
+    assert len(events) == pr_flow.MAX_TIMELINE_PAGES * 100
+    assert stats.gh_api_calls == pr_flow.MAX_TIMELINE_PAGES
 
 
 def test_fetch_queue_depth_returns_none_on_trunk_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,7 +238,7 @@ def test_fetch_queue_depth_returns_none_on_trunk_error(monkeypatch: pytest.Monke
         post=lambda *_a, **_k: (None, "HTTP 503"),
         target_payload=lambda _repo: {},
     )
-    monkeypatch.setattr(pr_flow, "_trunk_client", lambda: contextlib.nullcontext(fake))
+    monkeypatch.setattr(pr_flow, "trunk_client", lambda: contextlib.nullcontext(fake))
     stats = pr_flow.RunStats()
     assert pr_flow.fetch_queue_depth("r/x", "tok", stats) is None
     assert stats.trunk_error == "HTTP 503"
@@ -268,7 +268,7 @@ def test_fetch_quarantined_walks_next_page_token(monkeypatch: pytest.MonkeyPatch
         target_payload=lambda _repo: {},
         ORG_SLUG="org",
     )
-    monkeypatch.setattr(pr_flow, "_trunk_client", lambda: contextlib.nullcontext(fake))
+    monkeypatch.setattr(pr_flow, "trunk_client", lambda: contextlib.nullcontext(fake))
     stats = pr_flow.RunStats()
     result = pr_flow.fetch_quarantined("r/x", "tok", stats)
     assert result is not None and len(result) == 2

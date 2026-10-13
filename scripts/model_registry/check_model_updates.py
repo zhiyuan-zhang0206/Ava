@@ -41,7 +41,7 @@ _DOH_ENDPOINTS = (
     "https://dns.google/resolve",
 )
 _FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
-_doh_cache: dict[str, str] = {}
+doh_cache: dict[str, str] = {}
 _DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{4}(?:-\d{2}(?:-\d{2})?)?$|-\d{8}$")
 
 
@@ -213,8 +213,8 @@ def _first_real_doh_address(value: object, endpoint: str, host: str) -> str:
 
 
 def _doh_real_ip(host: str) -> str:
-    if host in _doh_cache:
-        return _doh_cache[host]
+    if host in doh_cache:
+        return doh_cache[host]
     last_error: Exception | None = None
     for endpoint in _DOH_ENDPOINTS:
         try:
@@ -226,7 +226,7 @@ def _doh_real_ip(host: str) -> str:
             )
             response.raise_for_status()
             address = _first_real_doh_address(response.json(), endpoint, host)
-            _doh_cache[host] = address
+            doh_cache[host] = address
             return address
         except Exception as exc:
             last_error = exc
