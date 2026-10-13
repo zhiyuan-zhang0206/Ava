@@ -37,6 +37,7 @@ from base.packages.plugins.extensions import (
     SdkMember,
     SdkNamespace,
 )
+from tests.fixtures.log_capture import loguru_records as loguru_records
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
