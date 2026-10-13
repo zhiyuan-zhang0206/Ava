@@ -25,19 +25,19 @@ def test_download_with_retry_preserves_contract(
             raise errors[calls - 1]
         dest.write_bytes(b"ok")
 
-    monkeypatch.setattr(artifact, "_stream_download", download)
+    monkeypatch.setattr(artifact, "stream_download", download)
     monkeypatch.setattr(artifact.time, "monotonic", lambda: 10.0)
     url = "https://example.invalid/t.tar.gz"
     if failures == 3:
         with pytest.raises(RuntimeError) as caught:
-            artifact._download_with_retry(url, tmp_path / "t.tar.gz")
+            artifact.download_with_retry(url, tmp_path / "t.tar.gz")
         assert (
             str(caught.value)
             == f"failed to download otel-collector from {url} after 3 attempts (0s total): reset 3"
         )
         assert caught.value.__cause__ is errors[-1]
     else:
-        artifact._download_with_retry(url, tmp_path / "t.tar.gz")
+        artifact.download_with_retry(url, tmp_path / "t.tar.gz")
         assert (tmp_path / "t.tar.gz").read_bytes() == b"ok"
     assert calls == min(failures + 1, 3)
     assert retry_waits == [5.0 * i for i in range(1, calls)]

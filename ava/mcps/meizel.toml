@@ -17,5 +17,3 @@ exports = ["config.py"]
 "tests/test_browser.py -> _browser.py#_RELEASE_TIMEOUT_S" = 1
 "tests/test_browser.py -> _browser.py#_dial_browser_mcp" = 2
 "tests/test_computer.py -> _computer.py#_LINE_LIMIT" = 1
-"tests/test_daemon.py -> _daemon.py#_load_config" = 3
-"tests/test_mcps.py -> _remote.py#_socket_path_for" = 2

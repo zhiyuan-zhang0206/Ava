@@ -109,10 +109,10 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         )
     elif cause == "ack_exhaustion":
         detail = stop_takeover_with_exhausted_ack(db_conn, requested, owner)
-        monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+        monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     else:
         detail = "the executor process is gone"
-        monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["dead"]))
+        monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["dead"]))
         session = leases.native_status(database, event_bus, owner.agent_id, owner)
         await impersonation.supervise_relay(
             database,
@@ -299,7 +299,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
         machine_identity=machine_identity,
     )
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
 
     def workspace_for_agent(_agent_id: int) -> Path:
         return tmp_path
@@ -408,7 +408,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
         machine_identity=machine_identity,
     )
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-    monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
+    monkeypatch.setattr(impersonation, "provider_anchor_states", Mock(return_value=["alive"]))
     await graph.ainvoke(
         reset,
         config,

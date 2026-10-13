@@ -37,7 +37,7 @@ def test_real_shell_owner_probe_counts_its_public_fanout(monkeypatch: pytest.Mon
     monkeypatch.setattr(
         ava.agents,
         "get_status",
-        metering._make_recorder(terminated, "agents.get_status", sampling),
+        metering.make_recorder(terminated, "agents.get_status", sampling),
     )
     registry = ExtensionRegistry(
         (

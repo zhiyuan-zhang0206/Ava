@@ -147,7 +147,7 @@ def test_allocate_output_path_never_evicts_live_session_log(
     live_launch = live_log.with_suffix(".sh")
     live_launch.write_text("still needed")
     os.utime(live_log, (base - 100, base - 100))
-    for i in range(background._OUTPUT_KEEP + 5):
+    for i in range(background.OUTPUT_KEEP + 5):
         p = d / f"{100 + i}_seed.log"
         p.write_text("old")
         os.utime(p, (base + i, base + i))
@@ -166,7 +166,7 @@ def test_allocate_output_path_prunes_ring() -> None:
         old_log.unlink()
     # Seed more logs than the ring keeps, with strictly increasing mtimes.
     base = time.time() - 3600
-    for i in range(background._OUTPUT_KEEP + 5):
+    for i in range(background.OUTPUT_KEEP + 5):
         p = d / f"{i}_seed.log"
         p.write_text("old")
         p.with_suffix(".sh").write_text("not started")
@@ -175,7 +175,7 @@ def test_allocate_output_path_prunes_ring() -> None:
     assert path == d / "999_fresh.log"
     assert path.exists()  # touched up front: tailable before the command writes
     remaining = list(d.glob("*.log"))
-    assert len(remaining) <= background._OUTPUT_KEEP
+    assert len(remaining) <= background.OUTPUT_KEEP
     assert path in remaining  # the newest survives the prune
     assert {p.stem for p in d.glob("*.sh")} <= {p.stem for p in remaining}
 

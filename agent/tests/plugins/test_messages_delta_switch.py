@@ -27,10 +27,10 @@ from agent.state import (
     MESSAGES_DELTA_CHANNEL,
     MESSAGES_DELTA_SNAPSHOT_FREQUENCY,
     BaseAgentState,
-    _resolve_reducer,
     accumulate_delta,
     is_messages_reducer_form,
     messages_annotation_key,
+    resolve_reducer,
 )
 
 PLUGIN_SPELLING = Annotated[list[AnyMessage], add_messages]
@@ -54,7 +54,7 @@ def test_annotation_keys_equivalent_across_spellings() -> None:
 
 def test_resolve_reducer_never_falls_back_for_the_delta_form() -> None:
     # The real base field: what the working-copy machinery resolves.
-    assert _resolve_reducer(BaseAgentState.model_fields["messages"]) is guarded_add_messages
+    assert resolve_reducer(BaseAgentState.model_fields["messages"]) is guarded_add_messages
 
 
 def test_resolve_reducer_ignores_foreign_delta_channels() -> None:
@@ -63,7 +63,7 @@ def test_resolve_reducer_ignores_foreign_delta_channels() -> None:
     class _Foreign(BaseModel):
         value: Annotated[list[AnyMessage], foreign] = Field(default_factory=list)
 
-    assert _resolve_reducer(_Foreign.model_fields["value"]) is not guarded_add_messages
+    assert resolve_reducer(_Foreign.model_fields["value"]) is not guarded_add_messages
 
 
 def test_accumulate_delta_concatenates_for_every_messages_spelling() -> None:

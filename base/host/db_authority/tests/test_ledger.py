@@ -119,7 +119,7 @@ def test_a_ledger_written_before_generations_stopped_rotating_loads(home: Path) 
     path.write_text(json.dumps(recorded))
     ledger = store.require_ledger(home)
     assert ledger.active is not None and ledger.active.origin == Origin(kind="cutover")
-    store._write(home, ledger)
+    store.write(home, ledger)
     rewritten = json.loads(path.read_text())
     assert "counter" not in rewritten and "revoked" not in rewritten
     assert rewritten["active"]["origin"] == {"kind": "cutover"}

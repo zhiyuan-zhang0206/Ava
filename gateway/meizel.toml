@@ -34,8 +34,6 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 
 [debt.private-name]
 "mcp_server/tests/test_guarded_tool_admission.py -> tests/extensions/test_mcp_endpoint.py#_enable_endpoint" = 1
-"tests/agents/test_agents_system_note_restart.py -> agents/system_note.py#_system_note_blocking" = 1
 "tests/observability/test_ops_monitor.py -> cluster/ops_series.py#_bucket_starts" = 1
 "tests/receipts/tasks/test_task_patch_tree.py -> routers/tests/test_tasks_router.py#_status" = 1
-"tests/receipts/test_system_note_idempotency.py -> agents/system_note.py#_system_note_blocking" = 1
 "tests/test_agent_inspect.py -> inspect/router.py#_cluster_rpc" = 1

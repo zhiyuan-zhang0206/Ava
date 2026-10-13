@@ -63,7 +63,7 @@ def test_bare_python_recorder_uses_its_captured_cold_producer(
         order.append("body")
         return "done"
 
-    wrapped = metering._make_recorder(body, "probe.bare", sampling, producer)
+    wrapped = metering.make_recorder(body, "probe.bare", sampling, producer)
     assert order == [] and built == []
     try:
         assert wrapped() == "done"
@@ -91,7 +91,7 @@ def test_sampled_out_call_does_not_construct_a_producer(
     def forbidden() -> EventPipeline:
         pytest.fail("sampled-out SDK call built a writer")
 
-    wrapped = metering._make_recorder(lambda: "done", "probe.sample", sampling, forbidden)
+    wrapped = metering.make_recorder(lambda: "done", "probe.sample", sampling, forbidden)
     assert wrapped() == "done"
 
 
@@ -144,7 +144,7 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
     def body() -> None:
         process_context.bind_context(new_context)
 
-    wrapped = metering._make_recorder(body, "probe.switch", sampling, forbidden)
+    wrapped = metering.make_recorder(body, "probe.switch", sampling, forbidden)
     try:
         wrapped()
         assert first.sync_events(timeout=1).status is DrainStatus.COMPLETED
@@ -219,7 +219,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         assert made == []
         attachment.close()
         process_context.unbind_context()
-        wrapped = metering._make_recorder(
+        wrapped = metering.make_recorder(
             lambda: "done", "probe.detached", sampling, bare_clients.event_pipeline
         )
         assert wrapped() == "done"

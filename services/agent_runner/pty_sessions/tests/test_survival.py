@@ -28,7 +28,7 @@ from base.sessions.pty.paths import ledger_path
 from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped import pty_shells as support
-from tests.path_scoped.pty_service import _REPO, PtyServiceProcess
+from tests.path_scoped.pty_service import REPO, PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
 
@@ -66,7 +66,7 @@ def test_a_session_outlives_the_process_that_created_it(unit_home: Path) -> None
             str(unit_home),
             f"python3 -u {script} {counter} &",
         ],
-        cwd=_REPO,
+        cwd=REPO,
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -95,7 +95,7 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
     name = "ava-agent-987-shell-2-backend"
     host = subprocess.Popen(  # noqa: S603 — repo-internal interpreter + inline program
         [sys.executable, str(_CHILD), "backend_host", name, str(unit_home)],
-        cwd=_REPO,
+        cwd=REPO,
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -128,7 +128,7 @@ def test_a_session_outlives_every_client_restarting_in_turn(unit_home: Path) -> 
                 name,
                 f"echo generation-{generation}",
             ],
-            cwd=_REPO,
+            cwd=REPO,
             capture_output=True,
             text=True,
             timeout=60,

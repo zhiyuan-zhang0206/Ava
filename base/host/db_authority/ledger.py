@@ -167,7 +167,7 @@ def locked(home: Path) -> Generator[None]:
         yield
 
 
-def _write(home: Path, ledger: Ledger) -> None:
+def write(home: Path, ledger: Ledger) -> None:
     write_private_bytes(ledger_path(home), _encode(ledger))
 
 
@@ -217,7 +217,7 @@ def create_ledger(home: Path, *, owner: str, groups: Groups) -> Ledger:
         if _secret_published(home):
             raise LedgerRefusedError("the generation secret exists without a ledger")
         ledger = Ledger(version=1, home=str(home), owner=owner, groups=groups)
-        _write(home, ledger)
+        write(home, ledger)
         return ledger
 
 
@@ -273,7 +273,7 @@ def begin_mint(home: Path, *, encrypt: Encrypt) -> Generation:
             credential_digest=credential_digest(body),
             origin=Origin(kind="birth"),
         )
-        _write(home, _replace(ledger, pending=pending))
+        write(home, _replace(ledger, pending=pending))
         return pending
 
 
@@ -302,5 +302,5 @@ def activate(home: Path, verified: VerifiedGeneration) -> Generation:
             raise LedgerRefusedError("activation must name the exact pending generation")
         if ledger.active is not None:
             return ledger.active
-        _write(home, _replace(ledger, active=current, pending=None))
+        write(home, _replace(ledger, active=current, pending=None))
         return current

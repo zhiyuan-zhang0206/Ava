@@ -90,7 +90,7 @@ def _triggers(content: str) -> list[str]:
     return hits
 
 
-def _record_finding(source: str, triggers: list[str]) -> None:
+def record_finding(source: str, triggers: list[str]) -> None:
     """Hand one security finding to the exec turn's state update.
 
     The finding is appended to `ava.state_update["security_findings"]` — the
@@ -133,7 +133,7 @@ def finding_delivery_active() -> bool:
     """True when a finding recorded now would reach the agent: scanning is
     enabled and an exec turn is running.
 
-    Lets a caller skip a paid check whose verdict `_record_finding` would drop.
+    Lets a caller skip a paid check whose verdict `record_finding` would drop.
     """
     from ava.sdk_surface.settings import agent_setting
 
@@ -149,7 +149,7 @@ def record_model_finding(source: str, score: float) -> None:
     `score` is the model's probability for that verdict. Delivered like any rule
     finding: a SECURITY system note after the tool result, content untouched.
     """
-    _record_finding(source, [f"{_MODEL_TRIGGER} (model score {score:.2f})"])
+    record_finding(source, [f"{_MODEL_TRIGGER} (model score {score:.2f})"])
 
 
 def scan_content(content: str, source: str = "unknown") -> str:
@@ -161,10 +161,10 @@ def scan_content(content: str, source: str = "unknown") -> str:
     construction must call scan_inbound_content() instead, whose caller owns the
     finding. The returned content is always clean — no warning is prepended.
     """
-    # The finding rides the exec turn's state update (see `_record_finding`); the SDK keeps none.
+    # The finding rides the exec turn's state update (see `record_finding`); the SDK keeps none.
     hits = _triggers(content)
     if hits:
-        _record_finding(source, hits)
+        record_finding(source, hits)
     return content
 
 

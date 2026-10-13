@@ -306,7 +306,7 @@ def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
         clients.event_pipeline()
         pin_agent(None, clients=clients)
         monkeypatch.setattr(pipeline, "finalize_exports", finalize)
-        child._deliver_run_telemetry(result_path, payload)
+        child.deliver_run_telemetry(result_path, payload)
         finalize.assert_called_once_with()
         assert Path(result_path).read_bytes() == before
     finally:
@@ -329,9 +329,9 @@ def test_unknown_ordinary_delivery_keeps_crash_primary(
     write_result(Path(result_path), payload)
     before = Path(result_path).read_bytes()
     monkeypatch.setattr(telemetry, "sync", MagicMock(side_effect=ValueError("unknown drain")))
-    child._deliver_run_telemetry(result_path, payload)
+    child.deliver_run_telemetry(result_path, payload)
     assert Path(result_path).read_bytes() == before
-    child._deliver_envelope_telemetry()
+    child.deliver_envelope_telemetry()
 
 
 def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path) -> None:
@@ -374,7 +374,7 @@ def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path)
                 target_agent_id=None,
             )
         )
-        child._deliver_run_telemetry(str(result_path), payload)
+        child.deliver_run_telemetry(str(result_path), payload)
         result = read_result(result_path)
         assert result.kind == "crashed" and result.code_reached is True
         assert result.exc_type == "ValueError" and result.exc_msg == str(original)

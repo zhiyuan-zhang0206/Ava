@@ -32,7 +32,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     bare_funnel = ava.mcps.call_funnel.call_raw
 
     load_extensions(validate_state=plugin_state_schema)
-    metered = {fq for p, a, fq in metering._instrument_targets() if is_recorder(getattr(p, a))}
+    metered = {fq for p, a, fq in metering.instrument_targets() if is_recorder(getattr(p, a))}
     assert metered, "the leak this guards is gone"
     assert is_recorder(ava.mcps.call_funnel.call_raw)
 
@@ -42,7 +42,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     assert ava.mcps.call_funnel.call_raw is bare_funnel
     # The whole surface, not just the funnel: a later test asserting on identity or
     # on call counts through a wrapped path must see no recorder anywhere.
-    assert not [fq for p, a, fq in metering._instrument_targets() if is_recorder(getattr(p, a))]
+    assert not [fq for p, a, fq in metering.instrument_targets() if is_recorder(getattr(p, a))]
 
 
 def test_a_plugin_load_leaves_no_namespace_behind(

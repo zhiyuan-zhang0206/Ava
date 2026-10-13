@@ -23,7 +23,7 @@ class SamplingPolicy(BaseModel):
     sample_every: int = Field(default=10, ge=1)
 
 
-def _read_policy() -> SamplingPolicy:
+def read_policy() -> SamplingPolicy:
     from base.config import settings
     from base.host.env.bootstrap import (
         config_source_is_local,
@@ -185,7 +185,7 @@ class SamplingPolicyOwner:
                 httpx.RemoteProtocolError,
             )
             status_error = httpx.HTTPStatusError
-            value = _read_policy() if self.reader is None else self.reader()
+            value = read_policy() if self.reader is None else self.reader()
             with self.lock:
                 self.value = value
                 self.error = None

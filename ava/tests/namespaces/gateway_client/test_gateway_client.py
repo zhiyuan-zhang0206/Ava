@@ -471,7 +471,7 @@ class TestTransientHttpRetry:
         passed = mock_client.post.call_args.kwargs["timeout"]
         assert (
             passed.read
-            == settings.services.memory_search_deadline_seconds + gc._MEMORY_SEARCH_TIMEOUT_MARGIN_S
+            == settings.services.memory_search_deadline_seconds + gc.MEMORY_SEARCH_TIMEOUT_MARGIN_S
         )
 
     def test_memory_search_sends_the_purpose(self, mock_client: MagicMock):
@@ -516,7 +516,7 @@ class TestTransientHttpRetry:
         mock_client.post.return_value = _transient_resp(200, {"results": []})
         gc.memory_search("query", 5, purpose="search", timeout=9.0)
         call = mock_client.post.call_args.kwargs
-        assert call["timeout"].read == 9.0 + gc._MEMORY_SEARCH_TIMEOUT_MARGIN_S
+        assert call["timeout"].read == 9.0 + gc.MEMORY_SEARCH_TIMEOUT_MARGIN_S
         assert call["json"]["deadline_seconds"] == 9.0
 
     def test_memory_search_without_a_timeout_sends_no_deadline(self, mock_client: MagicMock):
@@ -617,22 +617,22 @@ class TestRetryBackoffJitter:
 
         monkeypatch.delenv("AVA_AGENT_ID", raising=False)
         pin_no_identity()
-        assert gc._agent_jitter_seconds() == 0.0
+        assert gc.agent_jitter_seconds() == 0.0
 
     def test_agent_jitter_deterministic_and_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava.gateway_client import transport as gc
 
         pin_agent(1234)
-        assert gc._agent_jitter_seconds() == gc._agent_jitter_seconds()  # deterministic
-        assert 0.0 <= gc._agent_jitter_seconds() < gc._JITTER_SPAN_S
+        assert gc.agent_jitter_seconds() == gc.agent_jitter_seconds()  # deterministic
+        assert 0.0 <= gc.agent_jitter_seconds() < gc.JITTER_SPAN_S
 
     def test_agent_jitter_differs_across_agents(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava.gateway_client import transport as gc
 
         pin_agent(1)
-        a = gc._agent_jitter_seconds()
+        a = gc.agent_jitter_seconds()
         pin_agent(2)
-        b = gc._agent_jitter_seconds()
+        b = gc.agent_jitter_seconds()
         assert a != b
 
     def test_backoff_bounded_exponential(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -655,7 +655,7 @@ class TestRetryBackoffJitter:
                 }
             )
         )
-        assert [gc._retry_delay_seconds(i, context) for i in range(6)] == [
+        assert [gc.retry_delay_seconds(i, context) for i in range(6)] == [
             1.0,
             2.0,
             4.0,
@@ -778,5 +778,5 @@ def test_retry_settings_are_read_when_a_request_retries(monkeypatch: pytest.Monk
     )
     values.update(attempts=7, delay=0.5)
     assert transport._max_retries(context) == 7
-    assert transport._base_retry_delay_s(context) == 0.5
-    assert transport._retry_delay_seconds(0, context) >= 0.5
+    assert transport.base_retry_delay_s(context) == 0.5
+    assert transport.retry_delay_seconds(0, context) >= 0.5

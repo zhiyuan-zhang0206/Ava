@@ -22,17 +22,17 @@ import pytest
 
 import ava
 from ava.sdk_surface.discovery import (
+    Constant,
     UndeclaredSurfaceError,
-    _Constant,
-    _module_attribute_annotations,
-    _module_attribute_docs,
-    _module_children,
+    module_attribute_annotations,
+    module_attribute_docs,
+    module_children,
     resolve_child,
 )
 from ava.sdk_surface.help import (
-    _format_docstring,
-    _format_documented_const_stub,
-    _format_signature,
+    format_docstring,
+    format_documented_const_stub,
+    format_signature,
     render,
 )
 from base.packages.plugins.loading.plugin_loader import load_plugin_module
@@ -124,26 +124,26 @@ def test_help_recovers_after_source_becomes_available(
     assert "Recovered source documentation." in second
 
 
-# ── _format_docstring ───────────────────────────────────────────────────────
+# ── format_docstring ───────────────────────────────────────────────────────
 
 
 def test_format_docstring_single_line_one_line_form() -> None:
     # Single-phrase doc renders as one-line triple-quoted literal.
-    out = _format_docstring("Single phrase.", indent="")
+    out = format_docstring("Single phrase.", indent="")
     assert out == '"""Single phrase."""'
 
 
 def test_format_docstring_multi_line_first_line_inline() -> None:
     # First line of multi-line doc sits on opening triple; body follows.
     doc = "Summary.\n\nDetail body."
-    out = _format_docstring(doc, indent="")
+    out = format_docstring(doc, indent="")
     assert out == '"""Summary.\n\nDetail body.\n"""'
 
 
 def test_format_docstring_respects_indent() -> None:
     # Indent prefix applies to every line including closing triple.
     doc = "Summary.\n\nBody line."
-    out = _format_docstring(doc, indent="    ")
+    out = format_docstring(doc, indent="    ")
     expected = '    """Summary.\n\n    Body line.\n    """'
     assert out == expected
 
@@ -151,7 +151,7 @@ def test_format_docstring_respects_indent() -> None:
 def test_format_docstring_falls_back_to_single_quote_triple_when_double_present() -> None:
     # If the docstring itself contains `"""`, fall back to `'''` triple-quote.
     doc = 'Use `"""triple"""` for literals.'
-    out = _format_docstring(doc, indent="")
+    out = format_docstring(doc, indent="")
     assert out == "'''Use `\"\"\"triple\"\"\"` for literals.'''"
 
 
@@ -451,7 +451,7 @@ def test_pep224_constant_child_renders_name_type_with_docstring() -> None:
 def test_documented_const_short_value_renders_inline_assignment() -> None:
     """A scalar `ava.const()` value renders as a one-line `name: T = value`."""
     c = ava.const(7, doc="The answer-ish.")
-    out = _format_documented_const_stub("LIMIT", c)
+    out = format_documented_const_stub("LIMIT", c)
     assert out == 'LIMIT: int = 7\n"""The answer-ish."""'
 
 
@@ -459,7 +459,7 @@ def test_documented_const_multiline_string_renders_triple_quoted_block() -> None
     """A multi-line string const (e.g. a skill body) renders as a triple-quoted
     block with the doc as a lead-in — not a stiff `name: str = <... one line>`."""
     c = ava.const("line one\nline two\nline three", doc="A text block.")
-    out = _format_documented_const_stub("BODY", c)
+    out = format_documented_const_stub("BODY", c)
     assert out == '"""A text block."""\nBODY: str = """\nline one\nline two\nline three\n"""'
 
 
@@ -474,7 +474,7 @@ def test_multi_target_separates_with_blank_line() -> None:
     assert any("def read(" in b for b in blocks)
 
 
-# ── _format_signature: stringified annotation cleanup ───────────────────────
+# ── format_signature: stringified annotation cleanup ───────────────────────
 
 
 def test_format_signature_strips_stringified_annotation_quotes() -> None:
@@ -485,7 +485,7 @@ def test_format_signature_strips_stringified_annotation_quotes() -> None:
 
     # Force annotations to string form (simulating __future__ annotations).
     fn.__annotations__ = {"x": "str | None", "return": "None"}
-    sig = _format_signature(fn)
+    sig = format_signature(fn)
     assert sig == "(x: str | None = None) -> None"
 
 
@@ -495,11 +495,11 @@ def test_format_signature_strips_typing_dot_prefix() -> None:
 
     def fn(x: typing.Any) -> typing.Any: ...
 
-    sig = _format_signature(fn)
+    sig = format_signature(fn)
     assert "typing." not in sig
 
 
-# ── _module_children / _classify_dir_entry ──────────────────────────────────
+# ── module_children / _classify_dir_entry ──────────────────────────────────
 
 
 def test_module_children_uses_all_whitelist_when_present() -> None:
@@ -515,7 +515,7 @@ def test_module_children_uses_all_whitelist_when_present() -> None:
         ''',
         name="t_all_whitelist",
     )
-    children = dict(_module_children(mod))
+    children = dict(module_children(mod))
     assert "public" in children
     assert "_internal" not in children
     assert "alsohidden" not in children  # not in __all_for_ava__
@@ -538,7 +538,7 @@ def test_module_children_drops_underscore_names_in_surface() -> None:
         ''',
         name="t_surface_underscore_guard",
     )
-    children = dict(_module_children(mod))
+    children = dict(module_children(mod))
     assert "public" in children
     assert "_leaked" not in children
 
@@ -554,13 +554,13 @@ def test_a_module_without_all_for_ava_is_an_error() -> None:
         name="t_no_all",
     )
     with pytest.raises(UndeclaredSurfaceError, match="declares no __all_for_ava__"):
-        _module_children(mod)
+        module_children(mod)
     with pytest.raises(UndeclaredSurfaceError):
         ava.agent_visible_names(mod)
 
 
 def test_resolve_child_returns_constant_for_module_attr_string() -> None:
-    """Module-level int/str/etc. (not callable/class/module) -> wrapped as _Constant."""
+    """Module-level int/str/etc. (not callable/class/module) -> wrapped as Constant."""
     mod = _fake_module(
         '''
         VERSION: str = "1.0"
@@ -568,10 +568,10 @@ def test_resolve_child_returns_constant_for_module_attr_string() -> None:
         ''',
         name="t_const_classify",
     )
-    annotations = _module_attribute_annotations(mod)
-    docs = _module_attribute_docs(mod)
+    annotations = module_attribute_annotations(mod)
+    docs = module_attribute_docs(mod)
     entry = resolve_child(mod, "VERSION", annotations, docs)
-    assert isinstance(entry, _Constant)
+    assert isinstance(entry, Constant)
     assert entry.type_str == "str"
     assert entry.doc == "Library version."
 
@@ -582,7 +582,7 @@ def test_documented_const_path_under_home_renders_tilde_relative() -> None:
     from pathlib import Path
 
     c = ava.const(Path.home() / ".ava" / "memory", doc="x")
-    out = _format_documented_const_stub("PATH", c)
+    out = format_documented_const_stub("PATH", c)
     assert "PATH: PosixPath = ~/.ava/memory" in out
 
 

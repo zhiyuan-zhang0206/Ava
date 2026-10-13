@@ -67,7 +67,7 @@ from agent.graph.node_log import node_lifecycle
 from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
-from agent.state import AttachState, _validate_plugin_state_keys
+from agent.state import AttachState, validate_plugin_state_keys
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
@@ -231,7 +231,7 @@ async def run_agent_code(
         # non-dict) — raise the TypeError the child would have raised.
         raise TypeError(payload.state_update_error)
     delta = payload.state_update if payload is not None else None
-    plugin_state_update = _validate_plugin_state_keys(dict(delta), state.__class__) if delta else {}
+    plugin_state_update = validate_plugin_state_keys(dict(delta), state.__class__) if delta else {}
     attachments = plugin_state_update.pop("attach", None)
     sdk_calls = payload.sdk_calls if payload is not None else None
     return result, plugin_state_update, exec_ms, attachments, sdk_calls
