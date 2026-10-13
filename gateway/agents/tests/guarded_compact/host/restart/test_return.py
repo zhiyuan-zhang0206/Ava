@@ -154,9 +154,9 @@ def install_apply_loss(
             if lost in ("after_apply", "after_observe_cleanup"):
                 await original_apply(*args, **kwargs)
             if lost == "after_observe_cleanup":
-                from agent.tests.claim.test_inbound_ownership import _admit
+                from agent.tests.claim.test_inbound_ownership import admit_owner
 
-                await _admit(aops_pool, args[1].agent_id, database_gate=database_gate)
+                await admit_owner(aops_pool, args[1].agent_id, database_gate=database_gate)
                 db_conn.execute(
                     "DELETE FROM inbound_messages WHERE id=%s", (kwargs["expected_command_id"],)
                 )

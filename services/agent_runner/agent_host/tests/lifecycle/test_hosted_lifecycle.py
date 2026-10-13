@@ -18,7 +18,7 @@ from agent.ownership.hosted import (
     settle_hosted_runtime,
 )
 from agent.ownership.tests.test_lifecycle_intent import _command
-from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.context import AvaContext
 from base.config import settings
 from base.db import Database
@@ -105,7 +105,7 @@ async def test_hosted_applies_only_after_continuation_returns(
 ) -> None:
     async with hosted_scope() as resources:
         agent_id = agent_row(db_conn)
-        old = await _admit(aops_pool, agent_id, database_gate=database_gate)
+        old = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
         inbound = _command(db_conn, agent_id, kind)
         entered, release = asyncio.Event(), asyncio.Event()
         host = AgentHost(
@@ -184,7 +184,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
 ) -> None:
     async with hosted_scope() as resources:
         agent_id = agent_row(db_conn)
-        owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+        owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
         inbound = _command(db_conn, agent_id, "terminate")
         graph = Mock()
         graph.ainvoke = AsyncMock(
@@ -297,7 +297,7 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     inbound = _command(db_conn, agent_id, "restart")
     assert [
         row.id
@@ -408,7 +408,7 @@ async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     terminate_command(db_conn, agent_id, kill=requested)
     kills = _record_kills(monkeypatch)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
@@ -438,7 +438,7 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
     """The agent's own terminate won acceptance; the operator's kill-requesting
     terminate queued behind it still takes the sessions with the death."""
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     own = terminate_command(db_conn, agent_id, source="self")
     terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch)
@@ -468,7 +468,7 @@ async def test_hosted_failed_kill_still_applies_the_termination(
 ) -> None:
     """A session-kill failure is an ERROR, never a crashed turn: the death applies."""
     agent_id = agent_row(db_conn)
-    owner = await _admit(aops_pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     terminate_command(db_conn, agent_id, kill=True)
     kills = _record_kills(monkeypatch, fail=True)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)

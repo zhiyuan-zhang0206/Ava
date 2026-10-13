@@ -13,7 +13,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import claim_inbound_batch
 from agent.ownership import hosted_cleanup
 from agent.ownership.hosted import apply_hosted_lifecycle
-from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.hosted_force import original_host_force
 from base.db.code_version_gate import ProcessDbGate
@@ -29,7 +29,7 @@ async def _prepare(
     phase: str, conn: psycopg.Connection, pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> tuple[RuntimeIncarnation, int]:
     agent_id = agent_row(conn)
-    owner = await _admit(pool, agent_id, database_gate=database_gate)
+    owner = await admit_owner(pool, agent_id, database_gate=database_gate)
     conn.execute("UPDATE agents_meta SET session_index=4 WHERE id=%s", (agent_id,))
     conn.commit()
     if phase == "graceful":

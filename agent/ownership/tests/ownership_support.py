@@ -33,7 +33,7 @@ def insert(conn: psycopg.Connection, agent_id: int) -> int:
     return row[0]
 
 
-async def _admit(
+async def admit_owner(
     pool: AsyncConnectionPool, agent_id: int, database_gate: ProcessDbGate
 ) -> RuntimeIncarnation:
     owner = await admit_hosted_runtime(

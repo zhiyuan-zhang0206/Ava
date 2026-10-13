@@ -496,10 +496,10 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
 ):
     """Lifecycle acceptance is serial; a summary cannot run in the exiting owner."""
     from agent.ownership.hosted import apply_hosted_lifecycle
-    from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+    from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 
     tid = agent_row(db_conn)
-    old = await _admit(aops_pool, tid, database_gate=database_gate)
+    old = await admit_owner(aops_pool, tid, database_gate=database_gate)
     summary_text = "summary before terminate"
     insert_compact_summary(db_conn, tid, summary_text)
     with db_conn.cursor() as cur:
@@ -550,10 +550,10 @@ async def test_compact_in_same_batch_as_restart(
 ):
     """The admitted successor, not the exiting owner, consumes the same summary."""
     from agent.ownership.hosted import apply_hosted_lifecycle
-    from agent.tests.claim.test_inbound_ownership import _admit, agent_row
+    from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 
     tid = agent_row(db_conn)
-    old = await _admit(aops_pool, tid, database_gate=database_gate)
+    old = await admit_owner(aops_pool, tid, database_gate=database_gate)
 
     summary_text = "summary pre-restart"
     insert_compact_summary(db_conn, tid, summary_text)
@@ -597,7 +597,7 @@ async def test_compact_in_same_batch_as_restart(
         ("restart", "claimed", True, None),
     ]
     summary_id, restart_id = rows[0][0], rows[1][0]
-    successor = await _admit(aops_pool, tid, database_gate=database_gate)
+    successor = await admit_owner(aops_pool, tid, database_gate=database_gate)
     assert successor.generation != old.generation
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (restart_id,)

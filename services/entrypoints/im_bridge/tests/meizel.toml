@@ -1,6 +1,7 @@
-exports = ["slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]
+exports = ["adapters", "slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]
 
 [uses]
+"adapters" = ["slices.py", "task_scope.py", "test_notice_outbox.py", "test_timeline_outbox.py"]
 "conftest.py" = ["test_im_bridge_core.py"]
 "im_bridge_core" = ["slices.py", "task_scope.py", "test_im_bridge_core.py"]
 "test_alert_outbound.py" = ["test_timeline_outbox.py"]
