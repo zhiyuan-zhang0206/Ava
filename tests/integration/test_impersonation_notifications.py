@@ -22,6 +22,7 @@ from base.agents import impersonation as leases
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.incarnation.hosted_force import original_host_force
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
@@ -38,7 +39,6 @@ from cli.commands.agents import impersonation_relay as relay
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import _enqueue_termination_inbounds, _force_terminate_transaction
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import recorded_tree
 
 
 def test_reminder_commands_are_bare_ava(

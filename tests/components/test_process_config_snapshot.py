@@ -4,8 +4,8 @@ import pytest
 
 from base.clock import Clock, clock_config_from_boot
 from base.config import field_names, get_field, settings
+from base.config.tests.configuration import snapshot_process_config
 from gateway import app as gateway_app
-from tests.fixtures.configuration import snapshot_process_config
 from tests.path_scoped.gateway_tests import gateway_config_owner as gateway_config_owner
 
 

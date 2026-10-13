@@ -24,7 +24,7 @@ from base.cluster.machine import (
 )
 from base.config import settings
 from base.log import logger
-from services.desktop.browser.mcp_upstream import _await_stop_or_timeout, contained
+from services.desktop.browser.mcp_upstream import await_stop_or_timeout, contained
 from services.desktop.browser.session import inject_session_cookie
 
 # Gateway session cookie refresh: the default server-side lifetime is 24h;
@@ -107,7 +107,7 @@ class GatewaySession:
         """
         while not stop.is_set():
             await self.inject_once()
-            await _await_stop_or_timeout(stop, _SESSION_REFRESH_INTERVAL_S)
+            await await_stop_or_timeout(stop, _SESSION_REFRESH_INTERVAL_S)
 
 
 def stop_on_signals() -> asyncio.Event:

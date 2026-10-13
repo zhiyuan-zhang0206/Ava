@@ -25,6 +25,7 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
+from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
 from base.agents.tests.capture_inputs import (
@@ -50,7 +51,6 @@ from base.telemetry.audit_events import audit_event_uid, prepare_event_log
 from tests._containers import grant_runner_login
 from tests.fixtures.unit.config_authority import config_authority as config_authority
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller, recorded_tree
 
 # The capability group the grants target, and the generation-shaped login that
 # inherits it (the only identity that logs in).

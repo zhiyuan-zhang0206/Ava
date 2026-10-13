@@ -12,13 +12,13 @@ from uuid import uuid4
 import psycopg
 
 from base.agents import impersonation as leases
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.impersonation_support import recorded_tree
 
 __all__ = ["accept_controller", "create_native_owner", "native_status", "request_controller"]
 

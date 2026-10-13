@@ -8,6 +8,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -20,7 +21,6 @@ from base.tests.impersonation.support import (
     request_controller,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller
 
 
 @pytest.mark.parametrize("ending", ["released", "expired"])

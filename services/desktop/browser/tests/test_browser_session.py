@@ -304,7 +304,7 @@ async def test_session_loop_injects_then_waits(monkeypatch: pytest.MonkeyPatch) 
         stop.set()
 
     monkeypatch.setattr(keeper, "inject_once", fake_inject_once)
-    monkeypatch.setattr(gateway_session, "_await_stop_or_timeout", stop_after_first)
+    monkeypatch.setattr(gateway_session, "await_stop_or_timeout", stop_after_first)
     await keeper.refresh_loop(asyncio.Event())
     assert calls == ["inject"]
 

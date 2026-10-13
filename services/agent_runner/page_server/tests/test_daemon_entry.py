@@ -12,13 +12,13 @@ import pytest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, field_domain, settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.page_server import daemon, resources
-from tests.fixtures.configuration import snapshot_process_config
 
 
 def _assert_gate_matches_image(

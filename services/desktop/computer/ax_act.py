@@ -23,7 +23,7 @@ from base.host.permissions_helper.client import AxActResult, PermissionsHelperCl
 from .ax_ids import AxIdTable, AxSession
 from .ax_tools import require_helper_support
 from .errors import ComputerUseError
-from .screen import _current_scale
+from .screen import current_scale
 
 
 class AxAction(StrEnum):
@@ -210,7 +210,7 @@ def ax_act_tool(
     if "label" in result:
         out["label"] = result["label"]
     if "x" in result and "y" in result and "w" in result and "h" in result:
-        factor = _current_scale(helper, scale)
+        factor = current_scale(helper, scale)
         out["x"] = round((result["x"] + result["w"] / 2) * factor)
         out["y"] = round((result["y"] + result["h"] / 2) * factor)
     if result.get("unanswered"):

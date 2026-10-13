@@ -10,11 +10,11 @@ from typing import Any
 import pytest
 
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.net.auth import ClusterSecretMissingError
 from gateway.cluster import server as _server
-from tests.fixtures.configuration import snapshot_process_config
 
 
 def _app() -> Any:

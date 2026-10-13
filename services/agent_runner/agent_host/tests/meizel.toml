@@ -39,9 +39,6 @@ exports = ["guarded_compact_support.py", "host_policy.py", "lifecycle", "managed
 
 [debt.private-name]
 "agent_host/test_maintenance_failures.py -> runtime/host_support.py#_FakePool" = 1
-"native_cancel/test_authority.py -> history/test_hosted_compact_failure.py#_prepare_graph" = 1
-"native_cancel/test_checkpoint.py -> history/test_hosted_compact_failure.py#_prepare_graph" = 1
-"native_cancel/test_interrupt.py -> history/test_hosted_compact_failure.py#_prepare_graph" = 1
 "native_restart/test_return.py -> native_cancel/test_continuation.py#_install_faults" = 1
 
 [debt.unresolved-patch]

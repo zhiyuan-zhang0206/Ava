@@ -13,7 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership import hosted
 from agent.ownership.corpse_reap import ReapedCorpse
 from services.agent_runner.agent_host import invocation
-from services.agent_runner.agent_host.runtime import _config_fingerprint
+from services.agent_runner.agent_host.runtime import config_fingerprint
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
     GatedGraph,
@@ -68,16 +68,16 @@ class TestConfigRebind:
     def test_the_fingerprint_ignores_key_order(self) -> None:
         """JSONB gives no key-order guarantee, so a fingerprint that depended on
         it would rebuild at random."""
-        a = _config_fingerprint({"x": 1, "y": 2}, None)
-        b = _config_fingerprint({"y": 2, "x": 1}, None)
+        a = config_fingerprint({"x": 1, "y": 2}, None)
+        b = config_fingerprint({"y": 2, "x": 1}, None)
         assert a == b
-        assert a != _config_fingerprint({"x": 1, "y": 3}, None)
+        assert a != config_fingerprint({"x": 1, "y": 3}, None)
 
     def test_the_fingerprint_separates_the_two_maps(self) -> None:
         """`birth_config` and `config_overlay` are different columns with
         different provenance; a fingerprint that flattened them would call two
         genuinely different states equal."""
-        assert _config_fingerprint({"x": 1}, None) != _config_fingerprint(None, {"x": 1})
+        assert config_fingerprint({"x": 1}, None) != config_fingerprint(None, {"x": 1})
 
     async def test_the_row_is_re_read_every_turn(self, wired: Build) -> None:
         """The rebind only works if the read is per turn — caching the row with

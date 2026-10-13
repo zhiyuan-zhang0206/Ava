@@ -23,7 +23,7 @@ from . import ax_gap
 from .ax_gap import Frame
 from .ax_ids import AxSession
 from .errors import ComputerUseError
-from .screen import _current_scale
+from .screen import current_scale
 from .targets import AppTarget, app_selector
 
 Mode = Literal["interactive", "text", "full"]
@@ -450,7 +450,7 @@ def ax_tree_tool(
     session.visual = {}  # px: entries belong to the latest call only
     if not nodes:
         return out
-    factor = _current_scale(helper, scale)
+    factor = current_scale(helper, scale)
     visual_block = ""
     if wanted.ocr_gap:
         read = ax_gap.read_screen(helper, agent_id)

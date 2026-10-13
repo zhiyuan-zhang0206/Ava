@@ -1,4 +1,4 @@
-exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "profiles.py", "runtime_config.py", "service_read.py"]
+exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "profiles.py", "runtime_config.py", "service_read.py", "tests"]
 
 [uses]
 "__init__.py" = ["_full.py", "_lite.py", "admin", "config_registry.py", "profiles.py", "service_read.py"]

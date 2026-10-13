@@ -15,10 +15,7 @@ exports = ["daemon.py", "host.py", "invocation", "runtime.py", "settlement.py", 
 
 [debt.private-name]
 "daemon.py -> stdout_log.py#_rotate_stdout_log_forever" = 1
-"host.py -> runtime.py#_AgentRuntime" = 1
 "tests/agent_host/test_config_rebind.py -> daemon.py#_build_checkpointer" = 1
-"tests/agent_host/test_config_rebind.py -> runtime.py#_config_fingerprint" = 1
-"tests/agent_host/test_rejected_model_config.py -> runtime.py#_config_fingerprint" = 1
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_LIVENESS_BEAT_STEP_S" = 6
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_OWNERSHIP_RENEW_TIMEOUT_S" = 3
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_TURN_PROGRESS_PUBLISH_TIMEOUT_S" = 2
@@ -28,7 +25,6 @@ exports = ["daemon.py", "host.py", "invocation", "runtime.py", "settlement.py", 
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_publish_turn_progress_heartbeat" = 13
 "tests/dispatch/test_host_turn_progress_publish.py -> daemon.py#_stop_ownership_beat" = 2
 "tests/dispatch/test_timing_topology_agent_host.py -> daemon.py#_LIVENESS_BEAT_STEP_S" = 1
-"tests/guarded_compact_support.py -> runtime.py#_AgentRuntime" = 1
 "tests/history/test_checkpoint_parent_guard.py -> daemon.py#_build_checkpointer" = 1
 "tests/history/test_hosted_checkpoint_diagnostics.py -> daemon.py#_build_checkpointer" = 1
 "tests/history/test_pooled_checkpoint.py -> daemon.py#_build_checkpointer" = 1
@@ -48,5 +44,3 @@ exports = ["daemon.py", "host.py", "invocation", "runtime.py", "settlement.py", 
 "tests/runtime/test_resource_join.py -> daemon.py#_close_host_pools" = 2
 "tests/runtime/test_resource_join.py -> daemon.py#_close_joined_host_pools" = 2
 "tests/runtime/test_resource_join.py -> daemon.py#_close_process_owners" = 1
-"tests/turn_dispatcher/test_scan_and_slots.py -> dispatcher.py#_INBOUND_PATTERN_SUFFIX" = 1
-"tests/turn_dispatcher/test_subscription_recovery.py -> dispatcher.py#_MAX_CONSECUTIVE_RECONNECT_FAILURES" = 2

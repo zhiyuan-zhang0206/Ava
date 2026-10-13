@@ -22,12 +22,12 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_ava_kwargs
 from base.clock import Clock
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.configuration import snapshot_process_config
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:

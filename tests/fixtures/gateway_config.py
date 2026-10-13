@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import MachineIdentity
+from base.config.tests.configuration import snapshot_process_config
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
-from tests.fixtures.configuration import snapshot_process_config
 
 __all__ = [
     "SPAWN_PATH",
