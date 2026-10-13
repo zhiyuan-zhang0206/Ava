@@ -29,7 +29,7 @@ def test_process_environment_keeps_its_home_and_data_plane_boundary(
         request.getfixturevalue("redis_url")
     db = conninfo_to_dict(settings.data_plane.db_url)
     if static_mode(pytestconfig):
-        from tests import _containers
+        from base.deploy.tests import containers
 
         expected = conninfo_to_dict(UNPROVISIONED_DB_URL)
         assert {key: db[key] for key in expected} == expected
@@ -38,9 +38,9 @@ def test_process_environment_keeps_its_home_and_data_plane_boundary(
             with pytest.raises(pytest.fail.Exception, match="Static tests cannot request"):
                 request.getfixturevalue(fixture)
         with pytest.raises(pytest.fail.Exception, match="Static tests cannot use"):
-            _containers.postgres(machine_name=lambda: pytest.fail("Static identity must stay cold"))
+            containers.postgres(machine_name=lambda: pytest.fail("Static identity must stay cold"))
         with pytest.raises(pytest.fail.Exception, match="Static tests cannot use"):
-            _containers.redis_server()
+            containers.redis_server()
     else:
         assert db["dbname"] != "unprovisioned"
         assert settings.data_plane.redis_url != UNPROVISIONED_REDIS_URL

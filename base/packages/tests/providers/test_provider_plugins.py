@@ -33,9 +33,11 @@ from base.lm.factory import (
 )
 from base.lm.provider_api import PriceRates, ProviderBinding, ProviderContribution
 from base.lm.registry import ModelSpec, ModelTuning
-from base.lm.tests.providers.provider_plugin_support import provider_plugin as provider_plugin
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins import enable_config
+from base.packages.tests.lm.providers.provider_plugin_support import (
+    provider_plugin as provider_plugin,
+)
 from tests.fixtures.model_catalog import AddBindings
 
 _REPO_PROVIDER_PLUGINS = {
