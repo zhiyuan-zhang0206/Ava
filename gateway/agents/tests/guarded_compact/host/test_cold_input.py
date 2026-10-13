@@ -12,10 +12,10 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from gateway.agents.tests.guarded_compact.host.admission import admit
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.invocation.compact.checkpoint import cold_reader
-from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
-from services.agent_runner.agent_host.tests.guarded_compact.helpers import SummaryModel
+from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel
 from tests.fixtures.model_catalog import AddBindings
 
 

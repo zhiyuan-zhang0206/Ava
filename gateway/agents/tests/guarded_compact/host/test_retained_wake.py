@@ -8,8 +8,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import _insert, agent_row
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from gateway.agents.tests.guarded_compact.host.admission import admit
 from gateway.tests.test_idempotency import client as client
-from services.agent_runner.agent_host.tests.guarded_compact.admission import admit
 
 
 async def test_actual_scan_keeps_pending_compact_and_later_chat_on_work_lane(
