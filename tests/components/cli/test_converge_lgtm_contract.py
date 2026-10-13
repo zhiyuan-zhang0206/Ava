@@ -50,7 +50,7 @@ def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
-        "base.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json",
+        "base.packages.dashboard_supply.render_dashboard_json",
         render_dashboard_json,
     )
 

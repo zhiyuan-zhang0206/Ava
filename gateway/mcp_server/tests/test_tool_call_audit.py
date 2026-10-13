@@ -14,8 +14,8 @@ import psycopg
 import pytest
 
 from base import telemetry
-from base.agents.messages.caller_identity import CallerIdentity
 from base.db import Database
+from base.events.caller_identity import CallerIdentity
 from gateway.mcp_server.endpoint import _record_tool_call
 
 

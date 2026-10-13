@@ -279,7 +279,7 @@ def _cold_report(
         assert len(notes) == 1 and "fast shutdown timed out" in notes[0]
         return 0
     from base.config import settings
-    from base.telemetry.metrics import grafana_dashboard_supply
+    from base.packages import dashboard_supply
     from cli.commands.converge.spec import ConvergeCtx
     from cli.commands.observability import lgtm_native
 
@@ -288,7 +288,7 @@ def _cold_report(
     def failed_render(database: Database) -> tuple[str, list[str]]:
         raise original
 
-    monkeypatch.setattr(grafana_dashboard_supply, "render_dashboard_json", failed_render)
+    monkeypatch.setattr(dashboard_supply, "render_dashboard_json", failed_render)
     repo = _REPO_ROOT
     tag = lgtm_native.platform_tag()
     if tag is None:

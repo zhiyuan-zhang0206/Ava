@@ -14,8 +14,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from base.packages.dashboard_supply import load_repo_plugin_specs
 from base.telemetry.metrics.core import catalog
-from base.telemetry.metrics.grafana_dashboard_supply import load_repo_plugin_specs
 from base.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     render_query,

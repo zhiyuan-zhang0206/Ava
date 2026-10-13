@@ -62,7 +62,7 @@ def _stub_dashboard_render(monkeypatch: pytest.MonkeyPatch) -> None:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
-        "base.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json",
+        "base.packages.dashboard_supply.render_dashboard_json",
         render_dashboard_json,
     )
 
@@ -630,9 +630,7 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
     def broken_render(_db: object, _repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
         raise RuntimeError("render exploded")
 
-    monkeypatch.setattr(
-        "base.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json", broken_render
-    )
+    monkeypatch.setattr("base.packages.dashboard_supply.render_dashboard_json", broken_render)
     emitted: list[tuple[object, ...]] = []
 
     def record_emit(*args: object, **kwargs: object) -> None:

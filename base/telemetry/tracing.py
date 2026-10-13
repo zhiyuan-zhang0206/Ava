@@ -493,7 +493,7 @@ def _start_arm_thread(endpoint: str, machine: MachineIdentity, home: Path) -> No
     with _lifecycle_lock:
         if _state.get("closed") or _state.get("arm_owner") is not None:
             return
-        from base.telemetry.observability import production_identity
+        from base.cluster.derive import production_identity
 
         production = production_identity(machine, home=home)
         owner = TraceArm(

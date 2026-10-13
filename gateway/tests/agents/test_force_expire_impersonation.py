@@ -6,10 +6,10 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from base.agents import impersonation
-from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
+from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from gateway.app import app
 from tests.fixtures.unit.identity import machine_identity as machine_identity

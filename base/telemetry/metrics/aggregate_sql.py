@@ -34,7 +34,7 @@ from base.events.contract import (
     SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
 )
-from base.telemetry.event_sql import numeric
+from base.telemetry.metrics.event_sql import numeric
 
 EXEC_FAILURE_EVENTS = [
     "exec_failed",

@@ -158,7 +158,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
         return ".ava-test"
 
     monkeypatch.setattr(tracing_mod, "cluster_label", label)
-    monkeypatch.setattr("base.telemetry.observability.production_identity", deny_identity)
+    monkeypatch.setattr("base.cluster.derive.production_identity", deny_identity)
     _under_watermark(monkeypatch)
 
     calls: list[dict] = []
@@ -224,7 +224,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     (home / "lgtm-host").touch()
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
-    monkeypatch.setattr("base.telemetry.observability.production_identity", allow_identity)
+    monkeypatch.setattr("base.cluster.derive.production_identity", allow_identity)
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path / "traces")
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 

@@ -5,10 +5,10 @@ import asyncio
 from psycopg_pool import ConnectionPool
 
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.api_contracts.launch_retry import LaunchReconciled, LaunchReconcileRequest
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
-from ops.rpc_schemas.launch_retry import LaunchReconciled, LaunchReconcileRequest
 
 
 async def reconcile_launch_op(

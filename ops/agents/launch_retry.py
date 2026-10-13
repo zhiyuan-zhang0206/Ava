@@ -6,8 +6,8 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents import AgentNotFound
+from base.api_contracts.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
 from base.db.transaction import write_transaction
-from ops.rpc_schemas.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
 
 
 class RetryLaunchConflictError(ValueError):

@@ -13,7 +13,7 @@ from typing import Any, NamedTuple
 import psycopg
 
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
-from base.telemetry.event_sql import numeric
+from base.telemetry.metrics.event_sql import numeric
 
 
 class WindowTotals(NamedTuple):

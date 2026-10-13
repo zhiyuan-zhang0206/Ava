@@ -22,7 +22,6 @@ Its component nodes describe the current contracts and implementation.
 - [[base/agents/incarnation/docs/closed-predecessor.ava.okf.md]] — Closed predecessor.
 - [[base/agents/incarnation/docs/domain-closure.ava.okf.md]] — Exec domain closure.
 - [[base/agents/incarnation/docs/incarnation-resources.ava.okf.md]] — Incarnation resource evidence.
-- [[base/agents/messages/docs/caller_identity.ava.okf.md]] — Asserted External Caller Identity.
 - [[base/agents/messages/docs/external_caller.ava.okf.md]] — External Caller Profiles.
 - [[base/agents/messages/docs/inbound-provenance.ava.okf.md]] — Inbound Provenance Facts.
 - [[base/agents/messages/docs/kwargs.ava.okf.md]] — Message Metadata Contract.
