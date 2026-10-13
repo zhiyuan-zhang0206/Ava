@@ -126,7 +126,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     try:
-        from ava.sdk_surface.process_context import process_clients
+        from ava.boot import process_clients
         from base.agents.context import AvaContext
         from base.cluster.machine.boot import machine_from_boot
         from tests.fixtures.configuration import snapshot_process_config

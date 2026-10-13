@@ -23,7 +23,7 @@ from agent.graph.exec.node import exec_node
 from agent.impersonation import protect_native_hooks
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction

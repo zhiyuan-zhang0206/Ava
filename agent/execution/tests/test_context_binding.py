@@ -19,7 +19,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally

@@ -24,7 +24,7 @@ from agent.graph.tests.cursor_fixture import _fresh_snapshot_cursor as _fresh_sn
 from agent.messages import NoteTag
 from agent.state import AgentState
 from agent.tests.claim.claim_support import insert_inbound_kind, make_runtime, thread_config
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database

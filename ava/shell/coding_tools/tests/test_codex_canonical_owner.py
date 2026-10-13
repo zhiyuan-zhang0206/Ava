@@ -283,12 +283,12 @@ def test_failed_early_publish_kills_codex_session_before_startup(
     monkeypatch.setattr(codex, "new_generation", _claim)
     monkeypatch.setattr(codex, "_launch_supervisor", _launch_supervisor)
     monkeypatch.setattr(codex.coding_session_owner, "attach_supervisor", _attach)
-    monkeypatch.setattr(codex.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(codex.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(codex.sessions, "new", _new)
+    monkeypatch.setattr(codex.sessions, "send", _send)
     monkeypatch.setattr(codex, "_wait_for_ready", _ready)
     monkeypatch.setattr(codex, "_verify_submitted", _verified)
     monkeypatch.setattr(codex.coding_session_owner, "publish_active", _publish)
-    monkeypatch.setattr(codex.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(codex.sessions, "kill", _kill)
     monkeypatch.setattr(codex.coding_session_owner, "terminate_generation", _terminate)
 
     workspace = Path(launching.key.workspace)
@@ -379,8 +379,8 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     monkeypatch.setattr(codex.coding_session_owner, "attach_supervisor", _unexpected)
     monkeypatch.setattr(codex, "_read_session_id", _session_id)
     monkeypatch.setattr(codex, "_wait_for_app_server", partial(_record_app_server, events))
-    monkeypatch.setattr(codex.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(codex.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(codex.sessions, "new", _new)
+    monkeypatch.setattr(codex.sessions, "send", _send)
     monkeypatch.setattr(codex, "_wait_for_ready", _ready)
     monkeypatch.setattr(codex, "_verify_submitted", _verified)
     monkeypatch.setattr(codex.coding_session_owner, "publish_active", _publish)
@@ -587,8 +587,8 @@ def test_submission_check_survives_a_dead_session_at_enter(
         raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
 
     monkeypatch.setattr(codex.time, "sleep", no_sleep)
-    monkeypatch.setattr(codex.ava.shell.sessions, "capture", idle_capture)
-    monkeypatch.setattr(codex.ava.shell.sessions, "send_keys", dead_keys)
+    monkeypatch.setattr(codex.sessions, "capture", idle_capture)
+    monkeypatch.setattr(codex.sessions, "send_keys", dead_keys)
 
     codex._verify_submitted(7, timeout=0.01)
     out = capsys.readouterr().out
@@ -604,7 +604,7 @@ def test_submission_check_survives_a_dead_session_at_capture(
     def dead_capture(_sid: int, **_kwargs: object) -> str:
         raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
 
-    monkeypatch.setattr(codex.ava.shell.sessions, "capture", dead_capture)
+    monkeypatch.setattr(codex.sessions, "capture", dead_capture)
 
     codex._verify_submitted(7, timeout=5.0)
     assert "capture failed" in capsys.readouterr().out
@@ -633,8 +633,8 @@ def test_submission_check_survives_a_dead_session_after_the_enter_retry(
         entered["sent"] = True
 
     monkeypatch.setattr(codex.time, "sleep", no_sleep)
-    monkeypatch.setattr(codex.ava.shell.sessions, "capture", capture)
-    monkeypatch.setattr(codex.ava.shell.sessions, "send_keys", keys)
+    monkeypatch.setattr(codex.sessions, "capture", capture)
+    monkeypatch.setattr(codex.sessions, "send_keys", keys)
 
     codex._verify_submitted(7, timeout=0.01)
     assert "capture failed" in capsys.readouterr().out

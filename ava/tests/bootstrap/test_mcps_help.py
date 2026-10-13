@@ -11,7 +11,7 @@ import ava
 @pytest.fixture
 def fake_config(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point ava_home() to tmpdir; the repo's built-in .mcp.json files are not listed."""
-    import ava.mcp_config as _cfg
+    import ava.mcps.config as _cfg
 
     monkeypatch.setattr(_cfg, "builtin_mcp_paths", list)
     return unit_home / "mcp.json"

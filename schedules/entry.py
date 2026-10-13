@@ -31,7 +31,7 @@ def fresh_schedule_entry() -> Generator[ScheduleInputs]:
     """Own this fresh executable's SDK context and release its clients on exit."""
     import ava
 
-    image = ava.loaded_code_image()
+    image = process_context.loaded_code_image()
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)

@@ -17,6 +17,9 @@ Each module holds one cohesive slice of the entry-point machinery:
   surface (namespaces, members, expansions, wraps, skill sources, flags, config)
   and undoes it, producing one `Installation` — a change builds a new value and
   swaps the holder;
+- `process_context` — the process-local SDK entry: the context and exec-turn state slots behind
+  `ava.context` / `ava.state` / `ava.state_update`, the shared-host posture and the loaded code
+  image (`ava/boot.py` builds the contexts and clients and loads plugins above it);
 - `plugins` — the namespace / member install primitives and their exception
   hierarchy;
 - `wraps` — the wrap layer primitive `install` applies

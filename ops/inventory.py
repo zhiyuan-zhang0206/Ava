@@ -70,7 +70,7 @@ def inventory_read_op(*, local_machine: MachineIdentity) -> InventoryReadResult:
         and a read-time capability verdict (can_enable/reason) for the `requires`
         precondition
     """
-    from ava.mcp_config import load_mcp_config, server_capability
+    from ava.mcps.config import load_mcp_config, server_capability
 
     _assert_agent_runner(local_machine=local_machine)
     discovered = enable_config.discover_plugins()
@@ -123,7 +123,7 @@ def inventory_write_op(
     an `applied` flag. No restart_required field — plugin/MCP toggles take
     effect on the next agent step / next connect, no restart.
     """
-    from ava.mcp_config import load_mcp_config, server_capability
+    from ava.mcps.config import load_mcp_config, server_capability
 
     _assert_agent_runner(local_machine=local_machine)
     discovered = set(enable_config.discover_plugins())

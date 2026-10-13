@@ -59,12 +59,11 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import NoPermissionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-import ava
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_stale_running_rows
+from ava.boot import process_clients
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
-from ava.sdk_surface.process_context import process_clients
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.observation.turn_progress import TurnProgress
@@ -625,7 +624,7 @@ async def run(
         health = await start_health_server(
             "agent_host",
             endpoint.health_port,
-            image=ava.loaded_code_image(),
+            image=process_context.loaded_code_image(),
             liveness=liveness,
             extra_routes={
                 ("GET", "/stats"): stats_route(host, scheduler),
@@ -695,7 +694,7 @@ def main() -> None:
     _require_helper_parent_chain()
     assert_schema_current(config.view.data_plane.db_url)
     machine = host_machine(config)
-    version = CodeVersion(ava.loaded_code_image())
+    version = CodeVersion(process_context.loaded_code_image())
     gate = ProcessDbGate(version=version.get, process="agent_host")
 
     def database() -> Database:
@@ -710,7 +709,7 @@ def main() -> None:
         nonlocal clients_handed_off
         clients_handed_off = True
 
-    initialize_logging(clients, machine, ava.loaded_code_image())
+    initialize_logging(clients, machine, process_context.loaded_code_image())
     code = 0
     # Runner avoids automatic shutdown_default_executor joins of to_thread
     # recorders. Explicit drain reaches run's cleanup; hard exit skips executor teardown.

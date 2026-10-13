@@ -39,7 +39,7 @@ from typing import Any
 
 from loguru import logger
 
-from ava.mcp_config import (
+from ava.mcps.config import (
     MCPCallError,
     assert_requirements,
     is_transport_error,
@@ -171,7 +171,7 @@ def _is_transport_error(exc: BaseException) -> bool:
     """Return True when *exc* indicates the MCP server process or stdio pipe
     died and a reconnect + retry is appropriate.
 
-    Shared with the in-process SDK (`ava.mcp_config.is_transport_error`) so
+    Shared with the in-process SDK (`ava.mcps.config.is_transport_error`) so
     both sides agree on the retry seam. Notably treats the SDK-synthesized
     `MCPError(CONNECTION_CLOSED)` — raised `from None` when the stdio peer's
     read loop hits EOF, so the __cause__ probe alone missed it (2026-08-13
@@ -221,7 +221,7 @@ async def _connect_server(
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    from ava.mcp_config import server_cwd
+    from ava.mcps.config import server_cwd
 
     from ._browser import connect_browser_direct
 

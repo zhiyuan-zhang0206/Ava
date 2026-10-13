@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from ava.sdk_surface import process_context
+from ava.sdk_surface import ava_module, process_context
 
 from .const import is_documented_const
 from .discovery import (
@@ -73,7 +73,7 @@ def render(
     `ava.help` deliberately does not take. `compact_classes` shows class fields
     without methods. `hidden_members` omits the named dotted SDK members; when
     omitted, members unavailable to the model are hidden automatically."""
-    import ava as _ava
+    _ava = ava_module()
 
     if hidden_members is None:
         if process_context.ambient_context() is None:
@@ -97,7 +97,7 @@ def is_ava_target(obj: Any) -> bool:
     The module-name fast path treats an object's `__module__` value as a trusted
     identity boundary when it is `ava` or begins with `ava.`.
     """
-    import ava as _ava
+    _ava = ava_module()
 
     if obj is _ava:
         return True
@@ -191,7 +191,7 @@ def _resolve_fqn(target: Any) -> str:
     unwrapped SDK functions; wrapped functions whose `__module__` points back
     to the wrapping plugin are resolved by searching `ava.*` for the binding.
     """
-    import ava as _ava
+    _ava = ava_module()
 
     if target is _ava:
         return "ava"
@@ -237,7 +237,7 @@ def _search_ava_for_binding(target: Any) -> str | None:
     submodule's `_qualname` (plugin namespaces register that) so the heading
     reflects the agent-facing name rather than the internal module path.
     """
-    import ava as _ava
+    _ava = ava_module()
 
     for mod_name in agent_visible_names(_ava):
         mod = getattr(_ava, mod_name, None)

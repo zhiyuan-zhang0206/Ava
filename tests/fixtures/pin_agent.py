@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator, Callable
 import pytest
 
 import ava
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease

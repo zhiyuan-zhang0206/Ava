@@ -49,8 +49,8 @@ from agent.state import (
     PluginStateHandle,
     build_agent_state,
 )
+from ava.boot import process_clients
 from ava.sdk_surface import process_context
-from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock

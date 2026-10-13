@@ -10,6 +10,7 @@ from pathlib import Path
 from loguru import logger
 
 import ava
+from ava.boot import process_clients
 from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
@@ -52,7 +53,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
     config = ConfigBoot()
     config.read_process_environment()
     machine = machine_from_boot(config)
-    image = ava.loaded_code_image()
+    image = process_context.loaded_code_image()
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get)
 
@@ -66,7 +67,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config))
 
-    clients = process_context.process_clients(config=config, database=database, machine=machine)
+    clients = process_clients(config=config, database=database, machine=machine)
     primary: BaseException | None = None
     try:
         return engine.run(

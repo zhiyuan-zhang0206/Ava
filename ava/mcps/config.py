@@ -195,7 +195,7 @@ def builtin_mcp_paths() -> list[Path]:
     """Built-in MCP declarations shipped in the repo's `ava_builtins/mcps/` folder
     (`<repo>/ava_builtins/mcps/*/.mcp.json`), sorted by name. Symmetric with built-in skills
     (`ava_builtins/skills/`) and plugins (`ava_builtins/plugins/`)."""
-    root = Path(__file__).resolve().parent.parent / "ava_builtins" / "mcps"
+    root = Path(__file__).resolve().parents[2] / "ava_builtins" / "mcps"
     if not root.is_dir():
         return []
     paths: list[Path] = []
@@ -293,7 +293,7 @@ def _plugin_config_paths() -> list[Path]:
     an undeclared MCP executable closure rather than treating config as proof.
     """
     paths: list[Path] = []
-    repo_plugins = Path(__file__).resolve().parent.parent / "ava_builtins" / "plugins"
+    repo_plugins = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
     for root in (repo_plugins, external_plugin_read_root()):
         if not root.is_dir():
             continue

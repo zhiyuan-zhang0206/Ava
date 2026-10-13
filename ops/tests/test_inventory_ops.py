@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import ava.mcp_config as mcp_cfg_mod
+import ava.mcps.config as mcp_cfg_mod
 from base.cluster.machine import MachineIdentity
 from base.packages.plugins import enable_config, mcp_enabled
 from ops.inventory import inventory_read_op, inventory_write_op

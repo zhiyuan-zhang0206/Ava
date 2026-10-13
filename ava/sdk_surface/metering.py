@@ -39,8 +39,8 @@ from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-import ava
-from ava.sdk_surface import process_context
+from ava.sdk_surface import ava_module, process_context
+from ava.sdk_surface.discovery import agent_visible_names
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
@@ -211,7 +211,7 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
         # __all_for_ava__ statically so a dynamic proxy surface is never
         # force-evaluated; falls back to a module's own public routines
         # (ava.mcps) or a SimpleNamespace's public vars.
-        for name in ava.agent_visible_names(container):
+        for name in agent_visible_names(container):
             # getattr_static, never getattr: a dynamically-served member (e.g.
             # ava.self.MACHINE_SPEC, computed via module __getattr__) must not be
             # force-evaluated — it can raise (MachineNameMissing when unset) and crash
@@ -226,7 +226,7 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
             elif isinstance(attr, (ModuleType, SimpleNamespace)):
                 walk(attr, f"{fq}.")
 
-    walk(ava, "")
+    walk(ava_module(), "")
     return targets
 
 
@@ -245,7 +245,7 @@ def install(
     in wrap order. The installation carries it; ``uninstall(ledger)`` restores from it.
     """
     targets = _instrument_targets()
-    mcps_mod = getattr(ava, "mcps", None)
+    mcps_mod = getattr(ava_module(), "mcps", None)
     funnel = None if mcps_mod is None else getattr(mcps_mod, _MCP_CALL_FUNNEL, None)
     for parent, attr, _fq in targets:
         _check_sampling(getattr(parent, attr, None), sampling)

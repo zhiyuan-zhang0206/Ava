@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 
 import ava
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot

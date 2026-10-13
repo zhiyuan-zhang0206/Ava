@@ -1,6 +1,6 @@
 """Internal config — the SDK's composition root helpers.
 
-`database()`, `bus()`, `shell_sessions()`, `page_host()` and `agent_setting()` build what an `ava.*`
+`database()`, `bus()` and `agent_setting()` build what an `ava.*`
 function needs from this process's settings; the connections a process holds live on its bound
 `AvaContext` (`ava.context.sql` / `.redis` / `.gateway`, `base.agents.context.clients`).
 
@@ -98,41 +98,6 @@ def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariabl
     from base.events.live.bus import EventBus
 
     return EventBus.from_settings()
-
-
-def shell_sessions() -> "ShellSessions":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    """This agent's persistent shell sessions, on the shell backend and the cluster database.
-
-    Raises RuntimeError when this process has no agent identity: shell sessions are an agent's,
-    so a standalone script that imports ava gets an explicit refusal, never another agent's or
-    a global's sessions."""
-    import ava.sdk_surface.agent_identity
-    from ava.shell.sessions import ShellSessions
-    from base.sessions.backend import get_shell_backend
-
-    agent_id = ava.sdk_surface.agent_identity.agent_id()
-    if agent_id is None:
-        raise RuntimeError(
-            "Cannot use shell sessions: this process has no agent identity. "
-            "ava.shell.sessions requires an agent process or a background "
-            "script launched by one (which derives the identity from "
-            "AVA_AGENT_ID). Running a standalone script that imports ava "
-            "does not set an agent identity."
-        )
-    return ShellSessions(backend=get_shell_backend(), database=database(), agent_id=agent_id)
-
-
-def page_host() -> "PageHost":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    """The page host this agent's `ava.ui` calls run against: this machine's reachable host and
-    the agent's identity (RuntimeError when the process has none), read per call."""
-    import ava
-    import ava.sdk_surface.agent_identity
-    from ava.ui import PageHost
-
-    return PageHost(
-        host=process_context.current_context().require_machine().host(),
-        agent_id=ava.sdk_surface.agent_identity.require_agent_id(),
-    )
 
 
 def _attached() -> tuple[Mapping[str, Any], Any] | None:

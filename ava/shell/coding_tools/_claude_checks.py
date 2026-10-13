@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-import ava
+from ava.shell import sessions
 
 _PASTE_WRAP_THRESHOLD_CHARS = 1022
 """One Claude composer chunk is ~1022 chars: a longer raw burst folds into collapsed paste fragments, and a submission made while such a fragment sits next to a raw tail drops the fragment's content (#4364)."""
@@ -54,7 +54,7 @@ def _send_bootstrap(sid: int, message: str) -> None:
     payload = _bracketed_paste(message)
     if payload.startswith(_PASTE_BEGIN):
         payload += _OWN_WORDS
-    ava.shell.sessions.send(sid, payload)
+    sessions.send(sid, payload)
 
 
 def _pretrust(workspace: Path) -> None:
@@ -76,7 +76,7 @@ def _pretrust(workspace: Path) -> None:
 
 def _session_exists(name: str) -> bool:
     """Check if a persistent shell session with `name` already exists."""
-    return any(existing_name == name for existing_name in ava.shell.sessions.list().values())
+    return any(existing_name == name for existing_name in sessions.list().values())
 
 
 def _claude_ui_ready(output: str, *, resumed: bool = False) -> bool:
@@ -164,7 +164,7 @@ def _wait_for_ready(
     while time.time() < deadline:
         _check_missing_claude(failure_marker)
         try:
-            output = ava.shell.sessions.capture(sid, scrollback=False)
+            output = sessions.capture(sid, scrollback=False)
         except ValueError as exc:
             _check_missing_claude(failure_marker)
             raise RuntimeError(
@@ -176,7 +176,7 @@ def _wait_for_ready(
         if _claude_ui_ready(output, resumed=resumed):
             time.sleep(2)  # brief stability pause
             try:
-                stable = ava.shell.sessions.capture(sid, scrollback=False)
+                stable = sessions.capture(sid, scrollback=False)
             except ValueError as exc:
                 _check_missing_claude(failure_marker)
                 raise RuntimeError(f"Claude session {sid} exited before it became ready") from exc
@@ -239,7 +239,7 @@ def _verify_start_receipt(
         time.sleep(2)
     print("  -> no submission evidence yet; sending Enter once")
     try:
-        ava.shell.sessions.send_keys(sid, "Enter")
+        sessions.send_keys(sid, "Enter")
     except ValueError as exc:
         print(
             "  -> WARNING: start-receipt=not-submitted "

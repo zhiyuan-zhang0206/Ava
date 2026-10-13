@@ -5,9 +5,9 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-import ava
 import ava.sdk_surface.agent_identity
 from ava import gateway_client as _client
+from ava.sdk_surface import process_context
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.api_contracts.agent_contract import AgentLaunchFailed as AgentLaunchFailed
 
@@ -510,7 +510,9 @@ def spawn_impl(
         prompt=prompt,
         fork_from=fork_from,
         prompt_source=spawner,
-        machine=machine if machine is not None else ava.self.MACHINE_SPEC.name,
+        machine=machine
+        if machine is not None
+        else process_context.current_context().require_machine().name(),
         config=config,
         label=label,
         idempotency_key=idempotency_key,

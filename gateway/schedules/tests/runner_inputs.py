@@ -4,8 +4,8 @@ from contextlib import closing
 from functools import partial
 
 import ava
+from ava.boot import process_clients
 from ava.sdk_surface import process_context
-from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
@@ -32,7 +32,7 @@ def bind_actor(schedule_id: int, *, clients: ClientSet, machine: MachineIdentity
 
 
 def run_schedule(schedule_id: int, revision: int | None = None, *, machine: MachineIdentity) -> int:
-    image = ava.loaded_code_image()
+    image = process_context.loaded_code_image()
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get)
     database = partial(Database.from_settings, gate=gate, direct_url=ClusterDirectUrl(machine.host))

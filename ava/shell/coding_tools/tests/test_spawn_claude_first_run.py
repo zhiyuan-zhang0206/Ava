@@ -93,7 +93,7 @@ def test_command_echo_is_not_a_missing_executable_error(
     def _no_sleep(_seconds: float) -> None:
         pass
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     monkeypatch.setattr(_claude_checks.time, "sleep", _no_sleep)
 
     _claude_checks._wait_for_ready(7, timeout=1, failure_marker=tmp_path / "missing-claude")
@@ -109,7 +109,7 @@ def test_command_echo_without_ui_times_out(monkeypatch: pytest.MonkeyPatch, tmp_
     def _no_sleep(_seconds: float) -> None:
         pass
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     monkeypatch.setattr(_claude_checks.time, "sleep", _no_sleep)
 
     with pytest.raises(RuntimeError, match="Claude Code UI did not appear"):
@@ -137,7 +137,7 @@ def test_ready_accepts_recorded_claude_2_1_281_panel(
     def _no_sleep(_seconds: float) -> None:
         pass
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     monkeypatch.setattr(_claude_checks.time, "sleep", _no_sleep)
 
     _claude_checks._wait_for_ready(7, timeout=1)
@@ -162,7 +162,7 @@ def test_exited_session_reports_missing_executable_from_marker(
     def _capture(_sid: int, *, scrollback: bool) -> str:
         raise ValueError("session ended")
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     with pytest.raises(
         RuntimeError, match=r"claude executable not found in PATH or \$HOME/\.local/bin/claude"
     ):
@@ -184,7 +184,7 @@ def test_ready_requires_claude_ui_not_a_long_shell_prompt(
     def _no_sleep(_seconds: float) -> None:
         return None
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     monkeypatch.setattr(_claude_checks.time, "sleep", _no_sleep)
 
     with pytest.raises(RuntimeError, match="Claude Code UI did not appear"):
@@ -202,7 +202,7 @@ def test_ready_accepts_a_stable_claude_ui(monkeypatch: pytest.MonkeyPatch) -> No
     def _no_sleep(_seconds: float) -> None:
         return None
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     monkeypatch.setattr(_claude_checks.time, "sleep", _no_sleep)
     _claude_checks._wait_for_ready(7, timeout=1)
     assert captures == [7, 7]
@@ -216,7 +216,7 @@ def test_ready_rejects_claude_setup_screen(monkeypatch: pytest.MonkeyPatch) -> N
     def _no_sleep(_seconds: float) -> None:
         return None
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     monkeypatch.setattr(_claude_checks.time, "sleep", _no_sleep)
     with pytest.raises(RuntimeError, match="Claude Code UI did not appear"):
         _claude_checks._wait_for_ready(7, timeout=0.01)
@@ -229,7 +229,7 @@ def test_ready_reports_when_the_session_exits_before_capture(
         assert scrollback is False
         raise ValueError("session ended")
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     with pytest.raises(RuntimeError, match="exited before its UI appeared"):
         _claude_checks._wait_for_ready(7)
 
@@ -281,10 +281,10 @@ def test_supervised_launch_does_not_send_contract_to_a_shell(
 
     monkeypatch.setattr(claude, "_session_exists", _session_exists)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
-    monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", _send)
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
-    monkeypatch.setattr(claude.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(claude.sessions, "new", _new)
+    monkeypatch.setattr(claude.sessions, "send", _send)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "kill", _kill)
     monkeypatch.setattr(claude, "_claude_command", _missing_command)
 
     with pytest.raises(RuntimeError, match="claude executable not found"):
@@ -461,7 +461,7 @@ def test_signed_out_claude_fails_fast_instead_of_timing_out(
     def _no_sleep(_seconds: float) -> None:
         pass
 
-    monkeypatch.setattr(claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(claude.sessions, "capture", _capture)
     monkeypatch.setattr(_claude_checks.time, "sleep", _no_sleep)
 
     with pytest.raises(RuntimeError, match="not logged in on this host"):

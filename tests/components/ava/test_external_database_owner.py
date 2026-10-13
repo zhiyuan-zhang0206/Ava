@@ -14,7 +14,7 @@ import pytest
 
 import ava
 from agent.extensions import plugin_state_codec
-from ava import external
+from ava import boot, external
 from ava.sdk_surface import process_context
 from ava.sdk_surface import settings as _settings
 from base.agents.impersonation import manifest
@@ -260,7 +260,7 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
 ) -> None:
     prior = process_context.unbind_context()
     created: list[tuple[Any, list[bool]]] = []
-    build = external.process_context.process_clients
+    build = external.process_clients
     primary = RuntimeError("owned constructor failed")
 
     def clients(**kwargs: Any) -> Any:
@@ -279,11 +279,11 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
     def fail(*_args: Any, **_kwargs: Any) -> Any:
         raise primary
 
-    monkeypatch.setattr(external.process_context, "process_clients", clients)
+    monkeypatch.setattr(external, "process_clients", clients)
     target = (
         (external.control, "require_active")
         if failure_at == "lease"
-        else (ava, "ensure_plugins_loaded")
+        else (boot, "ensure_plugins_loaded")
         if failure_at == "plugins"
         else (plugin_state_codec, "load_snapshot")
     )
