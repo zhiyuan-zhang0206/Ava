@@ -108,6 +108,11 @@ E_MODULES: dict[str, tuple[str, str, bool]] = {
         False,
     ),
     "base.log.process": ("ambient-service", "process-global loguru startup and sinks", False),
+    "base.telemetry.process_logging": (
+        "ambient-service",
+        "process-global loguru event sink and gateway/CLI startup",
+        False,
+    ),
     "base.db": (
         "ambient-service",
         "process-global DB connect and pool seam at the package door",

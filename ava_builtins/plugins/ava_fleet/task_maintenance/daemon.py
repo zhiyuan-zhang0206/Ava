@@ -69,7 +69,6 @@ from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
-from base.log.process import init_gateway_process
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.config_registration import (
@@ -78,6 +77,7 @@ from base.packages.plugins.config_registration import (
     read_service_config,
 )
 from base.paths import ava_home
+from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")

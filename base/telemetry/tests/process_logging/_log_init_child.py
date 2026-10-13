@@ -19,7 +19,7 @@ def unreachable(*_args: object, **_kwargs: object) -> None:
 
 
 bootstrap.fetch_bootstrap_config = unreachable  # type: ignore[assignment]
-import base.log.process  # noqa: E402
+import base.telemetry.process_logging  # noqa: E402
 
 assert "base.config" not in sys.modules
 pipelines: list[object] = []
@@ -35,7 +35,7 @@ def producer() -> object:
 
 try:
     if sys.argv[2] == "init_cli_process":
-        base.log.process.init_cli_process(
+        base.telemetry.process_logging.init_cli_process(
             name="probe",
             producer=producer,  # type: ignore[arg-type]
             machine_reader=lambda: "probe-host",
@@ -43,7 +43,7 @@ try:
     else:
         from base.native_process.loaded_commit import LoadedCommit
 
-        base.log.process.init_gateway_process(
+        base.telemetry.process_logging.init_gateway_process(
             name="probe",
             producer=producer,  # type: ignore[arg-type]
             machine_reader=lambda: "probe-host",
