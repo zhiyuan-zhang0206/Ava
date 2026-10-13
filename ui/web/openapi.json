@@ -8116,9 +8116,16 @@
             "title": "Tokens Reasoning"
           },
           "cache_hit_pct": {
-            "type": "number",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Cache Hit Pct"
           }
         },
@@ -8134,7 +8141,7 @@
           "cache_hit_pct"
         ],
         "title": "AgentCost",
-        "description": "LLM spend + token usage for one agent over the requested window (whole\nlife = historical daily evidence + persisted observed facts; every `llm_usage` event under its\nagent_id — the agent's \"session\", which spans restarts/resurrects since\nagent_id is stable). `cost_usd` sums the rows' usage-time price snapshots\nonly — never re-priced against the current registry. Calls without a\nsnapshot (unpriced model) contribute 0 to cost and are counted in\n`unpriced_calls`. `cache_hit_pct` = cache_read / input * 100; input=0\ndegrades to 0."
+        "description": "LLM spend + token usage for one agent over the requested window (whole\nlife = historical daily evidence + persisted observed facts; every `llm_usage` event under its\nagent_id — the agent's \"session\", which spans restarts/resurrects since\nagent_id is stable). `cost_usd` sums the rows' usage-time price snapshots\nonly — never re-priced against the current registry. Calls without a\nsnapshot (unpriced model) contribute 0 to cost and are counted in\n`unpriced_calls`. `cache_hit_pct` uses only input with cache metering;\nnonzero input with no cache metering produces null. input=0\ndegrades to 0."
       },
       "AgentDirectoryPage": {
         "properties": {
@@ -8659,9 +8666,16 @@
             "title": "Tokens Cached"
           },
           "cache_hit_pct": {
-            "type": "number",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Cache Hit Pct"
           },
           "turn_ok": {
@@ -8702,7 +8716,7 @@
           "exec_failed"
         ],
         "title": "AgentMetricsItem",
-        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` prices each call via `base.lm.pricing.cost_usd`; calls on an\nunpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0\ndegrades to 0). `exec_failed` is every exec outcome other than plain\n`exec` — same exec-ok/exec-failed split as the metrics report."
+        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.\n`cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero\ninput has no cache metering. `exec_failed` is every exec outcome other than plain\n`exec` — same exec-ok/exec-failed split as the metrics report."
       },
       "AgentMetricsReport": {
         "properties": {
@@ -17792,9 +17806,16 @@
             "title": "Cache Read"
           },
           "cache_hit_pct": {
-            "type": "number",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Cache Hit Pct"
           }
         },
@@ -17806,7 +17827,7 @@
           "cache_hit_pct"
         ],
         "title": "StatsTokens",
-        "description": "`/api/stats/dashboard` token sub-section — windowed LLM usage aggregation.\n\n`cache_hit_pct` = cache_read / input * 100, rounded to 2 decimals;\ninput=0 degrades to 0 to avoid div-by-zero."
+        "description": "`/api/stats/dashboard` token sub-section — windowed LLM usage aggregation.\n\n`cache_hit_pct` uses only input with cache metering, rounded to 2 decimals;\nnonzero input with no cache metering produces null.\ninput=0 degrades to 0 to avoid div-by-zero."
       },
       "StatsWindowHours": {
         "type": "integer",

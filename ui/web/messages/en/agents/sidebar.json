@@ -38,7 +38,7 @@
   "tokens": "Tokens",
   "tokensTitle": "LLM tokens over the past {win} (input + output)",
   "tokensTitleDetail": "in {inp} / out {out} / cached {cache}%",
-  "cacheHitTitle": "Cache hit share of input tokens over the past {win} (cache_read / input) — providers report different scopes",
+  "cacheHitTitle": "Cache hit share over the past {win}, using only input with reported cache usage",
   "costTitle": "Estimated LLM spend over the past {win} (current per-model pricing)",
   "costTitleDetail": "Estimated LLM spend over the past {win} at current per-model pricing: ${amount}",
   "avgTurnTitle": "Avg LLM call wall time over the past {win} (filters ok=true to exclude failed turns)",

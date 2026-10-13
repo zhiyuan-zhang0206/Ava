@@ -4061,7 +4061,8 @@ export interface components {
          *     agent_id is stable). `cost_usd` sums the rows' usage-time price snapshots
          *     only — never re-priced against the current registry. Calls without a
          *     snapshot (unpriced model) contribute 0 to cost and are counted in
-         *     `unpriced_calls`. `cache_hit_pct` = cache_read / input * 100; input=0
+         *     `unpriced_calls`. `cache_hit_pct` uses only input with cache metering;
+         *     nonzero input with no cache metering produces null. input=0
          *     degrades to 0.
          */
         AgentCost: {
@@ -4080,7 +4081,7 @@ export interface components {
             /** Tokens Reasoning */
             tokens_reasoning: number;
             /** Cache Hit Pct */
-            cache_hit_pct: number;
+            cache_hit_pct: number | null;
         };
         /**
          * AgentDirectoryPage
@@ -4305,9 +4306,9 @@ export interface components {
          * @description One agent's row in the fleet metrics breakdown — headline counters
          *     aggregated over its events within the report window. `label` is the
          *     agent's display name (None = unset; frontend falls back to "#id").
-         *     `cost_usd` prices each call via `base.lm.pricing.cost_usd`; calls on an
-         *     unpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0
-         *     degrades to 0). `exec_failed` is every exec outcome other than plain
+         *     `cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.
+         *     `cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero
+         *     input has no cache metering. `exec_failed` is every exec outcome other than plain
          *     `exec` — same exec-ok/exec-failed split as the metrics report.
          */
         AgentMetricsItem: {
@@ -4328,7 +4329,7 @@ export interface components {
             /** Tokens Cached */
             tokens_cached: number;
             /** Cache Hit Pct */
-            cache_hit_pct: number;
+            cache_hit_pct: number | null;
             /** Turn Ok */
             turn_ok: number;
             /** Turn Total */
@@ -8586,7 +8587,8 @@ export interface components {
          * StatsTokens
          * @description `/api/stats/dashboard` token sub-section — windowed LLM usage aggregation.
          *
-         *     `cache_hit_pct` = cache_read / input * 100, rounded to 2 decimals;
+         *     `cache_hit_pct` uses only input with cache metering, rounded to 2 decimals;
+         *     nonzero input with no cache metering produces null.
          *     input=0 degrades to 0 to avoid div-by-zero.
          */
         StatsTokens: {
@@ -8597,7 +8599,7 @@ export interface components {
             /** Cache Read */
             cache_read: number;
             /** Cache Hit Pct */
-            cache_hit_pct: number;
+            cache_hit_pct: number | null;
         };
         /**
          * StatsWindowHours

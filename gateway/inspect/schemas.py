@@ -25,7 +25,8 @@ class AgentCost(BaseModel):
     agent_id is stable). `cost_usd` sums the rows' usage-time price snapshots
     only — never re-priced against the current registry. Calls without a
     snapshot (unpriced model) contribute 0 to cost and are counted in
-    `unpriced_calls`. `cache_hit_pct` = cache_read / input * 100; input=0
+    `unpriced_calls`. `cache_hit_pct` uses only input with cache metering;
+    nonzero input with no cache metering produces null. input=0
     degrades to 0."""
 
     model_config = ConfigDict(frozen=True)
@@ -37,7 +38,7 @@ class AgentCost(BaseModel):
     tokens_out: NonNegativeInt
     tokens_cached: NonNegativeInt
     tokens_reasoning: NonNegativeInt
-    cache_hit_pct: float = Field(ge=0, le=100)
+    cache_hit_pct: float | None = Field(ge=0, le=100)
 
 
 class AgentStats(BaseModel):

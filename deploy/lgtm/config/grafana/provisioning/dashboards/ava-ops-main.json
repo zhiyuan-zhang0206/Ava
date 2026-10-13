@@ -649,7 +649,8 @@
       ]
      },
      "unit": "percent",
-     "decimals": 2
+     "decimals": 2,
+     "noValue": "N/A"
     }
    },
    "gridPos": {
@@ -682,12 +683,13 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [$__range]))",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [$__range])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "cache hit %"
     }
-   ]
+   ],
+   "description": "Cache-read / input tokens over calls reporting cache usage; unmetered calls are excluded from both sums."
   },
   {
    "datasource": {
@@ -1241,7 +1243,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m]))",
+     "expr": "100 * sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum(sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "overall"
@@ -1252,7 +1254,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m])))",
+     "expr": "100 * max(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m])))",
      "refId": "B",
      "queryType": "range",
      "legendFormat": "max agent"
@@ -1263,7 +1265,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | unwrap attributes_in_total [5m])))",
+     "expr": "100 * min(sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_cache_read [5m])) / sum by (agent_id) (sum_over_time({service_name=\"unknown_service\", event_name=\"llm_usage\", agent_id!=\"\"} | json | category=\"telemetry\" | attributes_cache_read != \"\" | unwrap attributes_in_total [5m])))",
      "refId": "C",
      "queryType": "range",
      "legendFormat": "min agent"

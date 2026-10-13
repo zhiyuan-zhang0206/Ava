@@ -98,7 +98,7 @@ export function StatsCards({
       title:
         windowedTitle ??
         errMsg ??
-        (stats
+        (stats && stats.tokens.cache_hit_pct !== null
           ? t("tokensTitleDetail", { inp: stats.tokens.input.toLocaleString(), out: stats.tokens.output.toLocaleString(), cache: stats.tokens.cache_hit_pct })
           : t("tokensTitle", { win })),
     },
@@ -108,7 +108,7 @@ export function StatsCards({
       value: windowMismatch
         ? windowedPlaceholder
         : stats
-          ? `${stats.tokens.cache_hit_pct.toFixed(2)}%`
+          ? stats.tokens.cache_hit_pct === null ? "N/A" : `${stats.tokens.cache_hit_pct.toFixed(2)}%`
           : placeholder,
       title: windowedTitle ?? errMsg ?? t("cacheHitTitle", { win }),
     },

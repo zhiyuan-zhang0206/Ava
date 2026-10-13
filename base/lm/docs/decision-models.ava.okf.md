@@ -99,7 +99,8 @@ whether a second attempt is worth it.
 ## Usage accounting
 
 Each call writes one `llm_usage` row through `log_usage_fields` with `tok_out=0`, the
-provider's billed input tokens, and the caller's `usage_kind` and `source`. A response that
+provider's billed input tokens, and the caller's `usage_kind` and `source`.
+Current decision providers do not expose cache metering: their rows omit cache-read and cache-write fields, and cache-hit rates exclude them while retaining their usage and cost. A response that
 proves invalid after it was billed still writes its row (`DecisionResponseError.input_tokens`).
 Failures before the provider answers write nothing.
 
