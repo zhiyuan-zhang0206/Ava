@@ -123,7 +123,7 @@ Persistent interactive shells use the
 When stopping an older release, verify the actual native inventory as well as
 the desired roster; configuration alone is not evidence of termination.
 
-See [the checked service roster](../../ops/docs/service-roster.md) for the
+See [the checked service roster](../../services/supervision/roster/docs/service-roster.md) for the
 registered services and their probes.
 
 

@@ -31,7 +31,7 @@ from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
-from ops.roster.service_spec import ServiceSpec
+from services.supervision.roster.service_spec import ServiceSpec
 
 
 def _ensure_gateway_data_plane(
@@ -269,7 +269,7 @@ def _roster_for(
     """The launch roster of the resolved service selection; `publish=False` only inspects it."""
     import cli.commands.lifecycle.root_driver as _root_driver_commands
     from base.deploy.lifecycle.service_selection import resolve_selection
-    from ops.spec import services_for_capabilities_annotated
+    from services.supervision.roster.spec import services_for_capabilities_annotated
 
     names = {
         spec.session

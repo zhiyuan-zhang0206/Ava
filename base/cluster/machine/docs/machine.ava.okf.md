@@ -67,7 +67,7 @@ identity check. Durable names and cluster role tokens remain unchanged.
 | `observability-station` | the native LGTM observability backends (Loki / Prometheus / Grafana) — the declarative form of the `$AVA_HOME/lgtm-host` marker | none of its own — native processes on this host; Grafana dials Loki / Prometheus / Postgres over the host loopback |
 
 A host runs the **union** of its capabilities' services — the per-service
-capability declaration is `ServiceSpec.capabilities` in `ops/spec.py`, and the
+capability declaration is `ServiceSpec.capabilities` in `services/supervision/roster/spec.py`, and the
 resulting roster is documented in [[services/docs/services.ava.okf.md]]. A **single box**
 (`gateway,agent-runner`) is therefore not a special case in the code, just the
 host with several non-empty capability sets and the loopback reachable address.

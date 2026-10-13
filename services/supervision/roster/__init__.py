@@ -16,10 +16,14 @@ from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, re
 from base.config import settings
 from base.daemon.health import DaemonProbe, probe_home
 from base.paths import ava_home, otel_collector_binary, otel_collector_config
-from ops.roster import plugin_services
-from ops.roster.healthz import daemon_identity as daemon_identity  # public: plugin services
-from ops.roster.healthz import healthz_daemon as healthz_daemon  # public: plugin services
-from ops.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
+from services.supervision.roster import plugin_services
+from services.supervision.roster.healthz import (
+    daemon_identity as daemon_identity,  # public: plugin services
+)
+from services.supervision.roster.healthz import (
+    healthz_daemon as healthz_daemon,  # public: plugin services
+)
+from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
 
 # After uvicorn's connection drain the gateway runs its lifespan cleanup and the
 # interpreter exits. That tail waits on the lifespan teardown's in-flight work
@@ -31,7 +35,7 @@ _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
 def _redis_bridge_command() -> tuple[str, str, int]:
     """The relay's launch command, listen host and port.
 
-    A host that needs no relay is gated out of the roster (`ops.spec`), so its row only has
+    A host that needs no relay is gated out of the roster (`services.supervision.roster.spec`), so its row only has
     to be well formed: it carries the bare script and port 0.
     """
     relay = "services/redis_bridge/relay.py"
@@ -74,7 +78,7 @@ def _frontend_probe() -> DaemonProbe:
 def _browser_probe() -> DaemonProbe:
     """The headed browser's identity probe, imported at call time.
 
-    The one place ``ops`` reaches into ``services``. It has to: CDP exposes
+    CDP exposes
     nothing we control, so the browser is identified by the Chrome process
     running on this cluster's ``--user-data-dir`` — and both the profile path and
     the process-table identification already live in ``services/desktop/browser/``
@@ -276,7 +280,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # redis-bridge: the macOS gateway's off-box Redis ingress (Redis itself stays
         # loopback-only). Pure stdlib under the system interpreter so the application
         # firewall recognises the serving binary; gated to hosts that need a relay
-        # (`ops.spec`). A listener that keeps failing ends the process, so the root's
+        # (`services.supervision.roster.spec`). A listener that keeps failing ends the process, so the root's
         # bounded restart budget applies to it like to every other unit.
         ServiceSpec(
             session="redis-bridge",

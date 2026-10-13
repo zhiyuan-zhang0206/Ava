@@ -13,8 +13,8 @@ from dataclasses import replace
 
 from base.daemon.health import DaemonProbe
 from cli.commands.probe import occupied_health_ports
-from ops import roster
-from ops.roster.service_spec import ServiceSpec
+from services.supervision import roster
+from services.supervision.roster.service_spec import ServiceSpec
 
 _NOT_DAEMON_PORTS = ("gateway", "browser", "frontend", "memory-search", "otel-collector")
 

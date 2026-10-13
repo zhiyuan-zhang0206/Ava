@@ -135,7 +135,7 @@ def _port_findings(roles: MachineRoles, *, machine: MachineIdentity) -> tuple[li
     the thing that takes the host down.
     """
     import cli.commands.probe as _probe_commands
-    import ops.roster as _roster
+    import services.supervision.roster as _roster
     from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands.lifecycle.root_driver import _root_tree_roster
 
@@ -237,7 +237,7 @@ def _venv_findings(repo: Path, *, check_launcher: bool) -> list[str]:
     """The venv entry points the coming start needs, keyed to who runs it.
 
     - `.venv/bin/python` — the interpreter every service session launches
-      through (`ops/roster/__init__.py` builds `<venv>/bin/python -m ...`). Checked for
+      through (`services/supervision/roster/__init__.py` builds `<venv>/bin/python -m ...`). Checked for
       every caller: `ava restart` has no `uv sync` verification behind it, so a
       damaged venv is exactly the "stopped and cannot come back" class this
       gate exists for.

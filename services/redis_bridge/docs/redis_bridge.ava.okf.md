@@ -19,7 +19,7 @@ end to end because the bridge does not terminate or interpret RESP.
 
 `base.cluster.dataplane.redis_bridge.redis_bridge_endpoint` is the one answer to
 "does this host need a relay, and where": macOS, a local data plane and a declared
-non-loopback machine host. The roster builds the unit command from it, `ops.spec`
+non-loopback machine host. The roster builds the unit command from it, `services.supervision.roster.spec`
 gates the unit out where it returns None, and the converge and health probes read
 the same endpoint. The registry record owns the Redis port. The unit shares the
 root's bounded restart budget with every other service; its identity probe sends a
@@ -85,7 +85,7 @@ failure is infrastructure state.
   finite stop, and original worker error collection
 - `services/redis_bridge/relay.py:serve_forever()` — listener lifecycle and
   per-connection forwarding with cleanup on caller exit
-- `ops/roster/__init__.py` (`redis-bridge` unit) and `base/cluster/dataplane/redis_bridge.py` —
+- `services/supervision/roster/__init__.py` (`redis-bridge` unit) and `base/cluster/dataplane/redis_bridge.py` —
   rostered command and listen address
 - `cli/commands/converge/redis_bridge.py:retire_launchd_redis_bridge()` — removes the
   standalone launchd job and installed copy

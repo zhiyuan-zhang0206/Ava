@@ -16,7 +16,7 @@ import base.deploy.git.cluster_drift as _cluster_drift
 import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.status as _status_commands
 import cli.commands.probe as _probe_commands
-import ops.roster as _roster
+import services.supervision.roster as _roster
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, settings
@@ -236,7 +236,9 @@ def test_status_shows_browser_skip_reason(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(settings.services, "browser_enabled", True)
-    monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")
+    monkeypatch.setattr(
+        "services.supervision.roster.spec.browser_incapability", lambda: "no display (headless)"
+    )
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")

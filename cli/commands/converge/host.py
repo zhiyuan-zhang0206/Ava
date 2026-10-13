@@ -563,7 +563,7 @@ def _desired_service_names(
     roles: MachineRoles | None, *, machine: MachineIdentity
 ) -> frozenset[str]:
     from base.deploy.lifecycle.service_selection import read_selection
-    from ops.spec import services_for_capabilities_annotated
+    from services.supervision.roster.spec import services_for_capabilities_annotated
 
     if roles is None:
         return frozenset()

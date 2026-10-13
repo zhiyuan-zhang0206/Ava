@@ -22,7 +22,7 @@ This replaced the previous design where each agent spawned its own ~12MB daemon 
 - **Daemon required**: an absent or stale shared socket fails the call; the SDK does not own local MCP subprocesses.
 
 ## Key Dependencies
-- `ops/spec.py` — ServiceSpec "mcp-daemon" (agent-runner capability, `requires_db=False`, healthcheck `services.supervision.healthchecks.mcp_daemon`)
+- `services/supervision/roster/spec.py` — ServiceSpec "mcp-daemon" (agent-runner capability, `requires_db=False`, healthcheck `services.supervision.healthchecks.mcp_daemon`)
 - [[sdk-surface.ava.okf.md]] — `ava.mcps` SDK connects to the shared socket
 - [[oauth.ava.okf.md]] — OAuth 2.1 authorization-code + PKCE flow for remote servers
 

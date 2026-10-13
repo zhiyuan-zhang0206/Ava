@@ -13,7 +13,7 @@ Application service probes report the configured endpoint protocol. Helpers in
 this table do not own recovery. Readiness and diagnostic
 registration are distinct; the root manifest determines which services run.
 
-A standard `/healthz` daemon has no module here: `ops/roster/healthz.py` derives
+A standard `/healthz` daemon has no module here: `services/supervision/roster/healthz.py` derives
 its identity probe from the service name, so a new daemon of that shape adds no
 file to this directory and no row to this table.
 

@@ -12,7 +12,7 @@ import pytest
 from base.config import settings
 from base.daemon.tests.fakes import pin_endpoints
 from base.host.env.health_ports import DEFAULT_PORTS
-from ops.roster import build_services
+from services.supervision.roster import build_services
 
 
 def _spec_by_session(specs, session: str):

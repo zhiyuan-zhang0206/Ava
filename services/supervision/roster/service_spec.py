@@ -93,7 +93,7 @@ class ServiceSpec:
             os.environ at boot, so ``settings.lm.*_api_key`` resolve to None and
             every model build fails (labeler, issue #1128 / task #1230). The
             root launcher uses this declaration on every service start.
-        health_name: set only by ``ops.roster.healthz.healthz_daemon``: this
+        health_name: set only by ``services.supervision.roster.healthz.healthz_daemon``: this
             service is a standard Ava ``/healthz`` daemon whose port is the
             ``base.host.env.health_ports.DEFAULT_PORTS[health_name]`` slot (the same name
             the daemon passes to ``start_health_server``). None = any other shape.

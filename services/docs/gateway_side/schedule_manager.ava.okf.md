@@ -33,7 +33,7 @@ Still in memory, deliberately: the set of schedules whose stale same-name surviv
 ## Entry Points
 - `services/wake/schedule_manager/runner.py` — `.venv/bin/python -m services.wake.schedule_manager.runner <id> [revision]`, the independent process that composes the SDK before calling the gateway schedule execution engine
 - `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`
-- The application root supervises it through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
+- The application root supervises it through the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`).
 
 
 ## Process composition

@@ -9,7 +9,7 @@ tags:
 # Background services
 
 One root supervisor owns each host's selected application-service tree.
-`ops.roster.build_services()` merges core and plugin `ServiceSpec` declarations;
+`services.supervision.roster.build_services()` merges core and plugin `ServiceSpec` declarations;
 capabilities and service gates select the installed host's manifest. Each entry
 must provide a readiness probe. A matching HTTP response is insufficient without
 native ownership of the responding listener.

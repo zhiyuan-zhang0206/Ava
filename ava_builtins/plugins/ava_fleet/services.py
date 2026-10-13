@@ -1,9 +1,9 @@
 """ava_fleet — ops service declarations (the plugin's `build_services()` hook).
 
 A plugin that runs its own long-lived gateway/agent-runner daemon declares it
-here instead of hardcoding a ServiceSpec into the core `ops/roster/__init__.py`: a
+here instead of hardcoding a ServiceSpec into the core `services/supervision/roster/__init__.py`: a
 plugin ships a `services.py` exposing ``services() -> tuple[ServiceSpec, ...]``,
-and `ops.roster.plugin_services.plugin_services()` discovers + folds it into the single
+and `services.supervision.roster.plugin_services.plugin_services()` discovers + folds it into the single
 `build_services()` roster (so watchdog keepalive / `ava start` / `ava status`
 all still derive from one place). Discovery keys on this plugin's code being
 PRESENT on the machine, not the agent-facing enable-state — the
@@ -25,8 +25,8 @@ from functools import partial
 from ava_builtins.plugins.ava_fleet.default_config import FleetConfig
 from base.cluster.machine import MachineRole
 from base.packages.plugins.config_registration import disk_image_path, read_config_image
-from ops.roster import healthz_daemon
-from ops.roster.service_spec import ServiceSpec
+from services.supervision.roster import healthz_daemon
+from services.supervision.roster.service_spec import ServiceSpec
 
 # task-maintenance runs on the gateway capability, like the other cluster-wide
 # daemons. Declared here (not reaching into ops's private `_GATEWAY`) so the
@@ -40,7 +40,7 @@ def _task_maintenance_gate(config: FleetConfig) -> str | None:
     This is the daemon's host-owned on/off, with a cluster-wide business effect — Fleet `task_maintenance_enabled`, an
     explicit host plugin field (scope=host), read deterministically at
     daemon-start and unaffected by any per-agent config overlay. Owned by the
-    plugin (not `ops.spec._gate_reason`) so the fleet-domain toggle travels with
+    plugin (not `services.supervision.roster.spec._gate_reason`) so the fleet-domain toggle travels with
     the fleet service, and it — not the plugin's agent-facing enable-state — is
     what decides whether task-maintenance runs."""
     if not config.task_maintenance_enabled:

@@ -8,9 +8,7 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from ops import (
-    spec,  # canonical service roster and gate reasons
-)
+from services.supervision.roster import spec
 
 
 def _sessions(role: str, *, machine: MachineIdentity) -> set[str]:

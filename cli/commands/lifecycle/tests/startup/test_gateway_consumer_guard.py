@@ -596,7 +596,7 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     would silently mask any future cross-profile read instead of failing fast."""
     from base.config import PROCESS_PROFILES
     from cli.commands.lifecycle import root_driver
-    from ops.roster import build_services
+    from services.supervision.roster import build_services
 
     def delivery(_cls: str) -> dict[str, str]:
         return {"AVA_DB_URL": "postgresql://ava_g0_runner@fixture/ava"}

@@ -3,8 +3,8 @@
 
 Two tables are checked, both by set equality in both directions:
 
-1. the service domain roster (`ops/docs/service-roster.md`) against
-   `ops/roster/__init__.py:build_services()` —
+1. the service domain roster (`services/supervision/roster/docs/service-roster.md`) against
+   `services/supervision/roster/__init__.py:build_services()` —
    the single source of truth for the long-running sessions the cluster runs.
    The service domain carries a human-readable roster
    table documenting the same set. Nothing kept the two in sync, so a PR could
@@ -55,10 +55,10 @@ from base.host.env.dotenv_boot import enter_scratch_home
 if __name__ == "__main__":
     enter_scratch_home()
 
-from ops.roster import build_services
+from services.supervision.roster import build_services
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_SERVICE_ROSTER = _REPO_ROOT / "ops" / "docs" / "service-roster.md"
+_SERVICE_ROSTER = _REPO_ROOT / "services" / "supervision" / "roster" / "docs" / "service-roster.md"
 
 _SENTINEL = "<!-- lint:roster-table -->"
 

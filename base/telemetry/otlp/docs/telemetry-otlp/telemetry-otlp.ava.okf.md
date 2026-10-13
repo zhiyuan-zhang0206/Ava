@@ -104,7 +104,7 @@ receiver.
 - `base/deploy/release/collector_artifact.py` — pinned downloader for release prep and
   `cli/commands/observability/otel_collector.py` converge. Converge and
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
-  the credential-free (peer, monitoring role) Postgres receiver. Root health: `ops/spec.py`
+  the credential-free (peer, monitoring role) Postgres receiver. Root health: `services/supervision/roster/spec.py`
   (`ava-otel-collector`) + `services/supervision/healthchecks/otel_collector.py`.
 - `base/telemetry/tracing.py` + `cli/commands/observability/trace.py` + `cli/parsers/host.py` — the
   mirror `ava trace ship` replays, and the ship command.

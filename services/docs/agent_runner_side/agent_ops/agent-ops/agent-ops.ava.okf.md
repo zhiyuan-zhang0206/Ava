@@ -10,7 +10,7 @@ tags: []
 ## What is it
 The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway resolves the local address from the `machines` table and directly connects to `POST /ops`; the daemon calls the ops op clusters (`ops.cluster.operations` / `ops.host_config` / `ops.inventory` / `ops.lifecycle`) in-process to execute cluster ops operations, returning results synchronously in the HTTP response. Compact request/response, non-streaming, no queue / no SSE / no reconnection.
 
-**Role affiliation**: agent-runner side (gateway does not run; instead it runs `gateway.ops_*` in-process) — `ServiceSpec.capabilities=AGENT_RUNNER` in `ops/spec.py`.
+**Role affiliation**: agent-runner side (gateway does not run; instead it runs `gateway.ops_*` in-process) — `ServiceSpec.capabilities=AGENT_RUNNER` in `services/supervision/roster/spec.py`.
 
 ## Core Responsibilities
 - **Inbound HTTP endpoint**: binds `0.0.0.0:<ops_port>` when the host declares a reachable address (`AVA_MACHINE_HOST`), else `127.0.0.1`; serves `POST /ops`; `GET /healthz` (watchdog health check) on the same port, via localhost without auth. The health envelope reports active-op age and informational worker saturation; an operation held longer than 11 minutes (the no-progress bound plus margin) returns 503 so the watchdog restarts the daemon.

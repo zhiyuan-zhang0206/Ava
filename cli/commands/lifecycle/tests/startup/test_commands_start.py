@@ -21,7 +21,7 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 from cli.database.runtime import CommandRuntime
 from cli.tests._commands_helpers import _FakeResult, _git_aware
 from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
-from ops.roster.service_spec import ServiceSpec
+from services.supervision.roster.service_spec import ServiceSpec
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

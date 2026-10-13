@@ -17,7 +17,8 @@ from base.config import settings
 from base.log import logger
 from cli.commands.probe import ReadinessWait
 from cli.start_runtime import StartRuntime
-from ops.roster.service_spec import ServiceSpec, api_access, db_access, profile_marker
+from services.supervision.roster import service_spec
+from services.supervision.roster.service_spec import ServiceSpec
 
 _ROOT_SOCKET_NAME = "ava-root.sock"
 _ROOT_STDOUT_LOG = "root.stdout.log"
@@ -68,16 +69,16 @@ def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     from cli.commands.data_plane.bringup import api_delivery, db_delivery
 
     extra = service_environment(spec.session) if spec.session in BACKENDS else {}
-    marker = profile_marker(spec)
+    marker = service_spec.profile_marker(spec)
     if marker is not None:
         extra["AVA_PROCESS_PROFILE"] = marker
-    cls = db_access(spec)
+    cls = service_spec.db_access(spec)
     delivery = db_delivery(cls) if cls is not None else {}
     if delivery:
         extra.update(delivery)
     elif marker == "agent":
         extra["AVA_DB_URL"] = runner_db_url_projection()
-    extra.update(api_delivery(api) if (api := api_access(spec)) is not None else {})
+    extra.update(api_delivery(api) if (api := service_spec.api_access(spec)) is not None else {})
     if spec.plugin_config is not None:
         from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
         from base.packages.plugins.config_registration import service_config_packet
@@ -90,7 +91,7 @@ def _root_tree_roster(
     roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
 ) -> tuple[ServiceSpec, ...]:
     """The capability/config-selected units for this root."""
-    from ops.spec import services_for_capabilities_annotated
+    from services.supervision.roster.spec import services_for_capabilities_annotated
 
     return tuple(
         spec
