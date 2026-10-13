@@ -12,7 +12,7 @@
 "schedules" = ["ava", "base", "scripts", "services", "tests"]
 "scripts" = ["agent", "ava", "base", "cli", "gateway", "meizel", "ops", "services", "tests"]
 "services" = ["ava", "base", "ops", "tests"]
-"services/agent_runner/agent_host" = ["agent/db/__init__.py", "agent/graph/__init__.py", "agent/graph/_init_context.py", "agent/graph/claim/node.py", "agent/graph/exec/_child_boundary.py", "agent/graph/exec/_process.py", "agent/graph/exec/_result.py", "agent/graph/exec/_subprocess.py", "agent/graph/hooks/compact.py", "agent/graph/interrupt.py", "agent/graph/llm/node.py", "agent/graph/llm/tests/cancel_fixture.py", "agent/graph/llm_errors.py", "agent/graph/node_log.py", "agent/graph/tests/test_llm_helpers.py", "agent/hooks/compact_anchor.py", "agent/impersonation.py", "agent/impersonation_handoff.py", "agent/impersonation_process.py", "agent/llm/__init__.py", "agent/messages/guard.py", "agent/nodes.py", "agent/ownership/corpse_reap.py", "agent/ownership/hosted.py", "agent/ownership/hosted_completion.py", "agent/ownership/inbound.py", "agent/ownership/lifecycle_intent.py", "agent/ownership/native_cancel.py", "agent/ownership/tests/test_lifecycle_intent.py", "agent/process_boot.py", "agent/startup/__init__.py", "agent/state.py", "agent/tests/claim/claim_support.py", "agent/tests/claim/test_inbound_ownership.py", "agent/turn/runloop.py", "agent/turn/trace_checkpoint.py"]
+"services/agent_runner/agent_host" = ["agent/db/__init__.py", "agent/graph/__init__.py", "agent/graph/_init_context.py", "agent/graph/claim/node.py", "agent/graph/claim/tests", "agent/graph/exec/_child_boundary.py", "agent/graph/exec/_process.py", "agent/graph/exec/_result.py", "agent/graph/exec/_subprocess.py", "agent/graph/hooks/compact.py", "agent/graph/interrupt.py", "agent/graph/llm/node.py", "agent/graph/llm_errors.py", "agent/graph/node_log.py", "agent/graph/tests/cancel_fixture.py", "agent/graph/tests/test_llm_helpers.py", "agent/hooks/compact_anchor.py", "agent/impersonation.py", "agent/impersonation_handoff.py", "agent/impersonation_process.py", "agent/llm/__init__.py", "agent/messages/guard.py", "agent/nodes.py", "agent/ownership/corpse_reap.py", "agent/ownership/hosted.py", "agent/ownership/hosted_completion.py", "agent/ownership/inbound.py", "agent/ownership/lifecycle_intent.py", "agent/ownership/native_cancel.py", "agent/ownership/tests/test_lifecycle_intent.py", "agent/process_boot.py", "agent/startup/__init__.py", "agent/state.py", "agent/tests/claim/test_inbound_ownership.py", "agent/turn/runloop.py", "agent/turn/trace_checkpoint.py"]
 "tests" = [".agents", "agent", "ava", "ava_builtins", "base", "cli", "gateway", "meizel", "ops", "schedules", "scripts", "services", "ui"]
 [roles]
 # The shipped packages: the wheel, the framework scans.
@@ -140,9 +140,9 @@ frontend = ["ui"]
 "tests/ci/test_tests_dir_scope.py -> scripts/lint/no_os_environ.py" = 6
 "tests/ci/test_tests_dir_scope.py -> scripts/lint/plugins/no_plugin_wrap.py" = 5
 "tests/components/agent/test_claim_auto_resurrect.py -> agent/graph/__init__.py" = 1
+"tests/components/agent/test_claim_auto_resurrect.py -> agent/graph/claim/tests/claim_support.py" = 1
 "tests/components/agent/test_claim_auto_resurrect.py -> agent/ownership/hosted.py" = 2
 "tests/components/agent/test_claim_auto_resurrect.py -> agent/state.py" = 1
-"tests/components/agent/test_claim_auto_resurrect.py -> agent/tests/claim/claim_support.py" = 1
 "tests/components/agent/test_claim_auto_resurrect.py -> ava/__init__.py" = 3
 "tests/components/agent/test_claim_auto_resurrect.py -> ops/agents/wake.py" = 1
 "tests/components/agent/test_compact_contract.py -> agent/graph/hooks/compact.py" = 4
@@ -376,7 +376,7 @@ frontend = ["ui"]
 "tests/integration/test_termination_shell_cleanup.py -> agent/tests/claim/test_inbound_ownership.py" = 1
 "tests/integration/test_termination_shell_cleanup.py -> ops/lifecycle/termination.py" = 1
 "tests/integration/test_termination_shell_cleanup.py -> services/agent_runner/agent_host/tests/lifecycle/test_hosted_lifecycle.py" = 1
-"tests/path_scoped/agent_tests.py -> agent/graph/tests/cursor_fixture.py" = 1
+"tests/path_scoped/agent_tests.py -> agent/graph/claim/tests/cursor_fixture.py" = 1
 "tests/path_scoped/ava_tests.py -> ava/__init__.py" = 1
 "tests/path_scoped/ava_tests.py -> ava/sdk_surface/settings.py" = 1
 "tests/path_scoped/ava_tests.py -> ava/self/__init__.py" = 4
@@ -425,8 +425,6 @@ frontend = ["ui"]
 [debt.private-module]
 "agent/tests/impersonation/test_impersonation_transport_integration.py -> base/agents/impersonation/_store.py" = 2
 "agent/tests/test_exec_subprocess.py -> tests/_test_env_file.py" = 1
-"ava_builtins/plugins/ava_syntax_fix/tests/test_multiple_tool_calls_ava_syntax_fix.py -> agent/tests/_fakes.py" = 1
-"ava_builtins/plugins/tests/test_ava_sdk_reminder_plugin.py -> agent/tests/_fakes.py" = 2
 "base/db/tests/test_connect_helpers.py -> tests/_containers.py" = 1
 "conftest.py -> tests/_asyncio_stall_probe.py" = 1
 "gateway/tests/agents/test_external_agent_source.py -> agent/graph/claim/_chat_inbound.py" = 1
@@ -476,7 +474,6 @@ frontend = ["ui"]
 "services/agent_runner/agent_host/tests/lifecycle/test_hosted_lifecycle.py -> ops/lifecycle/termination.py#_force_terminate_transaction" = 1
 "services/agent_runner/agent_host/tests/native_cancel/test_authority.py -> ops/lifecycle/termination.py#_force_terminate_transaction" = 1
 "services/agent_runner/agent_host/tests/native_cancel/test_resource_proof.py -> ops/lifecycle/termination.py#_force_terminate_transaction" = 1
-"services/agent_runner/agent_host/tests/test_circuit_breaker.py -> agent/tests/claim/claim_support.py#_fake_llm" = 1
 "services/agent_runner/agent_host/tests/test_circuit_breaker.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
 "services/agent_runner/agent_host/tests/test_circuit_breaker_audit.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
 "services/agent_runner/agent_ops/tests/test_daemon_launch_reconcile.py -> ops/cluster/rpc.py#_NON_IDEMPOTENT_KINDS" = 2
