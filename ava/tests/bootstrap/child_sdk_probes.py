@@ -194,7 +194,7 @@ def non_agent_import_unbound_context() -> None:
 
     os.environ.pop("AVA_AGENT_ID", None)
     import ava
-    from ava.sdk_surface import install, installation
+    from ava.sdk_surface import install, installation, process_context
 
     assert getattr(ava, "context", None) is None
     assert installation.installed() is None
@@ -202,22 +202,22 @@ def non_agent_import_unbound_context() -> None:
     from base.agents.context.clients import ClientSet
 
     manual = AvaContext(clients=ClientSet())
-    ava.bind_context(manual)
+    process_context.bind_context(manual)
     importlib.reload(ava)
     assert ava.context is manual
     assert installation.installed() is None
-    ava.unbind_context()
-    ava.bind_host_process()
+    process_context.unbind_context()
+    process_context.bind_host_process()
     installed = installation.installed
     installation.installed = lambda: SimpleNamespace(faces=True)  # pyright: ignore[reportAttributeAccessIssue]
     ava.ensure_plugins_loaded()
-    assert ava.is_host_process()
+    assert process_context.is_host_process()
     assert getattr(ava, "context", None) is None
     installation.installed = installed
     error = ValueError("retained explicit load failure")
     install.mark_load_failed(error)
     importlib.reload(ava)
-    assert ava.is_host_process()
+    assert process_context.is_host_process()
     assert getattr(ava, "context", None) is None
     try:
         ava.ensure_plugins_loaded()
@@ -261,16 +261,16 @@ def host_refuses_env_context_and_attachment() -> None:
     from ava.sdk_surface import agent_identity, process_context
 
     os.environ["AVA_AGENT_ID"] = "5"
-    ava.bind_host_process()
-    assert ava.is_host_process()
+    process_context.bind_host_process()
+    assert process_context.is_host_process()
     assert agent_identity.is_launched_child() is False
     assert getattr(ava, "context", None) is None
     _expect_refusal(lambda: ava.external.attach("must-not-be-read"), "native agent runtime")
     _expect_refusal(
-        lambda: ava.bind_context(process_context.launched_context()),  # pyright: ignore[reportArgumentType]
+        lambda: process_context.bind_context(process_context.launched_context()),  # pyright: ignore[reportArgumentType]
         "shared agent host",
     )
-    _expect_refusal(ava.unbind_context, "startup posture")
+    _expect_refusal(process_context.unbind_context, "startup posture")
 
 
 def host_rejects_inherited_child_identity() -> None:

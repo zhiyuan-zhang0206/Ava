@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ava.files import resolve
+from ava.sdk_surface import process_context
 from ava.sdk_surface.validation import coerce_str
 from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
@@ -123,11 +124,10 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
         )
     path = coerce_str(path, "path", allow_types=(Path,))
     label = coerce_str(label, "label", allow_none=True)
-    import ava
 
-    bound = getattr(ava, "context", None)
+    bound = process_context.ambient_context()
     borrowed = bound is not None and bound.identity is not None and bound.identity.lease is not None
-    if not ava.in_exec_turn() or borrowed:
+    if not process_context.in_exec_turn() or borrowed:
         raise RuntimeError(
             "ava.self.attach only works inside an agent turn (execute_code); "
             "outside a turn there is no runner to deliver the attachment"
@@ -149,7 +149,7 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
         raise TypeError("attachment label must be a str or None")
     if label is not None and len(label) > ATTACH_MAX_LABEL_CHARS:
         raise ValueError(f"attachment label exceeds {ATTACH_MAX_LABEL_CHARS} characters")
-    update = ava.state_update
+    update = process_context.get_state_update()
     if not isinstance(update, dict):
         raise TypeError(
             f"ava.state_update must stay a dict, got {type(update).__name__} (attachment)"

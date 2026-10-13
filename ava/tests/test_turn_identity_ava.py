@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import ava
-from ava.sdk_surface import agent_identity
+from ava.sdk_surface import agent_identity, process_context
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.host.proc import run_bounded
@@ -70,9 +70,9 @@ def test_executable_host_rejects_inherited_child_identity_before_sdk_import() ->
 def test_established_child_context_cannot_become_shared_host() -> None:
     pin_agent(5, owns_loop=False)
     with pytest.raises(RuntimeError, match="established SDK process context"):
-        ava.bind_host_process()
+        process_context.bind_host_process()
     assert agent_identity.require_agent_id() == 5
-    assert ava.is_host_process() is False
+    assert process_context.is_host_process() is False
 
 
 def test_turn_metadata_cannot_grant_a_launched_script_loop_ownership(

@@ -23,7 +23,7 @@ from agent.extensions.plugin_state_codec import (
     encode_plugin_delta,
 )
 from ava import external, gateway_client
-from ava.sdk_surface import agent_identity
+from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.settings import agent_setting
 from base import telemetry
@@ -55,7 +55,7 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
         assert agent_setting("llm_model") == "external-test"
     assert _borrowed_agent_id() is None
     assert agent_identity.require_actor() == "external_agent:codex"
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
 
 
 def test_legacy_attachment_never_opens_an_event_receipt(
@@ -174,7 +174,7 @@ def _borrowed_agent_id() -> int | None:
 
 def _assert_detached() -> None:
     """After a detach the process holds no exec slot and no attached config."""
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
     assert _settings._attached() is None
 
 

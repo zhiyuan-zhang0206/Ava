@@ -15,6 +15,7 @@ from typing import Any
 import ava
 import ava.files as _ava_files
 import base.paths
+from ava.sdk_surface import process_context
 from ava.sdk_surface.agent_identity import require_agent_id
 from ava.sdk_surface.validation import coerce_str
 from base.log import logger
@@ -73,7 +74,7 @@ def record_written_note(path: str | Path) -> None:
     Never raises: the write it follows has already happened and must not be disturbed, so a
     failure here is logged and the note simply goes unchecked."""
     try:
-        if not ava.in_exec_turn():
+        if not process_context.in_exec_turn():
             return
         located = note_location(path)
         if located is None:

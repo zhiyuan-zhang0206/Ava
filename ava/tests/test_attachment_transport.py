@@ -10,6 +10,7 @@ import pytest
 
 import ava
 from ava import files
+from ava.sdk_surface import process_context
 from ava.sdk_surface.attachment_transport import attach
 from ava.sdk_surface.installation import Installation
 from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
@@ -30,7 +31,7 @@ def _exec_turn() -> Iterator[None]:
     ava.state = object()
     ava.state_update = {}
     yield
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +61,7 @@ def test_rejects_calls_outside_exec_child(
     tmp_path: Path, *, model_installation: Installation, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
 

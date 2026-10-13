@@ -10,7 +10,7 @@
 
 from typing import NoReturn
 
-from ava.sdk_surface import agent_identity
+from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.validation import coerce_str
 from base.agents.lifecycle import AgentImpersonation
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -23,9 +23,10 @@ __all_for_ava__ = []
 
 def _native_incarnation() -> RuntimeIncarnation:
     agent_identity.assert_self_action("impersonation")
-    import ava
 
-    return ava.context.require_original_incarnation(agent_identity.require_agent_id())
+    return process_context.current_context().require_original_incarnation(
+        agent_identity.require_agent_id()
+    )
 
 
 def accept(request_id: str, start_message: str) -> NoReturn:
@@ -44,7 +45,6 @@ def accept(request_id: str, start_message: str) -> NoReturn:
     relay cannot start, the acceptance rolls back loudly (the lease becomes
     rejected with the reason) and you keep running as native.
     """
-    import ava
     from ava.sdk_surface.settings import bus, database
     from base.agents.impersonation import accept as accept_request
 
@@ -56,7 +56,7 @@ def accept(request_id: str, start_message: str) -> NoReturn:
         incarnation.agent_id,
         incarnation,
         coerce_str(start_message, "start_message"),
-        local_machine=ava.context.require_machine().name(),
+        local_machine=process_context.current_context().require_machine().name(),
     )
     raise AgentImpersonation
 

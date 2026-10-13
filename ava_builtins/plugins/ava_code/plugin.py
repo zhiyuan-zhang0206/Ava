@@ -50,8 +50,8 @@ __description__ = "Ava Code conventions — maintains cwd and auto-injects proje
 from collections.abc import Callable
 from pathlib import Path
 
-import ava
 import ava.files as _ava_files_mod
+from ava.sdk_surface import process_context
 from ava.sdk_surface.agent_identity import require_agent_id
 from ava.sdk_surface.validation import coerce_str
 from base.clock import Clock
@@ -78,7 +78,7 @@ _files_resolve = _ava_files_mod.resolve
 # scan runs on every lookup AND once at the system-prompt build, where state
 # is not yet bound (cwd still default) — there we contribute nothing.
 def _project_skill_source() -> list[Path]:
-    if not ava.in_exec_turn():
+    if not process_context.in_exec_turn():
         return []
     return project_skill_roots(Path(read_state().cwd))
 
@@ -209,7 +209,7 @@ def _wrapped_read(
 
     # Fast-path: when called outside a turn (test / dev REPL), pass through
     # to the wrapped read — no path rewriting, no injection.
-    if not ava.in_exec_turn():
+    if not process_context.in_exec_turn():
         return inner(path, start, end, limit=limit, with_line_numbers=with_line_numbers)
 
     # 1. Resolve path against plugin cwd
@@ -283,7 +283,7 @@ def _wrapped_shell_run(
     """
     # Same by-design fast-path as _wrapped_read: outside a turn (test / dev
     # REPL), pass through; do not depend on plugin cwd state.
-    if not ava.in_exec_turn() or cwd is not None:
+    if not process_context.in_exec_turn() or cwd is not None:
         return inner(cmd, cwd=cwd, timeout=timeout)
     return inner(cmd, cwd=str(_code_namespace.get()), timeout=timeout)
 
@@ -294,12 +294,12 @@ def _wrapped_shell_run(
 # `ava.cwd.set("<repo>")` every file op follows the tracked cwd instead of
 # staying pinned to the workspace.
 # Uniform wrap: when a turn is active, fast-path cwd resolution matches
-# _wrapped_read; outside a turn (`ava.in_exec_turn()` is False) pass through to the
+# _wrapped_read; outside a turn (`in_exec_turn()` is False) pass through to the
 # original function.
 def _resolve_for_cwd(path: str | Path) -> Path:
     """Resolve path against plugin cwd; outside a turn defer to the SDK core
     resolution (workspace, or HOME before an identity is bound)."""
-    if not ava.in_exec_turn():
+    if not process_context.in_exec_turn():
         return _files_resolve(str(path))
     p = Path(path).expanduser()
     cwd = _code_namespace.get()
@@ -348,7 +348,7 @@ def _wrapped_glob(inner: Callable[..., list[Path]], pattern: str = "*") -> list[
     # glob is not a simple path — the pattern may contain ** / * wildcards.
     # Resolve cwd base first, concatenate the pattern (preserving wildcard
     # semantics), then call the wrapped glob with the normalized pattern.
-    if not ava.in_exec_turn():
+    if not process_context.in_exec_turn():
         return inner(pattern)
     p_pattern = Path(pattern).expanduser()
     if p_pattern.is_absolute():

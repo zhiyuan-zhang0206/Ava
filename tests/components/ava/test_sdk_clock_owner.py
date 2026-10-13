@@ -8,8 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-import ava
-from ava.sdk_surface import install, settings
+from ava.sdk_surface import install, process_context, settings
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.clock import Clock, clock_config_from_boot
@@ -19,7 +18,7 @@ from base.packages.plugins.extensions import ExtensionRegistry
 
 @pytest.fixture
 def clock_scope() -> Iterator[None]:
-    prior_context = ava.unbind_context()
+    prior_context = process_context.unbind_context()
     prior = install.uninstall()
     try:
         with patch.dict(os.environ):
@@ -37,7 +36,7 @@ def clock_scope() -> Iterator[None]:
                 clock_factory=prior.clock_factory,
             )
         if prior_context is not None:
-            ava.bind_context(prior_context)
+            process_context.bind_context(prior_context)
 
 
 def test_bare_sdk_clock_uses_live_installation_owner(clock_scope: None) -> None:
@@ -71,13 +70,13 @@ def test_bound_sdk_clock_uses_context_without_borrowing_installation(clock_scope
         raise AssertionError("a bound operation must keep its context's clock owner")
 
     install.install(ExtensionRegistry(()), clock_factory=unrelated)
-    ava.bind_context(
+    process_context.bind_context(
         AvaContext(clients=ClientSet(), clock_factory=lambda: Clock(clock_config_from_boot(boot)))
     )
     try:
         assert settings.clock().authoritative_timezone == "UTC"
     finally:
-        ava.unbind_context()
+        process_context.unbind_context()
 
 
 def test_partial_context_refuses_clock_instead_of_falling_back(clock_scope: None) -> None:
@@ -85,12 +84,12 @@ def test_partial_context_refuses_clock_instead_of_falling_back(clock_scope: None
     install.install(
         ExtensionRegistry(()), clock_factory=lambda: Clock(clock_config_from_boot(boot))
     )
-    ava.bind_context(AvaContext(clients=ClientSet()))
+    process_context.bind_context(AvaContext(clients=ClientSet()))
     try:
         with pytest.raises(RuntimeError, match="clock"):
             settings.clock()
     finally:
-        ava.unbind_context()
+        process_context.unbind_context()
 
 
 def test_inventory_installation_remains_cold_and_refuses_clock(clock_scope: None) -> None:

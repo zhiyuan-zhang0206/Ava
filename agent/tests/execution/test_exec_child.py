@@ -718,6 +718,7 @@ def test_child_help_hides_attach_for_withdrawn_model(
         tmp_path,
         "import ava, io, contextlib\n"
         "from dataclasses import replace\n"
+        "from ava.sdk_surface import process_context\n"
         "from ava.sdk_surface.settings import model_catalog\n"
         "catalog = model_catalog()\n"
         "withdrawn = replace(catalog.models['deepseek-flash'], "
@@ -725,7 +726,7 @@ def test_child_help_hides_attach_for_withdrawn_model(
         "media_types=frozenset({'image'}))\n"
         "fixture = replace(catalog, models={**catalog.models, 'deepseek-vision-fixture': withdrawn})\n"
         "ava.__plugin_installation__ = replace(ava.__plugin_installation__, catalog=fixture)\n"
-        "ava.bind_context(replace(ava.context, catalog=fixture))\n"
+        "process_context.bind_context(replace(ava.context, catalog=fixture))\n"
         "buf = io.StringIO()\n"
         "with contextlib.redirect_stdout(buf):\n"
         "    ava.help(ava.self)\n"

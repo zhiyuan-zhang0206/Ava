@@ -14,6 +14,7 @@ import ava
 from agent import state as state_module
 from agent.extensions import plugin_state_codec
 from ava import external
+from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -73,8 +74,8 @@ def attached_runtime(
     machine_config.read_process_environment()
     machine_config.set_field("machine_name", "local-runner")
     pin_agent(None, owns_loop=True, machine=machine_from_boot(machine_config))
-    ava.unbind_exec_turn()
-    request.addfinalizer(ava.unbind_exec_turn)
+    process_context.unbind_exec_turn()
+    request.addfinalizer(process_context.unbind_exec_turn)
 
     from ava.sdk_surface import metering
     from base.agents.sdk import call_policy

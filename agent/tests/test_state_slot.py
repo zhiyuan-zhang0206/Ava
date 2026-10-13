@@ -49,6 +49,7 @@ from agent.state import (
     PluginStateHandle,
     build_agent_state,
 )
+from ava.sdk_surface import process_context
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
@@ -70,9 +71,9 @@ assert (
 def _reset_state_slot():
     """Before/after each test, force reset slots back to None — do not restore previous (would mask test
     leaks). Module-level slots should default to None; any leftover value is a bug."""
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
     yield
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
 
 
 def _registry(**plugins: type[BaseModel]) -> ExtensionRegistry:
@@ -527,7 +528,7 @@ async def test_exec_node_never_binds_the_slot_in_the_parent(
     runtime, config = _make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     await _exec_node_impl(state, runtime, config)
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
 
 
 async def test_exec_node_leaves_parent_unbound_even_on_crash(
@@ -543,7 +544,7 @@ async def test_exec_node_leaves_parent_unbound_even_on_crash(
 
     cmd = await _exec_node_impl(state, runtime, config)
     assert cmd is not None
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
 
 
 async def test_plugin_cannot_overwrite_base_field_via_ava_state(
@@ -712,7 +713,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
     update = cast(dict, cmd.update)
     assert update.get("plugin__progress") == "before-cancel"  # pyright: ignore[reportUnknownMemberType]
     assert update["halted"] is True  # cancel path halted=True
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
 
 
 # ── exec-side system-note injection (user ruling 2026-08-11) ────────────────

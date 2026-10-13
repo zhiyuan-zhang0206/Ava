@@ -10,7 +10,7 @@ from collections.abc import Iterator
 import pytest
 
 import ava
-from ava.sdk_surface import metering
+from ava.sdk_surface import metering, process_context
 from ava.sdk_surface.installation import installed
 from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
@@ -43,7 +43,7 @@ def sdk_environment(
         machine=machine_identity,
         clock_factory=lambda: Clock(clock_config_from_boot(process_config)),
     )
-    ava.bind_context(context)
+    process_context.bind_context(context)
     try:
         yield context
     finally:
@@ -53,7 +53,7 @@ def sdk_environment(
             if previous is None:
                 del ava.context
             else:
-                ava.bind_context(previous)
+                process_context.bind_context(previous)
 
 
 @pytest.fixture

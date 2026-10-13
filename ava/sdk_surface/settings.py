@@ -11,10 +11,10 @@ process resource; the default database factory refuses it before a connection ca
 from collections.abc import Mapping
 from typing import Any
 
-from base.agents.context.clients import DatabaseFactory, DatabaseHandle
+from ava.sdk_surface import process_context
+from base.agents.context.clients import DatabaseHandle
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot, settings
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -40,9 +40,8 @@ def config_authority() -> ConfigAuthority:
 
 def clock() -> Clock:
     """Build an operation's clock from its context or installed SDK root."""
-    import ava
 
-    context = getattr(ava, "context", None)
+    context = process_context.ambient_context()
     if context is not None:
         return context.require_clock()
     installation = installed()
@@ -88,47 +87,10 @@ def __getattr__(name: str) -> Any:
 # live-events stacks into every exec child (task #3816).
 
 
-def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> DatabaseFactory:
-    """Retain one lazy database gate on this client set, without importing its dial stack."""
-    from threading import Lock
-
-    import ava
-    from base.native_process.code_version import CodeVersion
-
-    version = CodeVersion(ava.loaded_code_image())
-    lock = Lock()
-    # The dial stack stays cold until the first database request. The factory,
-    # not a module slot or an independently returned handle, owns this gate.
-    gate: Any = None
-
-    def database() -> Any:
-        nonlocal gate
-        from base.cluster.dataplane.direct_url import ClusterDirectUrl
-        from base.db import Database
-        from base.db.code_version_gate import ProcessDbGate
-        from base.db.config import db_config_from_boot
-
-        if not config.view.data_plane.db_url:
-            raise RuntimeError(
-                "AVA_DB_URL not set — SQL ops should not be called in container mode"
-            )
-        with lock:
-            if gate is None:
-                gate = ProcessDbGate(version=version.get, process="unknown")
-        return Database(
-            db_config_from_boot(config),
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
-        )
-
-    return database
-
-
 def database() -> DatabaseHandle:
     """A fresh handle from this SDK context's original database owner."""
-    import ava
 
-    return ava.context.clients.database()
+    return process_context.current_context().clients.database()
 
 
 def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
@@ -168,7 +130,7 @@ def page_host() -> "PageHost":  # noqa: F821  # pyright: ignore[reportUndefinedV
     from ava.ui import PageHost
 
     return PageHost(
-        host=ava.context.require_machine().host(),
+        host=process_context.current_context().require_machine().host(),
         agent_id=ava.sdk_surface.agent_identity.require_agent_id(),
     )
 
@@ -176,9 +138,8 @@ def page_host() -> "PageHost":  # noqa: F821  # pyright: ignore[reportUndefinedV
 def _attached() -> tuple[Mapping[str, Any], Any] | None:
     """The pins and plugin-config view of the agent this process attached to (`ava.external`:
     one attachment per process), if any: the lease its context carries."""
-    import ava
 
-    context = getattr(ava, "context", None)
+    context = process_context.ambient_context()
     lease = None if context is None or context.identity is None else context.identity.lease
     return None if lease is None else lease.config()
 

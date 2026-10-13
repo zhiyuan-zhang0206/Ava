@@ -4,7 +4,7 @@ from dataclasses import replace as _replace
 from pathlib import Path as _Path
 from types import ModuleType as _ModuleType
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 from base.native_process.loaded_commit import LoadedCommit as _LoadedCommit
 from base.native_process.loaded_commit import capture_commit as _capture_commit
@@ -66,54 +66,13 @@ from .sdk_surface.plugins import PluginNamespaceConflictError as PluginNamespace
 from .sdk_surface.plugins import RegisterNamespaceError as RegisterNamespaceError
 from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
 
-# ── Framework-internal state slot ──────────────────────────────────────────
+# ── The SDK entry's slots ───────────────────────────────────────────────────
 #
-# **Framework-internal. Plugin authors do not directly touch these two
-# attributes — exec-side state read/write goes through `agent.state.PluginStateHandle`
-# (`read` / `update`), and host-side logic (graph hooks) never touches them at all: it reads
-# the graph `state` argument and returns an update dict.** The framework itself (the exec
-# child, an external attachment) and the handle internals use them to pass the exec turn's
-# working copy + delta dict; the slot lives in the exec child, which rebuilds it from the
-# request envelope before agent code runs.
-#
-# Lifecycle (framework side):
-#   Before agent code runs, the exec child (after loading plugins) sets
-#   `ava.state = <snapshot validated from the request envelope>` +
-#   `ava.state_update = {}` (`agent/execution/child.py:_build_state_slot`).
-#   handle.read reads ava.state; handle.update synchronously mutates the
-#   ava.state working copy + accumulates raw delta into ava.state_update.
-#   When the child exits it writes state_update into its result envelope; exec_node
-#   reads it from there and merges it into `Command(update=...)`, going through
-#   the LangGraph reducer. Nothing resets the slots in the child: they are discarded
-#   with the process. An external attachment unbinds them at detach. No other process
-#   — the agent host included — ever binds them.
-#
-# Under the LangGraph cycling topology, nodes run sequentially, no
-# cross-turn race; if parallel branch (fan-out) is introduced in the
-# future, this one-slot model must be re-evaluated.
-
-
-class PluginStateOutsideTurnError(AttributeError):
-    """`ava.state` / `ava.state_update` (or a `PluginStateHandle` read / update) touched
-    outside an exec turn — the framework binds the state slot only in the exec child that
-    runs agent code.
-
-    An AttributeError, so the attribute simply does not exist elsewhere. Common misuse: a
-    plugin reads state at module load time, or from a graph hook in the agent host — host
-    logic reads the graph `state` argument its hook was handed, never the SDK's slot.
-    """
-
-
-# ── The exec turn's state slot ───────────────────────────────────────────────
-# `ava.state` / `ava.state_update` exist only while an exec turn is bound: reading either
-# anywhere else raises `PluginStateOutsideTurnError`, never a None. The two values live under
-# private keys of this module's own dict; the properties below are the only readers and
-# writers, and `in_exec_turn()` / `unbind_exec_turn()` are the framework's explicit questions
-# and ends of a turn. A bind is plain assignment — `ava.state = <snapshot>`,
-# `ava.state_update = {}` — and the exec child dies with its slot.
-_STATE_KEY = "_exec_state"
-_UPDATE_KEY = "_exec_state_update"
-_CONTEXT_KEY = "_exec_context"
+# `ava.context`, `ava.state` and `ava.state_update` are attribute delegations to the slots in
+# `ava.sdk_surface.process_context`, which owns their storage, lifecycle and errors. The values
+# are not kept in this module's dictionary, so `importlib.reload(ava)` neither resets nor
+# duplicates them. An assignment such as `ava.state = <snapshot>` or `ava.context = ctx` goes
+# through the property setters below; `del ava.context` releases the binding.
 
 state: Any
 state_update: dict[str, Any] | None
@@ -130,75 +89,36 @@ gateway API access. Unavailable when no execution context is established.
 """
 
 
-def _outside_exec_turn(name: str) -> PluginStateOutsideTurnError:
-    return PluginStateOutsideTurnError(
-        f"ava.{name} exists only inside execute_code (an exec turn); this process has no bound "
-        "turn state. Host code reads the graph state its hook was handed instead."
-    )
-
-
 class _SdkModule(_ModuleType):
-    """The `ava` module, whose three framework slots use process-local private keys."""
+    """The `ava` module, whose three framework slots delegate to `process_context`."""
 
     @property
     def state(self) -> Any:
-        value = self.__dict__.get(_STATE_KEY)
-        if value is None:
-            raise _outside_exec_turn("state")
-        return value
+        return process_context.get_state()
 
     @state.setter
     def state(self, value: Any) -> None:
-        if value is None:
-            raise TypeError("ava.state cannot be None; end a turn with ava.unbind_exec_turn()")
-        self.__dict__[_STATE_KEY] = value
+        process_context.set_state(value)
 
     @property
     def state_update(self) -> Any:
-        if self.__dict__.get(_STATE_KEY) is None:
-            raise _outside_exec_turn("state_update")
-        # Whatever the exec code left there: the exec child validates it is a dict at exit.
-        return self.__dict__.get(_UPDATE_KEY)
+        return process_context.get_state_update()
 
     @state_update.setter
     def state_update(self, value: Any) -> None:
-        self.__dict__[_UPDATE_KEY] = value
+        process_context.set_state_update(value)
 
     @property
     def context(self) -> AvaContext:
-        bound = self.__dict__.get(_CONTEXT_KEY)
-        if bound is process_context.SdkProcessPurpose.SHARED_HOST:
-            raise process_context.ContextOutsideProcessError(
-                "the shared agent host has no SDK process context; "
-                "host code uses the context its caller supplied"
-            )
-        if bound is not None:
-            return bound
-        launched = process_context.launched_context()
-        if launched is None:
-            raise process_context.ContextOutsideProcessError(
-                "ava.context requires an execution child, launched script or external attachment; "
-                "host code uses the context its caller supplied"
-            )
-        import atexit
-
-        self.context = launched
-        atexit.register(launched.clients.close)
-        return launched
+        return process_context.current_context()
 
     @context.setter
     def context(self, value: AvaContext) -> None:
-        if is_host_process():
-            raise RuntimeError("the shared agent host cannot bind an SDK process context")
-        if not isinstance(value, AvaContext):
-            raise TypeError("ava.context must be an AvaContext")
-        self.__dict__[_CONTEXT_KEY] = value
+        process_context.bind_context(value)
 
     @context.deleter
     def context(self) -> None:
-        if is_host_process():
-            raise RuntimeError("the shared agent host cannot release its startup posture")
-        self.__dict__.pop(_CONTEXT_KEY, None)
+        process_context.unbind_context()
 
     @property
     def DB(self) -> Any:  # noqa: N802 — the SDK's name for the SQL connection
@@ -213,61 +133,6 @@ class _SdkModule(_ModuleType):
 
 
 _sys.modules[__name__].__class__ = _SdkModule
-
-
-def bind_host_process() -> None:
-    """Establish shared-host startup posture before plugins or graph work.
-
-    This process never binds a current agent to the SDK, even if its environment
-    inherited an agent id. The posture lasts until this interpreter exits.
-    """
-    sdk = cast(_SdkModule, _sys.modules[__name__])
-    bound = sdk.__dict__.get(_CONTEXT_KEY)
-    if bound is not None and bound is not process_context.SdkProcessPurpose.SHARED_HOST:
-        raise RuntimeError("cannot boot a shared host with an established SDK process context")
-    sdk.__dict__[_CONTEXT_KEY] = process_context.SdkProcessPurpose.SHARED_HOST
-
-
-def is_host_process() -> bool:
-    """Whether this interpreter explicitly booted as the shared host."""
-    return globals().get(_CONTEXT_KEY) is process_context.SdkProcessPurpose.SHARED_HOST
-
-
-def bind_context(context: AvaContext) -> None:
-    """Initialize this process's SDK entry with an explicit context.
-
-    Framework-internal: used by disposable children and exclusive attachments,
-    never by the shared host to select its current agent.
-    """
-    cast(_SdkModule, _sys.modules[__name__]).context = context
-
-
-def unbind_context() -> AvaContext | None:
-    """Release the SDK binding without creating a launched-script context.
-
-    The caller owns restoration and closing its clients.
-    """
-    sdk = cast(_SdkModule, _sys.modules[__name__])
-    context = sdk.__dict__.get(_CONTEXT_KEY)
-    del sdk.context
-    return context
-
-
-def in_exec_turn() -> bool:
-    """Whether this process is running an exec turn — the framework has bound its state slot.
-
-    The one explicit answer for the SDK's own call sites (cwd-aware wraps, the security
-    scan): true in an exec child while agent code runs and in an attached external
-    controller, false in the agent host and in bare scripts. Framework-internal — not in the
-    `ava.help()` view.
-    """
-    return globals().get(_STATE_KEY) is not None
-
-
-def unbind_exec_turn() -> None:
-    """End the bound turn: drop both slot values (an external attachment's detach, a test)."""
-    globals().pop(_STATE_KEY, None)
-    globals().pop(_UPDATE_KEY, None)
 
 
 # Plugin-load state lives in the SDK installation slot (`ava.sdk_surface.install`):
@@ -337,9 +202,9 @@ def ensure_plugins_loaded(
     producer instead.
     """
     if context is not None:
-        bind_context(context)
+        process_context.bind_context(context)
     else:
-        context = _bound_process_context()
+        context = process_context.bound_context()
     from .sdk_surface import install as _sdk_install
     from .sdk_surface import sdk_disable
     from .sdk_surface.installation import installed
@@ -464,7 +329,7 @@ def _bind_installed_catalog(context: AvaContext | None) -> None:
     if installed() is not None:
         catalog = _settings.model_catalog()
         if context.catalog is not catalog:
-            bind_context(_replace(context, catalog=catalog))
+            process_context.bind_context(_replace(context, catalog=catalog))
 
 
 def _prepare_launched_context() -> tuple[AvaContext, ConfigBoot]:
@@ -476,20 +341,15 @@ def _prepare_launched_context() -> tuple[AvaContext, ConfigBoot]:
     import atexit
 
     atexit.register(context.clients.close)
-    bind_context(context)
+    process_context.bind_context(context)
     return context, config
-
-
-def _bound_process_context() -> AvaContext | None:
-    """Inspect the existing entry without turning host posture into a context."""
-    return None if is_host_process() else globals().get(_CONTEXT_KEY)
 
 
 def _is_launched_process() -> bool:
     """Inspect startup identity without triggering the ambient context getter."""
-    if is_host_process():
+    if process_context.is_host_process():
         return False
-    bound = _bound_process_context()
+    bound = process_context.bound_context()
     if bound is not None:
         identity = bound.identity
         return identity is not None and identity.agent_id is not None and not identity.owns_loop
@@ -546,12 +406,9 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
 def __getattr__(name: str) -> Any:
     if name in ("state", "state_update"):
         # Reached only when the slot property raised (an AttributeError falls through to here).
-        raise _outside_exec_turn(name)
+        raise process_context.outside_exec_turn(name)
     if name == "context":
-        raise process_context.ContextOutsideProcessError(
-            "ava.context requires an execution child, launched script or external attachment; "
-            "host code uses the context its caller supplied"
-        )
+        raise process_context.outside_process("context")
     if name == "DB":
         return _sys.modules[__name__].context.sql
     if name == "REDIS":

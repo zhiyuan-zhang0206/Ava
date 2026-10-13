@@ -19,7 +19,7 @@ import pytest
 import ava
 from agent.state import build_agent_state
 from ava import gateway_client
-from ava.sdk_surface import install
+from ava.sdk_surface import install, process_context
 from base.packages.plugins.extensions import ExtensionRegistry
 from tests.fixtures.pin_agent import pin_agent
 
@@ -64,7 +64,7 @@ def exec_turn(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path
     ava.state = build_agent_state(registry)(messages=[], halted=False)
     ava.state_update = {}
     yield unit_home
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
     install.uninstall()
 
 
@@ -220,11 +220,11 @@ def test_a_failure_while_recording_is_logged_and_does_not_touch_the_write(
 
 
 def test_outside_an_exec_turn_nothing_is_recorded_and_nothing_fails(exec_turn: Path) -> None:
-    ava.unbind_exec_turn()
+    process_context.unbind_exec_turn()
     note = ava.memory.PATH / "x.md"
     assert ava.files.write(note, "t") is None
     assert note.read_text() == "t"
-    assert not ava.in_exec_turn()
+    assert not process_context.in_exec_turn()
 
 
 _BOUNDARY_PROBE = """
