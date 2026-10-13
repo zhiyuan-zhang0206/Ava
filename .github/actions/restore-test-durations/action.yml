@@ -1,0 +1,25 @@
+name: Restore the test durations
+description: >
+  Restores `.test_durations` (pytest-split timings and the selector's duration guard) from the
+  exact cache key the run resolved once in `classify`. An empty key means the run has none and
+  carries on without; a key that no longer restores fails the job, because shards that split
+  with different timings than their siblings would drop or duplicate tests.
+inputs:
+  key:
+    description: The `resolve-test-durations` output; may be empty.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Restore .test_durations
+      if: inputs.key != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .test_durations
+        key: ${{ inputs.key }}
+        fail-on-cache-miss: true
+
+    - name: Note the missing durations
+      if: inputs.key == ''
+      shell: bash
+      run: echo "::warning title=test durations::no test timings for this run; shards are split by test count"

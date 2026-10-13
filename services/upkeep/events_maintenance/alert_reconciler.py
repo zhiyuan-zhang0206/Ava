@@ -54,7 +54,7 @@ def grafana_reconciliation_configured(config: EventsMaintenanceConfig) -> bool:
     return password is not None and bool(password.get_secret_value())
 
 
-def _grafana_active_alert_keys(payload: object) -> set[AlertKey]:
+def grafana_active_alert_keys(payload: object) -> set[AlertKey]:
     """Validate Grafana's Alertmanager response into instance identities.
 
     Reject the whole snapshot if any entry lacks its stable identity. Silently
@@ -173,7 +173,7 @@ async def _reconcile_once(
         payload: object = response.json()
     except ValueError as exc:
         raise GrafanaSnapshotError("Grafana active-alert response is not JSON") from exc
-    active_keys = _grafana_active_alert_keys(payload)
+    active_keys = grafana_active_alert_keys(payload)
     resolved_at = datetime.now(UTC)
     rows = await asyncio.to_thread(
         _reconcile_from_pool,

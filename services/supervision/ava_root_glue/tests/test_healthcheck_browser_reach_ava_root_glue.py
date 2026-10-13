@@ -27,11 +27,11 @@ def test_canary_distinguishes_browser_failure_from_unknown(
     def _fake_probe_browser(_port: int | None = None, _profile: Path | None = None) -> DaemonProbe:
         return DaemonProbe.up("owned")
 
-    def _fake_canary(*_a: object) -> hc._CanaryResult:
-        return hc._CanaryResult(outcome, "browser evidence")
+    def _fake_canary(*_a: object) -> hc.CanaryResult:
+        return hc.CanaryResult(outcome, "browser evidence")
 
-    def _fake_host_probe(*_a: object) -> hc._HostResult:
-        return hc._HostResult(host_ok, "host evidence")
+    def _fake_host_probe(*_a: object) -> hc.HostResult:
+        return hc.HostResult(host_ok, "host evidence")
 
     monkeypatch.setattr(
         probes,

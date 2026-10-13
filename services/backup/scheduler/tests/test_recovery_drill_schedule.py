@@ -20,7 +20,7 @@ def test_local_dump_restore_runs_once_after_the_weekly_window(
     def utc_zone(**_inputs: object) -> tzinfo:
         return UTC
 
-    monkeypatch.setattr(recovery_drill, "_cluster_tz", utc_zone)
+    monkeypatch.setattr(recovery_drill, "cluster_tz", utc_zone)
     before_window = _at(30, 2, 59)
     window = _at(30, 3)
 

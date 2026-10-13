@@ -398,6 +398,11 @@ def test_new_test_host_joins_generation_selection_and_collection(tmp_path: Path)
     assert [env["root"] for env in generated["executionEnvironments"]] == [
         "new_component/nested/tests"
     ]
+    # The selector keeps the full suite when it has no timings to compare.
+    (tmp_path / ".test_durations").write_text(
+        '{"tests/test_top.py::test_it": 3.0, "new_component/nested/tests/test_new.py::test_it": 1.0}',
+        encoding="utf-8",
+    )
     selected = test_selector.collectable_test_paths(tmp_path)
     assert selected == set(paths[:2])
     assert test_selector.select_tests([paths[1]], repo_root=tmp_path).tests == (paths[1],)

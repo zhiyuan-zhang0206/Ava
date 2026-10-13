@@ -17,8 +17,8 @@ from base.daemon.loop_health import LoopProgress
 from base.db.code_version_gate import ProcessDbGate
 from services.upkeep.events_maintenance.alert_reconciler import (
     GrafanaSnapshotError,
-    _grafana_active_alert_keys,
     _reconcile_once,
+    grafana_active_alert_keys,
     reconcile_open_grafana_alerts,
     reconciliation_round,
 )
@@ -82,7 +82,7 @@ def test_grafana_active_alert_keys_uses_instance_identity() -> None:
         },
     ]
 
-    assert _grafana_active_alert_keys(payload) == {
+    assert grafana_active_alert_keys(payload) == {
         ("same-fingerprint", datetime(2026, 8, 23, 10, tzinfo=UTC)),
         ("same-fingerprint", datetime(2026, 8, 23, 11, tzinfo=UTC)),
     }
@@ -100,7 +100,7 @@ def test_grafana_active_alert_keys_rejects_incomplete_snapshots(payload: object)
     """Malformed upstream truth must abort the sweep, never resolve by omission."""
 
     with pytest.raises(GrafanaSnapshotError):
-        _grafana_active_alert_keys(payload)
+        grafana_active_alert_keys(payload)
 
 
 def test_reconcile_open_grafana_alerts_resolves_only_snapshot_misses(

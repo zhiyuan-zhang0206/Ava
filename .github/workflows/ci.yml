@@ -3,11 +3,14 @@
 # Hosted minutes are free and unmetered for public repos and public forks, so one
 # lane runs everywhere with no canonical-vs-fork gating — and the same economics
 # make SHARDING the speed lever: the pytest suite dominates wall clock, so it
-# fans out over whole-file shards (pytest-split's LPT algorithm, balanced via the committed
+# fans out over whole-file shards (pytest-split's LPT algorithm, balanced via
 # .test_durations and least_duration — refreshes retain all measured tests;
-# unmeasured tests are costed at this run's average. Refreshed daily from isolated
-# shard measurements by scripts/ci/refresh_test_durations.py via
-# .github/workflows/refresh-test-durations.yml).
+# unmeasured tests are costed at this run's average). .test_durations is not in
+# the repository: the daily refresh (scripts/ci/refresh_test_durations.py via
+# .github/workflows/refresh-test-durations.yml) measures isolated shards and
+# saves the merged timings as an Actions cache, `classify` resolves the newest
+# one once per run, and every shard restores that exact key. A run with no cache
+# degrades with a warning: shards split by test count and the selector keeps FULL.
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
@@ -124,12 +127,17 @@ jobs:
     name: classify change
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # Lists the Actions caches to find the newest test timings.
+      actions: read
     # Draft PRs skip CI except Trunk test branches
     # (trunk-merge/*, trunk-temp/*), which must verify.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
       backend: ${{ steps.decide.outputs.backend }}
+      durations_key: ${{ steps.durations.outputs.key }}
       selector: ${{ steps.selector.outcome }}
       mode: ${{ steps.selector.outputs.mode }}
       decision: ${{ steps.selector.outputs.decision }}
@@ -142,6 +150,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # The run's test timings, resolved once here so every shard splits with the same ones.
+      # Without a cache the run goes on (the selector keeps FULL, the shards split by test
+      # count) and a warning says so.
+      - name: Resolve the test durations
+        id: durations
+        uses: ./.github/actions/resolve-test-durations
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ steps.durations.outputs.key }}
 
       - name: Classify changed paths
         id: decide
@@ -917,6 +937,11 @@ jobs:
       COVERAGE_FILE: coverage-data-${{ matrix.group }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.classify.outputs.durations_key }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -1989,6 +2014,11 @@ jobs:
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.classify.outputs.durations_key }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0

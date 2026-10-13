@@ -44,7 +44,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import ava_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
-from services.backup.dump import _cluster_tz, is_due
+from services.backup.dump import cluster_tz, is_due
 from services.backup.scheduler.operation.staging import OperationBusyError
 from services.backup.scheduler.recovery_drill import (
     load_local_dump_restore_success,
@@ -71,7 +71,7 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 
 
 @dataclass
-class _BackupState:
+class BackupState:
     """Scheduler state, owned by its event-loop thread and read by `/healthz`."""
 
     started_at: float = field(default_factory=time.monotonic)
@@ -114,7 +114,7 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-def _backup_components(state: _BackupState) -> list[dict[str, object]]:
+def backup_components(state: BackupState) -> list[dict[str, object]]:
     """Report scheduler progress; a running dump is healthy until it returns.
 
     `run_backup` has its own one-hour bound. A just-booted cluster gets one
@@ -163,10 +163,10 @@ async def _sleep(seconds: float) -> None:
         remaining -= chunk
 
 
-async def _sleep_until_next_backup_hour(now: datetime, *, config: ConfigBoot) -> None:
+async def sleep_until_next_backup_hour(now: datetime, *, config: ConfigBoot) -> None:
     """Sleep until the next configured backup hour on the cluster clock."""
     local_now = now.astimezone(
-        _cluster_tz(clock_factory=lambda: Clock(clock_config_from_boot(config)))
+        cluster_tz(clock_factory=lambda: Clock(clock_config_from_boot(config)))
     )
     backup_hour = config.view.services.backup_hour
     next_date = local_now.date()
@@ -204,7 +204,7 @@ async def _run_due_local_dump_restore(now: datetime, *, config: ConfigBoot) -> N
         _log.exception("[pg-backup] local restore drill failed")
 
 
-async def _backup_loop(state: _BackupState, *, config: ConfigBoot) -> None:
+async def _backup_loop(state: BackupState, *, config: ConfigBoot) -> None:
     """Run due dumps; a failed dump is reported and not attempted again before the next backup hour."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
     # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
@@ -215,7 +215,7 @@ async def _backup_loop(state: _BackupState, *, config: ConfigBoot) -> None:
             clock_factory=lambda: Clock(clock_config_from_boot(config)),
             hour_reader=lambda: config.view.services.backup_hour,
         ):
-            await _sleep_until_next_backup_hour(now, config=config)
+            await sleep_until_next_backup_hour(now, config=config)
             continue
 
         state.record_attempt(now)
@@ -235,7 +235,7 @@ async def _backup_loop(state: _BackupState, *, config: ConfigBoot) -> None:
             _log.exception("[pg-backup] dump failed; next attempt at the next backup hour")
         finally:
             state.running = False
-        await _sleep_until_next_backup_hour(datetime.now(UTC), config=config)
+        await sleep_until_next_backup_hour(datetime.now(UTC), config=config)
 
 
 async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path) -> None:
@@ -248,12 +248,12 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path) -> None
         sys.exit(1)
 
     _write_pidfile(config, runtime=runtime)
-    state = _BackupState()
+    state = BackupState()
     endpoint = _endpoint(config, runtime=runtime)
     health = await start_health_server(
         "pg_backup",
         endpoint.health_port,
-        components=lambda: _backup_components(state),
+        components=lambda: backup_components(state),
         image=image,
     )
     _log.info("[pg-backup] healthz listening on :%s", endpoint.health_port)

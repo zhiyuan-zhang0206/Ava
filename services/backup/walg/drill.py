@@ -57,7 +57,7 @@ from services.backup.walg.state import DrillRecord
 Report = Callable[[str], None]
 
 _CONNECT_TIMEOUT_S = 5
-_DETAIL_CHARS = 1000
+DETAIL_CHARS = 1000
 
 # `<timeline><log><segment>` in hex, optionally followed by `.partial` or `.<offset>.backup`.
 _SEGMENT_FILE = re.compile(r"[0-9A-F]{8}([0-9A-F]{8})([0-9A-F]{8})(?:\..+)?")
@@ -250,6 +250,6 @@ def run_drill(
         backup=backup.name,
         target_lsn=None if reached is None else format_lsn(reached),
         seconds=round(time.monotonic() - started, 1),
-        detail=detail[:_DETAIL_CHARS],
+        detail=detail[:DETAIL_CHARS],
         last_ok_at=finished if ok else (None if previous is None else previous.last_ok_at),
     )

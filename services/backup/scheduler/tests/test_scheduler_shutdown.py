@@ -84,8 +84,8 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
         patch.object(backup, "backup_dir", return_value=root / "artifacts"),
         patch.object(backup, "dump_source", return_value="postgresql://ava@127.0.0.1:1/test"),
         patch.object(backup, "pg_tool", return_value=Path("pg_dump")),
-        patch.object(backup, "_db_size_breakdown", return_value="test"),
-        patch.object(backup, "_run_with_progress", run),
+        patch.object(backup, "db_size_breakdown", return_value="test"),
+        patch.object(backup, "run_with_progress", run),
         patch.object(backup, "_key_file", key),
         patch.object(offsite, "publish", publish),
     ):
@@ -111,7 +111,7 @@ def _restore(root: Path, mode: str, postgres_base: Path) -> None:
             _block(root, mode)
 
 
-def _exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
+def exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
     """The operation worker's real entry, with only its external effects patched."""
     from services.backup import restore_drill
 
@@ -160,10 +160,10 @@ def _operation_harness(root: Path, mode: str, postgres_base: Path):
     return execute
 
 
-def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
+def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
     # This child is not pytest: patching a settings attribute needs the eager chain.
     ensure_eager()
-    state = daemon._BackupState()
+    state = daemon.BackupState()
     pidfile = root / "daemon.pid"
     restore_mode = mode.startswith("restore")
 

@@ -40,7 +40,7 @@ def _task_maintenance_gate(config: FleetConfig) -> str | None:
     This is the daemon's host-owned on/off, with a cluster-wide business effect — Fleet `task_maintenance_enabled`, an
     explicit host plugin field (scope=host), read deterministically at
     daemon-start and unaffected by any per-agent config overlay. Owned by the
-    plugin (not `services.supervision.roster.spec._gate_reason`) so the fleet-domain toggle travels with
+    plugin (not `services.supervision.roster.spec.gate_reason`) so the fleet-domain toggle travels with
     the fleet service, and it — not the plugin's agent-facing enable-state — is
     what decides whether task-maintenance runs."""
     if not config.task_maintenance_enabled:

@@ -248,6 +248,48 @@ def test_zero_known_time_and_unknown_nodes_use_the_same_cost_as_pytest_split(
     assert sum(group["estimated_seconds"] for group in data["baseline"]) == 20
 
 
+def test_a_missing_duration_file_plans_by_test_count(tmp_path: Path) -> None:
+    """Timings arrive through a cache a run may not have: without the file every test costs
+    the same, and the plan and its check still agree on that (empty) input."""
+    project(tmp_path)
+    (tmp_path / ".test_durations").unlink()
+    output = tmp_path / "plan.json"
+    result = run(
+        tmp_path,
+        "--collect-only",
+        "-m",
+        "not flaky",
+        "--file-shard-count",
+        "2",
+        "--file-shard-plan",
+        str(output),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(output.read_text())
+    assert data["unknown_nodes"] == 10
+    assert sum(group["estimated_seconds"] for group in data["groups"]) == 10
+    checked, report = check(tmp_path, output, 1)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert report
+
+
+def test_a_malformed_duration_file_is_still_an_error(tmp_path: Path) -> None:
+    project(tmp_path)
+    (tmp_path / ".test_durations").write_text("[1, 2]")
+    result = run(
+        tmp_path,
+        "--collect-only",
+        "-m",
+        "not flaky",
+        "--file-shard-count",
+        "2",
+        "--file-shard-plan",
+        str(tmp_path / "plan.json"),
+    )
+    assert result.returncode == 4
+    assert "Invalid shadow duration input" in result.stderr
+
+
 def test_duration_drift_cannot_reuse_the_old_plan(tmp_path: Path) -> None:
     manifest, _ = plan(tmp_path)
     (tmp_path / ".test_durations").write_text("{}")

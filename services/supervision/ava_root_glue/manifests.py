@@ -91,7 +91,7 @@ _SHELL_WORD = r"[A-Za-z0-9_./@%+:,=^-]+"
 _SIMPLE_COMMAND_RE = re.compile(rf"{_SHELL_WORD}(?: {_SHELL_WORD})*\Z")
 
 
-def _exec_argv(cmd: str, repo_root: Path) -> list[str]:
+def exec_argv(cmd: str, repo_root: Path) -> list[str]:
     """The unit argv for a roster command: `cd <repo> && [exec] <cmd>`."""
     cd = f"cd {shlex.quote(str(repo_root))}"
     first = cmd.split(" ", 1)[0]
@@ -128,7 +128,7 @@ def build_units(
             continue
         unit: dict[str, object] = {
             "id": spec.session,
-            "exec": _exec_argv(spec.cmd, repo_root),
+            "exec": exec_argv(spec.cmd, repo_root),
             "restart": "always",
             "attach": "root",
             "env": {} if environments is None else environments[spec.session],

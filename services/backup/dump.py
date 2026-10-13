@@ -67,12 +67,12 @@ _log = logging.getLogger(__name__)
 
 # Headroom against a stall, not an expected runtime: a full dump with
 # checkpoint history takes about 6.3 min.
-_DUMP_TIMEOUT_S = 60 * 60
+DUMP_TIMEOUT_S = 60 * 60
 # Heartbeat cadence while a dump or an encryption runs with a progress sink
 # attached. Either may run for many minutes without writing anything; a beat
 # every 60 s keeps the sink's operator's view alive instead of reading a healthy
 # dump as a hung one.
-_PROGRESS_INTERVAL_S = 60.0
+PROGRESS_INTERVAL_S = 60.0
 # Bound the composition-sample connection (a dead DB must stall the backup log
 # line only this long before degrading to "unavailable", never hang it).
 _BREAKDOWN_CONNECT_TIMEOUT_S = 10
@@ -81,7 +81,7 @@ _backup_lock_guard = threading.RLock()
 _backup_lock_state = threading.local()
 
 
-def _cluster_tz(*, clock_factory: Callable[[], Clock]) -> ZoneInfo:
+def cluster_tz(*, clock_factory: Callable[[], Clock]) -> ZoneInfo:
     """The cluster wall clock every scheduling decision here is made in."""
     return clock_factory().explicit_zone()
 
@@ -126,7 +126,7 @@ def backup_lock(*, timeout_s: float | None = None) -> Generator[None]:
                 del _backup_lock_state.depth
 
 
-def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
+def managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
     """This module's dumps in `directory`, oldest first, keyed by UTC instant."""
     dumps: list[tuple[datetime, Path]] = []
     if not directory.exists():
@@ -143,17 +143,17 @@ def is_due(
 ) -> bool:
     """True once the cluster clock has passed ``backup_hour`` with no dump for the
     current cluster day. `now` must be TZ-aware."""
-    local_now = _require_aware(now).astimezone(_cluster_tz(clock_factory=clock_factory))
+    local_now = _require_aware(now).astimezone(cluster_tz(clock_factory=clock_factory))
     if local_now.hour < hour_reader():
         return False
-    dumps = _managed_dumps(backup_dir())
-    tz = _cluster_tz(clock_factory=clock_factory)
+    dumps = managed_dumps(backup_dir())
+    tz = cluster_tz(clock_factory=clock_factory)
     return not dumps or dumps[-1][0].astimezone(tz).date() < local_now.date()
 
 
-def _prune(directory: Path, *, keep_reader: Callable[[], int]) -> list[Path]:
+def prune(directory: Path, *, keep_reader: Callable[[], int]) -> list[Path]:
     """Delete managed dumps beyond retention: all but the newest ``backup_keep``."""
-    dumps = _managed_dumps(directory)
+    dumps = managed_dumps(directory)
     keep = set(dumps[-keep_reader() :])
     removed: list[Path] = []
     for item in dumps:
@@ -223,7 +223,7 @@ def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
             ],
             capture_output=True,
             check=False,
-            timeout=_DUMP_TIMEOUT_S,
+            timeout=DUMP_TIMEOUT_S,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"backup decrypt exited {proc.returncode}")
@@ -242,8 +242,8 @@ def _available_target(directory: Path, dbname: str, now: datetime) -> Path:
     raise RuntimeError("could not choose a distinct backup filename within 60 seconds")
 
 
-# A one-line progress report, called at most every `_PROGRESS_INTERVAL_S` while a
-# long, otherwise-silent pipeline stage runs (see `_run_with_progress`).
+# A one-line progress report, called at most every `PROGRESS_INTERVAL_S` while a
+# long, otherwise-silent pipeline stage runs (see `run_with_progress`).
 _ProgressSink = Callable[[str], None]
 
 
@@ -258,7 +258,7 @@ def _written_suffix(size_path: Path | None) -> str:
     return f", {written / 2**20:.1f} MiB written"
 
 
-def _run_with_progress(
+def run_with_progress(
     argv: list[str],
     *,
     timeout_s: float,
@@ -270,7 +270,7 @@ def _run_with_progress(
     """`subprocess.run(argv, capture_output=True, check=False)` that narrates its wait.
 
     With `progress=None` this is exactly `subprocess.run`. With a sink, one line
-    names the child's bound and one every `_PROGRESS_INTERVAL_S` carries the
+    names the child's bound and one every `PROGRESS_INTERVAL_S` carries the
     elapsed time and the bytes `size_path` holds, so a caller's operator sees a
     long silent dump or encryption alive until its own `timeout_s`.
 
@@ -310,7 +310,7 @@ def _narrated_wait(
         if remaining_s <= 0:
             raise subprocess.TimeoutExpired(argv, timeout_s)
         try:
-            return proc.communicate(timeout=min(_PROGRESS_INTERVAL_S, remaining_s))
+            return proc.communicate(timeout=min(PROGRESS_INTERVAL_S, remaining_s))
         except subprocess.TimeoutExpired:
             progress(f"{label} {time.monotonic() - started:.0f}s{_written_suffix(size_path)}")
 
@@ -321,7 +321,7 @@ def run_backup(
     db: Database,
     is_remote_reader: Callable[[], bool],
     db_url: str | None = None,
-    timeout_s: float = _DUMP_TIMEOUT_S,
+    timeout_s: float = DUMP_TIMEOUT_S,
     publish: bool = True,
     progress: _ProgressSink | None = None,
     staging: Path | None = None,
@@ -343,7 +343,7 @@ def run_backup(
     off-site network latency cannot extend the run.
 
     `progress` narrates the stages that may run for minutes without writing
-    anything (`pg_dump` and the encryption pass) — see `_run_with_progress`.
+    anything (`pg_dump` and the encryption pass) — see `run_with_progress`.
     """
     with backup_lock():
         directory = backup_dir() if staging is None else staging
@@ -374,7 +374,7 @@ def run_backup(
                 credentials_file_reader=credentials_file_reader,
             )
         if staging is None:
-            _log_written(target, _prune(target.parent, keep_reader=keep_reader))
+            _log_written(target, prune(target.parent, keep_reader=keep_reader))
         return target
 
 
@@ -387,14 +387,14 @@ def prune_after_publish(target: Path, *, keep_reader: Callable[[], int]) -> None
     """
     try:
         with backup_lock(timeout_s=0):
-            removed = _prune(target.parent, keep_reader=keep_reader)
+            removed = prune(target.parent, keep_reader=keep_reader)
     except LockTimeoutError:
         _log.info("[backup] prune deferred while another backup owns the lock")
         removed = []
     _log_written(target, removed)
 
 
-def _db_size_breakdown(db: Database, db_url: str | None = None) -> str:
+def db_size_breakdown(db: Database, db_url: str | None = None) -> str:
     """One-line DB composition for the backup log: total, the LangGraph
     checkpoint tables, and everything else.
 
@@ -447,7 +447,7 @@ def _run_backup(
     db: Database,
     is_remote_reader: Callable[[], bool],
     db_url: str | None = None,
-    timeout_s: float = _DUMP_TIMEOUT_S,
+    timeout_s: float = DUMP_TIMEOUT_S,
     directory: Path,
     progress: _ProgressSink | None = None,
 ) -> Path:
@@ -458,14 +458,14 @@ def _run_backup(
     encryption. `timeout_s` bounds every subprocess; the caller owns the lock.
 
     `progress` narrates the two stages that may run for minutes without writing
-    anything: `pg_dump` and the encryption pass (see `_run_with_progress`).
+    anything: `pg_dump` and the encryption pass (see `run_with_progress`).
     """
     now = _require_aware(now) if now is not None else datetime.now(UTC)
     db_url = db_url if db_url is not None else dump_source(db, is_remote_reader=is_remote_reader)
     directory = ensure_private_dir(directory)
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
-    _log.info("[backup] db composition: %s", _db_size_breakdown(db, db_url))
+    _log.info("[backup] db composition: %s", db_size_breakdown(db, db_url))
     target = _available_target(directory, dbname, now)
     stem = target.name.removesuffix(".dump.enc")
     dump_partial = directory / f"{stem}.dump.partial"
@@ -512,7 +512,7 @@ def _dump_and_encrypt(
     # The scheduler owns this subprocess in its own process, so its bound
     # cannot delay watchdog supervision. Expiry kills the child and
     # TimeoutExpired lets the scheduler schedule its retry.
-    proc = _run_with_progress(
+    proc = run_with_progress(
         dump_cmd,
         timeout_s=timeout_s,
         label="pg_dump",
@@ -527,7 +527,7 @@ def _dump_and_encrypt(
     encrypted_partial.chmod(0o600)
     key_file = _key_file(dump_partial.parent)
     try:
-        proc = _run_with_progress(
+        proc = run_with_progress(
             [
                 "openssl",
                 "enc",
