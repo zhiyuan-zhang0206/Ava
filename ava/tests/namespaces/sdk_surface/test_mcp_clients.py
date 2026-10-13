@@ -1,6 +1,7 @@
 """SDK composition keeps per-context MCP policy and lazy resource lifetimes."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 from ava import mcps
@@ -9,6 +10,26 @@ from ava.mcps import McpClients
 from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
 from base.paths import mcp_daemon_shared_socket
+
+
+class _NoCache:
+    def read(self, server: str) -> None:
+        return None
+
+    def write(self, server: str, tools: list[Any]) -> None:
+        return None
+
+
+def _list_tools(server: str) -> list[Any]:
+    """`list_tools` over the bound context's own MCP clients, with no cache."""
+    clients = process_context.current_context().clients.get(McpClients)
+    source = mcps.call_funnel.ToolSource(
+        remote=clients.remote,
+        timeout_seconds=clients.timeout_seconds,
+        cache=_NoCache(),
+        validate_identity=lambda: None,
+    )
+    return mcps.call_funnel.list_tools(source, server)
 
 
 def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close() -> None:
@@ -30,12 +51,12 @@ def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close()
     previous = process_context.unbind_context()
     try:
         process_context.bind_context(first)
-        assert mcps._list_tools("test") == []
+        assert _list_tools("test") == []
         process_context.bind_context(second)
-        assert mcps._list_tools("test") == []
+        assert _list_tools("test") == []
         timeouts["first"] = 2.0
         process_context.bind_context(first)
-        assert mcps._list_tools("test") == []
+        assert _list_tools("test") == []
         assert [call.kwargs for call in first_remote.list_tools.call_args_list] == [
             {"timeout_seconds": 7.5},
             {"timeout_seconds": 2.0},

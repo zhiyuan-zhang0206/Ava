@@ -81,7 +81,6 @@ frontend = ["ui"]
 "agent/extensions/tests/test_lazy_plugin_load.py -> ava/__init__.py#_some_private" = 1
 "agent/graph/exec/tests/admission_fixture.py -> base/agents/incarnation/tests/test_resources.py#_admitted" = 1
 "agent/graph/exec/tests/resources/test_resource_admission_exec.py -> base/agents/incarnation/tests/test_resources.py#_admitted" = 1
-"agent/graph/tests/test_metering_graph.py -> ava/mcps/__init__.py#_call_raw" = 3
 "agent/graph/tests/test_metering_graph.py -> ava/sdk_surface/metering.py#_instrument_targets" = 2
 "agent/tests/execution/test_resource_admission.py -> base/agents/incarnation/tests/test_resources.py#_admitted" = 1
 "agent/tests/execution/test_resource_admission.py -> base/agents/incarnation/tests/test_resources.py#_entry" = 1

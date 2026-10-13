@@ -12,7 +12,7 @@ _CHILD = Path(__file__).parent / "bootstrap" / "child_sdk_probes.py"
 
 
 def test_install_wraps_and_restores_mcp_call_funnel() -> None:
-    """install()/uninstall() wrap the ava.mcps._call_raw funnel so dynamic MCP tool
+    """install()/uninstall() wrap the ava.mcps.call_funnel.call_raw funnel so dynamic MCP tool
     calls are metered, and restore it on teardown."""
     import ava.mcps
 
@@ -22,14 +22,14 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     # already wrapped — install() then correctly no-ops and the wrap assertion
     # below reads as a failure. The shared guards (`tests/fixtures/`) uninstall an
     # installation a test left behind, so the baseline here is bare.
-    before = ava.mcps._call_raw
+    before = ava.mcps.call_funnel.call_raw
     ledger = metering.install(call_policy.SamplingPolicyOwner())
     try:
-        assert ava.mcps._call_raw is not before
-        assert metering.is_recorder(ava.mcps._call_raw)
+        assert ava.mcps.call_funnel.call_raw is not before
+        assert metering.is_recorder(ava.mcps.call_funnel.call_raw)
     finally:
         metering.uninstall(ledger)
-    assert ava.mcps._call_raw is before
+    assert ava.mcps.call_funnel.call_raw is before
 
 
 def test_plain_python_import_installs_sdk_events(tmp_path: Path) -> None:

@@ -62,7 +62,7 @@ def fake_chrome(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     webchat does `import ava` at the top level, so it always gets the real
     `ava` module. Mocking only `ava.mcps.chrome` (not the whole `ava` module)
     keeps `ava.sdk_surface.agent_identity` and other submodules accessible — needed by
-    `_daemon_socket_path()` called during MCP tool loading.
+    `daemon_socket_path()` called during MCP tool loading.
     """
     chrome = MagicMock()
     chrome.new_page.return_value = _PAGE_LIST

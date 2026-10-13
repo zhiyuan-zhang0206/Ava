@@ -8,7 +8,7 @@ from collections.abc import Callable
 from ava.mcps.config import MCPConnectError
 
 from . import _remote
-from ._remote import _RemoteMCPClient, connect_remote
+from ._remote import RemoteMCPClient, connect_remote
 
 
 class McpClients:
@@ -17,11 +17,11 @@ class McpClients:
     def __init__(self, timeout_seconds: Callable[[], float]) -> None:
         self.timeout_seconds = timeout_seconds
         self._lock = threading.Lock()
-        self._remote: _RemoteMCPClient | None = None
+        self._remote: RemoteMCPClient | None = None
 
-    def remote(self) -> _RemoteMCPClient:
+    def remote(self) -> RemoteMCPClient:
         """Require a daemon socket; never spawn an alternative tool runtime."""
-        socket_path = _remote._daemon_socket_path()
+        socket_path = _remote.daemon_socket_path()
         if not socket_path:
             raise MCPConnectError("MCP daemon unavailable; start the machine's mcp-daemon service")
         with self._lock:

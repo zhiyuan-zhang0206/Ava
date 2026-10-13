@@ -7,23 +7,59 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import ava.mcps as mcps_mod
 from ava.mcps._clients import McpClients
+from ava.mcps._tools import RemoteClient, ToolSource
 from ava.mcps.config import ToolInfo
 from base.config import settings
 
 
-def local_mcp_clients(
-    monkeypatch: pytest.MonkeyPatch, timeout_seconds: Callable[[], float] | None = None
-) -> McpClients:
-    """Give this test its own MCP clients (a daemon client per test)."""
-    clients = McpClients(
+def local_mcp_clients(timeout_seconds: Callable[[], float] | None = None) -> McpClients:
+    """This test's own MCP clients (a daemon client per test)."""
+    return McpClients(
         timeout_seconds
         if timeout_seconds is not None
         else lambda: settings.sandbox.mcp_connect_timeout_seconds
     )
-    monkeypatch.setattr(mcps_mod, "_clients", lambda: clients)
-    return clients
+
+
+class NoCache:
+    """A tool cache that keeps nothing: every read misses, every write is dropped."""
+
+    def read(self, server: str) -> list[ToolInfo] | None:
+        return None
+
+    def write(self, server: str, tools: list[ToolInfo]) -> None:
+        return None
+
+
+class StoredTools:
+    """A tool cache that always holds `tools` and counts its reads."""
+
+    def __init__(self, tools: list[ToolInfo]) -> None:
+        self.tools = tools
+        self.reads = 0
+
+    def read(self, server: str) -> list[ToolInfo] | None:
+        self.reads += 1
+        return self.tools
+
+    def write(self, server: str, tools: list[ToolInfo]) -> None:
+        return None
+
+
+def tool_source(
+    remote: Callable[[], RemoteClient],
+    *,
+    timeout_seconds: Callable[[], float] = lambda: 5.0,
+    cache: object | None = None,
+) -> ToolSource:
+    """A source over the given daemon client: no cache unless one is passed, no identity check."""
+    return ToolSource(
+        remote=remote,
+        timeout_seconds=timeout_seconds,
+        cache=cache if cache is not None else NoCache(),  # pyright: ignore[reportArgumentType]
+        validate_identity=lambda: None,
+    )
 
 
 @pytest.fixture
@@ -65,13 +101,14 @@ class _DaemonFixture:
 
 
 @pytest.fixture
-def mock_session(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Simulate the daemon's wire result; never construct a local SDK session."""
+def mock_session() -> MagicMock:
+    """Simulate the daemon's wire result; never construct a local SDK session.
+
+    `session.source` is the `ToolSource` over it: a daemon client backed by the mock and no
+    cache, ready to hand to `ServerProxy` / `call_raw`.
+    """
     session = MagicMock(name="MCPSession")
-    local_mcp_clients(monkeypatch)
-    monkeypatch.setattr(mcps_mod, "_get_remote_client", lambda: _DaemonFixture(session))
-    monkeypatch.setattr(mcps_mod, "_read_cache", MagicMock(return_value=None))
-    monkeypatch.setattr(mcps_mod, "_write_cache", MagicMock(return_value=None))
+    session.source = tool_source(lambda: _DaemonFixture(session))
     return session
 
 

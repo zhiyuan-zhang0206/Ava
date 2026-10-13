@@ -156,11 +156,12 @@ def _make_recorder(
     return _recorder(recorder, sampling)
 
 
-# ava.mcps exposes tools dynamically (no list `__all_for_ava__`), so the namespace walk cannot
-# reach them. Every MCP tool call — text form `ava.mcps.<server>.<tool>(...)` and the
-# `raw` form — funnels through `ava.mcps._call_raw(server, tool, ...)`, so one wrapper
-# there meters them all, keyed by the runtime server + tool.
-_MCP_CALL_FUNNEL = "_call_raw"
+# ava.mcps exposes its tools dynamically (the servers come from configuration), so the namespace
+# walk cannot reach them. Every MCP tool call - text form `ava.mcps.<server>.<tool>(...)` and the
+# `raw` form - funnels through `ava.mcps.call_funnel.call_raw(source, server, tool, ...)`, so one
+# wrapper there meters them all, keyed by the runtime server + tool. `ava.mcps.call_funnel` is
+# the module that holds it.
+_MCP_CALL_FUNNEL = "call_raw"
 
 
 def _make_mcp_recorder(
@@ -171,14 +172,14 @@ def _make_mcp_recorder(
     """Recorder for the MCP call funnel — derives the fq from the runtime args."""
 
     @functools.wraps(original)
-    def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
+    def recorder(source: Any, server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
         identity, tally, capture_owner, call_producer, machine_reader = _caller(producer)
         return run_metered(
             f"mcps.{server}.{tool}",
             original,
-            (server, tool, *args),
+            (source, server, tool, *args),
             kwargs,
             identity=identity,
             tally=tally,
@@ -245,8 +246,8 @@ def install(
     in wrap order. The installation carries it; ``uninstall(ledger)`` restores from it.
     """
     targets = _instrument_targets()
-    mcps_mod = getattr(ava_module(), "mcps", None)
-    funnel = None if mcps_mod is None else getattr(mcps_mod, _MCP_CALL_FUNNEL, None)
+    funnel_mod = getattr(getattr(ava_module(), "mcps", None), "call_funnel", None)
+    funnel = None if funnel_mod is None else getattr(funnel_mod, _MCP_CALL_FUNNEL, None)
     for parent, attr, _fq in targets:
         _check_sampling(getattr(parent, attr, None), sampling)
     _check_sampling(funnel, sampling)
@@ -258,9 +259,9 @@ def install(
         setattr(parent, attr, _make_recorder(current, fq, sampling, producer))
         wrapped.append((parent, attr))
 
-    if mcps_mod is not None and callable(funnel) and not is_recorder(funnel):
-        setattr(mcps_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel, sampling, producer))
-        wrapped.append((mcps_mod, _MCP_CALL_FUNNEL))
+    if funnel_mod is not None and callable(funnel) and not is_recorder(funnel):
+        setattr(funnel_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel, sampling, producer))
+        wrapped.append((funnel_mod, _MCP_CALL_FUNNEL))
     return tuple(wrapped)
 
 
