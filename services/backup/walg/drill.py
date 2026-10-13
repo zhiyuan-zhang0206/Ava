@@ -161,7 +161,7 @@ def _verify(
     instance_url: str, reached: int | None, *, database_for_url: Callable[[str], Database]
 ) -> str:
     """Content check and target check on the promoted scratch instance; returns the summary."""
-    from scripts.data_plane_ops.restore_drill import verify_restored_database
+    from services.backup.restore_drill import verify_restored_database
 
     report = verify_restored_database(instance_url, database_for_url=database_for_url)
     if reached is not None:

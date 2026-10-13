@@ -93,7 +93,7 @@ document may promise point-in-time recovery.
    INFO line, and a failed publish warns without discarding the local backup,
    which stays the primary copy. The publisher has no delete verb; remote
    expiry belongs to the bucket's lifecycle policy.
-2. **Restore drill — delivered.** `scripts/data_plane_ops/restore_drill.py` decrypts the
+2. **Restore drill — delivered.** `services/backup/restore_drill.py` decrypts the
    latest managed artifact (or a supplied path), restores it into scratch
    Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
    reader sample, and a service smoke.

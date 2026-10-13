@@ -20,13 +20,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import psycopg
-
 from base.agents.history import checkpoint as checkpoint_reader
 from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
 from base.cluster.dataplane.pg_throwaway_base import format_bytes, select_throwaway_base
 from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
-from base.db import Database
+from base.db import Database, connect_url
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 from base.log import logger
@@ -74,7 +72,7 @@ def _ensure_restore_roles(db_url: str) -> None:
     """Create the dump-referenced roles in the throwaway cluster, idempotently."""
     from psycopg import sql as pgsql
 
-    with psycopg.connect(db_url, autocommit=True) as conn:
+    with connect_url(db_url, autocommit=True, unbounded=True) as conn:
         for role in _RESTORE_ROLES:
             exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
             if exists is None:
@@ -129,7 +127,7 @@ def verify_restored_database(
     UUIDs, which picked a May test residue over a live conversation."""
 
     required_tables = ("agents", "checkpoint_blobs", "checkpoints", "checkpoint_writes")
-    with psycopg.connect(db_url, autocommit=True) as conn:
+    with connect_url(db_url, autocommit=True, unbounded=True) as conn:
         for table in required_tables:
             row = conn.execute("SELECT to_regclass(%s)", (table,)).fetchone()
             if row is None or row[0] != table:
@@ -237,7 +235,7 @@ def main(argv: list[str] | None = None) -> None:
         args.artifact,
         database_for_url=database_for_url,
     )
-    print(
+    print(  # noqa: T201 — the operator command's result line, read on stdout
         "restore drill passed: "
         f"agents={report.agents} checkpoints={report.checkpoints} "
         f"checkpoint_blobs={report.checkpoint_blobs} "
