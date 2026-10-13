@@ -1,4 +1,4 @@
-"""Shared chat-inbound delivery for the gateway routers.
+"""Shared chat-inbound delivery for the gateway routers and the heartbeat service.
 
 REST/SDK chat, MCP send_message, file uploads and completion digests
 all do the same thing: persist one 'chat' inbound for an agent and announce it
