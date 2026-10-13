@@ -35,7 +35,7 @@ from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import Alerts
 from services.agent_runner.agent_host.tests.test_maintenance_receipt_grading import alerts as alerts
-from tests.components.agent.test_maintenance import WHEN, _agent
+from tests.components.agent.test_maintenance import WHEN, maintenance_agent
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
@@ -140,7 +140,7 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     host, _saver, config, tail, calls = await _failed_turn(
         aops_pool,
         agent,
@@ -226,7 +226,7 @@ async def test_prior_tail_flush_outage_ends_the_restart_once_and_the_stop_fails_
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     host, _saver, config, tail, calls = await _failed_turn(
         aops_pool,
         agent,

@@ -31,7 +31,7 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from ops import agent_pause
 from ops.agent_pause.probe import HostIdentity
-from tests.components.agent.test_maintenance import WHEN, _agent
+from tests.components.agent.test_maintenance import WHEN, maintenance_agent
 from tests.components.agent.test_maintenance import isolate as isolate
 
 
@@ -97,7 +97,7 @@ async def _live_member(
     machine_identity: MachineIdentity,
 ) -> int:
     """An idling hosted agent under the live owner — preparation's original cohort."""
-    agent = _agent(conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(conn, machine_name=machine_identity.name())
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent,
@@ -325,7 +325,7 @@ def test_parked_agent_lifecycle_command_is_waitable(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     insert_inbound_message(
         db_conn, agent, "", "agent:6090", kind="terminate", bus=event_bus, database=database
     )
@@ -356,7 +356,7 @@ def test_parked_claimed_ordinary_work_is_consumed_not_redelivered(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "hello", "user", bus=event_bus, database=database
     )
@@ -399,7 +399,7 @@ def test_parked_claimed_work_prepares_without_wait(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "hello", "user", bus=event_bus, database=database
     )
@@ -431,7 +431,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "", "user", kind=kind, bus=event_bus, database=database
     )
@@ -463,7 +463,7 @@ def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     ordinary = insert_inbound_message(
         db_conn, agent, "orphan", "user", bus=event_bus, database=database
     )
@@ -501,7 +501,7 @@ def test_orphan_cas_miss_accepts_concurrent_settlement(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "orphan", "user", bus=event_bus, database=database
     )
@@ -538,7 +538,7 @@ def test_parked_maintenance_command_refuses_without_wait(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     command = insert_inbound_message(
         db_conn,
         agent,
@@ -579,7 +579,7 @@ def test_parked_claim_guards_agree_on_waitability(
     second guard, and preparation's retry decision depends on the two staying
     consistent (task #4013).
     """
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "hello", "user", bus=event_bus, database=database
     )

@@ -16,9 +16,8 @@ from base.db import Database
 from base.deploy.maintenance import cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from tests.factories.maintenance import WHEN
+from tests.factories.maintenance import WHEN, maintenance_agent
 from tests.factories.maintenance import isolate as isolate
-from tests.factories.maintenance import maintenance_agent as _agent
 
 
 def test_maintenance_parks_a_never_admitted_birth_without_consuming_its_marker(
@@ -57,7 +56,7 @@ async def test_admission_waiting_on_real_row_lock_cannot_escape_published_hold(
     database: Database,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     # This is a real PostgreSQL lock wait, not a mocked held() return.
     async with aops_pool.connection() as blocker, blocker.transaction():
         await blocker.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent,))
@@ -100,7 +99,7 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     event_bus: EventBus,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent, owner = _agent(db_conn, machine_name=machine_identity.name()), uuid4()
+    agent, owner = maintenance_agent(db_conn, machine_name=machine_identity.name()), uuid4()
     incarnation = await admit_hosted_runtime(
         aops_pool, agent, machine_identity.name(), owner, expected_from="idling", db=database
     )
