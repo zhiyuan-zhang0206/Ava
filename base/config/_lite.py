@@ -657,8 +657,18 @@ class ConfigBoot:
         """The `base.config` import tail: prepare, or go eager now.
 
         `AVA_CONFIG_BOOT=eager` is the operator's instant rollback to the eager
-        boot (and the pytest conftest's default); any other explicit value is a
-        typo and fails fast rather than silently booting lite."""
+        boot; any other explicit value is a typo and fails fast rather than
+        silently booting lite.
+
+        Precedence when both `AVA_CONFIG_FETCH=skip` and `AVA_CONFIG_BOOT=eager`
+        are set: skip wins and the process stays boot-lite. This is deliberate.
+        `cli.main` sets skip for the settings-lite maintenance verbs (stop, status,
+        the config verbs) so they stay usable while the gateway is down or the
+        `.env` is broken; the operator's rollback flag may sit in the same unit
+        environment, and honouring it there would make the repair tool fail on
+        exactly the fault it exists to repair (#3621 / 405 ruling). A caller that
+        needs the eager chain regardless, such as the test session, calls
+        `ensure_eager()` instead of relying on the flag."""
         mode = os.environ.get(BOOT_MODE_ENV)
         if mode is not None and mode != BOOT_MODE_EAGER:
             raise ValueError(
