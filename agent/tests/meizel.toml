@@ -34,9 +34,7 @@ exports = ["claim"]
 "test_hosted_ownership_agent.py#monkeypatch.setattr agent.ownership.hosted_cleanup.publish_agent_updated" = 1
 
 [debt.private-name]
-"compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_ava_compact_loaded" = 1
 "compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_config" = 1
-"state_slot/test_exec_node_preserves_state_update_on_lifecycle.py -> test_state_slot.py#_reset_state_slot" = 1
 
 [debt.restricted-python]
 "test_compact.py#string patch target 'agent.graph.hooks.compact.resolve_context_budget'" = 1

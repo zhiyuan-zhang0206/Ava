@@ -38,7 +38,7 @@ class _RemoteProbeResults(dict[str, tuple[bool, bool | None]]):
 
 
 @pytest.fixture(autouse=True)
-def _truncate_machines(db_conn: psycopg.Connection) -> None:
+def truncate_machines(db_conn: psycopg.Connection) -> None:
     """The conftest db_conn TRUNCATE list does not include machines — this test suite
     clears it itself. autouse so every test starts with an empty machines table."""
     with db_conn.cursor() as cur:
