@@ -239,9 +239,10 @@ class AgentPromptSettings(EnvSettings):
         default=None,
         alias="AVA_AGENT_COMMUNICATION_STYLE",
         description=(
-            "How much the agent narrates while it works. 'oriented': brief "
-            "interleaved updates. 'concise': speak only at real milestones. 'silent': "
-            "one report at the end. 'off': the section is omitted entirely. Unset "
+            "Optional communication style. 'oriented': live pairing with substantive "
+            "findings and checkpoints. 'concise': brief milestone updates. 'silent': "
+            "one report for human-requested work. 'off': only the optional style "
+            "section is omitted; language and returning-reader rules remain active. Unset "
             "resolves the per-model default (base/lm/registry.py; shared floor "
             "'off')."
         ),

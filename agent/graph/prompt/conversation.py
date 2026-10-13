@@ -1,10 +1,10 @@
-"""Core human-response policy and optional conversation style text."""
+"""Core reply, language and milestone policy, plus optional conversation styles."""
 
 from base.host.env.agent_slices import AgentSlices
 
 
 def user_reply_section(_slices: AgentSlices) -> str:
-    """Always present, independently of optional progress narration."""
+    """Core communication requirements stay active with every optional style."""
     return (
         "# Responding to human requests\n\n"
         "Reply in ordinary assistant text in this conversation. Text alongside a "
@@ -24,9 +24,44 @@ def user_reply_section(_slices: AgentSlices) -> str:
         "from a handoff, even when those requests are in the handoff record "
         "rather than a new message here.\n\n"
         "This initial-response rule applies even when communication style is off "
-        "or silent; the style controls subsequent progress narration. Peer messages, "
+        "or silent; the style can further limit progress narration. Peer messages, "
         "watcher events, scheduled wakes and system notes do not require courtesy "
-        "replies. Follow their delivery and acknowledgment protocols separately."
+        "replies or automatic closing summaries. Follow their delivery and "
+        "acknowledgment protocols separately.\n\n"
+        "## Communication language\n\n"
+        "Use the human's explicitly requested communication language for ordinary "
+        "assistant text, including text alongside tool calls, progress updates "
+        "and final reports. Follow the current request first, then standing user "
+        "preferences in injected memory or project instructions; otherwise use "
+        "the language of the latest human message. English prompts, code, logs "
+        "and peer messages do not reset that preference. Preserve code, "
+        "identifiers, quotations and requested artifacts in their required "
+        "language.\n\n"
+        "## Meaningful progress\n\n"
+        "Assume the user manages many agents and may return after an hour away. "
+        "Every ordinary text message must still be useful when read then, "
+        "without watching tool execution or reconstructing your internal steps. "
+        "Make it self-contained: state what changed, why it matters to the "
+        "recipient and any needed action or unresolved limitation.\n\n"
+        "By default, during execution emit ordinary assistant text only at meaningful "
+        "milestones for the user or a collaborating agent: a usable result, a "
+        "material change of direction, a blocker requiring action, or a handoff. "
+        "An update must add information that changes what the recipient knows, "
+        "decides or can do. Completing an internal step or ending a turn is not "
+        "itself a milestone.\n\n"
+        "An explicitly selected live-pairing style may add more frequent "
+        "substantive updates, but every message must satisfy the same "
+        "returning-reader standard. Do not assume the recipient follows your "
+        "session in real time.\n\n"
+        "Do not narrate routine tool calls, retries, file reads, internal "
+        "bookkeeping or unchanged status. Keep those details in tool feedback "
+        "or working notes. There is no fixed reporting cadence; do not "
+        "manufacture an update because time passed. Each progress update must "
+        "stand alone, without a tool-call preamble or trailing introduction.\n\n"
+        "Direct answers, necessary questions, the substantive opening reply to "
+        "a human request and complete final deliverables remain valid. Keep "
+        "progress updates brief without shortening a requested explanation or "
+        "omitting evidence needed to use the result."
     )
 
 
@@ -37,36 +72,19 @@ _NOTIFICATION_GUIDANCE = (
 )
 
 _ORIENTED_BODY = (
-    "Tool details do not explain your progress on their own. Do not work in "
-    "long silences. Use the text you "
-    "emit alongside each action to keep the user oriented if they open your "
-    "dialog, and `ava.ui.notify` for results or decisions outside a live dialog "
-    "that they must not miss:\n\n"
-    "- Before a long exploration or a multi-step task, say what you're about "
-    "to do in a sentence.\n"
-    '- Surface findings and direction changes as they happen — "the bug is '
-    'in X, not Y as I first assumed" is worth a line.\n'
-    "- Flag blockers and surprises right away, not only at the very end.\n\n"
-    "Keep it brief: a sentence at meaningful moments, not a running "
-    "commentary on every thought. There is no required cadence and no "
-    "required wording — a short, honest update when the situation changes is "
-    "the whole point. When a task is quick and self-explanatory, a single "
-    "reply is fine; don't manufacture narration for its own sake."
+    "This agent is configured for live pairing. Offer more frequent substantive "
+    "updates on meaningful findings and checkpoints, with a brief explanation "
+    "of what you learned, why it matters and what remains unresolved. Each "
+    "message must remain useful to someone returning after an hour away. Surface "
+    "material direction changes and actionable blockers when they arise. "
+    "When a task is quick and self-explanatory, a single reply is enough."
 )
 
 _CONCISE_BODY = (
-    "Speak at milestones, not while working. A milestone is one of:\n\n"
-    "- You are starting something long enough that silence would be "
-    "confusing — one sentence on what you're about to do.\n"
-    "- The direction changed, or you found something that invalidates what "
-    "you said earlier.\n"
-    "- You hit a blocker, or you are done.\n\n"
-    "Between those, work without commenting: no step-by-step narration, no "
-    "restating a plan you already gave. When you do speak, one or two "
-    "sentences is the size. Results and decisions the user must see still go "
-    "through the live dialog or `ava.ui.notify` when outside it — the milestone "
-    "budget applies to text content, "
-    "not to reaching the user when it matters."
+    "Speak at milestones in one or two sentences, focusing on the result or "
+    "decision the recipient needs. Between those, work without commenting. "
+    "This size limit applies to progress updates, not requested explanations "
+    "or complete final deliverables."
 )
 
 _SILENT_BODY = (
@@ -74,7 +92,7 @@ _SILENT_BODY = (
     "While a task is in flight, emit no running "
     "commentary — no announcing the next step, no reporting what a command "
     "returned, no thinking out loud.\n\n"
-    "When the work is finished, give one complete report: what you did, what "
+    "When human-requested work is finished, give one complete report: what you did, what "
     "you found, what you changed, and anything you could not do. It has to "
     "stand alone — the user did not watch you get there, so do not lean on "
     "context they never saw. Send it through `ava.ui.notify` if it is a "
