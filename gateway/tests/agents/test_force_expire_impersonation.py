@@ -6,6 +6,7 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from base.agents import impersonation
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -13,7 +14,6 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.app import app
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import recorded_tree
 
 
 def test_force_expire_endpoint_requires_observed_session_and_returns_distinct_status(

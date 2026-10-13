@@ -18,6 +18,7 @@ import base.agents.impersonation as agents_impersonation
 from agent import impersonation
 from agent.tests.impersonation.test_impersonation import _notes
 from base.agents.context import AvaContext
+from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.incarnation.resources import ResourceProcess
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import Clock
@@ -31,7 +32,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import recorded_tree
 
 
 @pytest.fixture

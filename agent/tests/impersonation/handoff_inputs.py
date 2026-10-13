@@ -35,6 +35,7 @@ from base.agents.history.checkpoint_postgres_walks import (
 )
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.impersonation.notes import HandoffNotes
+from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
@@ -51,7 +52,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from tests.fixtures.pin_agent import hosted_resources as hosted_resources
-from tests.impersonation_support import attested_caller, recorded_tree
 
 __all__ = [
     "HandoffState",

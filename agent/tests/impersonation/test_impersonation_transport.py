@@ -66,13 +66,13 @@ def active_codex_lease(
     from uuid import uuid4
 
     from base.agents import impersonation as leases
+    from base.agents.impersonation.tests.impersonation_support import recorded_tree
     from base.agents.impersonation.tests.test_host_transport import FakeAppServer
     from base.api_contracts.caller_identity import CallerIdentity
     from base.db import create_agent
     from base.db.test_db_guard import assert_test_db_url
     from base.native_process.runtime_incarnation import RuntimeIncarnation
     from base.sessions import env_forwarding
-    from tests.impersonation_support import recorded_tree
 
     # The real relay boots this test-owned unit instead of inheriting cluster secrets.
     url = config_authority.runtime.data_plane.db_url
@@ -144,8 +144,8 @@ async def test_dead_relay_child_is_degraded_and_never_replaced(
     machine_identity: MachineIdentity,
 ) -> None:
     from base.agents import impersonation as leases
+    from base.agents.impersonation.tests.impersonation_support import attested_caller
     from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
-    from tests.impersonation_support import attested_caller
 
     session, owner = active_codex_lease
     assert leases.provision_relay(database, session["id"], owner, "old-private") is not None

@@ -8,6 +8,7 @@ from psycopg_pool import ConnectionPool
 
 from ava.sdk_surface.installation import Installation
 from base.agents import impersonation as leases
+from base.agents.impersonation.tests.impersonation_support import attested_caller
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -21,7 +22,6 @@ from services.wake.heartbeat.daemon import (
     _send_heartbeat_checkin,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller
 
 
 @pytest.fixture

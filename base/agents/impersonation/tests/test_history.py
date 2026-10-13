@@ -12,6 +12,11 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
+from base.agents.impersonation.tests.impersonation_support import (
+    attested_caller,
+    recorded_tree,
+    request_legacy_leases,
+)
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -19,7 +24,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.fixtures.unit.identity import machine_identity as machine_identity
-from tests.impersonation_support import attested_caller, recorded_tree, request_legacy_leases
 
 
 @pytest.fixture
