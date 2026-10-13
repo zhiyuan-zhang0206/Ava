@@ -41,11 +41,11 @@ _CATCHUP_SECONDS = 30.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
 # Bound each message in the host context; full bodies remain in the durable
 # inbox. The same cap also respects Claude Monitor's per-line budget.
-_PUSH_MAX_CHARS = 2000
+PUSH_MAX_CHARS = 2000
 _TERMINAL = frozenset(ImpersonationStatus) - frozenset(OPEN)
 
 
-class _Lease(BaseModel):
+class Lease(BaseModel):
     id: UUID
     agent_id: int
     status: ImpersonationStatus
@@ -197,7 +197,7 @@ def activation_hint(
     )
 
 
-def _ended(
+def ended(
     snapshot: InboxSnapshot, agent_id: int, lease_id: int | UUID, emit: Callable[[str], None]
 ) -> bool:
     if snapshot.status not in _TERMINAL:
@@ -231,7 +231,7 @@ def _read_inbox(
 ) -> InboxSnapshot:
     from base.agents import impersonation
 
-    lease = _Lease.model_validate(
+    lease = Lease.model_validate(
         impersonation.relay_get(db, bus, str(lease_id), token, local_machine=local_machine)
     )
     if lease.agent_id != agent_id or lease.id != lease_id:
@@ -249,7 +249,7 @@ def _read_inbox(
         # relay_inbox validates same-machine active authority in its own transaction.
         rows = impersonation.relay_inbox(db, str(lease_id), token, local_machine=local_machine)
     except impersonation.ImpersonationError:
-        latest = _Lease.model_validate(
+        latest = Lease.model_validate(
             impersonation.relay_get(db, bus, str(lease_id), token, local_machine=local_machine)
         )
         if latest.status in _TERMINAL:
@@ -301,7 +301,7 @@ def _routine_ids(rows: list[dict[str, Any]]) -> frozenset[int]:
     )
 
 
-def _loop_time() -> float:
+def loop_time() -> float:
     """The running loop's monotonic clock, as a seam for deterministic tests."""
     return asyncio.get_running_loop().time()
 
@@ -383,7 +383,7 @@ class _InboxRelay:
         snapshot = await self.read_inbox()
         if snapshot.status in _TERMINAL and not self.notify_terminal:
             return None  # The native host submits the Codex ended notice once.
-        if _ended(snapshot, self.agent_id, self.lease_id, self.emit):
+        if ended(snapshot, self.agent_id, self.lease_id, self.emit):
             return None
         return snapshot
 
@@ -406,7 +406,7 @@ class _InboxRelay:
             start_message += "\n\n" + hint
         self.emit(start_message)
         self.start_sent = True
-        self.last_emit = _loop_time()
+        self.last_emit = loop_time()
 
     async def _deliver_due(
         self, snapshot: InboxSnapshot, due: frozenset[int], *, redelivery: bool
@@ -417,7 +417,7 @@ class _InboxRelay:
                 snapshot,
                 new_ids=due,
                 routine_deadline=self.routine_deadline,
-                now=_loop_time(),
+                now=loop_time(),
             )
             if remaining is not None:
                 await self._wait(snapshot, remaining)
@@ -425,7 +425,7 @@ class _InboxRelay:
         # Catch ACK/release during debounce and merge bursts. Claude
         # Monitor replenishes one event allowance per two seconds.
         await asyncio.sleep(
-            max(self.debounce, self.last_emit + _MIN_EMIT_INTERVAL_SECONDS - _loop_time())
+            max(self.debounce, self.last_emit + _MIN_EMIT_INTERVAL_SECONDS - loop_time())
         )
         fresh = await self._read()
         if fresh is None:
@@ -447,7 +447,7 @@ class _InboxRelay:
                     max_chars=self.max_chars,
                 )
             )
-            self.last_emit = _loop_time()
+            self.last_emit = loop_time()
         self.routine_deadline = None
         return False
 
@@ -528,7 +528,7 @@ async def relay_inbox(
     ).run()
 
 
-def _write_heartbeat(db: Database, lease_id: UUID, token: str, *, local_machine: str) -> bool:
+def write_heartbeat(db: Database, lease_id: UUID, token: str, *, local_machine: str) -> bool:
     """One durable liveness beat; False means the lease ended or the relay
     credential was revoked — the heartbeat loop stops silently."""
     from base.agents import impersonation
@@ -540,7 +540,7 @@ def _write_heartbeat(db: Database, lease_id: UUID, token: str, *, local_machine:
     return True
 
 
-async def _heartbeat_loop(
+async def heartbeat_loop(
     db: Database,
     lease_id: UUID,
     token: str,
@@ -551,7 +551,7 @@ async def _heartbeat_loop(
     while True:
         await asyncio.sleep(interval)
         if not await asyncio.to_thread(
-            _write_heartbeat, db, lease_id, token, local_machine=local_machine
+            write_heartbeat, db, lease_id, token, local_machine=local_machine
         ):
             return
 
@@ -561,7 +561,7 @@ async def _heartbeat_completion(
 ) -> Exception | None:
     """Retain the original heartbeat failure until the relay stops and joins it."""
     try:
-        await _heartbeat_loop(db, lease_id, token, local_machine=local_machine)
+        await heartbeat_loop(db, lease_id, token, local_machine=local_machine)
     except Exception as error:
         return error
     return None
@@ -605,7 +605,7 @@ def cmd_relay(
             "session_id"
         ]
         adapter = resolve_adapter(args.provider, args.thread_id, codex_remote=args.codex_remote)
-        max_chars = _PUSH_MAX_CHARS
+        max_chars = PUSH_MAX_CHARS
 
         async def run() -> None:
             async def read_inbox() -> InboxSnapshot:
@@ -631,12 +631,12 @@ def cmd_relay(
                 )
 
             if not await asyncio.to_thread(
-                _write_heartbeat, db, lease_id, token, local_machine=machine.name()
+                write_heartbeat, db, lease_id, token, local_machine=machine.name()
             ):
                 # Termination can win between startup's lease read and beat.
                 # Terminal metadata is readable; ordinary inbox authority stays closed.
                 if adapter.notify_terminal:
-                    _ended(await read_inbox(), args.agent_id, session_id, adapter.send)
+                    ended(await read_inbox(), args.agent_id, session_id, adapter.send)
                 return
             heartbeat_tasks = asyncio.TaskGroup()
             await heartbeat_tasks.__aenter__()

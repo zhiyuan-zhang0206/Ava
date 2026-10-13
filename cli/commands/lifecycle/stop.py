@@ -61,7 +61,7 @@ def _stop_data_plane(
         stop_cluster_instance(retained_children=retained_children, producer=producer)
 
 
-def _reap_cluster_chrome() -> None:
+def reap_cluster_chrome() -> None:
     """Finish a browser teardown the session kill could not: kill any Chrome still
     running on THIS cluster's profile.
 
@@ -143,7 +143,7 @@ def _print_stop_plan(
     print()
 
 
-def _force_stop(
+def force_stop(
     _repo: Path,  # retained for the common stop call contract
     *,
     require_confirmation: bool = True,
@@ -210,7 +210,7 @@ def _force_stop(
     # after step 1 on purpose: the watchdog is dead by now, so nothing relaunches
     # Chrome onto the port we just cleared.
     if not keep_browser:
-        _reap_cluster_chrome()
+        reap_cluster_chrome()
 
     # Persistent terminals are closed through the service that holds them (from its
     # ledger when it is not running), then the service itself goes.
@@ -230,7 +230,7 @@ def _force_stop(
 
 
 @exclusive_resources
-def _do_stop(
+def do_stop(
     _repo: Path,
     *,
     require_confirmation: bool = True,
@@ -248,7 +248,7 @@ def _do_stop(
 ) -> int:
     """Shared stop kernel; only explicit force escalates a service stop."""
     if force:
-        return _force_stop(
+        return force_stop(
             _repo,
             require_confirmation=require_confirmation,
             keep_infra=keep_infra,
@@ -288,7 +288,7 @@ def cmd_stop(
     machine: MachineIdentity,
 ) -> int:
     """Stop this unit, including terminals and infrastructure; retain its data."""
-    return _do_stop(
+    return do_stop(
         _repo_root(),
         require_confirmation=require_confirmation,
         keep_infra=keep_infra,
@@ -305,9 +305,7 @@ def cmd_stop(
     )
 
 
-def _release_self_heal_pause(
-    *, database_factory: DatabaseFactory, machine: MachineIdentity
-) -> None:
+def release_self_heal_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
     """After a restart that failed before any service stopped, let go of what it took.
 
     A restart that declines or fails never reaches `ava start`/`ava restart`'s
@@ -369,7 +367,7 @@ def _release_own_hold(*, database_factory: DatabaseFactory, machine: MachineIden
     print("  · released the maintenance hold this restart took (nothing was stopped)")
 
 
-def _require_restart_runtime(runtime: StartRuntime) -> None:
+def require_restart_runtime(runtime: StartRuntime) -> None:
     """Recheck the captured runtime before disruptive work."""
     from base.paths import prod_service_checkout_error
 
@@ -378,10 +376,10 @@ def _require_restart_runtime(runtime: StartRuntime) -> None:
         raise ValueError(problem)
 
 
-def _restart_runtime() -> StartRuntime:
+def restart_runtime() -> StartRuntime:
     """Admit the currently executing checkout before restart effects."""
     runtime = StartRuntime.development(_repo_root())
-    _require_restart_runtime(runtime)
+    require_restart_runtime(runtime)
     return runtime
 
 
@@ -407,7 +405,7 @@ def _cmd_restart_body(
 
     # Admission precedes even the restart journal: an incompatible caller must
     # leave the running generation and its maintenance state untouched.
-    runtime = _restart_runtime()
+    runtime = restart_runtime()
 
     # An exec-domain restart is SIGKILLed by the execute_code call's own
     # teardown — the call's whole process group, as its turn ends (nohup/& do
@@ -423,7 +421,7 @@ def _cmd_restart_body(
             "it from a shell no ava session hosts (e.g. a plain ssh/login shell).",
             file=sys.stderr,
         )
-        _release_self_heal_pause(
+        release_self_heal_pause(
             database_factory=database_factory, machine=command.machine
         )  # same decline contract as the preflight refusal below
         return RESTART_DECLINED_EXIT_CODE
@@ -441,7 +439,7 @@ def _cmd_restart_body(
             "(e.g. a plain ssh/login shell) — host still serving",
             file=sys.stderr,
         )
-        _release_self_heal_pause(
+        release_self_heal_pause(
             database_factory=database_factory, machine=command.machine
         )  # same decline contract as the preflight refusal below
         return RESTART_DECLINED_EXIT_CODE
@@ -472,10 +470,10 @@ def _cmd_restart_body(
     # On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
     with status_journal.phase("preflight"):
-        rc = _repo._preflight_probes(database_factory(), command=command)
+        rc = _repo.preflight_probes(database_factory(), command=command)
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
-        _release_self_heal_pause(database_factory=database_factory, machine=command.machine)
+        release_self_heal_pause(database_factory=database_factory, machine=command.machine)
         if owns_journal:
             status_journal.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
         return RESTART_DECLINED_EXIT_CODE
@@ -500,7 +498,7 @@ def _cmd_restart_body(
             "nothing was stopped. Fix the findings above, then retry.",
             file=sys.stderr,
         )
-        _release_self_heal_pause(database_factory=database_factory, machine=command.machine)
+        release_self_heal_pause(database_factory=database_factory, machine=command.machine)
         if owns_journal:
             status_journal.finish(
                 RESTART_DECLINED_EXIT_CODE, error="start-readiness preflight failed"
@@ -509,14 +507,14 @@ def _cmd_restart_body(
 
     # Every restart uses the shared hosted stop kernel; a timeout never
     # silently authorizes force.
-    _require_restart_runtime(runtime)
+    require_restart_runtime(runtime)
 
     # Restart replaces the services, persistent terminals included (they close
     # as at `ava stop`: the pty-sessions service runs the new code afterwards),
     # and keeps the private data plane (keep_infra), the browser (keep_browser)
     # and, with teardown_extras left off, Gate, the permissions helper and native LGTM.
     with status_journal.phase("stop"):
-        rc = _do_stop(
+        rc = do_stop(
             repo,
             require_confirmation=False,
             keep_infra=True,
@@ -533,14 +531,14 @@ def _cmd_restart_body(
         # coming to restore it. Release the pause unless a stop hold owns it
         # (same contract as the refusal paths above). The stop leg's own
         # journal phases (drain / services / ...) remain readable.
-        _release_self_heal_pause(database_factory=database_factory, machine=command.machine)
+        release_self_heal_pause(database_factory=database_factory, machine=command.machine)
         if owns_journal:
             status_journal.finish(rc, error="stop leg failed")
         return rc
     # Keep the captured runtime and the operator's durable selection through
     # startup; neither is recaptured from a later caller or moving selector.
     with status_journal.phase("start"):
-        rc = start._cmd_start_body(
+        rc = start.cmd_start_body(
             None,
             database_factory,
             command.machine,

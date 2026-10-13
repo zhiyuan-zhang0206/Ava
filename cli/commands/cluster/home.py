@@ -22,7 +22,7 @@ def _drop_dirs(home: Path) -> list[Path]:
     return [home / "pg", home / "redis", pg_socket_path(home)]
 
 
-def _interactive() -> bool:
+def interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
@@ -33,7 +33,7 @@ def _confirm_destroy(home: Path, *, roles: list[str], drop_db: bool) -> bool:
     stdout to be terminals and offers no flag that skips it. Anything else (no
     terminal, end of input, a different string) does nothing.
     """
-    if not _interactive():
+    if not interactive():
         print(
             "✗ ava cluster destroy: refusing without an interactive terminal "
             "(over ssh, use `ssh -t`); there is no flag that skips the confirmation",
@@ -61,7 +61,7 @@ def _confirm_destroy(home: Path, *, roles: list[str], drop_db: bool) -> bool:
     return True
 
 
-def _stop_cluster() -> int:
+def stop_cluster() -> int:
     """Stop this cluster's services and its own pg/redis (does not drop data).
 
     The child is `ava stop`, run from this checkout with the same home. No
@@ -109,12 +109,12 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
     # refuse it from the first moment of the teardown.
     with file_lock(home / "start-intent.lock", timeout_s=30):
         write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"destroying"}\n')
-        rc = _stop_cluster()
+        rc = stop_cluster()
         if rc != 0:
             print("cluster stop incomplete; destroy intent retained", file=sys.stderr)
             return rc
         try:
-            _unregister_scheduled_jobs()
+            unregister_scheduled_jobs()
             unregister_helper(home, helper_port=settings.services.permissions_helper_port)
         except (OSError, RuntimeError, ValueError, TypeError) as exc:
             print(f"cluster cleanup incomplete: {exc}", file=sys.stderr)
@@ -125,7 +125,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
     if drop_db:
         # The whole Postgres+Redis instance is this cluster's own, so removing its
         # data dirs IS the drop — there is no shared server to DROP DATABASE inside.
-        # `_stop_cluster` already stopped it (above).
+        # `stop_cluster` already stopped it (above).
         import shutil
 
         for directory in _drop_dirs(home):
@@ -135,7 +135,7 @@ def cmd_cluster_destroy(*, drop_db: bool = False) -> int:
     return 0
 
 
-def _unregister_scheduled_jobs() -> None:
+def unregister_scheduled_jobs() -> None:
     """Remove every OS-scheduled job the host registered (health probe, boot
     autostart, logs maintenance, packages refresh, PR flow and the WAL-G tick).
 

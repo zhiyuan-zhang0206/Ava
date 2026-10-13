@@ -51,7 +51,7 @@ _NEW_HIERARCHY = (
 
 
 def _check(script: str) -> str | None:
-    return _verify._check_script(script)
+    return _verify.check_script(script)
 
 
 def test_an_old_signature_call_is_red_where_the_import_alone_was_green() -> None:
@@ -147,7 +147,7 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
         return None
 
     ports = _verify.VerifyPorts(
-        read_rows=lambda: rows, check_script=_verify._check_script, report=no_alert
+        read_rows=lambda: rows, check_script=_verify.check_script, report=no_alert
     )
     assert (
         _verify.cmd_schedules_verify(

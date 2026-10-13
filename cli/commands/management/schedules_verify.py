@@ -34,7 +34,7 @@ _CHILD_VERDICTS = (
 )
 
 
-def _check_script(script: str) -> str | None:
+def check_script(script: str) -> str | None:
     """Dry-import one in-store script, check its name reads and bind its repo-API call sites;
     None = clean, else the RED detail (`<module>` / `compile-error:<l>:<m>` / `<Exc>:<msg>` /
     `undefined-name:<l> <name>` / `call-signature:<l> <call>: <why>`).
@@ -143,7 +143,7 @@ def _verify_file(path: str) -> int:
     except (OSError, UnicodeDecodeError) as exc:
         print(f"cannot read script file: {exc}", file=sys.stderr)
         return 2
-    missing = _check_script(source)
+    missing = check_script(source)
     print("CHECK-OK" if missing is None else f"CHECK-RED missing={missing}")
     return 0 if missing is None else 1
 
@@ -185,7 +185,7 @@ def cmd_schedules_verify(
         read_rows=partial(_read_rows_file, rows_file)
         if rows_file
         else partial(_read_schedule_rows, database_factory=database_factory),
-        check_script=_check_script,
+        check_script=check_script,
         report=partial(_report_verify, producer=producer),
     )
     return _verify_sweep(notify=notify, ports=ports)

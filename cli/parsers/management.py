@@ -176,7 +176,7 @@ def _h_schedules_verify(args: argparse.Namespace) -> int:
     return h_schedules_verify(args)
 
 
-def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava config` — read / set / unset cluster + host config via the gateway. The
     # handlers defer the cli.commands.management.config import (which loads Settings) so
     # `ava --help` builds the parser without a configured .env.
@@ -219,7 +219,7 @@ def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     audit_p.set_defaults(func=_h_config_audit)
 
 
-def _add_presets_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_presets_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava presets` — manage agent config presets (thin client over /api/presets).
     presets_p = sub.add_parser(
         "presets",
@@ -269,7 +269,7 @@ def _add_presets_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     presets_delete_p.set_defaults(func=_h_presets_delete)
 
 
-def _add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava schedules` — manage gateway-supervised schedules (thin client over
     # /api/schedules). Every verb takes a name or a numeric id.
     schedules_p = sub.add_parser(

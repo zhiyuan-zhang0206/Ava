@@ -313,7 +313,7 @@ def test_existing_home_cannot_recapture_caller_tool_path(
     identity.prepare_identity(inputs)
     monkeypatch.setenv("AVA_SERVICE_PATH", str(inputs.checkout.parent / "unadmitted"))
     with pytest.raises(ValueError, match="explicit AVA_SERVICE_PATH"):
-        init_intent._service_path(identity.stored_values(inputs.home), inputs.home)
+        init_intent.service_path(identity.stored_values(inputs.home), inputs.home)
 
 
 def test_lossy_tool_path_is_rejected_before_identity_publication(
@@ -335,7 +335,7 @@ def test_config_file_cannot_choose_identity(inputs: identity.IdentityInput, key:
     config = inputs.home.parent / "input.env"
     config.write_text(f"{key}=wrong\n")
     with pytest.raises(ValueError, match="config file"):
-        init_intent._config_values(_args("--config-file", str(config)), inputs.home)
+        init_intent.config_values(_args("--config-file", str(config)), inputs.home)
 
 
 _RUNNER_ENDPOINT = "postgresql://ava@remote.invalid/db"
@@ -539,7 +539,7 @@ def test_config_file_is_taken_once_and_a_second_init_is_refused(
     assert (inputs.home / ".env").read_bytes() == first
     # A home that already has an `.env` without an intent takes no config file either.
     with pytest.raises(ValueError, match=r"no `\.env` yet"):
-        init_intent._config_values(args, inputs.home)
+        init_intent.config_values(args, inputs.home)
 
 
 def _remote_config(
@@ -554,7 +554,7 @@ def _remote_config(
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setattr(
         init_intent,
-        "_local_addresses",
+        "local_addresses",
         lambda _machine: {"this-host", "192.0.2.1"},  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
     monkeypatch.setattr(

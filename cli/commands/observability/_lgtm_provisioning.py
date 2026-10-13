@@ -99,7 +99,7 @@ def _record_rendered_hash(hashes_path: Path, key: str, digest: str) -> None:
     hashes_path.write_text(json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
 
 
-def _render_provisioning(
+def render_provisioning(
     repo: Path,
     native_dir: Path,
     *,

@@ -328,11 +328,11 @@ def _land_repo_copy(
     as repo-native. Returns the package name (the caller files it under the
     outcome it already knows)."""
     from base.packages.extensions.install_registry import InstalledPackage, tree_hash
-    from cli.commands.extensions.skills_sync import _copy_tree
+    from cli.commands.extensions.skills_sync import copy_tree
 
     dest = skills_root / s.name
     if not dest.exists() or overwrite:
-        _copy_tree(s.src, dest)
+        copy_tree(s.src, dest)
     entry = next((p for p in registry.packages if p.name == s.name), None)
     if entry is None:
         entry = InstalledPackage(name=s.name, type="skill", installed_at=now)

@@ -60,19 +60,19 @@ def test_repeated_observations_never_mutate_release_state(
 
     monkeypatch.setattr(subprocess, "run", forbidden)
     if health == "gateway":
-        monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-        monkeypatch.setattr(cluster_health, "_data_plane_abnormal", unhealthy)
+        monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
+        monkeypatch.setattr(cluster_health, "data_plane_abnormal", unhealthy)
     elif health == "population":
-        monkeypatch.setattr(cluster_health, "_agent_population", no_agents)
-        monkeypatch.setattr(cluster_health, "_agent_population_failure_class", population_failure)
+        monkeypatch.setattr(cluster_health, "agent_population", no_agents)
+        monkeypatch.setattr(cluster_health, "agent_population_failure_class", population_failure)
     elif health == "service":
         monkeypatch.setattr(
             cluster_health,
-            "_service_probes",
+            "service_probes",
             partial(service_probe_verdict, failures=["frontend (unknown)"]),
         )
     elif health == "disk":
-        monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: "disk full")
+        monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: "disk full")
     elif health == "provider":
         monkeypatch.setattr(cluster_health, "run_provider_guard", provider_failure)
 
@@ -90,9 +90,9 @@ def test_full_disk_is_reported_when_gateway_is_down(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Disk pressure must explain the gateway outage without being short-circuited."""
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(
-        cluster_health, "_disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
+        cluster_health, "disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
     )
 
     assert probe() == 1

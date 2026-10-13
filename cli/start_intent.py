@@ -81,7 +81,7 @@ def run_start(
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
 
     def start(*, boot: bool) -> int:
-        return _start_once(
+        return start_once(
             args,
             runtime,
             retained_children,
@@ -132,7 +132,7 @@ def _run_boot_attempt(home: Path, start: Callable[[], int]) -> int:
     return boot_policy.exit_code_after_budget(code)
 
 
-def _start_once(
+def start_once(
     args: argparse.Namespace,
     runtime: StartRuntime | None,
     retained_children: list[subprocess.Popen[bytes]],
@@ -154,14 +154,14 @@ def _start_once(
             require_initialized(home)
             _enter_home(home)
             from base.telemetry.process_logging import init_cli_process
-            from cli.main import _init_cli_logging
+            from cli.main import init_cli_logging
 
             def initialize(name: str) -> None:
                 init_cli_process(
                     name=name, producer=producer, machine_reader=args.runtime.machine.name
                 )
 
-            _init_cli_logging(["start"], initialize=initialize)
+            init_cli_logging(["start"], initialize=initialize)
             result = run_start_command(
                 disabled_services=tuple(args.disable_service),
                 only_services=tuple(args.only_service),
@@ -184,8 +184,8 @@ def _start_once(
         from pydantic import ValidationError
 
         if isinstance(exc, ValidationError):
-            from cli.main import _print_settings_load_failure
+            from cli.main import print_settings_load_failure
 
-            return _print_settings_load_failure(exc)
+            return print_settings_load_failure(exc)
         print(f"ava start: {exc}", file=sys.stderr)
         return 1

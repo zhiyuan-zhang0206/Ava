@@ -229,5 +229,5 @@ def test_a_test_home_is_taken_from_any_checkout(
 def test_the_fleet_updater_runs_the_homes_own_cli_on_every_host() -> None:
     """`cli.fleet_update` stops and starts each unit through `$H/source/.venv/bin/ava`
     with `AVA_HOME="$H"`: the home's own checkout, so the gate never blocks it."""
-    assert 'S="$H/source"' in fleet_update._HOME
-    assert fleet_update._AVA == 'AVA_HOME="$H" "$S/.venv/bin/ava"'
+    assert 'S="$H/source"' in fleet_update.HOME
+    assert fleet_update.AVA == 'AVA_HOME="$H" "$S/.venv/bin/ava"'

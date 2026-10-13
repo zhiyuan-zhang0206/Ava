@@ -197,7 +197,7 @@ def test_redis_bringup(
 
     monkeypatch.setattr(ci.subprocess, "run", fake_run)
     monkeypatch.setattr(ownership, "redis_data_dir", lambda: tmp_path / "redis")
-    monkeypatch.setattr(ci, "_ensure_redis_acl", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "ensure_redis_acl", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     def bind_fixture(*, machine: MachineIdentity) -> list[str]:
         assert machine is machine_identity
@@ -205,17 +205,17 @@ def test_redis_bringup(
 
     monkeypatch.setattr(port_preflight, "bind_addrs", bind_fixture)
     monkeypatch.setattr(ci, "print", lambda *_a, **_k: None, raising=False)  # pyright: ignore[reportUnknownArgumentType]
-    # `_redis_server_bin` resolves through `brew_prefix`, which shells out to `brew`; the faked
+    # `redis_server_bin` resolves through `brew_prefix`, which shells out to `brew`; the faked
     # `subprocess.run` above would answer it with "PONG". Stub the resolved path directly.
     monkeypatch.setattr(
         ci,
-        "_redis_server_bin",
+        "redis_server_bin",
         lambda: "/opt/homebrew/opt/redis@8.2/bin/redis-server",
     )
 
     # down on the first probe (so the full start path runs), up on the next
     probes = iter([False, True, True])
-    monkeypatch.setattr(ci, "_redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType]
     machine_identity.set(host="127.0.0.1")
     assert ci.start_redis(46999, SECRET, SECRET, "ava", machine=machine_identity) == 0
 

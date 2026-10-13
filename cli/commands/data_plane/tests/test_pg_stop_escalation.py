@@ -129,7 +129,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     notes: list[str] = []
     try:
         assert (
-            instance._start_pg(
+            instance.start_pg(
                 port, retained_children=retained_children, machine=command_runtime.machine
             )
             == 0
@@ -170,13 +170,13 @@ def test_the_fast_shutdown_leaves_room_for_the_legs_after_it(
     monkeypatch.setattr(plane, "PROCESS_KILL_WAIT_S", 3.0)
     monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
 
-    assert plane._postgres_fast_budget(1300.0) == 277.0
+    assert plane.postgres_fast_budget(1300.0) == 277.0
     # a stop with less time than the reserve gives the fast shutdown all of it
-    assert plane._postgres_fast_budget(1020.0) == 20.0
+    assert plane.postgres_fast_budget(1020.0) == 20.0
     # Exhaustion refuses admission instead of relying on a busy host to spend the budget.
     for deadline in (1000.0, 999.0):
         with pytest.raises(TimeoutError, match="stop deadline expired"):
-            plane._postgres_fast_budget(deadline)
+            plane.postgres_fast_budget(deadline)
 
 
 @pytest.fixture

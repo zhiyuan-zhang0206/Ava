@@ -55,7 +55,7 @@ _CLI_LOG_NAMES: dict[tuple[str, ...], str] = {
 }
 
 
-def _init_cli_logging(args_in: list[str], *, initialize: Callable[[str], None]) -> None:
+def init_cli_logging(args_in: list[str], *, initialize: Callable[[str], None]) -> None:
     """Open this verb's sinks, once its Settings may be built.
 
     Building them builds Settings, so `ava start` calls this only after the home
@@ -98,7 +98,7 @@ _LITE_VERBS = frozenset(
 )
 
 
-def _print_settings_load_failure(e: ValidationError) -> int:
+def print_settings_load_failure(e: ValidationError) -> int:
     """Translate Pydantic settings ValidationError into a copy-paste env template.
 
     Hit on a fresh host (no ~/.ava/.env, or missing required fields like
@@ -247,7 +247,7 @@ def main(
     args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
-            _init_cli_logging(args_in, initialize=producer.initialize_logging)
+            init_cli_logging(args_in, initialize=producer.initialize_logging)
         return args.func(args)
     except LockTimeoutError as exc:
         print(
@@ -256,7 +256,7 @@ def main(
         )
         return 1
     except ValidationError as exc:
-        return _print_settings_load_failure(exc)
+        return print_settings_load_failure(exc)
     except BootstrapFetchError as exc:
         # A pure agent-runner whose gateway is unreachable (or which was never
         # enrolled) fails fast with an actionable message.
