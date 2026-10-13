@@ -58,3 +58,51 @@ def test_missing_frontend_skips_only_its_fixture_consumers(
     )
     result = pytester.runpytest_subprocess("-n", "0", "-q")
     result.assert_outcomes(passed=1, skipped=2)
+
+
+def test_browser_contexts_need_no_minted_credentials(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session without the e2e stack still creates browser contexts.
+
+    The visual-baselines workflow renders `tests/e2e/visual/test_visual_regression.py`
+    standalone — no `_e2e_process_env`, no gateway. Its session runs with the autouse
+    client-credential hook installed but nothing minted, so `install_browser_login`'s
+    serving probe must answer "nothing to log in to" without a request; a probe that
+    reaches for the missing mint turns every context creation into a setup error. The
+    child session reproduces that exact shape: the real hook from the real fixture
+    module, and no mint.
+    """
+    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parents[2]))
+    pytester.makeconftest(
+        """
+        pytest_plugins = [
+            "tests.fixtures.env_bootstrap",
+            "tests.fixtures.leak_guard",
+            "tests.e2e._credentials",
+        ]
+        """
+    )
+    pytester.makepyfile(
+        """
+        from tests.e2e._credentials import install_browser_login
+
+
+        class _Browser:
+            def __init__(self):
+                self.created = 0
+
+            def new_context(self, **kwargs):
+                self.created += 1
+                return object()
+
+
+        def test_context_creation_outside_the_stack():
+            browser = _Browser()
+            install_browser_login(browser)
+            browser.new_context()
+            assert browser.created == 1
+        """
+    )
+    result = pytester.runpytest_subprocess("-n", "0", "-q")
+    result.assert_outcomes(passed=1)
