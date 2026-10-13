@@ -26,8 +26,8 @@ from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import build_model_catalog
 from base.packages.extensions import install_registry
+from base.packages.plugin_providers import build_model_catalog
 from base.paths import skills_dir
 
 

@@ -29,7 +29,7 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.daemon import health
 from base.daemon.health import Liveness
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer import config, daemon
 from services.derived.memory_indexer.backends.base import (
     ChunkHit,

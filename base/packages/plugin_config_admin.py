@@ -7,9 +7,12 @@ schema, while the image remains the sole persisted authority.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import ValidationError
 
-from base.config.admin.metadata import ConfigFieldMeta
+from base.config.admin.metadata import ConfigFieldMeta, env_override_values, get_config_metadata
+from base.config.service_read import ConfigAuthority
 from base.packages.plugin_config_images import (
     PluginConfigChangedError,
     PluginConfigOwner,
@@ -156,3 +159,18 @@ def write_plugin_patch(
     except ValidationError as exc:
         raise InvalidConfigOverlay(str(exc)) from exc
     write_config_image(owner, candidate, expected_digest=captured_digest)
+
+
+def panel_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:
+    """Core and plugin-owned config-panel metadata, in panel order."""
+    return [*get_config_metadata(authority=authority), *plugin_metadata()]
+
+
+def panel_overrides(*, authority: ConfigAuthority, local: bool = False) -> dict[str, Any]:
+    """The editable override set of core `.env` fields and plugin-owned images."""
+    return env_override_values(
+        authority=authority,
+        local=local,
+        plugin_metadata=plugin_metadata(),
+        plugin_values=plugin_overrides(),
+    )

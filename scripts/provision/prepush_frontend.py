@@ -39,7 +39,10 @@ _DISK_CONSUMERS = (
     ("ui/app/app-ui/", "src/app/app-ui-locale.test.ts"),
     ("tests/fixtures/events/", "src/lib/contracts/event-fixtures.test.ts"),
     ("services/entrypoints/gate/static/login.html", "src/lib/transport/gate-login.test.ts"),
-    ("base/packages/plugins/ui_contributions.py", "src/components/plugins/plugin-nav-icon.test.ts"),
+    (
+        "base/packages/plugins/surface/ui_contributions.py",
+        "src/components/plugins/plugin-nav-icon.test.ts",
+    ),
     ("ui/web/scripts/fixtures/route-bundle-stats.json", "scripts/check-first-load-js.test.ts"),
 )
 

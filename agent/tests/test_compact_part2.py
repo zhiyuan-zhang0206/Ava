@@ -46,7 +46,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import ContextBudget
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
 

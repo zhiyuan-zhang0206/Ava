@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
-from base.packages.plugins.inspector import InspectWidgetSpec
+from base.packages.plugins.surface.inspector import InspectWidgetSpec
 
 
 def _widget(**over: Any) -> InspectWidgetSpec:

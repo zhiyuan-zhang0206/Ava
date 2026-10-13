@@ -30,7 +30,7 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
     RecordingPublisher,
     breaker_ctx,

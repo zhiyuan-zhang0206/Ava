@@ -18,7 +18,7 @@ from agent.hooks.compact import _compact_reminder_update, auto_compact_will_fire
 from agent.state import AgentState, CompactState
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 build_model_catalog()
 

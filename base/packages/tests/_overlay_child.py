@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-from base.lm import plugin_providers
+from base.packages import plugin_providers
 from base.packages.plugins.config_registration import validate_config_overlay
 
 assert not hasattr(plugin_providers, "_STATE"), "catalog has no ambient holder"

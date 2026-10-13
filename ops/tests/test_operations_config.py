@@ -14,10 +14,10 @@ from pathlib import Path
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from base.config import get_config_metadata
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env import runtime_config
+from base.packages.plugin_config_admin import panel_metadata
 from ops import host_config as ops
 from ops.host_config import config_audit_read_op, config_read_op, config_write_op
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -45,13 +45,13 @@ def isolated_host_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
 
 def _host_field_names(*, config_authority: ConfigAuthority) -> list[str]:
-    return [m.name for m in get_config_metadata(authority=config_authority) if m.scope == "host"]
+    return [m.name for m in panel_metadata(authority=config_authority) if m.scope == "host"]
 
 
 def _sensitive_host_field_names(*, config_authority: ConfigAuthority) -> list[str]:
     return [
         m.name
-        for m in get_config_metadata(authority=config_authority)
+        for m in panel_metadata(authority=config_authority)
         if m.scope == "host" and m.sensitive
     ]
 
@@ -74,7 +74,7 @@ def _inject_sensitive_host_field(
     """
     from base.config import ConfigFieldMeta
 
-    metas = get_config_metadata(authority=config_authority)
+    metas = panel_metadata(authority=config_authority)
     field = ConfigFieldMeta(
         name=_SYNTHETIC_SENSITIVE_HOST,
         field_type="str",
@@ -96,7 +96,7 @@ def _inject_sensitive_host_field(
         assert authority is config_authority
         return [*metas, field]
 
-    monkeypatch.setattr(ops, "get_config_metadata", _metadata)
+    monkeypatch.setattr(ops, "panel_metadata", _metadata)
     return _SYNTHETIC_SENSITIVE_HOST
 
 
@@ -240,7 +240,7 @@ def test_config_read_op_raw_overrides_omits_sensitive(
         assert authority is config_authority
         return {name: "secret-val", "ops_concurrency": 3}
 
-    monkeypatch.setattr(ops, "env_override_values", _overrides)
+    monkeypatch.setattr(ops, "panel_overrides", _overrides)
     result = config_read_op(authority=config_authority, local_machine=machine_identity.name())
     raw = result.raw_overrides
     assert name not in raw, f"sensitive field {name} must be omitted from raw_overrides"
@@ -315,7 +315,7 @@ def test_config_write_op_rejects_non_remote_writable(
     # Find a host-scope field that is NOT remote_writable
     non_writable = [
         m.name
-        for m in get_config_metadata(authority=config_authority)
+        for m in panel_metadata(authority=config_authority)
         if m.scope == "host" and not m.remote_writable
     ]
     if not non_writable:
@@ -594,7 +594,7 @@ def test_config_write_op_restart_required_union(
     )
     assert result.applied is True
     # ops_concurrency.restart_required + machine_description.restart_required
-    metas = {m.name: m for m in get_config_metadata(authority=config_authority)}
+    metas = {m.name: m for m in panel_metadata(authority=config_authority)}
     expected = sorted(
         {
             v

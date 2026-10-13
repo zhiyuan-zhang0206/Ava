@@ -41,14 +41,19 @@ from base.api_contracts.config import (
     ResolvedFieldView,
 )
 from base.cluster.machine import MachineIdentity, MachineRole
-from base.config import env_override_values, field_domain, get_config_metadata, settings
+from base.config import field_domain, settings
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
-from base.config.admin.plugin_config import patch_owner, write_plugin_patch
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.env import runtime_config
 from base.host.env.audit import check_env_integrity
+from base.packages.plugin_config_admin import (
+    panel_metadata,
+    panel_overrides,
+    patch_owner,
+    write_plugin_patch,
+)
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
 from base.packages.plugins.config_registration import InvalidConfigOverlay
 from ops import host_config
@@ -346,7 +351,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
     host_fields = read.host_fields
 
     fields: list[ConfigFieldView] = []
-    for meta in get_config_metadata(authority=request.app.state.config_authority):
+    for meta in panel_metadata(authority=request.app.state.config_authority):
         if meta.scope == "host":
             hf = host_fields[meta.name]
             fields.append(
@@ -410,7 +415,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
     # remote_writable-gated fields (heartbeat_enabled / task_maintenance_enabled)
     # would be unreachable.
     raw_overrides = (
-        env_override_values(authority=request.app.state.config_authority, local=True)
+        panel_overrides(authority=request.app.state.config_authority, local=True)
         if machine is None
         else read.raw_overrides
     )
@@ -512,7 +517,7 @@ def get_resolved_config(request: Request, model: str | None = None) -> ResolvedC
     from base.lm.registry import explain_setting, tuning_field_names
 
     target = model or settings.lm.llm_model
-    metas = {m.name: m for m in get_config_metadata(authority=request.app.state.config_authority)}
+    metas = {m.name: m for m in panel_metadata(authority=request.app.state.config_authority)}
     per_agent = per_agent_field_names()
 
     fields: list[ResolvedFieldView] = []
@@ -727,7 +732,7 @@ async def put_config(
         local_machine_name=request.app.state.machine.name(),
     )
 
-    metas = {m.name: m for m in get_config_metadata(authority=request.app.state.config_authority)}
+    metas = {m.name: m for m in panel_metadata(authority=request.app.state.config_authority)}
     plan = ConfigPatchPlan.parse(body, metas, is_remote=machine is not None)
     _reject_invalid_plan(plan)
     try:

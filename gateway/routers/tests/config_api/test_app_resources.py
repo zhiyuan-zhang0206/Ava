@@ -11,9 +11,9 @@ from fastapi.testclient import TestClient
 
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
-from base.config import get_config_metadata
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.packages.plugin_config_admin import panel_metadata
 from gateway.routers.configuration import runtime
 from ops.cluster import rpc
 from ops.rpc_schemas import ConfigReadResult, HostConfigField
@@ -68,7 +68,7 @@ def clients(
                         overridden=False,
                         remote_writable=meta.remote_writable,
                     )
-                    for meta in get_config_metadata(authority=apps[index].state.config_authority)
+                    for meta in panel_metadata(authority=apps[index].state.config_authority)
                     if meta.scope == "host"
                 },
                 raw_overrides={"ops_concurrency": index + 3},

@@ -16,7 +16,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from ops.agents.spawn import create_agent_row

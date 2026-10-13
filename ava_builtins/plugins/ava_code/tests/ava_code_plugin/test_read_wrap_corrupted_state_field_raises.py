@@ -25,7 +25,7 @@ from ava_builtins.plugins.ava_code.tests.test_ava_code_plugin import (
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm import factory
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
 
 

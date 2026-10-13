@@ -43,7 +43,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm import registry
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 _MODEL = "deepseek-flash"
 _ZERO_PHASE = 1000  # agent_id % 1000 == 0: the transient schedule starts unshifted

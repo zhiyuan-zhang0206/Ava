@@ -265,10 +265,10 @@ def _full_host_fields_for_remote(
     """Build a full host_fields dict for every host-scope meta, taking explicit
     overrides where given and a neutral stub otherwise — so the GET composer can
     index every host field without a real remote runner."""
-    from base.config import get_config_metadata
+    from base.packages.plugin_config_admin import panel_metadata
 
     out: dict[str, Any] = {}
-    for meta in get_config_metadata(authority=config_authority):
+    for meta in panel_metadata(authority=config_authority):
         if meta.scope != "host":
             continue
         if meta.name in overrides:
@@ -543,11 +543,11 @@ def test_put_rejects_bad_scalar(
 ) -> None:
     """A non-numeric value for a cluster int/float field 400s before any write,
     rather than landing in .env and crashing Settings at the next restart."""
-    from base.config import get_config_metadata
+    from base.packages.plugin_config_admin import panel_metadata
 
     scalar = next(
         m
-        for m in get_config_metadata(authority=config_authority)
+        for m in panel_metadata(authority=config_authority)
         if m.scope != "host" and m.writable and m.field_type in ("int", "float")
     )
     with TestClient(app) as client:
@@ -562,11 +562,11 @@ def test_put_rejects_bool_for_int_field(
 ) -> None:
     """A JSON bool for an int field is rejected (it would otherwise pass int() and
     persist as 'true', breaking Settings at the next restart)."""
-    from base.config import get_config_metadata
+    from base.packages.plugin_config_admin import panel_metadata
 
     scalar = next(
         m
-        for m in get_config_metadata(authority=config_authority)
+        for m in panel_metadata(authority=config_authority)
         if m.scope != "host" and m.writable and m.field_type == "int"
     )
     with TestClient(app) as client:

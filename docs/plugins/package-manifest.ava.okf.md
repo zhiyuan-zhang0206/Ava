@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Package Manifest (spec v2)
-description: The `ava-plugin.json` every plugin ships (and a skill or MCP package may) — identity, dependencies, declared contribution surfaces, lifecycle shape — validated at install time by `base/packages/plugins/manifest.py`, with the console-contribution schema (`contributions.ui`) in `base/packages/plugins/ui_contributions.py`.
+description: The `ava-plugin.json` every plugin ships (and a skill or MCP package may) — identity, dependencies, declared contribution surfaces, lifecycle shape — validated at install time by `base/packages/plugins/manifest.py`, with the console-contribution schema (`contributions.ui`) in `base/packages/plugins/surface/ui_contributions.py`.
 tags:
 - plugins
 ---
@@ -21,7 +21,7 @@ loading, lifecycle states, and context gates land post-open-source. Full
 contract: [docs/conventions/extensions/plugin-spec-v2.md](../../docs/conventions/extensions/plugin-spec-v2.md).
 
 ## Console Contributions (`contributions.ui`)
-`base/packages/plugins/ui_contributions.py` validates the web-console half: a plugin
+`base/packages/plugins/surface/ui_contributions.py` validates the web-console half: a plugin
 declares `agentInspect` sections, `nav` entries, and `themes` token packs **as
 data**, and the console renders them with its own components — it never runs
 plugin JavaScript. Every vocabulary is closed: renderers and nav locations are

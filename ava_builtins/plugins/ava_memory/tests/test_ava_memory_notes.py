@@ -23,7 +23,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 

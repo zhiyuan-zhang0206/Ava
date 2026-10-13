@@ -10,7 +10,6 @@ from base.lm.catalog.decide.types import DecisionModelSpec, UnknownDecisionModel
 from base.lm.decision.call import decide
 from base.lm.decision.tests.support import MODEL, FakeBinding, provider
 from base.lm.factory import build_chat_model, validate_model_config
-from base.lm.plugin_providers import build_model_catalog
 from base.lm.provider_api import (
     PriceRates,
     ProviderBinding,
@@ -18,6 +17,7 @@ from base.lm.provider_api import (
     ProviderRegistrationError,
 )
 from base.lm.registry import ModelSpec
+from base.packages.plugin_providers import build_model_catalog
 
 
 def _chat_contribution(prefix: str, model_id: str) -> ProviderContribution:

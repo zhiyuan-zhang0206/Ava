@@ -81,7 +81,7 @@ not a plugin failure.
 
 The same containment applies at other plugin load sites, each
 reporting through one reporter: a plugin's `provider.py`
-(`base/lm/plugin_providers.py`), `services.py` (`services/supervision/roster/spec.py`), `setup.py`
+(`base/packages/plugin_providers.py`), `services.py` (`services/supervision/roster/spec.py`), `setup.py`
 (`cli/commands/extensions/_plugin_scaffold.py`), a built-in plugin's `metrics.py`
 (`gateway/inspect/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/inspect/_plugin_widgets.py`). The config face `default_config.py` is read by two more processes through

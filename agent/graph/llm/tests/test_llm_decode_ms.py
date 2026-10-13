@@ -28,7 +28,7 @@ from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_
 from base.agents.observation.turn_progress import TurnProgress
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 
 class _FakeClock:

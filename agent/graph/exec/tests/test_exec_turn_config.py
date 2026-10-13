@@ -27,7 +27,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from base.paths import workspace_dir_readonly
 from tests.fixtures.configuration import snapshot_process_config
 

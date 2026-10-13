@@ -1,2 +1,6 @@
 [loads]
 "dashboard_supply.py" = ["ava_builtins/plugins"]
+"plugin_providers.py" = ["ava_builtins/plugins"]
+
+[external]
+"plugin_providers.py" = "also loads operator-installed plugins from $AVA_HOME/plugins, outside the repository"

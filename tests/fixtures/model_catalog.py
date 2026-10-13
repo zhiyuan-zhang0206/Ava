@@ -6,10 +6,10 @@ from dataclasses import replace
 import pytest
 
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
 from base.lm.pricing import PriceBook
 from base.lm.provider_api import ProviderBinding
 from base.lm.registry import ModelSpec
+from base.packages.plugin_providers import build_model_catalog
 
 __all__ = ["model_catalog"]
 

@@ -36,7 +36,6 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
 from base.lm.provider_api import (
     Decision,
     DecisionModelSpec,
@@ -46,6 +45,7 @@ from base.lm.provider_api import (
     YesNo,
 )
 from base.packages.extensions import install_registry
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
 _CONFIG: Any = {"configurable": {"thread_id": "1042"}}

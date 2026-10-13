@@ -6,7 +6,7 @@ which model an agent runs on — no routing or provider-selected fallback
 ``docs/decisions/engineering/design/simplification/2026-07-29-no-runtime-model-routing.md``). A ``provider.py`` registers nothing: it
 exports ``contribute()`` returning a ``PluginContributions`` whose ``providers`` hold one
 ``ProviderContribution`` each (the binding, the model rows and the prices). The process's model
-catalog (``base/lm/catalog/__init__.py``) is built by ``base/lm/plugin_providers.py``, which loads every
+catalog (``base/lm/catalog/__init__.py``) is built by ``base/packages/plugin_providers.py``, which loads every
 enabled plugin's ``provider.py`` once per process, before the first build / spawn validation /
 model list, and installs each declaration into the catalog builder; the prefix map is flat — a
 duplicate prefix, or one that nests inside another (``foo-`` vs ``foo-bar-``), fails fast at

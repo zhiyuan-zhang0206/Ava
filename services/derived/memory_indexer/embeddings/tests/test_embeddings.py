@@ -30,7 +30,7 @@ import numpy as np
 import pytest
 
 from base.config import settings
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer.embeddings import gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.gemini import (

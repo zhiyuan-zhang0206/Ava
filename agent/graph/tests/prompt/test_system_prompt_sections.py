@@ -24,7 +24,7 @@ from agent.graph.prompt.system_prompt import (
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
 
 
@@ -452,7 +452,7 @@ def test_user_tone_uses_strong_gemini_variant(monkeypatch: pytest.MonkeyPatch) -
     the registry rather than hardcoded: a model swap (gemini-3.7-flash ->
     gemini-3.8-flash, #1535) must not break this contract test by drifting the
     id out of the model catalog."""
-    from base.lm.plugin_providers import build_model_catalog
+    from base.packages.plugin_providers import build_model_catalog
 
     gemini_id = next(
         model
@@ -565,7 +565,7 @@ def test_model_knowledge_cutoff_all_entries_valid():
     """Every knowledge cutoff in the catalog is a YYYY-MM string."""
     import re
 
-    from base.lm.plugin_providers import build_model_catalog
+    from base.packages.plugin_providers import build_model_catalog
 
     cutoffs = build_model_catalog().knowledge_cutoffs
     assert len(cutoffs) > 0
@@ -575,7 +575,7 @@ def test_model_knowledge_cutoff_all_entries_valid():
 
 def test_supported_models_all_have_cutoff(monkeypatch: pytest.MonkeyPatch):
     """Every spawnable model in the catalog has a knowledge cutoff."""
-    from base.lm.plugin_providers import build_model_catalog
+    from base.packages.plugin_providers import build_model_catalog
 
     catalog = build_model_catalog()
     for models in catalog.supported_models.values():

@@ -9,7 +9,7 @@ from agent.hooks.understanding_chunks import await_snapshot, due_chunk_update
 from agent.state_channels import CompactState
 from base.config import ConfigBoot
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 
 async def test_two_roots_keep_live_understanding_gates_independent() -> None:

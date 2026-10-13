@@ -21,7 +21,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 from ops.agents import birth_transaction
 from ops.agents.spawn import create_agent_row
 from ops.agents.tests.test_agents_internals import _insert_checkpoint, _spawn_agent

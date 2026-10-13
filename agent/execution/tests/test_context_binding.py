@@ -23,7 +23,7 @@ from ava.sdk_surface.process_context import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally
-from base.lm.plugin_providers import build_model_catalog
+from base.packages.plugin_providers import build_model_catalog
 
 
 @patch.dict(os.environ)

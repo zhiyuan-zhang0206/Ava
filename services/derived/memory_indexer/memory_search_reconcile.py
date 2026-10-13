@@ -29,10 +29,10 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.lm.plugin_providers import build_model_catalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.docs.notes import walk_notes
+from base.packages.plugin_providers import build_model_catalog
 from base.paths import gateway_memory_dir
 from base.telemetry.delivery.state import process_name
 from services.derived.memory_indexer.backends.base import MemorySearchBackend
