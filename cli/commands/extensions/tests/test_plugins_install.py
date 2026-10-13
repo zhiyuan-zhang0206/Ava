@@ -18,8 +18,8 @@ from cli.commands.extensions.plugins import (
     cmd_plugins_uninstall,
     cmd_plugins_upgrade,
 )
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 

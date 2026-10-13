@@ -20,8 +20,8 @@ from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import cleanup as bridge_cleanup
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
-from cli.tests.bootstrap.command_inputs import command_config_machine as command_config_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_config_machine as command_config_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.factories.external_skills import client_home, skill_ctx, skill_source, target_path
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline

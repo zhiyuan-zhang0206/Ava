@@ -1,0 +1,9 @@
+exports = ["command_fakes.py", "command_inputs.py"]
+
+[uses]
+"command_fakes.py" = ["command_inputs.py"]
+
+[debt.first-party-patch]
+"command_fakes.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 2
+"command_fakes.py#monkeypatch.setattr base.sessions.backend.get_backend" = 1
+"command_fakes.py#monkeypatch.setattr base.sessions.backend.get_shell_backend" = 1

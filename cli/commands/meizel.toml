@@ -4,22 +4,11 @@ exports = ["agents", "cluster", "converge", "data_plane", "extensions", "lifecyc
 "_repo.py" = ["_setup.py"]
 "cluster" = ["_repo.py", "converge", "probe.py"]
 "converge" = ["_repo.py"]
-"data_plane" = ["converge", "tests"]
+"data_plane" = ["converge"]
 "extensions" = ["_repo.py", "converge"]
-"lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py", "tests"]
+"lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py"]
 "observability" = ["converge"]
 "tests" = ["_repo.py", "_setup.py", "data_plane", "extensions", "lifecycle", "observability", "probe.py"]
-
-[debt.cycle-edge]
-"tests/maintenance_cluster.py -> lifecycle/_pause_resume.py" = 1
-"tests/test_external_skills.py -> lifecycle/converge_host.py" = 6
-"tests/test_single_box.py -> data_plane/bringup.py" = 15
-"tests/test_single_box.py -> data_plane/cluster_instance.py" = 6
-"tests/test_single_box.py -> data_plane/pgbouncer.py" = 4
-"tests/test_single_box.py -> lifecycle/migrations.py" = 1
-"tests/test_single_box.py -> lifecycle/root_driver.py" = 1
-"tests/test_unit_capability_commands.py -> data_plane/bringup.py" = 2
-"tests/test_unit_capability_commands.py -> data_plane/pgbouncer.py" = 2
 
 [debt.private-module]
 "tests/maintenance_cluster.py -> lifecycle/_pause_resume.py" = 1

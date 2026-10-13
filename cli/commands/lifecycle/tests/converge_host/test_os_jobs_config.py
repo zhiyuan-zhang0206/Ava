@@ -22,7 +22,7 @@ from cli.commands.converge.os_jobs import (
 from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
 from cli.commands.lifecycle import converge_host as host
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

@@ -12,8 +12,8 @@ import pytest
 import base.agents.impersonation as agents_impersonation
 from base.cluster.machine import MachineIdentity
 from base.db import Database
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 from .. import impersonation
 from .. import impersonation_relay as relay

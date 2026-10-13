@@ -47,7 +47,7 @@ from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.derived.memory_indexer.backends.pgvector import prepare_table
 from services.derived.memory_indexer.embeddings.factory import get_descriptor
 from tests.path_scoped.cli_tests import operator_database as operator_database

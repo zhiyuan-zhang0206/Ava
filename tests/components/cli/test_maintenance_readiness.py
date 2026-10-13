@@ -18,7 +18,7 @@ from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
 )
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import roster
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from gateway.app import app
 from tests.components.agent.test_maintenance import isolate as isolate
 from tests.components.services.test_maintenance_readiness import (

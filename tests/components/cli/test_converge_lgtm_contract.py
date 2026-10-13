@@ -16,8 +16,8 @@ from base.packages import dashboard_supply
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import service_argv
 from cli.commands.observability import lgtm_native
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

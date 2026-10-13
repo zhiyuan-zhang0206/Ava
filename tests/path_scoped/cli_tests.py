@@ -28,7 +28,7 @@ from cli.database import (
     operator_event_pipeline,
 )
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 
@@ -124,7 +124,7 @@ def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """In-process dispatch opens no real loguru sinks; the names asked for are recorded.
 
     `ava start`, `restart` and `lgtm on|off` open the
-    service sink set (`cli.main.init_cli_logging`). A real one here would
+    service sink set (`cli.startup_support.init_cli_logging`). A real one here would
     outlive its test: a stderr sink bound to that test's captured stream, a
     file sink in the session home and the process-wide init guard latched.
     """

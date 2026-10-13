@@ -44,7 +44,7 @@ that differs from the intent's refuses a start.
 `ava cluster db-authority issue-unit`, opened with its transport key from
 `AVA_DB_CAPABILITY_KEY`); the bundle's machine API token authenticates the join
 and, once verified, installs the unit's runner DB login and API token. That join
-(`cli/unit_join.py`) is also what `ava cluster db-authority install-unit` runs for a
+(`cli/commands/cluster/unit_join.py`) is also what `ava cluster db-authority install-unit` runs for a
 later bundle on an initialized unit; `ava start` makes no join, since a started
 runner fetches its configuration through Settings and probes its gateway itself. A
 remote runner never holds the human cluster secret (`AVA_CLUSTER_SECRET`; its

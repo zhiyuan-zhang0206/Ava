@@ -16,8 +16,8 @@ import pytest
 
 from base.config import ConfigBoot, settings
 from cli.commands.data_plane import walg as walg_cmd
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from services.backup.walg import config as walg_config
 from services.backup.walg import probe, state
 from services.backup.walg.check import Step

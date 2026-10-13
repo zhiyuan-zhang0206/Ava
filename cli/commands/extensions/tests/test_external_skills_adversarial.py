@@ -15,8 +15,8 @@ from base.config import ConfigBoot
 from base.telemetry import EventPipeline
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
-from cli.tests.bootstrap.command_inputs import command_config_machine as command_config_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_config_machine as command_config_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.factories.external_skills import (
     SKILL,
     client_home,

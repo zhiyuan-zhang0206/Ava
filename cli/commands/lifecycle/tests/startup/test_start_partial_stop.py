@@ -14,9 +14,9 @@ from base.sessions import hosting as sessions_hosting
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import _temporary_stop as stop
 from cli.commands.lifecycle import service_stop
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

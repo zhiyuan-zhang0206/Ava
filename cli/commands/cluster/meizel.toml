@@ -1,5 +1,6 @@
-exports = ["control.py", "cron.py", "health.py", "home.py", "tests"]
+exports = ["control.py", "cron.py", "health.py", "home.py", "tests", "unit_join.py"]
 
 [uses]
+"control.py" = ["unit_join.py"]
 "health.py" = ["_provider_guard.py"]
 "tests" = ["_provider_guard.py", "control.py", "cron.py", "health.py", "home.py"]

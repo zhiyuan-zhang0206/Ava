@@ -133,7 +133,7 @@ def _init_and_start_settings_free() -> None:
     sys.meta_path.insert(0, guard)
     _forbid_network()
     from base import cluster
-    from cli import main, start_intent
+    from cli import main, start_intent, startup_support
 
     home = Path(os.environ["AVA_HOME"])
     checkout = home.parent / "checkout"
@@ -152,7 +152,7 @@ def _init_and_start_settings_free() -> None:
         configured()
         calls.append("logging")
 
-    main.init_cli_logging = log
+    startup_support.init_cli_logging = log
 
     def start(**kwargs: Any) -> int:
         assert not kwargs["command"].config.prepared

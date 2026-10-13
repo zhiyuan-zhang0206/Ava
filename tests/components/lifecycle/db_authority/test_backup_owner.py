@@ -42,7 +42,7 @@ from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.tests.test_single_box import Born
 from cli.commands.tests.test_single_box import born as born
 from cli.commands.tests.test_single_box import configured as configured
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.backup.artifact import offsite
 from tests.path_scoped.cli_tests import operator_database as operator_database
 

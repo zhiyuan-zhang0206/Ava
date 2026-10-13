@@ -7,10 +7,10 @@ import pytest
 import cli.commands.cluster.control as cluster_control
 from base.cluster import machine
 from base.host.net import http_dial
-from cli.tests._commands_helpers import _FakeResponse
-from cli.tests._commands_helpers import fake_session_backends as fake_session_backends
-from cli.tests._commands_helpers import gateway_role_pinned as gateway_role_pinned
-from cli.tests._commands_helpers import hermetic_gateway_base as hermetic_gateway_base
+from cli.database.tests.command_fakes import _FakeResponse
+from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
+from cli.database.tests.command_fakes import gateway_role_pinned as gateway_role_pinned
+from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
 
 # ─── ava cluster status roster code column ───────────────────────────────────
 

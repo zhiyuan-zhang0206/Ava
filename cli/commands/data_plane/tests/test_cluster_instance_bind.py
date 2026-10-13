@@ -23,8 +23,8 @@ from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup as _dp
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.commands.data_plane import pgbouncer
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 

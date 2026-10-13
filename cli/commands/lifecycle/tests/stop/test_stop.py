@@ -42,7 +42,7 @@ from cli.commands.lifecycle.tests.stop.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop.stop_support import written as written
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause, pty_close_notices
 from ops.cluster_status import pause
 from tests.components.agent.test_maintenance import WHEN

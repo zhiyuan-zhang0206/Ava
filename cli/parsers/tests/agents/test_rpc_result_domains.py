@@ -20,7 +20,7 @@ def _response(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -> No
 def test_cancel_missing_native_acceptance_never_prints_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], payload: dict[str, object]
 ) -> None:
-    from cli.commands.agents.tests.test_agents_cmd import TARGET
+    from cli.parsers.tests.agents.test_agents_cmd import TARGET
 
     target = {**TARGET, "agent_id": 7}
 

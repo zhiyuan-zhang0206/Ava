@@ -5,8 +5,8 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from cli.database.runtime import CommandRuntime
-from cli.tests.bootstrap.command_inputs import command_machine as command_machine
-from cli.tests.bootstrap.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import command_machine as command_machine
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 def test_root_construction_does_not_prepare_configuration(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -64,7 +64,7 @@ with `--gateway-url`, `--machine-name`, `--machine-host`, an environment bearer
 and `--db-capability` (the unit capability from `ava cluster db-authority
 issue-unit`, [[base/cluster/authority/docs/wiring.ava.okf.md]]). It installs it
 before persisting identity, creating no local data plane; a later bundle goes to
-`ava cluster db-authority install-unit` (`cli/unit_join.py` is the one join).
+`ava cluster db-authority install-unit` (`cli/commands/cluster/unit_join.py` is the one join).
 Every runner process fetches current connection facts at Settings construction.
 
 Package acquisition is separate and has no cluster effects:
