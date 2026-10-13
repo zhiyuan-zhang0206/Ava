@@ -22,7 +22,7 @@ Overview of the Ava subsystem.
 - [[docs/mcps/mcps.ava.okf.md|Mcps]]
 - [[presets.ava.okf.md|Presets]]
 - [[sdk-surface.ava.okf.md|Sdk Surface]]
-- [[ava/docs/self.ava.okf.md|Self]]
+- [[ava/self/docs/self.ava.okf.md|Self]]
 - [[ava/shell/docs/shell.ava.okf.md|Shell]]
 - [[docs/skills/skills.ava.okf.md|Skills]]
 - [[ava/docs/ui.ava.okf.md|Ui]]

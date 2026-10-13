@@ -33,7 +33,7 @@ class PluginActivation(TypedDict):
 
 
 class HeartbeatPaused(TypedDict):
-    """`heartbeat_paused` payload — ava/self.py."""
+    """`heartbeat_paused` payload — ava/self/__init__.py."""
 
     duration_s: float
 
@@ -267,7 +267,7 @@ EVENTS: dict[str, EventSpec] = {
         "heartbeat_paused",
         "heartbeat paused",
         payload=HeartbeatPaused,
-        site='ava/self.py:258 telemetry.emit("telemetry", ...)',
+        site='ava/self/__init__.py:258 telemetry.emit("telemetry", ...)',
         persist=True,
     ),
     "shell_ttl_renewed": telemetry_event(
