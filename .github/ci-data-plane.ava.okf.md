@@ -11,7 +11,7 @@ tags:
 
 Each hosted job provisions its own toolchain: uv, Node 22, Postgres 17 + Redis 8.2 +
 PgBouncer server binaries on PATH, and Playwright chromium. The suite spins
-throwaway native clusters and poolers itself (`tests/_containers.py` and the
+throwaway native clusters and poolers itself (`base/deploy/tests/containers.py` and the
 PgBouncer wire fixtures).
 
 Postgres/Redis/PgBouncer installation lives in the composite action

@@ -14,7 +14,7 @@
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
-# throwaway native clusters via tests/_containers.py), and Playwright chromium
+# throwaway native clusters via base/deploy/tests/containers.py), and Playwright chromium
 # for e2e (browser dir cached; system deps installed per run).
 #
 # CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR

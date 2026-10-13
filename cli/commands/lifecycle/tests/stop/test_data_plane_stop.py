@@ -198,7 +198,7 @@ def test_real_redis_stops_owned_instance_only(
 ) -> None:
     import redis
 
-    from tests._containers import redis_server
+    from base.deploy.tests.containers import redis_server
 
     with redis_server() as url, redis_server() as sibling_url:
         with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — redis stubs
@@ -222,7 +222,7 @@ def test_real_redis_stops_owned_instance_only(
         # the latest in-memory write, not merely that an old RDB existed.
         from urllib.parse import urlparse
 
-        from tests._containers import wait_port
+        from base.deploy.tests.containers import wait_port
 
         port = urlparse(url).port
         assert port is not None
@@ -264,7 +264,7 @@ def test_foreign_redis_directory_refuses_before_local_signals(
 ) -> None:
     import redis
 
-    from tests._containers import redis_server
+    from base.deploy.tests.containers import redis_server
 
     with redis_server() as url:
         monkeypatch.setattr(settings.data_plane, "redis_url", url)
@@ -320,7 +320,7 @@ def test_redis_admin_credential_is_independent_of_runtime_url(
 ) -> None:
     import redis
 
-    from tests._containers import redis_server
+    from base.deploy.tests.containers import redis_server
 
     password = "private-maintenance-test"  # noqa: S105 — private ephemeral test
     with redis_server() as url:
@@ -345,7 +345,7 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 ) -> None:
     import shutil
 
-    from tests._containers import free_port, wait_port
+    from base.deploy.tests.containers import free_port, wait_port
 
     binary = plane.pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
@@ -402,7 +402,7 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
 
     import psycopg
 
-    from tests._containers import free_port, wait_port
+    from base.deploy.tests.containers import free_port, wait_port
 
     binary = plane.pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
@@ -444,7 +444,7 @@ def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
     monkeypatch: pytest.MonkeyPatch,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    from tests._containers import free_port
+    from base.deploy.tests.containers import free_port
 
     identity = OwnedProcess.capture(psutil.Process())
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{free_port()}")
@@ -470,7 +470,7 @@ def test_redis_cleanup_cannot_turn_deadline_into_an_unbounded_wait(
 ) -> None:
     import asyncio
 
-    from tests._containers import free_port
+    from base.deploy.tests.containers import free_port
 
     class HangingClose:
         connection = None
@@ -522,7 +522,7 @@ def _launch_incident_shape_pooler(
     short-circuits to the reload path by design). Pins the pooler's home and the address to
     private, bindable values.
     """
-    from tests._containers import free_port, wait_port
+    from base.deploy.tests.containers import free_port, wait_port
 
     binary = pb.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):

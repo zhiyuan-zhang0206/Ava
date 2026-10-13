@@ -60,6 +60,30 @@ def python_files(root: Path) -> Iterator[Path]:
         yield conftest
 
 
+def code_names(file: Path, needle: str, *, exact: bool) -> bool:
+    """Whether a Python file holds a string constant equal to (``exact``) or containing
+    ``needle`` outside docstrings; a comment or a docstring reads nothing."""
+    text = file.read_text(encoding="utf-8")
+    if needle not in text:
+        return False
+    tree = ast.parse(text, filename=str(file))
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+    }
+    return any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+        and (node.value == needle if exact else needle in node.value)
+        for node in ast.walk(tree)
+    )
+
+
 def module_files(module: str, index: ModuleIndex) -> set[str]:
     """Importing a module also executes its concrete package initializers."""
     parts = module.split(".")

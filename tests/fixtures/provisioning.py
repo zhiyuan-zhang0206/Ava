@@ -58,7 +58,7 @@ def provisioned_db(
 
     from base.cluster.machine.boot import machine_from_boot
     from base.db.test_db_guard import assert_test_db_url
-    from tests._containers import postgres
+    from base.deploy.tests.containers import postgres
 
     # Resolve this entry's image before tests can replace subprocess.run.
     database_version.get()
@@ -76,7 +76,7 @@ def provisioned_redis(pytestconfig: pytest.Config, process_config) -> Iterator[s
     """Own one native server only when a Redis consumer requests it."""
     if static_mode(pytestconfig):
         pytest.fail("Static tests cannot request Redis; use the native test environment.")
-    from tests._containers import redis_server
+    from base.deploy.tests.containers import redis_server
 
     with redis_server() as url:
         process_config.set_field("redis_url", url)

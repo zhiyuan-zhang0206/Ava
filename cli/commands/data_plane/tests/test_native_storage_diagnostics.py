@@ -12,12 +12,12 @@ import redis
 from base import cluster
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.deploy.tests.containers import free_port, redis_server
 from base.host.db_authority import delivery
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.tests.test_pooler_stop import native_pooler as native_pooler
 from services.supervision.ava_root.health import ProbeRunner
 from services.supervision.ava_root_glue import diagnostic_probes as probes
-from tests._containers import free_port, redis_server
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

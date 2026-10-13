@@ -178,7 +178,7 @@ os.environ["AVA_OS_JOBS_ENABLED"] = "false"
 # and a stray connection that bypasses a provisioning fixture fails loudly
 # instead of hitting a real database. load_dotenv(override=False) won't clobber
 # these. The real per-session URLs are injected by the `provisioned_db` /
-# `provisioned_redis` fixtures, which start throwaway native pg/redis (tests/_containers.py).
+# `provisioned_redis` fixtures, which start throwaway native pg/redis (base/deploy/tests/containers.py).
 UNPROVISIONED_DB_URL = "postgresql://unprovisioned@127.0.0.1:1/unprovisioned"
 UNPROVISIONED_REDIS_URL = "redis://127.0.0.1:1/0"
 os.environ["AVA_DB_URL"] = UNPROVISIONED_DB_URL
@@ -197,7 +197,7 @@ os.environ["AVA_TRANSPORT_ENCRYPTION"] = "overlay"
 # The suite's data-plane identity is `ava_citest`, carried entirely by the URLs
 # the provisioning fixtures write (names-as-data — Settings keeps the URL
 # verbatim, credentials included). The throwaway pg/redis provide the
-# `ava_citest` role/db/ACL user (tests/_containers.py), while the prod-db guard
+# `ava_citest` role/db/ACL user (base/deploy/tests/containers.py), while the prod-db guard
 # (tests/path_scoped/ava_tests.py, which refuses `ava`/`ava_main`) still fires if a test
 # ever points at the real production database.
 
@@ -464,7 +464,7 @@ os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 def _reserve_distinct_ports(count: int) -> list[int]:
     """`count` different free localhost ports: every socket stays bound until all
     are chosen, so the kernel cannot hand the same number out twice. The small race
-    before a server binds one is the same that tests/_containers.py accepts for
+    before a server binds one is the same that base/deploy/tests/containers.py accepts for
     pg/redis."""
     with contextlib.ExitStack() as stack:
         socks: list[socket.socket] = []

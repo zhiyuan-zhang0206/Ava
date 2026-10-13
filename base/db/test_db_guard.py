@@ -38,7 +38,7 @@ _MAIN_DB_NAME = "ava_main"
 # never implicitly, so it needs the explicit AVA_TEST_DB=1 marker.
 _FRESH_BIRTH_DB_NAME = "ava"
 
-# The suite's throwaway Postgres (tests/_containers.py ->
+# The suite's throwaway Postgres (base/deploy/tests/containers.py ->
 # base/pg_tools.throwaway_postgres) provisions databases named ava_citest;
 # ava_test* is the namespace for any per-session test database. The sentinel
 # URLs have no server behind them (port 1 on loopback) — every write fails
