@@ -11,7 +11,7 @@ from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
-from tests.fixtures.configuration import snapshot_process_config
+from base.config.tests.configuration import snapshot_process_config
 
 
 @pytest.fixture(autouse=True)

@@ -5,8 +5,8 @@ from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
-from tests.fixtures.configuration import snapshot_process_config
 
 
 def configured_policy() -> HostPolicy:

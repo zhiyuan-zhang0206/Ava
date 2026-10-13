@@ -12,11 +12,11 @@ from ava.gateway_client.transport import use_client
 from ava.sdk_surface.installation import Installation
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
-from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 

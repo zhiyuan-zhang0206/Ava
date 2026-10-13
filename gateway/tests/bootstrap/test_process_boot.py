@@ -12,6 +12,7 @@ import pytest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
@@ -21,7 +22,6 @@ from base.telemetry import DrainStatus
 from gateway import app as gateway_app
 from gateway.cluster import server
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
-from tests.fixtures.configuration import snapshot_process_config
 from tests.fixtures.gateway_config import gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 

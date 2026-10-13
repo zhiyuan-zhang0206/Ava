@@ -24,9 +24,9 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import DataPlaneSettings, settings
 from base.config.domains.storage import data_plane
 from base.config.domains.storage.data_plane import self_machine_host
+from base.config.tests.configuration import snapshot_process_config
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import redacted_url, url_with_password, url_with_userinfo
-from tests.fixtures.configuration import snapshot_process_config
 
 _SECRET = "new-secret_v2"  # noqa: S105 — test fixture, not a real credential
 
