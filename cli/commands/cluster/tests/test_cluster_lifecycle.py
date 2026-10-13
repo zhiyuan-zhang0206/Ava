@@ -56,8 +56,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, roles: list[str]) -> P
         return None
 
     monkeypatch.setattr(start_identity, "read_intent", read_intent)
-    monkeypatch.setattr(lifecycle, "_stop_cluster", stop)
-    monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", unregister_jobs)
+    monkeypatch.setattr(lifecycle, "stop_cluster", stop)
+    monkeypatch.setattr(lifecycle, "unregister_scheduled_jobs", unregister_jobs)
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", helper)
     return home
 
@@ -84,7 +84,7 @@ def _no_helper(*_args: object, **_kwargs: object) -> None:
 
 def _at_a_terminal(monkeypatch: pytest.MonkeyPatch, *answers: str | type[BaseException]) -> Mock:
     """A person at a terminal who types `answers` in turn (an exception is raised)."""
-    monkeypatch.setattr(lifecycle, "_interactive", lambda: True)
+    monkeypatch.setattr(lifecycle, "interactive", lambda: True)
     prompt = Mock(side_effect=list(answers))
     monkeypatch.setattr("builtins.input", prompt)
     return prompt
@@ -127,7 +127,7 @@ def test_destroy_refuses_without_an_interactive_terminal(
     monkeypatch.setattr(sys, "stdout", _Stream(tty=stdout_tty))
     monkeypatch.setattr(sys, "stderr", err)
     stop = Mock()
-    monkeypatch.setattr(lifecycle, "_stop_cluster", stop)
+    monkeypatch.setattr(lifecycle, "stop_cluster", stop)
 
     assert lifecycle.cmd_cluster_destroy() == 1
     assert "interactive terminal" in err.getvalue()
@@ -142,7 +142,7 @@ def test_a_different_answer_changes_nothing(
 ) -> None:
     _at_a_terminal(monkeypatch, answer)
     stop = Mock()
-    monkeypatch.setattr(lifecycle, "_stop_cluster", stop)
+    monkeypatch.setattr(lifecycle, "stop_cluster", stop)
     data = home / "pg"
     data.mkdir()
 
@@ -155,7 +155,7 @@ def test_a_different_answer_changes_nothing(
 def test_end_of_input_changes_nothing(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _at_a_terminal(monkeypatch, EOFError)
     stop = Mock()
-    monkeypatch.setattr(lifecycle, "_stop_cluster", stop)
+    monkeypatch.setattr(lifecycle, "stop_cluster", stop)
 
     assert lifecycle.cmd_cluster_destroy() == 1
     stop.assert_not_called()
@@ -200,8 +200,8 @@ def test_the_default_home_can_be_destroyed(
     prod = (default_home / ".ava").resolve()
     prod.mkdir(mode=0o700)
     monkeypatch.setattr(start_identity, "read_intent", _gateway_intent)
-    monkeypatch.setattr(lifecycle, "_stop_cluster", _nothing_to_stop)
-    monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", _no_jobs)
+    monkeypatch.setattr(lifecycle, "stop_cluster", _nothing_to_stop)
+    monkeypatch.setattr(lifecycle, "unregister_scheduled_jobs", _no_jobs)
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", _no_helper)
     _at_a_terminal(monkeypatch, str(prod))
 
@@ -212,7 +212,7 @@ def test_the_default_home_can_be_destroyed(
 def test_stop_failure_leaves_home_attached_and_never_unloads_helper(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(lifecycle, "_stop_cluster", lambda: 4)
+    monkeypatch.setattr(lifecycle, "stop_cluster", lambda: 4)
     unload = Mock()
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", unload)
     _at_a_terminal(monkeypatch, str(home))
@@ -230,7 +230,7 @@ def test_ambiguous_cleanup_leaves_home_attached(
         raise RuntimeError("ownership unknown")
 
     if stage == "jobs":
-        monkeypatch.setattr(lifecycle, "_unregister_scheduled_jobs", fail)
+        monkeypatch.setattr(lifecycle, "unregister_scheduled_jobs", fail)
     else:
         monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", fail)
     _at_a_terminal(monkeypatch, str(home))
@@ -266,7 +266,7 @@ def test_drop_db_removes_the_data_directories_after_the_stop(
         order.append("stop")
         return 0
 
-    monkeypatch.setattr(lifecycle, "_stop_cluster", stop)
+    monkeypatch.setattr(lifecycle, "stop_cluster", stop)
     _at_a_terminal(monkeypatch, str(home))
 
     assert lifecycle.cmd_cluster_destroy(drop_db=True) == 0
@@ -329,7 +329,7 @@ def test_every_scheduled_job_is_retired_including_pr_flow_and_the_walg_tick(
     ):
         monkeypatch.setattr(module, name, lambda label=label: retired.append(label))
 
-    lifecycle._unregister_scheduled_jobs()
+    lifecycle.unregister_scheduled_jobs()
 
     assert retired == [
         "health probe",
@@ -354,7 +354,7 @@ def test_a_failed_job_removal_is_raised_after_the_others_ran(
     monkeypatch.setattr(logs_job, "unregister_logs_job", lambda: ran.append("logs"))
 
     with pytest.raises(RuntimeError, match=r"autostart \(launchctl unavailable\)"):
-        lifecycle._unregister_scheduled_jobs()
+        lifecycle.unregister_scheduled_jobs()
     assert ran == ["logs"]
 
 
@@ -369,7 +369,7 @@ def test_destroying_a_scratch_home_never_reaches_the_hosts_scheduler(
     monkeypatch.setattr(system_cron, "unregister_platform_job", reached)
     monkeypatch.setattr(system_autostart, "unregister_platform_job", reached)
 
-    lifecycle._unregister_scheduled_jobs()  # no AssertionError == nothing was touched
+    lifecycle.unregister_scheduled_jobs()  # no AssertionError == nothing was touched
 
 
 def test_cron_cli_keeps_its_interval_and_passes_a_live_owned_gate(

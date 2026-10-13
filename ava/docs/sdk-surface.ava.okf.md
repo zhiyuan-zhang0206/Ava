@@ -42,7 +42,7 @@ and owns no second HTTP connection.
 - [[shell.ava.okf.md]] — Shell commands: run() / run_background() (auto-report on completion) + sessions (new / send / capture / kill)
 
 ### Agent Interop
-- [[ava/external/docs/external.ava.okf.md]] — local external Python attachment to a consented agent lease
+- [[ava/impersonation/docs/attachment.ava.okf.md]] — local external Python attachment to a consented agent lease
 - [[ava/agents/docs/agents.ava.okf.md]] — spawn / fork / send_message / terminate / resurrect / get_neighbors / get_ancestors / get_status
 - [[ava_builtins/plugins/ava_fleet/docs/tasks/tasks.ava.okf.md|Tasks]] — Task registry `ava.tasks`: create / get / list / update / log (injected by ava_fleet plugin, not core SDK—docs in fleet subtree)
 - [[presets.ava.okf.md]] — Configuration presets: list / get

@@ -29,7 +29,7 @@ from ops.agent_pause.probe import ops_quiescent
 from services.supervision.roster import build_services
 
 
-def _stop_browser(deadline: float) -> None:
+def stop_browser(deadline: float) -> None:
     from services.desktop.browser.orphan import find_cluster_chrome
 
     trees: set[OwnedProcess] = set()
@@ -46,13 +46,13 @@ def _stop_browser(deadline: float) -> None:
         raise RuntimeError("this unit's browser appeared during stop")
 
 
-def _stop_extras(deadline: float) -> None:
+def stop_extras(deadline: float) -> None:
     from cli.commands.lifecycle._stop_extras import stop_permissions_helper
 
     stop_permissions_helper(timeout_s=remaining(deadline))
 
 
-def _report_incomplete(
+def report_incomplete(
     exc: BaseException,
     phases: list[tuple[str, float]],
     *,
@@ -110,7 +110,7 @@ def _timed_phase(phases: list[tuple[str, float]], label: str, step: Callable[[],
         phases.append((label, time.monotonic() - started))
 
 
-def _stop_plan(
+def stop_plan(
     *,
     preserve_sessions: frozenset[str],
     keep_browser: bool,
@@ -141,7 +141,7 @@ def _stop_plan(
     return roles, selected, preserved
 
 
-def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Callable[[], object]:
+def services_phase_action(*, preserved: frozenset[str], deadline: float) -> Callable[[], object]:
     """Stop services through their root owner, preserving explicitly retained units."""
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
@@ -150,7 +150,7 @@ def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Cal
     )
 
 
-def _require_unstarted_initialization() -> bool:
+def require_unstarted_initialization() -> bool:
     """Positive first-start evidence that no application could have admitted work."""
     from base.paths import ava_home, root_manifests_path
     from cli.commands.lifecycle.root_driver import require_root_absent
@@ -183,12 +183,12 @@ def _stop_initialization(
 ) -> None:
     """Close a proven pre-application attempt through the existing native owners."""
     _timed_phase(
-        phases, "services", _services_phase_action(preserved=frozenset(), deadline=deadline)
+        phases, "services", services_phase_action(preserved=frozenset(), deadline=deadline)
     )
     if not keep_browser:
-        _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
+        _timed_phase(phases, "browser", lambda: stop_browser(deadline))
     if teardown_extras:
-        _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
+        _timed_phase(phases, "extras", lambda: stop_extras(deadline))
     if not keep_infra:
         _timed_phase(
             phases,
@@ -272,10 +272,10 @@ def _drain_and_stop(
     _timed_phase(
         phases,
         "services",
-        _services_phase_action(preserved=preserved | {SERVICE_UNIT}, deadline=deadline),
+        services_phase_action(preserved=preserved | {SERVICE_UNIT}, deadline=deadline),
     )
     if not keep_browser and "browser" not in preserved:
-        _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
+        _timed_phase(phases, "browser", lambda: stop_browser(deadline))
     if not keep_terminals:
         _timed_phase(
             phases,
@@ -293,10 +293,10 @@ def _drain_and_stop(
         _timed_phase(
             phases,
             "pty-sessions",
-            _services_phase_action(preserved=preserved, deadline=deadline),
+            services_phase_action(preserved=preserved, deadline=deadline),
         )
     if teardown_extras:
-        _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
+        _timed_phase(phases, "extras", lambda: stop_extras(deadline))
     if "gateway" in roles and not keep_infra:
         _timed_phase(
             phases,
@@ -334,7 +334,7 @@ def stop(
     its bounded grace (`service_stop.close_terminals`).
     """
     _refuse_hosted_stop()
-    roles, _selected, preserved = _stop_plan(
+    roles, _selected, preserved = stop_plan(
         preserve_sessions=preserve_sessions,
         keep_browser=keep_browser,
         keep_infra=keep_infra,
@@ -357,7 +357,7 @@ def stop(
     clients: list[str] = []  # the pooler's clients still connected at its stop (reported only)
 
     try:
-        if _require_unstarted_initialization():
+        if require_unstarted_initialization():
             _stop_initialization(
                 phases,
                 deadline,
@@ -369,7 +369,7 @@ def stop(
                 retained_children=retained_children,
                 producer=producer,
             )
-            return _finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
+            return finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
         _drain_and_stop(
             phases,
             deadline,
@@ -387,12 +387,12 @@ def stop(
             machine=machine,
         )
     except (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired) as exc:
-        _report_incomplete(exc, phases, owns_journal=owns_journal)
+        report_incomplete(exc, phases, owns_journal=owns_journal)
         return 1
-    return _finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
+    return finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
 
 
-def _finish_stop(*, owns_journal: bool, notes: list[str], clients: list[str] | None = None) -> int:
+def finish_stop(*, owns_journal: bool, notes: list[str], clients: list[str] | None = None) -> int:
     """The stop is done; `notes` (an escalated Postgres shutdown) and `clients` (the pooler's
     clients still connected at its stop) go into the journal."""
     for note in notes:

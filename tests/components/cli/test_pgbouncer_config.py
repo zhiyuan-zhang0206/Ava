@@ -29,7 +29,7 @@ def _assert_transaction_pooling_with_scram_clients(ini: str) -> None:
     assert "pool_mode = transaction" in ini
     # Client auth is scram against the userlist of generation verifiers.
     assert "auth_type = scram-sha-256" in ini
-    assert f"auth_file = {pgbouncer._userlist_path()}" in ini
+    assert f"auth_file = {pgbouncer.userlist_path()}" in ini
     assert "listen_port = 6433" in ini
 
 
@@ -86,7 +86,7 @@ def _assert_quiet_connection_logs_and_userlist_only_console(ini: str) -> None:
 def test_render_ini_is_transaction_scram_and_socket_server(
     machine_identity: MachineIdentity,
 ) -> None:
-    ini = pgbouncer._render_ini(
+    ini = pgbouncer.render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
@@ -105,7 +105,7 @@ def test_render_ini_authenticates_and_binds_loopback_on_a_single_box(
     """The internal data plane always authenticates, and a box that declares no
     reachable address (`AVA_MACHINE_HOST` unset) binds loopback alone."""
     machine_identity.set(host="localhost")
-    ini = pgbouncer._render_ini(
+    ini = pgbouncer.render_ini(
         pg_port=5433, listen_port=6433, db_name="ava", machine=machine_identity
     )
     assert "auth_type = scram-sha-256" in ini.splitlines()
@@ -117,14 +117,14 @@ def test_render_ini_adds_only_the_declared_reachable_address(
     machine_identity: MachineIdentity,
 ) -> None:
     machine_identity.set(host="10.0.0.5")
-    ini = pgbouncer._render_ini(
+    ini = pgbouncer.render_ini(
         pg_port=5433, listen_port=6433, db_name="ava", machine=machine_identity
     )
     assert "listen_addr = 127.0.0.1, 10.0.0.5" in ini.splitlines()
 
 
 def test_render_ini_binds_loopback_never_all_interfaces(machine_identity: MachineIdentity) -> None:
-    ini = pgbouncer._render_ini(
+    ini = pgbouncer.render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",

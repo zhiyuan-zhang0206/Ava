@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import patch
 
 import ava
-from ava import external
+from ava import impersonation
 from ava.sdk_surface import process_context
 from base.cluster.machine import MachineIdentity
 from tests.factories.external_attachment import attached_runtime as attached_runtime
@@ -20,7 +20,7 @@ def test_attachment_borrows_same_machine_without_resetting_prior_cache(
     # The attachment captures its own process input, not the Settings singleton.
     with (
         patch.dict(os.environ, {"AVA_MACHINE_NAME": "unrelated-process-change"}),
-        external.attach("lease"),
+        impersonation.attach("lease"),
     ):
         assert ava.context.require_machine() is machine
         assert ava.context.require_machine().name() == "local-runner"
@@ -39,7 +39,7 @@ def test_independent_attachments_own_fresh_machine_caches(
         for name in ("first-attachment", "second-attachment"):
             lease["machine"] = name
             # Each independent root captures this input before lease validation.
-            with patch.dict(os.environ, {"AVA_MACHINE_NAME": name}), external.attach("lease"):
+            with patch.dict(os.environ, {"AVA_MACHINE_NAME": name}), impersonation.attach("lease"):
                 machine = ava.context.require_machine()
                 assert machine.name() == name
                 assert all(machine is not previous for previous in owners)

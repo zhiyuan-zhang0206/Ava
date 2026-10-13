@@ -12,23 +12,23 @@ from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.schema import migration_layout
 from base.deploy.schema.migrations import (
-    _BASELINE_NAME,
+    BASELINE_NAME,
     CodeBehindSchema,
     MigrationLayoutError,
     SchemaVersionMismatch,
-    _list_migration_files,
-    _schema_mutation_lock,
     applied_migration_names,
     apply_pending_migrations,
     check_schema_version,
+    list_migration_files,
     required_migration_set,
+    schema_mutation_lock,
 )
 from base.deploy.schema.tests.migration_support import (
-    _SYN,
-    _SYN2,
-    _init_repo,
-    _set_table_to,
-    _try_lock_from_other_conn,
+    SYN,
+    SYN2,
+    init_repo,
+    set_table_to,
+    try_lock_from_other_conn,
 )
 from base.deploy.schema.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
@@ -42,9 +42,9 @@ def test_required_set_is_just_baseline_with_empty_migrations(
     """With an empty migrations/ (no delta over the baseline) the required set is
     exactly the baseline sentinel. Isolated to a tmp dir so a real post-baseline
     migration on disk does not change what this contract tests."""
-    _init_repo(tmp_path)  # the loader's git-tracking gate needs a real checkout
+    init_repo(tmp_path)  # the loader's git-tracking gate needs a real checkout
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
-    assert required_migration_set() == {_BASELINE_NAME}
+    assert required_migration_set() == {BASELINE_NAME}
 
 
 def test_list_migration_files_empty_is_valid(
@@ -52,15 +52,15 @@ def test_list_migration_files_empty_is_valid(
 ) -> None:
     """An empty migrations/ (no delta over the baseline) is valid — the loader
     returns [] instead of raising."""
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
-    assert _list_migration_files() == []
+    assert list_migration_files() == []
 
 
 def test_applied_migration_names_reads_the_set(db_conn: psycopg.Connection) -> None:
     """applied_migration_names returns the DB's applied name set (baseline only in
     the seeded state)."""
-    assert applied_migration_names(db_conn) == {_BASELINE_NAME}
+    assert applied_migration_names(db_conn) == {BASELINE_NAME}
 
 
 def test_check_passes_when_aligned(
@@ -69,25 +69,25 @@ def test_check_passes_when_aligned(
     """applied {baseline} == required {baseline}: no raise. Isolated to an empty
     migrations/ so the seeded baseline-only DB is aligned regardless of real
     post-baseline migrations on disk."""
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     check_schema_version(db_conn)
 
 
 def test_check_raises_when_db_behind(db_conn: psycopg.Connection) -> None:
     """Drop the baseline row -> applied {} is missing the baseline -> behind code."""
-    _set_table_to(db_conn, "set", [])  # empty, no baseline
+    set_table_to(db_conn, "set", [])  # empty, no baseline
     with pytest.raises(SchemaVersionMismatch) as ei:
         check_schema_version(db_conn)
-    assert _BASELINE_NAME in str(ei.value)
+    assert BASELINE_NAME in str(ei.value)
 
 
 def test_check_raises_when_code_behind(db_conn: psycopg.Connection) -> None:
     """An applied name the code does not carry -> DB ahead -> CodeBehindSchema."""
-    _set_table_to(db_conn, "set", [_BASELINE_NAME, _SYN])
+    set_table_to(db_conn, "set", [BASELINE_NAME, SYN])
     with pytest.raises(CodeBehindSchema) as ei:
         check_schema_version(db_conn)
-    assert _SYN in str(ei.value)
+    assert SYN in str(ei.value)
 
 
 def test_apply_pending_nothing_when_baselined(
@@ -99,7 +99,7 @@ def test_apply_pending_nothing_when_baselined(
 ) -> None:
     """Baselined DB, empty migrations/ -> nothing to apply."""
     _ = db_conn  # fixture reseeds the baseline
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url) as fresh:
         assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
@@ -117,15 +117,15 @@ def test_apply_pending_applies_post_baseline(
     _ = db_conn
     hour = tmp_path / "2999/12/31/23"
     hour.mkdir(parents=True)
-    (hour / f"{_SYN}.sql").write_text("CREATE TABLE syn_t (id int);")
-    _init_repo(tmp_path)  # applied only if git-tracked (#998)
+    (hour / f"{SYN}.sql").write_text("CREATE TABLE syn_t (id int);")
+    init_repo(tmp_path)  # applied only if git-tracked (#998)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
-            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [_SYN]
+            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [SYN]
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
-            assert cur.fetchall() == [(_BASELINE_NAME,), (_SYN,)]
+            assert cur.fetchall() == [(BASELINE_NAME,), (SYN,)]
             cur.execute("SELECT to_regclass('syn_t')")
             row = cur.fetchone()
             assert row is not None and row[0] is not None
@@ -150,15 +150,15 @@ def test_untracked_migration_is_skipped_and_warned(
     must NOT be applied. The tracked migration applies normally; the untracked
     one is skipped with a warning and never reaches the schema."""
     _ = db_conn
-    (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_ok_t (id int);")
-    _init_repo(tmp_path)  # _SYN is now tracked
+    (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_ok_t (id int);")
+    init_repo(tmp_path)  # SYN is now tracked
     rogue = "29991231T235958_synthetic-rogue"
     (tmp_path / f"{rogue}.sql").write_text("CREATE TABLE syn_rogue_t (id int);")
     # NOT git-added: the rogue sits untracked, exactly like the incident file.
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
-            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [_SYN]
+            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [SYN]
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
             row = c.execute("SELECT to_regclass('syn_rogue_t')").fetchone()
             assert row is None or row[0] is None  # the rogue never ran
@@ -180,11 +180,11 @@ def test_untracked_file_excluded_from_required_set(
     not part of this checkout's code, so a DB without it is not "behind". (The
     false "schema behind code" signal is what kept the incident wedge in place
     after the watchdog's rollback.)"""
-    (tmp_path / f"{_SYN}.sql").write_text("-- noop")
-    _init_repo(tmp_path)  # _SYN tracked
-    (tmp_path / f"{_SYN2}.sql").write_text("-- noop")  # untracked
+    (tmp_path / f"{SYN}.sql").write_text("-- noop")
+    init_repo(tmp_path)  # SYN tracked
+    (tmp_path / f"{SYN2}.sql").write_text("-- noop")  # untracked
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
-    assert required_migration_set() == {_BASELINE_NAME, _SYN}
+    assert required_migration_set() == {BASELINE_NAME, SYN}
 
 
 def test_untracked_malformed_name_is_skipped_not_fatal(
@@ -192,11 +192,11 @@ def test_untracked_malformed_name_is_skipped_not_fatal(
 ) -> None:
     """Layout validation applies to what git tracks; an untracked file with a
     malformed name is skipped like any other untracked file, not fatal."""
-    (tmp_path / f"{_SYN}.sql").write_text("-- noop")
-    _init_repo(tmp_path)
+    (tmp_path / f"{SYN}.sql").write_text("-- noop")
+    init_repo(tmp_path)
     (tmp_path / "0001_legacy.sql").write_text("-- noop")  # malformed AND untracked
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
-    assert [n for n, _ in _list_migration_files()] == [_SYN]
+    assert [n for n, _ in list_migration_files()] == [SYN]
 
 
 def test_non_git_dir_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -204,7 +204,7 @@ def test_non_git_dir_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     loader must not apply files whose git-tracking status it cannot verify."""
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with pytest.raises(MigrationLayoutError, match="git worktree"):
-        _list_migration_files()
+        list_migration_files()
 
 
 def test_apply_multi_statement_migration_over_prepared_conn(
@@ -223,10 +223,10 @@ def test_apply_multi_statement_migration_over_prepared_conn(
     applier now runs bodies with prepare=False (simple protocol), so a multi-
     statement migration is not tied to the caller's prepare posture. Without the
     fix this raises MigrationFailed."""
-    (tmp_path / f"{_SYN}.sql").write_text(
+    (tmp_path / f"{SYN}.sql").write_text(
         "CREATE TABLE mstest_t (id int, note text);\nINSERT INTO mstest_t (id, note) VALUES (1, 'ok');"
     )
-    _init_repo(tmp_path)
+    init_repo(tmp_path)
     monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     # A dedicated connection carrying the prepare posture that broke apply. The
@@ -236,7 +236,7 @@ def test_apply_multi_statement_migration_over_prepared_conn(
             cur.execute("DROP TABLE IF EXISTS mstest_t")
         conn.commit()
         applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
-        assert _SYN in applied
+        assert SYN in applied
         with conn.cursor() as cur:
             cur.execute("SELECT id, note FROM mstest_t")
             assert cur.fetchone() == (1, "ok")  # both statements of the body ran
@@ -248,17 +248,17 @@ def test_apply_multi_statement_migration_over_prepared_conn(
 
 
 def test_schema_mutation_lock_is_exclusive(db_conn: psycopg.Connection) -> None:
-    assert _try_lock_from_other_conn() is True
-    with _schema_mutation_lock(db_conn):
-        assert _try_lock_from_other_conn() is False
-    assert _try_lock_from_other_conn() is True
+    assert try_lock_from_other_conn() is True
+    with schema_mutation_lock(db_conn):
+        assert try_lock_from_other_conn() is False
+    assert try_lock_from_other_conn() is True
     db_conn.rollback()
 
 
 def test_schema_mutation_lock_released_on_exception(db_conn: psycopg.Connection) -> None:
-    with pytest.raises(RuntimeError, match="boom"), _schema_mutation_lock(db_conn):
+    with pytest.raises(RuntimeError, match="boom"), schema_mutation_lock(db_conn):
         raise RuntimeError("boom")
-    assert _try_lock_from_other_conn() is True
+    assert try_lock_from_other_conn() is True
     db_conn.rollback()
 
 
@@ -268,7 +268,7 @@ def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices(
 
     from psycopg import sql
 
-    from base.deploy.schema.tests.migration_support import _SCHEMA_SQL, _throwaway_database
+    from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
 
     root = Path(__file__).resolve().parents[3]
     delta = (
@@ -276,10 +276,10 @@ def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices(
         / "migrations/2026/10/05/20261005T095252_separate-impersonation-transport-lifecycle.sql"
     )
     with (
-        _throwaway_database("impersonation_transport") as url,
+        throwaway_database("impersonation_transport") as url,
         psycopg.connect(url, autocommit=True) as conn,
     ):
-        conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+        conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
         conn.execute("DROP TRIGGER agent_impersonations_terminal_notice ON agent_impersonations")
         conn.execute("DROP FUNCTION mark_impersonation_terminal_notice()")
         columns = (

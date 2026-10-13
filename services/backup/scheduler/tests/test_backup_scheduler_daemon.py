@@ -96,11 +96,11 @@ async def _http_get(port: int) -> tuple[int, bytes]:
 def test_backup_components_hold_a_boot_grace_then_require_a_fresh_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = daemon._BackupState(started_at=100.0)
+    state = daemon.BackupState(started_at=100.0)
     monkeypatch.setattr(daemon.time, "monotonic", lambda: 100.0 + daemon.BACKUP_STALE_AFTER_S)
     monkeypatch.setattr(daemon.time, "time", lambda: 1_000.0)
 
-    assert daemon._backup_components(state) == [
+    assert daemon.backup_components(state) == [
         {
             "name": "backup",
             "status": "ok",
@@ -109,7 +109,7 @@ def test_backup_components_hold_a_boot_grace_then_require_a_fresh_success(
     ]
 
     monkeypatch.setattr(daemon.time, "monotonic", lambda: 101.0 + daemon.BACKUP_STALE_AFTER_S)
-    assert daemon._backup_components(state) == [
+    assert daemon.backup_components(state) == [
         {
             "name": "backup",
             "status": "degraded",
@@ -120,7 +120,7 @@ def test_backup_components_hold_a_boot_grace_then_require_a_fresh_success(
 
     state.record_success(_at())
     monkeypatch.setattr(daemon.time, "time", lambda: _at().timestamp() + 10.0)
-    assert daemon._backup_components(state) == [
+    assert daemon.backup_components(state) == [
         {
             "name": "backup",
             "status": "ok",
@@ -134,18 +134,18 @@ def test_backup_components_hold_a_boot_grace_then_require_a_fresh_success(
         "time",
         lambda: _at().timestamp() + daemon.BACKUP_STALE_AFTER_S + 1.0,
     )
-    assert daemon._backup_components(state)[0]["status"] == "degraded"
+    assert daemon.backup_components(state)[0]["status"] == "degraded"
 
 
 def test_backup_components_keep_running_dump_healthy_after_previous_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = daemon._BackupState(started_at=0.0, running=True)
+    state = daemon.BackupState(started_at=0.0, running=True)
     state.record_attempt(_at())
     state.record_error("disk full")
     monkeypatch.setattr(daemon.time, "time", lambda: _at().timestamp() + 1.0)
 
-    assert daemon._backup_components(state) == [
+    assert daemon.backup_components(state) == [
         {
             "name": "backup",
             "status": "ok",
@@ -157,13 +157,13 @@ def test_backup_components_keep_running_dump_healthy_after_previous_failure(
 
 @pytest.mark.asyncio
 async def test_healthz_returns_503_for_an_overdue_backup(monkeypatch: pytest.MonkeyPatch) -> None:
-    state = daemon._BackupState(started_at=0.0)
+    state = daemon.BackupState(started_at=0.0)
     monkeypatch.setattr(daemon.time, "monotonic", lambda: daemon.BACKUP_STALE_AFTER_S + 1.0)
     port = _find_free_port()
     server = await health.start_health_server(
         "pg_backup",
         port=port,
-        components=lambda: daemon._backup_components(state),
+        components=lambda: daemon.backup_components(state),
         image=unknown_image(),
     )
     try:
@@ -200,12 +200,12 @@ def test_next_backup_hour_uses_the_cluster_timezone(monkeypatch: pytest.MonkeyPa
     def utc_zone(**_inputs: object) -> tzinfo:
         return UTC
 
-    monkeypatch.setattr(daemon, "_cluster_tz", utc_zone)
+    monkeypatch.setattr(daemon, "cluster_tz", utc_zone)
     monkeypatch.setattr(daemon, "_sleep", fake_sleep)
 
     backup_hour = settings.services.backup_hour
     asyncio.run(
-        daemon._sleep_until_next_backup_hour(
+        daemon.sleep_until_next_backup_hour(
             _at(hour=(backup_hour - 1) % 24, minute=30), config=ConfigBoot()
         )
     )
@@ -214,7 +214,7 @@ def test_next_backup_hour_uses_the_cluster_timezone(monkeypatch: pytest.MonkeyPa
 
 
 def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.MonkeyPatch) -> None:
-    state = daemon._BackupState(started_at=0.0)
+    state = daemon.BackupState(started_at=0.0)
     ran: list[datetime] = []
 
     monkeypatch.setattr(daemon, "is_due", _always_due)
@@ -228,7 +228,7 @@ def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.Monkey
     async def stop_after_success(_now: datetime, *, config: ConfigBoot) -> None:
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(daemon, "_sleep_until_next_backup_hour", stop_after_success)
+    monkeypatch.setattr(daemon, "sleep_until_next_backup_hour", stop_after_success)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(daemon._backup_loop(state, config=ConfigBoot()))
@@ -266,14 +266,14 @@ def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch)
     def utc_zone(**_inputs: object) -> tzinfo:
         return UTC
 
-    monkeypatch.setattr(daemon, "_cluster_tz", utc_zone)
+    monkeypatch.setattr(daemon, "cluster_tz", utc_zone)
     monkeypatch.setattr(daemon, "is_due", _always_due)
     monkeypatch.setattr(daemon, "run_job", run_dump)
     monkeypatch.setattr(daemon, "_run_due_local_dump_restore", skip_restore)
     monkeypatch.setattr(daemon, "_sleep", stop_after_sleep)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._backup_loop(daemon._BackupState(), config=ConfigBoot()))
+        asyncio.run(daemon._backup_loop(daemon.BackupState(), config=ConfigBoot()))
 
     assert sleeps == [24 * 3600 - 53 * 60 - 52]
 
@@ -281,7 +281,7 @@ def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch)
 def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = daemon._BackupState(started_at=0.0)
+    state = daemon.BackupState(started_at=0.0)
     ran: list[str] = []
     waits: list[str] = []
     emitted: list[tuple[str, str, dict[str, object]]] = []
@@ -304,7 +304,7 @@ def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
 
     monkeypatch.setattr(daemon, "run_job", fail)
     monkeypatch.setattr(daemon, "_sleep", no_short_retry_sleep)
-    monkeypatch.setattr(daemon, "_sleep_until_next_backup_hour", stop_at_next_backup_hour)
+    monkeypatch.setattr(daemon, "sleep_until_next_backup_hour", stop_at_next_backup_hour)
     monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
     with pytest.raises(asyncio.CancelledError):
@@ -326,10 +326,10 @@ def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
 def test_failed_dump_does_not_make_healthz_ask_the_supervisor_for_a_restart() -> None:
     """A degraded component is a 503, which root answers with a restart, and a restarted
     daemon dumps again at once. The failure is reported in the detail and the event."""
-    state = daemon._BackupState(started_at=time.monotonic())
+    state = daemon.BackupState(started_at=time.monotonic())
     state.record_error("disk full")
 
-    components = daemon._backup_components(state)
+    components = daemon.backup_components(state)
 
     assert components[0]["status"] == "ok"
     assert components[0]["last_error"] == "disk full"
@@ -460,7 +460,7 @@ def _staged_dump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     def keep_all(_directory: Path, **_inputs: object) -> list[Path]:
         return []
 
-    monkeypatch.setattr(backup, "_prune", keep_all)
+    monkeypatch.setattr(backup, "prune", keep_all)
     return staged, published, hashlib.sha256(b"encrypted").hexdigest()
 
 
@@ -502,7 +502,7 @@ def test_commit_defers_pruning_while_another_backup_holds_the_lock(
         pruned.append(directory)
         return []
 
-    monkeypatch.setattr(backup, "_prune", prune)
+    monkeypatch.setattr(backup, "prune", prune)
 
     @contextlib.contextmanager
     def busy(*, timeout_s: float | None = None) -> Generator[None]:
@@ -552,7 +552,7 @@ def test_next_backup_hour_reads_its_owner_instead_of_ambient_settings(
         slept.append(seconds)
 
     monkeypatch.setattr(daemon, "_sleep", record_sleep)
-    asyncio.run(daemon._sleep_until_next_backup_hour(_at(hour=6, minute=30), config=config))
+    asyncio.run(daemon.sleep_until_next_backup_hour(_at(hour=6, minute=30), config=config))
     config.view.services.backup_hour = 8
-    asyncio.run(daemon._sleep_until_next_backup_hour(_at(hour=6, minute=30), config=config))
+    asyncio.run(daemon.sleep_until_next_backup_hour(_at(hour=6, minute=30), config=config))
     assert slept == [1800, 5400]

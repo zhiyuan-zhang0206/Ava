@@ -1,6 +1,6 @@
 """base/log — file-sink rotation predicate (Task #434).
 
-`_rotate_by_size_or_day` is the JSONL sink's rotation predicate: 100 MB
+`rotate_by_size_or_day` is the JSONL sink's rotation predicate: 100 MB
 ceiling OR the message's date moved past the file's creation date. The
 time half is anchored on the file's own ctime so the processes sharing
 `agent-{N}.log` (the agent's exec subprocesses) evaluate the same decision.
@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from base.log import _FILE_SINK_SIZE_LIMIT, _rotate_by_size_or_day
+from base.log import FILE_SINK_SIZE_LIMIT, rotate_by_size_or_day
 
 
 def _message(t: datetime.datetime) -> SimpleNamespace:
@@ -25,14 +25,14 @@ def test_no_rotation_under_limit_same_day(tmp_path: Path) -> None:
     f = tmp_path / "agent-1.log"
     f.write_text("x" * 1000)
     with f.open("a") as fh:
-        assert not _rotate_by_size_or_day(_message(datetime.datetime.now(datetime.UTC)), fh)
+        assert not rotate_by_size_or_day(_message(datetime.datetime.now(datetime.UTC)), fh)
 
 
 def test_rotates_when_size_past_ceiling(tmp_path: Path) -> None:
     f = tmp_path / "agent-1.log"
-    f.write_text("x" * (_FILE_SINK_SIZE_LIMIT + 1))
+    f.write_text("x" * (FILE_SINK_SIZE_LIMIT + 1))
     with f.open("a") as fh:
-        assert _rotate_by_size_or_day(_message(datetime.datetime.now(datetime.UTC)), fh)
+        assert rotate_by_size_or_day(_message(datetime.datetime.now(datetime.UTC)), fh)
 
 
 def test_rotates_when_message_date_past_file_creation(tmp_path: Path) -> None:
@@ -40,7 +40,7 @@ def test_rotates_when_message_date_past_file_creation(tmp_path: Path) -> None:
     f.write_text("x")  # created now
     tomorrow = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
     with f.open("a") as fh:
-        assert _rotate_by_size_or_day(_message(tomorrow), fh)
+        assert rotate_by_size_or_day(_message(tomorrow), fh)
 
 
 def test_creation_date_is_re_read_after_rotation(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_creation_date_is_re_read_after_rotation(tmp_path: Path) -> None:
     f = tmp_path / "agent-1.log"
     f.write_text("x")
     with f.open("a") as fh:
-        assert _rotate_by_size_or_day(_message(datetime.datetime.now(datetime.UTC)), fh) is False
+        assert rotate_by_size_or_day(_message(datetime.datetime.now(datetime.UTC)), fh) is False
 
 
 def test_day_boundary_is_utc_not_message_local_tz(
@@ -91,4 +91,4 @@ def test_day_boundary_is_utc_not_message_local_tz(
     with f.open("a") as fh:
         # The real (UTC) day already changed — must rotate regardless of what
         # calendar date the message's own local tz happens to read.
-        assert _rotate_by_size_or_day(_message(local_view), fh) is True
+        assert rotate_by_size_or_day(_message(local_view), fh) is True

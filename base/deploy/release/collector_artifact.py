@@ -42,7 +42,7 @@ VERSION_MARKER = "version"
 # timeout catches a wedged connection; a total wall-clock cap per attempt
 # catches a mirror that trickles forever; a bounded retry rides out transient
 # blips; a heartbeat line distinguishes slow from dead.
-_DOWNLOAD_SOCKET_TIMEOUT_S = 30.0
+DOWNLOAD_SOCKET_TIMEOUT_S = 30.0
 _DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
 _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 5.0
@@ -103,7 +103,7 @@ def _stream_download(url: str, dest: Path) -> None:
     got = 0
     total: int | None = None
     with (
-        urllib.request.urlopen(url, timeout=_DOWNLOAD_SOCKET_TIMEOUT_S) as resp,  # noqa: S310 — pinned https release asset
+        urllib.request.urlopen(url, timeout=DOWNLOAD_SOCKET_TIMEOUT_S) as resp,  # noqa: S310 — pinned https release asset
         dest.open("wb") as fh,
     ):
         try:

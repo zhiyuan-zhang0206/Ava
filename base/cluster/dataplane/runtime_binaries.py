@@ -45,7 +45,7 @@ _MAVEN_BASE = "https://repo1.maven.org/maven2/io/zonky/test/postgres"
 
 # platform key -> (maven artifact id, pinned jar sha256). The darwin artifact is a
 # universal binary (x86_64 + arm64), so one entry covers both Mac architectures.
-_PG_ARTIFACTS: dict[str, tuple[str, str]] = {
+PG_ARTIFACTS: dict[str, tuple[str, str]] = {
     "darwin": (
         "embedded-postgres-binaries-darwin-arm64v8",
         "a1c2786acb0c398f9b2d76806fc52f5dc8b222cbc8e9383a9b9702084daaf3a5",
@@ -57,7 +57,7 @@ _PG_ARTIFACTS: dict[str, tuple[str, str]] = {
 }
 
 
-def _platform_key() -> str:
+def platform_key() -> str:
     system = platform.system()
     if system == "Darwin":
         return "darwin"  # universal binary covers arm64 + x86_64
@@ -75,7 +75,7 @@ def vendored_pg_supported() -> bool:
     version is absent); where it does not (e.g. linux/arm64) an installed PostgreSQL 17
     is the only option."""
     try:
-        _platform_key()
+        platform_key()
     except RuntimeError:
         return False
     return True
@@ -114,11 +114,11 @@ def ensure_pg_binaries() -> Path:
     if (bin_dir / "initdb").exists():
         return bin_dir
 
-    key = _platform_key()
-    artifact, expected_sha = _PG_ARTIFACTS[key]
+    key = platform_key()
+    artifact, expected_sha = PG_ARTIFACTS[key]
     url = f"{_MAVEN_BASE}/{artifact}/{_PG_VERSION}/{artifact}-{_PG_VERSION}.jar"
     logger.info(f"[runtime] fetching vendored Postgres {_PG_VERSION} ({key}) from {url}")
-    jar_bytes = _download(url)
+    jar_bytes = download(url)
 
     actual_sha = hashlib.sha256(jar_bytes).hexdigest()
     if actual_sha != expected_sha:
@@ -137,7 +137,7 @@ def ensure_pg_binaries() -> Path:
 # 35927189264 on 2026-09-24, Maven returned 404 for the pinned jar in attempt 1
 # and the same URL succeeded in attempt 2. Retry 403 as a possible intermediary
 # response too; other 4xx still fail fast.
-_DOWNLOAD_ATTEMPTS = 4
+DOWNLOAD_ATTEMPTS = 4
 _TRANSIENT_HTTP = frozenset({403, 404, 429, 500, 502, 503, 504})
 
 
@@ -154,7 +154,7 @@ def _download_backoff(attempt: int) -> float:
 
 # SHA-pinned GET retries only the historical urllib transient set at 2s, 4s, 8s.
 _DOWNLOAD_POLICY = Policy(
-    max_attempts=_DOWNLOAD_ATTEMPTS,
+    max_attempts=DOWNLOAD_ATTEMPTS,
     backoff=_download_backoff,
     jitter="none",
     jitter_span=1.0,
@@ -165,7 +165,7 @@ _DOWNLOAD_POLICY = Policy(
 )
 
 
-def _download(
+def download(
     url: str, *, headers: dict[str, str] | None = None, what: str = "vendored Postgres"
 ) -> bytes:
     attempt = 0
@@ -178,11 +178,11 @@ def _download(
             with urllib.request.urlopen(request, timeout=120) as resp:  # noqa: S310
                 return resp.read()
         except urllib.error.URLError as exc:
-            if attempt < _DOWNLOAD_ATTEMPTS and _is_transient_download_error(exc):
+            if attempt < DOWNLOAD_ATTEMPTS and _is_transient_download_error(exc):
                 delay = 2**attempt
                 logger.warning(
                     f"[runtime] transient error fetching {url} ({exc}); "
-                    f"retry {attempt}/{_DOWNLOAD_ATTEMPTS - 1} in {delay}s"
+                    f"retry {attempt}/{DOWNLOAD_ATTEMPTS - 1} in {delay}s"
                 )
             raise
 
@@ -236,8 +236,8 @@ _PGVECTOR_SQL = f"vector--{_PGVECTOR_VERSION}.sql"
 # platform key -> (download URL, pinned sha256 of the whole artifact).
 # The deb is a plain HTTPS file; the bottle is a content-addressed ghcr.io
 # blob (the sha256 Homebrew publishes in the formula), which needs an
-# anonymous pull token — handled by _download_ghcr_blob.
-_PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
+# anonymous pull token — handled by download_ghcr_blob.
+PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
     "linux-x86_64": (
         "https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector/"
         "postgresql-17-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
@@ -254,7 +254,7 @@ _PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
 }
 
 
-def _pgvector_platform_key() -> str:
+def pgvector_platform_key() -> str:
     """The pgvector artifact key. linux/arm64 and darwin/x86_64 are deliberately
     out of matrix (no pinned artifact: PGDG pins linux/amd64 only, Homebrew
     ships no Intel bottle for 0.8.7) — they raise instead of pretending support."""
@@ -286,7 +286,7 @@ def ensure_pgvector() -> None:
     instead of silently leaving stale/absent files in place.
     """
     pg_dir = vendored_pg_dir()
-    key = _pgvector_platform_key()
+    key = pgvector_platform_key()
     module_rel = (
         "lib/postgresql/vector.dylib" if key.startswith("darwin") else "lib/postgresql/vector.so"
     )
@@ -298,16 +298,16 @@ def ensure_pgvector() -> None:
         raise RuntimeError(
             f"vendored Postgres tree missing at {pg_dir} — ensure_pg_binaries() must run first"
         )
-    url, expected_sha = _PGVECTOR_ARTIFACTS[key]
+    url, expected_sha = PGVECTOR_ARTIFACTS[key]
     logger.info(f"[runtime] fetching pgvector {_PGVECTOR_VERSION} ({key}) from {url}")
-    blob = _download_ghcr_blob(url) if url.startswith("https://ghcr.io/") else _download(url)
+    blob = download_ghcr_blob(url) if url.startswith("https://ghcr.io/") else download(url)
     actual_sha = hashlib.sha256(blob).hexdigest()
     if actual_sha != expected_sha:
         raise RuntimeError(
             f"pgvector artifact sha256 mismatch for {key}: "
             f"expected {expected_sha}, got {actual_sha}"
         )
-    for relpath, content in _pgvector_extension_files(blob, key).items():
+    for relpath, content in pgvector_extension_files(blob, key).items():
         target = pg_dir / relpath
         target.parent.mkdir(parents=True, exist_ok=True)
         # Per-file tmp + atomic replace: a crash mid-injection cannot leave a
@@ -319,7 +319,7 @@ def ensure_pgvector() -> None:
     logger.info(f"[runtime] pgvector {_PGVECTOR_VERSION} injected into {pg_dir}")
 
 
-def _pgvector_extension_files(blob: bytes, key: str) -> dict[str, bytes]:
+def pgvector_extension_files(blob: bytes, key: str) -> dict[str, bytes]:
     """The extension files from the pinned artifact, keyed by their target path
     inside the vendored PG tree. Fail-fast on a missing member: a renamed
     upstream layout must be re-pinned, never silently skipped."""
@@ -333,7 +333,7 @@ def _tar_member_bytes(tar: tarfile.TarFile, name: str) -> bytes:
     """Read one regular member by exact name. Deb data tars carry `./` member
     prefixes (dpkg-deb layout), so both the bare and the `./`-prefixed
     spelling are accepted; a member present under neither raises (see
-    `_pgvector_extension_files`)."""
+    `pgvector_extension_files`)."""
     member = None
     for candidate in (name, f"./{name}"):
         try:
@@ -414,17 +414,17 @@ def _deb_data_member(deb: bytes) -> bytes:
     raise RuntimeError("no data.tar member in the pgvector deb")
 
 
-def _download_ghcr_blob(url: str) -> bytes:
+def download_ghcr_blob(url: str) -> bytes:
     """Fetch a ghcr.io blob. ghcr requires an anonymous pull token even for
     public blobs: the token endpoint issues a short-lived bearer for the
     repository, and the blob URL then answers with it."""
     import json
 
     repository = url[len("https://ghcr.io/v2/") :].split("/blobs/", 1)[0]
-    token_json = _download(
+    token_json = download(
         f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repository}:pull"
     )
     token = json.loads(token_json).get("token")
     if not token:
         raise RuntimeError(f"ghcr.io token endpoint answered without a token for {repository}")
-    return _download(url, headers={"Authorization": f"Bearer {token}"})
+    return download(url, headers={"Authorization": f"Bearer {token}"})

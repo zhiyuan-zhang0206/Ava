@@ -110,7 +110,7 @@ class CellProbe:
 
 
 class FakeClock:
-    """The `_monotonic` seam: advances a fixed step per call so windows elapse fast."""
+    """The `monotonic` seam: advances a fixed step per call so windows elapse fast."""
 
     def __init__(self, start: float = 1000.0, step: float = 0.02) -> None:
         self.now = start
@@ -124,7 +124,7 @@ class FakeClock:
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     fake = FakeClock()
-    monkeypatch.setattr(health_mod, "_monotonic", fake)
+    monkeypatch.setattr(health_mod, "monotonic", fake)
     return fake
 
 

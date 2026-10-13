@@ -31,7 +31,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.app import app
 
 
-def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
+def seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         row = cur.fetchone()
@@ -45,7 +45,7 @@ def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
     return new_id
 
 
-def _insert_notice(
+def insert_notice(
     db_conn: psycopg.Connection,
     agent_id: int,
     title: str,
@@ -91,7 +91,7 @@ def _insert_notice(
     return nid
 
 
-def _pending_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str, str]]:
+def pending_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str, str]]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT kind, status, content, source FROM inbound_messages "
@@ -107,8 +107,8 @@ def _pending_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, st
 def test_snapshot_lists_awaiting_oldest_first(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
-    n1 = _insert_notice(
+    a = seed_agent(db_conn)
+    n1 = insert_notice(
         db_conn,
         a,
         "deploy to prod?",
@@ -117,9 +117,9 @@ def test_snapshot_lists_awaiting_oldest_first(
         require_response=True,
         blocking=True,
     )
-    n2 = _insert_notice(db_conn, a, "name the branch?", priority="P3", require_response=True)
+    n2 = insert_notice(db_conn, a, "name the branch?", priority="P3", require_response=True)
     # resolved require_response notice is excluded
-    _insert_notice(
+    insert_notice(
         db_conn,
         a,
         "already decided",
@@ -129,7 +129,7 @@ def test_snapshot_lists_awaiting_oldest_first(
         reply="done",
     )
     # an open FYI notice does NOT ride the worklist (it counts as unread instead)
-    _insert_notice(db_conn, a, "fyi")
+    insert_notice(db_conn, a, "fyi")
 
     snap = select_one(
         db_conn,
@@ -153,7 +153,7 @@ def test_snapshot_lists_awaiting_oldest_first(
 def test_snapshot_awaiting_empty_when_none(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
+    a = seed_agent(db_conn)
     snap = select_one(
         db_conn,
         a,
@@ -168,11 +168,11 @@ def test_snapshot_awaiting_empty_when_none(
 def test_snapshot_scoped_by_agent(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
-    b = _seed_agent(db_conn)
-    na = _insert_notice(db_conn, a, "for a", require_response=True)
-    _insert_notice(db_conn, b, "for b", require_response=True)
-    _insert_notice(db_conn, b, "fyi b")
+    a = seed_agent(db_conn)
+    b = seed_agent(db_conn)
+    na = insert_notice(db_conn, a, "for a", require_response=True)
+    insert_notice(db_conn, b, "for b", require_response=True)
+    insert_notice(db_conn, b, "fyi b")
 
     snap_a = select_one(
         db_conn,
@@ -191,11 +191,11 @@ def test_snapshot_scoped_by_agent(
 def test_snapshot_counts_unread_fyi(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
-    _insert_notice(db_conn, a, "milestone 1")
-    _insert_notice(db_conn, a, "milestone 2")
+    a = seed_agent(db_conn)
+    insert_notice(db_conn, a, "milestone 1")
+    insert_notice(db_conn, a, "milestone 2")
     # a read FYI is no longer unread
-    _insert_notice(db_conn, a, "old one", resolved_at="2026-06-14T01:00:00Z", resolution="read")
+    insert_notice(db_conn, a, "old one", resolved_at="2026-06-14T01:00:00Z", resolution="read")
     snap = select_one(
         db_conn,
         a,
@@ -210,13 +210,13 @@ def test_snapshot_counts_unread_fyi(
 
 
 def test_open_feed_priority_then_newest(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
+    a = seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = 'agent-a' WHERE id = %s", (a,))
     db_conn.commit()
-    _insert_notice(db_conn, a, "p2 older", priority="P2")
-    p0 = _insert_notice(db_conn, a, "p0", priority="P0")
-    _insert_notice(db_conn, a, "p2 newer", priority="P2")
+    insert_notice(db_conn, a, "p2 older", priority="P2")
+    p0 = insert_notice(db_conn, a, "p0", priority="P0")
+    insert_notice(db_conn, a, "p2 newer", priority="P2")
 
     with TestClient(app) as client:
         resp = client.get("/api/notices/open")
@@ -259,12 +259,12 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
     """One request carries the whole panel: open (FYI) / awaiting
     (require_response) split by kind, plus one keyset page of the resolved
     history and a next_cursor when the page is full."""
-    a = _seed_agent(db_conn)
-    fyi1 = _insert_notice(db_conn, a, "fyi one", priority="P3")
-    fyi2 = _insert_notice(db_conn, a, "fyi two", priority="P0")
-    aw1 = _insert_notice(db_conn, a, "decision one", priority="P1", require_response=True)
-    aw2 = _insert_notice(db_conn, a, "decision two", priority="P2", require_response=True)
-    r1 = _insert_notice(
+    a = seed_agent(db_conn)
+    fyi1 = insert_notice(db_conn, a, "fyi one", priority="P3")
+    fyi2 = insert_notice(db_conn, a, "fyi two", priority="P0")
+    aw1 = insert_notice(db_conn, a, "decision one", priority="P1", require_response=True)
+    aw2 = insert_notice(db_conn, a, "decision two", priority="P2", require_response=True)
+    r1 = insert_notice(
         db_conn,
         a,
         "done one",
@@ -273,7 +273,7 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
         resolution="answered",
         reply="ok",
     )
-    r2 = _insert_notice(
+    r2 = insert_notice(
         db_conn,
         a,
         "done two",
@@ -282,7 +282,7 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
         resolution="answered",
         reply="ok",
     )
-    r3 = _insert_notice(
+    r3 = insert_notice(
         db_conn,
         a,
         "done three",
@@ -310,12 +310,12 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
 def test_notices_feed_resolved_page_keyset_cursor(db_conn: psycopg.Connection) -> None:
     """A full resolved page returns a next_cursor; passing it back yields the
     strictly-older page."""
-    a = _seed_agent(db_conn)
+    a = seed_agent(db_conn)
     # resolved_limit=2, seed 3 resolved
     for i, ts in enumerate(
         ["2026-06-14T03:00:00Z", "2026-06-14T02:00:00Z", "2026-06-14T01:00:00Z"]
     ):
-        _insert_notice(
+        insert_notice(
             db_conn,
             a,
             f"done {i}",
@@ -367,9 +367,9 @@ def test_notices_feed_excludes_resolved_from_open_lists(
     db_conn: psycopg.Connection,
 ) -> None:
     """Resolved notices never appear in open or awaiting, whatever their kind."""
-    a = _seed_agent(db_conn)
-    _insert_notice(db_conn, a, "was fyi", resolved_at="2026-06-14T00:00:00Z", resolution="read")
-    _insert_notice(
+    a = seed_agent(db_conn)
+    insert_notice(db_conn, a, "was fyi", resolved_at="2026-06-14T00:00:00Z", resolution="read")
+    insert_notice(
         db_conn,
         a,
         "was decision",
@@ -390,11 +390,11 @@ def test_task_id_flows_to_snapshot_and_feed(
 ) -> None:
     """A notice's task_id rides both the snapshot worklist (require_response) and
     the GET /api/notices/open FYI feed; a notice with no task reads back None."""
-    a = _seed_agent(db_conn)
+    a = seed_agent(db_conn)
     tid = _seed_task(db_conn, a)
-    _insert_notice(db_conn, a, "needs answer", require_response=True, task_id=tid)
-    _insert_notice(db_conn, a, "fyi with task", task_id=tid)
-    _insert_notice(db_conn, a, "fyi no task")
+    insert_notice(db_conn, a, "needs answer", require_response=True, task_id=tid)
+    insert_notice(db_conn, a, "fyi with task", task_id=tid)
+    insert_notice(db_conn, a, "fyi no task")
 
     snap = select_one(
         db_conn,
@@ -413,11 +413,11 @@ def test_task_id_flows_to_snapshot_and_feed(
 
 
 def test_open_feed_excludes_resolved_and_require_response(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
-    _insert_notice(db_conn, a, "open fyi")
-    _insert_notice(db_conn, a, "read fyi", resolved_at="2026-06-14T01:00:00Z", resolution="read")
+    a = seed_agent(db_conn)
+    insert_notice(db_conn, a, "open fyi")
+    insert_notice(db_conn, a, "read fyi", resolved_at="2026-06-14T01:00:00Z", resolution="read")
     # an open require_response notice is NOT in the FYI feed (it rides the snapshot)
-    _insert_notice(db_conn, a, "needs answer", require_response=True)
+    insert_notice(db_conn, a, "needs answer", require_response=True)
     with TestClient(app) as client:
         data = client.get("/api/notices/open").json()
     assert [r["title"] for r in data] == ["open fyi"]
@@ -443,11 +443,11 @@ def test_open_feed_drops_expired_fyi_and_auto_resolves(
     is auto-resolved 'read' by the feed query itself — the lazy sweep (audit C1)
     stops the permanent backlog. A recent FYI stays; a require_response notice
     never expires."""
-    a = _seed_agent(db_conn)
-    _insert_notice(db_conn, a, "fresh fyi")
-    stale = _insert_notice(db_conn, a, "stale fyi")
+    a = seed_agent(db_conn)
+    insert_notice(db_conn, a, "fresh fyi")
+    stale = insert_notice(db_conn, a, "stale fyi")
     _age_notice(db_conn, stale, 31)
-    req = _insert_notice(db_conn, a, "old but needs answer", require_response=True)
+    req = insert_notice(db_conn, a, "old but needs answer", require_response=True)
     _age_notice(db_conn, req, 60)
 
     with TestClient(app) as client:
@@ -472,9 +472,9 @@ def test_snapshot_unread_count_excludes_expired_fyi(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
     """The unread badge counts only FYIs inside the TTL window (audit C1)."""
-    a = _seed_agent(db_conn)
-    _insert_notice(db_conn, a, "fresh")
-    stale = _insert_notice(db_conn, a, "stale")
+    a = seed_agent(db_conn)
+    insert_notice(db_conn, a, "fresh")
+    stale = insert_notice(db_conn, a, "stale")
     _age_notice(db_conn, stale, 31)
     snap = select_one(
         db_conn,
@@ -489,10 +489,10 @@ def test_snapshot_unread_count_excludes_expired_fyi(
 def test_live_excludes_expired_fyi(db_conn: psycopg.Connection) -> None:
     """The IM bridge poll must not see expired FYIs — its cursor stays
     consistent with the feed (audit C1). require_response is exempt."""
-    a = _seed_agent(db_conn)
-    stale = _insert_notice(db_conn, a, "stale fyi")
+    a = seed_agent(db_conn)
+    stale = insert_notice(db_conn, a, "stale fyi")
     _age_notice(db_conn, stale, 31)
-    req = _insert_notice(db_conn, a, "old decision", require_response=True)
+    req = insert_notice(db_conn, a, "old decision", require_response=True)
     _age_notice(db_conn, req, 60)
 
     with TestClient(app) as client:
@@ -505,10 +505,10 @@ def test_open_feed_include_awaiting_excludes_expired_fyi(
     db_conn: psycopg.Connection,
 ) -> None:
     """The IM bridge's full queue view also drops expired FYIs (audit C1)."""
-    a = _seed_agent(db_conn)
-    stale = _insert_notice(db_conn, a, "stale fyi")
+    a = seed_agent(db_conn)
+    stale = insert_notice(db_conn, a, "stale fyi")
     _age_notice(db_conn, stale, 31)
-    _insert_notice(db_conn, a, "fresh fyi")
+    insert_notice(db_conn, a, "fresh fyi")
 
     with TestClient(app) as client:
         both = client.get("/api/notices/open", params={"include_awaiting": True}).json()
@@ -519,10 +519,10 @@ def test_open_feed_agent_filter_returns_only_that_agents_notices(
     db_conn: psycopg.Connection,
 ) -> None:
     """An agent observes its own open notice (any kind) without reading the fleet's."""
-    mine = _seed_agent(db_conn)
-    other = _seed_agent(db_conn)
-    _insert_notice(db_conn, mine, "my question", require_response=True)
-    _insert_notice(db_conn, other, "their fyi")
+    mine = seed_agent(db_conn)
+    other = seed_agent(db_conn)
+    insert_notice(db_conn, mine, "my question", require_response=True)
+    insert_notice(db_conn, other, "their fyi")
 
     with TestClient(app) as client:
         own = client.get(
@@ -541,8 +541,8 @@ def test_open_feed_agent_filter_returns_only_that_agents_notices(
 def test_answer_marks_and_delivers_inbound(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(
+    a = seed_agent(db_conn)
+    nid = insert_notice(
         db_conn, a, "send the records-release email?", require_response=True, blocking=True
     )
     with TestClient(app) as client:
@@ -567,7 +567,7 @@ def test_answer_marks_and_delivers_inbound(
 
     # one self-describing chat inbound, carrying the title and the answer —
     # a notice-system event, not user speech: system-sourced, no User envelope
-    rows = _pending_rows(db_conn, a)
+    rows = pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]
     assert kind == "chat"
@@ -589,8 +589,8 @@ def test_answer_marks_and_delivers_inbound(
 def test_answer_without_reply_422(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "q?", require_response=True)
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "q?", require_response=True)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -607,14 +607,14 @@ def test_answer_without_reply_422(
     )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
-    assert _pending_rows(db_conn, a) == []
+    assert pending_rows(db_conn, a) == []
 
 
 def test_answer_empty_reply_422(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "q?", require_response=True)
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "q?", require_response=True)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -630,15 +630,15 @@ def test_answer_empty_reply_422(
     )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
-    assert _pending_rows(db_conn, a) == []
+    assert pending_rows(db_conn, a) == []
 
 
 def test_answer_on_fyi_marks_and_delivers_inbound(db_conn: psycopg.Connection) -> None:
     """Task #1061: an FYI notice is answerable too — the reply marks it
     'answered' and rides `system:notice-reply` to the notice's agent, exactly
     like a require_response answer."""
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "FYI: deploy finished")  # require_response False
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "FYI: deploy finished")  # require_response False
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -660,7 +660,7 @@ def test_answer_on_fyi_marks_and_delivers_inbound(db_conn: psycopg.Connection) -
     assert reply == "thanks!"  # cached on the row
 
     # one self-describing chat inbound, same shape as the require_response path
-    rows = _pending_rows(db_conn, a)
+    rows = pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]
     assert kind == "chat"
@@ -676,8 +676,8 @@ def test_dismiss_require_response_delivers_system_note(db_conn: psycopg.Connecti
     """A dismiss is a system event, not user speech: it wakes the agent (so a
     blocked one stops waiting) but rides `system:notice-dismiss` — no User
     envelope, no user-role message, nothing shaped like a reply request."""
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "name the branch?", require_response=True, blocking=True)
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "name the branch?", require_response=True, blocking=True)
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -693,7 +693,7 @@ def test_dismiss_require_response_delivers_system_note(db_conn: psycopg.Connecti
 
     # one self-describing inbound, system-sourced — the claim node envelope-wraps
     # it as "[system] ..." (see base/agents/messages/envelope.py), never as the user "[ts]" header
-    rows = _pending_rows(db_conn, a)
+    rows = pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]
     assert kind == "chat"
@@ -703,8 +703,8 @@ def test_dismiss_require_response_delivers_system_note(db_conn: psycopg.Connecti
 
 
 def test_dismiss_on_fyi_is_409(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
-    nid = _insert_notice(db_conn, a, "fyi")  # require_response False
+    a = seed_agent(db_conn)
+    nid = insert_notice(db_conn, a, "fyi")  # require_response False
     with TestClient(app) as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -712,4 +712,4 @@ def test_dismiss_on_fyi_is_409(db_conn: psycopg.Connection) -> None:
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 409
-    assert _pending_rows(db_conn, a) == []
+    assert pending_rows(db_conn, a) == []

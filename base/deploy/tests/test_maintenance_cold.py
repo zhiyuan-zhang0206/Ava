@@ -146,4 +146,4 @@ def test_consumer_scan_skips_a_process_whose_cmdline_read_fails(
 
     monkeypatch.setattr(cold.psutil, "process_iter", process_iter)
     with pytest.raises(RuntimeError, match="native consumer still exists during cold prepare"):
-        cold._require_no_consumer_process()
+        cold.require_no_consumer_process()

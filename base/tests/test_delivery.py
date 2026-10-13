@@ -19,7 +19,7 @@ import pytest
 
 from base.db import connections
 from base.db.code_version_gate import ProcessDbGate
-from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
+from base.db.connections import NoDatabaseAuthorityError, guard_db_url
 from base.host.db_authority import delivery, ledger, model
 from base.host.env import dotenv_boot
 from base.paths.home import resolve_ava_home
@@ -159,7 +159,7 @@ def test_a_delivered_login_for_this_home_survives_the_env_file(
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "gateway")
     monkeypatch.setitem(os.environ, "AVA_DB_URL", delivered)
     monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "4")
-    result = dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == delivered
     assert result.db_authority_refusal is None
 
@@ -172,13 +172,13 @@ def test_a_sibling_homes_delivery_is_replaced_by_this_homes_endpoint(
         os.environ, "AVA_DB_URL", "postgresql://ava_g4_gateway:sibling@127.0.0.1:7433/ava"
     )
     monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "4")
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
 
 
 def test_an_admitted_operator_process_receives_the_gateway_login(boot: Path, seeded: Any) -> None:
     _intent(boot, _REPO)
-    result = dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     gateway = seeded.roles.gateway
     assert os.environ["AVA_DB_URL"] == (
         f"postgresql://{gateway.name}:{gateway.password}@127.0.0.1:6433/ava"
@@ -192,15 +192,15 @@ def test_a_foreign_runtime_gets_nothing_and_its_dial_fails_by_name(
 ) -> None:
     del seeded
     _intent(boot, tmp_path / "another-checkout")
-    result = dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
     assert delivery.GENERATION_ENV not in os.environ
     refusal = result.db_authority_refusal
     assert refusal is not None and "source checkout" in refusal
     with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):
-        _guard_db_url(_ENDPOINT, refusal=result.db_authority_refusal)
+        guard_db_url(_ENDPOINT, refusal=result.db_authority_refusal)
     # A URL carrying a credential is not the undelivered endpoint.
-    assert _guard_db_url("postgresql://ava_g0_gateway:pw@127.0.0.1:6433/ava", refusal=refusal)
+    assert guard_db_url("postgresql://ava_g0_gateway:pw@127.0.0.1:6433/ava", refusal=refusal)
 
 
 def test_a_launched_process_without_delivery_is_refused(
@@ -209,17 +209,17 @@ def test_a_launched_process_without_delivery_is_refused(
     del seeded
     _intent(boot, _REPO)
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "runner")
-    result = dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
     refusal = result.db_authority_refusal
     assert refusal is not None and "only the root launcher delivers" in refusal
 
 
 def test_a_home_without_a_ledger_is_untouched(boot: Path) -> None:
-    result = dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
     assert result.db_authority_refusal is None
-    assert _guard_db_url(_ENDPOINT, refusal=result.db_authority_refusal) == _ENDPOINT
+    assert guard_db_url(_ENDPOINT, refusal=result.db_authority_refusal) == _ENDPOINT
 
 
 # ── a URL's own startup options ──────────────────────────────────────────────
@@ -230,13 +230,13 @@ _WITH_OPTIONS = (
 
 
 def test_a_urls_own_startup_options_survive_the_statement_ceiling() -> None:
-    from base.db.connections import PG_STATEMENT_TIMEOUT_KWARGS, _statement_kwargs
+    from base.db.connections import PG_STATEMENT_TIMEOUT_KWARGS, statement_kwargs
 
-    assert _statement_kwargs(_ENDPOINT) is PG_STATEMENT_TIMEOUT_KWARGS
-    assert _statement_kwargs(_WITH_OPTIONS)["options"] == (
+    assert statement_kwargs(_ENDPOINT) is PG_STATEMENT_TIMEOUT_KWARGS
+    assert statement_kwargs(_WITH_OPTIONS)["options"] == (
         "-c role=ava_gateway -c statement_timeout=60000"
     )
-    assert _statement_kwargs(_WITH_OPTIONS)["connect_timeout"] == 5
+    assert statement_kwargs(_WITH_OPTIONS)["connect_timeout"] == 5
 
 
 def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
@@ -253,14 +253,14 @@ def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
     from base.db import config as db_config
 
     _intent(boot, tmp_path / "another-checkout")
-    result = dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    result = dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
     first = Settings(
         env_boot=result, data_plane={"db_url": _ENDPOINT, "redis_url": "redis://localhost:1"}
     )
     monkeypatch.setattr(db_config, "settings", first)
     handle = Database.from_settings(gate=database_gate)
     _intent(boot, _REPO)
-    dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
+    dotenv_boot.enforce_cluster_env_authority(resolve_ava_home())
 
     def unexpected_dial(*_args: Any, **_kwargs: Any) -> Any:
         pytest.fail("a later boot authorized a previously refused database handle")

@@ -29,9 +29,9 @@ def test_cmd_status_gateway_cluster_serves_line_shows_station(
             "paused": False,
         },
     )
-    from cli.commands.lifecycle.status import _print_gateway_cluster_status
+    from cli.commands.lifecycle.status import print_gateway_cluster_status
 
-    _print_gateway_cluster_status()
+    print_gateway_cluster_status()
     out = capsys.readouterr().out
     assert "machine_name: station-a" in out
     assert "serves:       observability-station" in out

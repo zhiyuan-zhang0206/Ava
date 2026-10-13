@@ -7,12 +7,12 @@ steps only to stay inside the structure budget, with the behavior unchanged.
 """
 
 from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
-    _STRING_PREFIX_CHARS,
-    _compiles,
-    _is_raw_prefixed,
-    _line_starts,
-    _quote_is_string_boundary,
-    _triple_quote_is_string_boundary,
+    STRING_PREFIX_CHARS,
+    compiles,
+    is_raw_prefixed,
+    line_starts,
+    quote_is_string_boundary,
+    triple_quote_is_string_boundary,
 )
 
 _LEGACY_SPECIFIER_CHARS = ("f", "r", "b", "u", "F", "R", "B", "U")
@@ -226,10 +226,10 @@ def _legacy_unterminated_opener(code: str) -> int | None:
     if not lineno or not offset:
         return None
 
-    op = _line_starts(code)[lineno - 1] + (offset - 1)
+    op = line_starts(code)[lineno - 1] + (offset - 1)
     # The offset may point at a string prefix (f / r / b / u) rather than the
     # quote itself; skip the prefix letters to land on the opening quote.
-    while op < len(code) and code[op] in _STRING_PREFIX_CHARS:
+    while op < len(code) and code[op] in STRING_PREFIX_CHARS:
         op += 1
     if op >= len(code) or code[op] not in ("'", '"'):
         return None
@@ -249,7 +249,7 @@ def _legacy_first_compiling_triple_conversion(code: str, op: int) -> str | None:
             continue
         if ch == quote and "\n" in code[op:i]:
             candidate = code[:op] + triple + code[op + 1 : i] + triple + code[i + 1 :]
-            if _compiles(candidate):
+            if compiles(candidate):
                 return candidate
         i += 1
     return None
@@ -315,17 +315,17 @@ def _legacy_nested_triple_for_delim(code: str, delim: str) -> tuple[str, int] | 
         return None
 
     for oi in range(len(positions)):
-        if _is_raw_prefixed(code, positions[oi]):
+        if is_raw_prefixed(code, positions[oi]):
             continue
         for ci in range(len(positions) - 1, oi, -1):
             opener, closer = positions[oi], positions[ci]
             interior = [p for p in positions if opener < p < closer]
             if not interior:
                 continue
-            if any(_triple_quote_is_string_boundary(code, p) for p in interior):
+            if any(triple_quote_is_string_boundary(code, p) for p in interior):
                 continue
             out = _legacy_escape_triples(code, delim, opener, closer, interior)
-            if _compiles(out):
+            if compiles(out):
                 return out, len(interior)
     return None
 
@@ -355,7 +355,7 @@ def legacy_fix_nested_triple_quote(code: str) -> tuple[str, int]:
     string that compiles but means something else. Those cases are left for the
     repair step, where intent can be inferred, rather than corrupted here.
     """
-    if _compiles(code):
+    if compiles(code):
         return code, 0
 
     for delim in ('"""', "'''"):
@@ -413,11 +413,11 @@ def _legacy_first_compiling_line_escape(
             interior = positions[oi + 1 : ci]
             if not interior:
                 continue
-            if any(_quote_is_string_boundary(line, p) for p in interior):
+            if any(quote_is_string_boundary(line, p) for p in interior):
                 continue
             new_line = _legacy_escape_line_quotes(line, opener, interior, quote)
             candidate = "\n".join([*lines[: lineno - 1], new_line, *lines[lineno:]])
-            if _compiles(candidate):
+            if compiles(candidate):
                 return candidate, len(interior)
     return None
 

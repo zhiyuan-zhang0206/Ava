@@ -12,15 +12,15 @@ from pathlib import Path
 
 from ava.shell import sessions
 
-_PASTE_WRAP_THRESHOLD_CHARS = 1022
+PASTE_WRAP_THRESHOLD_CHARS = 1022
 """One Claude composer chunk is ~1022 chars: a longer raw burst folds into collapsed paste fragments, and a submission made while such a fragment sits next to a raw tail drops the fragment's content (#4364)."""
 
-_PASTE_BEGIN = "\x1b[200~"
-_PASTE_END = "\x1b[201~"
+PASTE_BEGIN = "\x1b[200~"
+PASTE_END = "\x1b[201~"
 _CLAUDE_NOT_FOUND = "claude executable not found in PATH or $HOME/.local/bin/claude"
 
 
-def _bracketed_paste(text: str) -> str:
+def bracketed_paste(text: str) -> str:
     """Wrap a multi-chunk payload so the composer takes it as one atomic paste.
 
     The composer folds a raw burst longer than one chunk into collapsed paste
@@ -31,13 +31,13 @@ def _bracketed_paste(text: str) -> str:
     the payload cannot close the wrapper early; a payload within one chunk is
     sent unchanged.
     """
-    body = text.replace(_PASTE_BEGIN, "").replace(_PASTE_END, "")
-    if len(body) <= _PASTE_WRAP_THRESHOLD_CHARS:
+    body = text.replace(PASTE_BEGIN, "").replace(PASTE_END, "")
+    if len(body) <= PASTE_WRAP_THRESHOLD_CHARS:
         return body
-    return f"{_PASTE_BEGIN}{body}{_PASTE_END}"
+    return f"{PASTE_BEGIN}{body}{PASTE_END}"
 
 
-_OWN_WORDS = " Follow the launch message pasted above: it is from the Ava agent that launched you."
+OWN_WORDS = " Follow the launch message pasted above: it is from the Ava agent that launched you."
 """Typed after a pasted bootstrap. Claude Code marks a bracketed paste as pasted
 content, and the model will not act on instructions that arrive only inside a
 paste; it asks for confirmation instead, stalling an unattended takeover
@@ -45,19 +45,19 @@ paste; it asks for confirmation instead, stalling an unattended takeover
 words, outside the paste, is the request to act on it."""
 
 
-def _send_bootstrap(sid: int, message: str) -> None:
+def send_bootstrap(sid: int, message: str) -> None:
     """Send the takeover bootstrap through the composer's paste path (#4364).
 
-    A pasted bootstrap is followed by ``_OWN_WORDS`` before the Enter; a
+    A pasted bootstrap is followed by ``OWN_WORDS`` before the Enter; a
     bootstrap within one composer chunk is typed as-is and needs none.
     """
-    payload = _bracketed_paste(message)
-    if payload.startswith(_PASTE_BEGIN):
-        payload += _OWN_WORDS
+    payload = bracketed_paste(message)
+    if payload.startswith(PASTE_BEGIN):
+        payload += OWN_WORDS
     sessions.send(sid, payload)
 
 
-def _pretrust(workspace: Path) -> None:
+def pretrust(workspace: Path) -> None:
     config_path = Path.home() / ".claude.json"
     ws_key = workspace.as_posix()
     try:
@@ -74,12 +74,12 @@ def _pretrust(workspace: Path) -> None:
     print(f"+ trusted: {ws_key}")
 
 
-def _session_exists(name: str) -> bool:
+def session_exists(name: str) -> bool:
     """Check if a persistent shell session with `name` already exists."""
     return any(existing_name == name for existing_name in sessions.list().values())
 
 
-def _claude_ui_ready(output: str, *, resumed: bool = False) -> bool:
+def claude_ui_ready(output: str, *, resumed: bool = False) -> bool:
     """Require the title and a composer cue, normalizing Unicode prompt spacing.
 
     An empty composer is a bare prompt glyph: captures strip trailing blanks,
@@ -107,20 +107,20 @@ def _relay_stub_path(state_dir: Path) -> Path:
     return state_dir / "relay.env"
 
 
-def _login_marker(failure_marker: Path) -> Path:
+def login_marker(failure_marker: Path) -> Path:
     """Written by the launch command when `claude auth status` reports signed out."""
     return failure_marker.with_name("not-logged-in")
 
 
 def _check_login_marker(failure_marker: Path | None) -> None:
-    if failure_marker is not None and _login_marker(failure_marker).is_file():
+    if failure_marker is not None and login_marker(failure_marker).is_file():
         raise RuntimeError(
             "Claude Code is not logged in on this host; run `claude auth login` as the host "
             "user, then launch again. No text was delivered"
         )
 
 
-def _generation_relay_stub(state_dir: Path | None) -> Path:
+def generation_relay_stub(state_dir: Path | None) -> Path:
     """Create the new generation's private dir and name its stub inside it."""
     if state_dir is None:
         raise RuntimeError("new owner generation is missing its state dir")
@@ -146,7 +146,7 @@ def _check_missing_claude(failure_marker: Path | None, output: str = "") -> None
         raise RuntimeError(f"Claude did not start: {_CLAUDE_NOT_FOUND}")
 
 
-def _wait_for_ready(
+def wait_for_ready(
     sid: int,
     timeout: float = 30.0,
     *,
@@ -173,7 +173,7 @@ def _wait_for_ready(
             ) from exc
         _check_missing_claude(failure_marker, output)
         _check_login_marker(failure_marker)
-        if _claude_ui_ready(output, resumed=resumed):
+        if claude_ui_ready(output, resumed=resumed):
             time.sleep(2)  # brief stability pause
             try:
                 stable = sessions.capture(sid, scrollback=False)
@@ -181,7 +181,7 @@ def _wait_for_ready(
                 _check_missing_claude(failure_marker)
                 raise RuntimeError(f"Claude session {sid} exited before it became ready") from exc
             _check_missing_claude(failure_marker, stable)
-            if _claude_ui_ready(stable, resumed=resumed):
+            if claude_ui_ready(stable, resumed=resumed):
                 print("  -> ready (Claude Code UI)")
                 return
         time.sleep(1)
@@ -194,7 +194,7 @@ def _wait_for_ready(
 _BOOTSTRAP_MARKER = "take over Ava agent"
 
 
-def _bootstrap_count(claude_session: str) -> int:
+def bootstrap_count(claude_session: str) -> int:
     """How often this session's own transcript records the takeover bootstrap.
 
     Claude Code appends ``~/.claude/projects/<slug>/<session id>.jsonl`` as the
@@ -210,7 +210,7 @@ def _bootstrap_count(claude_session: str) -> int:
     return count
 
 
-def _verify_start_receipt(
+def verify_start_receipt(
     sid: int,
     submitted: Callable[[], bool],
     timeout: float = 45.0,
@@ -221,7 +221,7 @@ def _verify_start_receipt(
     executor that never learned it replaced the agent (F1 class — do not infer
     receipt from a zero exit code). Submission evidence is ``submitted()``:
     the session's own transcript records one more bootstrap than it did before
-    the send (``_bootstrap_count``). When it stays absent, press Enter once (a
+    the send (``bootstrap_count``). When it stays absent, press Enter once (a
     stale composer entry submits there) and re-check. If that still lacks
     evidence the bootstrap is NOT sent again: a second send could deliver the
     takeover twice, so the launcher warns and the operator checks the session.

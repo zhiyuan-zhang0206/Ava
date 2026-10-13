@@ -210,7 +210,7 @@ def scan_report(root: Path, name: str, *, accept_risk: bool) -> tuple[str, list[
     return report, scan.rule_ids(critical)
 
 
-def _register_in_cluster(
+def register_in_cluster(
     packages: list[SkillPackage],
     *,
     source: str | None,
@@ -306,7 +306,7 @@ def install(
     # exactly the drift the registry exists to delete. The reverse gap (a row
     # whose content is not on this machine yet) is not a gap at all: it is what
     # materialization is for, on every machine including this one.
-    _register_in_cluster(
+    register_in_cluster(
         packages, source=source, ref=ref, database_factory=database_factory, machine=machine
     )
     dest_root.mkdir(parents=True, exist_ok=True)

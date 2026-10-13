@@ -15,7 +15,7 @@ from base.host.env.registry import launch_input_keys
 from base.host.runtime_interpreter import source_digest
 
 
-def _write_generation(home: Path) -> dict[str, object] | None:
+def write_generation(home: Path) -> dict[str, object] | None:
     """The delivered write generation's non-secret reference: the ledger's active
     generation on a gateway home, the installed unit capability's on a pure
     agent-runner, None on a remote-managed plane."""
@@ -44,6 +44,6 @@ def launch_digest(repo: Path, environment: dict[str, str], *, home: Path) -> str
         "source": source_digest(repo),
         "environment": {key: value for key, value in environment.items() if key in inputs},
         "configuration": start_inputs.configuration_digest(home),
-        "write_generation": _write_generation(home),
+        "write_generation": write_generation(home),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()

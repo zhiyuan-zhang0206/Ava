@@ -198,7 +198,7 @@ def request_stop(pid: int) -> None:
         return
 
 
-def _wait_owned(members: list[OwnedProcess], timeout: float) -> list[OwnedProcess]:
+def wait_owned(members: list[OwnedProcess], timeout: float) -> list[OwnedProcess]:
     """Bounded native exit observation; a permission gap remains a survivor."""
     deadline = time.monotonic() + timeout
     while True:
@@ -259,13 +259,13 @@ def kill_process_tree(
         # snapshotted rather than re-walked.
         with contextlib.suppress(*_GONE):
             identity.send_signal(signal.SIGTERM)
-    alive = _wait_owned(members, grace_s)
+    alive = wait_owned(members, grace_s)
     if not alive:
         return
     for identity in alive:
         with contextlib.suppress(*_GONE):
             identity.send_signal(signal.SIGKILL)
-    _wait_owned(alive, _REAP_TIMEOUT_S)
+    wait_owned(alive, _REAP_TIMEOUT_S)
 
 
 def run_bounded(

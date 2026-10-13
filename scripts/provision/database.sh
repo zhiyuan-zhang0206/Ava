@@ -8,7 +8,7 @@
 # (pg17 binaries under /usr/lib/postgresql/17/bin, redis-server, pgbouncer)
 # skips apt entirely — the keyring/apt-sources writes need root, and the
 # runtime provisions its own per-cluster instance under $AVA_HOME/pg from a
-# cached template (cli/commands/data_plane/cluster_instance.py:_ensure_pg_data), so there
+# cached template (cli/commands/data_plane/cluster_instance.py:ensure_pg_data), so there
 # is no system data dir to bootstrap. The former `--initdb` block that initdb'd
 # /var/lib/postgresql/17/data (a legacy path `ava start` never reads) is
 # removed. An apt failure degrades to a warning; the packages can be installed

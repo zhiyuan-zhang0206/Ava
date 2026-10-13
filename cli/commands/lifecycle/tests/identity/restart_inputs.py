@@ -37,7 +37,7 @@ def restart_command_environment(
 
     Default role="gateway" (full service set). To test secondary, explicitly override:
         monkeypatch.setattr(_cli, "_roles_or_none", lambda *, machine: frozenset({"agent-runner"}))
-        monkeypatch.setattr(_cli, "_collect_setup_values", lambda: (..., []))"""
+        monkeypatch.setattr(_cli, "collect_setup_values", lambda: (..., []))"""
     from base.host.runtime_interpreter import LoadedRuntimeIdentity
 
     def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
@@ -54,10 +54,10 @@ def restart_command_environment(
             "gateway_url": "http://test-gateway:8000",
         }, []
 
-    monkeypatch.setattr(_setup_commands, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_setup_commands, "collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(converge_host, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    # The per-cluster pg/redis bring-up (`_ensure_gateway_data_plane`) starts a real
+    # The per-cluster pg/redis bring-up (`ensure_gateway_data_plane`) starts a real
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
     # the dev host's pg/redis.
@@ -65,7 +65,7 @@ def restart_command_environment(
     from cli.commands.lifecycle import start as _start_mod
 
     monkeypatch.setattr(
-        _start_mod, "_ensure_gateway_data_plane", ignore_retained_children(lambda: 0)
+        _start_mod, "ensure_gateway_data_plane", ignore_retained_children(lambda: 0)
     )
     monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda: None)
     monkeypatch.setattr(
@@ -99,18 +99,18 @@ def restart_command_environment(
     monkeypatch.setattr(command_runtime.machine, "role", lambda: frozenset({"gateway"}))
 
     # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes
-    # through _register_machine_or_die which internally imports register_self, directly patch the helper to return 0.
+    # through register_machine_or_die which internally imports register_self, directly patch the helper to return 0.
     def register(_db: object, _resolved: object, _role: object, *, command: CommandRuntime) -> int:
         del _db, _resolved, _role
         assert command is command_runtime
         return 0
 
-    monkeypatch.setattr(_repo_commands, "_register_machine_or_die", register)
-    # secondary path will run _probe_gateway_or_die; primary does not call it, adding here
+    monkeypatch.setattr(_repo_commands, "register_machine_or_die", register)
+    # secondary path will run probe_gateway_or_die; primary does not call it, adding here
     # ensures secondary tests can also reuse the default noop.
-    monkeypatch.setattr(_repo_commands, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
-    # _assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
-    monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 0)
+    monkeypatch.setattr(_repo_commands, "probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
+    # assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 0)
     # Root service preparation must not install frontend dependencies in unit tests.
     from cli.commands import _repo
     from cli.commands.lifecycle import root_driver
@@ -131,7 +131,7 @@ def root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """No command-layer test contacts or signals a native application root."""
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: None)
+    monkeypatch.setattr(_stop_commands, "reap_cluster_chrome", lambda: None)
     monkeypatch.setattr(_stop_commands, "force_close_terminals", lambda: None)
 
 

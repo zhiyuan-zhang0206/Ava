@@ -121,7 +121,7 @@ def _redis_bin(name: str) -> str:
     return str(brew_prefix("redis@8.2") / "bin" / name) if is_macos() else name
 
 
-def _redis_server_bin() -> str:
+def redis_server_bin() -> str:
     return _redis_bin("redis-server")
 
 
@@ -133,7 +133,7 @@ def _pg_bin(name: str) -> str:
     return str(pg_tool(name)) if is_macos() else str(PG_BIN_LINUX / name)
 
 
-def _addr_assigned(addr: str) -> bool:
+def addr_assigned(addr: str) -> bool:
     """True if `addr` is currently assigned to a local interface (bindable). A
     Postgres or PgBouncer listener can only bind an address the kernel has on an
     interface; before the private-network interface comes up, binding its address
@@ -157,21 +157,21 @@ def wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
         return True
     deadline = time.monotonic() + BIND_WAIT_TIMEOUT_S
     while True:
-        if _addr_assigned(host):
+        if addr_assigned(host):
             return True
         if time.monotonic() >= deadline:
             return False
         time.sleep(_BIND_WAIT_INTERVAL_S)
 
 
-def _pg_hba_body(*, machine: MachineIdentity) -> str:
+def pg_hba_body(*, machine: MachineIdentity) -> str:
     """Always-authenticated pg_hba.
 
     The OS user (the initdb bootstrap superuser) reaches Postgres only through
     `peer` on the owner-only socket — the administrator authority provisioning,
     migrations and the authority invariant use. The same OS user reaches the
     password-less monitoring login (the collector's statistics reader) through
-    `peer` with the `pg_ident` map `_pg_ident_body` writes. Every other role
+    `peer` with the `pg_ident` map `pg_ident_body` writes. Every other role
     authenticates with SCRAM over the socket and loopback TCP; `NOLOGIN` roles
     (the schema owner and the capability groups) never log in
     under any method.
@@ -197,7 +197,7 @@ def _pg_hba_body(*, machine: MachineIdentity) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _pg_ident_body() -> str:
+def pg_ident_body() -> str:
     """The only ident mapping: this OS user may log in as the monitoring role."""
     return f"{MONITOR_MAP} {getpass.getuser()} {MONITOR_ROLE}\n"
 
@@ -252,10 +252,10 @@ def require_authenticated_hba(pg_port: int, dial_host: str) -> None:
         time.sleep(0.1)
 
 
-def _initdb(target: Path) -> None:
+def initdb(target: Path) -> None:
     """Fresh initdb at `target` with the OS user as the bootstrap superuser
     (mirrors throwaway_postgres / the brew install convention). The `trust`
-    default is never served: `_start_pg` writes the always-auth hba first."""
+    default is never served: `start_pg` writes the always-auth hba first."""
     target.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
@@ -274,7 +274,7 @@ def _initdb(target: Path) -> None:
     )
 
 
-def _ensure_pg_data() -> Path:
+def ensure_pg_data() -> Path:
     """Ensure this cluster's pg data dir exists and is initialized, via the cached
     template (initdb once host-wide, then copy). Returns the data dir."""
     data = pg_data_dir()
@@ -282,7 +282,7 @@ def _ensure_pg_data() -> Path:
         return data
     template = _pg_template_dir()
     if not (template / "PG_VERSION").exists():
-        _initdb(template)
+        initdb(template)
     shutil.copytree(template, data)
     return data
 
@@ -315,7 +315,7 @@ def pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
     return out.returncode == 0
 
 
-def _start_pg(
+def start_pg(
     pg_port: int,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -331,9 +331,9 @@ def _start_pg(
         return config.view.walg.walg_config_file
 
     owner = ownership.require_postgres(pg_data_dir(), pg_port, required=False)
-    data = _ensure_pg_data()
-    (data / "pg_ident.conf").write_text(_pg_ident_body())
-    (data / "pg_hba.conf").write_text(_pg_hba_body(machine=machine))
+    data = ensure_pg_data()
+    (data / "pg_ident.conf").write_text(pg_ident_body())
+    (data / "pg_hba.conf").write_text(pg_hba_body(machine=machine))
     dial_host = pg_dial_host()
     # The wait applies only when this cluster binds a non-loopback reachable address
     # (`port_preflight.bind_addrs`); a loopback host returns immediately.
@@ -395,7 +395,7 @@ def redis_cli_env(redis_admin_password: str) -> dict[str, str]:
     return inherited_process_env({"REDISCLI_AUTH": redis_admin_password})
 
 
-def _redis_running(redis_port: int, redis_admin_password: str, host: str = "127.0.0.1") -> bool:
+def redis_running(redis_port: int, redis_admin_password: str, host: str = "127.0.0.1") -> bool:
     out = subprocess.run(
         [redis_cli_bin(), "-h", host, "-p", str(redis_port), "ping"],
         env=redis_cli_env(redis_admin_password),
@@ -410,7 +410,7 @@ def _redis_running(redis_port: int, redis_admin_password: str, host: str = "127.
 _REDIS_SAVE_SCHEDULE = ("900 1", "300 10", "60 10000")
 
 
-def _write_redis_conf(data: Path, redis_admin_password: str) -> Path:
+def write_redis_conf(data: Path, redis_admin_password: str) -> Path:
     """Write the cluster's RDB save schedule and `requirepass` into a 0600
     `redis.conf` and return it.
 
@@ -449,14 +449,14 @@ def start_redis(
     if not (redis_admin_password and runtime_password):
         raise ValueError("Redis always authenticates: its admin and runtime passwords are required")
     dial_host = redis_dial_host()
-    if _redis_running(redis_port, redis_admin_password, dial_host):
+    if redis_running(redis_port, redis_admin_password, dial_host):
         # Re-affirm the ACL user on every start (survives a restart that drops
         # the in-memory ACL).
-        result = _ensure_redis_acl(
+        result = ensure_redis_acl(
             redis_port, redis_admin_password, runtime_password, identity, dial_host
         )
         if result == 0:
-            _write_redis_conf(ownership.redis_data_dir(), redis_admin_password)
+            write_redis_conf(ownership.redis_data_dir(), redis_admin_password)
             print(f"  ✓ redis already running ({dial_host}:{redis_port})")
         return result
     port_preflight.require_listener(None, redis_port, required=False)
@@ -466,8 +466,8 @@ def start_redis(
     data = ownership.redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
-        _redis_server_bin(),
-        str(_write_redis_conf(data, redis_admin_password)),  # requirepass — see the helper
+        redis_server_bin(),
+        str(write_redis_conf(data, redis_admin_password)),  # requirepass — see the helper
         "--daemonize",
         "yes",
         "--port",
@@ -492,7 +492,7 @@ def start_redis(
         return 1
     # redis-server --daemonize returns immediately; wait for the port to answer.
     for _ in range(60):
-        if _redis_running(redis_port, redis_admin_password, dial_host):
+        if redis_running(redis_port, redis_admin_password, dial_host):
             break
         time.sleep(0.1)
     else:
@@ -501,7 +501,7 @@ def start_redis(
     # The runtime URLs carry the identity as username, and redis-py AUTHes as
     # that user, so a missing user would WRONGPASS forever and the redis wake
     # bus would never deliver to agents.
-    result = _ensure_redis_acl(
+    result = ensure_redis_acl(
         redis_port, redis_admin_password, runtime_password, identity, dial_host
     )
     if result == 0:
@@ -509,7 +509,7 @@ def start_redis(
     return result
 
 
-def _ensure_redis_acl(
+def ensure_redis_acl(
     redis_port: int,
     redis_admin_password: str,
     runtime_password: str,
@@ -560,7 +560,7 @@ def ensure_cluster_storage(
             "always authenticated and no conversion exists; re-birth it as a new home."
         )
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
-    if (rc := _start_pg(pg_port, retained_children=retained_children, machine=machine)) != 0:
+    if (rc := start_pg(pg_port, retained_children=retained_children, machine=machine)) != 0:
         return rc
     if (
         rc := start_redis(

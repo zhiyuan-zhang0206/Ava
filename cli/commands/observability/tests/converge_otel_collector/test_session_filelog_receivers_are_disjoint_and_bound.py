@@ -610,7 +610,7 @@ def test_stream_download_honors_socket_timeout(
     monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     with pytest.raises(TimeoutError):
         artifact._stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
-    assert seen["timeout"] == artifact._DOWNLOAD_SOCKET_TIMEOUT_S
+    assert seen["timeout"] == artifact.DOWNLOAD_SOCKET_TIMEOUT_S
 
 
 @pytest.mark.parametrize(

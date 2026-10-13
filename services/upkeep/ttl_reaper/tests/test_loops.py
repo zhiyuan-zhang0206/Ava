@@ -201,7 +201,7 @@ def _count_slow_phases(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
         calls["stuck"] += 1
         return 0
 
-    monkeypatch.setattr(sweep, "_prune_schedule_fire_log_blocking", prune)
+    monkeypatch.setattr(sweep, "prune_schedule_fire_log_blocking", prune)
     monkeypatch.setattr(sweep, "_scan_stuck_lifecycle_pointers_blocking", stuck)
     return calls
 
@@ -298,8 +298,8 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
     def expired(_pool: object) -> list[dict[str, object]]:
         return _rows(("slow", 1), ("fast", 2), ("slow", 3), ("fast", 4))
 
-    monkeypatch.setattr(shells, "_expired_shell_rows_blocking", expired)
-    monkeypatch.setattr(shells, "_reclaim_row", reclaim)
+    monkeypatch.setattr(shells, "expired_shell_rows_blocking", expired)
+    monkeypatch.setattr(shells, "reclaim_row", reclaim)
 
     faked_pool = cast(ConnectionPool, None)  # every pool consumer above is faked
     task = asyncio.create_task(
@@ -334,7 +334,7 @@ async def test_a_dispatch_past_its_deadline_defers_the_row(
     monkeypatch.setattr(shells, "dispatch_deadline_s", lambda: 0.05)
 
     assert (
-        await shells._dispatch_shell_kill(
+        await shells.dispatch_shell_kill(
             Database.from_settings(gate=database_gate), "macmini", 1, 2
         )
         is None

@@ -11,9 +11,9 @@ from typing import Any
 
 from cli.commands.extensions.external_skill_host.filesystem import (
     ClientConflictError,
-    _validate_manifest_subset,
     exists,
     tree_manifest,
+    validate_manifest_subset,
     verify_cleanup_file,
 )
 from cli.commands.extensions.external_skill_host.ledger import SKILL_NAME, write_ledger
@@ -79,7 +79,7 @@ def _source_path(
 
 def _verify_cleanup_candidate(path: Path, manifest: list[dict[str, Any]]) -> None:
     current = tree_manifest(path)
-    _validate_manifest_subset(current, manifest)
+    validate_manifest_subset(current, manifest)
 
 
 def _restore_cleanup_candidate(

@@ -67,7 +67,7 @@ PLACEHOLDER_DB_URL = "postgresql://no-cluster@127.0.0.1:1/run-ava-start-first"
 # clears the live marker (cli/main.py `_normalize_process_profile`). The CLI is
 # deliberately settings-full — no profile — but a boot pass reached through it
 # must still see which launcher context this process tree descends from; the
-# launcher-projection exemptions in `_enforce_cluster_env_authority` read it
+# launcher-projection exemptions in `enforce_cluster_env_authority` read it
 # live-or-recorded (`launcher_context`). Never cleared: a nested CLI only
 # overwrites it when it carries a fresh live marker of its own (#4334).
 LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
@@ -222,7 +222,7 @@ def load_ava_env() -> EnvBootResult:
     os.environ.setdefault("AVA_HOME", str(home))
     _load_dotenv_layer(home / ".env")
     _load_dotenv_layer(home / "mirror.env")
-    return _enforce_cluster_env_authority(home)
+    return enforce_cluster_env_authority(home)
 
 
 def _identity_env_only() -> frozenset[str]:
@@ -396,7 +396,7 @@ def _drop_undeclared(keys: Collection[str], file_vals: dict[str, str | None]) ->
             os.environ.pop(key, None)
 
 
-def _enforce_cluster_env_authority(home: Path) -> EnvBootResult:
+def enforce_cluster_env_authority(home: Path) -> EnvBootResult:
     """Force this unit's derived env keys from its own `.env`, overriding a polluted parent
     environment.
 

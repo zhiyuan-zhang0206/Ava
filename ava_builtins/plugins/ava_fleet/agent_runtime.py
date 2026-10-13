@@ -17,7 +17,7 @@ from base.packages.plugins.config_registration import get_plugin_config
 from base.packages.plugins.extensions import PluginContributions
 
 
-def _fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
     return (
         "## Fleet\n\n"
@@ -45,7 +45,7 @@ def _fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     )
 
 
-def _reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     """Keep the interruption boundary resident; load the playbook on demand."""
     del catalog
     if not get_plugin_config("ava_fleet", slices, FleetConfig).reduce_context_switch:
@@ -64,5 +64,5 @@ def _reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
-        system_prompt_sections=(_fleet_self_section, _reduce_context_switch_section)
+        system_prompt_sections=(fleet_self_section, reduce_context_switch_section)
     )

@@ -44,7 +44,7 @@ def _load_ava_code_plugin(
     install.uninstall()
 
 
-def _make_state_with_cwd(
+def make_state_with_cwd(
     cwd: str,
     *,
     injected: set[str] | None = None,
@@ -63,7 +63,7 @@ def _make_state_with_cwd(
     return state_cls(messages=[], halted=False, **kwargs)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def _get_injected_context_notes(state_update: dict[str, object]) -> list[dict[str, str]]:
+def get_injected_context_notes(state_update: dict[str, object]) -> list[dict[str, str]]:
     """Extract CONTEXT system notes from the exec's messages delta.
 
     The plugin delivers AGENTS.md / CLAUDE.md notes in-memory through the
@@ -98,7 +98,7 @@ def _get_injected_context_notes(state_update: dict[str, object]) -> list[dict[st
 
 def test_get_cwd_returns_state_value(tmp_path: Path):
     """get_cwd reads from ava.state.ava_code.cwd, returns Path."""
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         result = ava.cwd.get()
@@ -124,7 +124,7 @@ def test_get_cwd_after_set_cwd_reads_new_value_without_changing_process_cwd(tmp_
     p1.mkdir()
     p2.mkdir()
 
-    ava.state = _make_state_with_cwd(str(p1))
+    ava.state = make_state_with_cwd(str(p1))
     ava.state_update = {}
     process_cwd = Path.cwd()
     try:
@@ -164,7 +164,7 @@ def test_default_cwd_home_without_bootstrap(monkeypatch: pytest.MonkeyPatch):
 
 def test_set_cwd_writes_state_update(tmp_path: Path):
     """set_cwd writes new path into state_update["ava_code__cwd"]."""
-    ava.state = _make_state_with_cwd(str(Path.home()))
+    ava.state = make_state_with_cwd(str(Path.home()))
     ava.state_update = {}
     try:
         ava.cwd.set(tmp_path)
@@ -176,7 +176,7 @@ def test_set_cwd_writes_state_update(tmp_path: Path):
 def test_set_cwd_nonexistent_raises(tmp_path: Path):
     """path does not exist → FileNotFoundError, state_update unchanged."""
     fake = tmp_path / "no-such-dir"
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         with pytest.raises(FileNotFoundError):
@@ -190,7 +190,7 @@ def test_set_cwd_not_directory_raises(tmp_path: Path):
     """path exists but is not directory → NotADirectoryError."""
     f = tmp_path / "file.txt"
     f.write_text("")
-    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state = make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         with pytest.raises(NotADirectoryError):
@@ -209,7 +209,7 @@ def test_set_cwd_outside_turn_raises(tmp_path: Path):
 # ── files.read wrap: AGENTS.md injection ──────────────────────────────────────
 
 
-def _make_git_repo(root: Path) -> None:
+def make_git_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
 
 
@@ -219,12 +219,12 @@ def test_read_wrap_injects_agents_md(tmp_path: Path):
     (in-memory — no side-channel file)."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     (repo / "AGENTS.md").write_text("PROJECT CONVENTIONS")
     target = repo / "foo.py"
     target.write_text("# code")
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -233,7 +233,7 @@ def test_read_wrap_injects_agents_md(tmp_path: Path):
 
         assert content == "# code"
         # The note rides the exec's messages delta, not a file / stdout
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         assert len(notes) == 1
         assert "PROJECT CONVENTIONS" in notes[0]["content"]
         agents_path = str((repo / "AGENTS.md").resolve())
@@ -248,19 +248,19 @@ def test_read_wrap_injects_agents_and_claude(tmp_path: Path):
     """Same directory has both AGENTS.md and CLAUDE.md → both injected, each with its own prefix (path)."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     (repo / "AGENTS.md").write_text("AGENTS CONVENTIONS")
     (repo / "CLAUDE.md").write_text("CLAUDE CONVENTIONS")
     (repo / "foo.py").write_text("# code")
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
             ava.files.read("foo.py")
 
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         assert len(notes) == 2
         agents_path = str((repo / "AGENTS.md").resolve())
         claude_path = str((repo / "CLAUDE.md").resolve())
@@ -279,11 +279,11 @@ def test_read_wrap_no_emoji_in_marker(tmp_path: Path):
     """marker without emoji — plain `Project <file> from <path>:` text."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     (repo / "AGENTS.md").write_text("X")
     (repo / "foo.py").write_text("# code")
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -300,12 +300,12 @@ def test_read_wrap_dedup_via_injected_paths(tmp_path: Path):
     """AGENTS.md already recorded in injected_paths, sibling file read does not re-inject."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     agents_md = repo / "AGENTS.md"
     agents_md.write_text("PROJECT")
     (repo / "foo.py").write_text("")
 
-    ava.state = _make_state_with_cwd(str(repo), injected={str(agents_md.resolve())})
+    ava.state = make_state_with_cwd(str(repo), injected={str(agents_md.resolve())})
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -351,7 +351,7 @@ def test_read_wrap_forwards_line_range_in_turn(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "f.txt").write_text("one\ntwo\nthree\nfour\nfive\n")
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -375,11 +375,11 @@ def test_read_wrap_target_is_agents_md_marks_but_not_prints(tmp_path: Path):
     steps aside after active read."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     agents_md = repo / "AGENTS.md"
     agents_md.write_text("PROJECT")
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -402,11 +402,11 @@ def test_read_wrap_target_is_claude_md_marks_but_not_prints(tmp_path: Path):
     no re-print marker, but marks into injected_paths. Verify that samefile suppression also works for the second filename."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     claude_md = repo / "CLAUDE.md"
     claude_md.write_text("CLAUDE PROJECT")
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -428,13 +428,13 @@ def test_read_wrap_target_agents_md_via_symlink_still_primary(tmp_path: Path):
     would fail due to different path strings causing double-surface, samefile compares inode so doesn't."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     agents_md = repo / "AGENTS.md"
     agents_md.write_text("PROJECT")
     link = repo / "agents-link.md"
     link.symlink_to(agents_md)
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -456,12 +456,12 @@ def test_read_wrap_target_agents_md_then_sibling_no_reinject(tmp_path: Path):
     """primary path (agent directly reads AGENTS.md) → subsequent sibling file read no longer auto-injects."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     agents_md = repo / "AGENTS.md"
     agents_md.write_text("PROJECT")
     (repo / "foo.py").write_text("# code")
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -486,13 +486,13 @@ def test_read_wrap_compact_resets_injected_paths(tmp_path: Path):
     The monotonic version-counter reset pattern."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     agents_md = repo / "AGENTS.md"
     agents_md.write_text("PROJECT")
     (repo / "foo.py").write_text("")
 
     # previous turn already injected (last_seen_compact=0); but compact has run once → now version=1
-    ava.state = _make_state_with_cwd(
+    ava.state = make_state_with_cwd(
         str(repo),
         injected={str(agents_md.resolve())},
         last_seen_compact=0,
@@ -505,7 +505,7 @@ def test_read_wrap_compact_resets_injected_paths(tmp_path: Path):
             ava.files.read("foo.py")
 
         # injected_paths reset → AGENTS.md re-injected into the messages delta
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         assert len(notes) == 1
         assert "PROJECT" in notes[0]["content"]
         assert ava.state_update["ava_code__last_seen_compact"] == 1
@@ -517,12 +517,12 @@ def test_read_wrap_compact_not_advanced_keeps_dedup(tmp_path: Path):
     """compact.version in sync with bookmark (e.g. already processed by this plugin) → no reset."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     agents_md = repo / "AGENTS.md"
     agents_md.write_text("PROJECT")
     (repo / "foo.py").write_text("")
 
-    ava.state = _make_state_with_cwd(
+    ava.state = make_state_with_cwd(
         str(repo),
         injected={str(agents_md.resolve())},
         last_seen_compact=1,
@@ -553,12 +553,12 @@ def test_read_wrap_dedup_within_same_turn(tmp_path: Path):
     immediately sees injected_paths update — no extra turn cache needed."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     (repo / "AGENTS.md").write_text("PROJECT")
     (repo / "foo.py").write_text("")
     (repo / "bar.py").write_text("")
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -567,7 +567,7 @@ def test_read_wrap_dedup_within_same_turn(tmp_path: Path):
             ava.files.read("bar.py")
 
         # same AGENTS.md only injected once
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         assert len(notes) == 1
         assert "PROJECT" in notes[0]["content"]
     finally:
@@ -578,12 +578,12 @@ def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path):
     """Relative path resolved via ava.cwd maintained cwd — not system cwd."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     (repo / "AGENTS.md").write_text("X")
     (repo / "foo.py").write_text("# code")
 
     # system cwd unchanged, plugin cwd set to repo
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -592,7 +592,7 @@ def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path):
             content = ava.files.read("foo.py")
         assert content == "# code"
         # AGENTS.md injected (plugin uses plugin cwd to resolve path)
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         assert len(notes) == 1
         assert "X" in notes[0]["content"]
     finally:
@@ -606,7 +606,7 @@ def test_read_wrap_no_agents_md_no_op(tmp_path: Path):
     target = isolated / "foo.py"
     target.write_text("# code")
 
-    ava.state = _make_state_with_cwd(str(isolated))
+    ava.state = make_state_with_cwd(str(isolated))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -633,7 +633,7 @@ def test_read_wrap_outside_turn_passthrough(tmp_path: Path):
     """
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     (repo / "AGENTS.md").write_text("X")
     target = repo / "foo.py"
     target.write_text("hi")
@@ -656,11 +656,11 @@ def test_read_wrap_target_missing_still_injects(tmp_path: Path):
     """
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     (repo / "AGENTS.md").write_text("X")
     # don't create foo.py
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
@@ -668,7 +668,7 @@ def test_read_wrap_target_missing_still_injects(tmp_path: Path):
             with pytest.raises(FileNotFoundError):
                 ava.files.read("foo.py")
         # target doesn't exist, but AGENTS.md walk + inject runs before _orig_read
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         assert len(notes) == 1
         assert "X" in notes[0]["content"]
         agents_path = str((repo / "AGENTS.md").resolve())
@@ -689,7 +689,7 @@ def test_read_wrap_target_missing_still_injects(tmp_path: Path):
 # ── ava.understand wrap (paths follow the tracked cwd) ────────────────────
 
 
-def _stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
+def stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
     """Stub the text-path provider so wrap tests never hit a real model."""
     from unittest.mock import MagicMock
 
@@ -725,7 +725,7 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
 
     repo = tmp_path / "repo"
     repo.mkdir()
-    _make_git_repo(repo)
+    make_git_repo(repo)
     big = ("HEAD_MARKER" + ("x" * 5000) + "TAIL_MARKER").encode()
     (repo / "AGENTS.md").write_bytes(big)
     (repo / "foo.py").write_text("# code")
@@ -734,13 +734,13 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
     pin_agent(123)
     overflow = workspace_dir(123) / ".exec_output"
 
-    ava.state = _make_state_with_cwd(str(repo))
+    ava.state = make_state_with_cwd(str(repo))
     ava.state_update = {}
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
             ava.files.read("foo.py")
-        notes = _get_injected_context_notes(ava.state_update)
+        notes = get_injected_context_notes(ava.state_update)
         assert len(notes) == 1
         assert "HEAD_MARKER" in notes[0]["content"], "head must survive"
         assert "TAIL_MARKER" in notes[0]["content"], "tail must survive"

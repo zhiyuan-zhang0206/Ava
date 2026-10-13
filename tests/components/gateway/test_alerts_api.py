@@ -673,13 +673,13 @@ def test_ingest_loopback_trust_when_no_token(monkeypatch: pytest.MonkeyPatch) ->
     def request(host: str) -> Request:
         return Request({"type": "http", "app": application, "headers": [], "client": (host, 5000)})
 
-    assert alerts_router._ingest_authorized(request("127.0.0.1"))
-    assert alerts_router._ingest_authorized(request("::1"))
-    assert not alerts_router._ingest_authorized(request("10.0.0.5"))
+    assert alerts_router.ingest_authorized(request("127.0.0.1"))
+    assert alerts_router.ingest_authorized(request("::1"))
+    assert not alerts_router.ingest_authorized(request("10.0.0.5"))
 
     # token set -> loopback alone is not enough
     monkeypatch.setattr(settings.alerts, "webhook_token", SecretStr("t"))
-    assert not alerts_router._ingest_authorized(request("127.0.0.1"))
+    assert not alerts_router.ingest_authorized(request("127.0.0.1"))
 
 
 # -- list --------------------------------------------------------------------

@@ -770,7 +770,7 @@ class TestServe:
         window is the fallback for a slow pass / cold restart."""
         import ava.ui as ui_mod
 
-        assert ui_mod._SERVE_READY_TIMEOUT_S >= 60.0
+        assert ui_mod.PageHost(host="h", agent_id=1).ready_timeout_s >= 60.0
 
     def test_serve_same_name_replaces(
         self,

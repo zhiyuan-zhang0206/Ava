@@ -76,7 +76,7 @@ class Inbox:
     async def reserve(self, ids: list[int]) -> frozenset[int]:
         for i in ids:
             count, _ = self.attempts.get(i, (0, 0))
-            self.attempts[i] = (count + 1, relay._loop_time())
+            self.attempts[i] = (count + 1, relay.loop_time())
         return frozenset(ids)
 
     async def read(self) -> relay.InboxSnapshot:
@@ -84,7 +84,7 @@ class Inbox:
         if any(
             i in self.pending
             and count >= self.max_delivery_attempts
-            and relay._loop_time() - at >= self.ack_window_seconds
+            and relay.loop_time() - at >= self.ack_window_seconds
             for i, (count, at) in self.attempts.items()
         ):
             self.status = ImpersonationStatus.EXPIRED
@@ -96,7 +96,7 @@ class Inbox:
                     self.messages[i],
                     delivery_attempts=self.attempts.get(i, (0, 0))[0],
                     delivery_due=i not in self.attempts
-                    or relay._loop_time() - self.attempts[i][1] >= self.ack_window_seconds,
+                    or relay.loop_time() - self.attempts[i][1] >= self.ack_window_seconds,
                 )
                 for i in page
             },
@@ -151,7 +151,7 @@ class Listener:
 
 
 class FakeClock:
-    """Monotonic test clock patched onto relay._loop_time and relay.asyncio.sleep."""
+    """Monotonic test clock patched onto relay.loop_time and relay.asyncio.sleep."""
 
     def __init__(self) -> None:
         self.t = 0.0
@@ -166,7 +166,7 @@ class FakeClock:
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     clock = FakeClock()
-    monkeypatch.setattr(relay, "_loop_time", clock.time)
+    monkeypatch.setattr(relay, "loop_time", clock.time)
 
     async def fake_sleep(delay: float) -> None:
         clock.t += delay
@@ -569,7 +569,7 @@ def test_claude_envelope_truncates_long_content_but_keeps_the_ack_line() -> None
     inbox = Inbox(1)
     inbox.messages[1] = msg(1, content="x" * 5000)
     emitted: list[str] = []
-    run(inbox, Listener(inbox), emitted.append, max_chars=relay._PUSH_MAX_CHARS)
+    run(inbox, Listener(inbox), emitted.append, max_chars=relay.PUSH_MAX_CHARS)
 
     assert len(emitted) == 2
     push = emitted[1]
@@ -580,7 +580,7 @@ def test_claude_envelope_truncates_long_content_but_keeps_the_ack_line() -> None
     assert relay.ack_command(LEASE_ID, [1]) in push
     body_line = [line for line in push.splitlines() if line.startswith("x" * 10)]
     assert body_line
-    assert len(body_line[0]) <= relay._PUSH_MAX_CHARS + len(
+    assert len(body_line[0]) <= relay.PUSH_MAX_CHARS + len(
         " (truncated — run the inbox command to read the full body before acknowledging)"
     )
 
@@ -698,7 +698,7 @@ def test_write_heartbeat_stops_at_a_terminal_lease(
     beat = Mock()
     monkeypatch.setattr(agents_impersonation, "relay_heartbeat", beat)
     assert (
-        relay._write_heartbeat(
+        relay.write_heartbeat(
             database, LEASE_ID, "relay-token", local_machine=machine_identity.name()
         )
         is True
@@ -708,7 +708,7 @@ def test_write_heartbeat_stops_at_a_terminal_lease(
     )
     beat.side_effect = leases.ImpersonationError("Impersonation has ended")
     assert (
-        relay._write_heartbeat(
+        relay.write_heartbeat(
             database, LEASE_ID, "relay-token", local_machine=machine_identity.name()
         )
         is False

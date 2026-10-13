@@ -40,7 +40,7 @@ from base.paths import ava_home
 # a fixed constant, not a random port: the client metadata is minted once per
 # server and reused (persisted with the tokens). If the port is taken, fail
 # fast rather than register a redirect URI the callback can never receive.
-_OAUTH_CALLBACK_PORT = 8931
+OAUTH_CALLBACK_PORT = 8931
 _OAUTH_CALLBACK_PATH = "/callback"
 
 # How long an authorization flow may take (the user has to click through a
@@ -52,7 +52,7 @@ _OAUTH_FLOW_TIMEOUT_S = 600.0
 _CLIENT_NAME = "Ava MCP Daemon"
 
 
-class _FileTokenStorage:
+class FileTokenStorage:
     """Persist OAuth tokens + registered client info per server in `$AVA_HOME/mcp_oauth/`."""
 
     def __init__(self, server: str) -> None:
@@ -102,7 +102,7 @@ class _FileTokenStorage:
         self._write(data)
 
 
-class _CallbackServer:
+class CallbackServer:
     """One-shot loopback HTTP server that captures the authorization redirect.
 
     Binds 127.0.0.1 only. Serves the redirect URI once, parses
@@ -110,7 +110,7 @@ class _CallbackServer:
     then shuts down.
     """
 
-    def __init__(self, port: int = _OAUTH_CALLBACK_PORT) -> None:
+    def __init__(self, port: int = OAUTH_CALLBACK_PORT) -> None:
         self.port = port
         self._result: asyncio.Future[Any] | None = None
 
@@ -211,7 +211,7 @@ async def _open_browser(auth_url: str) -> None:
         logger.warning("[mcp-oauth] could not open a browser; authorize at: " + auth_url)
 
 
-def _normalize_issuer(url: str) -> str:
+def normalize_issuer(url: str) -> str:
     """Strip a trailing slash for issuer comparison (RFC 3986 §6.2.1).
 
     Google's protected-resource metadata advertises the authorization server
@@ -238,21 +238,21 @@ def _install_issuer_normalization() -> None:
     import mcp.client.auth.oauth2 as _oauth2
     import mcp.client.auth.utils as _utils
 
-    _utils.validate_metadata_issuer = _normalized_validate_issuer  # type: ignore[attr-defined]
-    _oauth2.validate_metadata_issuer = _normalized_validate_issuer  # type: ignore[attr-defined]
+    _utils.validate_metadata_issuer = normalized_validate_issuer  # type: ignore[attr-defined]
+    _oauth2.validate_metadata_issuer = normalized_validate_issuer  # type: ignore[attr-defined]
 
 
-def _normalized_validate_issuer(oauth_metadata: Any, expected_issuer: str) -> None:
+def normalized_validate_issuer(oauth_metadata: Any, expected_issuer: str) -> None:
     from mcp.client.auth.exceptions import OAuthFlowError
 
-    if _normalize_issuer(str(oauth_metadata.issuer)) != _normalize_issuer(expected_issuer):
+    if normalize_issuer(str(oauth_metadata.issuer)) != normalize_issuer(expected_issuer):
         raise OAuthFlowError(
             f"Authorization server metadata issuer mismatch: "
             f"{oauth_metadata.issuer} != {expected_issuer}"
         )
 
 
-def _install_token_auth_basic_shim() -> None:
+def install_token_auth_basic_shim() -> None:
     """Drop the duplicate body ``client_id`` on client_secret_basic requests.
 
     The SDK's ``OAuthContext.prepare_token_auth`` leaves the form body's
@@ -308,11 +308,11 @@ async def oauth_http_client(url: str, server: str, locks: dict[str, asyncio.Lock
     from mcp.shared.auth import OAuthClientMetadata
 
     _install_issuer_normalization()
-    _install_token_auth_basic_shim()
+    install_token_auth_basic_shim()
     lock = locks.setdefault(server, asyncio.Lock())
     async with lock:
-        storage = _FileTokenStorage(server)
-        callback = _CallbackServer()
+        storage = FileTokenStorage(server)
+        callback = CallbackServer()
 
         async def _redirect_handler(auth_url: str) -> None:
             await _open_browser(auth_url)

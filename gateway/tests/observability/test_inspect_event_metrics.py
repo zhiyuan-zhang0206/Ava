@@ -165,11 +165,11 @@ def test_anything_outside_the_vocabulary_is_refused(
 
 
 def test_every_shipped_inspector_metric_is_evaluable(db_conn: psycopg.Connection) -> None:
-    specs = [s for s in _plugin_metrics._load_plugin_metrics() if "inspector" in s.output]
+    specs = [s for s in _plugin_metrics.load_plugin_metrics() if "inspector" in s.output]
     assert specs
     for spec in specs:
-        query = _plugin_metrics._translate_macros(
-            _plugin_metrics._render_metric_query(spec, 7), logql=spec.query_type == "logql"
+        query = _plugin_metrics.translate_macros(
+            _plugin_metrics.render_metric_query(spec, 7), logql=spec.query_type == "logql"
         )
         if spec.query_type == "logql":
             _event_metrics.points(db_conn, query, _START, _STOP, 3600)

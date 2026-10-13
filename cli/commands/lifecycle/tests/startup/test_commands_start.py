@@ -14,7 +14,7 @@ import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 from base.agents.context.clients import DatabaseFactory
 from base.telemetry import EventPipeline
-from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
+from cli.commands._setup import collect_setup_values as _real_collect_setup_values
 from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
     _hermetic_start as _hermetic_start,
 )
@@ -100,13 +100,13 @@ def test_cmd_start_aborts_when_schema_mismatched(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """_assert_schema_current_or_die returning non-zero short-circuits cmd_start
+    """assert_schema_current_or_die returning non-zero short-circuits cmd_start
     before register_self / session launch, so a code-vs-DB drift fails loud at start."""
 
     _ = tmp_path
     launch = MagicMock()
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)
-    monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 1)
+    monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda: 1)
 
     rc = _start_commands.cmd_start(
         retained_children=[],
@@ -144,7 +144,7 @@ def test_start_missing_capability_reports_serve_flags_only(
     from base import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
-    monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
+    monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
         retained_children=[],
@@ -182,7 +182,7 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     from base import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
-    monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
+    monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
         retained_children=[],
@@ -216,7 +216,7 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     from base import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
-    monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
+    monkeypatch.setattr(_setup_commands, "collect_setup_values", _real_collect_setup_values)
 
     rc = _start_commands.cmd_start(
         retained_children=[],
@@ -245,7 +245,7 @@ def test_setup_field_resolves_from_settings_only_and_writes_nothing(
     home.mkdir()
     monkeypatch.setattr(paths, "ava_home", lambda: home)
     checked: list[str] = []
-    field = _setup_commands._SetupField(
+    field = _setup_commands.SetupField(
         name="machine_name",
         env_var="AVA_MACHINE_NAME",
         hint="<name>",
@@ -254,11 +254,11 @@ def test_setup_field_resolves_from_settings_only_and_writes_nothing(
 
     command_runtime.config.set_field("machine_name", "")
     (home / "machine_name").write_text("from-file\n")
-    assert _setup_commands._resolve_setup_field(field, config=command_runtime.config) is None
+    assert _setup_commands.resolve_setup_field(field, config=command_runtime.config) is None
     assert sorted(p.name for p in home.iterdir()) == ["machine_name"]  # nothing written
 
     command_runtime.config.set_field("machine_name", " from-env ")
-    assert _setup_commands._resolve_setup_field(field, config=command_runtime.config) == "from-env"
+    assert _setup_commands.resolve_setup_field(field, config=command_runtime.config) == "from-env"
     assert checked == ["from-env"]
 
 
@@ -312,7 +312,7 @@ def test_start_requires_child_owner_before_entering_lifecycle(
     command_runtime: CommandRuntime,
 ) -> None:
     body = MagicMock(side_effect=AssertionError("lifecycle must not be entered"))
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", body)
+    monkeypatch.setattr(_start_commands, "cmd_start_body", body)
     with pytest.raises(ValueError, match="caller-owned PostgreSQL child retention"):
         _start_commands.cmd_start(
             database_factory=operator_database, producer=operator_pipeline, command=command_runtime

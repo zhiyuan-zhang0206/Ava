@@ -132,7 +132,7 @@ def test_gateway_group_holds_the_full_dml_surface(authority_postgres: AuthorityC
         "sequence": {"USAGE", "SELECT", "UPDATE"},
         "routine": {"EXECUTE"},
     }
-    append_only = set(groups_module._GATEWAY_APPEND_ONLY_TABLES)
+    append_only = set(groups_module.GATEWAY_APPEND_ONLY_TABLES)
     missing = [
         row[:3]
         for row in rows
@@ -211,10 +211,10 @@ def _inject(monkeypatch: pytest.MonkeyPatch, boundary: str) -> None:
 
         monkeypatch.setattr(ledger_module, "write_private_bytes", fail_pending)
     elif boundary == "pending-recorded":
-        monkeypatch.setattr(roles_module, "_create_missing", _crash_before)
+        monkeypatch.setattr(roles_module, "create_missing", _crash_before)
     elif boundary == "roles-created":
         monkeypatch.setattr(
-            roles_module, "_create_missing", _crash_after(roles_module._create_missing)
+            roles_module, "create_missing", _crash_after(roles_module.create_missing)
         )
     else:
         monkeypatch.setattr(

@@ -452,7 +452,7 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     def settled(_until: float, _stage: str) -> None:
         """Stand-in for the closure evidence: nothing is left."""
 
-    monkeypatch.setattr(strict, "_await_no_terminals", settled)
+    monkeypatch.setattr(strict, "await_no_terminals", settled)
     strict.close_terminals(
         time.monotonic() + remaining_s,
         "stop-test",
@@ -463,7 +463,7 @@ def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     )
     ((grace, kill),) = asked
     assert expected_grace - 0.5 <= grace <= expected_grace
-    assert kill == strict._TERMINAL_KILL_WAIT_S
+    assert kill == strict.TERMINAL_KILL_WAIT_S
 
 
 def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
@@ -477,7 +477,7 @@ def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
     monkeypatch.setattr(strict, "live_terminals", lambda: [name])
 
     with pytest.raises(StopIncompleteError) as excinfo:
-        strict._await_no_terminals(time.monotonic(), "terminals")
+        strict.await_no_terminals(time.monotonic(), "terminals")
     message = str(excinfo.value)
     assert name in message
     assert "will not kill" not in message
@@ -495,7 +495,7 @@ def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
     leg's bound: a session still tearing down past that bound but gone from the
     service before the deadline is a closed terminal, not a failed stop."""
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setattr(strict, "_TERMINAL_KILL_WAIT_S", 0.2)
+    monkeypatch.setattr(strict, "TERMINAL_KILL_WAIT_S", 0.2)
     stub_closure(monkeypatch, closure.Outcome())
     cleared_at = time.monotonic() + 0.6
     name = "ava-agent-987-shell-2053-tearing-down"
@@ -617,7 +617,7 @@ def test_force_close_reports_known_job_without_failing(
     )
     strict.force_close_terminals()
     assert name in capsys.readouterr().err
-    assert asked == [(0.0, strict._TERMINAL_KILL_WAIT_S)]
+    assert asked == [(0.0, strict.TERMINAL_KILL_WAIT_S)]
 
 
 def test_force_close_still_fails_when_known_shell_survives(
@@ -646,7 +646,7 @@ def test_operational_terminal_close_failure_is_not_best_effort_success(
     def failed_close(_grace_s: float, _kill_s: float) -> closure.Outcome:
         raise client.ServiceError(1, "known group signal denied")
 
-    monkeypatch.setattr(strict, "_close_via_service", failed_close)
+    monkeypatch.setattr(strict, "close_via_service", failed_close)
     with pytest.raises(client.ServiceError, match="known group signal denied"):
         if force:
             strict.force_close_terminals()

@@ -198,7 +198,7 @@ def test_per_cluster_instance_bringup(
         assert conn.execute(
             "SELECT rolcanlogin, rolpassword IS NULL FROM pg_authid WHERE rolname = 'ava_tinst'"
         ).fetchone() == (False, True)
-        # mmap-backed shared memory pinned by `_start_pg` (Task #1263): the main
+        # mmap-backed shared memory pinned by `start_pg` (Task #1263): the main
         # region and dynamic segments live in files under the data dir, not POSIX
         # shm in /dev/shm, so an external unlink of /dev/shm cannot take the
         # instance down. Live check — this runs on Linux CI and macOS alike.
@@ -385,12 +385,12 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
 ) -> None:
     """TCP ownership does not make another directory's equal Unix port ours."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
+    assert ci.start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
     owned_data = resolve_ava_home() / "pg"
     with tempfile.TemporaryDirectory(prefix="ava-pg-foreign-", dir="/tmp") as temporary:
         directory = Path(temporary)
         data = directory / "data"
-        ci._initdb(data)
+        ci.initdb(data)
         subprocess.run(  # noqa: S603 — private test-owned postgres
             [
                 ci._pg_bin("pg_ctl"),
@@ -505,11 +505,11 @@ def test_rewritten_hba_is_reloaded_into_running_server(
     command_machine: MachineIdentity,
 ) -> None:
     """A running server keeps its last-loaded hba until reloaded. A postmaster
-    that still serves a legacy trust hba must, after `_start_pg` rewrites the
+    that still serves a legacy trust hba must, after `start_pg` rewrites the
     file, enforce passwords before start proceeds — the loaded proof, not the
     file on disk."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
+    assert ci.start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
     data = resolve_ava_home() / "pg"
     # A legacy postmaster: trust everywhere, reloaded into the running server.
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")
@@ -526,7 +526,7 @@ def test_rewritten_hba_is_reloaded_into_running_server(
             assert time.monotonic() < deadline, "legacy trust hba never loaded"
             time.sleep(0.05)
 
-    assert ci._start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
+    assert ci.start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
     with pytest.raises(psycopg.OperationalError, match="password"):
         psycopg.connect(
             host="127.0.0.1", port=pg_port, user=getpass.getuser(), password="", dbname="postgres"
@@ -543,7 +543,7 @@ def test_hba_proof_refuses_a_postmaster_still_serving_trust(
     password-less dial (a trust line loaded) fails the proof, whatever file is
     on disk."""
     pg_port, _redis_port = isolated_cluster
-    assert ci._start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
+    assert ci.start_pg(pg_port, retained_children=retained_children, machine=command_machine) == 0
     ci.require_authenticated_hba(pg_port, "127.0.0.1")
     data = resolve_ava_home() / "pg"
     (data / "pg_hba.conf").write_text("local all all trust\nhost all all 127.0.0.1/32 trust\n")

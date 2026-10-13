@@ -34,7 +34,7 @@ def sdk_http() -> Iterator[MagicMock]:
         yield http
 
 
-def _sdk(**kwargs: Any) -> int:
+def sdk(**kwargs: Any) -> int:
     args: dict[str, Any] = {
         "spawner": "user",
         "prompt": "one goal",
@@ -93,7 +93,7 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
     http = sdk_http
     http.post.side_effect = submit
     with pytest.raises(GatewayUnavailable):
-        _sdk()
+        sdk()
     lost_attempts = len(calls)
     assert lost_attempts > 1
     lose = False
@@ -109,10 +109,10 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
     ) as old:
         target = old
         with pytest.raises(httpx.HTTPStatusError) as error:
-            _sdk()
+            sdk()
         assert error.value.response.status_code in (404, 405)
     target = client
-    assert _sdk() == original
+    assert sdk() == original
     assert len(calls) == lost_attempts + 2
     assert all(call == calls[0] for call in calls)
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
@@ -121,10 +121,10 @@ def test_sdk_lost_response_downgrade_and_restore_one_birth(
     ).fetchone() == (1,)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
     with pytest.raises(httpx.HTTPStatusError) as conflict:
-        _sdk(spawner="agent:999")
+        sdk(spawner="agent:999")
     assert conflict.value.response.status_code == 409
     with pytest.raises(httpx.HTTPStatusError) as changed:
-        _sdk(prompt="changed")
+        sdk(prompt="changed")
     assert changed.value.response.status_code == 409
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
     http.get.assert_not_called()
@@ -152,7 +152,7 @@ def test_old_router_never_accepts_or_falls_back(
 
         http.post.side_effect = submit
         with pytest.raises(httpx.HTTPStatusError):
-            _sdk()
+            sdk()
         assert http.post.call_count == 1
         assert http.post.call_args.args == (PATH,)
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (0,)
@@ -170,14 +170,14 @@ def test_bearer_and_cookie_share_principal_but_revocation_blocks_replay(
         return _response(client.post(path, **kwargs))
 
     http.post.side_effect = submit
-    original = _sdk()
+    original = sdk()
     login = client.post("/api/auth/login", json={"password": SECRET})
     assert login.status_code == 200
     client.headers.pop("Authorization")
-    assert _sdk() == original
+    assert sdk() == original
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-sdk-strong-secret")
     with pytest.raises(httpx.HTTPStatusError) as revoked:
-        _sdk()
+        sdk()
     assert revoked.value.response.status_code == 401
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
 

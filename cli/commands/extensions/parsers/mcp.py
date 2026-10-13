@@ -77,7 +77,7 @@ def _h_memory_refresh(_args: argparse.Namespace) -> int:
     return cmd_memory_refresh()
 
 
-def _h_memory_init(args: argparse.Namespace) -> int:
+def h_memory_init(args: argparse.Namespace) -> int:
     from cli.commands.extensions.memory import cmd_memory_init
 
     return cmd_memory_init(machine=args.runtime.machine)
@@ -210,7 +210,7 @@ def add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     memory_sub = memory_p.add_subparsers(dest="memory_cmd", required=True)
 
     init_p = memory_sub.add_parser("init", help="initialize memory pool resources")
-    init_p.set_defaults(func=_h_memory_init)
+    init_p.set_defaults(func=h_memory_init)
 
     refresh_p = memory_sub.add_parser("refresh", help="trigger gateway memory index refresh")
     refresh_p.set_defaults(func=_h_memory_refresh)

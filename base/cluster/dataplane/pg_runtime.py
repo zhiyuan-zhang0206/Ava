@@ -14,7 +14,7 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.system.backend import get_backend
 
 
-def _installed_server() -> Path | None:
+def installed_server() -> Path | None:
     candidate = get_backend().pg_binary_path("postgres")
     if candidate is not None and candidate.exists():
         return candidate
@@ -77,7 +77,7 @@ def ensure_pg_runtime() -> None:
     platform without an artifact is an error, never a silent replacement.
     """
     if not runtime_binaries.vendored_pg_supported():
-        server = _installed_server()
+        server = installed_server()
         if server is None:
             raise RuntimeError(
                 "no vendored Postgres artifact for this platform and no installed "

@@ -41,7 +41,7 @@ def _drive(
             events_maintenance_db(process_config, local_machine=machine_identity),
             tasks=tasks,
         )
-    return daemon._resolution_loop(_FAKE_POOL, progress, config, tasks=tasks)
+    return daemon.resolution_loop(_FAKE_POOL, progress, config, tasks=tasks)
 
 
 def _script(
@@ -63,7 +63,7 @@ def _script(
     async def no_sleep(_progress: LoopProgress, _total_s: float) -> None:
         return None
 
-    monkeypatch.setattr(daemon, "_maintenance_with_liveness", fake_pass)
+    monkeypatch.setattr(daemon, "maintenance_with_liveness", fake_pass)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", no_sleep)
     return lambda: passes
 

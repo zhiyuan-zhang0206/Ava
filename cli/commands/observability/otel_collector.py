@@ -111,7 +111,7 @@ _POSTGRES_RECEIVER_BLOCK = """
 """
 # Not a credential: pg_hba admits the monitoring role only by peer, and the role
 # has no verifier, so no password can ever authenticate it.
-_PEER_PLACEHOLDER = "peer-authenticated-no-password"
+PEER_PLACEHOLDER = "peer-authenticated-no-password"
 
 _REDIS_RECEIVER_BLOCK = """
   # This cluster's OWN Redis. The receiver dials the default administrative
@@ -160,7 +160,7 @@ def _postgres_receiver_block(ava_home: Path) -> str:
     return _POSTGRES_RECEIVER_BLOCK.format(
         pg_endpoint=_yaml_quote(f"{socket_dir}:{record.ports['postgres']}"),
         pg_user=_yaml_quote(MONITOR_ROLE),
-        pg_placeholder=_yaml_quote(_PEER_PLACEHOLDER),
+        pg_placeholder=_yaml_quote(PEER_PLACEHOLDER),
         pg_database=_yaml_quote(db_identity()),
     )
 
@@ -394,7 +394,7 @@ def _otlp_exporters(roles: MachineRoles | None, *, database_factory: DatabaseFac
             endpoint=_yaml_quote(station_otel_ingress_endpoint(database_factory=database_factory)),
             authorization=_yaml_quote(_cluster_bearer()),
         )
-    loki_base, prom_base = _lgtm_fanout_bases(database_factory=database_factory)
+    loki_base, prom_base = lgtm_fanout_bases(database_factory=database_factory)
     return BACKEND_EXPORTERS.format(
         tempo_endpoint=_yaml_quote(obs.telemetry_tempo_endpoint.rstrip("/")),
         loki_base=_yaml_quote(loki_base),
@@ -415,7 +415,7 @@ def generate_config(
     from base.config import settings
 
     obs = settings.observability
-    loki_base, prom_base = _lgtm_fanout_bases(
+    loki_base, prom_base = lgtm_fanout_bases(
         remote=roles != frozenset({"agent-runner"}), database_factory=database_factory
     )
     data_plane_block, data_plane_pipeline = _data_plane_receivers(roles, ava_home)
@@ -439,9 +439,7 @@ def generate_config(
     return Template(_config_template(repo)).substitute(substitutions)
 
 
-def _lgtm_fanout_bases(
-    *, remote: bool = True, database_factory: DatabaseFactory
-) -> tuple[str, str]:
+def lgtm_fanout_bases(*, remote: bool = True, database_factory: DatabaseFactory) -> tuple[str, str]:
     """The gateway collector's LGTM fan-out base URLs (loki, prometheus).
 
     Two-state on AVA_OBSERVABILITY_URL (task #1791, A3): empty (default) keeps
@@ -472,7 +470,7 @@ def _atomic_write(path: Path, rendered: str) -> None:
     write_text_atomic(path, rendered, encoding="utf-8", suffix="")
 
 
-def _write_config(path: Path, rendered: str) -> None:
+def write_config(path: Path, rendered: str) -> None:
     """Publish the rendered collector config with user-edit protection.
 
     Content-hash guarded (web-sources precedent, task #1791 A3): a config.yaml
@@ -538,7 +536,7 @@ def ensure_otel_collector(
         print(
             f"  · otel-collector: otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} present"
         )
-    _write_config(
+    write_config(
         dest_dir / "config.yaml",
         generate_config(repo, ava_home, roles, database_factory=database_factory, machine=machine),
     )

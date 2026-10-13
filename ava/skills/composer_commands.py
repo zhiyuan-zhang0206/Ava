@@ -128,7 +128,7 @@ class Command(TypedDict):
     skill_target: str | None
 
 
-def _command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
+def command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
     """`(commands_dir, base_namespace)` pairs in override order (see module
     docstring). `base_namespace` is `()` for built-ins / overlay, `(plugin,)` for a
     plugin's bundled dir, and the carrying skill's full namespace path for a
@@ -149,7 +149,7 @@ def _command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
     return dirs
 
 
-def _scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
+def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     """Scan `<d>/*.md` into `{name: Command}`, prefixing each name with the
     `:`-joined base namespace.
 
@@ -190,7 +190,7 @@ def _scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     return out
 
 
-def _skill_commands() -> dict[str, Command]:
+def skill_commands() -> dict[str, Command]:
     """Every active skill as a same-named command (source 0, lowest priority).
 
     The command name is the skill's `:`-identifier (e.g. `demo:brainstorming`);
@@ -218,9 +218,9 @@ def discover_commands() -> list[Command]:
     Empty when the command module is disabled (settings.agent.commands_enabled)."""
     if not _commands_enabled():
         return []
-    out: dict[str, Command] = _skill_commands()
-    for d, base_ns in _command_dirs():
-        out.update(_scan_dir(d, base_ns))
+    out: dict[str, Command] = skill_commands()
+    for d, base_ns in command_dirs():
+        out.update(scan_dir(d, base_ns))
     return [out[name] for name in sorted(out)]
 
 

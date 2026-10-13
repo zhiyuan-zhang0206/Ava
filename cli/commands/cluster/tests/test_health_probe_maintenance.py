@@ -38,8 +38,8 @@ def probe_home(
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(service_selection, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: None)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
+    monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: None)
     monkeypatch.setattr(cluster_health.telemetry, "init_telemetry", _no_init)
     return tmp_path
 
@@ -92,7 +92,7 @@ def test_expected_low_population_does_not_rollback_or_promote(
         pause_owner.begin_maintenance("test-maintenance", datetime.now(UTC))
         marker = pause_owner.state_path()
     intent_before = marker.read_bytes()
-    assert cluster_health._agent_population(1, database_factory=operator_database) is False
+    assert cluster_health.agent_population(1, database_factory=operator_database) is False
     assert probe() == 1
 
     assert rollbacks == []
@@ -163,13 +163,13 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     operator_database: DatabaseFactory,
 ) -> None:
     _select_excluded({"agent-host"})
-    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
 
     def _plane_abnormal(*, database_factory: DatabaseFactory) -> bool:
         assert database_factory is operator_database
         return False
 
-    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", _plane_abnormal)
+    monkeypatch.setattr(cluster_health, "data_plane_abnormal", _plane_abnormal)
 
     assert probe() == 1
     assert rollbacks == []
@@ -190,7 +190,7 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
 
     patch_database(monkeypatch, connect=down)
     assert (
-        cluster_health._agent_population_failure_class(1, database_factory=operator_database)
+        cluster_health.agent_population_failure_class(1, database_factory=operator_database)
         == "environment"
     )
     assert probe() == 1

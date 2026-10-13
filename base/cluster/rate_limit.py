@@ -48,7 +48,7 @@ next failure record. Bounds memory for a subnet scan without a background
 timer. Protective constant (task #3696 exception inventory)."""
 
 
-class _Entry:
+class Entry:
     """Per-IP failure state."""
 
     __slots__ = ("failures", "last_failure_at", "locked_until")
@@ -78,7 +78,7 @@ class LoginRateLimiter:
     ) -> None:
         self._max_failures_reader = max_failures_reader
         self._lockout_seconds_reader = lockout_seconds_reader
-        self._entries: dict[str, _Entry] = {}
+        self._entries: dict[str, Entry] = {}
         self._lock = threading.Lock()
 
     def lockout_remaining(self, ip: str) -> int:
@@ -104,7 +104,7 @@ class LoginRateLimiter:
         with self._lock:
             entry = self._entries.get(ip)
             if entry is None or self._is_stale(entry, now, lockout_seconds):
-                entry = _Entry(failures=0, locked_until=0.0, last_failure_at=now)
+                entry = Entry(failures=0, locked_until=0.0, last_failure_at=now)
                 self._entries[ip] = entry
             entry.failures += 1
             entry.last_failure_at = now
@@ -125,7 +125,7 @@ class LoginRateLimiter:
             self._entries.clear()
 
     @staticmethod
-    def _is_stale(entry: _Entry, now: float, lockout_seconds: float) -> bool:
+    def _is_stale(entry: Entry, now: float, lockout_seconds: float) -> bool:
         """True when a streak no longer counts: any lockout has expired AND no
         failure happened within a full lockout window, so the run is not
         consecutive anymore."""

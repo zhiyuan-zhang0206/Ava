@@ -221,7 +221,7 @@ async def list_schedules(request: Request) -> list[ScheduleSummary]:
     return await asyncio.to_thread(_list_blocking, request.app.state.db_pool)
 
 
-def _create_blocking(
+def create_blocking(
     pool: ConnectionPool[Any], body: ScheduleCreate, key: str | None = None
 ) -> tuple[Any, ...]:
     """Sync create (syntax check + INSERT + version snapshot) — via to_thread."""
@@ -268,7 +268,7 @@ def _create_blocking(
 async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleView:
     """Create a schedule. 400 on a script syntax error, 409 on a name clash."""
     row = await asyncio.to_thread(
-        _create_blocking, request.app.state.db_pool, body, creation_receipts.operation_key(request)
+        create_blocking, request.app.state.db_pool, body, creation_receipts.operation_key(request)
     )
     # A newly-created enabled schedule is launched by the reconcile loop within a
     # poll interval; no explicit sync needed here.
@@ -278,7 +278,7 @@ async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleVie
 @router.get("/api/schedules/{schedule_id}")
 async def get_schedule(request: Request, schedule_id: int) -> ScheduleView:
     """Get one schedule (with its script). 404 if it does not exist."""
-    row = await asyncio.to_thread(_fetch_full_blocking, request.app.state.db_pool, schedule_id)
+    row = await asyncio.to_thread(fetch_full_blocking, request.app.state.db_pool, schedule_id)
     return _view(row)
 
 
@@ -307,7 +307,7 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
     return _view(row)
 
 
-def _delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
+def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
     """Sync delete (DELETE + 404 guard) — via to_thread."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM schedules WHERE id = %s RETURNING id", (schedule_id,))
@@ -326,7 +326,7 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
     """Delete a schedule. 404 if missing. The reconcile loop kills its (now
     orphaned) session; its work dir is removed."""
     pool = request.app.state.db_pool
-    await asyncio.to_thread(_delete_blocking, pool, schedule_id)
+    await asyncio.to_thread(delete_blocking, pool, schedule_id)
     await session_control.wait_consumed(pool, schedule_id)
     await asyncio.to_thread(_remove_schedule_dir, schedule_id)
     return {"status": "deleted"}
@@ -393,7 +393,7 @@ async def get_schedule_logs(
     """Recent output of the schedule. Live session -> its capture; a dead
     session -> its PTY transcript file; otherwise the last crash traceback
     (`last_error`). 404 if the schedule is missing."""
-    row = await asyncio.to_thread(_fetch_full_blocking, request.app.state.db_pool, schedule_id)
+    row = await asyncio.to_thread(fetch_full_blocking, request.app.state.db_pool, schedule_id)
     # Capture a window wide enough to cover the display padding: the PTY
     # screen model pads to the terminal height, so a narrow `lines` window
     # can be all blank rows even with the runner's output above it. Fetch a
@@ -439,7 +439,7 @@ async def get_schedule_runs(
     if limit is None:
         limit = settings.display.schedules_runs_default_limit
     pool = request.app.state.db_pool
-    await asyncio.to_thread(_fetch_full_blocking, pool, schedule_id)  # 404 guard
+    await asyncio.to_thread(fetch_full_blocking, pool, schedule_id)  # 404 guard
     return await asyncio.to_thread(_runs_blocking, pool, schedule_id, limit)
 
 
@@ -476,7 +476,7 @@ async def guarded_draft_schedule(
     return ScheduleDraftResponse(agent_id=spawned.id)
 
 
-def _fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[Any, ...]:
+def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[Any, ...]:
     """Sync full-row fetch + 404 guard — via to_thread (used by every read path)."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -489,7 +489,7 @@ def _fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[A
     return row
 
 
-def _control_blocking(
+def control_blocking(
     pool: ConnectionPool[Any], schedule_id: int, action: str, key: str | None
 ) -> tuple[tuple[Any, ...], bool]:
     with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -526,7 +526,7 @@ def _control_blocking(
 async def _control_and_sync(request: Request, schedule_id: int, *, action: str) -> ScheduleView:
     pool = request.app.state.db_pool
     row, needs_sync = await asyncio.to_thread(
-        _control_blocking, pool, schedule_id, action, receipts.operation_key(request)
+        control_blocking, pool, schedule_id, action, receipts.operation_key(request)
     )
     if needs_sync:
         await session_control.wait_consumed(pool, schedule_id)

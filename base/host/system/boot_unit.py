@@ -93,7 +93,7 @@ def systemd_running() -> bool:
     )
 
 
-def _systemctl(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
+def systemctl(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
     """One bounded seam for read-only systemctl calls (tests patch this)."""
     return subprocess.run(  # noqa: S603 — fixed systemctl verbs, literal args
         ["systemctl", *args], capture_output=True, text=True, check=False, timeout=timeout
@@ -104,7 +104,7 @@ def unit_enabled() -> bool:
     """Whether the boot unit is installed and enabled."""
     if not systemd_running():
         return False
-    return _systemctl("is-enabled", UNIT_NAME).stdout.strip() == "enabled"
+    return systemctl("is-enabled", UNIT_NAME).stdout.strip() == "enabled"
 
 
 # --- rendering --------------------------------------------------------------
@@ -116,7 +116,7 @@ def _clean(value: str, what: str) -> str:
     return value
 
 
-def _quote(value: str, what: str) -> str:
+def quote(value: str, what: str) -> str:
     """One quoted systemd argument; never expands specifiers or shell."""
     escaped = (
         _clean(value, what)
@@ -142,10 +142,10 @@ def render_unit(ctx: BootUnitContext) -> str:
         ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
     )
     env_lines = "\n".join(
-        f"Environment={_quote(f'{key}={value}', 'environment value')}" for key, value in environment
+        f"Environment={quote(f'{key}={value}', 'environment value')}" for key, value in environment
     )
     # Quote every argument. ':' also disables systemd's $ expansion.
-    command = " ".join(_quote(value, "start argument") for value in argv)
+    command = " ".join(quote(value, "start argument") for value in argv)
     # Only the generic network target: the host's private-network or proxy
     # services are the operator's (order after them with a drop-in), and a boot
     # start that beats them fails and retries under Restart=on-failure, at most
@@ -199,7 +199,7 @@ def in_boot_unit() -> bool:
 
 
 def manager_properties() -> dict[str, str]:
-    result = _systemctl("show", "--property=MainPID,ControlPID,ControlGroup,ActiveState", UNIT_NAME)
+    result = systemctl("show", "--property=MainPID,ControlPID,ControlGroup,ActiveState", UNIT_NAME)
     if result.returncode:
         raise RuntimeError(f"cannot observe systemd root ownership: {result.stderr.strip()}")
     values = dict(row.split("=", 1) for row in result.stdout.splitlines() if "=" in row)
@@ -345,7 +345,7 @@ def _failed_record(name: str) -> bool:
     until reset; checked also when a previous removal left one behind."""
     if not systemd_running():
         return False
-    result = _systemctl("show", "--property=ActiveState", "--value", name)
+    result = systemctl("show", "--property=ActiveState", "--value", name)
     if result.returncode:
         raise RuntimeError(f"cannot observe {name}: {result.stderr.strip()}")
     return result.stdout.strip() == "failed"

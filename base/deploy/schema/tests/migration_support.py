@@ -14,14 +14,14 @@ from psycopg import sql
 
 from base.config import settings
 from base.deploy.schema.migrations import (
-    _BASELINE_NAME,
-    _MIGRATION_LOCK_KEY,
+    BASELINE_NAME,
+    MIGRATION_LOCK_KEY,
     required_migration_set,
 )
 
-_SCHEMA_SQL = Path(__file__).resolve().parents[4] / "db" / "schema.sql"
-_SYN = "29991231T235959_synthetic"
-_SYN2 = "29991231T235960_synthetic-two"
+SCHEMA_SQL = Path(__file__).resolve().parents[4] / "db" / "schema.sql"
+SYN = "29991231T235959_synthetic"
+SYN2 = "29991231T235960_synthetic-two"
 SYN_ORPHAN = "20260815T000001_synthetic-orphan"
 
 
@@ -30,7 +30,7 @@ def db_url() -> str:
     return settings.data_plane.db_url
 
 
-def _schema_sql_stamped_migration_names() -> list[str]:
+def schema_sql_stamped_migration_names() -> list[str]:
     """The applied-set stamps db/schema.sql seeds, in file order.
 
     A folded strict migration keeps its stamp row so a fresh DB does not replay
@@ -42,12 +42,12 @@ def _schema_sql_stamped_migration_names() -> list[str]:
 
     return re.findall(
         r"INSERT INTO schema_migrations \(name\) VALUES \('([^']+)'\)",
-        _SCHEMA_SQL.read_text(),
+        SCHEMA_SQL.read_text(),
     )
 
 
 @contextmanager
-def _throwaway_database(prefix: str) -> Generator[str, None, None]:
+def throwaway_database(prefix: str) -> Generator[str, None, None]:
     base_url, _ = settings.data_plane.db_url.rsplit("/", 1)
     admin_url = f"{base_url}/postgres"
     name = f"ava_test_{prefix}_{os.getpid()}_{int(time.time() * 1_000_000)}"
@@ -66,7 +66,7 @@ def _throwaway_database(prefix: str) -> Generator[str, None, None]:
             cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
 
 
-def _set_table_to(
+def set_table_to(
     conn: psycopg.Connection, shape: str, rows: Iterable[str] | Iterable[int] | None = None
 ) -> None:
     """Rebuild schema_migrations in `shape` ('set' or 'legacy') with `rows`."""
@@ -104,13 +104,13 @@ def _reset_schema_migrations_state(db_url: str) -> Iterator[None]:
 
     def _reseed(names: list[str]) -> None:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
-            _set_table_to(conn, "set", names)
+            set_table_to(conn, "set", names)
 
     # Captured at setup, not at teardown: a test's monkeypatch of MIGRATIONS_DIR
     # is still active when this autouse fixture tears down, and the after-state
     # must be the real checkout's canonical applied set.
     _canonical_applied = sorted(required_migration_set())
-    _reseed([_BASELINE_NAME])
+    _reseed([BASELINE_NAME])
     yield
     # Restore the canonical fully-applied state (baseline + every migration file),
     # NOT a hard-coded prefix list: a freshly folded strict migration must stay
@@ -120,31 +120,31 @@ def _reset_schema_migrations_state(db_url: str) -> Iterator[None]:
     _reseed(_canonical_applied)
 
 
-def _git(repo: Path, *args: str) -> None:
+def git(repo: Path, *args: str) -> None:
     import subprocess
 
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)  # noqa: S603 — test git fixture, fixed argv
 
 
-def _init_repo(repo: Path) -> None:
+def init_repo(repo: Path) -> None:
     """Make `repo` a git worktree with an initial commit. The loader's
     git-tracking gate (#998) applies only what git tracks, so any test that
     monkeypatches MIGRATIONS_DIR must model a real checkout. Call AFTER writing
     the files that should be tracked (they land in the initial commit); files
     written afterwards are untracked by construction."""
-    _git(repo, "init", "-q")
-    _git(repo, "config", "user.email", "t@t")
-    _git(repo, "config", "user.name", "t")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "t@t")
+    git(repo, "config", "user.name", "t")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "init")
 
 
-def _try_lock_from_other_conn() -> bool:
+def try_lock_from_other_conn() -> bool:
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("SELECT pg_try_advisory_lock(%s)", (_MIGRATION_LOCK_KEY,))
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (MIGRATION_LOCK_KEY,))
         row = cur.fetchone()
         assert row is not None
         got = row[0]
         if got:
-            cur.execute("SELECT pg_advisory_unlock(%s)", (_MIGRATION_LOCK_KEY,))
+            cur.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK_KEY,))
         return bool(got)

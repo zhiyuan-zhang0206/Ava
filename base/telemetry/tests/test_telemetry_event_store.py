@@ -189,11 +189,11 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
     assert _rows(db_conn, marker) == []
 
     monkeypatch.setattr(event_store, "_write", real_write)
-    event_store._retry_at = time.monotonic() - 1
+    event_store.retry_at = time.monotonic() - 1
     event_store.store_events(database, [_event("llm_usage", marker)])
 
     assert len(_rows(db_conn, marker)) == 1
-    assert event_store._failures == 0
+    assert event_store.failures == 0
 
 
 def test_a_process_without_database_authority_turns_the_sink_off(

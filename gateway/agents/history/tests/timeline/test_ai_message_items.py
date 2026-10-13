@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from base.agents.history.timeline import _ai_message_items, build_timeline_items
+from base.agents.history.timeline import ai_message_items, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import ExecStatus
 from base.clock import Clock
@@ -19,7 +19,7 @@ _TIMELINE_INPUTS = TimelineReadInputs(
 
 
 class TestAiMessageItems:
-    """`_ai_message_items(msg, msg_idx, sdk_by_id)` splits a single AIMessage into
+    """`ai_message_items(msg, msg_idx, sdk_by_id)` splits a single AIMessage into
     per-block timeline items, each carrying a stable `item_id = f"{msg_idx}.{block_idx}"`.
 
     The production path ChatAnthropic + bind_tools returns list-of-blocks; legacy /
@@ -31,7 +31,7 @@ class TestAiMessageItems:
 
         if not isinstance(msg, AIMessage):
             msg = AIMessage(content=msg)  # pyright: ignore[reportUnknownArgumentType]
-        return _ai_message_items(msg, msg_idx, {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        return ai_message_items(msg, msg_idx, {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     def test_string_content_treated_as_chat(self):
         from langchain_core.messages import AIMessage

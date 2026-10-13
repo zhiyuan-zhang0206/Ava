@@ -160,7 +160,7 @@ async def run(options: DaemonOptions) -> int:
             await stop.wait()
         except BaseException as primary:
             try:
-                await _finish(started, server, supervisor, lock_fd)
+                await finish(started, server, supervisor, lock_fd)
             except BaseException as cleanup:
                 raise BaseExceptionGroup(
                     "root operation and teardown failed", [primary, cleanup]
@@ -170,11 +170,11 @@ async def run(options: DaemonOptions) -> int:
             # Participants first: their loops touch the tree, so they stop while it
             # (and the control server) still exist. A failing stop never blocks the
             # tree shutdown below.
-            await _finish(started, server, supervisor, lock_fd)
+            await finish(started, server, supervisor, lock_fd)
         return 0
 
 
-async def _finish(
+async def finish(
     started: list[WiringParticipant], server: ControlServer, supervisor: Supervisor, lock_fd: int
 ) -> None:
     """Attempt each owned teardown once, releasing the singleton even on failure."""

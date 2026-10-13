@@ -299,10 +299,10 @@ def _parse_periods(model: str, raw_periods: list[dict[str, Any]]) -> tuple[_Effe
 def load_archive() -> dict[str, ModelPrice]:
     path = Path(__file__).with_name("pricing_catalog_archive.json")
     raw = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
-    return _parse_catalog(raw)
+    return parse_catalog(raw)
 
 
-def _parse_catalog(raw: dict[str, Any]) -> dict[str, ModelPrice]:
+def parse_catalog(raw: dict[str, Any]) -> dict[str, ModelPrice]:
     schema_version = raw["schema_version"]
     if schema_version not in (1, 2) or raw["currency"] != "USD" or raw["unit_tokens"] != 1_000_000:
         raise RuntimeError("unsupported pricing catalog schema, currency, or token unit")

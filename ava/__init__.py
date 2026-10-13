@@ -236,12 +236,6 @@ def __getattr__(name: str) -> Any:
         return _sys.modules[__name__].context.sql
     if name == "REDIS":
         return _sys.modules[__name__].context.redis
-    if name == "external":
-        # Plain `import` binds the submodule on the package; `from . import external`
-        # would re-enter this `__getattr__`.
-        import ava.external
-
-        return ava.external
     if name in ("DB_URL", "REDIS_URL", "GATEWAY_URL"):
         from .sdk_surface import settings as _settings
 

@@ -21,8 +21,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from services.upkeep.ttl_reaper import lifecycle_fences, sweep
 from services.upkeep.ttl_reaper.sweep import (
-    _reap_expired_pages_blocking,
-    _reap_expired_web_sessions_blocking,
+    reap_expired_pages_blocking,
+    reap_expired_web_sessions_blocking,
 )
 
 
@@ -159,7 +159,7 @@ def test_reap_expired_web_sessions_removes_only_expired_rows(
         )
     db_conn.commit()
 
-    assert _reap_expired_web_sessions_blocking(reaper_pool) == 1
+    assert reap_expired_web_sessions_blocking(reaper_pool) == 1
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT id FROM web_sessions ORDER BY id")
@@ -184,7 +184,7 @@ def test_reap_expired_web_sessions_is_limited_to_one_pass_batch(
         )
     db_conn.commit()
 
-    assert _reap_expired_web_sessions_blocking(reaper_pool) == 1
+    assert reap_expired_web_sessions_blocking(reaper_pool) == 1
 
     with db_conn.cursor() as cur:
         cur.execute(
@@ -207,7 +207,7 @@ def test_reap_expired_pages_terminalizes_only_past_deadlines(
         cur.execute("UPDATE agent_pages SET closed_at = now() WHERE id = %s", (closed_id,))
     db_conn.commit()
 
-    reaped = _reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings())
+    reaped = reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings())
 
     assert [(aid, "expired")] == [(a, n) for a, n, _i in reaped]
     expired_closed, expired_marked = _page_state(db_conn, aid, "expired")
@@ -230,7 +230,7 @@ def test_reap_expired_pages_skips_already_terminal(
         )
     db_conn.commit()
 
-    assert _reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings()) == []
+    assert reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings()) == []
 
 
 def test_reap_expired_pages_notifies_only_live_agents(
@@ -247,7 +247,7 @@ def test_reap_expired_pages_notifies_only_live_agents(
     _open_page(db_conn, live, "live-page", expires_at=datetime.now(UTC) - timedelta(seconds=5))
     _open_page(db_conn, dead, "dead-page", expires_at=datetime.now(UTC) - timedelta(seconds=5))
 
-    _reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings())
+    reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings())
 
     live_msgs = _system_inbounds(db_conn, live)
     assert len(live_msgs) == 1
@@ -287,7 +287,7 @@ def test_prune_schedule_fire_log_deletes_every_row_past_the_window(
     _insert_fire_log(db_conn, s2, [50 * 24, 45 * 24])
     db_conn.commit()
 
-    pruned = sweep._prune_schedule_fire_log_blocking(reaper_pool)
+    pruned = sweep.prune_schedule_fire_log_blocking(reaper_pool)
 
     assert pruned == 5
     with db_conn.cursor() as cur:
@@ -303,21 +303,21 @@ def test_prune_schedule_fire_log_is_bounded_per_pass(
     reaper_pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One pass deletes at most _FIRE_LOG_PASS_BATCH rows; the backlog drains
+    """One pass deletes at most FIRE_LOG_PASS_BATCH rows; the backlog drains
     over successive passes."""
-    monkeypatch.setattr(sweep, "_FIRE_LOG_PASS_BATCH", 2)
+    monkeypatch.setattr(sweep, "FIRE_LOG_PASS_BATCH", 2)
     s1 = _new_schedule(db_conn, "fire-log-bounded")
     _insert_fire_log(db_conn, s1, [50 * 24, 49 * 24, 48 * 24, 47 * 24, 46 * 24])
     db_conn.commit()
 
-    assert sweep._prune_schedule_fire_log_blocking(reaper_pool) == 2
+    assert sweep.prune_schedule_fire_log_blocking(reaper_pool) == 2
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
         remaining = cur.fetchone()
         assert remaining is not None and remaining[0] == 3
 
-    assert sweep._prune_schedule_fire_log_blocking(reaper_pool) == 2
-    assert sweep._prune_schedule_fire_log_blocking(reaper_pool) == 1
+    assert sweep.prune_schedule_fire_log_blocking(reaper_pool) == 2
+    assert sweep.prune_schedule_fire_log_blocking(reaper_pool) == 1
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
         remaining = cur.fetchone()

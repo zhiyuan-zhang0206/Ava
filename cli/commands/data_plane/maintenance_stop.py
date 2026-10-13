@@ -58,11 +58,11 @@ def capture_postgres() -> OwnedProcess | None:
     return ownership.postgres(instance.pg_data_dir())
 
 
-def _capture_pooler() -> OwnedProcess | None:
+def capture_pooler() -> OwnedProcess | None:
     return ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
 
 
-def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
+def require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
     """A missing pidfile or refused port is not evidence of no local process."""
     directories = {
         "postgres": instance.pg_data_dir().resolve(),
@@ -136,7 +136,7 @@ async def _redis_command(client: Redis, deadline: float, *args: str) -> object:
     )
 
 
-def _postgres_fast_budget(deadline: float) -> float:
+def postgres_fast_budget(deadline: float) -> float:
     """How long Postgres' fast shutdown may take: what is left of the stop's deadline minus
     the legs that follow it, so a stuck fast shutdown cannot spend the whole shared budget.
 
@@ -150,7 +150,7 @@ def _postgres_fast_budget(deadline: float) -> float:
     return left - reserve if left > reserve else left
 
 
-async def _request_stop(
+async def request_stop(
     name: str,
     identity: OwnedProcess,
     client: Redis,
@@ -167,7 +167,7 @@ async def _request_stop(
         escalation = owned_postgres.stop(
             instance.pg_data_dir(),
             expected=identity,
-            timeout=_postgres_fast_budget(deadline),
+            timeout=postgres_fast_budget(deadline),
             immediate_wait=PROCESS_CLEANUP_WAIT_S,
             kill_wait=PROCESS_KILL_WAIT_S,
             retained_children=retained_children,
@@ -198,7 +198,7 @@ async def _stop(
     producer: Callable[[], EventPipeline],
 ) -> list[str]:
     pg = capture_postgres()
-    pgb = _capture_pooler()
+    pgb = capture_pooler()
     port = ownership.configured_redis_port()
     if port is None:
         raise RuntimeError("maintenance requires this home's explicit Redis endpoint")
@@ -225,7 +225,7 @@ async def _stop(
             for name, process in (("pgbouncer", pgb), ("postgres", pg), ("redis", redis_process))
             if process is not None
         }
-        _require_no_unrecorded(captured)
+        require_no_unrecorded(captured)
         trees = {name: capture_tree(process) for name, process in captured.items()}
         # Every service is identified before the first stop; no foreign Redis
         # endpoint can be discovered only after the local database was stopped.
@@ -236,7 +236,7 @@ async def _stop(
                 raise RuntimeError(f"{name} identity changed before stop")
             if name == "pgbouncer":
                 report_pooler_clients(identity, clients)
-            await _request_stop(
+            await request_stop(
                 name,
                 identity,
                 client,
@@ -249,9 +249,9 @@ async def _stop(
             wait_for_exit(trees[name], deadline)
             stopped.append(name)
         remaining(deadline)
-        if capture_postgres() is not None or _capture_pooler() is not None:
+        if capture_postgres() is not None or capture_pooler() is not None:
             raise RuntimeError("data-plane process appeared during held stop")
-        _require_no_unrecorded({})
+        require_no_unrecorded({})
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=remaining(deadline)):
                 raise RuntimeError("Redis endpoint still accepts connections after held stop")

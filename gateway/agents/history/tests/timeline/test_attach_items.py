@@ -530,10 +530,10 @@ class TestTimelineDispatch:
 def test_item_sort_key_is_numeric_not_lexical() -> None:
     """item_id ordering is numeric (msg_idx, block_idx), so "10.0" follows "2.0"
     and "3.10" follows "3.2" — a lexical sort would get both backwards."""
-    from gateway.agents.history.timeline import _item_sort_key
+    from gateway.agents.history.timeline import item_sort_key
 
-    assert _item_sort_key("2.0") < _item_sort_key("10.0")
-    assert _item_sort_key("3.2") < _item_sort_key("3.10")
+    assert item_sort_key("2.0") < item_sort_key("10.0")
+    assert item_sort_key("3.2") < item_sort_key("3.10")
 
     def test_attach_message_renders_through_full_dispatch(
         self,

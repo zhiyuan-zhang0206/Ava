@@ -70,7 +70,7 @@ def _config_overrides(workspace: Path) -> str:
     return f"-c {shlex.quote(trusted)} -c check_for_update_on_startup=false"
 
 
-def _wait_for_ready(sid: int, timeout: float = 90.0) -> None:
+def wait_for_ready(sid: int, timeout: float = 90.0) -> None:
     """Wait until Codex has finished MCP startup after publishing its handle.
 
     len(output) > 50 alone is a FALSE ready signal: the TUI renders its frame
@@ -113,7 +113,7 @@ def _dead_session_warning(action: str, exc: ValueError) -> None:
     )
 
 
-def _verify_submitted(sid: int, timeout: float = 60.0) -> None:
+def verify_submitted(sid: int, timeout: float = 60.0) -> None:
     """The bootstrap message must actually submit, not park in the composer.
 
     Submission signal = capture shows "Working" (Codex's busy state line). If
@@ -157,7 +157,7 @@ def _verify_submitted(sid: int, timeout: float = 60.0) -> None:
         )
 
 
-def _read_session_id(sid: int, timeout: float = 20.0) -> str:
+def read_session_id(sid: int, timeout: float = 20.0) -> str:
     """The Codex session id, read from the ``/status`` card of the ready TUI.
 
     It is the id ``codex resume <id>`` takes, and it is what a person sees in
@@ -182,7 +182,7 @@ def _read_session_id(sid: int, timeout: float = 20.0) -> str:
     )
 
 
-def _supervisor_code(owner: coding_session_owner.CodingSessionOwner, watcher: Path) -> str:
+def supervisor_code(owner: coding_session_owner.CodingSessionOwner, watcher: Path) -> str:
     """Run the skill's supervisor ``watch`` for exactly this generation."""
     if owner.generation is None or owner.owner_agent_id is None or owner.work_file is None:
         raise RuntimeError("launching owner is missing supervisor inputs")
@@ -195,32 +195,32 @@ def _supervisor_code(owner: coding_session_owner.CodingSessionOwner, watcher: Pa
     )
 
 
-def _supervisor_command(owner: coding_session_owner.CodingSessionOwner, watcher: Path) -> str:
+def supervisor_command(owner: coding_session_owner.CodingSessionOwner, watcher: Path) -> str:
     """The supervisor PTY's command, with the owner's identity pinned in its environment."""
-    code = _supervisor_code(owner, watcher)
+    code = supervisor_code(owner, watcher)
     return (
         f"exec env AVA_AGENT_ID={owner.owner_agent_id} "
         f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
     )
 
 
-def _supervisor_name(owner: coding_session_owner.CodingSessionOwner) -> str:
+def supervisor_name(owner: coding_session_owner.CodingSessionOwner) -> str:
     if owner.generation is None:
         raise RuntimeError("launching owner has no generation")
     return coding_session_owner.supervisor_suffix(owner.key, owner.generation)
 
 
-def _launch_supervisor(
+def launch_supervisor(
     owner: coding_session_owner.CodingSessionOwner, ttl_seconds: float, watcher: Path
 ) -> tuple[int, str]:
     """Launch a quiet PTY supervisor that cannot resurrect a terminated owner."""
     supervisor_ttl = min(ttl_seconds + _SUPERVISOR_TTL_PADDING_SECONDS, 86_400)
-    suffix = _supervisor_name(owner)
+    suffix = supervisor_name(owner)
     session_id = sessions.new(
         name=suffix,
         ttl=supervisor_ttl,
     )
-    command = _supervisor_command(owner, watcher)
+    command = supervisor_command(owner, watcher)
     try:
         sessions.send(session_id, command)
     except BaseException:
@@ -245,7 +245,7 @@ def _app_server_endpoint(key: coding_session_owner.CodingSessionKey, generation:
     return f"unix://{socket_path}"
 
 
-def _app_server_command(
+def app_server_command(
     owner: coding_session_owner.CodingSessionOwner,
     workspace: Path,
     endpoint: str,
@@ -300,7 +300,7 @@ def _app_server_log_path(owner: coding_session_owner.CodingSessionOwner) -> Path
     return owner.state_dir / "app-server.log"
 
 
-def _wait_for_app_server(
+def wait_for_app_server(
     endpoint: str, timeout: float = 20.0, *, log_path: Path | None = None
 ) -> None:
     """Block until the shared app server accepts a connection on its socket.
@@ -340,7 +340,7 @@ def _wait_for_app_server(
     )
 
 
-def _codex_command(
+def codex_command(
     workspace: Path,
     caller_instance: str | None = None,
     remote: str | None = None,
@@ -415,7 +415,7 @@ def cancel(workspace: Path, generation: str) -> int:
 
 
 @dataclass(frozen=True)
-class _LaunchRequest:
+class LaunchRequest:
     """One launch's inputs, checked: a takeover carries a name and briefing and
     no files; a supervised worker carries both files."""
 
@@ -445,13 +445,13 @@ def _checked_brief(
     return ""
 
 
-def _start_codex(
+def start_codex(
     sid: int,
     key: coding_session_owner.CodingSessionKey,
     owner: coding_session_owner.CodingSessionOwner,
     generation: str,
     owner_agent_id: int,
-    request: _LaunchRequest,
+    request: LaunchRequest,
 ) -> tuple[str | None, str]:
     """Start Codex in the published PTY and deliver its launch message.
 
@@ -462,17 +462,17 @@ def _start_codex(
     if request.takeover_name is not None:
         remote = _app_server_endpoint(key, generation)
         sessions.send(
-            sid, _app_server_command(owner, request.workspace, remote, request.caller_instance)
+            sid, app_server_command(owner, request.workspace, remote, request.caller_instance)
         )
-        _wait_for_app_server(remote, log_path=_app_server_log_path(owner))
+        wait_for_app_server(remote, log_path=_app_server_log_path(owner))
     sessions.send(
         sid,
-        _codex_command(
+        codex_command(
             request.workspace, request.caller_instance, remote=remote, resume=request.resume
         ),
     )
-    _wait_for_ready(sid)
-    codex_session = _read_session_id(sid)
+    wait_for_ready(sid)
+    codex_session = read_session_id(sid)
     if request.resume is not None and codex_session != request.resume:
         raise RuntimeError(
             f"codex reopened session {codex_session}, not the requested {request.resume}"
@@ -496,14 +496,14 @@ def _start_codex(
             resumed=request.resume is not None,
         )
     sessions.send(sid, message)
-    _verify_submitted(sid)
+    verify_submitted(sid)
     return remote, codex_session
 
 
 def _start_generation(
     key: coding_session_owner.CodingSessionKey,
     owner: coding_session_owner.CodingSessionOwner,
-    request: _LaunchRequest,
+    request: LaunchRequest,
 ) -> tuple[coding_session_owner.CodingSessionOwner, str | None, str]:
     """Supervise, publish and start one fresh generation; roll back on failure.
 
@@ -524,7 +524,7 @@ def _start_generation(
         if request.takeover_name is not None:
             owner.state_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
         else:
-            watcher_id, watcher_name = _launch_supervisor(
+            watcher_id, watcher_name = launch_supervisor(
                 owner, request.ttl_seconds, request.skill_dir / "scripts" / "watch_work.py"
             )
             owner = coding_session_owner.attach_supervisor(
@@ -541,7 +541,7 @@ def _start_generation(
             session_id=sid,
             session_name=full_name,
         )
-        remote, codex_session = _start_codex(sid, key, owner, generation, owner_agent_id, request)
+        remote, codex_session = start_codex(sid, key, owner, generation, owner_agent_id, request)
     except BaseException:
         # Another launch's sweep may have reclaimed this generation's record by
         # now, so its CAS cannot reclaim this PTY. The launcher still owns the
@@ -576,7 +576,7 @@ def launch(
     """
     from base.agents.messages.external_caller import launch_caller_assignment
 
-    request = _LaunchRequest(
+    request = LaunchRequest(
         workspace,
         tasks_file,
         work_file,

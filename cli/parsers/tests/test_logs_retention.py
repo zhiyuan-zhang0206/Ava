@@ -423,19 +423,19 @@ def test_configured_days_apply_when_the_flag_is_omitted(
 def test_service_stdout_names_are_managed_and_follow_service_family_rules(
     name: str, family: str
 ) -> None:
-    from cli.commands.observability.logs import _MANAGED_LOG_NAME, _log_family
+    from cli.commands.observability.logs import MANAGED_LOG_NAME, log_family
 
-    match = _MANAGED_LOG_NAME.fullmatch(name)
+    match = MANAGED_LOG_NAME.fullmatch(name)
     assert match is not None
     assert match["svcout"] == name
-    assert _log_family(match) == family
+    assert log_family(match) == family
 
 
 def test_agent_and_shell_names_keep_precedence_over_service_stdout() -> None:
-    from cli.commands.observability.logs import _MANAGED_LOG_NAME
+    from cli.commands.observability.logs import MANAGED_LOG_NAME
 
-    agent = _MANAGED_LOG_NAME.fullmatch("ava-agent-12.out.log")
-    shell = _MANAGED_LOG_NAME.fullmatch("ava-agent-12-shell-3-review.out.log")
+    agent = MANAGED_LOG_NAME.fullmatch("ava-agent-12.out.log")
+    shell = MANAGED_LOG_NAME.fullmatch("ava-agent-12-shell-3-review.out.log")
 
     assert agent is not None and agent["agent"] is not None and agent["svcout"] is None
     assert shell is not None and shell["shell"] is not None and shell["svcout"] is None
@@ -453,12 +453,12 @@ def test_agent_and_shell_names_keep_precedence_over_service_stdout() -> None:
     ],
 )
 def test_copytruncate_archives_are_managed(name: str, group: str, family: str) -> None:
-    from cli.commands.observability.logs import _MANAGED_LOG_NAME, _log_family
+    from cli.commands.observability.logs import MANAGED_LOG_NAME, log_family
 
-    match = _MANAGED_LOG_NAME.fullmatch(name)
+    match = MANAGED_LOG_NAME.fullmatch(name)
     assert match is not None
     assert match[group] == name
-    assert _log_family(match) == family
+    assert log_family(match) == family
 
 
 def test_active_service_stdout_is_excluded_via_open_path_snapshot(
@@ -513,12 +513,12 @@ def test_retention_deletes_expired_service_stdout_and_native_archive(
 
 
 def test_snapshot_names_map_to_snapshot_family() -> None:
-    from cli.commands.observability.logs import _MANAGED_LOG_NAME, _log_family
+    from cli.commands.observability.logs import MANAGED_LOG_NAME, log_family
 
-    match = _MANAGED_LOG_NAME.fullmatch("agent-42-20260911T144255403250.png")
+    match = MANAGED_LOG_NAME.fullmatch("agent-42-20260911T144255403250.png")
     assert match is not None
     assert match["snapshot"] == "agent-42-20260911T144255403250.png"
-    assert _log_family(match) == "snapshot"
+    assert log_family(match) == "snapshot"
 
 
 def test_snapshot_retention_scans_the_nested_computer_dir(
@@ -569,12 +569,12 @@ def test_snapshot_retention_scans_the_nested_computer_dir(
 
 def test_retention_family_sets_stay_in_sync() -> None:
     from base.host.system.logs_job import FAMILY_DAYS
-    from cli.commands.observability.logs import _FAMILY_DEFAULT_DAYS
-    from cli.parsers.logs import _FAMILY_DAYS_NAMES
+    from cli.commands.observability.logs import FAMILY_DEFAULT_DAYS
+    from cli.parsers.logs import FAMILY_DAYS_NAMES
 
-    assert set(_FAMILY_DEFAULT_DAYS) == set(_FAMILY_DAYS_NAMES) - {"default"}
+    assert set(FAMILY_DEFAULT_DAYS) == set(FAMILY_DAYS_NAMES) - {"default"}
     job_families: dict[str, str] = {}
     for item in FAMILY_DAYS.split(","):
         family, _, days = item.partition("=")
         job_families[family] = days
-    assert job_families == {family: str(days) for family, days in _FAMILY_DEFAULT_DAYS.items()}
+    assert job_families == {family: str(days) for family, days in FAMILY_DEFAULT_DAYS.items()}

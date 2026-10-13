@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 
 from base.config import settings
 from base.events.live.redis_client import (
-    _AuthRetryAsyncRedis,
-    _AuthRetrySyncRedis,
+    AuthRetryAsyncRedis,
+    AuthRetrySyncRedis,
     open_async_redis,
     open_sync_redis,
     publish_sync_via,
@@ -51,7 +51,7 @@ class EventBus:
     def __init__(self, config: EventBusConfig) -> None:
         self._config = config
         self._warn_last: dict[tuple[str, str], float] = {}
-        self._clients: dict[asyncio.AbstractEventLoop, _AuthRetryAsyncRedis] = {}
+        self._clients: dict[asyncio.AbstractEventLoop, AuthRetryAsyncRedis] = {}
 
     @classmethod
     def from_settings(cls) -> EventBus:
@@ -63,11 +63,11 @@ class EventBus:
         """The channel live lifecycle and UI events are published on."""
         return self._config.events_channel
 
-    def open_async_redis(self, *, decode_responses: bool = True) -> _AuthRetryAsyncRedis:
+    def open_async_redis(self, *, decode_responses: bool = True) -> AuthRetryAsyncRedis:
         """A new async client for a caller-owned connection lifecycle (pub/sub subscribers)."""
         return open_async_redis(self._config.redis_url, decode_responses=decode_responses)
 
-    def async_redis(self) -> _AuthRetryAsyncRedis:
+    def async_redis(self) -> AuthRetryAsyncRedis:
         """The shared async client of the running event loop; callers must not close it."""
         loop = asyncio.get_running_loop()
         client = self._clients.get(loop)
@@ -76,7 +76,7 @@ class EventBus:
             self._clients[loop] = client
         return client
 
-    def sync_redis(self, *, decode_responses: bool = False) -> _AuthRetrySyncRedis:
+    def sync_redis(self, *, decode_responses: bool = False) -> AuthRetrySyncRedis:
         """A new synchronous client; the caller owns it and closes it."""
         return open_sync_redis(self._config.redis_url, decode_responses=decode_responses)
 

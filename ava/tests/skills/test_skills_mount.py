@@ -7,8 +7,8 @@ import pytest
 import ava.skills as skills_mod
 from ava.sdk_surface import skill_sources
 from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
-from ava.tests.skills._skills_helpers import _write_skill
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
+from ava.tests.skills._skills_helpers import write_skill
 from base.packages.extensions import install_registry
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
@@ -78,8 +78,8 @@ def test_mount_hash_dedup_respects_different_content(tmp_path: Path) -> None:
 def test_mount_hash_dedup_does_not_affect_single_root(fake_skills_dir: Path) -> None:
     """Single root with unique skills — hash dedup is a no-op; all skills
     are loaded normally."""
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
-    _write_skill(fake_skills_dir, "beta", "name: beta\ndescription: b")
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
+    write_skill(fake_skills_dir, "beta", "name: beta\ndescription: b")
     # Use skills_in with a single root (simulates _scan_tree's per-root calls
     # with a shared seen_hashes set — here the set is fresh per skills_in).
     skills = skills_mod.skills_in([fake_skills_dir])
@@ -163,7 +163,7 @@ def test_mount_hash_dedup_same_content_across_mount_calls_in_scan_tree(
     content = "---\nname: dup-skill\ndescription: Same everywhere\n---\n\n# Dup\n"
 
     # Put skill in overlay (fake_skills_dir)
-    _write_skill(
+    write_skill(
         fake_skills_dir, "dup-skill", "name: dup-skill\ndescription: Same everywhere", body="# Dup"
     )
 
@@ -340,7 +340,7 @@ def test_auto_promote_help_renders_root_skill(
 def test_dash_dir_renders_dash_identifier_and_underscore_target(fake_skills_dir: Path) -> None:
     """The canonical case: a dash-named skill displays with dashes and is
     reached through the underscore attribute path."""
-    _write_skill(
+    write_skill(
         fake_skills_dir, "write-a-pr-description", "name: write-a-pr-description\ndescription: d"
     )
     (skill,) = skills_mod.names()
@@ -353,7 +353,7 @@ def test_legacy_underscore_dir_still_loads_and_displays_dash(fake_skills_dir: Pa
     """A hand-installed skill still spelled with underscores (the shape of an
     instance-local `~/.agents/skills/` package nobody renamed) keeps loading, keeps
     resolving under the Python path, and presents the canonical dash name."""
-    _write_skill(fake_skills_dir, "page_ocr", "name: page_ocr\ndescription: read page")
+    write_skill(fake_skills_dir, "page_ocr", "name: page_ocr\ndescription: read page")
     (skill,) = skills_mod.names()
     assert skills_mod.identifier(skill) == "page-ocr"
     assert skills_mod.target(skill) == "page_ocr"
@@ -364,7 +364,7 @@ def test_legacy_underscore_namespace_dir_still_loads(fake_skills_dir: Path) -> N
     """Same for a namespace folder: `web_ai/console/` reads as `web-ai:console`
     and is reached at `ava.skills.web_ai.console`."""
     (fake_skills_dir / "web_ai").mkdir()
-    _write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
+    write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
     (skill,) = skills_mod.names()
     assert skills_mod.identifier(skill) == "web-ai:console"
     assert skills_mod.target(skill) == "web_ai.console"
@@ -378,7 +378,7 @@ def test_registry_gate_matches_across_the_dash_underscore_fold(
     written before the rename still enables the renamed directory — otherwise
     every skill would silently vanish between the code upgrade and the next
     converge."""
-    _write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
+    write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"ava-goal"})
     assert [skills_mod.identifier(s) for s in skills_mod.names()] == ["ava-goal"]
 
@@ -387,7 +387,7 @@ def test_registry_gate_still_hides_an_unlisted_skill(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The normalized gate must not turn into a pass-through."""
-    _write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
+    write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"something-else"})
     assert skills_mod.names() == []
 
@@ -395,8 +395,8 @@ def test_registry_gate_still_hides_an_unlisted_skill(
 def test_colliding_dash_and_underscore_dirs_are_refused(fake_skills_dir: Path) -> None:
     """`foo-bar/` beside `foo_bar/` fold to one attribute path. The tree can
     hold one, so the loader refuses rather than silently dropping a skill."""
-    _write_skill(fake_skills_dir, "foo-bar", "name: foo-bar\ndescription: dash one")
-    _write_skill(fake_skills_dir, "foo_bar", "name: foo_bar\ndescription: underscore one")
+    write_skill(fake_skills_dir, "foo-bar", "name: foo-bar\ndescription: dash one")
+    write_skill(fake_skills_dir, "foo_bar", "name: foo_bar\ndescription: underscore one")
     with pytest.raises(skills_mod.SkillNameCollision) as e:
         skills_mod.names()
     assert "foo_bar" in str(e.value)
@@ -406,8 +406,8 @@ def test_colliding_namespace_folders_are_refused(fake_skills_dir: Path) -> None:
     """The collision guard covers namespace segments, not just leaf names."""
     (fake_skills_dir / "web-ai").mkdir()
     (fake_skills_dir / "web_ai").mkdir()
-    _write_skill(fake_skills_dir / "web-ai", "console", "name: console\ndescription: a")
-    _write_skill(fake_skills_dir / "web_ai", "media", "name: media\ndescription: b")
+    write_skill(fake_skills_dir / "web-ai", "console", "name: console\ndescription: a")
+    write_skill(fake_skills_dir / "web_ai", "media", "name: media\ndescription: b")
     with pytest.raises(skills_mod.SkillNameCollision):
         skills_mod.names()
 
@@ -418,8 +418,8 @@ def test_two_skills_claiming_one_frontmatter_name_are_refused(fake_skills_dir: P
     the directory's own name, so a `second/` dir claiming `first` is a
     mismatch — the old silent-winner collision is now unreachable because the
     identity check fires first."""
-    _write_skill(fake_skills_dir, "first", "name: first\ndescription: a")
-    _write_skill(fake_skills_dir, "second", "name: first\ndescription: b")
+    write_skill(fake_skills_dir, "first", "name: first\ndescription: a")
+    write_skill(fake_skills_dir, "second", "name: first\ndescription: b")
     from base.packages.skills.names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
@@ -431,10 +431,10 @@ def test_a_provider_root_may_still_override_a_same_named_skill(
 ) -> None:
     """The collision guard is per mount root: a project-local skill overriding a
     converged one is the documented provider-root behaviour, not a collision."""
-    _write_skill(fake_skills_dir, "tdd", "name: tdd\ndescription: converged")
+    write_skill(fake_skills_dir, "tdd", "name: tdd\ndescription: converged")
     project = tmp_path / "project-skills"
     project.mkdir()
-    _write_skill(project, "tdd", "name: tdd\ndescription: project-local")
+    write_skill(project, "tdd", "name: tdd\ndescription: project-local")
     with skill_sources.scoped(lambda: [project]):
         (skill,) = skills_mod.names()
         assert skill["description"] == "project-local"
@@ -462,7 +462,7 @@ def test_index_gate_still_hides_unlisted_dirs(
 ) -> None:
     """The folded gate must not turn into a pass-through: an unlisted
     directory's INDEX.md sets no doc."""
-    _write_skill(fake_skills_dir, "foo_bar", "name: foo-bar\ndescription: s")
+    write_skill(fake_skills_dir, "foo_bar", "name: foo-bar\ndescription: s")
     (fake_skills_dir / "foo_bar" / "INDEX.md").write_text("namespace doc", encoding="utf-8")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"something-else"})
     assert skills_mod.names() == []
@@ -474,7 +474,7 @@ def test_root_index_md_is_ignored(fake_skills_dir: Path) -> None:
     for the merged single traversal, which now visits the root folder)."""
     (fake_skills_dir / "INDEX.md").write_text("root doc", encoding="utf-8")
     (fake_skills_dir / "feeds").mkdir()
-    _write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
+    write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
     assert skills_mod.feeds.__doc__ == "Contains: rss"
 
 
@@ -487,7 +487,7 @@ def test_root_skill_md_still_loads(fake_skills_dir: Path) -> None:
         encoding="utf-8",
     )
     (fake_skills_dir / "feeds").mkdir()
-    _write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
+    write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
     assert skills_mod.root_skill.name == "root-skill"
     assert [s["name"] for s in skills_mod.names()] == ["rss", "root-skill"]
 
@@ -500,7 +500,7 @@ def test_frontmatter_name_not_folding_to_dir_is_refused(
     frontmatter says `page` inside a `page-ocr/` directory used to load
     under a name that was not its own; the loader refuses it now (same
     family as SkillNameCollision)."""
-    _write_skill(fake_skills_dir, "page-ocr", "name: page\ndescription: read page")
+    write_skill(fake_skills_dir, "page-ocr", "name: page\ndescription: read page")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"page-ocr"})
     from base.packages.skills.names import SkillIdentityMismatch
 
@@ -515,7 +515,7 @@ def test_namespaced_subskill_folds_against_its_leaf_dir(
     (the install point), not the namespace — `web_ai/console/` with
     `name: console` is consistent."""
     (fake_skills_dir / "web_ai").mkdir()
-    _write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
+    write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"web_ai"})
     (skill,) = skills_mod.names()
     assert skills_mod.identifier(skill) == "web-ai:console"

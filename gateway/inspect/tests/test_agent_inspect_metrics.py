@@ -2,7 +2,7 @@
 
 The inspector surface of the plugin metric system: the gateway builds the
 metric registry in process (task #180 PR D — mocked here by patching
-`_load_plugin_metrics`), keeps `output`-inspector metrics, renders each
+`load_plugin_metrics`), keeps `output`-inspector metrics, renders each
 template for the agent, re-validates the rendered query, substitutes the
 Grafana time macros with a fixed window, and executes the query — LogQL
 against a fake Loki client, SQL against the test DB.
@@ -34,8 +34,8 @@ from base.packages.plugins import enable_config
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 from gateway.inspect import _plugin_metrics
 from gateway.inspect._plugin_metrics import (
-    _render_metric_query,
-    _translate_macros,
+    render_metric_query,
+    translate_macros,
 )
 from gateway.inspect.router import router
 
@@ -97,7 +97,7 @@ def _patch_loader(monkeypatch: pytest.MonkeyPatch, *metrics: dict[str, Any]) -> 
     task #180 PR D equivalent of the old snapshot file (the loader itself is
     covered separately by `test_in_process_loader_imports_shipped_metrics`)."""
     specs = [MetricSpec.model_validate(m) for m in metrics]
-    monkeypatch.setattr(_plugin_metrics, "_load_plugin_metrics", lambda: specs)
+    monkeypatch.setattr(_plugin_metrics, "load_plugin_metrics", lambda: specs)
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
@@ -195,7 +195,7 @@ def test_metrics_macro_translation_unit() -> None:
     """The Grafana macros translate to the fixed inspector window; macro
     arguments (file-controlled) are consumed wholesale and never reach the
     output."""
-    sql = _translate_macros(
+    sql = translate_macros(
         "SELECT $__timeGroup(ts, $__interval) AS time, count(*) "
         "FROM agents_meta WHERE event_name = 'k' AND $__timeFilter(ts) "
         "AND $__timeFilter(ts, 'extra')"
@@ -206,7 +206,7 @@ def test_metrics_macro_translation_unit() -> None:
     assert "ts >= now() - interval '24 hours'" in sql
     assert "$__" not in sql
     # a weird argument inside the macro parens is discarded, not echoed
-    sql2 = _translate_macros(
+    sql2 = translate_macros(
         "SELECT count(*) FROM agents_meta WHERE $__timeFilter(attributes->>'model')"
     )
     assert "attributes" not in sql2
@@ -254,7 +254,7 @@ def test_metrics_render_requires_agent_id_400() -> None:
     {{agent_id}} idiom lives in the LogQL dialect (task #180 PR C)."""
     spec = MetricSpec.model_validate(_logql_metric())
     with pytest.raises(HTTPException) as exc_info:
-        _render_metric_query(spec, agent_id=None)
+        render_metric_query(spec, agent_id=None)
     assert exc_info.value.status_code == 400
 
 
@@ -262,7 +262,7 @@ def test_metrics_render_static_sql_passes_through() -> None:
     """A static SQL query renders verbatim and passes the whitelist (the
     template era is over, task #180 PR C)."""
     spec = MetricSpec.model_validate(_metric())
-    query = _render_metric_query(spec, agent_id=7)
+    query = render_metric_query(spec, agent_id=7)
     assert query == _DEMO_QUERY
     assert "{event_name}" not in query
 
@@ -464,7 +464,7 @@ def test_metrics_logql_tampered_query_500(
 def test_metrics_logql_macro_translation_unit() -> None:
     """LogQL macros translate to the fixed window: $__interval -> 1h
     (LogQL duration syntax — '1 hour' is not a duration), $__range -> 24h."""
-    translated = _translate_macros(
+    translated = translate_macros(
         'sum(count_over_time({service_name="unknown_service"} | json | '
         'event_name="x" [$__interval])) + sum(sum_over_time({service_name="unknown_service"} | json | '
         'event_name="x" | unwrap attributes_cost_usd [$__range]))',
@@ -483,7 +483,7 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     `contribute()` declaration into a data registry plus the core definition
     modules — plugin metrics first, then core, the old snapshot's two-section
     order. No file involved."""
-    specs = _plugin_metrics._load_plugin_metrics()
+    specs = _plugin_metrics.load_plugin_metrics()
 
     plugin_specs = [s for s in specs if s.plugin != "core"]
     core_specs = [s for s in specs if s.plugin == "core"]
@@ -494,14 +494,14 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     assert [s.plugin for s in specs].index("core") == len(plugin_specs)
     assert len(core_specs) >= 16
     # a second call rebuilds the same registry (no process-global state to double up)
-    assert _plugin_metrics._load_plugin_metrics() == specs
+    assert _plugin_metrics.load_plugin_metrics() == specs
 
 
 def test_a_disabled_plugins_metrics_are_not_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
     """Metrics follow the enable rule the widgets already follow: a disabled shipped plugin
     contributes none (the per-agent inspector panel), read per request."""
-    shipped = _plugin_metrics._PLUGINS_DIR / "ava_fleet" / "metrics.py"
-    assert shipped in _plugin_metrics._plugin_metric_modules()
+    shipped = _plugin_metrics.PLUGINS_DIR / "ava_fleet" / "metrics.py"
+    assert shipped in _plugin_metrics.plugin_metric_modules()
     real_load = enable_config.load_for_runtime
 
     def _fleet_disabled(known: set[str]) -> enable_config.PluginsConfig:
@@ -511,8 +511,8 @@ def test_a_disabled_plugins_metrics_are_not_loaded(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(enable_config, "load_for_runtime", _fleet_disabled)
 
-    assert shipped not in _plugin_metrics._plugin_metric_modules()
-    assert "ava_fleet" not in {s.plugin for s in _plugin_metrics._load_plugin_metrics()}
+    assert shipped not in _plugin_metrics.plugin_metric_modules()
+    assert "ava_fleet" not in {s.plugin for s in _plugin_metrics.load_plugin_metrics()}
 
 
 def _fixture_plugin(
@@ -560,7 +560,7 @@ def fixture_plugins_dir(
 ) -> Path:
     """Point the loader at `tmp_path` as the shipped-plugins directory (the
     fixture plugins are the only ones it sees besides the core metrics)."""
-    monkeypatch.setattr(_plugin_metrics, "_PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr(_plugin_metrics, "PLUGINS_DIR", tmp_path)
     real_load = enable_config.load_for_runtime
 
     def _with_fixture_plugins(known: set[str]) -> enable_config.PluginsConfig:
@@ -589,8 +589,8 @@ def test_in_process_loader_skips_a_failing_module_and_recovers(
     user ruling 2026-09-11)."""
     metrics_py = _fixture_plugin(fixture_plugins_dir, "fx_drop_partial", raises=True)
 
-    _plugin_metrics._load_plugin_metrics()  # must not raise
-    specs = _plugin_metrics._load_plugin_metrics()
+    _plugin_metrics.load_plugin_metrics()  # must not raise
+    specs = _plugin_metrics.load_plugin_metrics()
     assert [s for s in specs if s.plugin == "fx_drop_partial"] == []
     assert {s.plugin for s in specs if s.plugin != "core"} == set()
     assert any(
@@ -601,7 +601,7 @@ def test_in_process_loader_skips_a_failing_module_and_recovers(
     metrics_py.write_text(
         _fixture_metrics_source("fx_drop_partial_one", _STAT_QUERY), encoding="utf-8"
     )
-    specs = _plugin_metrics._load_plugin_metrics()
+    specs = _plugin_metrics.load_plugin_metrics()
     assert [(s.plugin, s.name) for s in specs if s.plugin == "fx_drop_partial"] == [
         ("fx_drop_partial", "fx_drop_partial_one")
     ]
@@ -617,6 +617,6 @@ def test_in_process_loader_refuses_a_plugin_claiming_a_taken_metric_name(
     # Plugins load in sorted order, so `fx_first` is the first claimant.
     _fixture_plugin(fixture_plugins_dir, "fx_thief", metric="fx_shared_name")
 
-    specs = _plugin_metrics._load_plugin_metrics()
+    specs = _plugin_metrics.load_plugin_metrics()
     assert [s.plugin for s in specs if s.name == "fx_shared_name"] == ["fx_first"]
     assert [s for s in specs if s.plugin == "fx_thief"] == []

@@ -20,7 +20,7 @@ _ENQUEUE_FAILURE_SAMPLE = re.compile(
 _LABEL = re.compile(r'(?:^|,)\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>[^"]*)"')
 
 
-def _collector_serves_this_home(*, machine: MachineIdentity) -> bool:
+def collector_serves_this_home(*, machine: MachineIdentity) -> bool:
     """Whether this unit owns a collector that the healthcheck should probe."""
     try:
         roles = machine.role()
@@ -71,7 +71,7 @@ def probe_collector() -> DaemonProbe:
     return DaemonProbe.down("collector does not accept a valid OTLP trace request")
 
 
-def _queue_pressure() -> CollectorPressure | None:
+def queue_pressure() -> CollectorPressure | None:
     """Current saturation plus lifetime enqueue-failure counters.
 
     The counter is reported only as context while a queue is currently full;

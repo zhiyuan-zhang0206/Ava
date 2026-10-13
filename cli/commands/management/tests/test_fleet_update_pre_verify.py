@@ -67,7 +67,7 @@ def _read_rows(checkout: Path, out: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
-            str(fleet_update._VERIFY_SCRIPTS / "schedules_verify_read_rows.py"),
+            str(fleet_update.VERIFY_SCRIPTS / "schedules_verify_read_rows.py"),
             str(out),
         ],
         cwd=checkout,
@@ -111,7 +111,7 @@ def test_a_failing_read_is_an_error_not_a_fallback(tmp_path: Path) -> None:
 
 
 def test_the_read_script_imports_nothing_from_cli_database_unconditionally() -> None:
-    read = fleet_update._read_rows_py()
+    read = fleet_update.read_rows_py()
     assert read.index("inspect.signature") < read.index("cli.database")
     assert not [
         line
@@ -121,11 +121,11 @@ def test_the_read_script_imports_nothing_from_cli_database_unconditionally() -> 
 
 
 def _render(new: str = "deadbeef") -> str:
-    return fleet_update._PRE_VERIFY.format(
-        home=fleet_update._HOME,
+    return fleet_update.PRE_VERIFY.format(
+        home=fleet_update.HOME,
         new=new,
-        read_rows=shlex.quote(fleet_update._read_rows_py()),
-        check_rows=shlex.quote(fleet_update._check_rows_py()),
+        read_rows=shlex.quote(fleet_update.read_rows_py()),
+        check_rows=shlex.quote(fleet_update.check_rows_py()),
     )
 
 
@@ -137,7 +137,7 @@ def test_the_check_goes_through_the_cli_entry_with_a_throwaway_home() -> None:
     assert "cmd_schedules_verify" not in script
     assert '(umask 077; AVA_HOME="$H"' in script  # the rows file holds every stored script
     assert 'rm -f "$R"' in script and 'worktree remove --force "$W"' in script
-    check_py = fleet_update._check_rows_py()
+    check_py = fleet_update.check_rows_py()
     assert "from cli.main import main" in check_py and '"schedules", "verify"' in check_py
     assert '"--rows-file"' in check_py and '"--no-notify"' in check_py
 
@@ -165,7 +165,7 @@ def test_the_real_cli_checks_a_rows_file_offline_under_a_throwaway_home(tmp_path
     proc = subprocess.run(
         [
             sys.executable,
-            str(fleet_update._VERIFY_SCRIPTS / "schedules_verify_check_rows.py"),
+            str(fleet_update.VERIFY_SCRIPTS / "schedules_verify_check_rows.py"),
             str(rows),
         ],
         cwd=repo_root(),

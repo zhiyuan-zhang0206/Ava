@@ -17,24 +17,24 @@ from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gate
 
 def test_code_cell_matches_checkout() -> None:
     """running_sha == head_sha → the short SHA with no drift marker."""
-    from cli.commands.cluster.control import _code_cell
+    from cli.commands.cluster.control import code_cell
 
-    assert _code_cell(running_sha="abc1234def", head_sha="abc1234def") == "abc1234"
+    assert code_cell(running_sha="abc1234def", head_sha="abc1234def") == "abc1234"
 
 
 def test_code_cell_drift_marks_stale_process() -> None:
     """running_sha != head_sha → ⚠ + running short SHA (process running stale code
     vs its checkout)."""
-    from cli.commands.cluster.control import _code_cell
+    from cli.commands.cluster.control import code_cell
 
-    assert _code_cell(running_sha="999888777", head_sha="abc1234def") == "⚠ 9998887"
+    assert code_cell(running_sha="999888777", head_sha="abc1234def") == "⚠ 9998887"
 
 
 def test_code_cell_unknown_running_sha() -> None:
     """No running_sha recorded → em dash."""
-    from cli.commands.cluster.control import _code_cell
+    from cli.commands.cluster.control import code_cell
 
-    assert _code_cell(running_sha=None, head_sha="abc1234def") == "—"
+    assert code_cell(running_sha=None, head_sha="abc1234def") == "—"
 
 
 def test_status_cell_identity_mismatch_outranks_online() -> None:
@@ -42,16 +42,16 @@ def test_status_cell_identity_mismatch_outranks_online() -> None:
     wrong-identity responder is never shown as a plain online host."""
     from datetime import UTC, datetime
 
-    from cli.commands.cluster.control import _status_cell
+    from cli.commands.cluster.control import status_cell
 
     stopped = datetime(2026, 6, 1, 6, 0, tzinfo=UTC)
-    assert _status_cell(online=True, identity_mismatch=True, stopped_at=None) == "MISMATCH"
-    assert _status_cell(online=True, identity_mismatch=False, stopped_at=None) == "online"
-    assert _status_cell(online=False, identity_mismatch=False, stopped_at=stopped) == "stopped"
-    assert _status_cell(online=False, identity_mismatch=False, stopped_at=None) == "offline"
+    assert status_cell(online=True, identity_mismatch=True, stopped_at=None) == "MISMATCH"
+    assert status_cell(online=True, identity_mismatch=False, stopped_at=None) == "online"
+    assert status_cell(online=False, identity_mismatch=False, stopped_at=stopped) == "stopped"
+    assert status_cell(online=False, identity_mismatch=False, stopped_at=None) == "offline"
     # online + a stop marker is the two sources of truth disagreeing, not a green
     # host — see cli/commands/lifecycle/tests/test_rollout_robustness.py for why that mattered.
-    assert _status_cell(online=True, identity_mismatch=False, stopped_at=stopped) == "STALE-STOP"
+    assert status_cell(online=True, identity_mismatch=False, stopped_at=stopped) == "STALE-STOP"
 
 
 def test_cmd_cluster_status_renders_identity_mismatch_and_code_drift(
@@ -200,7 +200,7 @@ def test_roster_read_timeout_derives_from_the_probe_budget(
     from base.config import settings
 
     monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 5.0)
-    assert cluster_control._roster_read_timeout_s() == 9.0
+    assert cluster_control.roster_read_timeout_s() == 9.0
 
 
 def test_cmd_cluster_status_dials_the_derived_read_budget(

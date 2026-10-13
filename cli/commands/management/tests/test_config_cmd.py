@@ -1,6 +1,6 @@
 """`ava config get/set/unset` — the thin client over GET/PUT /api/config.
 
-The gateway calls (`_get_config` / `_put_config`) are monkeypatched, so these
+The gateway calls (`get_config` / `put_config`) are monkeypatched, so these
 tests exercise the client-side logic: key resolution (env-var or field name),
 value coercion by field type, the merge-patch delta (only changed keys; an unset
 is an explicit null), the read-only / unknown-key guards, and the restart hint.
@@ -83,14 +83,14 @@ def captured_put(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Capture the PUT body + return an applied result; seed GET with a view."""
     state: dict[str, Any] = {"body": None, "machine": None, "view": _view()}
 
-    monkeypatch.setattr(cfg, "_get_config", lambda _machine: state["view"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cfg, "get_config", lambda _machine: state["view"])  # pyright: ignore[reportUnknownArgumentType]
 
     def _fake_put(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
         state["body"] = body
         state["machine"] = machine
         return ConfigWriteResult(applied=True, results={}, restart_required=["agent"])
 
-    monkeypatch.setattr(cfg, "_put_config", _fake_put)
+    monkeypatch.setattr(cfg, "put_config", _fake_put)
     return state
 
 
@@ -131,14 +131,14 @@ def test_set_list_field_writes_bare_env_and_round_trips(
             "agent",
         )
     )
-    monkeypatch.setattr(cfg, "_get_config", lambda _machine: view)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cfg, "get_config", lambda _machine: view)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
 
     def _persist(body: dict[str, Any], _machine: str | None) -> ConfigWriteResult:
         runtime_config.write_fields(body, set())
         return ConfigWriteResult(applied=True, results={}, restart_required=["agent"])
 
-    monkeypatch.setattr(cfg, "_put_config", _persist)
+    monkeypatch.setattr(cfg, "put_config", _persist)
 
     rc = cfg.cmd_config_set(["AVA_IM_DISABLED_ADAPTERS=weixin,feishu"], machine=None)
 
@@ -154,13 +154,13 @@ def test_set_sends_only_the_delta(monkeypatch: pytest.MonkeyPatch) -> None:
     are left untouched server-side (merge semantics), so an existing override
     (llm_model here) need not be echoed back and can't be clobbered by a stale GET."""
     state: dict[str, Any] = {"body": None}
-    monkeypatch.setattr(cfg, "_get_config", lambda _machine: _view({"llm_model": "keep"}))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cfg, "get_config", lambda _machine: _view({"llm_model": "keep"}))  # pyright: ignore[reportUnknownArgumentType]
 
     def _fake_put(body: dict[str, Any], _machine: str | None) -> ConfigWriteResult:
         state["body"] = body
         return ConfigWriteResult(applied=True, results={}, restart_required=[])
 
-    monkeypatch.setattr(cfg, "_put_config", _fake_put)
+    monkeypatch.setattr(cfg, "put_config", _fake_put)
     rc = cfg.cmd_config_set(["AVA_OPS_CONCURRENCY=4"], machine=None)
     assert rc == 0
     assert state["body"] == {"ops_concurrency": 4}  # only the delta; llm_model not echoed
@@ -198,7 +198,7 @@ def test_unset_sends_explicit_null(monkeypatch: pytest.MonkeyPatch) -> None:
     state: dict[str, Any] = {"body": None}
     monkeypatch.setattr(
         cfg,
-        "_get_config",
+        "get_config",
         lambda _machine: _view({"llm_model": "x", "ops_concurrency": 4}),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -206,7 +206,7 @@ def test_unset_sends_explicit_null(monkeypatch: pytest.MonkeyPatch) -> None:
         state["body"] = body
         return ConfigWriteResult(applied=True, results={}, restart_required=[])
 
-    monkeypatch.setattr(cfg, "_put_config", _fake_put)
+    monkeypatch.setattr(cfg, "put_config", _fake_put)
     rc = cfg.cmd_config_unset(["AVA_MODEL"], machine=None)
     assert rc == 0
     assert state["body"] == {"llm_model": None}  # explicit null, not omission
@@ -346,7 +346,7 @@ def test_cli_field_editable_mirrors_shared_definition(
         remote_writable=remote_writable,
         per_agent=False,
     )
-    assert cfg._field_editable(view_field, remote=remote) == field_editable(meta, local=not remote)
+    assert cfg.field_editable(view_field, remote=remote) == field_editable(meta, local=not remote)
 
 
 def test_unset_machine_host_field_uses_remote_writable(captured_put: dict[str, Any]) -> None:
@@ -460,7 +460,7 @@ def test_gateway_base_refuses_a_home_with_no_gateway_identity(
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
     (local_env_home / ".env").write_text("OTHER=kept\n")
 
-    with pytest.raises(cfg._ConfigError, match="no gateway identity"):
+    with pytest.raises(cfg.ConfigError, match="no gateway identity"):
         cfg._gateway_base()
 
 
@@ -471,8 +471,8 @@ def test_put_config_refuses_a_home_with_no_identity_even_with_env_override(
     override but never write gateway config — no HTTP call happens."""
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://elsewhere.test:8000")
 
-    with pytest.raises(cfg._ConfigError, match="refusing to write gateway config"):
-        cfg._put_config({"x": "y"}, machine=None)
+    with pytest.raises(cfg.ConfigError, match="refusing to write gateway config"):
+        cfg.put_config({"x": "y"}, machine=None)
 
 
 def test_put_config_refuses_env_override_mismatching_home_identity(
@@ -483,8 +483,8 @@ def test_put_config_refuses_env_override_mismatching_home_identity(
     (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://own-cluster.test:8000\n")
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://other-cluster.test:9000")
 
-    with pytest.raises(cfg._ConfigError, match="does not match this home's gateway"):
-        cfg._put_config({"x": "y"}, machine=None)
+    with pytest.raises(cfg.ConfigError, match="does not match this home's gateway"):
+        cfg.put_config({"x": "y"}, machine=None)
 
 
 def test_local_get_masks_sensitive(
@@ -641,10 +641,10 @@ def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
 
 def test_set_rejected_result_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
     """A host-validated rejection (applied False) surfaces per-field reasons + rc=1."""
-    monkeypatch.setattr(cfg, "_get_config", lambda _machine: _view())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cfg, "get_config", lambda _machine: _view())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         cfg,
-        "_put_config",
+        "put_config",
         lambda _body, _machine: ConfigWriteResult(  # pyright: ignore[reportUnknownArgumentType]
             applied=False,
             results={"ops_concurrency": ConfigFieldWriteResult(ok=False, reason="out of range")},
@@ -658,7 +658,7 @@ def test_set_rejected_result_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_get_single_key(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cfg, "_get_config", lambda _machine: _view())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cfg, "get_config", lambda _machine: _view())  # pyright: ignore[reportUnknownArgumentType]
     rc = cfg.cmd_config_get("AVA_MODEL", machine=None)
     assert rc == 0
     out = capsys.readouterr().out
@@ -743,7 +743,7 @@ def test_config_audit_machine_fetches_via_gateway(
     def _fetch(_machine: str | None, _last: int) -> ConfigAuditView:
         return view
 
-    monkeypatch.setattr(cfg, "_get_config_audit", _fetch)
+    monkeypatch.setattr(cfg, "get_config_audit", _fetch)
 
     assert cfg.cmd_config_audit(last=5, key=None, machine="m1", identity=machine_identity) == 0
     out = capsys.readouterr().out

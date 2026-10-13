@@ -97,7 +97,7 @@ def _fetch_backoff(attempt: int) -> float:
 _SNAPSHOT_NAME = "bootstrap-snapshot.json"
 # Snapshots carry no database credential (bootstrap serves the credential-free
 # endpoint); a snapshot of any other version is never reused.
-_SNAPSHOT_VERSION = 3
+SNAPSHOT_VERSION = 3
 # Freshness window: how long a snapshot may stand in for a live fetch. Bounds
 # cluster-edit propagation to a few minutes in steady state (the first child
 # past the window re-fetches and refreshes the snapshot) while keeping the
@@ -313,7 +313,7 @@ def _snapshot_path() -> Path:
     return resolve_ava_home() / "run" / _SNAPSHOT_NAME
 
 
-def _read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
+def read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
     """The last-known cluster config and its age in seconds, or None.
 
     Guards: the snapshot must have been written for the SAME gateway URL (a
@@ -328,7 +328,7 @@ def _read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
     if not isinstance(raw, dict):
         return None
     data = cast("dict[str, Any]", raw)
-    if data.get("v") != _SNAPSHOT_VERSION:
+    if data.get("v") != SNAPSHOT_VERSION:
         return None
     if data.get("base_url") != base_url:
         return None
@@ -351,7 +351,7 @@ def _write_config_snapshot(base_url: str, values: dict[str, str]) -> None:
     path = _snapshot_path()
     payload = json.dumps(
         {
-            "v": _SNAPSHOT_VERSION,
+            "v": SNAPSHOT_VERSION,
             "base_url": base_url,
             "written_at": time.time(),
             "values": values,
@@ -380,7 +380,7 @@ def _write_config_snapshot(base_url: str, values: dict[str, str]) -> None:
             temporary.unlink()
 
 
-def _apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
+def apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
     """Inject one bootstrap payload into os.environ — the shared tail of the
     fetch path and the snapshot path."""
     # ``AVA_GATEWAY_HEALTH_URL`` is host-scoped, so the gateway correctly does
@@ -441,7 +441,7 @@ def resolve_bootstrap_values() -> dict[str, str]:
             process must not start with no config.
     """
     base_url = _gateway_base_url()
-    snapshot = _read_config_snapshot(base_url)
+    snapshot = read_config_snapshot(base_url)
     if snapshot is not None and snapshot[1] <= _SNAPSHOT_FRESH_S:
         # Fresh parent snapshot: the authoritative values this unit fetched
         # moments ago. Skip the fetch — a gateway that is down or restarting
@@ -511,5 +511,5 @@ def inject_config_from_gateway() -> EnvBootResult:
     base_url = _gateway_base_url()
     result = deliver_unit_authority()
     values = resolve_bootstrap_values()
-    _apply_bootstrap_values(base_url, values)
+    apply_bootstrap_values(base_url, values)
     return result
