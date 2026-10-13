@@ -30,7 +30,7 @@ from base.events.contract import (
     SSE_DROP_KEYS,
     family_events,
 )
-from base.telemetry.event_sql import numeric
+from base.telemetry.metrics.event_sql import numeric
 
 # Window -> (seconds, bucket seconds). Bucket count per window is fixed:
 # 1h=60, 6h=72, 24h=48, 7d=168 points — enough shape, small payloads.

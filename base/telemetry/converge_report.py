@@ -15,6 +15,9 @@ base/events/declarations/root.py next to the dashboard render-failure guard.
 
 from __future__ import annotations
 
+from base.log import logger
+from base.telemetry.emitter import emit
+
 
 def report_converge_preserve(*, path: str, key: str, surface: str) -> None:
     """Report one preserved converge destination. Never raises.
@@ -24,9 +27,6 @@ def report_converge_preserve(*, path: str, key: str, surface: str) -> None:
     renderer (``lgtm-provisioning``, ``otel-collector``,
     ``skills``, ``extensions``).
     """
-    from base.log import logger
-    from base.telemetry import emit
-
     try:
         emit(
             "telemetry",

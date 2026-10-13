@@ -38,7 +38,7 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_de
     admission closes it, and the close does not restore the dead incarnation."""
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
-    from base.agents.messages.caller_identity import CallerIdentity
+    from base.events.caller_identity import CallerIdentity
     from tests.fixtures.units import spawn_agent
 
     agent_id = spawn_agent(

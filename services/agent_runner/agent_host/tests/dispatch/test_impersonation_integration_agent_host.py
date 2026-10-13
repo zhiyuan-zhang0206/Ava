@@ -11,11 +11,11 @@ from psycopg_pool import AsyncConnectionPool
 from agent import impersonation_process
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents import impersonation as leases
-from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.events.caller_identity import CallerIdentity
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy

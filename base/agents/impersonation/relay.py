@@ -25,8 +25,8 @@ from base.agents.impersonation.status import (
     parse_lease,
 )
 from base.agents.impersonation.wake import wake_agent
-from base.agents.messages.caller_identity import caller_payload
 from base.db import Database
+from base.events.caller_identity import caller_payload
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation

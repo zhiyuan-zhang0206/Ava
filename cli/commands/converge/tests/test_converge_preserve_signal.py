@@ -30,7 +30,7 @@ def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
     def record_emit(*args: object, **kwargs: object) -> None:
         emitted.append((*args, kwargs))
 
-    monkeypatch.setattr("base.telemetry.emit", record_emit)
+    monkeypatch.setattr("base.telemetry.converge_report.emit", record_emit)
     return emitted
 
 

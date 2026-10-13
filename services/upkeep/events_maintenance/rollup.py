@@ -40,8 +40,8 @@ from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
-from base.telemetry.event_sql import numeric
 from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
+from base.telemetry.metrics.event_sql import numeric
 from services.upkeep.events_maintenance.config import RECOMPUTE_DAYS, events_maintenance_db
 from services.upkeep.events_maintenance.token_totals import folded_through, rebuild_totals
 

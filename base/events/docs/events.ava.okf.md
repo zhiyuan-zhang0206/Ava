@@ -18,3 +18,4 @@ it. `base.telemetry.emit` rejects undeclared event names.
 ## Documented components
 
 - [[base/events/live/docs/live/live.ava.okf.md]] — Live Event Channel (`ava:events`).
+- [[base/events/docs/caller_identity.ava.okf.md]] — Asserted External Caller Identity.
