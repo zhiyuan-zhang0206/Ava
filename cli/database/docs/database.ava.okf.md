@@ -23,7 +23,8 @@ command to every handle consumer. The callback stays lazy and belongs to the
 same `CommandRuntime.machine` used by logging and telemetry. Import and help retain their lightweight
 boundaries; init and start admit the home before configuration-dependent work.
 `operator_event_pipeline(factory, machine=command.machine, home=ava_home())` retains one lazy pipeline for logging and
-health initialization and cold command reporters. Its database writer borrows
+health initialization and cold command reporters; `OperatorEventPipeline(..., flush_interval_s=)` sets how long its writer holds a
+partial batch (0.5 seconds by default). Its database writer borrows
 this same factory. Producer ports are `Callable[[], EventPipeline]`; the
 ordinary callable owner retains `EventPipeline | None` and returns the original
 `EventPipeline`. `close` returns its `DrainResult`, or `None` for a quiet owner;

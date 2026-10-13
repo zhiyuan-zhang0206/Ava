@@ -67,6 +67,9 @@ def test_cli_first_event_reaches_otlp_before_exit(
         check=False,
     )
     assert child.returncode == 0, child.stderr
+    # The child holds the command open for several default flush intervals with a 60 s pipeline
+    # timer: any batch written meanwhile came from a timer, not from the drain after the command.
+    assert "early_batch_writes=0" in child.stdout, child.stdout + child.stderr
     rows = _mirror_rows(tmp_path / "home")
     disabled = [row for row in rows if row["event_name"] == "otlp_backend_disabled"]
     names = _log_names(bodies)

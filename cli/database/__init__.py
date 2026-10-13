@@ -70,10 +70,16 @@ class OperatorEventPipeline:
     """Retain one lazy command writer and its finite shutdown result."""
 
     def __init__(
-        self, database_factory: OperatorDatabaseFactory, *, machine: MachineIdentity, home: Path
+        self,
+        database_factory: OperatorDatabaseFactory,
+        *,
+        machine: MachineIdentity,
+        home: Path,
+        flush_interval_s: float = 0.5,
     ) -> None:
         self._machine = machine
         self._home = home
+        self._flush_interval_s = flush_interval_s
         self._database_factory = database_factory
         self._pipeline: EventPipeline | None = None
 
@@ -82,7 +88,10 @@ class OperatorEventPipeline:
             from base.telemetry import build_pipeline
 
             self._pipeline = build_pipeline(
-                database=self._database_factory, machine=self._machine, home=self._home
+                database=self._database_factory,
+                machine=self._machine,
+                home=self._home,
+                flush_interval_s=self._flush_interval_s,
             )
         return self._pipeline
 
