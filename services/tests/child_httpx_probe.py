@@ -15,9 +15,6 @@ def _import_entry(entry: str) -> None:
         import services.derived.memory_indexer.daemon  # pyright: ignore[reportUnusedImport]
     elif entry == "memory-search":
         import services.derived.memory_search.daemon  # pyright: ignore[reportUnusedImport]
-    elif entry == "gateway":
-        import gateway.app  # pyright: ignore[reportUnusedImport]
-        import gateway.cluster.server  # noqa: F401  # pyright: ignore[reportUnusedImport]
     elif entry == "ops":
         import services.agent_runner.agent_ops.daemon  # pyright: ignore[reportUnusedImport]
     elif entry == "browser-mcp":

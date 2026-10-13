@@ -8,7 +8,6 @@
 ]
 "tests.fixtures.unit.gateway" = [
     "test_weixin_chat_identity.py",
-    "test_weixin_ingress_command_http.py",
 ]
 "tests.fixtures.unit.sdk" = [
     "feishu_adapter/test_poll_feeds_messages_newer_than_cursor_in.py",
@@ -23,7 +22,6 @@
     "test_weixin_adapter.py",
     "test_weixin_chat_identity.py",
     "test_weixin_ingress_account_fencing.py",
-    "test_weixin_ingress_command_http.py",
     "test_weixin_ingress_recovery.py",
     "test_weixin_ingress_runtime.py"
 ]

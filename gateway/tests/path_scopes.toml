@@ -26,3 +26,6 @@
 "tests.fixtures.unit.sdk" = [
     "."
 ]
+"tests.fixtures.unit.gateway" = [
+    "events/test_weixin_ingress_command_http.py",
+]
