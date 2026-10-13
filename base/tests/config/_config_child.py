@@ -37,10 +37,10 @@ elif mode == "skip_defers_prepare":
     import base.config as c
     from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
-    prepared_before = c._boot_state()["prepared"]
+    prepared_before = c.boot_state()["prepared"]
     value = c.settings.lm.llm_model
     sys.stdout.write(
-        f"DEFER {prepared_before} {c._boot_state()['prepared']} {value} "
+        f"DEFER {prepared_before} {c.boot_state()['prepared']} {value} "
         f"{os.environ.get('AVA_DB_URL') == PLACEHOLDER_DB_URL}\n"
     )
 elif mode == "eval_isolation":

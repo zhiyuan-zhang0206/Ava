@@ -126,7 +126,7 @@ if __name__ == "__main__":
 _ensure_index_present()
 
 from base.config.config_registry import (  # noqa: E402 — must follow the bootstrap above
-    _build_registry,
+    build_registry,
     field_alias,
     schema_extra,
 )
@@ -341,7 +341,7 @@ def _collect() -> tuple[
     list[str],
 ]:
     """Validate the manifest against the live registry and collect every table row."""
-    reg = _build_registry()
+    reg = build_registry()
     seen: set[str] = set()
     lite: list[tuple[str, _LiteRow]] = []
     for row in LITE_MANIFEST:

@@ -5,6 +5,3 @@ exports = ["clients.py", "creation_receipts.py", "endpoint.py", "router.py"]
 "endpoint.py" = ["clients.py"]
 "router.py" = ["clients.py", "creation_receipts.py"]
 "tests" = ["endpoint.py"]
-
-[debt.private-name]
-"tests/test_tool_call_audit.py -> endpoint.py#_record_tool_call" = 1

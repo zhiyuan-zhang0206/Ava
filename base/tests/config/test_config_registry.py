@@ -81,7 +81,7 @@ def test_every_field_declares_valid_scope() -> None:
 def test_every_field_resolves_a_valid_capability(authority: ConfigAuthority) -> None:
     """Every field resolves to a capability in the allowed set — the top-level
     config-panel section. Resolution is the field's `capability` override or its
-    domain default; `_build_registry` fail-fasts on a bad value at import, so this
+    domain default; `build_registry` fail-fasts on a bad value at import, so this
     guards the public metadata surface the frontend groups on."""
     from base.config import get_config_metadata
     from base.config.config_registry import ALLOWED_CAPABILITIES
@@ -129,7 +129,7 @@ def test_capability_assignment_is_pinned_for_load_bearing_fields(
 
 
 def test_build_registry_rejects_bad_capability(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A typo'd capability can never reach prod boot. `_build_registry` runs at
+    """A typo'd capability can never reach prod boot. `build_registry` runs at
     import and raises on a bad resolved capability (a field override or, here, a
     domain default), so the whole process fails fast rather than silently
     mis-grouping — the same seal `scope` has. Pin the raise directly (the
@@ -143,12 +143,12 @@ def test_build_registry_rejects_bad_capability(monkeypatch: pytest.MonkeyPatch) 
         "DOMAIN_MODELS",
         (("telegram", "Telegram", "TelegramSettings", "gatway"),),  # typo'd default
     )
-    config_registry._build_registry.cache_clear()
+    config_registry.build_registry.cache_clear()
     try:
         with pytest.raises(RuntimeError, match="capability='gatway'"):
-            config_registry._build_registry()
+            config_registry.build_registry()
     finally:
-        config_registry._build_registry.cache_clear()
+        config_registry.build_registry.cache_clear()
 
 
 def test_identity_fields_are_read_only() -> None:

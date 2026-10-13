@@ -19,7 +19,7 @@ import logging
 
 import pytest
 
-from base.log import FIRST_PARTY_LOGGER_NAMES, _install_stdlib_intercept, _StdlibInterceptHandler
+from base.log import FIRST_PARTY_LOGGER_NAMES, StdlibInterceptHandler, _install_stdlib_intercept
 from base.log.tests.stdlib_logging import stdlib_logging_isolated
 
 
@@ -45,7 +45,7 @@ def test_a_real_intercept_install_is_undone_level_for_level() -> None:
         # The leak is real: this is what the next test used to inherit.
         assert logging.getLogger().level == logging.INFO
         assert all(logging.getLogger(n).level == logging.DEBUG for n in FIRST_PARTY_LOGGER_NAMES)
-        assert any(isinstance(h, _StdlibInterceptHandler) for h in logging.getLogger().handlers)
+        assert any(isinstance(h, StdlibInterceptHandler) for h in logging.getLogger().handlers)
 
     after = _all_levels()
     assert {name: level for name, level in after.items() if name in before} == before, (
@@ -75,7 +75,7 @@ def test_the_block_restores_on_an_exception() -> None:
 
 def test_the_bridge_handler_is_off_the_root_inside_the_block() -> None:
     root = logging.getLogger()
-    bridge = _StdlibInterceptHandler()
+    bridge = StdlibInterceptHandler()
     root.addHandler(bridge)
     try:
         with stdlib_logging_isolated():

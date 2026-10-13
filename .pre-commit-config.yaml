@@ -524,7 +524,7 @@ repos:
         files: ^(.*\.py|pyproject\.toml)$
 
       # (Config-scope ownership is now enforced at import by the config package's
-      # registry builder — base/config/__init__.py:_build_registry fails fast on
+      # registry builder — base/config/__init__.py:build_registry fails fast on
       # a field with a missing/invalid scope, so the former standalone
       # lint-config-scope hook retired.)
 

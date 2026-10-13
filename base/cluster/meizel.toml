@@ -18,4 +18,3 @@ exports = ["authority", "dataplane", "derive.py", "machine", "machine_exclusions
 "tests/test_storage_ownership.py -> postgres.py#_boot" = 1
 "tests/test_storage_ownership.py -> postgres.py#_pidfile" = 2
 "tests/test_storage_ownership.py -> postgres.py#_read" = 6
-"tests/test_storage_ownership.py -> postgres.py#_spawn" = 4

@@ -117,7 +117,7 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
         "import base.config as c\n"
         "from ava.sdk_surface.settings import agent_setting\n"
         f"pins = {{name: agent_setting(name) for name in {tuple(_PINMAP)!r}}}\n"
-        "st = c._boot_state()\n"
+        "st = c.boot_state()\n"
         "cfgmods = sorted(m for m in sys.modules if m.startswith('base.config'))\n"
         "print('CANARY ' + json.dumps({'mode': st['mode'], 'upgrades': st['upgrades'],\n"
         "  'pins': pins, 'pydantic_settings': 'pydantic_settings' in sys.modules,\n"

@@ -9,6 +9,3 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "protocol.py" = ["record.py"]
 "pty" = ["record.py"]
 "tests" = ["backend.py", "coding_session_owner.py", "coding_session_owner_record.py", "env_forwarding.py", "hosting.py", "log_prefix.py", "posixproc.py", "protocol.py", "pty", "record.py"]
-
-[debt.private-name]
-"tests/test_coding_session_owner.py -> coding_session_owner_record.py#_payload" = 1

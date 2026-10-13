@@ -21,7 +21,7 @@ import pytest
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
-from base.config.config_registry import _build_registry, field_alias, schema_extra
+from base.config.config_registry import build_registry, field_alias, schema_extra
 from base.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_CAPABILITIES,
@@ -59,7 +59,7 @@ def test_all_field_faces_match_the_live_registry() -> None:
     """Every index face (domains/aliases/scopes/capabilities/per-agent/required)
     equals the live registry's derivation — the drift lock for the four
     env-authority projections the review called out by name."""
-    reg = _build_registry()
+    reg = build_registry()
     names = sorted(reg)
     assert set(FIELD_DOMAINS) == set(FIELD_ALIASES) == set(names)
     assert set(FIELD_SCOPES) == set(FIELD_CAPABILITIES) == set(names)
@@ -88,7 +88,7 @@ def test_lite_fields_match_the_registry() -> None:
     """Every boot-path row's (domain, alias) equals the registry's and every
     literal default equals the field's declared default. The manifest's
     membership itself is locked by the generator's own `--check` byte diff."""
-    reg = _build_registry()
+    reg = build_registry()
     assert LITE_FIELDS, "the boot-path index must not be empty"
     for name, row in LITE_FIELDS.items():
         assert isinstance(row, tuple) and len(row) == 6

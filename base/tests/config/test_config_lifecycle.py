@@ -2,7 +2,7 @@
 
 The registry's job here is to make an UNDECLARED classification impossible: a new
 per-agent field must be ruled on (is this the agent's identity material, or an
-operational knob?) before it can load at all. These tests drive `_build_registry`
+operational knob?) before it can load at all. These tests drive `build_registry`
 against synthetic sub-models rather than the real ones, so they assert the rule and
 not today's roster.
 """
@@ -17,18 +17,18 @@ from base.config.base import EnvSettings
 
 
 def _registry_with(model: type[EnvSettings]) -> None:
-    """Run `_build_registry` over one synthetic domain and nothing else."""
+    """Run `build_registry` over one synthetic domain and nothing else."""
     from base.config import config_registry
 
     domains = (("synthetic", "Synthetic", model, "agent-runner"),)
     original = config_registry.DOMAIN_MODELS
     config_registry.DOMAIN_MODELS = domains
-    config_registry._build_registry.cache_clear()
+    config_registry.build_registry.cache_clear()
     try:
-        config_registry._build_registry()
+        config_registry.build_registry()
     finally:
         config_registry.DOMAIN_MODELS = original
-        config_registry._build_registry.cache_clear()
+        config_registry.build_registry.cache_clear()
 
 
 class TestRegistryEnforcement:

@@ -701,14 +701,14 @@ async def test_one_jobs_failure_touches_no_other_job(
 async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_finish(
     model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = loop._settle
+    real = loop.settle_chunk_job
 
     async def settle(pool: AsyncConnectionPool, job: ChunkJob, outcome: loop.Outcome) -> None:
         if job.agent_id == 1:
             raise ConnectionError("database went away")
         await real(pool, job, outcome)
 
-    monkeypatch.setattr(loop, "_settle", settle)
+    monkeypatch.setattr(loop, "settle_chunk_job", settle)
     for agent in (1, 2):
         await _enqueue_ends(aops_pool, agent, "m1")
     consumer = loop.Consumer(

@@ -12,7 +12,7 @@ from typing import Any
 from loguru import logger
 
 
-class _StdlibInterceptHandler(logging.Handler):
+class StdlibInterceptHandler(logging.Handler):
     """Route stdlib logging through loguru so every `_log = logging.getLogger(...)`
     callsite in the codebase lands in the loguru sinks (stderr / file / the unified stream)
     without per-file rewrites.
@@ -117,7 +117,7 @@ class GenaiEmptyPartsWarningFilter(logging.Filter):
     i.e. for every sub-logger the library emits under. `record.msg` (the raw
     format string) is matched instead of `record.getMessage()`, whose
     %-formatting can raise and would then throw into the logging call site
-    (see `_StdlibInterceptHandler.emit`).
+    (see `StdlibInterceptHandler.emit`).
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -148,7 +148,7 @@ def _install_stdlib_intercept() -> None:
     occurrences of a line that fires every time the respawn controller's
     gateway-health gate defers a restart.
     """
-    intercept_handler = _StdlibInterceptHandler()
+    intercept_handler = StdlibInterceptHandler()
     # #3317: the langchain-google-genai 'no Gemini parts' chatter is dropped at
     # this stdlib→loguru boundary — see `GenaiEmptyPartsWarningFilter`.
     intercept_handler.addFilter(GenaiEmptyPartsWarningFilter())

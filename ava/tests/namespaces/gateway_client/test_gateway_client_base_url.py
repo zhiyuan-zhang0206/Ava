@@ -38,7 +38,7 @@ def test_gateway_client_base_url_is_gateway_url(
 
     import ava.gateway_client.transport as gc
 
-    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc.gateway_http())  # pyright: ignore[reportUnknownMemberType]
     assert str(client.base_url).rstrip("/") == "https://cp.example.com"
 
 
@@ -53,7 +53,7 @@ def test_gateway_client_sends_cluster_secret_bearer(
 
     import ava.gateway_client.transport as gc
 
-    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc.gateway_http())  # pyright: ignore[reportUnknownMemberType]
     assert client.headers.get("Authorization") == "Bearer s3cr3t-token"
 
 
@@ -71,7 +71,7 @@ def test_gateway_client_without_any_credential_fails_instead_of_sending_none(
     from base.cluster.machine import GatewayApiTokenMissing
 
     with pytest.raises(GatewayApiTokenMissing):
-        gc._http()  # pyright: ignore[reportUnknownMemberType]
+        gc.gateway_http()  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_gateway_client_in_an_agent_presents_the_delivered_token(
@@ -87,7 +87,7 @@ def test_gateway_client_in_an_agent_presents_the_delivered_token(
 
     import ava.gateway_client.transport as gc
 
-    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc.gateway_http())  # pyright: ignore[reportUnknownMemberType]
     assert client.headers.get("Authorization") == "Bearer delivered-token"
 
 
@@ -103,7 +103,7 @@ def test_gateway_client_in_an_agent_without_a_token_fails_instead_of_using_the_s
     import ava.gateway_client.transport as gc
 
     with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
-        gc._http()  # pyright: ignore[reportUnknownMemberType]
+        gc.gateway_http()  # pyright: ignore[reportUnknownMemberType]
 
 
 def _answering(label: str, seen: list[str]) -> Any:
@@ -127,7 +127,7 @@ def test_use_client_routes_sdk_calls_through_the_injected_client_and_restores_th
 
     with gc.use_client(outer):
         with gc.use_client(_answering("injected", seen)) as injected:
-            assert gc._http() is injected  # pyright: ignore[reportUnknownMemberType]
+            assert gc.gateway_http() is injected  # pyright: ignore[reportUnknownMemberType]
             gc.get("/api/x")  # pyright: ignore[reportUnknownMemberType]
         gc.get("/api/y")  # pyright: ignore[reportUnknownMemberType]
 
@@ -156,7 +156,7 @@ def test_client_carries_the_configured_timeout(
 
     client_config.set_field("gateway_client_http_timeout_seconds", 20.0)
 
-    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc.gateway_http())  # pyright: ignore[reportUnknownMemberType]
     assert client.timeout.read == 20.0
     assert client.timeout.connect == 20.0
 

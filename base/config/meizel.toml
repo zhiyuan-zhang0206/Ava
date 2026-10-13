@@ -17,4 +17,3 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 
 [debt.private-name]
 "tests/_boot_lite_child.py -> __init__.py#_FIELDS" = 1
-"tests/_boot_lite_child.py -> __init__.py#_boot_state" = 22

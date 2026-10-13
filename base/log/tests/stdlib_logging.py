@@ -35,7 +35,7 @@ def stdlib_logging_isolated() -> Generator[None]:
         for handler in saved_handlers
         if not (
             type(handler).__module__ == "base.log.sinks"
-            and type(handler).__name__ == "_StdlibInterceptHandler"
+            and type(handler).__name__ == "StdlibInterceptHandler"
         )
     ]
     try:

@@ -14,7 +14,7 @@ from functools import cache
 
 
 @cache
-def _api() -> ctypes.CDLL:
+def pidfd_libc() -> ctypes.CDLL:
     if sys.platform != "linux":
         raise RuntimeError("process descriptors require Linux")
     libc = ctypes.CDLL(None, use_errno=True)
@@ -32,7 +32,7 @@ def _api() -> ctypes.CDLL:
 
 def open_process(pid: int) -> int:
     """Return a non-inheritable descriptor; the caller owns its close."""
-    descriptor = _api().pidfd_open(pid, 0)
+    descriptor = pidfd_libc().pidfd_open(pid, 0)
     if descriptor < 0:
         code = ctypes.get_errno()
         raise OSError(code, f"pidfd_open({pid}): {os.strerror(code)}")
@@ -41,6 +41,6 @@ def open_process(pid: int) -> int:
 
 def send_signal(descriptor: int, signum: int) -> None:
     """Signal the retained task, preserving native errno for the custody owner."""
-    if _api().pidfd_send_signal(descriptor, signum, None, 0) < 0:
+    if pidfd_libc().pidfd_send_signal(descriptor, signum, None, 0) < 0:
         code = ctypes.get_errno()
         raise OSError(code, f"pidfd_send_signal({descriptor}): {os.strerror(code)}")

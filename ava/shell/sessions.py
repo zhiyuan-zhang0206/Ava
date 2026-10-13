@@ -419,7 +419,7 @@ def shell_sessions() -> ShellSessions:
     return ShellSessions(backend=get_shell_backend(), database=database(), agent_id=agent_id)
 
 
-def _handle() -> ShellSessions:
+def shell_sessions_handle() -> ShellSessions:
     return shell_sessions()
 
 
@@ -433,7 +433,9 @@ def create_session(
 ) -> tuple[int, str]:
     # Allocate the next session id and create the shell session. Internal — `new()`
     # (shell), `run_background`, and `ava.watcher.spawn.run` (named "watcher") all use it.
-    return _handle().create(name, cwd=cwd, ttl=ttl, system=system, env_overrides=env_overrides)
+    return shell_sessions_handle().create(
+        name, cwd=cwd, ttl=ttl, system=system, env_overrides=env_overrides
+    )
 
 
 def new(name: str, *, ttl: float) -> int:
@@ -448,7 +450,7 @@ def new(name: str, *, ttl: float) -> int:
             passes, with `renew(id, ttl=)`."""
     name = coerce_str(name, "name")
     ttl = coerce_typed(ttl, "ttl", (int, float))
-    session_id, _ = _handle().create(name, ttl=ttl)
+    session_id, _ = shell_sessions_handle().create(name, ttl=ttl)
     return session_id
 
 
@@ -463,7 +465,7 @@ def send(id: int, cmd: str, *, enter: bool = True) -> None:
     id = coerce_typed(id, "id", int)
     cmd = coerce_str(cmd, "cmd")
     enter = coerce_typed(enter, "enter", bool)
-    _handle().send(id, cmd, enter=enter)
+    shell_sessions_handle().send(id, cmd, enter=enter)
 
 
 def send_keys(id: int, *keys: str) -> None:
@@ -472,7 +474,7 @@ def send_keys(id: int, *keys: str) -> None:
     `Enter`, `Space`, `PageUp`."""
     id = coerce_typed(id, "id", int)
     keys = tuple(coerce_str(key, "key") for key in keys)
-    _handle().send_keys(id, *keys)
+    shell_sessions_handle().send_keys(id, *keys)
 
 
 def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> str:
@@ -491,12 +493,12 @@ def capture(id: int, lines: int | None = None, *, scrollback: bool = True) -> st
     else:
         resolved_lines = coerce_typed(lines, "lines", int)
     scrollback = coerce_typed(scrollback, "scrollback", bool)
-    return _handle().capture(id, resolved_lines, scrollback=scrollback)
+    return shell_sessions_handle().capture(id, resolved_lines, scrollback=scrollback)
 
 
 def kill(id: int) -> None:
     id = coerce_typed(id, "id", int)
-    _handle().kill(id)
+    shell_sessions_handle().kill(id)
 
 
 # Not in __all_for_ava__, so never rendered into the SDK docs: a prefix-scoped
@@ -504,7 +506,7 @@ def kill(id: int) -> None:
 # NOT reap sessions — they outlive the turn (see services/agent_runner/agent_host/host.py); the agent
 # itself kills sessions one by one via kill(id).
 def kill_all() -> int:
-    return _handle().kill_all()
+    return shell_sessions_handle().kill_all()
 
 
 def renew(id: int, *, ttl: float) -> datetime:
@@ -519,7 +521,7 @@ def renew(id: int, *, ttl: float) -> datetime:
         The new expiry time."""
     id = coerce_typed(id, "id", int)
     ttl = validate_ttl(coerce_typed(ttl, "ttl", (int, float)))
-    return _handle().renew(id, ttl)
+    return shell_sessions_handle().renew(id, ttl)
 
 
 def list() -> dict[int, str | None]:
@@ -528,4 +530,4 @@ def list() -> dict[int, str | None]:
     Entries named `page-<name>` are live page servers for pages this agent
     opened via `ava.ui.serve`, not leftovers; see `ava.ui` for their lifecycle.
     """
-    return _handle().list()
+    return shell_sessions_handle().list()

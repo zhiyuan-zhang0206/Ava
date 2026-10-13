@@ -7,7 +7,7 @@ import psycopg
 from base.cluster import machines
 from base.cluster.tests.machines.setup import (
     MachineSetup,
-    _db,
+    machines_test_db,
     read_description,
     read_machine,
     read_unit_up_since,
@@ -30,8 +30,8 @@ def test_mark_stopping_preserves_description(
 
     machine_setup(name="keepdesc", role="agent-runner", home="~/.ava")
     machine_setup.machine.set(description="keep me")
-    machine_setup.register(_db(database_gate=database_gate), url="http://k:9000")
-    machines.mark_stopping(_db(database_gate=database_gate), "keepdesc", "~/.ava")
+    machine_setup.register(machines_test_db(database_gate=database_gate), url="http://k:9000")
+    machines.mark_stopping(machines_test_db(database_gate=database_gate), "keepdesc", "~/.ava")
     assert read_description("keepdesc") == "keep me"
 
 
@@ -45,7 +45,9 @@ def test_register_self_stamps_up_since_on_unit_and_composed_row(
     be shown, so what it must survive is exactly this write-then-compose path.
     """
     machine_setup(name="stamp-host", role="agent-runner", home="~/.ava")
-    machine_setup.register(_db(database_gate=database_gate), url="http://stamp-host:9100")
+    machine_setup.register(
+        machines_test_db(database_gate=database_gate), url="http://stamp-host:9100"
+    )
 
     (unit_up_since,) = read_unit_up_since("stamp-host", "~/.ava")
     (composed_up_since,) = read_up_since("stamp-host")
@@ -63,9 +65,13 @@ def test_composed_up_since_is_the_max_over_live_units(
     most recent claim about this host.
     """
     machine_setup(name="max-host", role="gateway", home="~/.ava_gateway")
-    machine_setup.register(_db(database_gate=database_gate), url="http://max-host:8000")
+    machine_setup.register(
+        machines_test_db(database_gate=database_gate), url="http://max-host:8000"
+    )
     machine_setup(name="max-host", role="agent-runner", home="~/.ava")
-    machine_setup.register(_db(database_gate=database_gate), url="http://localhost:8600")
+    machine_setup.register(
+        machines_test_db(database_gate=database_gate), url="http://localhost:8600"
+    )
 
     (gateway_unit,) = read_unit_up_since("max-host", "~/.ava_gateway")
     (runner_unit,) = read_unit_up_since("max-host", "~/.ava")
@@ -85,7 +91,9 @@ def test_recompute_tolerates_a_unit_with_null_up_since(
     would raise and take the whole register_self down.
     """
     machine_setup(name="skew-host", role="gateway", home="~/.ava_gateway")
-    machine_setup.register(_db(database_gate=database_gate), url="http://skew-host:8000")
+    machine_setup.register(
+        machines_test_db(database_gate=database_gate), url="http://skew-host:8000"
+    )
     # Rewrite that unit the way a pre-#981 writer would have left it.
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
@@ -95,7 +103,9 @@ def test_recompute_tolerates_a_unit_with_null_up_since(
         conn.commit()
 
     machine_setup(name="skew-host", role="agent-runner", home="~/.ava")
-    machine_setup.register(_db(database_gate=database_gate), url="http://localhost:8600")
+    machine_setup.register(
+        machines_test_db(database_gate=database_gate), url="http://localhost:8600"
+    )
 
     (runner_unit,) = read_unit_up_since("skew-host", "~/.ava")
     (composed,) = read_up_since("skew-host")
