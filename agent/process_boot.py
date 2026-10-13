@@ -17,7 +17,6 @@ from typing import Any
 
 import ava
 from ava.sdk_surface import sdk_disable
-from ava_builtins.plugins.ava_memory.sdk import MemoryMatch
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
@@ -68,8 +67,11 @@ def _apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any]
         memory.search = _isolated_memory_search
 
 
-def _isolated_memory_search(_query: str, _k: int = 5) -> list[MemoryMatch]:
-    """Return no shared-memory results for an isolated evaluation agent."""
+def _isolated_memory_search(_query: str, _k: int = 5) -> list[Any]:
+    """Return no shared-memory results for an isolated evaluation agent.
+
+    The empty list stands in for `ava.memory.search`'s `list[MemoryMatch]`; the
+    memory plugin owns that type and the kernel does not import the plugin."""
     return []
 
 
