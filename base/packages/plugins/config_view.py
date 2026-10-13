@@ -93,21 +93,18 @@ def with_cluster_policy[C: BaseModel](plugin: str, config: C) -> C:
     """Combine local host fields with the complete declared gateway projection."""
     from pydantic import ValidationError
 
+    from base.config import schema_extra
     from base.host.env.bootstrap import (
         cluster_plugin_config_values,
         config_source_is_local,
         should_fetch_from_gateway,
     )
-    from base.packages.plugins.config_registration import (
-        InvalidConfigData,
-        SchemaDriftError,
-        _schema_extra,
-    )
+    from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 
     cluster_fields = {
         name
         for name, info in type(config).model_fields.items()
-        if _schema_extra(info).get("scope") in {"cluster-pinned", "cluster-default"}
+        if schema_extra(info).get("scope") in {"cluster-pinned", "cluster-default"}
     }
     projection = cluster_plugin_config_values(plugin)
     if projection is None:

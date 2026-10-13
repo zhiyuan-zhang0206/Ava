@@ -27,7 +27,7 @@ from base.packages.plugin_config_admin import (
     write_plugin_patch,
 )
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
-from base.packages.plugins.config_registration import InvalidConfigOverlay
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from ops.rpc_schemas import (
     ConfigAuditReadResult,
     ConfigReadResult,

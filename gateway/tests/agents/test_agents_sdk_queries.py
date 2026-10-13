@@ -418,7 +418,7 @@ class TestSpawnConfig:
         (which reject unknown keys) must not see it, while the other fields are
         still validated."""
         from ava import agents
-        from base.packages.plugins.config_registration import InvalidConfigOverlay
+        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         seen: dict[str, Any] = {}
@@ -440,7 +440,7 @@ class TestSpawnConfig:
     ) -> None:
         """spawn(config_overlay=...) rejects fields not marked per_agent — raises before spawning."""
         from ava import agents
-        from base.packages.plugins.config_registration import InvalidConfigOverlay
+        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from base.api_contracts.agent_contract import InvalidModelConfig
 from base.lm.catalog import ModelCatalog
 from base.lm.pricing import PriceBook
-from base.packages.plugins import config_registration
+from base.packages.plugins import config_registration, plugin_errors
 from gateway.agents import lifecycle as gateway_lifecycle
 from ops import lifecycle
 from ops.rpc_schemas import RestartAgentRequest
@@ -44,7 +44,7 @@ def test_dto_shape_does_not_construct_a_catalog(no_plugin_overlay_schemas: None)
     request = RestartAgentRequest(config_overlay={"llm_model": "test-provider-model"})
     assert request.config_overlay == {"llm_model": "test-provider-model"}
     assert request.config_overlay is not None
-    with pytest.raises(config_registration.InvalidConfigOverlay, match="not a registered model"):
+    with pytest.raises(plugin_errors.InvalidConfigOverlay, match="not a registered model"):
         config_registration.validate_config_overlay(request.config_overlay, models={})
     config_registration.validate_config_overlay(
         request.config_overlay, models={"test-provider-model": object()}

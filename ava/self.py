@@ -68,7 +68,7 @@ def __getattr__(name: str) -> object:
         machine = ava.context.require_machine()
         return MachineSpec(machine.name(), machine.description() or "")
     if name == "InvalidConfigOverlay":
-        from base.packages.plugins.config_registration import InvalidConfigOverlay
+        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         return InvalidConfigOverlay
     # Plugin members land on ava.self via a declared `SdkMember` (ava_fleet

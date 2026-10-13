@@ -19,9 +19,6 @@ from base.config import ConfigBoot, set_field, settings
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.config_registration import (
-    DuplicateRegistration,
-    InvalidConfigOverlay,
-    SchemaDriftError,
     apply_config_overlay,
     bind_plugin_config,
     disk_image_path,
@@ -32,6 +29,11 @@ from base.packages.plugins.config_registration import (
     resolve_overlay_targets,
     validate_config_overlay,
     write_default_disk_image,
+)
+from base.packages.plugins.plugin_errors import (
+    DuplicateRegistration,
+    InvalidConfigOverlay,
+    SchemaDriftError,
 )
 
 

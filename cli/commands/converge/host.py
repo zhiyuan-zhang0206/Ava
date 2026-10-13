@@ -87,7 +87,7 @@ __all__ = [
 
 
 def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    from base.packages.plugins.enable_config import update_all_disk_images
+    from base.packages.plugin_config_admin import update_all_disk_images
 
     update_all_disk_images()
 

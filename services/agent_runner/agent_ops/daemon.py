@@ -75,7 +75,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
-from base.packages.plugins.config_registration import InvalidConfigOverlay
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from ops import lifecycle

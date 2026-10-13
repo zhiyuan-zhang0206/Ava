@@ -9,13 +9,13 @@ from pydantic import BaseModel
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import load_report
 from base.packages.plugins.config_registration import (
-    SchemaDriftError,
     bind_plugin_config,
     disk_image_path,
     is_per_agent_field,
     read_config_image,
     validate_config_overlay,
 )
+from base.packages.plugins.plugin_errors import SchemaDriftError
 from base.packages.plugins.tests.test_plugin_config import (
     _FixtureConfig,
 )

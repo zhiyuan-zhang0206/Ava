@@ -395,10 +395,8 @@ def _restart_blocking(
     """Sync restart section — via to_thread. Returns the inbound id, or None
     when the agent is already terminated."""
     from base.db.transaction import write_transaction
-    from base.packages.plugins.config_registration import (
-        InvalidConfigOverlay,
-        validate_config_overlay,
-    )
+    from base.packages.plugins.config_registration import validate_config_overlay
+    from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
     if body.config_overlay:
         try:
