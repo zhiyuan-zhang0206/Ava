@@ -99,7 +99,7 @@ fixture/incident scope.
 - **first-seen**: 2026-09-23
 - **last-verified**: 2026-09-23
 
-### docstring-budget:ava/watcher.py:cron
+### docstring-budget:ava/watcher/__init__.py:cron
 - **class**: docstring-budget
 - **status**: wontfix
 - **evidence**: ~18 lines (soft cap 12) after the 2026-09-27 watcher-registry removal (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md) dropped the old supersede/replace/reuse residue entirely. Residue now: five Args (cron format, timezone, end_time types, name, notify) + the one-line warning that re-registering the same schedule does NOT dedupe any more — it starts a second, independent session, whose loss would silently reintroduce the double-firing confusion the old dedupe used to prevent. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.

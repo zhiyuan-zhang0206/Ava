@@ -26,7 +26,7 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 - [[ava/mcps/docs/mcps.ava.okf.md]] — MCP tool servers
 - [[web.ava.okf.md]] — network access
 - [[understand.ava.okf.md]] — multimodal understanding primitives
-- [[watcher.ava.okf.md]] — background watchers
+- [[ava/watcher/docs/watcher.ava.okf.md|watcher]] — background watchers
 - [[ava/self/docs/self.ava.okf.md|self]] — agent self
 - [[ui.ava.okf.md]] — user interface
 - [[ava_builtins/plugins/ava_memory/docs/memory-api.ava.okf.md]] — long-term memory pool

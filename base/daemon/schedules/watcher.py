@@ -44,7 +44,7 @@ __all__ = [
 # without an explicit end_time lives at most this long, counted from
 # registration — `ava.watcher.cron` defaults `end_time` to now + this. A longer
 # schedule must pass an explicit end_time. Calling `cron()` again with the same
-# expression starts another, independent session (see ava/watcher.py::cron) —
+# expression starts another, independent session (see ava/watcher/__init__.py::cron) —
 # it does not renew or replace the earlier one.
 DEFAULT_STANDING_CRON_MAX_SECONDS = 7 * 24 * 3600
 
@@ -236,7 +236,7 @@ def session_deadline(
     """The moment a watcher's session must be reclaimed — its target deadline.
 
     One derivation for the lifecycle (user ruling 2026-09-14, task #3411: a
-    watcher session's shell TTL IS its target deadline). `ava.watcher._spawn`
+    watcher session's shell TTL IS its target deadline). `ava.watcher.spawn.run`
     calls this once, at spawn, to fold the deadline into the session's shell
     TTL — the only place it is derived any more: the TTL reaper
     (`services/upkeep/ttl_reaper/shells.py`) reclaims every session, watcher or not, purely

@@ -27,5 +27,5 @@ Overview of the Ava subsystem.
 - [[docs/skills/skills.ava.okf.md|Skills]]
 - [[ava/docs/ui.ava.okf.md|Ui]]
 - [[understand.ava.okf.md|Understand]]
-- [[ava/docs/watcher.ava.okf.md|Watcher]]
+- [[ava/watcher/docs/watcher.ava.okf.md|Watcher]]
 - [[web.ava.okf.md|Web]]
