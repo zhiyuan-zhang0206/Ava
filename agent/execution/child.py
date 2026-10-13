@@ -96,6 +96,7 @@ class _Sdk(Protocol):
         config: Any = None,
         clock_factory: Callable[[], Any] | None = None,
         producer: Callable[[], Any] | None = None,
+        validate_state: Callable[[Any], object] | None = None,
     ) -> None: ...
 
 
@@ -299,12 +300,13 @@ class _LazyStateSlot:
         # The faces declare the plugins' state fields — loaded before the registry is built, and the
         # dynamic class is built before the blob is decoded: the decode's allowlist is the class's.
         ava: _Sdk = object.__getattribute__(self, "_ava")
-        ava.ensure_plugins_loaded(surface=False)
-        payload: RequestPayload = object.__getattribute__(self, "_payload")
-        from agent.extensions.registry import build_registry
-        from agent.state import build_agent_state
+        from agent.state import build_agent_state, plugin_state_schema
 
-        state_cls = build_agent_state(build_registry())
+        ava.ensure_plugins_loaded(surface=False, validate_state=plugin_state_schema)
+        payload: RequestPayload = object.__getattribute__(self, "_payload")
+        from base.packages.plugins.loading.registry import build_registry
+
+        state_cls = build_agent_state(build_registry(validate_state=plugin_state_schema))
         snapshot = payload.materialize_state()
         real = state_cls.model_validate(snapshot)
         object.__setattr__(self, "_real", real)

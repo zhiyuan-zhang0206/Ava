@@ -25,6 +25,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.packages.plugins.loading import StateGate
 
 
 def _redis(*, url_reader: Callable[[], str]) -> object:
@@ -247,6 +248,7 @@ def ensure_plugins_loaded(
     producer: Callable[[], Any] | None = None,
     machine: MachineIdentity | None = None,
     context: AvaContext | None = None,
+    validate_state: StateGate | None = None,
 ) -> None:
     """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
 
@@ -261,20 +263,18 @@ def ensure_plugins_loaded(
     field registrations. Each stage runs at most once per process — the load state
     is the installation slot (`ava.sdk_surface.install`): `installed()` answers
     "loaded", `faces` "and the faces", `load_attempted()` "in flight, or attempted
-    and failed (no retry)"; the failed state preserves the original exception. A call that arrives while the loader module is still
-    initializing (a re-entrant import) defers instead, so a later miss retries
-    once the module is complete.
+    and failed (no retry)"; the failed state preserves the original exception.
 
-    The loader lives in the agent layer; it is reached via `importlib` (a runtime
-    string, not a static `from agent import`) so this ava-layer module keeps NO
-    static dependency on agent — the layering contract stays intact while the
-    launched subprocess still self-loads its plugins.
+    The loader is `ava.sdk_surface.extensions.load_extensions` over `base.packages.plugins.loading`; neither imports `agent`. A load
+    that imports agent-runtime faces (`surface=False`) validates the state they declare with
+    `validate_state` (`agent.state.plugin_state_schema`), which only a caller that runs agent
+    code can supply.
 
     Expected typed declaration refusals are isolated by the installer after a
     successful rollback. Unknown inventory, configuration, programming or I/O
     failures propagate unchanged; a later call re-raises the same failure without
     retrying the load. The loader's earlier per-module import containment is a
-    separate boundary in `agent.extensions`.
+    separate boundary in `ava.sdk_surface.extensions`.
 
     A supplied context binds before loading and receives the installed catalog.
     A launched process with no context first constructs one from the same boot
@@ -316,6 +316,7 @@ def ensure_plugins_loaded(
         clock_factory=clock_factory,
         machine=machine,
         producer=producer,
+        validate_state=validate_state,
     )
     _bind_installed_catalog(context)
 
@@ -328,20 +329,16 @@ def _load_plugin_stages(
     clock_factory: Callable[[], Clock] | None,
     machine: MachineIdentity | None,
     producer: Callable[[], Any] | None,
+    validate_state: StateGate | None,
 ) -> None:
     """Run the existing installation stage and retain its original load failure."""
-    import importlib
-
     from ava.sdk_surface import install as _sdk_install
+    from ava.sdk_surface.extensions import load_extensions
+    from base.packages.plugins.loading.faces import load_agent_faces
 
     try:
-        loader = importlib.import_module("agent.extensions")
-        if getattr(loader.__spec__, "_initializing", False):
-            # Python returned the module during its own import: no load ran yet.
-            _sdk_install.clear_load_attempt()
-            return
         if upgrade_faces:
-            loader.load_agent_faces()
+            load_agent_faces()
             _sdk_install.mark_faces_loaded()
         else:
             from base import paths
@@ -364,12 +361,13 @@ def _load_plugin_stages(
                 build_all_domains=config.complete_read_model,
                 env_path=paths.ava_home() / ".env",
             )
-            loader.load_extensions(
+            load_extensions(
                 surface=surface,
                 catalog=build_model_catalog(),
                 authority=authority,
                 producer=producer,
                 clock_factory=clock_factory or (lambda: Clock(clock_config_from_boot(config))),
+                validate_state=validate_state,
             )
             if not surface:
                 _sdk_install.mark_faces_loaded()
@@ -385,6 +383,7 @@ def initialize_context(
     config: ConfigBoot | None = None,
     clock_factory: Callable[[], Clock] | None = None,
     producer: Callable[[], Any] | None = None,
+    validate_state: StateGate | None = None,
 ) -> None:
     """Bind a root-supplied context and complete its SDK installation.
 
@@ -399,6 +398,7 @@ def initialize_context(
         clock_factory=clock_factory or context.clock_factory,
         machine=context.machine,
         producer=producer,
+        validate_state=validate_state,
     )
 
 

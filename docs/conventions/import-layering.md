@@ -73,8 +73,9 @@ One row per contract in `pyproject.toml`, under the name it has there.
 
 Edges the contracts do not see or do not cover. They are listed, not exempted.
 
-- String-form imports of a higher layer. `ava/__init__.py` loads `agent.extensions` by name;
-  it documents that as how `ava` keeps no static dependency on `agent`.
+- `ava.external` (`ava/external/__init__.py`) reaches the agent kernel's plugin-state codec and
+  `plugin_state_schema` by name (`importlib`), because it runs in bare scripts that have not
+  imported `agent`.
 
 ## Checking
 

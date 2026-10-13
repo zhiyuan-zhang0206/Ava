@@ -181,4 +181,4 @@ Python surfaces, so they keep heading form rather than stub form).
    the fields in its class docstring; `Returns:` then only names the type. See
    [SDK return shapes](python-conventions.md#sdk-return-shapes).
 
-Every other `ava/` module — framework code such as `ava/sdk_surface/wraps.py` or `ava/sdk_surface/plugin_loader.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.
+Every other `ava/` module — framework code such as `ava/sdk_surface/wraps.py` or `base/packages/plugins/loading/plugin_loader.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.

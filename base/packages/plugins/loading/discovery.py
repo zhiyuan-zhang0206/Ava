@@ -1,6 +1,6 @@
 """Which plugins are enabled and where their faces live — the loader's discovery leaf.
 
-`agent.extensions` (the loader), `registry.py` and `catalog.py` all start from the same answer:
+`faces.py` (the loader), `registry.py` and `agent/extensions/catalog.py` all start from the same answer:
 the enabled plugin directories, the dotted package each loads under, and the two face names the
 loader owns. They live here, below all three, so none of them has to import another to learn it.
 """

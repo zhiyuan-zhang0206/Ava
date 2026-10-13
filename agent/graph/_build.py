@@ -5,12 +5,12 @@ build_graph does not take them; the caller passes them via
 `graph.ainvoke(..., context=AvaContext(...))`. Node functions access them via
 `runtime.context.X`.
 
-Plugins reach the graph as a value: the caller loads them (`agent.extensions.load_extensions()`),
-builds the `ExtensionRegistry` of what they declare (`agent.extensions.registry.build_registry()`)
+Plugins reach the graph as a value: the caller loads them (`ava.sdk_surface.extensions.load_extensions()`),
+builds the `ExtensionRegistry` of what they declare (`base.packages.plugins.loading.registry.build_registry()`)
 and passes it in. The graph is a function of that registry: its hooks run in the hook container
 nodes, its state classes shape the dynamic `AgentState`. The loader lives in `agent.extensions`
 (task #3633 moved it off this module so surface-only processes never need the graph kernel); the
-import mechanics and the fail-soft contract live in `ava.sdk_surface.plugin_loader`
+import mechanics and the fail-soft contract live in `base.packages.plugins.loading.plugin_loader`
 (`load_plugin_module` / `safe_load_plugin_module`): one module name, package context,
 `sys.modules` identity, and containment however many times a plugin loads.
 A repeat load re-executes the module already in `sys.modules` rather than

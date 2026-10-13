@@ -1,6 +1,6 @@
 """Agent-runtime face of the ava_sdk_reminder plugin — state fields and hooks.
 
-Loaded only in the agent process: `agent.extensions` imports this module after
+Loaded only in the agent process: the plugin loader (`base.packages.plugins.loading`) imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin has no
 SDK-visible surface — everything it does is agent-runtime behavior — so the
 surface module carries only the description (task #3633).

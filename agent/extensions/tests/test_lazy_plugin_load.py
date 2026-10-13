@@ -13,13 +13,8 @@ into a plugin load.
 
 from __future__ import annotations
 
-import sys
-from collections.abc import Callable, Generator, Iterator, Sequence
-from contextlib import contextmanager
-from importlib.abc import Loader, MetaPathFinder
-from importlib.machinery import ModuleSpec
-from importlib.util import spec_from_loader
-from types import ModuleType, SimpleNamespace
+from collections.abc import Callable, Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -88,10 +83,10 @@ def _installing(
 
 
 def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
-    """Replace agent.extensions.load_extensions (reached by ensure_plugins_loaded
+    """Replace ava.sdk_surface.extensions.load_extensions (reached by ensure_plugins_loaded
     via importlib) with a spy that records calls and optionally registers a namespace.
     Avoids the heavy, DB-touching real load in a unit test."""
-    from agent import extensions
+    from ava.sdk_surface import extensions
 
     calls: list[int] = []
 
@@ -102,6 +97,7 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
         clock_factory: Callable[[], Clock],
         producer: Callable[[], Any],
         surface: bool = False,
+        validate_state: object = None,
     ) -> None:
         calls.append(1)
         if register is not None:
@@ -221,13 +217,16 @@ def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> No
         (ValueError, "original plugin boot error"),
         (RuntimeError, "original plugin boot error"),
         (OSError, "original plugin boot error"),
-        (AttributeError, "partially initialized module 'agent.extensions' implementation bug"),
+        (
+            AttributeError,
+            "partially initialized module 'ava.sdk_surface.extensions' implementation bug",
+        ),
     ],
 )
 def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
     monkeypatch: pytest.MonkeyPatch, error_type: type[Exception], message: str
 ) -> None:
-    from agent import extensions
+    from ava.sdk_surface import extensions
 
     error = error_type(message)
     calls: list[int] = []
@@ -239,6 +238,7 @@ def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
         clock_factory: Callable[[], Clock],
         producer: Callable[[], Any],
         surface: bool = False,
+        validate_state: object = None,
     ) -> None:
         calls.append(1)
         raise error
@@ -256,7 +256,7 @@ def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
 def test_failed_lazy_lookup_repeats_the_original_boot_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent import extensions
+    from ava.sdk_surface import extensions
 
     _as_launched_child(monkeypatch)
     error = RuntimeError("lazy boot failed")
@@ -268,6 +268,7 @@ def test_failed_lazy_lookup_repeats_the_original_boot_error(
         clock_factory: Callable[[], Clock],
         producer: Callable[[], Any],
         surface: bool = False,
+        validate_state: object = None,
     ) -> None:
         raise error
 
@@ -281,7 +282,6 @@ def test_failed_lazy_lookup_repeats_the_original_boot_error(
 def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent import extensions
 
     calls = _spy_loader(monkeypatch, register="lazytasks")
     ava.ensure_plugins_loaded()
@@ -294,7 +294,9 @@ def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
         face_calls.append(1)
         raise error
 
-    monkeypatch.setattr(extensions, "load_agent_faces", boom)
+    from base.packages.plugins.loading import faces
+
+    monkeypatch.setattr(faces, "load_agent_faces", boom)
     for full in (True, False, True):
         with pytest.raises(RuntimeError) as caught:
             ava.ensure_plugins_loaded(surface=not full)
@@ -305,162 +307,12 @@ def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
     assert not hasattr(ava, "lazytasks")
 
 
-class _ReentrantLoader(Loader):
-    def __init__(self, during_import: Callable[[], None], load: Callable[..., None]) -> None:
-        self.during_import = during_import
-        self.load = load
-
-    def create_module(self, spec: ModuleSpec) -> ModuleType | None:
-        return None
-
-    def exec_module(self, module: ModuleType) -> None:
-        self.during_import()
-        vars(module)["load_extensions"] = self.load
-
-
-class _ExtensionsFinder(MetaPathFinder):
-    def __init__(self, loader: Loader) -> None:
-        self.loader = loader
-
-    def find_spec(
-        self,
-        fullname: str,
-        path: Sequence[str] | None = None,
-        target: ModuleType | None = None,
-    ) -> ModuleSpec | None:
-        if fullname == "agent.extensions":
-            return spec_from_loader(fullname, self.loader)
-        return None
-
-
-@contextmanager
-def _partial_extensions(
-    monkeypatch: pytest.MonkeyPatch,
-    during_import: Callable[[], None],
-    load: Callable[..., None],
-) -> Generator[None]:
-    """Let Python mark a real reentrant import, then restore both module bindings."""
-    import agent
-    from agent import extensions
-
-    prior_module = extensions
-    prior_parent_binding = vars(agent)["extensions"]
-    prior_finders = sys.meta_path
-    try:
-        with monkeypatch.context() as patch:
-            # Importlib replaces the parent's public binding when the import finishes.
-            patch.setattr(agent, "extensions", extensions)
-            patch.delitem(sys.modules, "agent.extensions")
-            finder = _ExtensionsFinder(_ReentrantLoader(during_import, load))
-            patch.setattr(sys, "meta_path", [finder, *prior_finders])
-            import agent.extensions  # pyright: ignore[reportUnusedImport]
-
-            yield
-    finally:
-        assert sys.modules["agent.extensions"] is prior_module
-        assert vars(agent)["extensions"] is prior_parent_binding
-        assert sys.meta_path is prior_finders
-
-
-def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    loguru_records: list[dict],
-) -> None:
-    """A re-entrant import is not a failure (task #3234).
-
-    A process that imports an `agent.*` module before `ava` reaches the eager
-    load hits the loader while `agent.extensions` is still its own partial
-    `sys.modules` entry: the attribute does not exist YET. That call must defer
-    (no latch, no loud report) — and once the module is complete, the next call
-    loads normally instead of being blocked by a latch for a load that never
-    ran.
-    """
-    calls: list[int] = []
-
-    def fake(
-        *,
-        catalog: ModelCatalog,
-        authority: ConfigAuthority,
-        clock_factory: Callable[[], Clock],
-        producer: Callable[[], Any],
-        surface: bool = False,
-    ) -> None:
-        calls.append(1)
-
-    def during_import() -> None:
-        ava.ensure_plugins_loaded()  # must not raise
-        assert installed() is None and not install.load_attempted()
-        assert calls == []
-        assert "plugin load failed" not in capsys.readouterr().err
-        assert not any("failed in this launched child" in r["message"] for r in loguru_records)
-
-    with _partial_extensions(monkeypatch, during_import, fake):
-        # The module completed; the next call retries a load that never ran.
-        ava.ensure_plugins_loaded()
-        assert calls == [1]
-        assert install.load_attempted()
-
-
-def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """The deferred path must not re-enter `__getattr__` recursively.
-
-    With the latch left off, a lazy miss whose load defers stops at the
-    fail-fast AttributeError (no reload loop), and the first miss after the
-    loader module is complete loads the plugin surface.
-    """
-    _as_launched_child(monkeypatch)
-
-    calls: list[int] = []
-
-    def fake(
-        *,
-        catalog: ModelCatalog,
-        authority: ConfigAuthority,
-        clock_factory: Callable[[], Clock],
-        producer: Callable[[], Any],
-        surface: bool = False,
-    ) -> None:
-        calls.append(1)
-        _installing(
-            (
-                "deferred",
-                PluginContributions(
-                    sdk_namespaces=(
-                        SdkNamespace(
-                            "deferrednsp", SimpleNamespace(ping=lambda: "pong", __doc__="t")
-                        ),
-                    )
-                ),
-            ),
-            catalog=catalog,
-            authority=authority,
-            clock_factory=clock_factory,
-            producer=producer,
-        )
-
-    def during_import() -> None:
-        with pytest.raises(AttributeError):
-            _ = ava.deferrednsp  # type: ignore[attr-defined]
-        assert calls == []
-        assert installed() is None and not install.load_attempted()
-        assert "plugin load failed" not in capsys.readouterr().err
-
-    with _partial_extensions(monkeypatch, during_import, fake):
-        assert ava.deferrednsp.ping() == "pong"  # type: ignore[attr-defined]
-        assert calls == [1]
-        assert installed() is not None
-
-
 def _spy_member_loader(
     monkeypatch: pytest.MonkeyPatch, *, namespace: str, member: str
 ) -> list[int]:
     """Loader spy that registers a plugin MEMBER on an existing framework
     namespace (ava.self / ava.ui) — the shape ava_fleet uses for log/notify."""
-    from agent import extensions
+    from ava.sdk_surface import extensions
 
     calls: list[int] = []
 
@@ -471,6 +323,7 @@ def _spy_member_loader(
         clock_factory: Callable[[], Clock],
         producer: Callable[[], Any],
         surface: bool = False,
+        validate_state: object = None,
     ) -> None:
         calls.append(1)
         _installing(

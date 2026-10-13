@@ -59,7 +59,6 @@ from . import plugins as _plugins
 from .installation import (
     LOADING,
     SLOT,
-    ExternalState,
     Installation,
     Loading,
     SkillProvider,
@@ -260,7 +259,6 @@ def install(
     sampling: SamplingPolicyOwner | None = None,
     clock_factory: Callable[[], Clock] | None = None,
     producer: Callable[[], Any] | None = None,
-    external_state: Callable[[], ExternalState] | None = None,
 ) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `ava`; return the registry of the plugins admitted.
 
@@ -330,7 +328,6 @@ def install(
         authority=authority,
         clock_factory=clock_factory,
         producer=producer,
-        external_state=external_state,
     )
     setattr(ava_module(), SLOT, installation)
     if sampling is None:

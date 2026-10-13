@@ -99,7 +99,6 @@ def attached_runtime(
         undo=(),
         catalog=model_catalog,
         authority=config_authority,
-        external_state=lambda: plugin_state_codec,
     )
     monkeypatch.setattr(ava, "__plugin_installation__", installation, raising=False)
 

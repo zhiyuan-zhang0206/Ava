@@ -17,7 +17,6 @@ from uuid import uuid4
 
 from ava.boot import initialize_context, process_clients
 from ava.sdk_surface import process_context
-from ava.sdk_surface.installation import ExternalState
 from base.agents import impersonation as control
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
@@ -116,6 +115,13 @@ def _attachment_database(
     )
 
 
+def _state_gate() -> Any:
+    """The agent kernel's plugin-state check (interim: reached by name until this package moves above `agent`)."""
+    import importlib
+
+    return importlib.import_module("agent.state").plugin_state_schema
+
+
 class Attachment:
     """One local SDK attachment; use a context manager or explicitly close it.
 
@@ -202,6 +208,7 @@ class Attachment:
             surface=False,
             config=config,
             clock_factory=self._clock_factory,
+            validate_state=_state_gate(),
         )
         if config is None:
             from ava.sdk_surface.settings import config_authority
@@ -232,14 +239,11 @@ class Attachment:
         process_context.set_state(state)
         process_context.set_state_update({})
 
-    def _codec(self) -> ExternalState:
-        """The agent layer's plugin-state codec, supplied through the SDK installation."""
-        from ava.sdk_surface.installation import installed
+    def _codec(self) -> Any:
+        """The agent layer's plugin-state codec (interim: reached by name until this package moves above `agent`)."""
+        import importlib
 
-        installation = installed()
-        if installation is None:
-            raise RuntimeError("the SDK surface was not installed for the attachment")
-        return installation.require_external_state()
+        return importlib.import_module("agent.extensions.plugin_state_codec")
 
     def native_snapshot(self) -> Any:
         """The agent's saved state, as its checkpoint holds it.
