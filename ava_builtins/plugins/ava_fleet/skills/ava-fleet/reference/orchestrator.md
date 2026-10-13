@@ -5,36 +5,19 @@ You are the one who splits work, spawns workers, and judges results. This refere
 
 ## Spawning Workers
 
-### Before You Spawn: Reuse Existing Agents
+### Choosing Context and Capacity
 
-Spawning is not the first move — it is the fallback when no existing agent can take the
-work. Before you call `ava.agents.spawn()`, check who is already running and could help.
-This is the fleet-skill counterpart of the system prompt's **delegation check**: the same
-logic, reinforced here, so the spawn path itself reminds you to look first.
+Proactively parallelize independent work. Fork when your existing context is
+valuable to the task; otherwise spawn fresh or reuse a suitable, available agent.
 
-1. **Check your neighbors.** Call `ava.agents.get_neighbors(ava.self.AGENT_ID, depth=2)`
-   and scan their labels. An agent whose label names the domain you need is already
-   responsible for it — it has conversation history, workspace files, and memory for that
-   domain. Messaging it is cheaper and faster than spawning a fresh agent that must
-   rebuild all of that context from zero.
+Check existing ownership to avoid duplicate effort. Use neighbors or the agent
+directory when discovery is needed; consult the owner if responsibility is
+unclear. A role match alone does not establish availability, and a busy owner
+does not require independent work to queue behind its current task.
 
-2. **Search the directory.** Call `ava.agents.list_agents(scope="all", query="<role>")`
-   when the right agent might not be in your immediate neighbor graph. Inspect
-   `page.agents`; if more matches are needed, pass `page.next_cursor` as
-   `before_id` with the same scope/query. A single page is not the whole fleet.
-
-3. **Message the existing agent.** If you find one whose role fits, send it the task with
-   `ava.agents.send_message()`. The existing agent keeps everything it knows about the
-   domain — you pay no context-rebuild cost.
-
-4. **Resurrect if terminated.** A terminated agent still holds its context. Sending it a
-   message auto-resurrects it — it comes back with its full conversation history,
-   workspace, and memory intact. A fresh spawn starts from zero and must rediscover what
-   the terminated agent already knew.
-
-5. **Spawn only when no one fits.** If no existing agent can take the work, spawn. But
-   you have made a deliberate choice, not skipped a step. The default is reuse; spawn is
-   the exception.
+Forking inherits conversation and configuration, not all of the source agent's
+responsibilities. Fresh spawn fits a self-contained brief, an independent view,
+or a different model/configuration. See `ava.agents.spawn` for fork overlay limits.
 
 ### Mission, Not Micro-Task
 
@@ -51,9 +34,10 @@ blockers, completion, or when it needs something from you; routine
 progress pings and bare acknowledgments are never required. A brief
 missing the skill name is incomplete.
 
-- **After a mission, reuse before you replace.** If the agent has deep domain context and more work in that domain is coming, send it the next task. A terminated agent can be resurrected — its context is preserved — but a fresh spawn starts blank.
-
-**Spawn a fresh agent only when** (a) the next task is unrelated to anything the agent knows, (b) you need parallel execution, or (c) the agent has said it cannot continue. The default is reuse; spawn is the fallback.
+- **Preserve useful context across a mission.** Reuse a suitable agent when it
+  is available for related follow-up work. A message can resurrect a terminated
+  agent with its context intact. Choose fork or fresh spawn for independent work
+  according to the context it needs.
 
 #### Anti-Pattern
 
@@ -83,7 +67,7 @@ A worker is as smart as you. You hand it a *piece* of the work and the context t
 - **Tier the worker to the sub-task.** A worker's model is an Effort choice — overlay it with `ava.agents.spawn(config_overlay={"llm_model": "..."})`; no overlay = the default model. A cheaper model cross-checked by a second run and a single stronger run are two ways to spend the same Effort.
 - **Point the worker at its skills; don't ration them.** A worker's index already lists every loaded skill, so there is nothing to add — name the skill you expect it to use in the spawn prompt instead. `skills_to_inject_into_system_prompt` in a `config_overlay` now only *narrows* an index, and narrowing is an attention decision, not a permission one: it shortens the listing the worker reads, while `ava.help(ava.skills)` still enumerates the whole catalog and any skill stays loadable by name. Reach for it to keep a long index from burying the two skills a worker actually needs — never as a boundary. When a skill must be read in full before the worker's first turn, preload it with `skills_to_expand_at_start`.
 - **Name the role as you spawn.** Pass `label=` so the worker shows up as its role in the fleet view and is discoverable by its peers from the first moment — `ava.agents.spawn(prompt=..., label="auth-refactor lead")`.
-- **Fork when the worker builds on your context.** `ava.agents.spawn(fork_from=<your id>)` hands the worker your explored context for free; `fork_from` is also the dependency edge — a worker forks from the node whose output it builds on. A fresh spawn (no `fork_from`) starts the worker clean.
+- **Fork when the worker builds on your context.** `ava.agents.spawn(fork_from=<your id>)` gives the worker your explored context and configuration. A fresh spawn (no `fork_from`) starts from its brief and selected configuration.
 - **Spawn info reaches the worker in its first prompt.** When spawned, a worker's prompt names the **agent that started it** and the **task** — that id is the worker's reporting line: its progress and conclusions come back to you for aggregation, and only what needs the user's authorization goes to the user directly.
 - **Agent-to-agent communication is `send_message`.** A worker's text output is *not* a message to anyone. When you need another agent to act on your output, message it directly:
 
@@ -113,9 +97,9 @@ Naming the skill is still worth doing even though the worker can see it: you hol
 
 ## Finding and Coordinating with Other Agents
 
-You are one node among dozens. Before spawning a new agent for a task, always check
-whether an existing one already fits — start with [Before You Spawn](#before-you-spawn-reuse-existing-agents)
-above, then come here for the mechanics.
+You are one node among dozens. Choose collaborators by
+[context and availability](#choosing-context-and-capacity), then use the discovery
+mechanics below when needed.
 
 When you need to coordinate with a peer — the agent that owns a branch you depend on, the reviewer of your artifact, whoever last touched the area you are about to change — find that one agent and message it alone:
 
@@ -160,9 +144,9 @@ By convention only the owner drives their own task's status — peers coordinate
 When a piece of work splits into parts that can run in parallel, a reliable shape is explore → fork → join. It is a pattern for parallelizable work, not a required procedure — grow it at runtime instead of writing a static task graph up front:
 
 1. **Explore.** One agent first builds the shared context and decides how to split (how many branches, each branch's goal). The split comes *out of* the exploration, not from a guess made before it. Higher Effort = a more deliberate split.
-2. **Freeze, then fan out.** When exploration is done, treat its result as a **frozen** baseline and fork **all** the workers for this level from that one point. If you keep evolving while you drip out forks, a child forked early and a sibling forked later inherit *different* baselines, and merging them at the reduce point costs more than it should. One freeze, one fan-out — every sibling shares the same baseline.
-3. **Fork.** Spawn one worker per branch with `ava.agents.spawn(fork_from=<your id>)`. Forking hands each worker the explored context for free.
-4. **Join by being woken, not by polling.** After spawning, go **idle** (return no tool call). "Who am I still waiting for" lives in your own conversation across the pause — never poll status in a loop. If a worker reliably reports on completion, let its `send_message` wake you. But for any **completion-critical** worker, don't trust it to report — supervise it with a goal watcher (see next section) so a silent stall wakes you instead of stranding the branch.
+2. **Choose the baseline.** Give workers that depend on the same explored state a consistent baseline. Independent work can start as it becomes actionable; a global freeze is not required.
+3. **Delegate.** Fork workers that need the explored context; use fresh or existing agents when those fit better.
+4. **Join by being woken, not by polling.** Continue other actionable work while workers run. When only waiting remains, go **idle** (return no tool call) and let `send_message` wake you. For completion-critical work, use the supervision procedure below so a silent stall does not strand the branch.
 
 ## Supervising Workers
 

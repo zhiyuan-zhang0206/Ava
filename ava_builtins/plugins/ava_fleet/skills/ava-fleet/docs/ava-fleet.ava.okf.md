@@ -14,6 +14,14 @@ tags:
 
 The master outline of the fleet collaboration methodology (`plugins/ava_fleet/skills/ava-fleet/SKILL.md`, loaded name `ava.skills.ava_fleet`, indexed in every agent's prompt like every other loaded skill). fleet = a graph of agents working toward a human goal; the human only controls **decomposition** (how the work is split) and **judgment** (the results that come back), never opening any agent's conversation. Agents are general-purpose—their division of labor comes from the spawn-time instructions, not from which skills they were handed: a worker's index already lists everything its machine has.
 
+## Parallel Work
+
+Proactively parallelize independent work. Fork when existing context is valuable
+to the task; otherwise spawn fresh or reuse a suitable, available agent. Keep
+short or dependent work local, respect existing ownership, and continue other
+actionable work while delegates run. The orchestrator reference describes
+context selection and assignment boundaries.
+
 ## Communication Bisection (#620 Revision)
 
 The old tenet "any agent reaches the user directly, no relay chain" was over-extended—raw worker output flooded the user queue. The bisection corrects this:
