@@ -2,47 +2,22 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from meizel.contracts.analysis import analyze
 from meizel.contracts.manifest import manifest_path
+from meizel.contracts.manifest_text import ENTRY, HEADER, entry_end, items, unquote
 from meizel.graph.model import MeizelError
 
 __all__ = ["prune", "remove_entries"]
 
-_HEADER = re.compile(r"^\s*\[([\w.-]+)\]\s*(?:#.*)?$")
-_ENTRY = re.compile(r"""^(\s*)("[^"]*"|'[^']*'|[\w.-]+)\s*=\s*\[""")
-_QUOTED = re.compile(r""""([^"]*)"|'([^']*)'""")
-
-
-def _unquote(key: str) -> str:
-    return key[1:-1] if key[:1] in {'"', "'"} else key
-
-
-def _entry_end(lines: list[str], start: int) -> int:
-    """Index of the line holding the `]` that closes the list opened on `start`."""
-    depth = 0
-    for index in range(start, len(lines)):
-        text = re.sub(r"""("[^"]*"|'[^']*')""", "", lines[index].split("#", 1)[0])
-        depth += text.count("[") - text.count("]")
-        if depth <= 0:
-            return index
-    return len(lines) - 1
-
-
-def _items(block: str) -> list[str]:
-    body = block[block.index("[") + 1 : block.rindex("]")]
-    uncommented = "\n".join(line.split("#", 1)[0] for line in body.splitlines())
-    return [a or b for a, b in _QUOTED.findall(uncommented)]
-
 
 def _rewrite_entry(lines: list[str], start: int, end: int, drop: set[str]) -> list[str]:
-    match = _ENTRY.match(lines[start])
+    match = ENTRY.match(lines[start])
     if match is None:
         raise MeizelError(f"line {start + 1}: not a manifest entry: {lines[start]!r}")
     block = "\n".join(lines[start : end + 1])
-    kept = [item for item in _items(block) if item not in drop]
+    kept = [item for item in items(block) if item not in drop]
     if not kept or "*" in drop:
         return []
     values = ", ".join(f'"{item}"' for item in kept)
@@ -56,13 +31,13 @@ def remove_entries(text: str, removals: dict[str, dict[str, set[str]]]) -> str:
     section = ""
     index = 0
     while index < len(lines):
-        header = _HEADER.match(lines[index])
+        header = HEADER.match(lines[index])
         if header:
             section = header.group(1)
-        entry = _ENTRY.match(lines[index])
+        entry = ENTRY.match(lines[index])
         if entry and section in removals:
-            end = _entry_end(lines, index)
-            drop = removals[section].get(_unquote(entry.group(2)))
+            end = entry_end(lines, index)
+            drop = removals[section].get(unquote(entry.group(2)))
             out.extend(_rewrite_entry(lines, index, end, drop) if drop else lines[index : end + 1])
             index = end + 1
             continue
@@ -74,10 +49,10 @@ def remove_entries(text: str, removals: dict[str, dict[str, set[str]]]) -> str:
 def _drop_empty_sections(lines: list[str]) -> str:
     kept: list[str] = []
     for position, line in enumerate(lines):
-        if _HEADER.match(line):
+        if HEADER.match(line):
             rest = lines[position + 1 :]
             following = next((x for x in rest if x.strip() and not x.strip().startswith("#")), "")
-            if not following or _HEADER.match(following):
+            if not following or HEADER.match(following):
                 continue
         kept.append(line)
     while kept and not kept[-1].strip():
