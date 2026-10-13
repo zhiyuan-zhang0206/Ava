@@ -129,7 +129,6 @@ _ROOT_FILES = (
     "AGENTS.md",
     ".gitleaks.toml",
     "CHANGELOG.md",
-    ".test_durations",
 )
 _PATH_ROOTS = (*CODE_TOPS, *_ARTIFACT_TOPS, *_ROOT_FILES)
 

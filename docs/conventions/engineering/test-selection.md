@@ -119,6 +119,7 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | 6 | Otherwise, union the contribution of every path, the tree-scan tests and every test reaching an opaque input in either tree | candidate subset |
 | 7 | The candidate is empty | FULL (no-tests) |
 | 8 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (`incomplete-impact` when the changed paths' own tests fit and opaque-input tests do not, else `subset-too-close`) |
+| 8a | No timings were restored for this run (rule 8 would compare two zero sums) | FULL (no-durations) |
 | 9 | None of the above | SELECTED (owner-tests) |
 
 Rule 4 is a runtime safety net. scripts/tests/test_test_selector_owner_rules.py
@@ -194,9 +195,10 @@ while the serial lane owns flaky execution. JUnit records remain the execution e
 
 ## Duration guard
 
-The timing input is the repository-root
-[.test_durations](../../../.test_durations) file, refreshed daily from isolated shard measurements by
-[refresh-test-durations.yml](../../../.github/workflows/refresh-test-durations.yml).
+The timing input is the repository-root `.test_durations` file. It is not tracked: the daily
+isolated shard measurement ([refresh-test-durations.yml](../../../.github/workflows/refresh-test-durations.yml))
+saves it as an Actions cache, `classify change` restores it, and a run without one keeps the full
+suite (rule 2a) because the guard below would compare two zero sums.
 It maps pytest node IDs to seconds. Refreshes retain every measured node,
 including fast tests and durations that round to zero; only unmeasured nodes
 use pytest-split's average fallback. The selector sums entries whose node ID
@@ -254,8 +256,8 @@ so the fan-out runs regardless of the mode.
 - Keep selector unit tests focused on observable decisions, AST resolution,
   current-test filtering, duration estimates, queue branches, per-class owner
   rules, the tracked-tree completeness guard, and deterministic JSON.
-- Refresh .test_durations through its normal nightly workflow after material
-  suite changes.
+- The daily workflow keeps the timings current; nothing to refresh by hand after
+  material suite changes.
 - Revert: set `TEST_SELECTION_MODE: "shadow"` in ci.yml (one line) and update
   the enforce-default assertion in tests/scripts/test_ci_test_selection.py.
   The wiring contracts deliberately turn red when the switch moves — that

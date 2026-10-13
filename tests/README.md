@@ -172,33 +172,31 @@ see the [hook runbook](../docs/conventions/runbook.md#git-hooks-pre-commit--pre-
 
 ## `.test_durations` — pytest-split duration data
 
-The backend shards (`--splits 16`) and the e2e shards (`--splits 4`) are
-balanced by per-test durations from the repo-root `.test_durations`; a test
-without an entry is costed at the average of this run's known durations, so a
-stale file skews the shards (measured ~20% skew as of 2026-08-30, after the
-file went 11 days without a refresh).
+The backend shards (16 whole-file groups) and the e2e shards (`--splits 4`) are
+balanced by per-test durations from the repo-root `.test_durations`, an untracked
+file: the daily measurement saves it as a GitHub Actions cache and CI restores it
+(a run without one splits by test count and warns). A test without an entry is
+costed at the average of this run's known durations, so stale timings skew the
+shards (measured ~20% skew as of 2026-08-30).
 
-Refresh the file manually after a significant test-suite change:
+To get timings on a development machine:
 
 ```bash
 uv run python scripts/ci/refresh_test_durations.py
 ```
 
 Main runs no CI (CI runs on pull requests only), so timings come from daily
-isolated measurements of each CI-shaped shard, with a two-hour backstop.
-Backend retries reseed the committed input weights so a failed attempt cannot
+isolated measurements of each CI-shaped shard.
+Backend retries reseed the input weights so a failed attempt cannot
 change its shard's selection. Backend measurements carry `--omit-static-tests`, `-n 4`, `-m "not flaky"`,
 and CI's coverage module list; e2e carries `-n 2`. The merge requires every
 artifact, rejects empty or overlapping measurements, retains fast and zero
-entries, and atomically writes compact JSON. All measurements and publication
-use one immutable source SHA.
+entries, and atomically writes compact JSON.
 
-[Duration refresh policy](../scripts/ci/docs/duration-refresh.md) explains
-cadence and provenance. `.github/workflows/refresh-test-durations.yml` updates
-one reviewable bot PR and records its source in `.test_durations.source.json`.
-Only complete published measurements reset freshness; skipped runs and failed
-measurements do not. Main uses the new weights after that PR merges; it is never
-auto-merged.
+[Test durations](../scripts/ci/docs/duration-refresh.md) explains the cache key,
+how a CI run resolves and restores it, and what happens without one.
+`.github/workflows/refresh-test-durations.yml` saves the merged timings as an
+Actions cache; no pull request is involved.
 
 ## Host isolation: what a test run may touch
 
