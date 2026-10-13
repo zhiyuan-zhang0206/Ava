@@ -2,6 +2,7 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.cli_tests" = [
     "identity/test_commands_restart_stop.py",
+    "identity/test_root_driver_signals.py",
     "test_commands_status.py",
     "test_maintenance_stop_report.py",
     "test_remote_data_plane.py",
