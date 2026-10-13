@@ -157,6 +157,54 @@ def test_probe_always_returns_a_verdict(
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)
 
 
+def test_an_inspection_failure_is_unavailable_not_down(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The 2026-10-13 shape at the probe boundary: the process scan raising the
+    psutil C-extension's SystemError is "we could not look", not "the browser is
+    down". UNAVAILABLE is terminal — reported, never respawned — so one
+    process's mid-scan race cannot swap the Chrome generation and lose every
+    agent's pages; the next ordinary round simply re-observes."""
+    import logging
+
+    def _racing_walk(_profile: Path) -> list[int]:
+        raise SystemError(
+            "<built-in function proc_cmdline> returned a result with an exception set"
+        )
+
+    _wire(monkeypatch, cdp=None, chromes=[], listening={})
+    monkeypatch.setattr(probe_mod, "find_cluster_chrome", _racing_walk)
+    with caplog.at_level(logging.ERROR, logger="services.desktop.browser.probe"):
+        verdict = probe_mod.probe_browser(9222, _PROFILE)
+    assert verdict.verdict is ProbeVerdict.UNAVAILABLE
+    assert verdict.terminal is True
+    assert "SystemError" in verdict.detail
+    assert any("inspection failed" in r.getMessage() for r in caplog.records)
+
+
+def test_the_holder_and_socket_reads_survive_the_psutil_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_process_facts` is `_readable_facts` one pid at a time and `_listens_on`
+    reads the same process: the race must come back as "cannot tell" —
+    (("", None)) and None — never as an exception into the probe."""
+    race = SystemError("<built-in function proc_cmdline> returned a result with an exception set")
+
+    class _RacingProc:
+        def name(self) -> str:
+            return ""
+
+        def cmdline(self) -> list[str]:
+            raise race
+
+        def net_connections(self, kind: str) -> list[object]:
+            raise race
+
+    monkeypatch.setattr(probe_mod.psutil, "Process", lambda _pid: _RacingProc())  # pyright: ignore[reportUnknownArgumentType]
+    assert probe_mod._process_facts(4242) == ("", None)
+    assert probe_mod._listens_on(4242, 9222) is None
+
+
 def test_the_listener_is_ours_even_when_the_walk_missed_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
