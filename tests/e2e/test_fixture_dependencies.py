@@ -1,8 +1,13 @@
 """Resource prerequisites follow fixture dependencies rather than test paths."""
 
 from pathlib import Path
+from typing import Any, cast
 
+import httpx
 import pytest
+from playwright.sync_api import Browser, BrowserContext
+
+from tests.e2e._credentials import install_browser_login
 
 
 def test_direct_unit_does_not_request_e2e_process_environment(
@@ -11,6 +16,40 @@ def test_direct_unit_does_not_request_e2e_process_environment(
     assert "_e2e_process_env" not in request.fixturenames
     assert "frontend_proc" not in request.fixturenames
     assert "playwright_runtime" not in request.fixturenames
+
+
+def test_mocked_browser_context_does_not_need_e2e_credentials(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    assert "_e2e_process_env" not in request.fixturenames
+    probes: list[httpx.Request] = []
+
+    def health_probe(request: httpx.Request) -> httpx.Response:
+        probes.append(request)
+        return httpx.Response(503)
+
+    client_init = httpx.Client.__init__
+    transport = httpx.MockTransport(health_probe)
+
+    def initialize(client: httpx.Client, *args: Any, **kwargs: Any) -> None:
+        kwargs["transport"] = transport
+        kwargs["trust_env"] = False
+        client_init(client, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.Client, "__init__", initialize)
+    context = cast(BrowserContext, object())
+
+    class BrowserDouble:
+        def new_context(self) -> BrowserContext:
+            return context
+
+    browser = BrowserDouble()
+    install_browser_login(cast(Browser, browser))
+
+    assert browser.new_context() is context
+    assert len(probes) == 1
+    assert probes[0].url.path == "/api/health"
+    assert not probes[0].headers.get("authorization")
 
 
 def test_missing_frontend_skips_only_its_fixture_consumers(

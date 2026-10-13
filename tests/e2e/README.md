@@ -20,6 +20,10 @@ accepted. The test process reaches the gateway with the human secret as a Bearer
 every browser context the suite creates logs in through `/api/auth/login` (`install_browser_login`), as a user's browser does. No product admission rule is
 bypassed.
 
+Browser login first probes the public `/api/health` endpoint without credentials.
+Mocked visual pages that start only the frontend need no cluster credentials or login;
+contexts created after a gateway becomes ready still use the authenticated login path.
+
 
 ## Running
 

@@ -9,6 +9,7 @@ exports = ["conftest.py", "fakes", "process_support.py", "visual"]
 "plugins" = ["_db.py", "_ports.py", "fakes"]
 "process_support.py" = ["_credentials.py"]
 "state" = ["_db.py", "_settings.py", "fakes", "fixture_environment.py"]
+"test_fixture_dependencies.py" = ["_credentials.py"]
 "visual" = ["_ports.py"]
 
 [loads]

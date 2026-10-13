@@ -113,7 +113,11 @@ def _gateway_serving() -> bool:
     """True once the gateway answers HTTP. The retained listening socket accepts
     connections before any process serves them, so only a response proves it."""
     try:
-        return httpx.get(f"{GATEWAY_URL}/api/health", timeout=1.0).is_success
+        # Health is public. An explicit empty header keeps the autouse client
+        # credential wrapper from requiring a stack that mocked pages never start.
+        return httpx.get(
+            f"{GATEWAY_URL}/api/health", headers={"Authorization": ""}, timeout=1.0
+        ).is_success
     except httpx.HTTPError:
         return False
 
