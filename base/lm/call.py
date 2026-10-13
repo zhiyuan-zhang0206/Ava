@@ -223,6 +223,7 @@ def answer_text(
     catalog: Any,
     llm_override: str,
     overrides: ModelOverrides,
+    build_chat_model: Callable[..., Any],
 ) -> str:
     """Build `model` at `effort` and answer `prompt` against `material`.
 
@@ -235,8 +236,6 @@ def answer_text(
     transient-failure retry; `timeout` is the provider-client request timeout
     (None = provider SDK default). `usage_source` forwards to `invoke_text`.
     """
-    from base.lm.factory import build_chat_model
-
     try:
         llm = build_chat_model(
             model,
