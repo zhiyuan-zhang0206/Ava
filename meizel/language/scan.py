@@ -14,7 +14,7 @@ from meizel.graph.universe import Universe
 from meizel.language import fixtures
 from meizel.language.restricted import EXTERNAL_FORMS, RestrictedForms, const_str
 
-__all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file"]
+__all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file", "scan_source"]
 
 _PATCH_CALLS = {
     "unittest.mock.patch": "patch",
@@ -351,13 +351,20 @@ class Scanner(RestrictedForms):
         self.children(node)
 
 
-def scan_file(universe: Universe, path: str) -> FileScan:
-    full = universe.root / path
+def scan_source(universe: Universe, path: str, source: bytes) -> FileScan:
+    """Scan `source` as if it were the file at `path` (a version that is not in the working tree)."""
     try:
-        source = full.read_bytes()
         tree = ast.parse(source, filename=path)
     except SyntaxError as error:
         raise MeizelError(f"{path}:{error.lineno}: cannot parse: {error.msg}") from error
-    except (OSError, ValueError) as error:
+    except ValueError as error:
         raise MeizelError(f"{path}: cannot read: {error}") from error
     return Scanner(universe, path, tree, walrus=b":=" in source).run()
+
+
+def scan_file(universe: Universe, path: str) -> FileScan:
+    try:
+        source = (universe.root / path).read_bytes()
+    except (OSError, ValueError) as error:
+        raise MeizelError(f"{path}: cannot read: {error}") from error
+    return scan_source(universe, path, source)
