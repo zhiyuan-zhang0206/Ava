@@ -18,16 +18,16 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.invocation import native_work
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     _Build,
     _FakePool,
-    _host,
     _Row,
+    build_agent_host,
 )
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     host_plugin as host_plugin,
 )
-from services.agent_runner.agent_host.tests.test_agent_host import (
+from services.agent_runner.agent_host.tests.runtime.host_support import (
     wired as wired,
 )
 from tests.fixtures.unit.identity import machine_identity as machine_identity
@@ -110,7 +110,7 @@ class TestPoolIsolation:
         )
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
         monkeypatch.setattr(hosted_force, "original_host_force", force)
-        host = _host(
+        host = build_agent_host(
             catalog=model_catalog,
             pool=cast(AsyncConnectionPool[Any], turn_pool),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),

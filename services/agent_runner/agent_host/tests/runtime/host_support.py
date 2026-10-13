@@ -1,0 +1,457 @@
+"""Fakes and fixtures for the hosted agent-runner turn tests: an `AgentHost` over fake pools."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from typing import Any, cast
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
+
+import pytest
+from pydantic import BaseModel, ConfigDict, Field
+
+import services.agent_runner.agent_host.host as agent_host_host
+from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
+from base.agents.context import AvaContext
+from base.agents.incarnation import hosted_force
+from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
+from base.cluster.machine import MachineIdentity
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
+from base.events.live.tests.fakes import patch_async_redis
+from base.lm.catalog import ModelCatalog
+from services.agent_runner.agent_host import invocation, settlement
+from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.runtime import HostPolicy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_policy,
+)
+from services.agent_runner.agent_host.tests.runtime.observation import HostTurnObservation
+from tests.fixtures.unit.identity import machine_identity as machine_identity
+
+
+def build_agent_host(
+    *, catalog: ModelCatalog, database_gate: ProcessDbGate, machine: MachineIdentity, **kwargs: Any
+) -> AgentHost:
+    """An `AgentHost` on this box with the handles the tests share."""
+    return AgentHost(
+        policy=kwargs.pop("policy", configured_policy()),
+        machine=machine,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(gate=database_gate),
+        catalog=catalog,
+        **kwargs,
+    )
+
+
+class _HostPluginConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    marker: str = Field(default="disk-default", json_schema_extra={"per_agent": True})
+
+
+@pytest.fixture
+def host_plugin() -> dict[str, BaseModel]:
+    """One host's plugin config image, passed into its composition root."""
+    return {"hostplug": _HostPluginConfig()}
+
+
+# ── fakes ────────────────────────────────────────────────────────────────────
+
+
+class _Row:
+    """One `agents_meta` row as `read_stored_config` selects it."""
+
+    def __init__(
+        self,
+        machine: str = "this-box",
+        status: str = "running",
+        overlay: dict[str, Any] | None = None,
+        birth: dict[str, Any] | None = None,
+    ) -> None:
+        self.tuple = (machine, status, overlay, birth)
+
+
+class _FakeCursor:
+    def __init__(self, row: tuple[Any, ...] | None) -> None:
+        self._row = row
+
+    async def fetchone(self) -> tuple[Any, ...] | None:
+        return self._row
+
+
+class _FakeConn:
+    def __init__(self, pool: _FakePool) -> None:
+        self._pool = pool
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncGenerator[None]:
+        yield
+
+    async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _FakeCursor:
+        if sql == "SET TRANSACTION READ WRITE":
+            return _FakeCursor(None)
+        if sql == "SELECT id FROM agents_meta WHERE id=%s FOR UPDATE":
+            return _FakeCursor((params[0],) if params[0] in self._pool.rows else None)
+        if sql == (
+            "SELECT i.id FROM agents_meta m JOIN inbound_messages i "
+            "ON i.id=m.lifecycle_command_id WHERE m.id=%s "
+            "AND m.runtime_generation=%s AND m.runtime_owner=%s "
+            "AND i.agent_id=m.id AND i.target_generation=%s AND i.target_owner=%s "
+            "AND i.kind IN ('restart','terminate') AND i.status='claimed' "
+            "AND i.applied_at IS NULL"
+        ):
+            # Legacy graph-return cases carry one synthetic claimed command.
+            return _FakeCursor((params[0],) if params[0] in self._pool.rows else None)
+        if sql == (
+            "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant owner SQL
+            "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
+            "WHERE m.id=%s AND i.id=%s AND i.kind='restart' "
+            "AND i.status='claimed' AND i.applied_at IS NOT NULL "
+            "AND i.target_owner=%s "
+            "AND i.observed_at IS NULL AND m.runtime_owner IS NULL "
+            f"AND {DRAINED_RESOURCES}"
+        ):
+            # A failed orchestration turn has no certified maintenance receipt.
+            return _FakeCursor(None)
+        compact_pending = (
+            "SELECT acceptance,outcome,attempt_id,execution,result,attempt_provider "
+            "FROM native_compact_commands WHERE agent_id=%s AND released_at IS NULL"
+        )
+        compact_closed = (
+            "SELECT c.acceptance,c.outcome,c.attempt_id,c.execution,c.result,c.attempt_provider "
+            "FROM native_compact_commands c JOIN agents_meta m ON m.id=c.agent_id "
+            "JOIN native_graph_work w ON w.id=m.native_work_id "
+            "WHERE m.id=%s AND c.execution->>'work_id'=w.id::text "
+            "AND c.released_at IS NOT NULL AND w.phase='settled' AND w.ended_at IS NOT NULL"
+        )
+        if sql in (compact_pending, compact_pending + " FOR UPDATE", compact_closed):
+            # These orchestration agents have no guarded compact command.
+            return _FakeCursor(None)
+        if sql == (
+            "SELECT machine, status, config_overlay, birth_config FROM agents_meta WHERE id = %s"
+        ):
+            self._pool.reads += 1
+            row = self._pool.rows.get(params[0])
+            return _FakeCursor(row.tuple if row is not None else None)
+        raise AssertionError(f"unexpected host fixture SQL: {sql}")
+
+
+class _FakeConnCtx:
+    """The `async with pool.connection()` shape."""
+
+    def __init__(self, pool: _FakePool) -> None:
+        self._pool = pool
+
+    async def __aenter__(self) -> _FakeConn:
+        return _FakeConn(self._pool)
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
+
+
+class _FakePool:
+    """Host orchestration SQL without native commands; count stored-config reads.
+
+    Deliberately not a live pool: every contract in this file is about
+    contextvars, asyncio ordering and cache bookkeeping, none of which a real
+    Postgres would exercise differently. What a real DB WOULD add — that an
+    overlay write lands in the column this reads — is one `UPDATE` away from
+    trivial and is not what has ever broken.
+    """
+
+    def __init__(self, rows: dict[int, _Row]) -> None:
+        self.rows = rows
+        self.reads = 0
+
+    def connection(self, timeout: float | None = None) -> _FakeConnCtx:
+        return _FakeConnCtx(self)
+
+
+class _PendingScanCursor:
+    def __init__(self, rows: list[tuple[int]]) -> None:
+        self._rows = rows
+
+    async def fetchall(self) -> list[tuple[int]]:
+        return self._rows
+
+
+class _PendingScanConn:
+    def __init__(self, pool: _PendingScanPool) -> None:
+        self._pool = pool
+
+    async def execute(self, sql: str, params: tuple[object, ...]) -> _PendingScanCursor:
+        self._pool.sql = sql
+        self._pool.params = params
+        return _PendingScanCursor(self._pool.rows)
+
+
+class _PendingScanPool:
+    """One host backstop query with captured SQL and returned candidates."""
+
+    def __init__(self, rows: list[tuple[int]]) -> None:
+        self.rows = rows
+        self.sql = ""
+        self.params: tuple[object, ...] = ()
+
+    def connection(self) -> _PendingScanCtx:
+        return _PendingScanCtx(self)
+
+
+class _PendingScanCtx:
+    def __init__(self, pool: _PendingScanPool) -> None:
+        self._pool = pool
+
+    async def __aenter__(self) -> _PendingScanConn:
+        return _PendingScanConn(self._pool)
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
+
+
+class _Model:
+    """A stand-in chat model that remembers which model name built it."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _Publisher:
+    """A stand-in `AgentEventPublisher` that remembers whose turn built it."""
+
+    def __init__(self, _redis: object, _channel: str, *, agent_id: int) -> None:
+        self.agent_id = agent_id
+
+    async def start(self, _tasks: asyncio.TaskGroup) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+
+class _FakeGraph:
+    """Stands in for the compiled graph.
+
+    `ainvoke` reads the explicit invocation context from inside a child task,
+    where a LangGraph node actually runs.
+    """
+
+    def __init__(self, results: dict[int, list[dict[str, Any]]]) -> None:
+        self._results = results
+        self.observations: list[HostTurnObservation] = []
+        self.gates: dict[int, asyncio.Event] = {}
+        self.arrived: dict[int, asyncio.Event] = {}
+
+    def gate(self, agent_id: int) -> asyncio.Event:
+        return self.gates.setdefault(agent_id, asyncio.Event())
+
+    def arrival(self, agent_id: int) -> asyncio.Event:
+        return self.arrived.setdefault(agent_id, asyncio.Event())
+
+    async def _observe(self, _agent_id: int, context: AvaContext) -> HostTurnObservation:
+        agent = context.require_agent()
+        plugin_cfg = cast(_HostPluginConfig, agent.plugin_config("hostplug"))
+        return HostTurnObservation(
+            agent_id=context.require_identity().agent_id,
+            model=agent.brain.llm_model,
+            plugin_marker=plugin_cfg.marker,
+            llm=cast(_Model, context.llm),
+            publisher=cast(_Publisher, context.event_publisher),
+            ops_pool=context.ops_pool,
+            machine=context.require_machine(),
+        )
+
+    async def ainvoke(
+        self, _input: dict[str, Any], *, config: dict[str, Any], context: AvaContext
+    ) -> dict[str, Any]:
+        agent_id = int(config["configurable"]["thread_id"])
+        self.observations.append(await asyncio.create_task(self._observe(agent_id, context)))
+        self.arrival(agent_id).set()
+        gate = self.gates.get(agent_id)
+        if gate is not None:
+            await gate.wait()
+            gate.clear()
+        queued = self._results.get(agent_id)
+        if queued:
+            return queued.pop(0)
+        return {"exit_requested": False, "turn_idle": True, "restart_requested": False}
+
+
+class _GatedGraph:
+    """`ainvoke` that blocks on an event, optionally swallowing its own
+    cancellation (the C-call-blocked shape the bounded unwind cannot interrupt).
+    """
+
+    def __init__(self, *, refuse_cancel: bool = False) -> None:
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.refuse_cancel = refuse_cancel
+        self.cancel_seen = False
+        self.contexts: list[AvaContext] = []
+
+    async def ainvoke(
+        self, _input: dict[str, Any], *, config: dict[str, Any], context: AvaContext
+    ) -> dict[str, Any]:
+        self.contexts.append(context)
+        self.entered.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancel_seen = True
+            if self.refuse_cancel:
+                # Model the blocked-in-a-C-call shape: the cancellation lands
+                # but the task cannot honour it.
+                await self.release.wait()
+            raise
+        return {"exit_requested": False, "turn_idle": True, "restart_requested": False}
+
+
+_Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
+
+
+def _stub_host_transitions(
+    monkeypatch: pytest.MonkeyPatch, flip: Callable[..., Awaitable[bool]]
+) -> list[int]:
+    import services.agent_runner.agent_host.host as host_mod
+    from base.native_process.runtime_incarnation import RuntimeIncarnation
+    from services.agent_runner.agent_host.invocation import native_work
+
+    stamps: list[int] = []
+
+    async def admit(
+        pool: object, agent_id: int, _machine: str, owner: UUID, *, expected_from: str, db: object
+    ) -> RuntimeIncarnation | None:
+        if not await flip(pool, agent_id, "running", expected_from=expected_from):
+            return None
+        return RuntimeIncarnation(agent_id, uuid4(), owner)
+
+    async def settle_and_stamp(
+        pool: object,
+        incarnation: RuntimeIncarnation,
+        *,
+        bus: object,
+        exited: bool,
+        crashed: bool,
+        resources: object,
+    ) -> TurnSettlement:
+        if crashed:
+            stamps.append(incarnation.agent_id)
+        if not exited:
+            await flip(pool, incarnation.agent_id, "idling", expected_from="running")
+        return TurnSettlement(stamp=TurnFatalStamp(applied=crashed), settled=not exited)
+
+    monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
+    # These orchestration fixtures expose no managed native-work capability.
+    # Strong command/checkpoint/transfer facts use actual PG tests in native_cancel/.
+    monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
+    monkeypatch.setattr(native_work, "prepare_native_invocation", AsyncMock(return_value=None))
+    monkeypatch.setattr(native_work, "settle_checkpoint", AsyncMock(return_value=False))
+    monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
+    return stamps
+
+
+@pytest.fixture
+def wired(
+    machine_identity: MachineIdentity,
+    monkeypatch: pytest.MonkeyPatch,
+    host_plugin: dict[str, BaseModel],
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> _Build:
+    """An `AgentHost` over fakes, with the per-agent build stubbed.
+
+    The per-agent build is stubbed because it needs a live key.
+    `boot_agent_scope` is replaced by a build that returns a model named as the
+    host asked, so a test can tell which model the host prepared.
+    """
+    # This suite's agents/ownership live exclusively in _FakePool. Real lease
+    # SQL is covered by takeover integration tests, so its no-lease baseline
+    # must be fake too instead of querying a second, empty database.
+    monkeypatch.setattr(agent_host_host, "active_lease", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        invocation,
+        "settle_checkpoint",
+        AsyncMock(return_value=False),
+    )
+    import services.agent_runner.agent_host.host as host_mod
+    import services.agent_runner.agent_host.runtime as runtime_mod
+
+    async def _noop_reconcile(*_a: object, **_k: object) -> None:
+        return None
+
+    monkeypatch.setattr(host_mod, "consume_claimed_inbounds", _noop_reconcile)
+    monkeypatch.setattr(settlement, "consume_claimed_inbounds", _noop_reconcile)
+    monkeypatch.setattr(host_mod, "publish_agent_updated", _noop_reconcile)
+
+    async def _fake_boot_agent_scope(
+        _agent_id: int, llm_model: str, *_: object, **_kwargs: object
+    ) -> tuple[_Model, None]:
+        return _Model(llm_model), None
+
+    monkeypatch.setattr(runtime_mod, "boot_agent_scope", _fake_boot_agent_scope)
+
+    def _allow_model_config(
+        *,
+        model: str | None = None,
+        catalog: ModelCatalog,
+        llm_override: str,
+        overrides: object = None,
+    ) -> None:
+        """Keep fake host tests independent of installed provider credentials."""
+
+    monkeypatch.setattr(runtime_mod, "validate_model_config", _allow_model_config)
+
+    # The publisher below never touches the client; the host only passes it through.
+    patch_async_redis(monkeypatch, object)
+
+    monkeypatch.setattr(host_mod, "AgentEventPublisher", _Publisher)
+
+    async def _flip_hosted_status(*_args: object, **_kwargs: object) -> bool:
+        return True
+
+    _stub_host_transitions(monkeypatch, _flip_hosted_status)
+
+    monkeypatch.setattr(agent_host_host, "release_hosted_owner", _noop_reconcile)
+
+    async def _apply_lifecycle(_pool: object, _incarnation: object, **_kwargs: object) -> str:
+        """Host orchestration fake; real durable effects use the PG contract tests."""
+        return "terminate"
+
+    monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", _apply_lifecycle)
+    monkeypatch.setattr(invocation, "apply_hosted_lifecycle", _apply_lifecycle)
+
+    async def _no_force(*_args: object, **_kwargs: object) -> bool:
+        # These cache/context fixtures carry no force command. Real owner/pointer
+        # settlement and refusal are covered by test_hosted_force_quiescence.
+        return False
+
+    monkeypatch.setattr(hosted_force, "original_host_force", _no_force)
+
+    machine_identity.set(name="this-box")
+
+    def _build(
+        rows: dict[int, _Row],
+        results: dict[int, list[dict[str, Any]]] | None = None,
+        *,
+        catalog: ModelCatalog | None = None,
+        policy: HostPolicy | None = None,
+    ) -> tuple[AgentHost, _FakeGraph, _FakePool]:
+        graph = _FakeGraph(results or {})
+        pool = _FakePool(rows)
+        host = build_agent_host(
+            pool=pool,
+            checkpointer=object(),
+            graph=graph,
+            plugin_configs=host_plugin,
+            catalog=model_catalog if catalog is None else catalog,
+            policy=policy if policy is not None else configured_policy(),
+            database_gate=database_gate,
+            machine=machine_identity,
+        )
+        return host, graph, pool
+
+    return _build
+
+
+__all__ = ["_GatedGraph"]
