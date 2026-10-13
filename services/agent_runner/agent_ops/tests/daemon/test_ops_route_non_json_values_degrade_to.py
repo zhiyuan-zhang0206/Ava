@@ -686,7 +686,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
         release.wait(timeout=30)
         return "completed", {}
 
-    monkeypatch.setattr(daemon, "_dispatch_sync", _wedged)
+    monkeypatch.setattr(daemon, "bind_dispatch_sync", _wedged)
 
     task = asyncio.ensure_future(
         daemon._dispatch(

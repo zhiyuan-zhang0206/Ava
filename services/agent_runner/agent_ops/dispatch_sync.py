@@ -1,7 +1,7 @@
 """The blocking op arms: every synchronous `/ops` arm in one module.
 
 Split out of `services/agent_runner/agent_ops/daemon.py` at its file-size ceiling (task
-#4129 I4). `daemon._dispatch_sync` is
+#4129 I4). `daemon.bind_dispatch_sync` is
 the thin binding that supplies this daemon's shared DB pool, and
 `daemon._run_arm` runs the arms here on the daemon's own worker pool; the
 commentary on `dispatch_sync` below -- which moved with the code -- explains
