@@ -777,6 +777,6 @@ def test_retry_settings_are_read_when_a_request_retries(monkeypatch: pytest.Monk
         )
     )
     values.update(attempts=7, delay=0.5)
-    assert transport._max_retries(context) == 7
+    assert transport.request_max_retries(context) == 7
     assert transport.base_retry_delay_s(context) == 0.5
     assert transport.retry_delay_seconds(0, context) >= 0.5

@@ -568,7 +568,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     incumbent, resources = row_identity(db, args.agent)
     entries = survey(args.agent, incumbent=incumbent, resources=resources)
     if not args.quarantine:
-        _report(args.agent, entries)
+        print_request_evidence(args.agent, entries)
         return 0
     known = {entry.path.name: entry for entry in entries}
     selected: list[RequestEvidence] = []
@@ -594,7 +594,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _report(agent_id: int, entries: Sequence[RequestEvidence]) -> None:
+def print_request_evidence(agent_id: int, entries: Sequence[RequestEvidence]) -> None:
     """The listing an operator reads before deciding anything else."""
     if not entries:
         _emit(f"agent {agent_id}: no exec request evidence")

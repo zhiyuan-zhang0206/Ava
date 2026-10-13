@@ -195,7 +195,7 @@ def test_journal_write_failure_never_breaks_the_operation(
     # file makes every mkdir inside _write fail.
     blocked = home / "blocked"
     blocked.write_text("not a directory")
-    monkeypatch.setattr(journal, "_path", lambda: blocked / "lifecycle-op.json")
+    monkeypatch.setattr(journal, "journal_path", lambda: blocked / "lifecycle-op.json")
 
     journal.begin("stop")
     with journal.phase("drain"):

@@ -29,11 +29,6 @@ exports = ["identity_inputs.py"]
 "test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_metrics.metric_views" = 1
 "test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_metrics.metrics_resource" = 1
 
-[debt.private-name]
-"telemetry_otlp/test_backend_init_failure_isolated_and_waits_before.py -> test_telemetry_otlp.py#_event" = 1
-"telemetry_otlp/test_backend_init_failure_isolated_and_waits_before.py -> test_telemetry_otlp.py#_metrics" = 1
-"test_otlp_worker_lifecycle.py -> test_telemetry_otlp.py#_event" = 1
-
 [debt.stdlib-patch]
 "test_telemetry_otlp_child_defer.py#monkeypatch.setattr sys.is_finalizing" = 2
 

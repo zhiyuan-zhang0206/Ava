@@ -86,7 +86,7 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
         patch.object(backup, "pg_tool", return_value=Path("pg_dump")),
         patch.object(backup, "db_size_breakdown", return_value="test"),
         patch.object(backup, "run_with_progress", run),
-        patch.object(backup, "_key_file", key),
+        patch.object(backup, "passphrase_key_file", key),
         patch.object(offsite, "publish", publish),
     ):
         stack.enter_context(patcher)

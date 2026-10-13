@@ -629,7 +629,7 @@ def _fake_tools(
     return recorded
 
 
-def _argvs(recorded: list[_Call]) -> list[list[str]]:
+def recorded_argvs(recorded: list[_Call]) -> list[list[str]]:
     return [c.argv for c in recorded]
 
 
@@ -687,7 +687,7 @@ def _install_env(
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
     monkeypatch.setattr(lifecycle, "_run", run)
-    monkeypatch.setattr(lifecycle, "_probe", probe)
+    monkeypatch.setattr(lifecycle, "run_readonly_query", probe)
     if matching_plist:
         plist_path.parent.mkdir(parents=True)
         plist_path.write_bytes(

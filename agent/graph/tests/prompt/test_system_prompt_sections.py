@@ -689,14 +689,14 @@ def test_workspace_section_names_the_history_dump(
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", True)
     monkeypatch.setattr(settings.agent, "history_dump_enabled", True)
 
-    from agent.graph.prompt.system_prompt import _workspace_section
+    from agent.graph.prompt.system_prompt import agent_workspace_pointer
 
-    rendered = _workspace_section(_slices(), agent_id=1)
+    rendered = agent_workspace_pointer(_slices(), agent_id=1)
     assert "message-history/" in rendered
     assert "grep -rn 'keyword' message-history/" in rendered
 
     monkeypatch.setattr(settings.agent, "history_dump_enabled", False)
-    assert "message-history" not in _workspace_section(_slices(), agent_id=1)
+    assert "message-history" not in agent_workspace_pointer(_slices(), agent_id=1)
 
 
 # ── activation telemetry (issue #40) ────────────────────────────────────────

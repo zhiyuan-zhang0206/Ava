@@ -56,7 +56,7 @@ def owns_stop_hold(holder: str | None) -> bool:
 _LIFECYCLE_WAIT_POLL_SECONDS = 5.0
 
 
-def _hold(holder: str, at: datetime) -> MaintenanceHold:
+def require_maintenance_hold(holder: str, at: datetime) -> MaintenanceHold:
     current = admission.require_operation(holder, at)
     assert current.maintenance is not None  # noqa: S101
     return current.maintenance
@@ -119,7 +119,7 @@ def prepare(
             ).fetchone()
         if row is not None:
             raise RuntimeError("unit has native agents but no running hosted owner")
-        current = _hold(holder, at)
+        current = require_maintenance_hold(holder, at)
         if current.phase == MaintenancePhase.PREPARING:
             pause_owner.change_maintenance(
                 holder, at, current, MaintenanceHold(MaintenancePhase.DRAINING)
@@ -196,7 +196,7 @@ def drain(
     deadline = time.monotonic() + timeout
     # quiesce-exempt: the stop command's own bounded drain wait; it ends the moment the drain lands
     while True:
-        hold = _hold(holder, at)
+        hold = require_maintenance_hold(holder, at)
         if hold.phase == MaintenancePhase.PREPARING:
             raise RuntimeError(
                 "preparation is incomplete; re-run `ava stop`, or abandon it with `ava start`"
@@ -345,7 +345,7 @@ def pause_agents(
         or current.maintenance.phase == MaintenancePhase.PREPARING
     ):
         prepare(db, bus, holder, at, local_machine=local_machine)
-    hold = _hold(holder, at)
+    hold = require_maintenance_hold(holder, at)
     if hold.phase in (
         MaintenancePhase.PREPARING,
         MaintenancePhase.DRAINING,

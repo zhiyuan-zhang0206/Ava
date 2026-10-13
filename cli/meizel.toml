@@ -177,7 +177,5 @@ exports = ["commands", "database", "parsers", "start_identity.py", "tests", "uni
 "tests/bootstrap/test_start_boot_attempts.py -> start_intent.py#_run_boot_attempt" = 3
 "tests/bootstrap/test_start_identity.py -> start_intent.py#_checkout" = 10
 "tests/test_cluster_health_parser.py -> commands/cluster/tests/test_cluster_health.py#_home" = 1
-"tests/test_fleet_alert_silence.py -> fleet_alert_silence.py#_grafana" = 6
-"tests/test_fleet_update.py -> fleet_update.py#_hold" = 1
 "tests/test_start_gate.py -> start_intent.py#_checkout" = 1
 "tests/test_unit_capability_cli.py -> start_intent.py#_checkout" = 1

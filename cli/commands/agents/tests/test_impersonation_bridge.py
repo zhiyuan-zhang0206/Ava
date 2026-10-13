@@ -632,7 +632,7 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    snapshot = relay._read_inbox(
+    snapshot = relay.read_relay_inbox(
         database,
         event_bus,
         42,
@@ -675,7 +675,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     with pytest.raises(ValueError, match="does not belong"):
-        relay._read_inbox(
+        relay.read_relay_inbox(
             database,
             event_bus,
             42,
@@ -764,6 +764,6 @@ def test_release_racing_with_read_stops_cleanly(
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    assert not relay._read_inbox(
+    assert not relay.read_relay_inbox(
         database, event_bus, 42, LEASE_ID, "test-token", local_machine=machine_identity.name()
     ).active

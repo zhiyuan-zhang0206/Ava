@@ -159,7 +159,7 @@ _Query = tuple[LiteralString, Sequence[Any]]
 _Rows = list[dict[str, Any]]
 
 
-def _body_batches(keys: _Rows) -> Generator[_Rows]:
+def body_key_batches(keys: _Rows) -> Generator[_Rows]:
     batch: _Rows = []
     size = 0
     for key in keys:
@@ -187,7 +187,7 @@ def _fetch_suffix(
     body_bytes = body_rows = body_batches = 0
     reset = False
     decode = saver.serde.loads_typed
-    for batch in _body_batches(keys):
+    for batch in body_key_batches(keys):
         fetched = yield (
             _WRITE_BODIES_SQL,
             (

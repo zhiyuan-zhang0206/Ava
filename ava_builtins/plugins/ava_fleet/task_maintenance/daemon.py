@@ -83,12 +83,12 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
 
 
-def _endpoint() -> ServiceEndpoint:
+def task_maintenance_endpoint() -> ServiceEndpoint:
     return ServiceEndpoints.from_settings().of("task_maintenance")
 
 
 def _pidfile() -> Path:
-    return _endpoint().pidfile
+    return task_maintenance_endpoint().pidfile
 
 
 _LIVENESS_TIMEOUT_S = 60.0
@@ -325,7 +325,7 @@ async def run(
     _log.info("[task-maintenance] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint()
+    endpoint = task_maintenance_endpoint()
     health = await start_health_server(
         "task_maintenance", endpoint.health_port, liveness=liveness, image=image
     )

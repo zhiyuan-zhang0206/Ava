@@ -22,10 +22,10 @@ from playwright.sync_api import Error as PlaywrightError
 from scripts.post_deploy_visual import check
 from scripts.post_deploy_visual.check import (
     REPO_ROOT,
-    _cookie_file,
     accept_wave,
     assert_gate_origin,
     expected_capture_names,
+    resolved_cookie_file,
     session_precheck,
     validate_demo_target,
 )
@@ -242,10 +242,10 @@ def test_cookie_file_requires_a_regular_0600_file(tmp_path: Path) -> None:
     cookie = tmp_path / "cookie.txt"
     cookie.write_text("ava_session=value")
     with pytest.raises(PermissionError, match="0600"):
-        _cookie_file(cookie)
+        resolved_cookie_file(cookie)
 
     cookie.chmod(0o600)
-    assert _cookie_file(cookie) == cookie
+    assert resolved_cookie_file(cookie) == cookie
 
 
 def test_ignore_registry_requires_version_one(tmp_path: Path) -> None:

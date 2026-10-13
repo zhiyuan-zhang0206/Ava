@@ -12,4 +12,4 @@
 "test_heartbeat_projection.py#monkeypatch.setattr gateway.inspect._live.JITTER_SPAN_S" = 1
 "test_inspect_metrics.py#monkeypatch.setattr gateway.inspect._metrics.note_inspect_metrics_coverage" = 1
 "test_inspect_metrics.py#monkeypatch.setattr gateway.inspect.router.db_rows_blocking" = 1
-"test_inspect_metrics_health.py#monkeypatch.setattr gateway.inspect._metrics_health._historical" = 1
+"test_inspect_metrics_health.py#monkeypatch.setattr gateway.inspect._metrics_health.window_is_historical" = 1

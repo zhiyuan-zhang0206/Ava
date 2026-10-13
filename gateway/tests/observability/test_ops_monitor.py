@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.cluster import ops_monitor
-from gateway.cluster.ops_series import GRID_ORIGIN, _bucket_starts
+from gateway.cluster.ops_series import GRID_ORIGIN, bucket_start_times
 
 
 def _add(
@@ -44,7 +44,7 @@ def _grid_index(ts: datetime, anchor: datetime, window_s: int, bucket_s: int) ->
     """Position of `ts`'s bucket within the API's bucket_starts grid."""
     elapsed = int((ts - GRID_ORIGIN).total_seconds())
     bucket = GRID_ORIGIN + timedelta(seconds=elapsed - (elapsed % bucket_s))
-    starts = _bucket_starts(anchor, window_s, bucket_s)
+    starts = bucket_start_times(anchor, window_s, bucket_s)
     return starts.index(bucket)
 
 
@@ -136,7 +136,7 @@ def _seed_llm_bucket(db: psycopg.Connection) -> int:
     """Four llm_usage rows with known latency and a row with none, plus two LLM errors, all in
     one bucket; returns that bucket's index."""
     i = 40
-    inside = _bucket_starts(_now_ts(), 86400, 1800)[i] + timedelta(seconds=60)
+    inside = bucket_start_times(_now_ts(), 86400, 1800)[i] + timedelta(seconds=60)
     for latency, tokens_in in ((100.0, 600), (300.0, 300), (900.0, 100), (2000.0, 0)):
         payload: dict[str, object] = {
             "latency_ms": latency,

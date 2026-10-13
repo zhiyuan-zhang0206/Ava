@@ -584,7 +584,7 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
     monkeypatch.setattr(relay, "_MIN_EMIT_INTERVAL_SECONDS", 0)
 
     async def read() -> relay.InboxSnapshot:
-        return relay._read_inbox(
+        return relay.read_relay_inbox(
             database,
             event_bus,
             owner.agent_id,

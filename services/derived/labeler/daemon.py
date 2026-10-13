@@ -87,13 +87,13 @@ def labeler_model_overrides(*, profile: str | None, lm: LmSettings) -> ModelOver
     )
 
 
-def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
+def labeler_endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
     runtime.mkdir(parents=True, exist_ok=True)
     return ServiceEndpoints.from_boot(config, runtime=runtime).of("labeler")
 
 
 def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
-    return _endpoint(config, runtime=runtime).pidfile
+    return labeler_endpoint(config, runtime=runtime).pidfile
 
 
 # The inbound condition a label prompt may come from: a chat peer message,
@@ -244,7 +244,7 @@ async def run(
     _log.info("[labeler] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     liveness = Liveness(LIVENESS_TIMEOUT_S)
-    endpoint = _endpoint(process_config, runtime=runtime)
+    endpoint = labeler_endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "labeler", endpoint.health_port, liveness=liveness, image=image
     )

@@ -8,7 +8,7 @@ from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     FakeGateway,
     FakePlainAdapter,
     FakeTypingAdapter,
-    _core,
+    create_test_core,
 )
 from services.entrypoints.im_bridge.types import ChatState
 
@@ -21,7 +21,7 @@ async def test_push_snapshot_watermark_is_per_chat() -> None:
     those items. The key must be (channel, chat_id, agent_id)."""
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = _core(gateway, tasks=_owned_tasks)
+        core = create_test_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
         plain = FakePlainAdapter()
         core.register(adapter)

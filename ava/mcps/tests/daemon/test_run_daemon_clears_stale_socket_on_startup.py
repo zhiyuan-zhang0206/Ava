@@ -348,39 +348,39 @@ async def test_overlay_error_or_disabled_server_never_starts_a_process(
 
 
 def test_is_transport_error_broken_pipe() -> None:
-    assert daemon_mod._is_transport_error(BrokenPipeError()) is True
+    assert daemon_mod.is_mcp_transport_error(BrokenPipeError()) is True
 
 
 def test_is_transport_error_connection_reset() -> None:
-    assert daemon_mod._is_transport_error(ConnectionResetError()) is True
+    assert daemon_mod.is_mcp_transport_error(ConnectionResetError()) is True
 
 
 def test_is_transport_error_timeout_error() -> None:
-    assert daemon_mod._is_transport_error(TimeoutError()) is True
+    assert daemon_mod.is_mcp_transport_error(TimeoutError()) is True
 
 
 def test_is_transport_error_oserror_epipe() -> None:
-    assert daemon_mod._is_transport_error(OSError(32, "Broken pipe")) is True
+    assert daemon_mod.is_mcp_transport_error(OSError(32, "Broken pipe")) is True
 
 
 def test_is_transport_error_oserror_econnreset() -> None:
     assert (
-        daemon_mod._is_transport_error(OSError(errno.ECONNRESET, "Connection reset by peer"))
+        daemon_mod.is_mcp_transport_error(OSError(errno.ECONNRESET, "Connection reset by peer"))
         is True
     )
 
 
 def test_is_transport_error_oserror_other() -> None:
     """OSError with a non-transport errno (e.g. ENOENT) is not a transport error."""
-    assert daemon_mod._is_transport_error(OSError(2, "No such file")) is False
+    assert daemon_mod.is_mcp_transport_error(OSError(2, "No such file")) is False
 
 
 def test_is_transport_error_value_error() -> None:
-    assert daemon_mod._is_transport_error(ValueError("not transport")) is False
+    assert daemon_mod.is_mcp_transport_error(ValueError("not transport")) is False
 
 
 def test_is_transport_error_runtime_error() -> None:
-    assert daemon_mod._is_transport_error(RuntimeError("not transport")) is False
+    assert daemon_mod.is_mcp_transport_error(RuntimeError("not transport")) is False
 
 
 def test_is_transport_error_mcp_error_wraps_transport() -> None:
@@ -390,14 +390,14 @@ def test_is_transport_error_mcp_error_wraps_transport() -> None:
     inner = BrokenPipeError()
     exc = MCPError(-1, "wrapped")
     exc.__cause__ = inner
-    assert daemon_mod._is_transport_error(exc) is True
+    assert daemon_mod.is_mcp_transport_error(exc) is True
 
 
 def test_is_transport_error_mcp_error_no_cause() -> None:
     """MCPError without __cause__ is not a transport error."""
     from mcp import MCPError
 
-    assert daemon_mod._is_transport_error(MCPError(-1, "no cause")) is False
+    assert daemon_mod.is_mcp_transport_error(MCPError(-1, "no cause")) is False
 
 
 def test_is_transport_error_mcp_error_connection_closed_no_cause() -> None:
@@ -408,7 +408,9 @@ def test_is_transport_error_mcp_error_connection_closed_no_cause() -> None:
     from mcp import MCPError
     from mcp.types import CONNECTION_CLOSED
 
-    assert daemon_mod._is_transport_error(MCPError(CONNECTION_CLOSED, "Connection closed")) is True
+    assert (
+        daemon_mod.is_mcp_transport_error(MCPError(CONNECTION_CLOSED, "Connection closed")) is True
+    )
 
 
 def test_is_transport_error_mcp_error_request_timeout_no_cause() -> None:
@@ -417,7 +419,7 @@ def test_is_transport_error_mcp_error_request_timeout_no_cause() -> None:
     from mcp import MCPError
     from mcp.types import REQUEST_TIMEOUT
 
-    assert daemon_mod._is_transport_error(MCPError(REQUEST_TIMEOUT, "Timed out")) is True
+    assert daemon_mod.is_mcp_transport_error(MCPError(REQUEST_TIMEOUT, "Timed out")) is True
 
 
 def test_is_transport_error_mcp_error_tool_code_no_cause() -> None:
@@ -426,14 +428,14 @@ def test_is_transport_error_mcp_error_tool_code_no_cause() -> None:
     from mcp import MCPError
     from mcp.types import INVALID_PARAMS
 
-    assert daemon_mod._is_transport_error(MCPError(INVALID_PARAMS, "Bad args")) is False
+    assert daemon_mod.is_mcp_transport_error(MCPError(INVALID_PARAMS, "Bad args")) is False
 
 
 def test_is_transport_error_anyio_broken_resource() -> None:
     """The required transport dependency supplies the concrete exception type."""
     from anyio import BrokenResourceError
 
-    assert daemon_mod._is_transport_error(BrokenResourceError()) is True
+    assert daemon_mod.is_mcp_transport_error(BrokenResourceError()) is True
 
 
 async def test_invalidate_session_removes_cached_session_and_closes_stack(

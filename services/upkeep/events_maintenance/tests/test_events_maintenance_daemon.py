@@ -496,7 +496,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(
 
     monkeypatch.setattr(
         daemon,
-        "_endpoint",
+        "events_maintenance_endpoint",
         endpoint_for_entry,
     )
 
@@ -668,7 +668,7 @@ def _run_with_alert_loop(
 
     monkeypatch.setattr(
         daemon,
-        "_endpoint",
+        "events_maintenance_endpoint",
         endpoint_for_entry,
     )
 

@@ -31,7 +31,7 @@ from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.events.live.bus import EventBus
 from ops import agent_pause
 from ops.agent_pause.probe import HostIdentity
-from tests.components.agent.test_maintenance import WHEN, _agent
+from tests.components.agent.test_maintenance import WHEN, maintenance_agent
 from tests.components.agent.test_maintenance import isolate as isolate
 
 
@@ -97,7 +97,7 @@ async def _live_member(
     machine_identity: MachineIdentity,
 ) -> int:
     """An idling hosted agent under the live owner — preparation's original cohort."""
-    agent = _agent(conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(conn, machine_name=machine_identity.name())
     incarnation = await admit_hosted_runtime(
         aops_pool,
         agent,
@@ -211,7 +211,7 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
         agent_pause.prepare, database, event_bus, "move", WHEN, local_machine=machine_identity
     )
 
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == {agent}
     assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
@@ -253,7 +253,7 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     assert "unfinished lifecycle command" in str(raised.value)
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.PREPARING and hold.commands == {}
     assert [event["attributes"]["outcome"] for event in events] == ["exceeded"]
     assert events[0]["attributes"]["agents"] == [agent]
@@ -278,7 +278,7 @@ async def test_collision_free_prepare_is_unchanged(
     events = _events(monkeypatch)
 
     agent_pause.prepare(database, event_bus, "move", WHEN, local_machine=machine_identity)
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == {agent}
     assert events == []
@@ -325,7 +325,7 @@ def test_parked_agent_lifecycle_command_is_waitable(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     insert_inbound_message(
         db_conn, agent, "", "agent:6090", kind="terminate", bus=event_bus, database=database
     )
@@ -356,7 +356,7 @@ def test_parked_claimed_ordinary_work_is_consumed_not_redelivered(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "hello", "user", bus=event_bus, database=database
     )
@@ -399,7 +399,7 @@ def test_parked_claimed_work_prepares_without_wait(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "hello", "user", bus=event_bus, database=database
     )
@@ -411,7 +411,7 @@ def test_parked_claimed_work_prepares_without_wait(
 
     agent_pause.prepare(database, event_bus, "move", WHEN, local_machine=machine_identity)
 
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.DRAINING
     assert set(hold.commands) == set()
     assert hold.parked == (agent,)
@@ -431,7 +431,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "", "user", kind=kind, bus=event_bus, database=database
     )
@@ -448,7 +448,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     assert "unfinished lifecycle command" in str(raised.value)
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.PREPARING and hold.commands == {} and hold.parked == ()
     assert [event["attributes"]["outcome"] for event in events] == ["exceeded"]
     assert events[0]["attributes"]["agents"] == [agent]
@@ -463,7 +463,7 @@ def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     ordinary = insert_inbound_message(
         db_conn, agent, "orphan", "user", bus=event_bus, database=database
     )
@@ -489,7 +489,7 @@ def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
     ).fetchall() == [(ordinary, "claimed"), (authored, "claimed")]
     assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
     assert events[0]["attributes"]["outcome"] == "refused"
-    hold = agent_pause._hold("move", WHEN)
+    hold = agent_pause.require_maintenance_hold("move", WHEN)
     assert hold.phase == MaintenancePhase.PREPARING and hold.parked == ()
 
 
@@ -501,7 +501,7 @@ def test_orphan_cas_miss_accepts_concurrent_settlement(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "orphan", "user", bus=event_bus, database=database
     )
@@ -538,7 +538,7 @@ def test_parked_maintenance_command_refuses_without_wait(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     command = insert_inbound_message(
         db_conn,
         agent,
@@ -579,7 +579,7 @@ def test_parked_claim_guards_agree_on_waitability(
     second guard, and preparation's retry decision depends on the two staying
     consistent (task #4013).
     """
-    agent = _agent(db_conn, machine_name=machine_identity.name())
+    agent = maintenance_agent(db_conn, machine_name=machine_identity.name())
     message = insert_inbound_message(
         db_conn, agent, "hello", "user", bus=event_bus, database=database
     )

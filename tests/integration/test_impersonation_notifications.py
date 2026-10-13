@@ -577,7 +577,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
                 "UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,)
             )
             db_conn.commit()
-        return relay._read_inbox(
+        return relay.read_relay_inbox(
             database,
             event_bus,
             owner.agent_id,

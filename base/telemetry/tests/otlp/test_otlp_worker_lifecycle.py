@@ -12,7 +12,7 @@ from base.telemetry.delivery import reporting
 from base.telemetry.delivery.receipts import DrainStatus, Event
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.otlp import telemetry_otlp_worker as worker_module
-from base.telemetry.tests.otlp.test_telemetry_otlp import _event
+from base.telemetry.tests.otlp.test_telemetry_otlp import otlp_test_event
 
 
 class _Provider:
@@ -62,7 +62,7 @@ def test_blocked_sdk_init_stays_owned_after_finite_stop(monkeypatch: pytest.Monk
         assert time.monotonic() - started < 1
         assert worker._thread.is_alive()
         assert backend._worker is worker
-        backend.export_batch([_event()])
+        backend.export_batch([otlp_test_event()])
         assert backend._get_worker() is None
         assert not logs.closed.is_set()
     finally:
@@ -81,7 +81,7 @@ def test_sdk_flush_does_not_block_observing_caller(monkeypatch: pytest.MonkeyPat
         assert release.wait(5)
 
     monkeypatch.setattr(logs, "force_flush", flush)
-    backend.export_batch([_event()])
+    backend.export_batch([otlp_test_event()])
     try:
         started = time.monotonic()
         assert backend.flush(timeout=0.01).status is DrainStatus.UNFINISHED
@@ -110,7 +110,7 @@ def test_full_queue_stop_uses_same_worker_and_preserves_admitted_records(
         delivered.append(event)
 
     monkeypatch.setattr(backend, "_emit_log", emit)
-    first, second, after_stop = _event(), _event(), _event()
+    first, second, after_stop = otlp_test_event(), otlp_test_event(), otlp_test_event()
     backend.export_batch([first])
     try:
         assert entered.wait(5)
@@ -220,7 +220,7 @@ def test_shutdown_replays_deferred_metrics_before_logs_once(
 
     monkeypatch.setattr(backend, "_record_metrics", record)
     monkeypatch.setattr(backend, "_emit_log", emit)
-    first, second = _event(), _event()
+    first, second = otlp_test_event(), otlp_test_event()
     backend.defer_until_exit()
     backend.export_batch([first, second])
     assert backend.shutdown().status is DrainStatus.COMPLETED
@@ -242,7 +242,7 @@ def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk(
 
     monkeypatch.setattr(backend, "_enabled", enabled_at_bringup)
     monkeypatch.setattr(backend, "_emit_log", delivered.append)
-    event = _event()
+    event = otlp_test_event()
     backend.defer_until_exit()
     backend.export_batch([event])
     assert reads == []  # holding remains cold; the flag is read only at bring-up
@@ -271,7 +271,7 @@ def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup(
 
     monkeypatch.setattr(backend, "_enabled", enabled_at_bringup)
     monkeypatch.setattr(backend, "_emit_log", delivered.append)
-    event = _event()
+    event = otlp_test_event()
     backend.defer_until_exit()
     backend.export_batch([event])
     assert reads == []
@@ -374,7 +374,7 @@ def test_deferral_completion_in_flight_cannot_close_providers_under_replay(
     monkeypatch.setattr(backend, "_record_metrics", record)
     monkeypatch.setattr(backend, "_emit_log", emit)
     backend.defer_until_exit()
-    event = _event()
+    event = otlp_test_event()
     backend.export_batch([event])
     caller = threading.Thread(target=backend.finalize)
     caller.start()
@@ -407,7 +407,7 @@ def test_admitted_metric_call_retains_provider_until_it_finishes(
         assert not metrics.closed.is_set()
 
     monkeypatch.setattr(backend, "_record_metrics", record)
-    caller = threading.Thread(target=backend.export_batch, args=([_event()],))
+    caller = threading.Thread(target=backend.export_batch, args=([otlp_test_event()],))
     caller.start()
     try:
         assert entered.wait(5)
@@ -495,7 +495,7 @@ def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock(
         raise error
 
     backend.defer_until_exit()
-    backend.export_batch([_event()])
+    backend.export_batch([otlp_test_event()])
     monkeypatch.setattr(backend, "_initialize_worker", initialize)
     worker = backend._get_worker()
     assert worker.finished.wait(5)
@@ -541,7 +541,7 @@ def test_unfinished_ordinary_writer_keeps_its_exporter_alive(
 
     pipeline = telemetry_otlp.ExportingEventPipeline(writer=write, export_allowed=lambda: True)
     assert backend._ensure()
-    pipeline.enqueue(_event())
+    pipeline.enqueue(otlp_test_event())
     assert entered.wait(2)
     try:
         assert pipeline.stop(timeout=0.01).status is DrainStatus.UNFINISHED

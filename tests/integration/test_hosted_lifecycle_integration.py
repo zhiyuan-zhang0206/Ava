@@ -9,7 +9,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.ownership.tests.test_lifecycle_intent import insert_lifecycle_command
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database
@@ -30,7 +30,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
 ) -> None:
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-    first = _command(db_conn, agent_id, "restart")
+    first = insert_lifecycle_command(db_conn, agent_id, "restart")
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner, work=None)
     if applied:
         assert (
@@ -43,7 +43,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
         _, _, _, force, _cutoff = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
-    later = _command(db_conn, agent_id, "restart")
+    later = insert_lifecycle_command(db_conn, agent_id, "restart")
     assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus, resources=None) is None
     assert (
         await admit_hosted_runtime(
