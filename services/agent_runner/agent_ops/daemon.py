@@ -56,6 +56,7 @@ from base import paths
 from base.agents import AvaAgentError, ResurrectRefused
 from base.agents.context.clients import ClientSet
 from base.agents.incarnation.native_restart_models import NativeRestartOperation
+from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -79,14 +80,7 @@ from base.packages.plugins.config_registration import InvalidConfigOverlay
 from base.telemetry import build_pipeline
 from ops import lifecycle
 from ops.cluster_status import ShellNotFoundError
-from ops.rpc_schemas import (
-    LaunchAgentRequest,
-    LaunchReconcileRequest,
-    LifecyclePayload,
-    OpEnvelope,
-    OpStatus,
-    is_op_kind,
-)
+from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpEnvelope, OpStatus, is_op_kind
 from services.agent_runner.agent_ops import boot, health
 from services.agent_runner.agent_ops import maintenance as maintenance_activity
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
