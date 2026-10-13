@@ -20,5 +20,5 @@ def test_tree_scan_pins_cover_the_real_repo_lint_family_and_are_never_stale() ->
     }
     assert lint_files, "the lint family must be discoverable"
     assert lint_files <= pinned
-    for path in test_selector._TREE_SCAN_TESTS:
+    for path in test_selector.TREE_SCAN_TESTS:
         assert path in pinned, f"{path} is stale (missing on disk)"

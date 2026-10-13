@@ -713,7 +713,7 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _immutability_base(ref: str | None) -> str | None:
+def immutability_base(ref: str | None) -> str | None:
     """The revision merged migrations are compared against, or None when unknown.
 
     `ref` (CI passes the pull request's base revision with `--base`) must resolve;
@@ -776,7 +776,7 @@ def _check_merged_migrations_immutable(base: str | None) -> list[str]:
 
 def main(base_ref: str | None = None) -> int:
     ups, errors = _collect_migrations()
-    errors.extend(_check_merged_migrations_immutable(_immutability_base(base_ref)))
+    errors.extend(_check_merged_migrations_immutable(immutability_base(base_ref)))
     errors.extend(_check_schema_seed())
     errors.extend(_check_backfill_snapshot_drop_plans())
     errors.extend(_check_folded_strict_without_seed())

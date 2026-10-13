@@ -6,9 +6,3 @@ exports = ["grafana_render.py", "lgtm.py", "lgtm_native.py", "logs.py", "otel_co
 "otel_collector.py" = ["_otel_collector_exporters.py"]
 "tests" = ["grafana_render.py", "lgtm_native.py", "observatory_urls.py", "otel_collector.py", "trace.py"]
 "trace.py" = ["otel_collector.py"]
-
-[debt.private-name]
-"_lgtm_provisioning.py -> observatory_urls.py#_atomic_write" = 1
-"tests/test_atomic_writer_contracts.py -> grafana_render.py#_atomic_write" = 3
-"tests/test_atomic_writer_contracts.py -> observatory_urls.py#_atomic_write" = 1
-"tests/test_atomic_writer_contracts.py -> otel_collector.py#_atomic_write" = 1
