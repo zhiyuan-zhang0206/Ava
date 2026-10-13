@@ -16,7 +16,9 @@ from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
+from base.deploy.state import host_deploy_state
 from base.events.live.bus import EventBus
+from ops import agent_pause
 from services.agent_runner.agent_host.lifecycle import maintenance as receipts
 from services.agent_runner.agent_host.scheduling.pending_wakes import held_maintenance_wakes
 from tests.components.agent.test_maintenance import WHEN
@@ -263,7 +265,7 @@ def test_resume_agents_releases_the_hold(
 
     from ops.agent_pause import resume_agents
 
-    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
+    monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
     _held()
     resume_agents(database, event_bus)
     assert pause_owner.read().status == "resumed"
@@ -280,8 +282,8 @@ def test_unpause_releases_the_hold(
 
     from ops.cluster_status.pause import unpause_local_cluster
 
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
-    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
+    monkeypatch.setattr(host_deploy_state, "set_posture", MagicMock())
+    monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
     _held()
     unpause_local_cluster(database, event_bus, local_machine=machine_identity)
     assert pause_owner.read().status == "resumed"

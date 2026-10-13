@@ -25,6 +25,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+import services.agent_runner.agent_host.host as agent_host_host
 from agent.graph.exec._subprocess import _run_in_subprocess
 from agent.ownership import hosted
 from agent.tests.claim.test_inbound_ownership import _admit, agent_row
@@ -292,7 +293,8 @@ async def test_the_held_wake_force_guard_stops_quietly(
     incarnation = await _admit(aops_pool, agent_id, database_gate=database_gate)
     _apply_force(db_conn, agent_id)
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.admit_hosted_runtime",
+        agent_host_host,
+        "admit_hosted_runtime",
         AsyncMock(return_value=incarnation),
     )
     host = _host(

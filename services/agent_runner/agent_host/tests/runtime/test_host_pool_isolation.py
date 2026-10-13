@@ -10,12 +10,14 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
+from base.agents.incarnation import hosted_force
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.agent_host import settlement
+from services.agent_runner.agent_host.invocation import native_work
 from services.agent_runner.agent_host.tests.test_agent_host import (
     _Build,
     _FakePool,
@@ -102,11 +104,12 @@ class TestPoolIsolation:
         # This force fixture has no strong native-work command.
         monkeypatch.setattr(host_mod, "recover_native_cancel", AsyncMock(return_value=True))
         monkeypatch.setattr(
-            "services.agent_runner.agent_host.invocation.native_work.prepare_native_invocation",
+            native_work,
+            "prepare_native_invocation",
             AsyncMock(return_value=None),
         )
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
-        monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", force)
+        monkeypatch.setattr(hosted_force, "original_host_force", force)
         host = _host(
             catalog=model_catalog,
             pool=cast(AsyncConnectionPool[Any], turn_pool),

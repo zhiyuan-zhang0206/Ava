@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     _TEST_CERT_SHA1,
     _argvs,
@@ -502,7 +503,7 @@ def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
 
     monkeypatch.setattr(lifecycle, "run_bounded", hang)
     monkeypatch.setattr(launchd_job, "run_bounded", hang)
-    monkeypatch.setattr("base.paths.ava_home", lambda: Path("/x/.ava-demo"))
+    monkeypatch.setattr(paths, "ava_home", lambda: Path("/x/.ava-demo"))
 
     with pytest.raises(subprocess.TimeoutExpired):
         lifecycle._is_loaded()

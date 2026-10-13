@@ -9,6 +9,8 @@ from uuid import uuid4
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
+import services.agent_runner.agent_host.host as agent_host_host
+from agent import db
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import MachineIdentity
@@ -59,7 +61,8 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     host._bus = MagicMock()
     host._checkpointer = cast(Any, MemorySaver())
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.read_stored_config",
+        agent_host_host,
+        "read_stored_config",
         AsyncMock(
             return_value=StoredConfig(
                 machine="local", status="idling", config_overlay=None, birth_config=None
@@ -67,21 +70,15 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
         ),
     )
     host._runtime_for = AsyncMock()
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.active_lease", AsyncMock(return_value=True)
-    )
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.native_status", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr("services.agent_runner.agent_host.host.supervise_relay", AsyncMock())
-    monkeypatch.setattr("agent.db.claim_inbound_batch", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.apply_hosted_lifecycle", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(agent_host_host, "active_lease", AsyncMock(return_value=True))
+    monkeypatch.setattr(agent_host_host, "native_status", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_host_host, "supervise_relay", AsyncMock())
+    monkeypatch.setattr(db, "claim_inbound_batch", AsyncMock(return_value=[]))
+    monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", AsyncMock(return_value=None))
     admission = AsyncMock(return_value=RuntimeIncarnation(42, uuid4(), host._owner))
     settlement = AsyncMock(return_value=True)
-    monkeypatch.setattr("services.agent_runner.agent_host.host.admit_hosted_runtime", admission)
-    monkeypatch.setattr("services.agent_runner.agent_host.host.settle_hosted_runtime", settlement)
+    monkeypatch.setattr(agent_host_host, "admit_hosted_runtime", admission)
+    monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", settlement)
     # No admission slot or graph exists: touching either is a test failure.
     await host._run_turn(42, resources=HostedTurnResources())
     host._runtime_for.assert_not_awaited()
@@ -107,20 +104,17 @@ async def test_held_host_refuses_unaccepted_control_batch(
     host._bus = MagicMock()
     host._checkpointer = cast(Any, MemorySaver())
     owner = RuntimeIncarnation(42, uuid4(), host._owner)
+    monkeypatch.setattr(agent_host_host, "admit_hosted_runtime", AsyncMock(return_value=owner))
+    monkeypatch.setattr(agent_host_host, "native_status", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_host_host, "supervise_relay", AsyncMock())
     monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.admit_hosted_runtime", AsyncMock(return_value=owner)
-    )
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.native_status", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr("services.agent_runner.agent_host.host.supervise_relay", AsyncMock())
-    monkeypatch.setattr(
-        "agent.db.claim_inbound_batch",
+        db,
+        "claim_inbound_batch",
         AsyncMock(return_value=[SimpleNamespace(durable_lifecycle=False)]),
     )
     apply = AsyncMock(return_value=None)
-    monkeypatch.setattr("services.agent_runner.agent_host.host.apply_hosted_lifecycle", apply)
-    monkeypatch.setattr("services.agent_runner.agent_host.host.settle_hosted_runtime", AsyncMock())
+    monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", apply)
+    monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", AsyncMock())
     with pytest.raises(RuntimeError, match="held control claim returned an unaccepted command"):
         await host._run_held_controls(42, "idling", resources=None)
     apply.assert_not_awaited()
@@ -146,20 +140,14 @@ async def test_held_controls_supervise_the_active_lease_relay(
     host._bus = MagicMock()
     host._checkpointer = cast(Any, MemorySaver())
     owner = RuntimeIncarnation(42, uuid4(), host._owner)
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.admit_hosted_runtime", AsyncMock(return_value=owner)
-    )
+    monkeypatch.setattr(agent_host_host, "admit_hosted_runtime", AsyncMock(return_value=owner))
     session = _relay_session("active")
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.native_status", AsyncMock(return_value=session)
-    )
+    monkeypatch.setattr(agent_host_host, "native_status", AsyncMock(return_value=session))
     supervise = AsyncMock()
-    monkeypatch.setattr("services.agent_runner.agent_host.host.supervise_relay", supervise)
-    monkeypatch.setattr("agent.db.claim_inbound_batch", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.host.apply_hosted_lifecycle", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr("services.agent_runner.agent_host.host.settle_hosted_runtime", AsyncMock())
+    monkeypatch.setattr(agent_host_host, "supervise_relay", supervise)
+    monkeypatch.setattr(db, "claim_inbound_batch", AsyncMock(return_value=[]))
+    monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", AsyncMock())
     await host._run_held_controls(42, "idling", resources=None)
     supervise.assert_awaited_once_with(
         host._db,

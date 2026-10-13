@@ -9,6 +9,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import payload_keys
@@ -37,7 +38,7 @@ class TestMachineProbeFailedSignal:
         def capture(category: str, event_name: str, **kwargs: Any) -> None:
             events.append((category, event_name, kwargs["level"], kwargs["attributes"]))
 
-        monkeypatch.setattr("base.telemetry.emit", capture)
+        monkeypatch.setattr(telemetry, "emit", capture)
         return events
 
     async def _run(
