@@ -2,7 +2,5 @@
 "test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr base.agents.impersonation.manifest.emit_recorded_central_event" = 1
 "test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.mcp_daemon._socket_in_use" = 1
 "test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.asyncio.start_unix_server" = 1
-"test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.click" = 1
 "test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.logger.warning" = 1
 "test_click_text_measures_scale_and_tracks_pointer.py#monkeypatch.setattr services.desktop.computer.screen._snapshot_path" = 4
-"test_release_control_ends_the_capture_badge.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.indicator_stop" = 1

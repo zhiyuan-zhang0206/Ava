@@ -62,7 +62,7 @@ def _warning_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
         AttachEntry(path="/example/render.png", label="render"),
         AttachState(pending=[AttachEntry(path="/example/render.png", label="render")]),
         CompactState(version=3, reminder_shown=True, reminder_seen_version=2),
-        MemoryState(injected_paths={"a.md", "b.md"}),
+        MemoryState(injected_paths={"a.md", "b.md"}, window=2),
         ContextReset(resume="claim"),
         CapabilitiesState(indexed={"ava.skills.gmail", "ava.skills.wechat"}),
         SkillRecallState(prompted={"web-ai:deep-research"}, window=2),

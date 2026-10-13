@@ -7,7 +7,7 @@ Data sources (task #1197 LGTM cutover):
 - `agents_meta` + `agents` (Postgres): node identity, liveness, labels.
 - Postgres: the llm_usage token sums — retained-window (7d) totals + selected-window
   scores — from `telemetry_events`, the day-grain ledger and the folded
-  `agent_model_tokens_total` (`gateway/routers/_fleet_tokens.py`), read in the same
+  `agent_model_tokens_total` (`gateway/routers/fleet_tokens.py`), read in the same
   connection as the nodes.
 - Edge events (audit category, spawn/send_message/fork/resurrect): aggregated
   in Postgres from `audit_events`, the permanent audit record
@@ -35,7 +35,7 @@ from base.events.live.bus import EventBus
 from base.events.reads import audit_rows
 from base.log import logger
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
-from gateway.routers._fleet_tokens import AgentTokens, agent_tokens
+from gateway.routers.fleet_tokens import AgentTokens, agent_tokens
 from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
@@ -243,7 +243,7 @@ def get_fleet_graph(
         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
     over the agent's `llm_usage` rows in the window. `total_tokens` is the sum of
     the same two fields over the retained 7d window. Both are read in parts
-    (`gateway/routers/_fleet_tokens.py`): raw rows of the newest two days, the
+    (`gateway/routers/fleet_tokens.py`): raw rows of the newest two days, the
     day-grain ledger before them, and for the all-time score the folded
     `agent_model_tokens_total`, so the read does not scan history.
 

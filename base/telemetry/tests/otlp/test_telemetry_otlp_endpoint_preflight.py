@@ -22,7 +22,7 @@ import pytest
 
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_metrics
 from base.telemetry.tests.otlp.test_telemetry_otlp import (
-    _production_process_by_default,  # noqa: F401 — shared autouse fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
+    production_process_by_default,  # noqa: F401 — shared autouse fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
 
 

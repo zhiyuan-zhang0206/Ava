@@ -49,7 +49,7 @@ def _fleet_slices() -> AgentSlices:
 
 
 @pytest.fixture
-def _load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Install Fleet with a valid local sampling policy; uninstall after the test."""
     from base.agents.sdk import call_policy
 
@@ -61,27 +61,27 @@ def _load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         yield
 
 
-def test_plugin_registers_self_members(_load_activity_plugin: None):
+def test_plugin_registers_self_members(load_activity_plugin: None):
     for name in ("set_label",):
         assert callable(getattr(ava.self, name))
         assert name in ava.self.__all_for_ava__
 
 
-def test_member_torn_down_on_uninstall(_load_activity_plugin: None):
+def test_member_torn_down_on_uninstall(load_activity_plugin: None):
     # Uninstall must remove the member from both the module and its __all_for_ava__.
     install.uninstall()
     assert not hasattr(ava.self, "set_label")
     assert "set_label" not in ava.self.__all_for_ava__
 
 
-def test_plugin_registers_prompt_section(_load_activity_plugin: None):
+def test_plugin_registers_prompt_section(load_activity_plugin: None):
     prompt = build_system_prompt(
         fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
     )
     assert "ava.self.set_label" in prompt
 
 
-def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
+def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
     """The rendered prompt carries the reporting contract with the plugin."""
     prompt = build_system_prompt(
         fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
@@ -95,7 +95,7 @@ def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
 
 
 def test_enabled_fleet_preserves_parallel_work_policy(
-    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
     """Fleet preserves core parallel guidance without requiring task tracking."""
     monkeypatch.setattr(settings.agent, "prompt_delegation_check_enabled", True)
@@ -122,7 +122,7 @@ def test_enabled_fleet_preserves_parallel_work_policy(
         assert instruction not in prompt
 
 
-def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
+def test_fleet_does_not_duplicate_core_lifecycle(load_activity_plugin: None):
     """Fleet adds collaboration guidance without owning the core lifecycle."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import fleet_self_section
 
@@ -137,7 +137,7 @@ def test_fleet_does_not_duplicate_core_lifecycle(_load_activity_plugin: None):
 
 
 def test_peer_communication_survives_human_guidance_toggle(
-    _load_activity_plugin: None,
+    load_activity_plugin: None,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Turning off human interruption guidance must not remove peer discipline."""
@@ -154,7 +154,7 @@ def test_peer_communication_survives_human_guidance_toggle(
     assert "without courtesy ACKs" in prompt
 
 
-def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin: None):
+def test_prompt_section_dismiss_notice_after_dialog_reply(load_activity_plugin: None):
     """When the user has already answered in the dialog, the agent must
     actively dismiss the pending notice instead of leaving it open — and the
     rule is phrased semantically (no dismiss_notice call name)."""
@@ -166,7 +166,7 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin:
     assert "dismiss_notice" not in section
 
 
-def test_prompt_section_queue_delivery_mandate(_load_activity_plugin: None):
+def test_prompt_section_queue_delivery_mandate(load_activity_plugin: None):
     """Keep asynchronous delivery and resolved-notice semantics resident."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import fleet_self_section
 
@@ -180,7 +180,7 @@ def test_prompt_section_queue_delivery_mandate(_load_activity_plugin: None):
 
 
 def test_prompt_section_reduce_context_switch_gating(
-    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
     """The platform reduce-context-switch default renders only while the
     FleetConfig.reduce_context_switch toggle is on; off is the escape hatch
@@ -199,7 +199,7 @@ def test_prompt_section_reduce_context_switch_gating(
 
 
 def test_prompt_section_reduce_context_switch_content(
-    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
     """Keep interruption limits resident and route procedures to the skill."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
@@ -221,7 +221,7 @@ def test_prompt_section_reduce_context_switch_content(
 
 
 def test_reduce_context_switch_reaches_the_prompt(
-    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
     """End to end: the toggle gates the section's presence in the assembled
     system prompt."""
@@ -238,7 +238,7 @@ def test_reduce_context_switch_reaches_the_prompt(
     )
 
 
-def test_fleet_operating_contract_is_loaded_on_demand(_load_activity_plugin: None):
+def test_fleet_operating_contract_is_loaded_on_demand(load_activity_plugin: None):
     """The prompt routes chosen capabilities to complete, preserved procedures."""
     from ava_builtins.plugins.ava_fleet import agent_runtime
 
@@ -300,7 +300,7 @@ def test_task_conversion_absent_when_plugin_disabled():
     assert "One reporter per milestone" not in prompt
 
 
-def test_spawn_label_param_gated_on_plugin(_load_activity_plugin: None):
+def test_spawn_label_param_gated_on_plugin(load_activity_plugin: None):
     # With the plugin enabled, spawn is wrapped and exposes the `label` arg. The
     # wrap fact lives in the introspectable stack (the chained callable mimics
     # the original's __module__), and the added `label` shows in the signature.
@@ -324,7 +324,7 @@ def _label_of(db_conn: psycopg.Connection, agent_id: int) -> str | None:
 
 
 def test_set_label_hands_the_agents_own_label_to_the_gateway(
-    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ):
     from ava import gateway_client
 
@@ -342,7 +342,7 @@ def test_set_label_hands_the_agents_own_label_to_the_gateway(
     assert calls == [(7, "auth-refactor lead", "self"), (7, "", "self")]
 
 
-def test_plugin_registers_ui_notice_members(_load_activity_plugin: None):
+def test_plugin_registers_ui_notice_members(load_activity_plugin: None):
     # The whole notice surface is a push to the user's queue — registered on the
     # ui namespace (not self), gated on this plugin: it depends on a human
     # supervising.
@@ -351,7 +351,7 @@ def test_plugin_registers_ui_notice_members(_load_activity_plugin: None):
         assert name in ava.ui.__all_for_ava__
 
 
-def test_notify_validates_title_priority_and_blocking(_load_activity_plugin: None):
+def test_notify_validates_title_priority_and_blocking(load_activity_plugin: None):
     with pytest.raises(ValueError, match="title"):
         ava.ui.notify("   ", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
     with pytest.raises(ValueError, match="priority"):
@@ -362,7 +362,7 @@ def test_notify_validates_title_priority_and_blocking(_load_activity_plugin: Non
 
 
 def test_fleet_spawn_preserves_caller_creation_key(
-    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: list[dict[str, Any]] = []
 
@@ -378,7 +378,7 @@ def test_fleet_spawn_preserves_caller_creation_key(
 
 
 def test_fleet_spawn_forwards_keyed_fork_without_mode_flag(
-    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: list[dict[str, Any]] = []
 

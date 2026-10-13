@@ -62,9 +62,12 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
         assert inputs["machine_reader"]() == "computer-entry"
         factories[0]()
 
-    async def work(sock: str | None = None, *, database: Callable[[], Database]) -> None:
+    async def work(
+        sock: str | None = None, *, database: Callable[[], Database], helper: object
+    ) -> None:
         stages.append("run")
         assert sock is None
+        assert helper is not None
         assert database is factories[0]
         database()
 

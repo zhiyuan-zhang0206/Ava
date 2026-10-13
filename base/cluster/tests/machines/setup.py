@@ -40,7 +40,7 @@ def _db(database_gate: ProcessDbGate) -> Database:
 
 
 @pytest.fixture(autouse=True)
-def _truncate_machines(db_conn: None) -> None:
+def truncate_machines(db_conn: None) -> None:
     """Truncate both tables per test — leftover register_self/recompute across tests would pollute subsequent assertions."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("TRUNCATE machines")
@@ -49,7 +49,7 @@ def _truncate_machines(db_conn: None) -> None:
 
 
 @pytest.fixture
-def _machine_setup(monkeypatch: pytest.MonkeyPatch, process_config: ConfigBoot) -> MachineSetup:
+def machine_setup(monkeypatch: pytest.MonkeyPatch, process_config: ConfigBoot) -> MachineSetup:
     """Provide one explicit registration owner; no process identity slot is changed."""
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://localhost:8000")
     return MachineSetup(machine_from_boot(process_config))

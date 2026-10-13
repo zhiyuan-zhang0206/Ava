@@ -6,7 +6,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _fresh_snapshot_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
+def fresh_snapshot_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
     """`node_log.SNAPSHOT_CURSOR` is per-process module state — in production
     one host serves many agents and a test session outlives every test, so the
     cursor set by one test would silently switch a later test's node enter to

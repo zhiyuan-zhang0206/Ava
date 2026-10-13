@@ -100,13 +100,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     recorded_pids: set[int] = set()
     phases: list[str] = []
 
-    from base.host.permissions_helper import client as helper_client
+    from base.host.permissions_helper.client import PermissionsHelperClient
+
+    helper_client = PermissionsHelperClient(helper_sock)
 
     def root_status() -> dict[str, Any]:
         return _root_call(run_dir, "status")
 
     def helper_root_status() -> dict[str, Any]:
-        return cast("dict[str, Any]", helper_client.root_status(sock_path=helper_sock))
+        return cast("dict[str, Any]", helper_client.root_status())
 
     def phase_pass(name: str, detail: str) -> None:
         phases.append(name)
@@ -238,7 +240,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         _wait_for("helper socket", helper_sock.exists, _HELPER_WAIT_S, "launch")
         ping = _wait_for(
             "helper ping",
-            lambda: _ping_or_none(helper_client, helper_sock),
+            lambda: _ping_or_none(helper_client),
             _HELPER_WAIT_S,
             "launch",
         )
@@ -405,8 +407,8 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         # The helper never signals a root it did not seed: a plain stop and a
         # forced one (raw wire -- the client has no force) are both refused.
         refusals = (
-            _refusal(lambda: helper_client.stop_root(sock_path=helper_sock)),
-            _refusal(lambda: helper_client._call("root_stop", force=True, sock_path=helper_sock)),
+            _refusal(helper_client.stop_root),
+            _refusal(lambda: helper_client.call("root_stop", force=True)),
         )
         if "native recovery is required" not in refusals[0] or "force" not in refusals[1]:
             _fail("conflict", f"root_stop over the orphan root was not refused: {refusals}")
@@ -512,7 +514,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         print(str(failure))
         if helper_sock.exists():
             with contextlib.suppress(OSError, RuntimeError):
-                helper_client.stop_root(sock_path=helper_sock)
+                helper_client.stop_root()
         print(f"helper stderr tail:\n{_tail(workdir / 'helper.stderr.log')}")
         print(f"root stderr tail:\n{_tail(workdir / 'root.stderr.log')}")
         print(f"evidence retained at: {evidence}")

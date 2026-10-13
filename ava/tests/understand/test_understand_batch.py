@@ -11,10 +11,10 @@ import pytest
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.tests.understand.provider_support import ProviderCapture
 from ava.tests.understand.provider_support import mock_deepseek as mock_deepseek
-from ava.tests.understand.provider_support import understand_clock as understand_clock
+from ava.tests.understand.provider_support import understand_deps as understand_deps
 from ava.understand import understand
 
-pytestmark = pytest.mark.usefixtures("sdk_model_owner", "understand_clock")
+pytestmark = pytest.mark.usefixtures("sdk_model_owner")
 
 # ── batch (concurrent) mode ─────────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ def test_batch_text_concurrent(mock_deepseek: ProviderCapture) -> None:
         {"prompt": "second question", "text": "material B"},
         {"prompt": "third question", "text": "material C"},
     ]
-    results = understand(targets)
+    results = mock_deepseek.understand(targets)
     assert isinstance(results, list)
     assert len(results) == 3
     assert results[0] == "answer to: first question"
@@ -92,7 +92,7 @@ def test_batch_mixed_paths_and_text(mock_deepseek: ProviderCapture, tmp_path: Pa
         {"prompt": "extract", "paths": [str(f)]},
         {"prompt": "analyze", "text": "more inline"},
     ]
-    results = understand(targets)
+    results = mock_deepseek.understand(targets)
     assert len(results) == 3
     assert results[0] == "ok: summarize"
     assert results[1] == "ok: extract"
@@ -131,7 +131,7 @@ def test_batch_default_concurrency_uses_the_shared_ceiling(mock_deepseek: Provid
     mock_deepseek.invoke.side_effect = _tracking_invoke
 
     targets = [{"prompt": f"q{i}", "text": f"m{i}"} for i in range(n)]
-    results = understand(targets)
+    results = mock_deepseek.understand(targets)
     assert results == ["ok"] * n
     assert peak <= DEFAULT_BATCH_MAX_CONCURRENT
 
@@ -140,11 +140,11 @@ def test_max_concurrent_validation(mock_deepseek: ProviderCapture) -> None:
     """max_concurrent must be a positive int or None — bad values fail fast
     before any model call."""
     with pytest.raises(ValueError, match="at least 1"):
-        understand([{"prompt": "x", "text": "y"}], max_concurrent=0)
+        mock_deepseek.understand([{"prompt": "x", "text": "y"}], max_concurrent=0)
     with pytest.raises(ValueError, match="at least 1"):
-        understand([{"prompt": "x", "text": "y"}], max_concurrent=-2)
+        mock_deepseek.understand([{"prompt": "x", "text": "y"}], max_concurrent=-2)
     with pytest.raises(TypeError, match="int or None"):
-        understand(
+        mock_deepseek.understand(
             [{"prompt": "x", "text": "y"}],
             max_concurrent="4",  # type: ignore[arg-type]
         )
@@ -176,7 +176,7 @@ def test_max_concurrent_caps_inflight_calls(mock_deepseek: ProviderCapture) -> N
 
     mock_deepseek.invoke.side_effect = _tracking_invoke
     targets = [{"prompt": f"q{i}", "text": f"m{i}"} for i in range(n_targets)]
-    results = understand(targets, max_concurrent=ceiling)
+    results = mock_deepseek.understand(targets, max_concurrent=ceiling)
     assert results == ["ok"] * n_targets
     assert peak == ceiling, f"peak in-flight {peak} exceeded ceiling {ceiling}"
 
@@ -206,7 +206,7 @@ def test_max_concurrent_one_serializes(mock_deepseek: ProviderCapture) -> None:
 
     mock_deepseek.invoke.side_effect = _tracking_invoke
     targets = [{"prompt": f"q{i}", "text": f"m{i}"} for i in range(3)]
-    results = understand(targets, max_concurrent=1)
+    results = mock_deepseek.understand(targets, max_concurrent=1)
     assert results == ["ok"] * 3
     assert peak == 1
 
@@ -222,4 +222,4 @@ def test_batch_error_propagates(mock_deepseek: ProviderCapture, tmp_path: Path) 
         {"prompt": "q3", "text": "also ok"},
     ]
     with pytest.raises(FileNotFoundError):
-        understand(targets)
+        mock_deepseek.understand(targets)

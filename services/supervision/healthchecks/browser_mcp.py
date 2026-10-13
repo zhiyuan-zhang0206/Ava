@@ -4,6 +4,7 @@ import json
 import logging
 import socket
 
+from base.config import settings
 from base.paths import chrome_mcp_socket
 from services.desktop.browser.protocol import Request, Response
 
@@ -17,7 +18,7 @@ def _probe() -> bool:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_TIMEOUT_S)
     try:
-        sock.connect(str(chrome_mcp_socket()))
+        sock.connect(str(chrome_mcp_socket(settings.services.browser_cdp_port)))
         req: Request = {"id": 0, "method": "ping"}
         sock.sendall((json.dumps(req) + "\n").encode())
         buf = b""

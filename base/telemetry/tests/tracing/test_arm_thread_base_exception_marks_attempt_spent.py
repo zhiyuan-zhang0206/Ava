@@ -24,13 +24,13 @@ from base.telemetry.tests.test_tracing import (
     wait_init_resolved,
 )
 from base.telemetry.tests.test_tracing import (
-    _collector_up as _collector_up,
+    collector_up as collector_up,
 )
 from base.telemetry.tests.test_tracing import (
-    _production_process_by_default as _production_process_by_default,
+    production_process_by_default as production_process_by_default,
 )
 from base.telemetry.tests.test_tracing import (
-    _reset_init_flag as _reset_init_flag,
+    reset_tracing_init_flag as reset_tracing_init_flag,
 )
 from base.telemetry.tracing import (
     OtlpJsonHttpSpanExporter,

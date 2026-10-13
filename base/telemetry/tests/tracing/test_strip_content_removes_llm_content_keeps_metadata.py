@@ -13,17 +13,17 @@ from base import config
 from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
-from base.telemetry.tests.test_tracing import _collector_up as _collector_up
-from base.telemetry.tests.test_tracing import (
-    _production_process_by_default as _production_process_by_default,
-)
-from base.telemetry.tests.test_tracing import (
-    _reset_init_flag as _reset_init_flag,
-)
+from base.telemetry.tests.test_tracing import collector_up as collector_up
 from base.telemetry.tests.test_tracing import (
     otlp_with_attrs,
     under_watermark,
     wait_init_resolved,
+)
+from base.telemetry.tests.test_tracing import (
+    production_process_by_default as production_process_by_default,
+)
+from base.telemetry.tests.test_tracing import (
+    reset_tracing_init_flag as reset_tracing_init_flag,
 )
 from base.telemetry.tracing import OtlpJsonHttpSpanExporter, initialize_tracing
 

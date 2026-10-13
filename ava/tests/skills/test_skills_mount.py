@@ -7,8 +7,8 @@ import pytest
 import ava.skills as skills_mod
 from ava.sdk_surface import skill_sources
 from ava.skills.skill_proxies import Namespace, SkillProxy
-from ava.tests.skills._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
+from ava.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
 from ava.tests.skills._skills_helpers import write_skill
 from base.packages.extensions import install_registry
 

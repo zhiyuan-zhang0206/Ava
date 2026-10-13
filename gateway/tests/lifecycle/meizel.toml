@@ -1,0 +1,53 @@
+exports = ["creation"]
+
+[uses]
+"test_native_restart.py" = ["test_native_cancel.py"]
+"test_sdk_guarded_launch_retry.py" = ["test_keyed_launch_retry.py"]
+"test_sdk_task_assignment.py" = ["test_task_assignments.py"]
+"test_task_assignment_races.py" = ["test_task_assignments.py"]
+
+[debt.env-patch]
+"test_agent_launch_visibility.py#patch.dict os.environ" = 1
+"test_spawn_forward.py#patch.dict os.environ" = 1
+"test_task_assignments.py#patch.dict os.environ" = 1
+
+[debt.first-party-patch]
+"test_agent_launch_visibility.py#monkeypatch.setattr base.agents.birth.transaction.insert_spawn_prompt_in_transaction" = 1
+"test_agent_launch_visibility.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 4
+"test_agent_launch_visibility.py#monkeypatch.setattr gateway.agents.creation.write_transaction" = 1
+"test_impersonation_event_capture.py#monkeypatch.setattr base.agents.impersonation.manifest.append_source_event" = 2
+"test_impersonation_event_capture.py#monkeypatch.setattr base.agents.impersonation.manifest.locked_receipt_state" = 1
+"test_impersonation_event_capture.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
+"test_impersonation_event_capture.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
+"test_impersonation_event_capture.py#monkeypatch.setattr base.telemetry.emit_prepared" = 1
+"test_inbound_provenance.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_keyed_launch_retry.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_keyed_launch_retry.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
+"test_keyed_launch_retry.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
+"test_keyed_launch_retry.py#monkeypatch.setattr gateway.agents.launch_retry.rpc.dispatch_to_machine" = 2
+"test_keyed_launch_retry.py#monkeypatch.setattr ops.lifecycle.launch_reconcile.publish_inbound_wake" = 4
+"test_native_cancel.py#monkeypatch.setattr gateway.agents.lifecycle.accept_native_cancel" = 1
+"test_native_cancel.py#monkeypatch.setattr gateway.agents.lifecycle.observe_native_work" = 1
+"test_native_restart.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 2
+"test_resurrect_forward.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 2
+"test_resurrect_forward.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 4
+"test_sdk_native_cancel.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_sdk_native_restart.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_sdk_native_restart.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 1
+"test_spawn_forward.py#monkeypatch.setattr base.cluster.machines.is_paused" = 4
+"test_spawn_forward.py#monkeypatch.setattr base.cluster.machines.lookup_role" = 5
+"test_spawn_forward.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 9
+"test_spawn_forward.py#monkeypatch.setattr gateway.agents.creation.snapshot_module.select_one" = 1
+"test_spawn_forward.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 2
+"test_task_assignment_races.py#monkeypatch.setattr gateway.agents.creation.spawn_preflight_blocking" = 5
+"test_task_assignments.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
+"test_task_assignments.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 3
+"test_task_assignments.py#monkeypatch.setattr gateway.agents.task_assignment.router.find_creation" = 1
+"test_task_assignments.py#monkeypatch.setattr gateway.agents.task_assignment.router.save_assignment" = 1
+"test_terminate_forward.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 1
+"test_terminate_forward.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 7
+
+[debt.unresolved-patch]
+"test_resurrect_forward.py#monkeypatch.setattr forward._LIFECYCLE_DISPATCH_DEADLINE_S" = 1
+"test_resurrect_forward.py#monkeypatch.setattr forward._cluster_rpc.dispatch_to_machine" = 2
+"test_task_assignment_races.py#monkeypatch.setattr owner" = 1

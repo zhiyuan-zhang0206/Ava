@@ -12,15 +12,16 @@ import contextlib
 import os
 import signal
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import psutil
 
-from base.host.permissions_helper import client as helper_client
+from base.host.permissions_helper.client import PermissionsHelperClient
 from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
-from base.paths import logs_dir, run_dir
+from base.paths import logs_dir, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
 from base.sessions.record import SessionRecord
 
@@ -90,7 +91,18 @@ def _record_reapable(record: SessionRecord) -> tuple[bool, str]:
     return False, "live pid did not satisfy the identity check"
 
 
+def helper_client() -> PermissionsHelperClient:
+    """The client for this cluster's permissions helper: the composition root's one way to
+    reach it. The socket is keyed by the cluster's helper port, read here once per client."""
+    from base.config import settings
+
+    return PermissionsHelperClient(
+        permissions_helper_socket(settings.services.permissions_helper_port)
+    )
+
+
 def spawn_via_helper(
+    client: PermissionsHelperClient,
     name: str,
     argv: list[str],
     cwd: Path,
@@ -105,7 +117,7 @@ def spawn_via_helper(
     launch successfully with the wrong TCC responsibility identity.
     """
     try:
-        result = helper_client.spawn_process(
+        result = client.spawn_process(
             name,
             argv,
             env,
@@ -136,6 +148,11 @@ def _wait_until_dead(process: psutil.Process, timeout: float) -> bool:
 
 class HelperProcSessionBackend(SessionBackend):
     """Named sessions whose processes are direct children of the macOS helper."""
+
+    def __init__(self, client_factory: Callable[[], PermissionsHelperClient]) -> None:
+        # A factory, not a client: only a spawn dials the helper, and a process that merely
+        # lists sessions (the gateway) must not read the helper port to build one.
+        self._client_factory = client_factory
 
     def has_session(self, name: str) -> bool:
         record = _read_record(name)
@@ -174,6 +191,7 @@ class HelperProcSessionBackend(SessionBackend):
         stderr_path = stderr_append if stderr_append is not None else stdout_path
         logs_dir().mkdir(parents=True, exist_ok=True)
         child_pid = spawn_via_helper(
+            self._client_factory(),
             name,
             argv,
             cwd,

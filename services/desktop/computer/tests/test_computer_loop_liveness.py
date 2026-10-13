@@ -22,6 +22,7 @@ import pytest
 import services.desktop.computer.mcp_daemon as daemon_mod
 from base.db import Database
 from services.desktop.computer.tests.slices import short_sock_dir
+from services.desktop.computer.tests.test_computer_mcp_daemon import FakeHelper
 
 # ── loop-liveness watchdog (2026-10-04 wedged-loop regression) ─────────────
 
@@ -135,7 +136,7 @@ async def test_run_arms_loop_watchdog(monkeypatch: pytest.MonkeyPatch, database:
     monkeypatch.setattr(daemon_mod.asyncio, "Event", StopEvent)
 
     try:
-        await daemon_mod.run(sock=str(sock), database=lambda: database)
+        await daemon_mod.run(sock=str(sock), database=lambda: database, helper=FakeHelper())
     finally:
         cleanup(d)
 

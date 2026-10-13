@@ -15,8 +15,7 @@ import pytest
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.permissions_helper import client as helper
-from base.host.permissions_helper.client import AxNode, AxTreeResult
+from base.host.permissions_helper.client import AxNode, AxTreeResult, PermissionsHelperClient
 
 from .. import ax_tools as ax
 from ..errors import ComputerUseError
@@ -232,14 +231,16 @@ def test_scoped_walk_is_not_judged_sparse() -> None:
 # ── tool entry through the daemon ───────────────────────────────────────────
 
 
-class FakeAxHelper:
+class FakeAxHelper(PermissionsHelperClient):
     def __init__(self) -> None:
+        super().__init__("/nonexistent-test-helper.sock")
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.supported = True
+        self.forbid_frontmost = False
         self.target_supported = True
         self.tree = result(compose_window())
 
-    def ping(self, **kw: Any) -> dict[str, Any]:
+    def ping(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("ping", {}))
         return (
             {"pong": True, "ax_tree_v1": True, "ax_target_v1": self.target_supported}
@@ -247,23 +248,22 @@ class FakeAxHelper:
             else {"pong": True}
         )
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
+    def frontmost_app(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+        if self.forbid_frontmost:
+            pytest.fail("explicit AX targets must not select the foreground app")
         return {"app": "Mail"}
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:
+    def screen_size(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
         return {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
 
-    def ax_tree(self, app: str | None, **kw: Any) -> AxTreeResult:
+    def ax_tree(self, app: str | None, **kw: Any) -> AxTreeResult:  # pyright: ignore[reportIncompatibleMethodOverride]
         self.calls.append(("ax_tree", {"app": app, **kw}))
         return self.tree
 
 
 @pytest.fixture
-def fake_ax(monkeypatch: pytest.MonkeyPatch) -> FakeAxHelper:
-    fake = FakeAxHelper()
-    for name in ("ping", "frontmost_app", "screen_size", "ax_tree"):
-        monkeypatch.setattr(helper, name, getattr(fake, name))
-    return fake
+def fake_ax() -> FakeAxHelper:
+    return FakeAxHelper()
 
 
 async def call_ax(
@@ -271,11 +271,13 @@ async def call_ax(
     daemon: ComputerMcpDaemon | None = None,
     *,
     database_gate: ProcessDbGate,
+    helper: PermissionsHelperClient | None = None,
 ) -> dict[str, Any]:
     daemon = daemon or ComputerMcpDaemon(
         computer_use_config(),
         Database.from_settings(gate=database_gate),
         sock="/nonexistent-test.sock",
+        helper=helper if helper is not None else FakeAxHelper(),
     )
     resp = await daemon._dispatch(
         {"id": 1, "method": "call_tool", "tool": "ax_tree", "args": args or {}, "agent_id": None}
@@ -288,7 +290,7 @@ async def call_ax(
 async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(
     fake_ax: FakeAxHelper, *, database_gate: ProcessDbGate
 ) -> None:
-    out = await call_ax(database_gate=database_gate)
+    out = await call_ax(database_gate=database_gate, helper=fake_ax)
     assert out["app"] == "Mail"
     assert out["quality"]["ok"] is True
     assert out["tree"].startswith('[e1] window "Compose" @1000,800 2000x1600')
@@ -299,16 +301,12 @@ async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(
 @pytest.mark.parametrize("target", [{"pid": 4242}, {"bundle_id": "org.test.editor"}])
 async def test_explicit_app_target_is_forwarded_without_frontmost_lookup(
     fake_ax: FakeAxHelper,
-    monkeypatch: pytest.MonkeyPatch,
     target: dict[str, Any],
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    def unexpected_frontmost() -> dict[str, str]:
-        pytest.fail("explicit AX targets must not select the foreground app")
-
-    monkeypatch.setattr(helper, "frontmost_app", unexpected_frontmost)
-    out = await call_ax({"target": target}, database_gate=database_gate)
+    fake_ax.forbid_frontmost = True
+    out = await call_ax({"target": target}, database_gate=database_gate, helper=fake_ax)
     assert fake_ax.calls[-1][1]["target"] == target
     assert fake_ax.calls[-1][1]["app"] is None
     assert out["pid"] == fake_ax.tree["pid"]
@@ -322,7 +320,7 @@ async def test_ax_target_invalid_or_conflicting_selectors_fail_before_walk(
     fake_ax: FakeAxHelper, args: dict[str, Any], *, database_gate: ProcessDbGate
 ) -> None:
     with pytest.raises(ComputerUseError):
-        await call_ax(args, database_gate=database_gate)
+        await call_ax(args, database_gate=database_gate, helper=fake_ax)
     assert not any(name == "ax_tree" for name, _ in fake_ax.calls)
 
 
@@ -331,15 +329,17 @@ async def test_tree_target_guarantee_requires_new_capability_before_any_walk(
 ) -> None:
     fake_ax.target_supported = False
     with pytest.raises(ComputerUseError, match="predates ax_tree"):
-        await call_ax({"target": {"pid": 4242}}, database_gate=database_gate)
+        await call_ax({"target": {"pid": 4242}}, database_gate=database_gate, helper=fake_ax)
     assert not any(name == "ax_tree" for name, _ in fake_ax.calls)
 
 
 async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
     fake_ax: FakeAxHelper, database: Database, *, database_gate: ProcessDbGate
 ) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/nonexistent-test.sock")
-    await call_ax({"app": "Mail"}, daemon, database_gate=database_gate)
+    daemon = ComputerMcpDaemon(
+        computer_use_config(), database, sock="/nonexistent-test.sock", helper=fake_ax
+    )
+    await call_ax({"app": "Mail"}, daemon, database_gate=database_gate, helper=fake_ax)
     await call_ax(
         {"app": "Mail", "scope": "e2", "max_nodes": 300}, daemon, database_gate=database_gate
     )
@@ -357,7 +357,7 @@ async def test_ax_tree_scope_without_a_prior_walk_is_refused(
     fake_ax: FakeAxHelper, *, database_gate: ProcessDbGate
 ) -> None:
     with pytest.raises(ComputerUseError, match="call ax_tree first"):
-        await call_ax({"app": "Mail", "scope": "e2"}, database_gate=database_gate)
+        await call_ax({"app": "Mail", "scope": "e2"}, database_gate=database_gate, helper=fake_ax)
     assert all(name != "ax_tree" for name, _ in fake_ax.calls)
 
 
@@ -365,7 +365,7 @@ async def test_ax_tree_unusable_window_returns_the_verdict_and_no_tree(
     fake_ax: FakeAxHelper, *, database_gate: ProcessDbGate
 ) -> None:
     fake_ax.tree = result([])
-    out = await call_ax(database_gate=database_gate)
+    out = await call_ax(database_gate=database_gate, helper=fake_ax)
     assert out["tree"] == "" and out["quality"]["reason"] == "no_window"
 
 
@@ -374,7 +374,7 @@ async def test_ax_tree_on_an_old_helper_fails_with_the_rebuild_instruction(
 ) -> None:
     fake_ax.supported = False
     with pytest.raises(ComputerUseError, match="predates ax_tree"):
-        await call_ax(database_gate=database_gate)
+        await call_ax(database_gate=database_gate, helper=fake_ax)
     assert all(name != "ax_tree" for name, _ in fake_ax.calls)
 
 
@@ -386,12 +386,14 @@ async def test_ax_tree_rejects_bad_arguments(
     fake_ax: FakeAxHelper, args: dict[str, Any], *, database_gate: ProcessDbGate
 ) -> None:
     with pytest.raises(ComputerUseError):
-        await call_ax(args, database_gate=database_gate)
+        await call_ax(args, database_gate=database_gate, helper=fake_ax)
     assert fake_ax.calls == []
 
 
 async def test_ax_tree_is_declared_in_the_tool_list(database: Database) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/nonexistent-test.sock")
+    daemon = ComputerMcpDaemon(
+        computer_use_config(), database, sock="/nonexistent-test.sock", helper=FakeAxHelper()
+    )
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True
     assert resp["ok"] is True

@@ -14,6 +14,4 @@
 "test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status._cluster_rpc.dispatch_to_url" = 6
 "test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status.cluster_is_paused" = 2
 "test_cluster_status_fields_cluster.py#monkeypatch.setattr gateway.cluster.status.prod_source_head_sha" = 2
-"test_roster_snapshots.py#monkeypatch.setattr base.config.settings.gateway.status_probe_timeout_seconds" = 1
-"test_roster_snapshots.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_url" = 5
 "test_status_services.py#monkeypatch.setattr gateway.cluster.status.check_pidfile" = 1

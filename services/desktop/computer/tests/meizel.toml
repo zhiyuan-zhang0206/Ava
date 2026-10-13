@@ -5,7 +5,7 @@ exports = ["slices.py"]
 "test_computer_ax_act.py" = ["slices.py"]
 "test_computer_ax_gap.py" = ["slices.py"]
 "test_computer_ax_tools.py" = ["slices.py"]
-"test_computer_loop_liveness.py" = ["slices.py"]
+"test_computer_loop_liveness.py" = ["slices.py", "test_computer_mcp_daemon.py"]
 "test_computer_mcp_daemon.py" = ["slices.py"]
 
 [debt.env-patch]
@@ -14,13 +14,7 @@ exports = ["slices.py"]
 
 [debt.first-party-patch]
 "test_computer_ax_act.py#monkeypatch.setattr base.agents.impersonation.manifest.emit_recorded_central_event" = 1
-"test_computer_ax_act.py#monkeypatch.setattr base.host.permissions_helper.client" = 1
-"test_computer_ax_act.py#monkeypatch.setattr base.host.permissions_helper.client.click" = 1
-"test_computer_ax_gap.py#monkeypatch.setattr base.host.permissions_helper.client" = 1
-"test_computer_ax_gap.py#monkeypatch.setattr base.host.permissions_helper.client.click" = 1
 "test_computer_ax_gap.py#monkeypatch.setattr services.desktop.computer.ax_gap.read_screen" = 1
-"test_computer_ax_tools.py#monkeypatch.setattr base.host.permissions_helper.client" = 1
-"test_computer_ax_tools.py#monkeypatch.setattr base.host.permissions_helper.client.frontmost_app" = 1
 "test_computer_config.py#monkeypatch.setattr base.config.settings.daemon.computer_use_lease_s" = 1
 "test_computer_config.py#monkeypatch.setattr base.config.settings.daemon.computer_use_loop_stall_s" = 1
 "test_computer_config.py#monkeypatch.setattr base.config.settings.daemon.computer_use_session_idle_s" = 1
@@ -31,24 +25,10 @@ exports = ["slices.py"]
 "test_computer_loop_liveness.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.asyncio.Event" = 1
 "test_computer_loop_liveness.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.asyncio.start_unix_server" = 1
 "test_computer_mcp_daemon.py#monkeypatch.setattr base.agents.impersonation.manifest.emit_recorded_central_event" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.ax_window_info" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.click" = 2
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.cursor_position" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.frontmost_app" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.indicator_stop" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.key" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.screen_size" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.screencapture_region" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.scroll" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.session_info" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.type_text" = 1
-"test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.helper.window_info" = 1
 "test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.ocr.ocr_image" = 4
 "test_computer_mcp_daemon.py#monkeypatch.setattr services.desktop.computer.screen._snapshot_path" = 17
 "test_computer_mcp_wrapper.py#monkeypatch.setattr base.host.permissions_helper.client.socket.socket" = 4
 "test_computer_screen_region.py#monkeypatch.setattr services.desktop.computer.screen._snapshot_path" = 2
-"test_computer_screen_region.py#monkeypatch.setattr services.desktop.computer.screen.helper.screen_size" = 1
-"test_computer_screen_region.py#monkeypatch.setattr services.desktop.computer.screen.helper.screencapture_region" = 3
 "test_mcp_daemon_entry.py#monkeypatch.setattr base.config.settings.general.machine_name" = 1
 "test_mcp_daemon_entry.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_mcp_daemon_entry.py#monkeypatch.setattr services.desktop.computer.mcp_daemon.ConfigBoot" = 1

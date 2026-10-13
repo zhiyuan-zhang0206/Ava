@@ -1,8 +1,5 @@
 exports = ["client.py", "client_stateful.py"]
 
 [uses]
-"client.py" = ["wire.py"]
-"client_stateful.py" = ["client.py", "wire.py"]
-
-[debt.private-name]
-"client_stateful.py -> client.py#_call" = 1
+"client.py" = ["client_stateful.py", "wire.py"]
+"client_stateful.py" = ["wire.py"]

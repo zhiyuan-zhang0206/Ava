@@ -628,7 +628,7 @@ def _foreign_label_plists() -> list[Path]:
     the current one races this cluster's own job for the same socket; which one
     a client reaches then depends on the last bind. Other
     clusters' jobs are left alone -- they pin their own sockets."""
-    sock = str(permissions_helper_socket())
+    sock = str(helper_socket())
     foreign: list[Path] = []
     for plist in _agents_dir().glob(f"{HELPER_BUNDLE_ID}.*.plist"):
         try:
@@ -664,7 +664,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         "Label": _label(),
         "ProgramArguments": [str(exe)],
         "EnvironmentVariables": {
-            "AVA_PERMISSIONS_HELPER_SOCKET": str(permissions_helper_socket()),
+            "AVA_PERMISSIONS_HELPER_SOCKET": str(helper_socket()),
             "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(base.paths.root_run_dir() / "seed.json"),
         },
         "RunAtLoad": True,
@@ -698,12 +698,18 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         )
 
 
+def helper_socket() -> Path:
+    """This cluster's permissions-helper socket, from its configured helper port."""
+    return permissions_helper_socket(settings.services.permissions_helper_port)
+
+
 def _helper_answers_ping() -> bool:
     from base.host.permissions_helper import client
+    from base.sessions.helperproc import helper_client
 
     for attempt in range(_HELPER_PING_ATTEMPTS):
         try:
-            reply = client.ping()
+            reply = helper_client().ping()
         except (client.PermissionsHelperError, OSError, ValueError):
             reply = None
         if reply is not None and reply.get("pong") is True:
@@ -723,7 +729,7 @@ def _helper_answers_ping() -> bool:
 
 def _require_usable_socket_paths() -> None:
     """Refuse impossible macOS IPC names before signing or registering jobs."""
-    paths = (permissions_helper_socket(), base.paths.root_run_dir() / "ava-root.sock")
+    paths = (helper_socket(), base.paths.root_run_dir() / "ava-root.sock")
     for path in paths:
         # Darwin sockaddr_un.sun_path has 104 bytes, including the terminating NUL.
         if len(os.fsencode(path)) >= 104:
