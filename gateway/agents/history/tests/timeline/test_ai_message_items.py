@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from base.agents.history.timeline import _ai_message_items, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import ExecStatus
@@ -184,6 +186,7 @@ class TestAiMessageItems:
             exec_ms=1300,
             status=ExecStatus.COMPLETED,
             body_start=0,
+            created_at=datetime.now(UTC),
         )
         items, _ = build_timeline_items([msg], [], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
