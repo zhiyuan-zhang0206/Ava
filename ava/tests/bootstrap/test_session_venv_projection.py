@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from ava.sdk_surface import settings
 from ava.shell import sessions
 from ava.shell.tests.support import FakeDatabase
 from base.host.env import bootstrap, dotenv_boot
@@ -99,7 +98,7 @@ def test_watcher_override_reaches_backend_without_changing_generic_sessions(
     monkeypatch.setattr(sessions, "workspace_dir", workspace_for_test)
     monkeypatch.setattr(sessions, "repo_root", lambda: tmp_path / "checkout")
     backend = _CapturingBackend()
-    monkeypatch.setattr(settings, "shell_sessions", lambda: _handle(backend))
+    monkeypatch.setattr(sessions, "shell_sessions", lambda: _handle(backend))
 
     class _CapturedSessionError(RuntimeError):
         pass

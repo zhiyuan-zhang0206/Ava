@@ -12,7 +12,7 @@ aredis client).
 import pytest
 import redis
 
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 
 
 def test_connect_redis_applies_resilience_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:

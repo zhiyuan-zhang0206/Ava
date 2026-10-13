@@ -12,7 +12,7 @@ with the tool's named arguments."""
 #   _computer   the daemon's in-process line client for the computer-mcp service
 # Every submodule is private on purpose: `ava.mcps.<name>` resolves to an MCP
 # server proxy, so a public submodule would shadow the server of the same name.
-# For the same reason the server configuration (`ava.mcp_config`, imported by
+# For the same reason the server configuration (`ava.mcps.config`, imported by
 # cli/ and ops/) stays outside this package.
 
 from __future__ import annotations
@@ -26,17 +26,17 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from ava.mcp_config import (
+from ava.mcps.config import (
     MCPCallError,
     MCPConnectError,
     MCPServerNotFound,
     ToolInfo,
     load_mcp_config,
 )
-from ava.mcp_config import (
+from ava.mcps.config import (
     MCPError as MCPError,
 )
-from ava.mcp_config import (
+from ava.mcps.config import (
     MCPToolNotFound as MCPToolNotFound,
 )
 from ava.sdk_surface import process_context

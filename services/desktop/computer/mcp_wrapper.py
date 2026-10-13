@@ -11,7 +11,7 @@ Wired in ava_builtins/mcps/computer_use/.mcp.json as the compatibility command f
 (the MCP daemon's primary path dials the service directly — see
 ava/mcps/_computer.py). Takes no arguments (the socket path is derived from
 settings, matching the daemon). The MCP daemon spawns it with cwd pinned to the
-repo root (`ava/mcp_config.py:server_cwd`), so the relative interpreter path
+repo root (`ava/mcps/config.py:server_cwd`), so the relative interpreter path
 resolves there:
 
     .venv/bin/python -m services.desktop.computer.mcp_wrapper

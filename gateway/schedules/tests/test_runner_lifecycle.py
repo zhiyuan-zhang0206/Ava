@@ -12,6 +12,7 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
+from ava.sdk_surface import process_context
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.daemon.schedules.inputs import ScheduleInputs
@@ -190,7 +191,7 @@ def test_script_failure_stays_primary_when_guard_close_fails(
             inputs=ScheduleInputs(
                 lambda: Database.from_settings(gate=database_gate),
                 Mock(),
-                ava.loaded_code_image(),
+                process_context.loaded_code_image(),
                 machine=machine_identity,
             ),
         )

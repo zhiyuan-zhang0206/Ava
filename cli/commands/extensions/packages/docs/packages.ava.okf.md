@@ -133,7 +133,7 @@ vendor's README works as-is.
 
 - **Launch form**: both server sets we own declare a *relative* interpreter
   (`.venv/bin/python`) and are spawned with a cwd that makes it resolve
-  (`ava/mcp_config.py:server_cwd`) — an installed package from its own dir, a
+  (`ava/mcps/config.py:server_cwd`) — an installed package from its own dir, a
   built-in from the repo root. Never `uv run`: that leaves a resident wrapper
   process per agent per server, pure overhead at the target agent density.
   Plugin / machine entries keep cwd `None`; their command line is the third

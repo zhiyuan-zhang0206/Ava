@@ -22,7 +22,7 @@ from agent.extensions.plugin_state_codec import (
     decode_plugin_delta,
     encode_plugin_delta,
 )
-from ava import external, gateway_client
+from ava import boot, external, gateway_client
 from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface import settings as _settings
 from ava.sdk_surface.settings import agent_setting
@@ -115,7 +115,7 @@ def test_attach_requests_native_plugin_load(
     def spy_loader(**kwargs: Any) -> None:
         calls.append(kwargs)
 
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", spy_loader)
+    monkeypatch.setattr(boot, "ensure_plugins_loaded", spy_loader)
     with external.attach("lease"):
         pass
     assert len(calls) == 1

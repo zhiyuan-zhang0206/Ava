@@ -11,8 +11,8 @@ import pytest
 import ava
 from ava import files
 from ava.sdk_surface import process_context
-from ava.sdk_surface.attachment_transport import attach
 from ava.sdk_surface.installation import Installation
+from ava.self import attach
 from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
 from base.lm.catalog import ModelCatalog
 from tests.fixtures.model_catalog import AddModels

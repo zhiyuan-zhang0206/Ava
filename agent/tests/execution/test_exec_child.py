@@ -28,6 +28,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from ava import boot
 from ava.sdk_surface.installation import Installation
 from tests.fixtures.pin_agent import exec_context
 
@@ -614,7 +615,7 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr(ava, "ensure_plugins_loaded", fake_plugins_loaded)
+    monkeypatch.setattr(boot, "ensure_plugins_loaded", fake_plugins_loaded)
     monkeypatch.setattr(ava, "__plugin_installation__", model_installation, raising=False)
 
     def fake_apply_scope(

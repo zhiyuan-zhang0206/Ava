@@ -16,9 +16,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import ava
-from ava import gateway_client
-from ava.sdk_surface.settings import page_host
+from ava import boot, gateway_client
+from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.log import logger
 
@@ -137,7 +136,7 @@ class PageHost:
     """What a page call runs against: this machine's page host, the agent it acts for and how
     it probes ports.
 
-    Built per call by `ava.sdk_surface.settings.page_host()` from this process's settings and agent
+    Built per call by `page_host()` from this process's settings and agent
     identity; the module functions below delegate to it. A test builds one with the probes it
     needs.
     """
@@ -280,6 +279,15 @@ class PageHost:
             raise PageClosed(f"no open page {name!r} for agent {self.agent_id}")
 
 
+def page_host() -> PageHost:
+    """The page host this agent's `ava.ui` calls run against: this machine's reachable host and
+    the agent's identity (RuntimeError when the process has none), read per call."""
+    return PageHost(
+        host=process_context.current_context().require_machine().host(),
+        agent_id=agent_identity.require_agent_id(),
+    )
+
+
 def _error_detail(exc: Exception) -> str | None:
     """The gateway error body's `detail` string, or None when there is none.
 
@@ -406,6 +414,6 @@ def __getattr__(name: str) -> object:
     # load here, then retry.
     import sys as _sys
 
-    if ava._maybe_load_plugins_for_missing(name):
+    if boot.maybe_load_plugins_for_missing(name):
         return getattr(_sys.modules[__name__], name)
     raise AttributeError(f"module 'ava.ui' has no attribute {name!r}")

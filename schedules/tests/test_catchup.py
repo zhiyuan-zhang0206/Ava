@@ -27,6 +27,7 @@ from schedules.catchup import fire_slot_once
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry
 from schedules import entry as entry_owner
+from ava.sdk_surface import process_context
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DAILY_SCRIPTS = ("c9-daily-report-schedule.py", "dev-ci-metrics-schedule.py")
@@ -237,7 +238,7 @@ def test_schedule_entry_retains_the_loaded_image_gate(
     database = Mock()
     create = Mock(return_value=database)
     consumer = Mock(side_effect=_LoopStoppedError)
-    monkeypatch.setattr(module.ava, "loaded_code_image", capture)
+    monkeypatch.setattr(process_context, "loaded_code_image", capture)
     monkeypatch.setattr(entry_owner, "process_name", lambda: "schedule")
     monkeypatch.setattr(code_version, "first_parent_count", count)
     monkeypatch.setattr(entry_owner, "Database", create)
@@ -296,7 +297,7 @@ def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
     with pytest.raises(_LoopStoppedError):
         module._main_loop(
             inputs=ScheduleInputs(
-                Mock(), Mock(), module.ava.loaded_code_image(), machine=machine_identity
+                Mock(), Mock(), process_context.loaded_code_image(), machine=machine_identity
             )
         )
 
@@ -335,7 +336,7 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
     with pytest.raises(_LoopStoppedError):
         module._main_loop(
             inputs=ScheduleInputs(
-                Mock(), Mock(), module.ava.loaded_code_image(), machine=machine_identity
+                Mock(), Mock(), process_context.loaded_code_image(), machine=machine_identity
             )
         )
 
@@ -345,7 +346,7 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
         assert isinstance(fire, partial)
         assert fire.func is module._fire
         assert callable(fire.keywords["producer"])
-        assert fire.keywords["image"] is module.ava.loaded_code_image()
+        assert fire.keywords["image"] is process_context.loaded_code_image()
     else:
         assert fire is module._fire
     sleep.assert_called_once_with(120)
@@ -390,7 +391,7 @@ def test_restart_does_not_fire_a_slot_inside_the_previous_two_minutes(
     with pytest.raises(_LoopStoppedError):
         getattr(module, entry)(
             inputs=ScheduleInputs(
-                Mock(), Mock(), module.ava.loaded_code_image(), machine=machine_identity
+                Mock(), Mock(), process_context.loaded_code_image(), machine=machine_identity
             )
         )
 

@@ -121,7 +121,7 @@ def fake_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     Patches builtin_mcp_paths to list so tests expecting empty config are
     not surprised by the repo's mcps/chrome/.mcp.json built-in.
     """
-    import ava.mcp_config as _cfg
+    import ava.mcps.config as _cfg
 
     monkeypatch.setattr(_cfg, "builtin_mcp_paths", list)
     return unit_home

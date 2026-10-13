@@ -335,7 +335,7 @@ def test_module_property_provenance_does_not_grant_dynamic_children(tmp_path: Pa
     "exposed,module,name,availability",
     [
         ("ava.help", "ava.sdk_surface.help", "help", Availability.STATIC),
-        ("ava.self.attach", "ava.sdk_surface.attachment_transport", "attach", Availability.STATIC),
+        ("ava.self.attach", "ava.self", "attach", Availability.STATIC),
         (
             "ava.cwd.get",
             "ava_builtins.plugins.ava_code._code_namespace",

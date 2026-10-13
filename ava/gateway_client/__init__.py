@@ -65,7 +65,6 @@ import uuid
 from collections.abc import Collection
 from typing import Any, Literal, NamedTuple
 
-import ava
 import ava.sdk_surface.agent_identity
 from ava.gateway_client.launch_retry import get_launch_attempt as get_launch_attempt
 from ava.gateway_client.launch_retry import retry_launch as retry_launch

@@ -25,7 +25,7 @@ from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet

@@ -9,7 +9,7 @@ import psycopg
 import pytest
 import redis
 
-from ava.sdk_surface.process_context import context_from_description, process_clients
+from ava.boot import context_from_description, process_clients
 from base.agents.context import AvaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
@@ -134,7 +134,7 @@ def test_process_boot_builds_no_connection_stack(pytester: pytest.Pytester) -> N
         "importlib.reload(ava)\n"
         "assert ava._LOADED_IMAGE is image\n"
         "assert 'base.db' not in sys.modules\n"
-        "from ava.sdk_surface.process_context import process_clients, context_from_description\n"
+        "from ava.boot import process_clients, context_from_description\n"
         "before = set(sys.modules)\n"
         "process_clients()\n"
         "context_from_description({'identity': {'agent_id': 17, 'owns_loop': True, "
@@ -153,7 +153,7 @@ def test_default_clients_capture_only_on_first_read_without_delivery(
     code = """
 import os
 from ava.gateway_client.transport import GatewayTransportInputs
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.config import ConfigBoot
 
 capture = ConfigBoot.read_process_environment

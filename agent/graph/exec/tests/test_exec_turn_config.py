@@ -16,7 +16,7 @@ from agent.graph.exec._result import _ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import _run_agent_code, exec_node
 from agent.state import AgentState
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import ExecStatus, read_ava_kwargs

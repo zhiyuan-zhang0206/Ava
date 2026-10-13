@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import ava
+from ava.shell import sessions
 from base.sessions import coding_session_owner
 
 from . import impersonator_guide
@@ -83,7 +83,7 @@ def _wait_for_ready(sid: int, timeout: float = 90.0) -> None:
     deadline = time.time() + timeout
     rendered = False
     while time.time() < deadline:
-        output = ava.shell.sessions.capture(sid, scrollback=False)
+        output = sessions.capture(sid, scrollback=False)
         if len(output) > 50:
             rendered = True
             if "Starting MCP" in output:
@@ -127,7 +127,7 @@ def _verify_submitted(sid: int, timeout: float = 60.0) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            output = ava.shell.sessions.capture(sid, scrollback=False)
+            output = sessions.capture(sid, scrollback=False)
         except ValueError as exc:
             _dead_session_warning("capture", exc)
             return
@@ -137,13 +137,13 @@ def _verify_submitted(sid: int, timeout: float = 60.0) -> None:
         time.sleep(3)
     print("  -> not submitted within window; sending Enter once")
     try:
-        ava.shell.sessions.send_keys(sid, "Enter")
+        sessions.send_keys(sid, "Enter")
     except ValueError as exc:
         _dead_session_warning("Enter retry", exc)
         return
     time.sleep(5)
     try:
-        output = ava.shell.sessions.capture(sid, scrollback=False)
+        output = sessions.capture(sid, scrollback=False)
     except ValueError as exc:
         _dead_session_warning("capture", exc)
         return
@@ -165,17 +165,17 @@ def _read_session_id(sid: int, timeout: float = 20.0) -> str:
     ``/status`` that parked gets one Enter. No id means the launch cannot be
     resumed later, so it fails.
     """
-    ava.shell.sessions.send(sid, "/status")
+    sessions.send(sid, "/status")
     for attempt in range(2):
         deadline = time.time() + timeout / 2
         while time.time() < deadline:
-            found = _SESSION_ID.search(ava.shell.sessions.capture(sid, lines=80))
+            found = _SESSION_ID.search(sessions.capture(sid, lines=80))
             if found is not None:
                 print(f"  -> codex session {found.group(1)}")
                 return found.group(1)
             time.sleep(1)
         if attempt == 0:
-            ava.shell.sessions.send_keys(sid, "Enter")
+            sessions.send_keys(sid, "Enter")
     raise RuntimeError(
         f"could not read the Codex session id from /status in session {sid}; "
         "the launch is rolled back because it could not be resumed later"
@@ -216,13 +216,13 @@ def _launch_supervisor(
     """Launch a quiet PTY supervisor that cannot resurrect a terminated owner."""
     supervisor_ttl = min(ttl_seconds + _SUPERVISOR_TTL_PADDING_SECONDS, 86_400)
     suffix = _supervisor_name(owner)
-    session_id = ava.shell.sessions.new(
+    session_id = sessions.new(
         name=suffix,
         ttl=supervisor_ttl,
     )
     command = _supervisor_command(owner, watcher)
     try:
-        ava.shell.sessions.send(session_id, command)
+        sessions.send(session_id, command)
     except BaseException:
         kill_session_after_failed_launch(session_id)
         raise
@@ -461,11 +461,11 @@ def _start_codex(
     remote: str | None = None
     if request.takeover_name is not None:
         remote = _app_server_endpoint(key, generation)
-        ava.shell.sessions.send(
+        sessions.send(
             sid, _app_server_command(owner, request.workspace, remote, request.caller_instance)
         )
         _wait_for_app_server(remote, log_path=_app_server_log_path(owner))
-    ava.shell.sessions.send(
+    sessions.send(
         sid,
         _codex_command(
             request.workspace, request.caller_instance, remote=remote, resume=request.resume
@@ -495,7 +495,7 @@ def _start_codex(
             request.work_file,
             resumed=request.resume is not None,
         )
-    ava.shell.sessions.send(sid, message)
+    sessions.send(sid, message)
     _verify_submitted(sid)
     return remote, codex_session
 
@@ -533,7 +533,7 @@ def _start_generation(
                 session_id=watcher_id,
                 session_name=watcher_name,
             )
-        sid = ava.shell.sessions.new(name=expected_suffix, ttl=request.ttl_seconds)
+        sid = sessions.new(name=expected_suffix, ttl=request.ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
         active = coding_session_owner.publish_active(
             key,

@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 import ava
+from ava import security
 from ava.sdk_surface import agent_identity, process_context
 from ava.sdk_surface import settings as sdk_settings
 from ava.sdk_surface.injection_check import QUESTION, begin_check, page_probability, split_for_model
@@ -85,7 +86,13 @@ def _install(monkeypatch: pytest.MonkeyPatch, answer: Answer) -> FakeDecide:
 
 def _check(url: str, title: str, content: str) -> None:
     """Start the check and wait for its verdict, as a fetch does around its summary."""
-    begin_check(url, title, content)()
+    begin_check(
+        url,
+        title,
+        content,
+        delivery_active=security.finding_delivery_active,
+        record=security.record_model_finding,
+    )()
 
 
 def _findings(update: dict[str, Any]) -> list[Any]:

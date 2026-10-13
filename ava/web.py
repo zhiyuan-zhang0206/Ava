@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava.sdk_surface.injection_check import begin_check
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-from ava.security import scan_content
+from ava.security import finding_delivery_active, record_model_finding, scan_content
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.lm.call import answer_text
 from base.lm.effort import ReasoningEffort, coerce_effort
@@ -451,7 +451,13 @@ def _fetch_one(url: str, prompt: str, max_chars: int, effort: str | ReasoningEff
     needs only the page, so it runs beside `_answer`.
     """
     title, page_url, content, truncated = _read_page(url, max_chars)
-    finish_check = begin_check(url, title, content)
+    finish_check = begin_check(
+        url,
+        title,
+        content,
+        delivery_active=finding_delivery_active,
+        record=record_model_finding,
+    )
     try:
         answer = _answer(
             prompt,

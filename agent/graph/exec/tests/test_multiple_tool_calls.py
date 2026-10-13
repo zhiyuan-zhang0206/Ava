@@ -16,7 +16,7 @@ from agent.graph.interrupt import InterruptEvent
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
-from ava.sdk_surface.process_context import process_clients
+from ava.boot import process_clients
 from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock

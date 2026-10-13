@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json as _json
+from pathlib import Path
 from typing import NamedTuple, NoReturn
 
-from ava.sdk_surface import process_context
+from ava import boot, files
+from ava.sdk_surface import attachment_transport, process_context
 from ava.sdk_surface import settings as _settings
-from ava.sdk_surface.attachment_transport import attach as attach
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 
@@ -63,8 +64,6 @@ def __getattr__(name: str) -> object:
 
         return ava.sdk_surface.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
-        import ava
-
         machine = process_context.current_context().require_machine()
         return MachineSpec(machine.name(), machine.description() or "")
     if name == "InvalidConfigOverlay":
@@ -77,9 +76,7 @@ def __getattr__(name: str) -> object:
     # ava.__getattr__ never fires — trigger the shared lazy load here, then retry.
     import sys as _sys
 
-    import ava
-
-    if ava._maybe_load_plugins_for_missing(name):
+    if boot.maybe_load_plugins_for_missing(name):
         return getattr(_sys.modules[__name__], name)
     raise AttributeError(f"module 'ava.self' has no attribute {name!r}")
 
@@ -91,6 +88,19 @@ def __getattr__(name: str) -> object:
 # running line 91 `import ava.self` and ava.help isn't registered yet →
 # AttributeError. Lazy makes this import chain only resolve when the
 # caller actually accesses InvalidConfigOverlay.
+
+
+def attach(path: str | Path, *, label: str | None = None) -> None:
+    """Register a local media file for your next turn.
+
+    Use this when your next response needs to inspect a file generated during
+    this turn. The file is read when this turn ends, so keep it available until
+    then. Your model receives supported media natively; a file whose modality
+    your model cannot receive (e.g. video on an image-only model) is rejected
+    with an error naming the allowed set. Attach at most 8 files and 48 MiB per
+    turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
+    """
+    attachment_transport.register(path, label=label, resolve=files.resolve)
 
 
 def _publish_self_inbound_wake() -> None:

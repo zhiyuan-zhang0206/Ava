@@ -18,9 +18,9 @@ import ava
 from agent import state as state_module
 from agent.extensions import registry as registry_module
 from ava import external
+from ava.boot import process_clients
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import Installation
-from ava.sdk_surface.process_context import process_clients
 from base.agents import impersonation as leases
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity

@@ -15,7 +15,7 @@ from types import TracebackType
 from typing import Any, Self, cast
 from uuid import uuid4
 
-import ava
+from ava.boot import initialize_context, process_clients
 from ava.sdk_surface import process_context
 from ava.sdk_surface.installation import ExternalState
 from base.agents import impersonation as control
@@ -108,7 +108,7 @@ def _attachment_database(
         return bound.clients.database
     if config is None:
         raise RuntimeError("an independent attachment needs its configuration owner")
-    version = CodeVersion(ava.loaded_code_image())
+    version = CodeVersion(process_context.loaded_code_image())
     gate = ProcessDbGate(version=version.get, process="unknown")
     return lambda: Database(
         db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
@@ -184,7 +184,7 @@ class Attachment:
                 local_machine=self._machine.name(),
             )
         if bound is None:
-            self._own_clients = process_context.process_clients(
+            self._own_clients = process_clients(
                 database=self._database, config=config, machine=self._machine
             )
         lease = self._lease()
@@ -196,7 +196,7 @@ class Attachment:
         # state fields registered — the surface-only default would silently
         # drop them (review finding, #2616).
         self._bind_borrowed_context()
-        ava.initialize_context(
+        initialize_context(
             process_context.current_context(),
             surface=False,
             config=config,
