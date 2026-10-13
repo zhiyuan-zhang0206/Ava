@@ -12,7 +12,7 @@ def stdlib_logging_isolated() -> Generator[None]:
     logging back as it was: the root handlers AND the level of every logger the intercept
     sets.
 
-    `_install_stdlib_intercept()` sets the root to INFO and each first-party logger to
+    `install_stdlib_intercept()` sets the root to INFO and each first-party logger to
     DEBUG (plus the psycopg pool and uvicorn loggers). Levels live on the process-global
     `logging.Logger.manager`, so restoring only the handlers left them set for every later
     test in the same xdist worker. A stdlib call whose format string cannot consume its

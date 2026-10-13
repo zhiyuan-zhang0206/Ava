@@ -1,6 +1,6 @@
 [debt.first-party-patch]
 "test_decisions.py#monkeypatch.setattr meizel.owners.decisions.DECISIONS" = 5
+"test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice.FAMILY_MODULES" = 4
+"test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice.INDEPENDENT_CLOCKS" = 4
 "test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice.REGISTERED_CLOCKS" = 1
-"test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice._FAMILY_MODULES" = 4
-"test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice._INDEPENDENT_CLOCKS" = 4
 "test_lint_clock_lattice.py#monkeypatch.setattr meizel.owners.clock_lattice._REPO_ROOT" = 1

@@ -83,7 +83,7 @@ class _FakeCursor:
 
 
 class _FakeConn:
-    def __init__(self, pool: _FakePool) -> None:
+    def __init__(self, pool: FakePool) -> None:
         self._pool = pool
 
     @asynccontextmanager
@@ -142,7 +142,7 @@ class _FakeConn:
 class FakeConnCtx:
     """The `async with pool.connection()` shape."""
 
-    def __init__(self, pool: _FakePool) -> None:
+    def __init__(self, pool: FakePool) -> None:
         self._pool = pool
 
     async def __aenter__(self) -> _FakeConn:
@@ -152,7 +152,7 @@ class FakeConnCtx:
         return False
 
 
-class _FakePool:
+class FakePool:
     """Host orchestration SQL without native commands; count stored-config reads.
 
     Deliberately not a live pool: every contract in this file is about
@@ -306,7 +306,7 @@ class GatedGraph:
         return {"exit_requested": False, "turn_idle": True, "restart_requested": False}
 
 
-Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
+Build = Callable[..., "tuple[AgentHost, _FakeGraph, FakePool]"]
 
 
 def stub_host_transitions(
@@ -365,7 +365,7 @@ def wired(
     `boot_agent_scope` is replaced by a build that returns a model named as the
     host asked, so a test can tell which model the host prepared.
     """
-    # This suite's agents/ownership live exclusively in _FakePool. Real lease
+    # This suite's agents/ownership live exclusively in FakePool. Real lease
     # SQL is covered by takeover integration tests, so its no-lease baseline
     # must be fake too instead of querying a second, empty database.
     monkeypatch.setattr(agent_host_host, "active_lease", AsyncMock(return_value=False))
@@ -436,9 +436,9 @@ def wired(
         *,
         catalog: ModelCatalog | None = None,
         policy: HostPolicy | None = None,
-    ) -> tuple[AgentHost, _FakeGraph, _FakePool]:
+    ) -> tuple[AgentHost, _FakeGraph, FakePool]:
         graph = _FakeGraph(results or {})
-        pool = _FakePool(rows)
+        pool = FakePool(rows)
         host = build_agent_host(
             pool=pool,
             checkpointer=object(),

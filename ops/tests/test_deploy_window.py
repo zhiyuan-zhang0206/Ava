@@ -35,7 +35,7 @@ def _quiet_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     """An idle cluster. Each test re-arms exactly the signal it is about."""
     monkeypatch.setattr(machines, "list_all", lambda _db: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(machine_exclusions, "list_excluded_machines", lambda _db: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(dw, "_read_deploy_states", lambda _db: {})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(dw, "read_deploy_states", lambda _db: {})  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _posture(machine: str, posture: str, *, age_s: float) -> HostDeployState:
@@ -78,7 +78,7 @@ def test_a_paused_posture_is_a_deploy_window(
     _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {"runner-a": _posture("runner-a", "paused", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -94,7 +94,7 @@ def test_an_idle_posture_is_not_a_deploy_window(
     _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {"runner-a": _posture("runner-a", "idle", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
     assert dw.deploy_in_flight(_db(database_gate=database_gate)).active is False
@@ -119,7 +119,7 @@ def test_a_legacy_converging_row_still_blocks_a_cohort_machine(
     _machines(monkeypatch, "macmini")
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {"macmini": _posture("macmini", "converging", age_s=2 * 86400)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -149,7 +149,7 @@ def test_excluded_machines_stale_posture_does_not_block(
     )
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {"runner-a": _posture("runner-a", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -169,7 +169,7 @@ def test_an_excluded_machines_row_is_ignored_whatever_its_posture(
     )
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {"runner-a": _posture("runner-a", "converging", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -188,7 +188,7 @@ def test_an_excluded_machine_does_not_hide_a_cohort_machine(
     )
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {  # pyright: ignore[reportUnknownArgumentType]
             "runner-a": _posture("runner-a", "paused", age_s=31 * 3600),
             "macmini": _posture("macmini", "paused", age_s=60),
@@ -214,7 +214,7 @@ def test_a_staging_machine_with_a_stale_posture_does_not_block(
     )
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {"stage": _posture("stage", "paused", age_s=86400)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -239,7 +239,7 @@ def test_the_skip_line_names_exclusion_and_freshness(
     )
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {"runner-a": _posture("runner-a", "paused", age_s=3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -267,7 +267,7 @@ def test_an_unreadable_exclusion_read_still_refuses(
     _machines(monkeypatch, "runner-a")
     monkeypatch.setattr(
         dw,
-        "_read_deploy_states",
+        "read_deploy_states",
         lambda _db: {"runner-a": _posture("runner-a", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -282,7 +282,7 @@ def test_an_unreadable_exclusion_read_still_refuses(
     [
         "base.cluster.machines.list_all",
         "base.cluster.machine_exclusions.list_excluded_machines",
-        "ops.deploy_window._read_deploy_states",
+        "ops.deploy_window.read_deploy_states",
     ],
 )
 def test_never_raises_when_a_signal_is_broken(

@@ -143,7 +143,7 @@ def _pin(home: Path, rotation: Rotation) -> None:
         raise RotationRefusedError(f"{passphrase.pin_path(home)} pins another passphrase")
 
 
-def _write_secret(home: Path, rotation: Rotation) -> None:
+def write_secret(home: Path, rotation: Rotation) -> None:
     current = bearer_fingerprint(_current_secret(home))
     if current == rotation.new:
         return
@@ -172,7 +172,7 @@ def advance(home: Path, rotation: Rotation | None, save: Callable[[Rotation], No
         save(rotation)
     if rotation.state == "pinned":
         _pin(home, rotation)  # verify only: never re-derived after `pinning`
-        _write_secret(home, rotation)
+        write_secret(home, rotation)
         rotation = replace(rotation, state="done")
         save(rotation)
     _pin(home, rotation)

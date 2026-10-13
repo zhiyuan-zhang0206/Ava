@@ -549,7 +549,7 @@ async def ops_route(
     )
 
 
-async def _main(
+async def serve_ops_daemon(
     *,
     database: Callable[[], Database],
     image: LoadedCommit,
@@ -691,7 +691,11 @@ def main(*, argv: list[str] | None = None) -> None:
         install_graceful_shutdown("ops")
         runner = asyncio.Runner()
         try:
-            runner.run(_main(database=database, image=image, local_machine=machine, config=config))
+            runner.run(
+                serve_ops_daemon(
+                    database=database, image=image, local_machine=machine, config=config
+                )
+            )
         except KeyboardInterrupt as exc:
             primary = exc
             _log.info("[ops] interrupted, shutting down")
@@ -701,7 +705,7 @@ def main(*, argv: list[str] | None = None) -> None:
                 code = 1
         except Exception as exc:
             primary = exc
-            _log.exception("[ops] daemon crashed — uncaught exception escaped _main()")
+            _log.exception("[ops] daemon crashed — uncaught exception escaped serve_ops_daemon()")
             code = 1
     finally:
         failure = primary if primary is not None else sys.exception()

@@ -5,6 +5,3 @@ exports = ["node.py", "tests"]
 "_dispatch.py" = ["_chat_inbound.py", "_routing.py"]
 "node.py" = ["_decide.py", "_dispatch.py", "_present.py", "_routing.py"]
 "tests" = ["_chat_inbound.py", "_dispatch.py", "node.py"]
-
-[debt.private-name]
-"node.py -> _dispatch.py#_handle_heartbeat" = 1

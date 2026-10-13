@@ -33,13 +33,13 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
    reference to a clock registered in `base.deploy.timing.CLOCKS`
    (e.g. `_ROLLOUT_STALL_TIMEOUT_S: float = NO_PROGRESS_TIMEOUT_S`). The value is
    still defined once; the alias is just a local name.
-3. **Explicitly exempt** in `_INDEPENDENT_CLOCKS` below — the constant is either
+3. **Explicitly exempt** in `INDEPENDENT_CLOCKS` below — the constant is either
    not a clock at all (a flag name, a SQL key, a collection) or a genuinely
    independent clock with no lattice neighbour, each with a stated reason.
 
 The allowlists must stay current: a full scan (no path arguments, as pre-commit
-and CI run it) also fails when a `_FAMILY_MODULES` file or an
-`_INDEPENDENT_CLOCKS` file is gone, or an exempted constant is no longer defined
+and CI run it) also fails when a `FAMILY_MODULES` file or an
+`INDEPENDENT_CLOCKS` file is gone, or an exempted constant is no longer defined
 at module level in its file — an exemption for a deleted symbol would silently
 pre-approve whatever next takes that name.
 
@@ -91,7 +91,7 @@ _POLICY = allowances.load(_REPO_ROOT)
 
 # The lattice family modules: lattice vocabulary may be DEFINED here (and only here). Listed in
 # meizel.policy.toml under [clock-lattice].
-_FAMILY_MODULES = _POLICY.names("clock-lattice", "family-modules")
+FAMILY_MODULES = _POLICY.names("clock-lattice", "family-modules")
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 
@@ -130,7 +130,7 @@ def _registered_clock_names() -> frozenset[str]:
 # outside the family modules. Either it is not a clock at all (a flag, a key, a collection), or it
 # is a genuinely independent clock with no lattice neighbour. Every entry states which, in
 # meizel.policy.toml under [clock-lattice.independent-clocks] (`path::NAME`).
-_INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
+INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     (path, name): why
     for site, why in _POLICY.reasons("clock-lattice", "independent-clocks").items()
     for path, _, name in [site.partition("::")]
@@ -141,9 +141,9 @@ def _is_unregistered_clock(rel: str, name: str, value: ast.expr | None) -> bool:
     """A lattice-vocabulary constant outside the family modules, not exempt and not an alias."""
     if not _CONST_NAME.match(name) or not any(term in name for term in _LATTICE_TERMS):
         return False
-    if rel in _FAMILY_MODULES:
+    if rel in FAMILY_MODULES:
         return False  # rule 1: the lattice's homes
-    if (rel, name) in _INDEPENDENT_CLOCKS:
+    if (rel, name) in INDEPENDENT_CLOCKS:
         return False  # rule 3: explicit exemption
     # rule 2: alias of a registered clock
     return not (isinstance(value, ast.Name) and value.id in _registered_clock_names())
@@ -185,14 +185,14 @@ def _module_level_names(tree: ast.Module) -> set[str]:
 def stale_allowlist_entries() -> list[str]:
     """Allowlist entries whose file or exempted constant no longer exists."""
     errors: list[str] = []
-    for rel in _FAMILY_MODULES:
+    for rel in FAMILY_MODULES:
         if not (_REPO_ROOT / rel).is_file():
-            errors.append(f"{rel}: stale _FAMILY_MODULES entry — the file no longer exists")
-    for rel, name in _INDEPENDENT_CLOCKS:
+            errors.append(f"{rel}: stale FAMILY_MODULES entry — the file no longer exists")
+    for rel, name in INDEPENDENT_CLOCKS:
         path = _REPO_ROOT / rel
         if not path.is_file():
             errors.append(
-                f"{rel}: stale _INDEPENDENT_CLOCKS entry {name} — the file no longer exists"
+                f"{rel}: stale INDEPENDENT_CLOCKS entry {name} — the file no longer exists"
             )
             continue
         try:
@@ -201,7 +201,7 @@ def stale_allowlist_entries() -> list[str]:
             continue  # unreadable or a syntax error the compiler owns: cannot judge
         if name not in _module_level_names(tree):
             errors.append(
-                f"{rel}: stale _INDEPENDENT_CLOCKS entry {name} — no module-level {name} "
+                f"{rel}: stale INDEPENDENT_CLOCKS entry {name} — no module-level {name} "
                 "is defined there any more; drop the exemption"
             )
     return errors
@@ -241,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     # `--only` (the commit hook) judges the changed files under the default scope; the
     # lattice's own family modules are inputs: editing one re-judges every file.
-    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_FAMILY_MODULES)
+    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=FAMILY_MODULES)
     errors = _scan(paths, scope)
     if not argv:
         errors.extend(stale_allowlist_entries())

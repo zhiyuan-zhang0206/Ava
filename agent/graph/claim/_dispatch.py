@@ -350,7 +350,7 @@ async def _handle_cancel(
     st.cancelled = True
 
 
-async def _handle_heartbeat(
+async def handle_heartbeat(
     ctx: AvaContext,
     agent_id: int,
     item: ClaimedInbound,
@@ -362,7 +362,7 @@ async def _handle_heartbeat(
     An open provider circuit consumes heartbeat without another model call;
     fresh chat and explicit controls keep their normal routing.
     """
-    assert ctx.ops_pool is not None, "_handle_heartbeat requires ctx.ops_pool"  # noqa: S101
+    assert ctx.ops_pool is not None, "handle_heartbeat requires ctx.ops_pool"  # noqa: S101
     circuit = state.circuit
     if circuit.open:
         logger.warning(
@@ -602,7 +602,7 @@ async def _dispatch_item(
     elif kind == InboundKind.CANCEL:
         await _handle_cancel(ctx, agent_id, st)
     elif kind == InboundKind.HEARTBEAT:
-        await _handle_heartbeat(ctx, agent_id, item, st, state)
+        await handle_heartbeat(ctx, agent_id, item, st, state)
     elif kind == InboundKind.TERMINATE:
         await _handle_terminate(ctx, item, st)
     elif kind == InboundKind.RESTART:

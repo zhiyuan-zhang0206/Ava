@@ -122,7 +122,7 @@ def test_entry_shares_image_gate_factory_and_closes_writer(
 
     monkeypatch.setattr(daemon, "install_graceful_shutdown", install_shutdown)
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
-    monkeypatch.setattr(daemon, "_main", run)
+    monkeypatch.setattr(daemon, "serve_ops_daemon", run)
     monkeypatch.setattr(daemon, "_hard_exit", hard_exit)
     try:
         with pytest.raises(_ExitError) as exited:

@@ -6,7 +6,6 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py"]
 
 [debt.private-name]
 "tests/child_daemon_exit.py -> daemon.py#_hard_exit" = 2
-"tests/child_daemon_exit.py -> daemon.py#_main" = 1
 "tests/daemon/test_an_unrelated_op_still_dispatches_while_a.py -> daemon.py#_dispatch" = 9
 "tests/daemon/test_dispatch_resource_binding.py -> daemon.py#_dispatch" = 4
 "tests/daemon/test_idempotent_connection_retry.py -> daemon.py#_sleep" = 3
@@ -14,10 +13,8 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py"]
 "tests/daemon/test_ops_route_non_json_values_degrade_to.py -> daemon.py#_dispatch" = 5
 "tests/test_daemon.py -> daemon.py#_dispatch" = 11
 "tests/test_daemon_entry.py -> daemon.py#_hard_exit" = 1
-"tests/test_daemon_entry.py -> daemon.py#_main" = 1
 "tests/test_daemon_launch.py -> daemon.py#_dispatch" = 1
 "tests/test_daemon_launch_reconcile.py -> daemon.py#_dispatch" = 1
-"tests/test_daemon_runtime.py -> daemon.py#_main" = 1
 "tests/test_daemon_status.py -> daemon.py#_dispatch" = 1
 "tests/test_dispatch_lifecycle.py -> daemon.py#_dispatch" = 5
 "tests/test_native_restart.py -> daemon.py#_dispatch" = 2

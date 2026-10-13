@@ -214,7 +214,7 @@ def serve_kwargs(*, host: str, app: Any = "gateway.app:app") -> dict[str, Any]:
         # of through loguru → gateway.log + the events pipeline. With None,
         # uvicorn leaves the logging system alone; uvicorn.error propagates to
         # the root intercept handler, and uvicorn.access is gated to WARNING in
-        # `_install_stdlib_intercept` (per-request INFO is noise). #970: an
+        # `install_stdlib_intercept` (per-request INFO is noise). #970: an
         # unhandled ASGI exception used to land only in the session log and die
         # with the session — now it reaches gateway.log and the events pipeline.
         "log_config": None,

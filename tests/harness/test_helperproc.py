@@ -408,8 +408,8 @@ def test_parent_chain_checks_are_wired_at_host_boot_and_heartbeat() -> None:
     hosted_boot = inspect.getsource(daemon.main)
     hosted_beat = inspect.getsource(daemon._beat_forever)
 
-    assert "_require_helper_parent_chain()" in hosted_boot
-    assert "_require_helper_parent_chain()" in hosted_beat
+    assert "require_helper_parent_chain()" in hosted_boot
+    assert "require_helper_parent_chain()" in hosted_beat
 
 
 def test_broken_parent_chain_exits_host_with_software_error(
@@ -421,6 +421,6 @@ def test_broken_parent_chain_exits_host_with_software_error(
     monkeypatch.setattr(daemon, "parent_chain_intact", lambda: False)
     monkeypatch.setattr(os, "_exit", exits.append)
 
-    daemon._require_helper_parent_chain()
+    daemon.require_helper_parent_chain()
 
     assert exits == [70]

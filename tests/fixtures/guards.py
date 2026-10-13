@@ -402,7 +402,7 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
 def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     """Keep stdlib logging off the loguru->telemetry bridge during tests.
 
-    base/log/__init__.py's `_install_stdlib_intercept()` (called by init_gateway_process
+    base/log/__init__.py's `install_stdlib_intercept()` (called by init_gateway_process
     and friends) installs a root-logger handler that forwards stdlib records
     into loguru, whose `_event_sink` turns them into telemetry 'log' events.
     Any test that monkeypatches `base.telemetry.emit` and triggers a log
