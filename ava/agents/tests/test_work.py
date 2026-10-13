@@ -13,7 +13,7 @@ from ava.agents import work
 from ava.gateway_client import transport
 from ava.sdk_surface import agent_identity
 from base.agents.incarnation.native_work_models import NativeWorkTarget
-from tests.fixtures.retry_waits import retry_waits as retry_waits
+from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 
 TARGET = NativeWorkTarget(
     work_id=uuid4(), agent_id=42, machine="local", generation=uuid4(), owner=uuid4(), protocol=1

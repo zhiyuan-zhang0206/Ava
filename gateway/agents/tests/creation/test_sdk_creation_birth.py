@@ -13,6 +13,7 @@ from ava.gateway_client import transport
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, SECRET
 from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
@@ -21,7 +22,6 @@ from ops.cluster import rpc
 from ops.lifecycle.launch import _validate_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.retry_waits import retry_waits as retry_waits
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 

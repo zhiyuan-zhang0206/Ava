@@ -11,11 +11,11 @@ from psycopg.types.json import Jsonb
 
 from ava.gateway_client import transport
 from base.api_contracts.agent_contract import GatewayUnavailable
+from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from gateway.agents import creation as agent_creation
 from gateway.agents.tests.creation.test_guarded_creation import HEADERS, PATH
 from gateway.agents.tests.creation.test_guarded_creation import client as client
 from gateway.agents.tests.creation.test_sdk_strong_creation import _response, _sdk
-from tests.fixtures.retry_waits import retry_waits as retry_waits
 from tests.path_scoped.gateway_tests import _local_spawn_in_process as _local_spawn_in_process
 
 

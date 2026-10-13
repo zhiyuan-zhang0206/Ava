@@ -15,8 +15,8 @@ from base.agents.incarnation.native_restart_models import (
     NativeRestartOutcome,
     NativeRestartProgress,
 )
+from base.tests.fixtures.retry_waits import retry_waits as retry_waits
 from tests.fixtures.pin_agent import pin_agent
-from tests.fixtures.retry_waits import retry_waits as retry_waits
 
 ACCEPTED = NativeRestartAcceptance(
     command_id=123, target=TARGET, config_overlay={"completion_notice_policy": "hourly"}
