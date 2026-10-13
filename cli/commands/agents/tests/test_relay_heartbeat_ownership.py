@@ -60,7 +60,7 @@ def test_heartbeat_failure_does_not_cancel_inbox_or_change_cli_error_contract(
         agents_impersonation, "relay_get", MagicMock(return_value={"session_id": 0})
     )
     monkeypatch.setattr(relay, "resolve_adapter", MagicMock(return_value=MagicMock()))
-    monkeypatch.setattr(relay, "_write_heartbeat", MagicMock(return_value=True))
+    monkeypatch.setattr(relay, "write_heartbeat", MagicMock(return_value=True))
 
     async def heartbeat(*_args: object, **_kwargs: object) -> None:
         events.append("heartbeat_started")
@@ -80,7 +80,7 @@ def test_heartbeat_failure_does_not_cancel_inbox_or_change_cli_error_contract(
         if interrupt:
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(relay, "_heartbeat_loop", heartbeat)
+    monkeypatch.setattr(relay, "heartbeat_loop", heartbeat)
     monkeypatch.setattr(relay, "relay_inbox", inbox)
     monkeypatch.setattr(relay.base.events.live.redis_listener, "RedisInboundListener", MagicMock())
 

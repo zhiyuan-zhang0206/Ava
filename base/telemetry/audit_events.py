@@ -104,7 +104,7 @@ def prepare_event_log(
             Left untyped on purpose; see the module docstring's payload tiering
             rule for when an event's payload gets a model instead.
     """
-    from base.events.caller_identity import caller_payload
+    from base.api_contracts.caller_identity import caller_payload
 
     return telemetry.prepare_event(
         "audit",

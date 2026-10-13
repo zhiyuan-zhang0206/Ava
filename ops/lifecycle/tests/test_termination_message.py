@@ -72,7 +72,7 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
     event_bus: EventBus,
 ) -> None:
     """A failed pair rolls back both rows, then retries terminate before chat."""
-    real_insert = termination._insert_termination_pair
+    real_insert = termination.insert_termination_pair
     failed_pair = False
 
     def _fail_after_pair(
@@ -96,7 +96,7 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
             raise RuntimeError("injected pair failure")
         return result
 
-    monkeypatch.setattr(termination, "_insert_termination_pair", _fail_after_pair)
+    monkeypatch.setattr(termination, "insert_termination_pair", _fail_after_pair)
     terminate_id, _cutoff = termination._enqueue_termination_inbounds(
         database,
         event_bus,
@@ -126,7 +126,7 @@ def test_termination_survives_failed_message_retry(
     event_bus: EventBus,
 ) -> None:
     """Once fallback terminate succeeds, a second chat failure is non-fatal."""
-    real_insert = termination._insert_termination_pair
+    real_insert = termination.insert_termination_pair
 
     def _fail_pair(
         conn: psycopg.Connection,
@@ -149,8 +149,8 @@ def test_termination_survives_failed_message_retry(
     def _fail_retry(*_args: object, **_kwargs: object) -> int:
         raise RuntimeError("injected retry failure")
 
-    monkeypatch.setattr(termination, "_insert_termination_pair", _fail_pair)
-    monkeypatch.setattr(termination, "_insert_pending_termination_message", _fail_retry)
+    monkeypatch.setattr(termination, "insert_termination_pair", _fail_pair)
+    monkeypatch.setattr(termination, "insert_pending_termination_message", _fail_retry)
     terminate_id, _cutoff = termination._enqueue_termination_inbounds(
         database,
         event_bus,
@@ -173,7 +173,7 @@ def test_force_termination_retries_command_before_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Force termination uses the same rollback and termination-first fallback."""
-    real_insert = termination._insert_termination_pair
+    real_insert = termination.insert_termination_pair
     failed_pair = False
 
     def _fail_after_pair(
@@ -197,7 +197,7 @@ def test_force_termination_retries_command_before_message(
             raise RuntimeError("injected force pair failure")
         return result
 
-    monkeypatch.setattr(termination, "_insert_termination_pair", _fail_after_pair)
+    monkeypatch.setattr(termination, "insert_termination_pair", _fail_after_pair)
     old_status, _, _, terminate_id, _cutoff = termination._force_terminate_transaction(
         running_agent_id,
         db_pool,
@@ -270,7 +270,7 @@ class TestKillAllShellSessions:
             return None
 
         monkeypatch.setattr(lifecycle, "kill_agent_shells", _kill)
-        monkeypatch.setattr(lifecycle, "_cancel_hosted_turn_best_effort", _noop_cancel)
+        monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _noop_cancel)
         return calls
 
     @pytest.mark.asyncio
@@ -537,7 +537,7 @@ class TestKillAllShellSessions:
             return None
 
         monkeypatch.setattr(lifecycle, "kill_agent_shells", _fail)
-        monkeypatch.setattr(lifecycle, "_cancel_hosted_turn_best_effort", _noop_cancel)
+        monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _noop_cancel)
 
         with pytest.raises(RuntimeError, match="failed to kill"):
             await lifecycle.terminate_agent_op(
@@ -620,7 +620,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         assert backend.new_session(replacement, "", tmp_path, env={"AVA_HOME": str(tmp_path)})
         shells[replacement] = pty_reaper.track_session(replacement).pid
 
-    monkeypatch.setattr(lifecycle, "_cancel_hosted_turn_best_effort", _allocate_after_acceptance)
+    monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _allocate_after_acceptance)
     watcher_cmd = shlex.join([sys.executable, "-u", str(job), str(marker)])
     shells: dict[str, int] = {}
     for name, cmd in ((shell, ""), (watcher, watcher_cmd), (page, "sleep 300"), (foreign, "")):

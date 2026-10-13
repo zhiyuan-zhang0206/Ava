@@ -23,9 +23,9 @@ from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.paths import prod_service_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands._repo import _repo_root
-from cli.commands._setup import SetupValues, _missing_setup_message
+from cli.commands._setup import SetupValues, missing_setup_message
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
-from cli.commands.lifecycle._start_bookmarks import record_running_sha as _record_running_sha
+from cli.commands.lifecycle._start_bookmarks import record_running_sha as record_running_sha
 from cli.commands.lifecycle.login_link import print_login_link
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
@@ -34,7 +34,7 @@ from cli.start_runtime import StartRuntime
 from services.supervision.roster.service_spec import ServiceSpec
 
 
-def _ensure_gateway_data_plane(
+def ensure_gateway_data_plane(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     database_factory: DatabaseFactory,
@@ -52,7 +52,7 @@ def _ensure_gateway_data_plane(
     )
 
 
-def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
+def refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     """Refuse known core-port conflicts; optional capabilities cannot block start."""
     # Read through the probe owner so the safety fixture guards this lookup.
     import cli.commands.probe as _probe_commands
@@ -92,7 +92,7 @@ def _prepare_start_schema(
     return 0
 
 
-def _prepare_cold_start(
+def prepare_cold_start(
     repo: Path,
     roles: MachineRoles,
     roster: tuple[ServiceSpec, ...],
@@ -126,7 +126,7 @@ def _prepare_cold_start(
     #    central node's DB/Redis). macOS: brew binaries via pg_ctl + redis-server;
     #    Linux: pg_ctl + redis-server. No docker on any POSIX platform.
     if "gateway" in roles:
-        rc = _ensure_gateway_data_plane(
+        rc = ensure_gateway_data_plane(
             retained_children=retained_children,
             database_factory=database_factory,
             machine=command.machine,
@@ -147,7 +147,7 @@ def _prepare_cold_start(
         from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
         complete_gateway_data_plane(database_factory=database_factory, machine=command.machine)
-    rc = _repo_commands._assert_schema_current_or_die()
+    rc = _repo_commands.assert_schema_current_or_die()
     if rc != 0:
         return rc
 
@@ -228,14 +228,14 @@ def _resolve_identity(command: CommandRuntime) -> tuple[SetupValues, MachineRole
 
     # 0b) collect & validate the home's recorded setup fields (capability-aware filter)
     try:
-        resolved, missing = _setup_commands._collect_setup_values(config=command.config)
+        resolved, missing = _setup_commands.collect_setup_values(config=command.config)
     except ValueError as e:
         # validator failure (e.g. MachineRoleInvalid) — do not persist invalid
         # value, print error + exit.
         print(f"\n✗ {e}", file=sys.stderr)
         return 1
     if missing:
-        print(_missing_setup_message(missing), file=sys.stderr)
+        print(missing_setup_message(missing), file=sys.stderr)
         return 1
 
     # Successful setup refreshes only this invocation's cached identity.
@@ -305,7 +305,7 @@ def _admit_start(
             roster, state.repo, state.roles, reconcile=selection.persist_services
         )
         if not state.live:
-            rc = _prepare_cold_start(
+            rc = prepare_cold_start(
                 state.repo,
                 state.roles,
                 roster,
@@ -321,7 +321,7 @@ def _admit_start(
         return 1
     # A live generation may only be inspected here; pending schema changes
     # require a stopped writer boundary and never run as a repeat-start effect.
-    rc = _repo_commands._assert_schema_current_or_die()
+    rc = _repo_commands.assert_schema_current_or_die()
     if rc:
         return rc
     if state.live:
@@ -343,7 +343,7 @@ def _register_and_probe(state: _StartState, *, database_factory: DatabaseFactory
     # agent-runner will also fail every subsequent `ava cluster status` and
     # The fleet update orchestration.
     print("\n→ register machine in central DB")
-    rc = _repo_commands._register_machine_or_die(
+    rc = _repo_commands.register_machine_or_die(
         database_factory(), state.resolved, state.roles, command=state.command
     )
     if rc != 0:
@@ -357,13 +357,13 @@ def _register_and_probe(state: _StartState, *, database_factory: DatabaseFactory
     # is on this stdout and the host fails non-zero.
     if "agent-runner" in state.roles and "gateway" not in state.roles:
         print("\n→ probe gateway")
-        rc = _repo_commands._probe_gateway_or_die(state.resolved["gateway_url"])
+        rc = _repo_commands.probe_gateway_or_die(state.resolved["gateway_url"])
         if rc != 0:
             return rc
     return None
 
 
-def _print_gateway_hint(*, machine: MachineIdentity) -> None:
+def print_gateway_hint(*, machine: MachineIdentity) -> None:
     """Where a remote agent-runner dials this gateway, and how a browser logs in.
 
     The gateway's own .env holds the loopback URL (a box reaches its own gateway over
@@ -403,7 +403,7 @@ def _critical_launch_failures(launch: Any) -> tuple[str, ...]:
     return tuple(name for name in launch.failed if name in names)
 
 
-def _readiness_verdict(launch: Any, wait: Any) -> int | None:
+def readiness_verdict(launch: Any, wait: Any) -> int | None:
     """Report all failures, but gate serving only on selected core services."""
     import cli.commands.probe as _probe_commands
 
@@ -424,7 +424,7 @@ def _readiness_verdict(launch: Any, wait: Any) -> int | None:
 
 
 @resume_after_start
-def _cmd_start_body(
+def cmd_start_body(
     operation: PauseOwnerSnapshot | None,
     database_factory: DatabaseFactory,
     disabled_services: tuple[str, ...] = (),
@@ -476,13 +476,13 @@ def _cmd_start_body(
     # 4a) probe before binding: refuse to launch a daemon onto a health port
     # another unit already answers on — this is the last point at which nothing
     # has been spawned, and the roster is knowable only after the skip resolves.
-    rc = _refuse_occupied_health_ports(roster)
+    rc = refuse_occupied_health_ports(roster)
     if rc != 0:
         return rc
 
     # Failed start attempts must leave recovery actions gated.
     serving_generation = start_serving.begin_start()
-    _record_running_sha(repo)
+    record_running_sha(repo)
     launch = _root_driver_commands._launch_service_tree(
         roster,
         repo,
@@ -521,11 +521,11 @@ def _cmd_start_body(
 
     # 7) gateway reachability hint.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
-        _print_gateway_hint(machine=command.machine)
+        print_gateway_hint(machine=command.machine)
         print_login_link({spec.session for spec in started})
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
-    rc = _readiness_verdict(launch, wait)
+    rc = readiness_verdict(launch, wait)
     if rc is not None:
         return rc
 
@@ -562,7 +562,7 @@ def cmd_start(
     """
     if retained_children is None:
         raise ValueError("start requires its caller-owned PostgreSQL child retention")
-    return _cmd_start_body(
+    return cmd_start_body(
         operation,
         database_factory,
         command.machine,

@@ -42,7 +42,7 @@ from services.agent_runner.pty_sessions import ledger
 
 # The unit stop's terminal closure uses the shared stop bounds (`data_plane/stop_waits.py`).
 _TERMINAL_STOP_GRACE_S = PROCESS_CLEANUP_WAIT_S
-_TERMINAL_KILL_WAIT_S = PROCESS_KILL_WAIT_S
+TERMINAL_KILL_WAIT_S = PROCESS_KILL_WAIT_S
 
 
 def require_no_terminals() -> None:
@@ -67,7 +67,7 @@ def live_terminals() -> list[str]:
         return ledger.leftovers(ledger_path())
 
 
-def _close_via_service(grace_s: float, kill_s: float) -> closure.Outcome:
+def close_via_service(grace_s: float, kill_s: float) -> closure.Outcome:
     """Run the one closure where the shells are: in the service (raises when it is down)."""
     return client.close_all(grace_s=grace_s, kill_s=kill_s)
 
@@ -80,7 +80,7 @@ def _close_terminals_now(grace_s: float, kill_s: float) -> tuple[closure.Outcome
     this stop, and its notices say so (`pty_close_notices.CRASH_REASON`).
     """
     try:
-        return _close_via_service(grace_s, kill_s), pty_close_notices.STOP_REASON
+        return close_via_service(grace_s, kill_s), pty_close_notices.STOP_REASON
     except client.ServiceDownError:
         return ledger.sweep(ledger_path()), pty_close_notices.CRASH_REASON
 
@@ -127,7 +127,7 @@ class _Notice:
     reason: str
 
 
-def _await_no_terminals(until: float, stage: str) -> None:
+def await_no_terminals(until: float, stage: str) -> None:
     """The closure evidence: no terminal is live; raise at `until`.
 
     The service drops a session from its table the moment its teardown is claimed,
@@ -197,14 +197,14 @@ def close_terminals(
     """Close this unit's terminals at `ava stop`: HUP/TERM, a bounded grace, then SIGKILL.
 
     The grace is `_TERMINAL_STOP_GRACE_S`, capped by the stop's `deadline`;
-    the SIGKILL leg is bounded by `_TERMINAL_KILL_WAIT_S` and runs even when
+    the SIGKILL leg is bounded by `TERMINAL_KILL_WAIT_S` and runs even when
     the grace spent the rest of the deadline — a stop that reached its
     terminal phase closes its terminals
     (docs/decisions/runtime/processes/sessions/2026-10-07-pty-best-effort-closure.md). A shell that
     survives fails the stop, which keeps its maintenance hold. Known job
     leftovers are reported without failing the stop. A
     terminal still tearing down after that gets the rest of the deadline, and
-    at least `_TERMINAL_KILL_WAIT_S`, to leave the service's table.
+    at least `TERMINAL_KILL_WAIT_S`, to leave the service's table.
 
     Busy sessions whose shell is verified gone — a job the SIGKILL cut short
     included — get a closure notice for their owner agent (issue #2044),
@@ -215,7 +215,7 @@ def close_terminals(
     another session keeps the stop incomplete.
     """
     grace_s = max(0.0, min(deadline - time.monotonic(), _TERMINAL_STOP_GRACE_S))
-    outcome, reason = _close_terminals_now(grace_s, _TERMINAL_KILL_WAIT_S)
+    outcome, reason = _close_terminals_now(grace_s, TERMINAL_KILL_WAIT_S)
     _record_close_notices(
         outcome.closed,
         _Notice(operation, acquired_at, reason),
@@ -226,7 +226,7 @@ def close_terminals(
     _report_terminal_job_leftovers(outcome)
     if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):
         raise _terminals_incomplete(outcome, "terminals")
-    _await_no_terminals(max(deadline, time.monotonic() + _TERMINAL_KILL_WAIT_S), "terminals")
+    await_no_terminals(max(deadline, time.monotonic() + TERMINAL_KILL_WAIT_S), "terminals")
 
 
 def force_close_terminals() -> None:
@@ -235,7 +235,7 @@ def force_close_terminals() -> None:
     Force skips owner notices and drain guarantees. A surviving shell still
     fails it; known job leftovers remain diagnostics.
     """
-    outcome, _reason = _close_terminals_now(0.0, _TERMINAL_KILL_WAIT_S)
+    outcome, _reason = _close_terminals_now(0.0, TERMINAL_KILL_WAIT_S)
     _report_terminal_job_leftovers(outcome)
     if any(s.role == "terminal" and live_identities([s.process]) for s in outcome.survivors):
         raise RuntimeError(

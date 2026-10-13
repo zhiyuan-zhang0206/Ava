@@ -15,7 +15,7 @@ import pytest
 import base.cluster.machine as cluster_machine
 from cli.commands.agents import control as _agents
 
-_TARGET = {
+TARGET = {
     "agent_id": 5,
     "work_id": "00000000-0000-4000-8000-000000000001",
     "machine": "local",
@@ -26,7 +26,7 @@ _TARGET = {
 _COMPACT_TARGET = {
     "protocol": 1,
     "observation_id": "00000000-0000-4000-8000-000000000004",
-    "source": {**_TARGET, "agent_id": 7},
+    "source": {**TARGET, "agent_id": 7},
     "checkpoint_id": "source",
     "checkpoint_ns": "",
     "messages_version": "1",
@@ -207,16 +207,16 @@ def test_agents_cancel_posts_to_cancel_route(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def observe(*_args: object, **_kwargs: object) -> _FakeResp:
-        return _FakeResp(_TARGET)
+        return _FakeResp(TARGET)
 
     monkeypatch.setattr(httpx, "get", observe)
-    seen = _patch_post(monkeypatch, {"target": _TARGET, "command_id": _TARGET["work_id"]})
+    seen = _patch_post(monkeypatch, {"target": TARGET, "command_id": TARGET["work_id"]})
     assert _agents.cmd_agents_cancel(5) == 0
     assert seen["url"] == "http://gw:8000/api/keyed/v1/agents/5/cancel-work"
     assert isinstance(seen["headers"], dict)
     assert seen["headers"]["Idempotency-Key"]
     assert seen["headers"]["Idempotency-Scope"] == "principal-v1"
-    assert seen["json"] == _TARGET
+    assert seen["json"] == TARGET
     assert "cancel accepted" in capsys.readouterr().out
 
 
@@ -424,7 +424,7 @@ def test_agents_compact_posts_to_the_compact_route(
         return _FakeResp(_COMPACT_TARGET)
 
     monkeypatch.setattr(httpx, "get", observe)
-    seen = _patch_post(monkeypatch, {"target": _COMPACT_TARGET, "command_id": _TARGET["work_id"]})
+    seen = _patch_post(monkeypatch, {"target": _COMPACT_TARGET, "command_id": TARGET["work_id"]})
     assert _agents.cmd_agents_compact(7) == 0
     assert seen["url"] == "http://gw:8000/api/keyed/v1/agents/7/compact-history"
     assert isinstance(seen["headers"], dict)

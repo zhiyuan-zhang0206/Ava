@@ -20,9 +20,9 @@ def _response(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -> No
 def test_cancel_missing_native_acceptance_never_prints_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], payload: dict[str, object]
 ) -> None:
-    from cli.commands.agents.tests.test_agents_cmd import _TARGET
+    from cli.commands.agents.tests.test_agents_cmd import TARGET
 
-    target = {**_TARGET, "agent_id": 7}
+    target = {**TARGET, "agent_id": 7}
 
     def observe(*_args: object, **_kwargs: object) -> httpx.Response:
         return httpx.Response(200, json=target, request=httpx.Request("GET", "http://gateway"))

@@ -69,7 +69,7 @@ def _run(argv: list[str], repo: Path, env: dict[str, str], *, discard_stdout: bo
     ).returncode
 
 
-def _configured_env(environment: Mapping[str, str], mirror_env: Path | None) -> dict[str, str]:
+def configured_env(environment: Mapping[str, str], mirror_env: Path | None) -> dict[str, str]:
     """Real single-index environment settings override the entire saved profile."""
     configured = dict(environment)
     if (
@@ -109,7 +109,7 @@ def _reported_version(python: Path, env: dict[str, str]) -> str:
     ).stdout.strip()
 
 
-def _remove_checkout_venv(repo: Path) -> None:
+def remove_checkout_venv(repo: Path) -> None:
     """Delete only the checkout's own real `.venv` directory, never a link's target."""
     venv = repo / ".venv"
     if venv.is_symlink() or venv.resolve(strict=True).parent != repo.resolve(strict=True):
@@ -143,7 +143,7 @@ def _mirror_environment(
         file=sys.stderr,
         flush=True,
     )
-    _remove_checkout_venv(repo)
+    remove_checkout_venv(repo)
     return run(create, repo, env)
 
 
@@ -163,7 +163,7 @@ def install(
     errors = violations(repo / "uv.lock")
     if errors:
         raise ValueError("Noncanonical uv.lock; restore the committed PyPI lock before installing")
-    configured = _configured_env(os.environ, mirror_env)
+    configured = configured_env(os.environ, mirror_env)
     index = python_index(repo, configured)
     env = {key: value for key, value in configured.items() if key not in _IGNORED_ENV}
     flags = (["--no-dev"] if no_dev else []) + (["--verbose"] if verbose else [])

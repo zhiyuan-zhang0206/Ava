@@ -52,9 +52,9 @@ def test_balance_at_the_minimum_passes(
     def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
         return _balance_payload("500.00")
 
-    monkeypatch.setattr(_provider_guard, "_fetch_balance", _fetch)
+    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
 
-    assert _provider_guard._balance_failure() is None
+    assert _provider_guard.balance_failure() is None
     assert capsys.readouterr().err == ""
 
 
@@ -69,10 +69,10 @@ def test_balance_below_minimum_reports_a_stable_message(
     def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
         return _balance_payload(next(totals))
 
-    monkeypatch.setattr(_provider_guard, "_fetch_balance", _fetch)
+    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
 
-    first = _provider_guard._balance_failure()
-    second = _provider_guard._balance_failure()
+    first = _provider_guard.balance_failure()
+    second = _provider_guard.balance_failure()
 
     assert first is not None
     assert first == second
@@ -90,9 +90,9 @@ def test_balance_unavailable_account_fails_even_when_funded(
     def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
         return _balance_payload("9999.00", available=False)
 
-    monkeypatch.setattr(_provider_guard, "_fetch_balance", _fetch)
+    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
 
-    failure = _provider_guard._balance_failure()
+    failure = _provider_guard.balance_failure()
 
     assert failure is not None
     assert "is_available=false" in failure
@@ -109,9 +109,9 @@ def test_balance_without_a_key_skips_without_fetching(
         fetches.append(True)
         return _balance_payload("0.00")
 
-    monkeypatch.setattr(_provider_guard, "_fetch_balance", _fetch)
+    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
 
-    assert _provider_guard._balance_failure() is None
+    assert _provider_guard.balance_failure() is None
     assert fetches == []
     assert "DEEPSEEK_API_KEY not configured" in capsys.readouterr().err
 
@@ -125,9 +125,9 @@ def test_balance_read_error_is_fail_open(
     def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
         raise _provider_guard.BalanceReadError("HTTP 502")
 
-    monkeypatch.setattr(_provider_guard, "_fetch_balance", _fetch)
+    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
 
-    assert _provider_guard._balance_failure() is None
+    assert _provider_guard.balance_failure() is None
     assert "HTTP 502" in capsys.readouterr().err
 
 
@@ -140,9 +140,9 @@ def test_balance_without_a_cny_entry_skips(
     def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
         return _balance_payload("100.00", currency="USD")
 
-    monkeypatch.setattr(_provider_guard, "_fetch_balance", _fetch)
+    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
 
-    assert _provider_guard._balance_failure() is None
+    assert _provider_guard.balance_failure() is None
     assert "no CNY balance entry" in capsys.readouterr().err
 
 
@@ -152,9 +152,9 @@ def test_balance_disabled_skips_before_the_read(monkeypatch: pytest.MonkeyPatch)
     def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
         raise AssertionError("a disabled check must not read the provider")
 
-    monkeypatch.setattr(_provider_guard, "_fetch_balance", _fetch)
+    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
 
-    assert _provider_guard._balance_failure() is None
+    assert _provider_guard.balance_failure() is None
 
 
 def test_fetch_balance_maps_http_failure_to_a_sanitized_read_error(
@@ -172,7 +172,7 @@ def test_fetch_balance_maps_http_failure_to_a_sanitized_read_error(
     monkeypatch.setattr(httpx, "get", _get)
 
     with pytest.raises(_provider_guard.BalanceReadError, match="HTTP 500"):
-        _provider_guard._fetch_balance("https://balance.test", "sk-test", 5.0)
+        _provider_guard.fetch_balance("https://balance.test", "sk-test", 5.0)
 
 
 # ─── check 10: halted agents ─────────────────────────────────────────────────
@@ -189,10 +189,10 @@ def test_blocked_agents_at_threshold_reports_a_stable_message(
     def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
         return next(counts)
 
-    monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
+    monkeypatch.setattr(_provider_guard, "halted_agents_count", _count)
 
-    first = _provider_guard._blocked_agents_failure(database_factory=operator_database)
-    second = _provider_guard._blocked_agents_failure(database_factory=operator_database)
+    first = _provider_guard.blocked_agents_failure(database_factory=operator_database)
+    second = _provider_guard.blocked_agents_failure(database_factory=operator_database)
 
     assert first is not None
     assert first == second
@@ -211,9 +211,9 @@ def test_blocked_agents_below_threshold_is_silent(
     def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
         return 2
 
-    monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
+    monkeypatch.setattr(_provider_guard, "halted_agents_count", _count)
 
-    assert _provider_guard._blocked_agents_failure(database_factory=operator_database) is None
+    assert _provider_guard.blocked_agents_failure(database_factory=operator_database) is None
     assert capsys.readouterr().err == ""
 
 
@@ -226,9 +226,9 @@ def test_blocked_agents_unreadable_table_is_fail_open(
     def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
         return None
 
-    monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
+    monkeypatch.setattr(_provider_guard, "halted_agents_count", _count)
 
-    assert _provider_guard._blocked_agents_failure(database_factory=operator_database) is None
+    assert _provider_guard.blocked_agents_failure(database_factory=operator_database) is None
     assert "agent table unreachable" in capsys.readouterr().err
 
 
@@ -240,9 +240,9 @@ def test_blocked_agents_disabled_skips_before_the_query(
     def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
         raise AssertionError("a disabled check must not query")
 
-    monkeypatch.setattr(_provider_guard, "_halted_agents_count", _count)
+    monkeypatch.setattr(_provider_guard, "halted_agents_count", _count)
 
-    assert _provider_guard._blocked_agents_failure(database_factory=operator_database) is None
+    assert _provider_guard.blocked_agents_failure(database_factory=operator_database) is None
 
 
 def test_halted_agents_count_reads_the_recovery_breaker_halt(
@@ -279,7 +279,7 @@ def test_halted_agents_count_reads_the_recovery_breaker_halt(
 
     patch_database(monkeypatch, connect=_Connection)
 
-    assert _provider_guard._halted_agents_count(24, database_factory=operator_database) == 4
+    assert _provider_guard.halted_agents_count(24, database_factory=operator_database) == 4
     query, params = queries[0]
     assert "permanent_reject_streak >= %s" in query
     assert "last_turn_fatal_at > now() - make_interval" in query
@@ -295,7 +295,7 @@ def test_halted_agents_count_db_error_is_fail_open(
 
     patch_database(monkeypatch, connect=_down)
 
-    assert _provider_guard._halted_agents_count(24, database_factory=operator_database) is None
+    assert _provider_guard.halted_agents_count(24, database_factory=operator_database) is None
 
 
 # ─── the combined entry point ────────────────────────────────────────────────
@@ -313,8 +313,8 @@ def test_provider_guard_failure_reports_balance_before_blocked(
     def _blocked(*, database_factory: DatabaseFactory) -> str:
         return "blocked detail"
 
-    monkeypatch.setattr(_provider_guard, "_balance_failure", _balance)
-    monkeypatch.setattr(_provider_guard, "_blocked_agents_failure", _blocked)
+    monkeypatch.setattr(_provider_guard, "balance_failure", _balance)
+    monkeypatch.setattr(_provider_guard, "blocked_agents_failure", _blocked)
 
     assert _provider_guard.provider_guard_failure(database_factory=operator_database) == (
         "provider_balance",
@@ -324,7 +324,7 @@ def test_provider_guard_failure_reports_balance_before_blocked(
     def _fine() -> None:
         return None
 
-    monkeypatch.setattr(_provider_guard, "_balance_failure", _fine)
+    monkeypatch.setattr(_provider_guard, "balance_failure", _fine)
     assert _provider_guard.provider_guard_failure(database_factory=operator_database) == (
         "provider_blocked_agents",
         "FAIL: provider blocked agents \u2014 blocked detail",

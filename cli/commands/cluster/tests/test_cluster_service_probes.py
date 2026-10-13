@@ -74,7 +74,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _probe)
 
-    assert cluster_health._service_probes(machine=command_runtime.machine) == [
+    assert cluster_health.service_probes(machine=command_runtime.machine) == [
         "frontend",
         "browser-mcp",
     ]
@@ -118,7 +118,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health._service_probes(machine=command_runtime.machine) == []
+    assert cluster_health.service_probes(machine=command_runtime.machine) == []
     assert "otel-collector" not in recorded_sessions
 
 
@@ -160,7 +160,7 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health._service_probes(machine=command_runtime.machine) == []
+    assert cluster_health.service_probes(machine=command_runtime.machine) == []
     assert "otel-collector" in recorded_sessions
 
 
@@ -202,7 +202,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
 
     monkeypatch.setattr(_probe_commands, "probe_service", _record_probe)
 
-    assert cluster_health._service_probes(machine=command_runtime.machine) == []
+    assert cluster_health.service_probes(machine=command_runtime.machine) == []
     assert "otel-collector" in recorded_sessions
 
 
@@ -243,7 +243,7 @@ def test_service_probes_carry_the_failing_fact(
         ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert cluster_health._service_probes(machine=command_runtime.machine) == [
+    assert cluster_health.service_probes(machine=command_runtime.machine) == [
         "ops (home='/home/ava/.ava' != '/u/.ava')"
     ]
 
@@ -260,7 +260,7 @@ def test_service_probes_unknown_roster_is_unhealthy(
     import cli.commands._repo as _repo_commands
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
-    assert cluster_health._service_probes(machine=command_runtime.machine) == [
+    assert cluster_health.service_probes(machine=command_runtime.machine) == [
         "service roster unavailable"
     ]
 
@@ -303,7 +303,7 @@ def test_service_probes_respect_durable_service_intent(
         "read_selection",
         lambda: service_selection.ServiceSelection(mode, frozenset(names)),
     )
-    assert cluster_health._service_probes(machine=command_runtime.machine) == []
+    assert cluster_health.service_probes(machine=command_runtime.machine) == []
 
 
 def test_service_probes_unreadable_selection_is_unhealthy(
@@ -320,6 +320,6 @@ def test_service_probes_unreadable_selection_is_unhealthy(
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", read_roles)
     monkeypatch.setattr(lifecycle_service_selection, "read_selection", unreadable)
-    assert cluster_health._service_probes(machine=command_runtime.machine) == [
+    assert cluster_health.service_probes(machine=command_runtime.machine) == [
         "service selection unavailable (corrupt selection)"
     ]

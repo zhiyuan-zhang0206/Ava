@@ -28,7 +28,7 @@ _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
 _ROSTER_READ_MARGIN_S = 4.0
 
 
-def _roster_read_timeout_s() -> float:
+def roster_read_timeout_s() -> float:
     """Client read budget for the fresh roster: the gateway's per-machine probe
     budget + `_ROSTER_READ_MARGIN_S`.
 
@@ -180,7 +180,7 @@ def cmd_cluster_status() -> int:
     The read budget is derived, not fixed (#4900): a black-holed machine makes
     the gateway's fresh read ride that machine's probe up to its
     `status_probe_timeout_seconds` bound, so the client budget is that setting
-    plus a margin (`_roster_read_timeout_s`). A fixed budget set to the probe
+    plus a margin (`roster_read_timeout_s`). A fixed budget set to the probe
     budget alone collides with it exactly when a machine is down (the #219
     incident shape).
     """
@@ -200,7 +200,7 @@ def cmd_cluster_status() -> int:
         # that cannot resolve the gateway URL must still say why.
         print(f"✗ cannot resolve gateway URL: {exc}", file=sys.stderr)
         return 1
-    read_timeout_s = _roster_read_timeout_s()
+    read_timeout_s = roster_read_timeout_s()
     try:
         resp = dial_get(url, timeout=read_timeout_s, headers=gateway_auth_headers())
     except httpx.TimeoutException as exc:
@@ -258,7 +258,7 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
         "-" * (name_w + 71),
     ]
     for m in roster:
-        status = _status_cell(m.online, m.identity_mismatch, m.stopped_at)
+        status = status_cell(m.online, m.identity_mismatch, m.stopped_at)
         # staging hosts stay roster-visible but are not rollout targets —
         # mark the name so the roster states the exclusion.
         display_name = f"{m.name} (staging)" if m.is_staging else m.name
@@ -267,7 +267,7 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
         role = format_capabilities(
             m.serve_gateway, m.serve_agent_runner, m.serve_observability_station
         )
-        code_str = _code_cell(m.running_sha, m.head_sha)
+        code_str = code_cell(m.running_sha, m.head_sha)
         lines.append(
             f"{display_name.ljust(name_w)}  {role:<{_ROLE_COL_W}} {paused_str:<7} {status:<10} "
             f"{code_str:<10} {up_since}"
@@ -286,7 +286,7 @@ def _schema_mismatch_banner(roster: list[MachineStatus]) -> list[str]:
     return lines
 
 
-def _status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | None) -> str:  # noqa: FBT001 — online / identity_mismatch are probe verdicts, passed positionally by the renderer
+def status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | None) -> str:  # noqa: FBT001 — online / identity_mismatch are probe verdicts, passed positionally by the renderer
     """The roster `status` column. `MISMATCH` is a loud third state that outranks
     online/offline: the probe reached an ops server that answered under the WRONG
     machine_name, so this row's gateway_url points at the wrong host — never a
@@ -308,7 +308,7 @@ def _status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | N
     return "stopped" if stopped_at else "offline"
 
 
-def _code_cell(running_sha: str | None, head_sha: str | None) -> str:
+def code_cell(running_sha: str | None, head_sha: str | None) -> str:
     """One cell for the roster `code` column: the commit the live process is
     actually running (`running_sha`), short. `⚠` when it differs from the node's
     checkout HEAD (`head_sha`) — the checkout advanced but the process was not

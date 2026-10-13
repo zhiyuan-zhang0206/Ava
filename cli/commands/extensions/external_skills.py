@@ -55,7 +55,7 @@ def _prepared_stage_path(ledger_path: Path, generation_id: str) -> Path:
     return ledger_path.parent / f".{ledger_path.stem}-stage-{generation_id}"
 
 
-def _verify_marker(
+def verify_marker(
     root: Path, installation_id: str, generation_id: str, *, skill_name: str = SKILL_NAME
 ) -> None:
     if not stat.S_ISDIR(lstat(root).st_mode):
@@ -102,7 +102,7 @@ def _cleanup_garbage(
     )
 
 
-def _stage_copy(
+def stage_copy(
     snapshot: SourceSnapshot,
     source_manifest: list[dict[str, Any]],
     skills_root: Path,
@@ -195,7 +195,7 @@ def _restore_claimed_previous(
     if not exists(previous):
         if not exists(target):
             raise ClientConflictError("claimed target and prior copy are both missing")
-        _verify_marker(
+        verify_marker(
             target, ledger["installation_id"], old["generation_id"], skill_name=target.name
         )
         _require_digest(target, old["digest"], "restored managed target was modified")
@@ -205,7 +205,7 @@ def _restore_claimed_previous(
     write_ledger(ledger_path, ledger)
 
 
-def _commit_activation(
+def commit_activation(
     ledger_path: Path,
     ledger: dict[str, Any],
     transaction: dict[str, Any],
@@ -241,7 +241,7 @@ def _activate(
     previous = transaction_path(skills_root, "previous", generation_id, skill_name=target.name)
     if transaction["stage_state"] != "published" or not exists(stage):
         raise ClientConflictError("incomplete Ava transaction was preserved")
-    _verify_marker(stage, ledger["installation_id"], generation_id, skill_name=target.name)
+    verify_marker(stage, ledger["installation_id"], generation_id, skill_name=target.name)
     if tree_manifest(stage) != transaction["expected_manifest"]:
         raise ClientConflictError("staged Ava transaction was modified")
     old = ledger["installed"]
@@ -257,7 +257,7 @@ def _activate(
             rename_no_replace(target, previous)
             transaction["claim_state"] = "claimed"
             write_ledger(ledger_path, ledger)
-            _verify_marker(
+            verify_marker(
                 previous, ledger["installation_id"], old["generation_id"], skill_name=target.name
             )
             _require_digest(
@@ -273,10 +273,10 @@ def _activate(
     except OSError:
         _restore_claimed_previous(ledger_path, ledger, transaction, previous, target)
         raise
-    _verify_marker(target, ledger["installation_id"], generation_id, skill_name=target.name)
+    verify_marker(target, ledger["installation_id"], generation_id, skill_name=target.name)
     if tree_digest(target) != transaction["expected_digest"]:
         raise ClientConflictError("activated Ava target failed verification")
-    _commit_activation(ledger_path, ledger, transaction, previous)
+    commit_activation(ledger_path, ledger, transaction, previous)
     return action
 
 
@@ -348,7 +348,7 @@ def _managed_target_current(ledger: dict[str, Any], target: Path, source_digest:
         return False
     if not exists(target):
         raise ClientConflictError("managed target is missing")
-    _verify_marker(
+    verify_marker(
         target, ledger["installation_id"], installed["generation_id"], skill_name=target.name
     )
     if tree_digest(target) != installed["digest"]:
@@ -384,7 +384,7 @@ def _converge_locked(
     if _managed_target_current(ledger, target, source_digest):
         return
     try:
-        _stage_copy(
+        stage_copy(
             snapshot,
             source_manifest,
             skills_root,

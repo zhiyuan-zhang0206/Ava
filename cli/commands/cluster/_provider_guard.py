@@ -75,16 +75,16 @@ def provider_guard_failure(*, database_factory: DatabaseFactory) -> tuple[str, s
     Balance first (the root cause), blocked agents second; a run reports one
     failure at a time, like the probe's earlier checks.
     """
-    balance = _balance_failure()
+    balance = balance_failure()
     if balance is not None:
         return "provider_balance", f"FAIL: provider balance — {balance}"
-    blocked = _blocked_agents_failure(database_factory=database_factory)
+    blocked = blocked_agents_failure(database_factory=database_factory)
     if blocked is not None:
         return "provider_blocked_agents", f"FAIL: provider blocked agents — {blocked}"
     return None
 
 
-def _balance_failure() -> str | None:
+def balance_failure() -> str | None:
     """Check 9: None when disabled, unconfigured, unreadable, or funded enough."""
     guard = settings.alerts
     if not guard.provider_guard_balance_enabled:
@@ -97,7 +97,7 @@ def _balance_failure() -> str | None:
         )
         return None
     try:
-        payload = _fetch_balance(
+        payload = fetch_balance(
             guard.provider_guard_balance_url,
             key.get_secret_value(),
             guard.provider_guard_balance_timeout_seconds,
@@ -133,7 +133,7 @@ def _balance_failure() -> str | None:
     )
 
 
-def _fetch_balance(url: str, key: str, timeout: float) -> dict[str, Any]:
+def fetch_balance(url: str, key: str, timeout: float) -> dict[str, Any]:
     """One authenticated read of the provider balance endpoint."""
     import httpx
 
@@ -178,12 +178,12 @@ def _cny_balance(payload: dict[str, Any]) -> float | None:
     return None
 
 
-def _blocked_agents_failure(*, database_factory: DatabaseFactory) -> str | None:
+def blocked_agents_failure(*, database_factory: DatabaseFactory) -> str | None:
     """Check 10: None when disabled, database-unreadable, or under threshold."""
     guard = settings.alerts
     if not guard.provider_guard_blocked_agents_enabled:
         return None
-    count = _halted_agents_count(
+    count = halted_agents_count(
         guard.provider_guard_blocked_agents_window_hours, database_factory=database_factory
     )
     if count is None:
@@ -208,7 +208,7 @@ def _blocked_agents_failure(*, database_factory: DatabaseFactory) -> str | None:
     )
 
 
-def _halted_agents_count(window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
+def halted_agents_count(window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
     """Count agents halted by permanent provider rejections inside the window.
 
     `permanent_reject_streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS` is

@@ -28,7 +28,7 @@ from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import _pooler_stop, maintenance_stop
 from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.data_plane._pooler_stop import OwnedPooler, _native_birth
+from cli.commands.data_plane._pooler_stop import OwnedPooler, native_birth
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
@@ -311,7 +311,7 @@ def test_expired_stop_budget_never_admits_a_signal(
     intent = tmp_path / "stop-intent.json"
     assert intent.exists() is after_intent_write
     if after_intent_write:
-        assert json.loads(intent.read_text()) == _native_birth(identity)
+        assert json.loads(intent.read_text()) == native_birth(identity)
 
 
 def test_native_birth_change_refuses_signal(tmp_path: Path) -> None:
@@ -329,7 +329,7 @@ def test_native_birth_change_refuses_signal(tmp_path: Path) -> None:
 def test_linux_stop_intent_uses_native_tick_after_clock_correction(tmp_path: Path) -> None:
     first_reader = OwnedProcess(1234, 1000.0, 9876)
     next_reader = OwnedProcess(1234, 1001.0, 9876)
-    (tmp_path / "stop-intent.json").write_text(json.dumps(_native_birth(first_reader)))
+    (tmp_path / "stop-intent.json").write_text(json.dumps(native_birth(first_reader)))
     assert OwnedPooler(next_reader, 16433, tmp_path / "pgbouncer.ini")._stop_requested()
     replacement = OwnedProcess(1234, 1001.0, 9877)
     assert not OwnedPooler(replacement, 16433, tmp_path / "pgbouncer.ini")._stop_requested()

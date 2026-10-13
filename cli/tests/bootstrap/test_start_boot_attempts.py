@@ -109,7 +109,7 @@ def test_run_start_hands_the_boot_flag_to_the_start_and_wraps_it(
         seen["home"] = home
         return start()
 
-    monkeypatch.setattr(start_intent, "_start_once", once)
+    monkeypatch.setattr(start_intent, "start_once", once)
     monkeypatch.setattr(start_intent, "_run_boot_attempt", wrapped)
     monkeypatch.setattr(start_intent, "_home", lambda: tmp_path)
 

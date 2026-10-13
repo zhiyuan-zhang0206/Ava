@@ -43,13 +43,13 @@ def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_configured_without_application_evidence_is_proven_unstarted(partial_home: Path) -> None:
-    assert stop._require_unstarted_initialization() is True
+    assert stop.require_unstarted_initialization() is True
 
 
 @pytest.mark.parametrize("phase", ["provisioned", "ready"])
 def test_progressed_start_must_use_ordinary_drain(partial_home: Path, phase: str) -> None:
     mark_phase(partial_home, phase)
-    assert stop._require_unstarted_initialization() is False
+    assert stop.require_unstarted_initialization() is False
 
 
 @pytest.mark.parametrize("evidence", ["serving", "manifest", "locked-root"])
@@ -69,7 +69,7 @@ def test_any_application_evidence_refuses_partial_shortcut(
         fd = acquire_instance_lock(paths.root_run_dir())
     try:
         with pytest.raises(RuntimeError):
-            stop._require_unstarted_initialization()
+            stop.require_unstarted_initialization()
     finally:
         if fd is not None:
             release_instance_lock(fd)
@@ -130,11 +130,11 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
 
     monkeypatch.setattr(proc, "hosting_exec_domain", lambda: None)
     monkeypatch.setattr(sessions_hosting, "hosting_supervised_session", lambda: None)
-    monkeypatch.setattr(stop, "_stop_plan", _fake_stop_plan)
+    monkeypatch.setattr(stop, "stop_plan", _fake_stop_plan)
     monkeypatch.setattr(stop, "pause_agents", _fake_pause_agents)
-    monkeypatch.setattr(stop, "_services_phase_action", _fake_services_phase_action)
-    monkeypatch.setattr(stop, "_stop_browser", _fake_stop_browser)
-    monkeypatch.setattr(stop, "_stop_extras", _fake_stop_extras)
+    monkeypatch.setattr(stop, "services_phase_action", _fake_services_phase_action)
+    monkeypatch.setattr(stop, "stop_browser", _fake_stop_browser)
+    monkeypatch.setattr(stop, "stop_extras", _fake_stop_extras)
     monkeypatch.setattr(stop, "stop_data_plane", _fake_stop_data_plane)
     assert (
         stop.stop(

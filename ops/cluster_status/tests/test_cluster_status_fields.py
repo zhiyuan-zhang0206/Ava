@@ -7,7 +7,7 @@ import pytest
 
 import base.sessions.backend as sessions_backend
 from ops import cluster_status
-from ops.cluster_status import _count_agent_shells, agent_shell_sessions, check_pidfile
+from ops.cluster_status import agent_shell_sessions, check_pidfile, count_agent_shells
 from ops.rpc_schemas import SessionInfo
 
 
@@ -17,7 +17,7 @@ def _rows(*names: str) -> list[SessionInfo]:
 
 
 def test_collect_sessions_enumerates_both_backends(monkeypatch):
-    """`_collect_sessions` merges the service backend and the shell backend,
+    """`collect_sessions` merges the service backend and the shell backend,
     scoped to the cluster prefix, with timestamps where the backend records
     them."""
 
@@ -42,7 +42,7 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):
     monkeypatch.setattr(sessions_backend, "get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
 
-    sessions, shell_count, total = cluster_status._collect_sessions()
+    sessions, shell_count, total = cluster_status.collect_sessions()
     names = {s.name for s in sessions}
     assert names == {
         "ava-main-restarter",
@@ -77,7 +77,7 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
         },
     )
     monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
-    sessions, _, _ = cluster_status._collect_sessions()
+    sessions, _, _ = cluster_status.collect_sessions()
     assert sessions[0].created_at is not None
     assert sessions[0].uptime_seconds > 0
 
@@ -89,18 +89,18 @@ def test_count_agent_shells():
         "ava-main-agent-12-shell-3",
         "ava-main-restarter",  # not an agent shell
     )
-    assert _count_agent_shells(sessions) == 3
+    assert count_agent_shells(sessions) == 3
 
 
 def test_count_agent_shells_empty():
-    assert _count_agent_shells([]) == 0
+    assert count_agent_shells([]) == 0
 
 
 def _stub_sessions(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
-    # agent_shell_sessions reads `_collect_sessions()` (sessions, *counts);
+    # agent_shell_sessions reads `collect_sessions()` (sessions, *counts);
     # stub it to the named rows so the test exercises only the filter.
     sessions = _rows(*names)
-    monkeypatch.setattr(cluster_status, "_collect_sessions", lambda: (sessions, 0, 0))
+    monkeypatch.setattr(cluster_status, "collect_sessions", lambda: (sessions, 0, 0))
 
 
 def test_agent_shell_sessions_parses_and_filters(monkeypatch: pytest.MonkeyPatch):

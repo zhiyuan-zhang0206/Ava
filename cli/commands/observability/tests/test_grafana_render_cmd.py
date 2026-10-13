@@ -26,7 +26,7 @@ def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     def _provisioning_dashboard(_home: Path) -> Path:
         return target
 
-    monkeypatch.setattr(grafana_render, "_provisioning_dashboard", _provisioning_dashboard)
+    monkeypatch.setattr(grafana_render, "provisioning_dashboard", _provisioning_dashboard)
     return target
 
 
@@ -95,7 +95,7 @@ def test_render_cmd_refuses_a_host_without_the_lgtm_tree(
     def _provisioning_dashboard(_home: Path) -> Path:
         return target
 
-    monkeypatch.setattr(grafana_render, "_provisioning_dashboard", _provisioning_dashboard)
+    monkeypatch.setattr(grafana_render, "provisioning_dashboard", _provisioning_dashboard)
     assert (
         grafana_render.cmd_grafana_render(
             force=False, repo_only=True, database_factory=operator_database

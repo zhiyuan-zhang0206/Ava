@@ -57,14 +57,14 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 def test_roster_flags_a_live_host_that_carries_a_stop_marker() -> None:
     """`online` here is what hid the exclusion: the roster's own source of truth
     (a live probe) contradicted the fan-out's (the marker) with nothing to see."""
-    from cli.commands.cluster.control import _status_cell
+    from cli.commands.cluster.control import status_cell
 
     stopped = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
-    assert _status_cell(online=True, identity_mismatch=False, stopped_at=stopped) == "STALE-STOP"
+    assert status_cell(online=True, identity_mismatch=False, stopped_at=stopped) == "STALE-STOP"
     # the other three verdicts are unchanged
-    assert _status_cell(online=True, identity_mismatch=False, stopped_at=None) == "online"
-    assert _status_cell(online=False, identity_mismatch=False, stopped_at=stopped) == "stopped"
-    assert _status_cell(online=True, identity_mismatch=True, stopped_at=stopped) == "MISMATCH"
+    assert status_cell(online=True, identity_mismatch=False, stopped_at=None) == "online"
+    assert status_cell(online=False, identity_mismatch=False, stopped_at=stopped) == "stopped"
+    assert status_cell(online=True, identity_mismatch=True, stopped_at=stopped) == "MISMATCH"
 
 
 # ─── Defect 3: declined restart vs failed restart ────────────────────────────
@@ -88,14 +88,14 @@ def test_declined_restart_reports_its_own_exit_code(
         del _db
         return 1
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
+    monkeypatch.setattr(_repo_commands, "preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_commands, "do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
 
     def release_pause(*, database_factory: DatabaseFactory, machine: MachineIdentity) -> None:
         assert database_factory is operator_database
         assert machine is command_runtime.machine
 
-    monkeypatch.setattr(_stop_commands, "_release_self_heal_pause", release_pause)
+    monkeypatch.setattr(_stop_commands, "release_self_heal_pause", release_pause)
 
     assert (
         _stop_commands.cmd_restart(
@@ -124,13 +124,13 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
         del _db
         return 0
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "preflight_probes", preflight)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
         lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_stop_commands, "do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     def start_result(
         operation: object,
@@ -143,7 +143,7 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
         assert kwargs["producer"] is operator_pipeline
         return 1
 
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", start_result)
+    monkeypatch.setattr(_start_commands, "cmd_start_body", start_result)
 
     rc = _stop_commands.cmd_restart(
         retained_children=[],
@@ -156,7 +156,7 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
 
 
 def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make `_release_self_heal_pause`'s posture read answer `paused` — the pause
+    """Make `release_self_heal_pause`'s posture read answer `paused` — the pause
     state it heals (R1 old-signal sweep, PR5: the posture row replaced the
     `cluster_paused` file)."""
     from base.deploy.state.host_deploy_state import HostDeployState
@@ -194,7 +194,7 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
         ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    _stop_commands._release_self_heal_pause(
+    _stop_commands.release_self_heal_pause(
         database_factory=operator_database, machine=command_runtime.machine
     )
     assert unpaused == [True]
@@ -230,7 +230,7 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
         ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    _stop_commands._release_self_heal_pause(
+    _stop_commands.release_self_heal_pause(
         database_factory=operator_database, machine=command_runtime.machine
     )
     assert unpaused == []
@@ -281,7 +281,7 @@ def test_failed_restart_before_any_service_stops_releases_its_own_hold(
         pause_owner.change_maintenance(holder, WHEN, before, MaintenanceHold(phase))
     assert admission.held()
 
-    _stop_commands._release_self_heal_pause(
+    _stop_commands.release_self_heal_pause(
         database_factory=lambda: database, machine=command_runtime.machine
     )
 
@@ -302,7 +302,7 @@ def test_failed_restart_leaves_a_hold_another_process_took(
     monkeypatch.setattr(host_deploy_state, "read", lambda _db, *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     pause_owner.begin_maintenance(f"local-pause:test-machine:{os.getpid() + 1}:{uuid4()}", WHEN)
 
-    _stop_commands._release_self_heal_pause(
+    _stop_commands.release_self_heal_pause(
         database_factory=lambda: database, machine=command_runtime.machine
     )
 
@@ -329,7 +329,7 @@ async def test_a_drain_failure_in_restart_leaves_the_host_wakeable(
     def passes(*_args: object, **_kwargs: object) -> int:
         return 0
 
-    monkeypatch.setattr(_repo_commands, "_preflight_probes", passes)
+    monkeypatch.setattr(_repo_commands, "preflight_probes", passes)
     monkeypatch.setattr(_start_readiness_preflight_commands, "preflight_start_readiness", passes)
 
     def failing_drain(*_args: object, **_kwargs: object) -> int:
@@ -337,13 +337,13 @@ async def test_a_drain_failure_in_restart_leaves_the_host_wakeable(
         return 1
 
     started: list[bool] = []
-    monkeypatch.setattr(_stop_commands, "_do_stop", failing_drain)
+    monkeypatch.setattr(_stop_commands, "do_stop", failing_drain)
 
     def start(*_args: object, **_kwargs: object) -> int:
         started.append(True)
         return 0
 
-    monkeypatch.setattr(_start_commands, "_cmd_start_body", start)
+    monkeypatch.setattr(_start_commands, "cmd_start_body", start)
 
     agent = maintenance_agent(db_conn, machine_name=command_runtime.machine.name())
 

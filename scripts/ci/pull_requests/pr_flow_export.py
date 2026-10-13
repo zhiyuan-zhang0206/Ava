@@ -48,7 +48,7 @@ through its list endpoints (``getQueue`` / ``flaky-tests/list-quarantined-tests`
 nothing here writes to GitHub, Trunk, or any queue.
 
 Rate-limit budget: a cold run fetches one list page per 100 closed PRs plus
-one timeline per PR (at most ``_MAX_TIMELINE_PAGES`` pages each); steady
+one timeline per PR (at most ``MAX_TIMELINE_PAGES`` pages each); steady
 state refetches only PRs whose ``updated_at`` moved since the last run
 (typically well under 100/day) plus ~24 list pages and one Trunk call per
 100 quarantined tests. Measured on 2026-09-14 (30-day window, 1361 merged
@@ -92,8 +92,8 @@ _GH_TIMEOUT_S = 60.0
 _TRUNK_REQUEST_TIMEOUT_S = 30.0
 # Bounded pagination: the list caps this run's read budget; a truncated walk
 # logs loudly rather than silently shrinking the window.
-_MAX_LIST_PAGES = 80
-_MAX_TIMELINE_PAGES = 3
+MAX_LIST_PAGES = 80
+MAX_TIMELINE_PAGES = 3
 _MAX_FLAKY_PAGES = 20
 # GitHub's per_page ceiling (100); every walk pages in batches of this size
 # (task #3696 exception inventory).
@@ -179,7 +179,7 @@ def window_days(now: datetime, days: int, tz: ZoneInfo) -> list[date]:
     return [last_complete - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
 
 
-def _run_gh(args: list[str], *, timeout: float = _GH_TIMEOUT_S) -> str:
+def run_gh(args: list[str], *, timeout: float = _GH_TIMEOUT_S) -> str:
     """Run one gh command and return stdout; raise on any failure.
 
     Direct `gh` (not the API wrapper) because the job runs where the gh
@@ -206,8 +206,8 @@ def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[s
     """
     jq = "[.[] | {number, created_at, updated_at, merged_at}] | @json"
     prs: list[dict[str, Any]] = []
-    for page in range(1, _MAX_LIST_PAGES + 1):
-        out = _run_gh(
+    for page in range(1, MAX_LIST_PAGES + 1):
+        out = run_gh(
             [
                 "api",
                 f"repos/{repo}/pulls?state=closed&sort=updated&direction=desc"
@@ -230,20 +230,20 @@ def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[s
         except ValueError:
             continue  # unparsable stamp: keep walking rather than stop early
     raise PrFlowError(
-        f"pulls walk exceeded {_MAX_LIST_PAGES} pages — run budget exhausted, window truncated"
+        f"pulls walk exceeded {MAX_LIST_PAGES} pages — run budget exhausted, window truncated"
     )
 
 
 def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, Any]]:
     """One PR's issue timeline, projected to the events the aggregates read.
 
-    Bounded at ``_MAX_TIMELINE_PAGES`` pages; a busier timeline is truncated
+    Bounded at ``MAX_TIMELINE_PAGES`` pages; a busier timeline is truncated
     (logged via stats) rather than unbounded.
     """
     jq = "[.[] | {event, created_at}] | @json"
     events: list[dict[str, Any]] = []
-    for page in range(1, _MAX_TIMELINE_PAGES + 1):
-        out = _run_gh(
+    for page in range(1, MAX_TIMELINE_PAGES + 1):
+        out = run_gh(
             [
                 "api",
                 f"repos/{repo}/issues/{number}/timeline?per_page={_PAGE_SIZE}&page={page}",
@@ -260,7 +260,7 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
             break
     else:
         print(
-            f"pr-flow: PR #{number} timeline truncated at {_MAX_TIMELINE_PAGES} pages",
+            f"pr-flow: PR #{number} timeline truncated at {MAX_TIMELINE_PAGES} pages",
             file=sys.stderr,
         )
     return events
@@ -285,7 +285,7 @@ def build_record(meta: dict[str, Any], events: list[dict[str, Any]]) -> PrRecord
     )
 
 
-def _percentile(sorted_values: list[float], quantile: float) -> float:
+def percentile(sorted_values: list[float], quantile: float) -> float:
     """Linear interpolation between closest ranks (numpy's default method).
 
     n == 1 returns the single value; the caller only passes non-empty lists.
@@ -299,7 +299,7 @@ def _percentile(sorted_values: list[float], quantile: float) -> float:
     return sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * fraction
 
 
-def _duration_seconds(record: PrRecord) -> float | None:
+def duration_seconds(record: PrRecord) -> float | None:
     """ready -> merged seconds; None when missing/unparsable/non-positive.
 
     A zero-or-negative span is a data anomaly (a ready stamp after the merge
@@ -346,11 +346,11 @@ def compute_days(
         group = by_day[day]
         entry: dict[str, Any] = {"merged_count": len(group)}
         durations = sorted(
-            value for record in group if (value := _duration_seconds(record)) is not None
+            value for record in group if (value := duration_seconds(record)) is not None
         )
         if durations:
-            entry["ready_to_merge_median_seconds"] = round(_percentile(durations, 0.5), 1)
-            entry["ready_to_merge_p90_seconds"] = round(_percentile(durations, 0.9), 1)
+            entry["ready_to_merge_median_seconds"] = round(percentile(durations, 0.5), 1)
+            entry["ready_to_merge_p90_seconds"] = round(percentile(durations, 0.9), 1)
         if flake_counts is not None:
             entry["flake_new_quarantines"] = flake_counts.get(day, 0)
         payload[day.isoformat()] = entry
@@ -372,7 +372,7 @@ def load_trunk_token() -> str | None:
 
 
 @contextlib.contextmanager
-def _trunk_client() -> Any:
+def trunk_client() -> Any:
     """The repo's Trunk API channel (`scripts/ci/pull_requests/trunk_api.py`), imported lazily."""
     from scripts.ci.pull_requests import trunk_api
 
@@ -381,7 +381,7 @@ def _trunk_client() -> Any:
 
 def fetch_queue_depth(repo: str, token: str, stats: RunStats) -> int | None:
     """The Trunk merge queue's pending depth right now; None on any failure."""
-    with _trunk_client() as trunk:
+    with trunk_client() as trunk:
         data, error = trunk.post("getQueue", trunk.target_payload(repo), token)
     stats.trunk_calls += 1
     if error is not None or data is None:
@@ -401,7 +401,7 @@ def fetch_quarantined(repo: str, token: str, stats: RunStats) -> list[dict[str, 
     silently truncating the counts.
     """
     owner, name = repo.split("/", maxsplit=1)
-    with _trunk_client() as trunk:
+    with trunk_client() as trunk:
         collected: list[dict[str, Any]] = []
         page_token: str | None = None
         for _ in range(_MAX_FLAKY_PAGES):

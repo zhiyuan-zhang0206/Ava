@@ -282,7 +282,7 @@ def _layer_home(rel: str, repo_root: Path) -> str:
     return posixpath.join(head, "docs", name)
 
 
-def _layer_error(filepath: Path, repo_root: Path) -> LintError | None:
+def layer_error(filepath: Path, repo_root: Path) -> LintError | None:
     """Rule 14: a node outside `.github/` sits in a `docs/` layer."""
     try:
         rel = filepath.resolve().relative_to(repo_root).as_posix()
@@ -302,7 +302,7 @@ def _layer_error(filepath: Path, repo_root: Path) -> LintError | None:
 
 def _placement_errors(filepath: Path, repo_root: Path, all_paths: set[str]) -> list[LintError]:
     """Rule 9 (overview position) and rule 14 (docs layer) for one node."""
-    found = (_dual_node_error(filepath, repo_root, all_paths), _layer_error(filepath, repo_root))
+    found = (_dual_node_error(filepath, repo_root, all_paths), layer_error(filepath, repo_root))
     return [error for error in found if error is not None]
 
 

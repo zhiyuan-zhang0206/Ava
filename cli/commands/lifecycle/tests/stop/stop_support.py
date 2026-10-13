@@ -290,7 +290,7 @@ def stub_closure(
         asked.append((grace_s, kill_s))
         return pending.pop(0) if len(pending) > 1 else pending[0]
 
-    monkeypatch.setattr(strict, "_close_via_service", close)
+    monkeypatch.setattr(strict, "close_via_service", close)
     return asked
 
 

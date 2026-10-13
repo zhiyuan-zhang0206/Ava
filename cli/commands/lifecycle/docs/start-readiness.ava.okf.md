@@ -11,7 +11,7 @@ tags:
 # Start readiness
 
 `ava start` first validates the persisted home (initialized by `ava init`) and service selection. The
-pre-bind gate in `cli/commands/lifecycle/start.py:_refuse_occupied_health_ports` refuses
+pre-bind gate in `cli/commands/lifecycle/start.py:refuse_occupied_health_ports` refuses
 ports held by another unit before launching application processes. It reads the
 selected core roster; optional port conflicts cannot block the core.
 

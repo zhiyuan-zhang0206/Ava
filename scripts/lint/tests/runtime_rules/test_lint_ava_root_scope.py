@@ -171,7 +171,7 @@ def test_directory_scan_skips_pycache_and_pyc(tmp_path: Path) -> None:
     _write(tmp_path, "pkg/__pycache__/cached.py", "value = 'launchd'\n")
     pyc = tmp_path / "pkg" / "cached.pyc"
     pyc.write_bytes(b"\x00pyc")
-    files = gate._iter_files([tmp_path / "pkg"])
+    files = gate.iter_files([tmp_path / "pkg"])
     assert [f.relative_to(tmp_path).as_posix() for f in files] == ["pkg/real.py"]
 
 

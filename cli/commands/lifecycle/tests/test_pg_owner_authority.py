@@ -156,7 +156,7 @@ def owned_pg(
     children: list[subprocess.Popen[bytes]] = []
     try:
         assert (
-            ci._start_pg(pg_port, retained_children=children, machine=command_runtime.machine) == 0
+            ci.start_pg(pg_port, retained_children=children, machine=command_runtime.machine) == 0
         )
         yield pg_port
     finally:

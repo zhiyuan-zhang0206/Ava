@@ -34,12 +34,12 @@ from base.telemetry.lgtm_local import BACKENDS
 from base.telemetry.lgtm_local import storage_dir as _storage_dir
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from cli.commands.converge.spec import ConvergeCtx
-from cli.commands.observability._lgtm_assets import _NATIVE_CONSTANTS, load_versions
-from cli.commands.observability._lgtm_provisioning import _render_provisioning
+from cli.commands.observability._lgtm_assets import NATIVE_CONSTANTS, load_versions
+from cli.commands.observability._lgtm_provisioning import render_provisioning
 from cli.commands.observability.lgtm import is_station_ctx
 from cli.commands.observability.observatory_urls import (
-    _alerts_webhook_url,
-    _observability_datasource_urls,
+    alerts_webhook_url,
+    observability_datasource_urls,
 )
 
 SUPPORTED_TAGS = {"darwin_arm64", "linux_amd64"}
@@ -87,7 +87,7 @@ def native_versions(repo: Path) -> dict[str, dict[str, str]]:
 
 def _binary_path(name: str, native_dir: Path) -> Path:
     """Return the installed executable path for one native backend."""
-    return native_dir / _NATIVE_CONSTANTS[name].binary_path
+    return native_dir / NATIVE_CONSTANTS[name].binary_path
 
 
 def stream_download(url: str, destination: Path) -> None:
@@ -151,7 +151,7 @@ def download_with_retry(url: str, archive: Path) -> None:
 
 def _extract_member(name: str, archive: Path, destination: Path, member: str | None = None) -> None:
     """Copy the expected release member into its final binary path."""
-    member = member or _NATIVE_CONSTANTS[name].archive_member
+    member = member or NATIVE_CONSTANTS[name].archive_member
     if member is None:
         raise RuntimeError(f"native LGTM {name} must install a release tree")
     with tempfile.TemporaryDirectory() as temporary_dir:
@@ -203,7 +203,7 @@ def download_and_verify(name: str, version: str, asset: dict[str, str], native_d
                 f"native LGTM {name} {version} SHA256 mismatch: got {actual}, "
                 f"expected {asset['sha256']} — refusing to install"
             )
-        service = _NATIVE_CONSTANTS[name]
+        service = NATIVE_CONSTANTS[name]
         if service.archive_member is None:
             _extract_tree(name, archive, native_dir / "grafana-home")
         else:
@@ -306,7 +306,7 @@ def _warn_listen_read_mismatches() -> None:
         )
 
 
-def _warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
+def warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
     """Warn when a value about to be rendered disagrees with this unit's .env.
 
     Settings give an inherited environment value precedence over the file for
@@ -361,7 +361,7 @@ def render_configs(
             file=sys.stderr,
         )
     _warn_listen_read_mismatches()
-    _warn_env_file_divergence(
+    warn_env_file_divergence(
         ava_home,
         {
             "AVA_TELEMETRY_TEMPO_QUERY_URL": tempo_query_url,
@@ -376,7 +376,7 @@ def render_configs(
             "AVA_LGTM_GRAFANA_PORT": str(settings.observability.lgtm_grafana_port),
         },
     )
-    loki_url, prometheus_url, pg_url = _observability_datasource_urls(
+    loki_url, prometheus_url, pg_url = observability_datasource_urls(
         database_factory=database_factory
     )
     substitutions = {
@@ -391,7 +391,7 @@ def render_configs(
         "PROMETHEUS_URL": prometheus_url,
         "PG_URL": pg_url,
         # run.sh sources runtime.env; URL paths must remain literal shell data.
-        "ALERTS_WEBHOOK_URL": shlex.quote(_alerts_webhook_url(machine=machine)),
+        "ALERTS_WEBHOOK_URL": shlex.quote(alerts_webhook_url(machine=machine)),
         "REPO": str(repo),
         "lgtm_grafana_listen_host": settings.observability.lgtm_grafana_listen_host,
         "LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
@@ -436,7 +436,7 @@ def render_configs(
     rendered_run_script = native_dir / "grafana" / "run.sh"
     write_if_changed(rendered_run_script, run_script)
     rendered_run_script.chmod(0o755)
-    _render_provisioning(repo, native_dir, database_factory=database_factory, producer=producer)
+    render_provisioning(repo, native_dir, database_factory=database_factory, producer=producer)
 
 
 def render_grafana_admin_password(native_dir: Path) -> None:

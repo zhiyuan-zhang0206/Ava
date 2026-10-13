@@ -35,7 +35,7 @@ def _load_lint(monkeypatch, registered, runbook_text, tmp_path):
     monkeypatch.setattr(lint, "build_services", lambda: tuple(_FakeSpec(s) for s in registered))
     runbook = tmp_path / "runbook.md"
     runbook.write_text(runbook_text, encoding="utf-8")
-    monkeypatch.setattr(lint, "_SERVICE_ROSTER", runbook)
+    monkeypatch.setattr(lint, "SERVICE_ROSTER", runbook)
     return lint
 
 
@@ -134,7 +134,7 @@ def _load_healthcheck_lint(
     monkeypatch.setattr(lint, "diagnostic_healthchecks", lambda: hand_added)
     roster = tmp_path / "check-roster.ava.okf.md"
     roster.write_text(table_text, encoding="utf-8")
-    monkeypatch.setattr(lint, "_HEALTHCHECK_ROSTER", roster)
+    monkeypatch.setattr(lint, "HEALTHCHECK_ROSTER", roster)
     return lint
 
 
@@ -214,7 +214,7 @@ def test_diagnostic_imports_include_nested_and_aliased_modules(monkeypatch, tmp_
     source.write_text(
         "def probe():\n    from services.supervision.healthchecks import redis_acl as check, protocol_probe\n    from services.supervision.healthchecks.permissions_helper import probe\n"
     )
-    monkeypatch.setattr(lint, "_DIAGNOSTIC_PROBES", source)
+    monkeypatch.setattr(lint, "DIAGNOSTIC_PROBES", source)
     assert lint.diagnostic_healthchecks() == {"redis_acl", "protocol_probe", "permissions_helper"}
 
 

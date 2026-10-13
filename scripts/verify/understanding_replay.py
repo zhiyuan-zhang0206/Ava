@@ -103,11 +103,11 @@ from base.native_process.loaded_commit import LoadedCommit  # noqa: E402
 from base.packages.plugin_providers import build_model_catalog  # noqa: E402
 from base.telemetry import process_name  # noqa: E402
 
-_DOCKERENV = Path("/.dockerenv")
+DOCKERENV = Path("/.dockerenv")
 
 
-def _require_preview() -> None:
-    if not _DOCKERENV.exists():
+def require_preview() -> None:
+    if not DOCKERENV.exists():
         sys.exit(
             "refusing: this tool runs inside the preview container only (docker exec ava-preview ...)"
         )
@@ -351,7 +351,7 @@ def main() -> None:
         help="explicit chunk threshold in tokens (overrides --ratio)",
     )
     args = parser.parse_args()
-    _require_preview()
+    require_preview()
     config = ConfigBoot()
     config.boot()
     version = CodeVersion(LoadedCommit.capture())

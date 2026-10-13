@@ -81,7 +81,7 @@ def test_render_warns_when_a_value_diverges_from_the_env_file(
     (home / ".env").write_text(
         "AVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\n", encoding="utf-8"
     )
-    lgtm_native._warn_env_file_divergence(
+    lgtm_native.warn_env_file_divergence(
         home, {"AVA_TELEMETRY_TEMPO_QUERY_URL": "http://10.55.0.9:3200"}
     )
     err = capsys.readouterr().err
@@ -98,7 +98,7 @@ def test_render_value_divergence_check_stays_quiet_when_consistent(
         "AVA_TELEMETRY_TEMPO_QUERY_URL=http://127.0.0.1:3200\nAVA_LGTM_LOKI_PORT=53100\n",
         encoding="utf-8",
     )
-    lgtm_native._warn_env_file_divergence(
+    lgtm_native.warn_env_file_divergence(
         home,
         {
             "AVA_TELEMETRY_TEMPO_QUERY_URL": "http://127.0.0.1:3200",
@@ -528,7 +528,7 @@ def test_render_provisioning_generates_the_dashboard_from_the_render_path(
     (source / "datasources/datasources.yml").write_text("datasource\n", encoding="utf-8")
     native = tmp_path / "native"
 
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
 
@@ -553,14 +553,14 @@ def test_render_provisioning_keeps_the_generated_dashboard_without_its_source(
     checkout_copy.write_text('{"checkout": true}\n', encoding="utf-8")
     native = tmp_path / "native"
 
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     assert dest.is_file()
 
     checkout_copy.unlink()
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
 
@@ -576,13 +576,13 @@ def test_render_provisioning_rewrites_the_dashboard_only_on_change(
     (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
     native = tmp_path / "native"
 
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     before = dest.stat().st_mtime_ns
 
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
 
@@ -599,13 +599,13 @@ def test_render_provisioning_replaces_a_dashboard_written_outside_converge(
     repo = tmp_path / "repo"
     (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
     native = tmp_path / "native"
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     dest.write_text('{"panels": ["rendered by hand on 10-02"]}\n', encoding="utf-8")
 
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
 
@@ -626,7 +626,7 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
     repo = tmp_path / "repo"
     (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
     native = tmp_path / "native"
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
@@ -643,7 +643,7 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
 
     monkeypatch.setattr(telemetry, "emit", record_emit)
 
-    lgtm_native._render_provisioning(
+    lgtm_native.render_provisioning(
         repo, native, database_factory=operator_database, producer=operator_pipeline
     )
 

@@ -25,8 +25,9 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 import agent.graph.exec.node as agent_graph_exec_node
-from agent.graph import claim_node, exec_node
+from agent.graph.claim.node import claim_node
 from agent.graph.exec._result import ExecDone
+from agent.graph.exec.node import exec_node
 from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import AvaContext

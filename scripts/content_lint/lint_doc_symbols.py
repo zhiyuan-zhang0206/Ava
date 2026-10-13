@@ -76,8 +76,8 @@ if __name__ == "__main__":
 import ava
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_DOCS_CONVENTIONS = _REPO_ROOT / "docs" / "conventions"
-_DEV_SKILLS = _REPO_ROOT / ".agents" / "skills"
+DOCS_CONVENTIONS = _REPO_ROOT / "docs" / "conventions"
+DEV_SKILLS = _REPO_ROOT / ".agents" / "skills"
 
 # `ava.<name>` — first segment only. `\b` anchors so `lava.x` doesn't match; the
 # name segment is a Python-identifier-shaped token.
@@ -261,7 +261,7 @@ def check() -> int:
     violations: list[str] = []
     # Read the roots through the module globals so a test can monkeypatch either
     # one at a throwaway tree.
-    for root in (_DOCS_CONVENTIONS, _DEV_SKILLS):
+    for root in (DOCS_CONVENTIONS, DEV_SKILLS):
         if root.is_dir():
             violations.extend(_dangling_refs(root, valid))
     if violations:

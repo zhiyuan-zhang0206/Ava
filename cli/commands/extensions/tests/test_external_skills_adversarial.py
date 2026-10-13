@@ -47,7 +47,7 @@ def test_source_change_after_snapshot_does_not_mix_generations(
     client = client_home(tmp_path)
     second_client = client.parent / ".claude"
     second_client.mkdir()
-    original_stage = bridge._stage_copy
+    original_stage = bridge.stage_copy
     changed = False
 
     def change_source_then_stage(*args: Any, **kwargs: Any) -> Path:
@@ -57,7 +57,7 @@ def test_source_change_after_snapshot_does_not_mix_generations(
             (source / "SKILL.md").write_text("operator v2\n")
         return original_stage(*args, **kwargs)
 
-    monkeypatch.setattr(bridge, "_stage_copy", change_source_then_stage)
+    monkeypatch.setattr(bridge, "stage_copy", change_source_then_stage)
 
     bridge.converge_external_agent_skill(
         skill_ctx(
@@ -136,7 +136,7 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    original_stage = bridge._stage_copy
+    original_stage = bridge.stage_copy
 
     def edit_after_check(
         snapshot: Any,
@@ -159,7 +159,7 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
         (target / "SKILL.md").write_text("late user edit\n")
         return staged
 
-    monkeypatch.setattr(bridge, "_stage_copy", edit_after_check)
+    monkeypatch.setattr(bridge, "stage_copy", edit_after_check)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "late user edit\n"
@@ -273,7 +273,7 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     target = target_path(client, tmp_path)
     installed_before = read_ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
-    original_verify = bridge._verify_marker
+    original_verify = bridge.verify_marker
     original_rename = bridge.rename_no_replace
     late_target = False
 
@@ -292,7 +292,7 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
             (destination / "user.txt").write_text("late user target\n")
         original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_verify_marker", reject_claimed_previous)
+    monkeypatch.setattr(bridge, "verify_marker", reject_claimed_previous)
     monkeypatch.setattr(bridge, "rename_no_replace", collide_with_restore)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
@@ -574,7 +574,7 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
     codex = client_home(tmp_path)
     claude = codex.parent / ".claude"
     claude.mkdir()
-    original_stage = bridge._stage_copy
+    original_stage = bridge.stage_copy
 
     def inaccessible(
         snapshot: Any,
@@ -598,7 +598,7 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
             skill_name=skill_name,
         )
 
-    monkeypatch.setattr(bridge, "_stage_copy", inaccessible)
+    monkeypatch.setattr(bridge, "stage_copy", inaccessible)
 
     bridge.converge_external_agent_skill(
         skill_ctx(
@@ -682,7 +682,7 @@ def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    original_commit = bridge._commit_activation
+    original_commit = bridge.commit_activation
     interrupted = False
 
     def interrupt_once(
@@ -697,13 +697,13 @@ def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
             raise OSError("simulated process interruption")
         return original_commit(ledger_path, ledger, transaction, previous)
 
-    monkeypatch.setattr(bridge, "_commit_activation", interrupt_once)
+    monkeypatch.setattr(bridge, "commit_activation", interrupt_once)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     ledger_path = context.ava_home / "configs" / "external-agent-skills" / "codex.json"
     ledger_before = ledger_path.read_text()
     capsys.readouterr()
-    monkeypatch.setattr(bridge, "_commit_activation", original_commit)
+    monkeypatch.setattr(bridge, "commit_activation", original_commit)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert "not resumed" in capsys.readouterr().err

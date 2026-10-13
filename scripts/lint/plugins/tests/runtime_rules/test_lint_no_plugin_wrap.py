@@ -20,7 +20,7 @@ def test_directory_with_unreadable_member_is_skipped(
     symlink) must be skipped like any unreadable entry — the scan must not crash
     on it, and a violating sibling file is still reported."""
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
-    plugins = tmp_path / gate._SCAN_DIR
+    plugins = tmp_path / gate.SCAN_DIR
     plugins.mkdir(parents=True)
     (plugins / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (plugins / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
@@ -38,7 +38,7 @@ def test_explicit_plugins_directory_argument_enumerates_members(
     """The plugins directory itself is in scope, so a directory argument
     enumerates its members rather than filtering them out (an empty scan, rc 0)."""
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
-    plugins = tmp_path / gate._SCAN_DIR
+    plugins = tmp_path / gate.SCAN_DIR
     plugins.mkdir(parents=True)
     (plugins / "ok.py").write_text("value = 1\n", encoding="utf-8")
     assert gate.main([str(plugins)]) == 0
@@ -62,7 +62,7 @@ def test_explicit_missing_target_is_an_error(
 def test_default_scope_is_the_builtin_plugins_tree() -> None:
     """The default scan names the directory the built-in plugins live in, so a
     bare run checks real plugin code instead of a directory that is not there."""
-    plugins = gate._REPO_ROOT / gate._SCAN_DIR
+    plugins = gate._REPO_ROOT / gate.SCAN_DIR
     assert plugins.is_dir()
     assert any(plugins.rglob("plugin.py"))
 
