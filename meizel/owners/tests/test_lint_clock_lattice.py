@@ -26,12 +26,12 @@ from meizel.owners import clock_lattice as _lint
 def scan_tmp(tmp_path: Path, monkeypatch) -> None:
     """Point the lint at a scratch tree so fixtures never touch the real repo.
 
-    `_REGISTERED_CLOCKS` is pinned to a fixed set (the lint resolves it once at
+    `REGISTERED_CLOCKS` is pinned to a fixed set (the lint resolves it once at
     import from the real tree); `_REPO_ROOT` is redirected so fixture files are
     written to the scratch tree and nothing in the real repo is read.
     """
     monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(_lint, "_REGISTERED_CLOCKS", frozenset({"NO_PROGRESS_TIMEOUT_S"}))
+    monkeypatch.setattr(_lint, "REGISTERED_CLOCKS", frozenset({"NO_PROGRESS_TIMEOUT_S"}))
 
 
 def _write(scan_tmp, rel: str, body: str) -> Path:
@@ -43,7 +43,7 @@ def _write(scan_tmp, rel: str, body: str) -> Path:
 
 def _errors(scan_tmp, rel: str, body: str) -> list[str]:
     p = _write(scan_tmp, rel, body)
-    return _lint._scan_file(p)
+    return _lint.scan_file(p)
 
 
 def test_bare_lattice_clock_outside_family_is_rejected(scan_tmp) -> None:
