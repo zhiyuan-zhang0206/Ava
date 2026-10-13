@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from gateway.app import app
-from gateway.tests.extensions.test_mcp_endpoint import initialize, tool_call, tool_result
+from gateway.tests.mcp_calls import initialize, tool_call, tool_result
 from tests.fixtures.gateway_config import create_mcp_client, gateway_test_client
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 
