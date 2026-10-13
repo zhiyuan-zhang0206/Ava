@@ -9,6 +9,7 @@ recorder sits outermost over plugin wraps, and wrap layers stack in plugin order
 
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 from collections.abc import Callable, Iterator
@@ -137,6 +138,15 @@ def _passthrough(inner: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     return inner(*args, **kwargs)
 
 
+_CORE_DIR = Path(inspect.getfile(ava)).resolve().parent
+
+
+def _is_core_module(name: str) -> bool:
+    """Whether a loaded module is backed by a file of the core `ava` package."""
+    file = getattr(sys.modules.get(name), "__file__", None)
+    return file is not None and Path(file).resolve().is_relative_to(_CORE_DIR)
+
+
 def _surface_snapshot() -> dict[str, Any]:
     """Everything an install may write that a test can observe from outside."""
     return {
@@ -148,6 +158,21 @@ def _surface_snapshot() -> dict[str, Any]:
         "roots": skill_sources.roots(),
         "modules": {k for k in sys.modules if k.startswith("ava.")},
     }
+
+
+def _assert_surface_unchanged(before: dict[str, Any]) -> None:
+    """The surface is what it was before the install.
+
+    A core module that was imported for the first time since `before` (the first skill-root scan
+    imports `ava.skills.skill_index`, whichever test reaches it first on a worker) is a lazy import,
+    not an install leftover. Namespaces a plugin registers have no file in the core package, and a
+    core module that disappeared is still a difference.
+    """
+    after = _surface_snapshot()
+    after["modules"] = {
+        name for name in after["modules"] if name in before["modules"] or not _is_core_module(name)
+    }
+    assert after == before
 
 
 # ── one plugin, every piece, fully removed ─────────────────────────────────────
@@ -209,14 +234,14 @@ def test_a_one_plugin_install_is_fully_removed_by_uninstall(
     assert install.expansions() == ()
     assert not hasattr(ava, "install_ns")
     assert not hasattr(ava.self, "install_probe")
-    assert _surface_snapshot() == before
+    _assert_surface_unchanged(before)
 
 
 def test_uninstall_without_an_installation_is_a_no_op() -> None:
     before = _surface_snapshot()
     install.uninstall()
     assert installed() is None
-    assert _surface_snapshot() == before
+    _assert_surface_unchanged(before)
 
 
 def test_installing_twice_raises_until_uninstall() -> None:
@@ -320,7 +345,7 @@ def test_a_plugin_whose_later_piece_fails_is_rolled_back_whole(
     assert ava.good_ns.ping() == "g(pong)"  # type: ignore[attr-defined]
 
     install.uninstall()
-    assert _surface_snapshot() == before
+    _assert_surface_unchanged(before)
 
 
 def test_a_namespace_disabled_by_the_sdk_disable_sentinel_refuses_the_plugin(
@@ -541,7 +566,7 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
     assert caught.value is error
     assert installed() is None
     assert load_failures == []
-    assert _surface_snapshot() == before
+    _assert_surface_unchanged(before)
     assert not hasattr(ava, "failed_ns") and not hasattr(ava, "prior_ns")
     assert not hasattr(ava, "later_ns")
 
@@ -614,4 +639,4 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
         assert "member cleanup failed" in notes
     assert load_failures == []
     assert installed() is None
-    assert _surface_snapshot() == before
+    _assert_surface_unchanged(before)
