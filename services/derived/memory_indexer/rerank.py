@@ -8,10 +8,15 @@ whether that note is worth the agent reading (`recall`, `search`), or whether it
 essentially the same knowledge as a note the agent just wrote (`dedup`). Results are ordered by
 the probability of "yes". No text is generated anywhere on this path.
 
+A search ranks at most `limit` candidates (the purpose's configured candidate count), however many
+results the caller asked for: the cost of one search is fixed by configuration, not by its
+arguments. Excluded notes are dropped before they are read or ranked, and do not take a slot.
+
 One request per candidate, each with its own state (the query plus that one note) and a single
 yes/no question, is the shape the score threshold of passive recall was calibrated on; the
 wording below is part of that calibration, so changing the model, a question or a state template
-means re-running the benchmark. Requests run concurrently up to `_MAX_CONCURRENT_DECISIONS`.
+means re-running the benchmark. Requests run concurrently up to `_MAX_CONCURRENT_DECISIONS`;
+cancelling the search cancels the requests still running.
 
 A failed decision call raises `IndexerUnavailable` with the cause: there is no fallback to vector
 order, because a silent downgrade would hide a broken ranking behind plausible-looking results.
@@ -20,7 +25,7 @@ order, because a silent downgrade would hide a broken ranking behind plausible-l
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -160,20 +165,36 @@ async def ask_relevance(
 # ── candidates ──
 
 
-def _load_candidates(hits: Sequence[ChunkHit], memory_root: Path) -> list[_Candidate]:
-    """Restore each hit's chunk text from its note file.
+def _pool_relative(path: str, root: Path) -> tuple[Path, str]:
+    """The resolved file of an index path and its path relative to the pool root.
 
-    A hit whose file is gone, unreadable, or no longer produces that chunk is skipped: the
-    index lags the pool by seconds to minutes, and a row the file no longer has cannot be judged.
+    An index path outside the pool keeps the path as stored.
+    """
+    file = Path(path).resolve()
+    try:
+        return file, str(file.relative_to(root))
+    except ValueError:
+        return file, path
+
+
+def _load_candidates(
+    hits: Sequence[ChunkHit], memory_root: Path, exclude: Collection[str], limit: int
+) -> list[_Candidate]:
+    """Restore the chunk text of the first `limit` hits that are not excluded.
+
+    An excluded hit is passed over before its file is read. A hit whose file is gone,
+    unreadable, or no longer produces that chunk is skipped too: the index lags the pool by
+    seconds to minutes, and a row the file no longer has cannot be judged. Neither takes one of
+    the `limit` slots, so the next-closest hit fills it.
     """
     root = memory_root.resolve()
     candidates: list[_Candidate] = []
     for hit in hits:
-        file = Path(hit.path).resolve()
-        try:
-            rel = str(file.relative_to(root))
-        except ValueError:
-            rel = hit.path
+        if len(candidates) == limit:
+            break
+        file, rel = _pool_relative(hit.path, root)
+        if rel in exclude:
+            continue
         try:
             content = file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -235,14 +256,19 @@ async def rerank(
     model: str,
     catalog: ModelCatalog,
     k: int,
+    limit: int,
+    exclude: Collection[str],
     memory_root: Path,
 ) -> list[RankedChunk]:
-    """The `k` candidates most worth reading for `query`, best first.
+    """Up to `k` of the `limit` candidates most worth reading for `query`, best first.
 
-    `hits` come from vector search (one best chunk per file). Raises `IndexerUnavailable` when
-    the decision model cannot answer; an empty `hits`, or hits whose files are all gone, give [].
+    `hits` come from vector search (one best chunk per file), closest first; the first `limit`
+    of them that are not in `exclude` (pool-relative paths) are ranked, one decision request
+    each, so `k` above `limit` returns `limit` results. Raises `IndexerUnavailable` when the
+    decision model cannot answer; an empty `hits`, or hits whose files are all gone or excluded,
+    give [].
     """
-    candidates = await asyncio.to_thread(_load_candidates, hits, memory_root)
+    candidates = await asyncio.to_thread(_load_candidates, hits, memory_root, exclude, limit)
     if not candidates:
         return []
     states = [_pair_state(query, candidate, purpose) for candidate in candidates]

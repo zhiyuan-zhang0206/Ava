@@ -59,7 +59,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)
 - **tasks** (`/api/tasks` GET + `/api/tasks/{id}` PATCH) — [[task-patch-receipts.ava.okf.md|task registry read + keyed partial update]] (no create; an owner reassignment notifies the new and, when live, previous owner); GET defaults to a full compatibility row or serves a metadata-only SQL projection with `fields=summary`; rows carry `priority` (`P0`..`P3`, validated, illegal 422)
-- **memory** (`/api/memory/search`, `/refresh`, `/graph`) — Memory pool search/refresh/graph
+- **memory** (`/api/memory/search`, `/refresh`, `/graph`) — Memory pool search/refresh/graph; a search stops when its client disconnects
 - **commands** (`/api/commands`) — slash command list acceptable by composer
 - **auth** (`/api/auth/login|logout|check|sessions`) — opaque server-side session login, validation, listing, and per-session revocation
 - **uploads** (`/api/agents/{id}/uploads`) — [[upload-batches.ava.okf.md|keyed silent batch acceptance]] and the saved-file download; delivery to the agent is the keyed `/api/keyed/v1/agents/{id}/uploads` route.

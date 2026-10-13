@@ -42,14 +42,14 @@ Standing guidance descendants should receive.
 
 - `PATH: PosixPath` — shared memory pool root directory `~/.ava/memory`; its `help()` text is the note format an agent follows
 - `PERSONAL_PATH: PosixPath` — the agent's own memory folder, `<workspace>/memory`, resolved from the current SDK identity (an attached external lease first, then the process identity) when read; raises when no identity is bound
-- `search(query, k=5, *, timeout=None) → list[MemoryMatch]` — semantic search; returns up to `k` `MemoryMatch(path, description, tags, score, chunk)` named tuples, most relevant first. `path` is absolute, `score` is a decision model's probability (0..1) that the matched `chunk` (the note's best passage, or its description line) is relevant to the query, and every match is returned whatever its score — the caller decides what a weak match deserves. `timeout` bounds one attempt (default = the gateway's own search deadline + 3s, 18s), and a congested index answers 503 (`IndexerUnavailable`) in ~1s instead of queueing the call
+- `search(query, k=5, *, timeout=None) → list[MemoryMatch]` — semantic search; returns up to `k` `MemoryMatch(path, description, tags, score, chunk)` named tuples, most relevant first. `path` is absolute, `score` is a decision model's probability (0..1) that the matched `chunk` (the note's best passage, or its description line) is relevant to the query, and every match is returned whatever its score — the caller decides what a weak match deserves. `timeout` bounds one attempt (default = the gateway's own search deadline + 3s, 18s); when given it also travels in the request as the search's deadline, so the gateway stops ranking when it passes, and the HTTP timeout is `timeout` + 3s. A congested index answers 503 (`IndexerUnavailable`) in ~1s instead of queueing the call. A search returns at most the notes one search ranks (`memory_rerank_candidates`, 30), whatever `k` is
 - `MemoryMatch` — the result tuple above, exported in `__all_for_ava__` so `help(ava.memory)` renders its fields
 - `IndexerUnavailable` — exception when the indexer service is unavailable, or when the decision model that ranks results fails (search never falls back to unranked vector order)
 
 Search is two stages, both on the gateway: vector search returns the best chunk of the
 closest `memory_rerank_candidates` notes (default 30), then the decision model
 `memory_rerank_model` answers a yes/no "worth reading for this query" question for each chunk (one request per candidate; `purpose` tells recall from an agent search) and the response is
-ordered by the probability of yes. No text is generated. The gateway response contains only
+ordered by the probability of yes. That count is the most decision requests one search issues: neither `k` nor the request's `exclude` list (paths dropped before ranking, used by passive recall; internal, not an `ava.memory.search` parameter) changes it. No text is generated. The gateway response contains only
 `results`, each with a memory-root-relative `path`, frontmatter `description` and `tags`, the
 `score` and the matched `chunk`. The SDK resolves each path against the runner's memory root;
 the HTTP response has no duplicate bare-path list.

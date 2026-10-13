@@ -35,6 +35,7 @@ from base.db import Database
 from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
 from base.paths import gateway_memory_dir
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.http.disconnect import run_until_disconnect
 from gateway.schemas.memory import (
     MemoryGraphEdge,
     MemoryGraphNode,
@@ -304,6 +305,12 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     against the query, and the response is ordered by the probability that the
     chunk is relevant (`score`). No text is generated on this path.
 
+    One search issues at most that many decision requests, whatever `k` is: `k` above the
+    candidate count returns the candidates. Notes in `exclude` are dropped from the vector
+    candidates before ranking and take no slot. The ranking stops, and its unanswered requests
+    are cancelled, when the client disconnects or the deadline passes (the gateway's own, or
+    the request's `deadline_seconds` when that is shorter).
+
     Paths are relative to memory pool root (settings.services.memory_root, e.g.
     `~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to
     reconstruct the absolute path. fs-neutral so gateway fs (e.g.
@@ -346,20 +353,19 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     # `async with`, whose release is synchronous — so the permit is returned
     # even though the cleanup awaits below never get to run.
     deadline = inputs.deadline()
+    if body.deadline_seconds is not None:
+        deadline = min(deadline, body.deadline_seconds)
     try:
         async with asyncio.timeout(deadline):
-            hits = await _vector_candidates(request, body, provider, inputs, deadline)
-            ranked = await rerank.rerank(
-                body.query,
-                hits,
-                purpose=body.purpose,
-                model=inputs.rerank_model(),
-                catalog=request.app.state.catalog,
-                k=body.k,
-                memory_root=gateway_memory_dir(roles=request.app.state.machine.role()),
+            ranked = await run_until_disconnect(
+                _search_and_rank(request, body, provider, inputs, deadline),
+                request.is_disconnected,
             )
     except TimeoutError as exc:
         raise IndexerUnavailable(f"memory search exceeded its {deadline:g}s deadline") from exc
+    if ranked is None:
+        # The caller left; the ranking requests it started were cancelled, and no one reads this.
+        return MemorySearchResponse(results=[])
     return MemorySearchResponse(
         results=[
             MemorySearchResultItem(
@@ -375,8 +381,35 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
 
 
 def _candidate_count(inputs: MemorySearchInputs, body: MemorySearchRequest) -> int:
-    """How many notes vector search hands to the decision model for this request's purpose."""
+    """How many notes vector search hands to the decision model for this request's purpose.
+
+    The most decision requests one search issues: `k` and the exclusion list do not change it.
+    """
     return inputs.dedup_candidates() if body.purpose == "dedup" else inputs.rerank_candidates()
+
+
+async def _search_and_rank(
+    request: Request,
+    body: MemorySearchRequest,
+    provider: EmbeddingProvider,
+    inputs: MemorySearchInputs,
+    deadline: float,
+) -> list[rerank.RankedChunk]:
+    """Both stages: vector candidates, then the decision model's ranking of them."""
+    limit = _candidate_count(inputs, body)
+    exclude = frozenset(body.exclude)
+    hits = await _vector_candidates(request, body, provider, inputs, deadline, limit + len(exclude))
+    return await rerank.rerank(
+        body.query,
+        hits,
+        purpose=body.purpose,
+        model=inputs.rerank_model(),
+        catalog=request.app.state.catalog,
+        k=body.k,
+        limit=limit,
+        exclude=exclude,
+        memory_root=gateway_memory_dir(roles=request.app.state.machine.role()),
+    )
 
 
 async def _vector_candidates(
@@ -385,12 +418,12 @@ async def _vector_candidates(
     provider: EmbeddingProvider,
     inputs: MemorySearchInputs,
     deadline: float,
+    count: int,
 ) -> list[ChunkHit]:
-    """The first stage: embed the query and read the closest notes' best chunks.
+    """The first stage: embed the query and read the `count` closest notes' best chunks.
 
-    Asks for at least `body.k` notes so the second stage can always fill the
-    response, and for the purpose's candidate count when that is more:
-    `memory_dedup_candidates` for `dedup`, `memory_rerank_candidates` otherwise.
+    `count` is the purpose's candidate count plus the notes the request excludes, so the second
+    stage still has a full set of candidates once the excluded ones are dropped.
     """
     from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
@@ -410,7 +443,7 @@ async def _vector_candidates(
             return await _backend_topk(
                 request.app.state.db,
                 query_vector,
-                max(body.k, _candidate_count(inputs, body)),
+                count,
                 deadline,
                 provider.dim,
                 provider.fingerprint,

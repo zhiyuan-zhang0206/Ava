@@ -173,11 +173,15 @@ class AgentMemorySettings(EnvSettings):
     memory_recall_inject_max: int = Field(
         default=3,
         ge=0,
+        le=100,
         alias="AVA_MEMORY_RECALL_INJECT_MAX",
         description=(
             "The most notes passive recall injects in one turn, taken best score first "
             "among the notes that reach memory_recall_inject_threshold. Notes crowd the "
-            "context they are meant to inform, so the cap holds even when more qualify."
+            "context they are meant to inform, so the cap holds even when more qualify. "
+            "It is also the number of results recall asks the search for (at most 100, the "
+            "search's result limit); notes injected earlier in the session are left out of "
+            "that search, so the cost of a pass does not grow with the session."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -195,6 +199,8 @@ class AgentMemorySettings(EnvSettings):
         description=(
             "Wall-clock budget (seconds) for one passive-recall pass — the search "
             "request, which includes the gateway's rerank of the retrieved chunks. "
+            "The search request carries this budget, so the gateway stops ranking when it "
+            "passes. "
             "Recall runs before the LLM on every inbound turn, so a congested gateway "
             "or a slow ranking model must not hold the turn hostage: when the deadline "
             "expires the turn proceeds with no recall this turn and the next turn "

@@ -3302,6 +3302,12 @@ export interface paths {
          *     against the query, and the response is ordered by the probability that the
          *     chunk is relevant (`score`). No text is generated on this path.
          *
+         *     One search issues at most that many decision requests, whatever `k` is: `k` above the
+         *     candidate count returns the candidates. Notes in `exclude` are dropped from the vector
+         *     candidates before ranking and take no slot. The ranking stops, and its unanswered requests
+         *     are cancelled, when the client disconnects or the deadline passes (the gateway's own, or
+         *     the request's `deadline_seconds` when that is shorter).
+         *
          *     Paths are relative to memory pool root (settings.services.memory_root, e.g.
          *     `~/.ava/memory/`); the SDK caller prepends `ava.memory.PATH` to
          *     reconstruct the absolute path. fs-neutral so gateway fs (e.g.
@@ -6487,7 +6493,7 @@ export interface components {
             query: string;
             /**
              * K
-             * @description result count
+             * @description most results wanted; never more than the candidates the purpose ranks (`memory_rerank_candidates`, `memory_dedup_candidates` for 'dedup')
              * @default 5
              */
             k: number;
@@ -6497,6 +6503,16 @@ export interface components {
              * @enum {string}
              */
             purpose: "recall" | "search" | "dedup";
+            /**
+             * Exclude
+             * @description memory-pool-relative note paths to leave out: they are dropped from the vector candidates before ranking, so they neither cost a ranking request nor take a candidate slot
+             */
+            exclude?: string[];
+            /**
+             * Deadline Seconds
+             * @description how long the caller waits, in seconds: the search stops, and the ranking requests still running are cancelled, when this passes. Can only shorten the gateway's own search deadline. Omitted: the gateway's deadline applies
+             */
+            deadline_seconds?: number | null;
         };
         /**
          * MemorySearchResponse
