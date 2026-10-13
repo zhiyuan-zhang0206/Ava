@@ -109,23 +109,6 @@ def resolved_pool_size(
     )
 
 
-def gateway_url_host() -> str:
-    """The host this process dials as its gateway (`AVA_GATEWAY_URL`), lowercased
-    and unbracketed; "" when the gateway domain is not constructed in this
-    process's profile (or unset). Used by `base.cluster.dataplane.direct_url.direct_db_url`
-    to tell a split agent-runner's URL — which names the GATEWAY's pooler, a foreign host
-    whose direct-exemption warning is meaningful — apart from a remote/SaaS
-    plane URL, which is direct by definition and must dial silently
-    (Task #1752)."""
-    from base.config import settings
-
-    try:
-        url = settings.gateway.gateway_url
-    except AttributeError:
-        return ""
-    return (urlsplit(url).hostname or "").lower().removeprefix("[").removesuffix("]")
-
-
 class AgentProfileOwnerDbUrlRefusedError(ValueError):
     """An agent-profile process at the default home refused a local non-runner DB URL.
 
