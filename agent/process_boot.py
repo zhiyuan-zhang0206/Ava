@@ -114,7 +114,7 @@ def land_cluster_extensions(db: Database) -> None:
     this once at daemon boot, beside the other two process-scope halves, rather
     than per agent.
 
-    Runs before the plugin load (`agent.extensions.load_extensions`, at host boot) so the ordering
+    Runs before the plugin load (`ava.sdk_surface.extensions.load_extensions`, at host boot) so the ordering
     stays correct when plugins become registry-owned in a later slice. Today it does not matter —
     skills are read per turn and plugins still come from the checkout — which is
     exactly why it is worth fixing now rather than after the ordering has a

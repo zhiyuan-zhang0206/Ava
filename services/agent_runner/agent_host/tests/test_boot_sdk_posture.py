@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+from functools import partial
 from unittest.mock import Mock, patch
 
 import pytest
 
-from agent.extensions import load_extensions
+from agent.state import plugin_state_schema
 from ava.sdk_surface import install, process_context
+from ava.sdk_surface.extensions import load_extensions
 from base import config
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.lifecycle.configuration import load_installation
@@ -40,7 +42,9 @@ def test_host_root_supplies_model_and_config_owners() -> None:
                 side_effect=AssertionError("plugin loading must keep its producer cold")
             )
             installation = load_installation(
-                boot, producer=producer, load_extensions=load_extensions
+                boot,
+                producer=producer,
+                load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
             )
             assert installation.require_catalog().models
             assert installation.producer is producer
@@ -75,7 +79,11 @@ def _assert_profiled_host_defers_complete_model(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(config, "Settings", build)
     try:
         producer = Mock(side_effect=AssertionError("plugin loading must keep its producer cold"))
-        installation = load_installation(boot, producer=producer, load_extensions=load_extensions)
+        installation = load_installation(
+            boot,
+            producer=producer,
+            load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
+        )
         authority = installation.authority
         assert authority is not None
         assert authority.runtime is runtime

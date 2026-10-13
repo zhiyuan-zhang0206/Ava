@@ -33,6 +33,7 @@ import os
 import signal
 import sys
 from collections.abc import Callable, Collection, Coroutine, Iterable
+from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -131,7 +132,7 @@ _TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 
 
 # Plugin-discovery watchdog (issue #170): the host loads external plugins
-# exactly once per process (`agent.extensions.load_extensions`), so a plugin installed
+# exactly once per process (`ava.sdk_surface.extensions.load_extensions`), so a plugin installed
 # after boot is invisible to every agent on this runner until a restart. The
 # runner's supervisor (watchdog -> healthcheck) restarts a dead host within a
 # minute, so the fix is not a reload (plugin-spec-v2's S4 dispose contract is
@@ -535,6 +536,14 @@ async def _dispatch_host(
         raise RuntimeError("wake dispatcher exited without cancellation")
 
 
+def _state_gated_loader() -> Callable[..., object]:
+    """The plugin loader, given the agent kernel's plugin-state admission check."""
+    from agent.state import plugin_state_schema
+    from ava.sdk_surface.extensions import load_extensions
+
+    return partial(load_extensions, validate_state=plugin_state_schema)
+
+
 async def run(
     *,
     config: ConfigBoot,
@@ -574,10 +583,8 @@ async def run(
         await _open_host_pools(workload_pool, control_pool)
         if clients is None:
             clients = process_clients(database=lambda: db, config=config, machine=machine)
-        from agent.extensions import load_extensions
-
         installation = load_installation(
-            config, producer=clients.event_pipeline, load_extensions=load_extensions
+            config, producer=clients.event_pipeline, load_extensions=_state_gated_loader()
         )
         checkpointer = await _build_checkpointer(
             workload_pool,

@@ -9,12 +9,12 @@ tags:
 # Plugin Module Loading
 
 ## One loader contract, two production call sites
-`agent/extensions/__init__.py:load_extensions()` imports every enabled plugin's
+`ava/sdk_surface/extensions.py:load_extensions()` imports every enabled plugin's
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
-path — at host boot, and in the plugin catalog. The
+path — at host boot and in the plugin catalog. The
 agent-launched child enters through the same loader (`ava.ensure_plugins_loaded`);
 its stateless form loads surfaces only ([[docs/plugins/module-loading/two-faces.ava.okf.md]]).
-All drive the same primitives (`ava/sdk_surface/plugin_loader.py`), so a plugin sees the same
+All drive the same primitives (`base/packages/plugins/loading/`), so a plugin sees the same
 module name, `__package__`, `sys.modules` identity, and containment whichever
 production path imports it (issue #2161 — before unification the boot loader
 exec'd plugins under a top-level name and relative imports crashed the agent
@@ -56,7 +56,7 @@ Machine-level roster paths sit outside the enable plane: the
 enable-state (`services/supervision/roster/plugin_services.py:plugin_services`).
 
 ## The external `plugins` prefix is registered, not resolved from sys.path
-`register_plugin_parent_packages` (`ava/sdk_surface/plugin_loader.py`, applied by the loader for
+`register_plugin_parent_packages` (`plugins/loading/plugin_loader.py`, applied by the loader for
 external plugins) registers `plugins` over `$AVA_HOME/plugins` and
 `plugins.<name>` over the plugin's directory before executing `plugin.py`. It
 does not rely on `$AVA_HOME` being on `sys.path`: the exec child boots with
@@ -121,5 +121,5 @@ In full: [[docs/plugins/module-loading/reload-semantics.ava.okf.md]].
 
 ## Key Dependencies
 - [[docs/plugins/plugins.ava.okf.md]] — the injection surfaces the import registers into
-- [[agent/graph/docs/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent.extensions.load_extensions`) before wiring nodes
+- [[agent/graph/docs/graph.ava.okf.md]] — `build_graph()` calls the loader (`load_extensions`) before wiring nodes
 - [[ava_builtins/docs/extensions.ava.okf.md]] — the `SdkWrap` layers a reload re-installs from a pristine core

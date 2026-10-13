@@ -45,6 +45,7 @@ from .sdk_surface import process_context
 # contextvars, the SDK-disable entries) are imported from their own module.
 from .sdk_surface.const import const as const
 from .sdk_surface.discovery import agent_visible_names as agent_visible_names
+from .sdk_surface.extensions import StateGate
 from .sdk_surface.help import help as help
 from .sdk_surface.plugins import FrameworkNamespaceConflictError as FrameworkNamespaceConflictError
 from .sdk_surface.plugins import InvalidNamespaceMemberError as InvalidNamespaceMemberError
@@ -138,7 +139,7 @@ _sys.modules[__name__].__class__ = _SdkModule
 # hooks / prompt sections, loaded on the full path via
 # `ensure_plugins_loaded(surface=False)`), `load_attempted()` true while a load is in
 # flight; after a failure it re-raises the original error. The agent process does NOT go through this path (it calls
-# `agent.extensions.load_extensions` directly from build_graph / host boot and
+# `ava.sdk_surface.extensions.load_extensions` directly from build_graph / host boot and
 # re-registers built-in hooks after), so a genuinely-unknown `ava.X` keeps failing fast
 # in `__getattr__` there; nothing to latch in this module.
 
@@ -161,6 +162,7 @@ def ensure_plugins_loaded(
     producer: Callable[[], Any] | None = None,
     machine: _MachineIdentity | None = None,
     context: AvaContext | None = None,
+    validate_state: StateGate | None = None,
 ) -> None:
     """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
 
@@ -188,7 +190,7 @@ def ensure_plugins_loaded(
     successful rollback. Unknown inventory, configuration, programming or I/O
     failures propagate unchanged; a later call re-raises the same failure without
     retrying the load. The loader's earlier per-module import containment is a
-    separate boundary in `agent.extensions`.
+    separate boundary in `ava.sdk_surface.extensions`.
 
     A supplied context binds before loading and receives the installed catalog.
     A launched process with no context first constructs one from the same boot
@@ -208,6 +210,7 @@ def ensure_plugins_loaded(
         producer=producer,
         machine=machine,
         context=context,
+        validate_state=validate_state,
     )
 
 
@@ -256,10 +259,9 @@ def __getattr__(name: str) -> Any:
 # Submodule imports must come after DB / REDIS (they read these
 # globals when importing ava). The `# isort: split` above prevents ruff
 # from merging / reordering the two import blocks.
-# `ava.sdk_surface.wraps` and `ava.sdk_surface.plugin_loader` are public names
-# (agent visibility is the `__all_for_ava__` whitelist below, not the
-# underscore) reached across the `ava` package boundary by the agent kernel
-# (`agent/state.py`, `agent/process_boot.py`, `agent/extensions/__init__.py`).
+# `ava.sdk_surface.wraps` is a public name (agent visibility is the `__all_for_ava__` whitelist
+# below, not the underscore) reached across the `ava` package boundary by the agent kernel
+# (`agent/state.py`, `agent/process_boot.py`).
 # `wraps`' curated plugin-author surface is assembled as `ava.extend` further
 # down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection

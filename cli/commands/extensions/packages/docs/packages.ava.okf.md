@@ -44,7 +44,7 @@ ava skill trust <name> [--revoke]             # record that a human read it (tru
 
 ## `ava plugins verify` — does every enabled plugin load
 
-Runs the fail-soft loader (`agent.extensions.load_extensions`) and exits 1 when it skipped a plugin:
+Runs the fail-soft loader (`ava.sdk_surface.extensions.load_extensions`) and exits 1 when it skipped a plugin:
 `RESULT enabled=N failed=M rc=R`, then `RED plugin=<name> <error> (at <file>:<line>)`. Read-only (no hook
 runs, nothing written, no failure telemetry); covers the agent-boot load path, not a plugin's `services.py`
 or `provider.py`. `python -m cli.fleet_update up` runs it on every host.

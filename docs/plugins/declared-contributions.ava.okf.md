@@ -30,7 +30,7 @@ frozen declaration.
   `read_declared_flag(key, contributions.flags)` using that declaration directly; there is no separate
   flag registry. Unknown or sensitive keys, undeclared reads and unavailable process domains fail.
 
-`agent/extensions/registry.py:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
+`base/packages/plugins/loading/registry.py:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
 order, and returns an `ExtensionRegistry` — plugin name beside its contributions, so attribution is the entry,
 not a ContextVar. It is also the load-time gate: a plugin is admitted only if `contribute()` returns a
 `PluginContributions`, its state validates (`plugin_state_schema`), and the `ava-plugin.json` it must ship (a

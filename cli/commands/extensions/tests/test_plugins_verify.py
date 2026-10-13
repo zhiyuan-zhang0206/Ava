@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent import extensions
+from ava.sdk_surface import extensions
 from base import paths, telemetry
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
