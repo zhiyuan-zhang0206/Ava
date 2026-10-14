@@ -398,6 +398,12 @@ class InboundCommitted(_Base):
     inbound_id: int
 
 
+class ToUserChanged(_Base):
+    """The home-machine file changed; readers fetch its authoritative contents."""
+
+    role: Literal["to_user_changed"] = "to_user_changed"
+
+
 class PageOpened(_Base):
     """Published when the agent calls `ava.ui.show(name)` to
     register / update an HTML page — the frontend Pages popover adds
@@ -542,6 +548,7 @@ Event = Annotated[
     | InboundCommitted
     | LabelUpdated
     | PageOpened
+    | ToUserChanged
     | PageClosed
     | TokenUsage
     | LLMDone
@@ -581,6 +588,7 @@ _ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (InboundCommitted, False),
     (LabelUpdated, True),
     (PageOpened, True),
+    (ToUserChanged, True),
     (PageClosed, True),
     (TokenUsage, False),
     (LLMDone, False),

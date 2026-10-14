@@ -147,7 +147,7 @@ async def test_server_failure_releases_owned_resources(
         ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
     )  # the port table still names the ops slot
 
-    with pytest.raises(RuntimeError, match="ops server crashed"):
+    with pytest.RaisesGroup(pytest.RaisesExc(RuntimeError, match="ops server crashed")):
         await daemon.serve_ops_daemon(
             database=ops_database,
             image=ops_image,

@@ -110,6 +110,7 @@ class TestRealRoster:
             "skills_to_expand_at_start",
             "system_prompt_extra",
             "agent_communication_style",
+            "to_user_format",
             "sdk_disable",
             "eval_isolation",
             "eval_network_allowlist",

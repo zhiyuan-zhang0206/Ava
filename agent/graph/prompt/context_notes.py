@@ -36,6 +36,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import AvaContext
+from base.agents.to_user import read_document
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.paths import workspace_dir
@@ -274,6 +275,19 @@ def agent_id_note(ctx: AvaContext) -> HumanMessage | None:
         aid, enabled=ctx.require_agent().read("agent", "workspace_in_system_prompt")
     )
     tail = f" Your workspace is {workspace}." if workspace else ""
+    if workspace:
+        try:
+            document = read_document(workspace_dir(aid), ctx.require_agent().prompt.to_user_format)
+        except (OSError, ValueError) as exc:
+            tail += (
+                f"\nThe shared context file could not be read: {exc}. Repair it in your workspace."
+            )
+        else:
+            if document.content:
+                tail += (
+                    "\n\nCurrent shared context displayed beside your messages:\n"
+                    + document.content
+                )
     return system_note_message(
         content=f"Your Agent ID is {aid}{detail}.{tail}",
         tag=NoteTag.AGENT_ID,
