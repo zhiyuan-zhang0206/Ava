@@ -1,0 +1,2 @@
+[uses]
+"test_event_capture.py" = ["event_capture.py"]
