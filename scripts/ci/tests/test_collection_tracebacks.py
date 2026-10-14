@@ -136,32 +136,43 @@ def test_frame_churn_finishes_with_complete_tracebacks(
     assert "churn" in trace
 
 
-@pytest.mark.parametrize("workflow", ["ci.yml", "file-shard-proof.yml"])
-@pytest.mark.parametrize("exit_code", [0, 4])
-def test_workflow_planner_preserves_verdict(
-    pytester: pytest.Pytester, workflow: str, exit_code: int
-) -> None:
+@pytest.mark.parametrize(("workflow", "count"), [("ci.yml", 8), ("file-shard-proof.yml", 16)])
+def test_workflow_runs_the_planner_module(workflow: str, count: int) -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"]
-    script = next(
+    scripts = [
         step["run"]
         for job in jobs.values()
         for step in job.get("steps", [])
-        if "periodic_tracebacks" in step.get("run", "")
-    )
-    body = script.split("<<'PY'", 1)[1].split("\n", 1)[1].split("\nPY", 1)[0]
-    (pytester.path / "tmp/file-shards").mkdir(parents=True)
+        if "plan_file_shards" in step.get("run", "")
+    ]
+    assert len(scripts) == 1
+    assert "-m scripts.ci.pull_requests.plan_file_shards" in scripts[0]
+    assert f"--count {count} " in scripts[0]
+
+
+@pytest.mark.parametrize("exit_code", [0, 4])
+def test_planner_preserves_verdict(pytester: pytest.Pytester, exit_code: int) -> None:
+    (pytester.path / "tmp").mkdir()
     result = run_isolated(
         pytester,
         "import types\n"
         "pytest = types.ModuleType('pytest')\n"
         "def main(args):\n"
-        "    assert '--collect-only' in args\n"
-        "    print('planner called')\n"
+        "    print('planner called', args)\n"
         f"    return {exit_code}\n"
         "pytest.main = main\n"
         "sys.modules['pytest'] = pytest\n"
-        f"exec(compile({body!r}, 'workflow-planner', 'exec'))\n",
+        "from scripts.ci.pull_requests.plan_file_shards import main\n"
+        "raise SystemExit(main(['--count', '8', '--plan', 'tmp/plan.json',"
+        " '--stacks', 'tmp/plan-stacks.log']))\n",
     )
     assert result.ret == exit_code, str(result.stderr)
-    assert "planner called" in str(result.stdout)
+    called = str(result.stdout)
+    for argument in (
+        "--collect-only",
+        "--omit-static-tests",
+        "--file-shard-count=8",
+        "--file-shard-plan=tmp/plan.json",
+    ):
+        assert argument in called
     assert len(list((pytester.path / "tmp").rglob("*-stacks.log"))) == 1

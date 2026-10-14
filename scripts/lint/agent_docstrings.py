@@ -187,7 +187,7 @@ def _registered_namespace_files(plugin_py: Path, tree: ast.Module) -> set[Path]:
     return files
 
 
-def _discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
+def discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
     """Find plugin module files declared as `ava.X` namespaces.
 
     Scans every `plugins/*/plugin.py` for `SdkNamespace("X", <module>)` declarations
@@ -386,7 +386,7 @@ def module_doc_child_reference_violations(
     return violations
 
 
-def _agent_visible_names(tree: ast.Module) -> set[str] | None:
+def static_agent_visible_names(tree: ast.Module) -> set[str] | None:
     """Mirror `ava/sdk_surface/discovery.py:agent_visible_names` discovery, statically.
 
     Returns the set of names whose docstrings appear in agent-visible
@@ -410,7 +410,7 @@ def _agent_visible_names(tree: ast.Module) -> set[str] | None:
     return None
 
 
-def _wrap_targets(tree: ast.Module) -> set[str]:
+def plugin_wrap_targets(tree: ast.Module) -> set[str]:
     """Find wrapper functions that take over public SDK entries.
 
     The declaration is `SdkWrap("files.read", _wrapped_read)`, anywhere in the
@@ -439,7 +439,7 @@ def _sdk_wrap_wrapper(call: ast.Call) -> str | None:
     return None
 
 
-def _is_visible(name: str, all_names: set[str] | None) -> bool:
+def is_agent_visible(name: str, all_names: set[str] | None) -> bool:
     if all_names is not None:
         return name in all_names
     return not name.startswith("_")
@@ -452,7 +452,7 @@ def _agent_visible_nodes(
     if is_plugin_module:
         # plugin.py is dev-facing. Only wrap targets (`ava.X.Y = <name>`)
         # leak their docstrings into the agent prompt.
-        wrap_targets = _wrap_targets(tree)
+        wrap_targets = plugin_wrap_targets(tree)
         return [
             node
             for node in tree.body
@@ -461,12 +461,12 @@ def _agent_visible_nodes(
         ]
     # ava/*.py + plugins/*/_*.py: lint everything agent-visible per
     # `help()` discovery (`__all_for_ava__` whitelist, else non-underscore).
-    all_names = _agent_visible_names(tree)
+    all_names = static_agent_visible_names(tree)
     return [
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-        and _is_visible(node.name, all_names)
+        and is_agent_visible(node.name, all_names)
     ]
 
 
@@ -529,7 +529,7 @@ def _check_agents_md(repo_root: Path) -> list[tuple[Path, int, str]]:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent.parent
-    plugin_namespace_files = _discover_plugin_namespace_modules(repo_root)
+    plugin_namespace_files = discover_plugin_namespace_modules(repo_root)
     ava_surface_files = discover_agent_surface_modules(repo_root)
     files = sorted(
         p
