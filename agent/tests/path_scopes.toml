@@ -8,4 +8,3 @@
 "ava.tests.fixtures.ava_tests" = [
 ]
 "agent.graph.exec.tests.admission_fixture" = ["test_resource_admission.py"]
-"tests.fixtures.unit.gateway" = ["test_external_integration_agent.py"]

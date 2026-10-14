@@ -2,7 +2,7 @@
 "agent/execution/child.py" = "executes the agent-authored code of one execute_code call"
 "agent/graph/tests/test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
 "agent/tests/plugins/test_register_namespace.py" = "imports SDK namespaces that plugins install at run time; they have no module file"
-"agent/tests/test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
+"gateway/tests/lifecycle/sdk/test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 "ava/agents/tests/test_adversarial_eval_schedule.py" = "imports a built-in schedule template from schedules/ to test it; schedule scripts are run content, core does not depend on them"
 "ava/shell/coding_tools/tests/test_claude_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 "ava/shell/coding_tools/tests/test_codex_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"

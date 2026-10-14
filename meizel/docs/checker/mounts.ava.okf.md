@@ -26,7 +26,7 @@ Like an import: the edge must be declared in the manifest of the lowest director
 both ends, enter a directory through its exports, avoid underscore modules and close no cycle.
 A directory that mounts a plugin of the tests above it is therefore a back-edge, recorded as
 debt in the owning manifest, keyed by the TOML and the module
-(`base/x/tests/path_scopes.toml -> tests/path_scoped/agent_tests.py`). To repay: move the
+(`base/x/tests/path_scopes.toml -> tests/path_scoped/gateway_tests.py`). To repay: move the
 plugin to the mounting directory's side, split the part it needs, or drop the mount.
 
 A module that is not in the checkout is an `unresolved-import` error at the key's line, since

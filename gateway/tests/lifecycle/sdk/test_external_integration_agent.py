@@ -142,7 +142,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(attachment_module, "process_metadata", lambda: attested_caller(lease))
     script = (
-        Path(__file__).parents[2]
+        Path(__file__).parents[4]
         / "ava_builtins/skills/platform/impersonator-guide/scripts/read_instructions.py"
     )
     spec = importlib.util.spec_from_file_location("impersonator_instruction_reader", script)
