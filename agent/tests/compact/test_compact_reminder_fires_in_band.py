@@ -40,8 +40,8 @@ from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -175,20 +175,13 @@ async def test_compact_reminder_silent_when_no_conversation(
     assert result is None
 
 
-async def test_compact_contract_reaches_request_without_resident_self(
-    ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
-):
+async def test_compact_contract_reaches_request_without_resident_self(ava_compact_loaded):
     """The one compaction contract — the summary's sections + how to write it —
     lives in the SDK docstring and reaches the forced request even when the
     standing P95 reference omits `self`. The cached conversation prefix stays
     unchanged; the contract is disclosed in the final instruction."""
     from agent.graph.prompt.system_prompt import build_system_prompt
     from ava.self import compact
-    from base.config import settings
-
-    monkeypatch.setattr(
-        settings.agent, "sdk_expand_in_system_prompt", ["shell", "files", "agents", "tasks"]
-    )
 
     contract = compact.__doc__
     assert contract is not None
@@ -198,7 +191,9 @@ async def test_compact_contract_reaches_request_without_resident_self(
     system_prompt = build_system_prompt(
         EMPTY,
         AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            default_reader=defaults(
+                agent__sdk_expand_in_system_prompt=["shell", "files", "agents", "tasks"]
+            )
         ),
         agent_id=1,
         catalog=build_model_catalog(),
@@ -210,7 +205,9 @@ async def test_compact_contract_reaches_request_without_resident_self(
         [head, HumanMessage(content="Keep my work")],
         llm,
         AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            default_reader=defaults(
+                agent__sdk_expand_in_system_prompt=["shell", "files", "agents", "tasks"]
+            )
         ),
         catalog=build_model_catalog(),
     )
@@ -336,9 +333,7 @@ async def test_compact_summary_emits_compact_done(
         ops_pool=aops_pool,
         llm=AsyncMock(),
         event_publisher=publisher,
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),

@@ -1,15 +1,17 @@
 """Existing host tests explicitly assemble their process-default policy inputs."""
 
+from typing import Any
+
 from base.agents.impersonation.notes import HandoffNotes
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import settings
-from base.config.tests.configuration import snapshot_process_config
+from base.config.tests.configuration import defaults, snapshot_process_config
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
 
-def configured_policy() -> HostPolicy:
+def configured_policy(**changes: Any) -> HostPolicy:
     """Keep legacy config-mutation cases at the test's composition boundary."""
     return HostPolicy(
         max_concurrent_turns=settings.daemon.host_max_concurrent_turns,
@@ -19,7 +21,7 @@ def configured_policy() -> HostPolicy:
         ),
         default_model=lambda: settings.lm.llm_model,
         llm_override=lambda: settings.lm.llm_override,
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        default_reader=defaults(**changes),
         clock_factory=Clock.from_settings,
         handoff_notes=HandoffNotes(
             clock_factory=Clock.from_settings,

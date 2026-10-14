@@ -1,13 +1,10 @@
 """Actual SDK events retain the service receipt through LangChain conversion."""
 
-from dataclasses import fields
-
 import pytest
 from anthropic.types import Message, RawMessageDeltaEvent, RawMessageStartEvent
 from langchain_core.messages import AIMessage
 
-from base.config import get_field, settings
-from base.host.env.agent_slices import ModelOverrides
+from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 from base.lm.factory import build_chat_model, build_chat_model_bound
@@ -37,10 +34,8 @@ def test_nonstream_receipt_survives_output_conversion(
     model, binding = build_chat_model_bound(
         "claude-opus-5-5-fast",
         catalog=model_catalog,
-        llm_override=settings.lm.llm_override,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        llm_override="",
+        overrides=model_overrides(),
     )
     assert isinstance(model, ThinkingTokensChatAnthropic)
     assert binding is model_catalog.bindings["claude-"]
@@ -60,10 +55,8 @@ def test_stream_receipt_is_emitted_once_when_chunks_are_combined(
     model = build_chat_model(
         "claude-opus-5-5-fast",
         catalog=model_catalog,
-        llm_override=settings.lm.llm_override,
-        overrides=ModelOverrides.from_pins(
-            {field.name: get_field(field.name) for field in fields(ModelOverrides)}
-        ),
+        llm_override="",
+        overrides=model_overrides(),
     )
     assert isinstance(model, ThinkingTokensChatAnthropic)
     start = RawMessageStartEvent(type="message_start", message=_message(speed))

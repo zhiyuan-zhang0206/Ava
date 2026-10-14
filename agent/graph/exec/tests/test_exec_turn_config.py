@@ -23,7 +23,7 @@ from base.agents.messages.kwargs import ExecStatus, read_ava_kwargs
 from base.clock import Clock
 from base.config import ConfigBoot, settings
 from base.config.agent_pins import resolve_agent_config_pins
-from base.config.tests.configuration import snapshot_process_config
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -90,10 +90,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
         result, *_ = await run_agent_code(
             AgentState(),
             AvaContext(
-                agent=slices
-                or AgentSlices.resolve(
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-                ),
+                agent=slices or AgentSlices.resolve(default_reader=defaults()),
                 db=database,
                 bus=EventBus.from_settings(),
                 clients=process_clients(
@@ -123,7 +120,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
         slices = AgentSlices.resolve(
             pins,
             {"exec_config_probe": {"exec_probe_marker": marker}},
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(),
         )
         tasks.append(asyncio.create_task(execute(agent_id, slices)))
     assert await asyncio.gather(*tasks) == [

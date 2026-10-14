@@ -31,8 +31,8 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because
 # they depend on real DB IO timing.
-from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -517,9 +517,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             ops_pool=aops_pool,
             llm=model,
             event_publisher=publisher,
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
+            agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
@@ -660,9 +658,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
             ops_pool=aops_pool,
             llm=model,
             event_publisher=publisher,
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
+            agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),

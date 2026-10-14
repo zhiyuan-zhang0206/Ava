@@ -15,6 +15,7 @@ from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._retry import retry_wait
 from agent.graph.llm._stream import consume_llm, consume_stream_with_stall_timeout
 from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.errors import is_retryable_provider_error
 from base.packages.plugin_providers import build_model_catalog
@@ -49,9 +50,7 @@ async def test_transport_authority_stays_at_the_model_boundary(
 
 
 @pytest.mark.parametrize("timeout_origin", ["stream_model", "stream_callback"])
-async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
-    monkeypatch: pytest.MonkeyPatch, timeout_origin: str
-) -> None:
+async def test_builtin_timeout_does_not_borrow_owned_stall_authority(timeout_origin: str) -> None:
     error = TimeoutError("application operation failed")
     calls: list[str] = []
 
@@ -69,8 +68,6 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
             raise error
         return AIMessage(content="successful fallback")
 
-    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", 0.01)
-    monkeypatch.setattr(settings.lm, "llm_stream_inter_chunk_timeout_seconds", 0.01)
     sink = MagicMock(spec=RedisStreamHandler)
     if timeout_origin.endswith("callback"):
         sink.process_chunk.side_effect = error
@@ -78,7 +75,10 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
     model.astream.return_value = stream()
     model.ainvoke = AsyncMock(side_effect=invoke)
     agent = AgentSlices.resolve(
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+        default_reader=defaults(
+            lm__llm_stream_ttft_timeout_seconds=0.01,
+            lm__llm_stream_inter_chunk_timeout_seconds=0.01,
+        )
     )
     with pytest.raises(TimeoutError) as raised:
         await consume_llm(
@@ -98,7 +98,10 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
             agent_id=7,
             catalog=build_model_catalog(),
             max_attempts_pin=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                default_reader=defaults(
+                    lm__llm_stream_ttft_timeout_seconds=0.01,
+                    lm__llm_stream_inter_chunk_timeout_seconds=0.01,
+                )
             ).read("lm", "llm_retry_max_attempts"),
             read_lm=lambda field: getattr(settings.lm, field),
         )
@@ -108,9 +111,7 @@ async def test_builtin_timeout_does_not_borrow_owned_stall_authority(
     assert calls == expected
 
 
-async def test_external_cancellation_stays_external_inside_owned_model_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_external_cancellation_stays_external_inside_owned_model_deadline() -> None:
     ready = asyncio.Event()
     cancelled: list[str] = []
 
@@ -132,8 +133,6 @@ async def test_external_cancellation_stays_external_inside_owned_model_deadline(
             raise
         return AIMessage(content="unreachable")
 
-    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", 10)
-    monkeypatch.setattr(settings.lm, "llm_stream_inter_chunk_timeout_seconds", 10)
     sink = MagicMock(spec=RedisStreamHandler)
     model = MagicMock(spec=BaseChatModel)
     model.astream.return_value = stream()
@@ -145,7 +144,10 @@ async def test_external_cancellation_stays_external_inside_owned_model_deadline(
             chunks=[],
             handler=cast(RedisStreamHandler, sink),
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                default_reader=defaults(
+                    lm__llm_stream_ttft_timeout_seconds=10,
+                    lm__llm_stream_inter_chunk_timeout_seconds=10,
+                )
             ),
             catalog=build_model_catalog(),
         )

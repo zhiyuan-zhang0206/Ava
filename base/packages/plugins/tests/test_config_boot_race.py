@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_config_images import (
     PluginConfigChangedError,
@@ -126,7 +126,7 @@ def test_bind_rereads_image_created_after_the_missing_read(
                 "read-race",
                 AgentSlices.resolve(
                     plugin_configs=configs,
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                    default_reader=defaults(),
                 ),
                 BootConfig,
             ).marker
@@ -169,7 +169,7 @@ def test_bind_rejects_invalid_winning_image(
             "invalid-winner",
             AgentSlices.resolve(
                 plugin_configs=configs,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             BootConfig,
         )
@@ -196,7 +196,7 @@ def test_bind_propagates_unknown_creation_errors(
             "unknown-writer-error",
             AgentSlices.resolve(
                 plugin_configs=configs,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             BootConfig,
         )
@@ -236,7 +236,7 @@ def test_bind_does_not_replace_a_disappearing_winner_with_defaults(
             "missing-winner",
             AgentSlices.resolve(
                 plugin_configs=configs,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             BootConfig,
         )
@@ -266,7 +266,7 @@ def test_bind_propagates_unknown_winning_image_errors(
             "unknown-read-error",
             AgentSlices.resolve(
                 plugin_configs=configs,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             BootConfig,
         )

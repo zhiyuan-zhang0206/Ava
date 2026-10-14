@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -30,6 +31,7 @@ from agent.graph.tests.test_llm_helpers import (
 )
 from agent.state import AgentState
 from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -118,9 +120,9 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
             model="deepseek-flash",
             agent_id=7,
             catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).read("lm", "llm_retry_max_attempts"),
+            max_attempts_pin=AgentSlices.resolve(default_reader=defaults()).read(
+                "lm", "llm_retry_max_attempts"
+            ),
             read_lm=lambda field: getattr(settings.lm, field),
         )
         is not None
@@ -434,16 +436,14 @@ def test_is_fatal_provider_error_type_empty_config() -> None:
     assert fatal("engine_overloaded_error", "") is False
 
 
-def test_is_fatal_provider_error_type_no_body() -> None:
+def test_is_fatal_provider_error_type_no_body(**changes: Any) -> None:
     """Exception without body (generic exception) returns False."""
     from agent.graph.llm_errors import is_fatal_provider_error_type
 
     assert (
         is_fatal_provider_error_type(
             ConnectionError("net"),
-            AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).llm_policy,
+            AgentSlices.resolve(default_reader=defaults(**changes)).llm_policy,
         )
         is False
     )

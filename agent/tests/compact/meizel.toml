@@ -4,7 +4,6 @@
 "test_compact_generate_summary.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 1
 "test_compact_generate_summary.py#monkeypatch.setattr base.lm.usage.vendor_of_model" = 1
 "test_compact_generate_summary.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 1
-"test_compact_reminder_fires_in_band.py#monkeypatch.setattr base.config.settings.agent.sdk_expand_in_system_prompt" = 1
 
 [debt.third-party-patch]
 "test_compact_generate_summary.py#monkeypatch.setattr opentelemetry.trace.get_tracer" = 1

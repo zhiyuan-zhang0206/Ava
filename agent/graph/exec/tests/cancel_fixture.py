@@ -19,7 +19,7 @@ from agent.hooks.tests.fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -88,9 +88,7 @@ def make_runtime(
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),

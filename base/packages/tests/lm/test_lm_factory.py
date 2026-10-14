@@ -48,7 +48,7 @@ def test_plugin_key_env_injection_authorizes_without_env_file(
             model="deepseek-flash",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
         == "deepseek-flash"
     )
@@ -66,7 +66,7 @@ def test_plugin_key_missing_in_both_channels_raises(
             model="deepseek-flash",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -76,7 +76,6 @@ def test_plugin_key_ignores_legacy_settings_field(
     """Provider plugins use their declared env channel, never the Settings alias."""
     monkeypatch.setattr(settings.lm, "deepseek_api_key", "sk-test")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["deepseek-"] == ("DeepSeek", "DEEPSEEK_API_KEY")
@@ -85,7 +84,7 @@ def test_plugin_key_ignores_legacy_settings_field(
             model="deepseek-flash",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -95,7 +94,6 @@ def test_gemini_plugin_key_ignores_legacy_settings_field(
     """The migrated Gemini binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "gemini_api_key", "sk-test")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["gemini-"] == ("Google", "GEMINI_API_KEY")
@@ -104,7 +102,7 @@ def test_gemini_plugin_key_ignores_legacy_settings_field(
             model="gemini-3.5-flash",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -114,7 +112,6 @@ def test_anthropic_plugin_key_ignores_legacy_settings_field(
     """The migrated Anthropic binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "anthropic_api_key", "sk-test")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["claude-"] == ("Anthropic", "ANTHROPIC_API_KEY")
@@ -123,7 +120,7 @@ def test_anthropic_plugin_key_ignores_legacy_settings_field(
             model="claude-sonnet-5",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -133,7 +130,6 @@ def test_openai_plugin_key_ignores_legacy_settings_field(
     """The migrated OpenAI binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "openai_api_key", "sk-test")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["gpt-"] == ("OpenAI", "OPENAI_API_KEY")
@@ -142,7 +138,7 @@ def test_openai_plugin_key_ignores_legacy_settings_field(
             model="gpt-5.6-sol",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -152,7 +148,6 @@ def test_qwen_plugin_key_ignores_legacy_settings_field(
     """The migrated Qwen binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "dashscope_api_key", "sk-test")
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["qwen"] == ("Alibaba", "DASHSCOPE_API_KEY")
@@ -161,7 +156,7 @@ def test_qwen_plugin_key_ignores_legacy_settings_field(
             model="qwen3.8-max",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -171,14 +166,11 @@ def test_glm_plugin_key_ignores_legacy_settings_field(
     """The migrated Zhipu binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "zhipu_api_key", "sk-test")
     monkeypatch.delenv("GLM_API_KEY", raising=False)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["glm-"] == ("Zhipu", "GLM_API_KEY")
     with pytest.raises(ValueError, match="GLM_API_KEY"):
-        validate_model_config(
-            model="glm-5.2", config={}, catalog=model_catalog, llm_override=settings.lm.llm_override
-        )
+        validate_model_config(model="glm-5.2", config={}, catalog=model_catalog, llm_override="")
 
 
 def test_kimi_plugin_key_ignores_legacy_settings_field(
@@ -187,14 +179,11 @@ def test_kimi_plugin_key_ignores_legacy_settings_field(
     """The migrated Moonshot binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "moonshot_api_key", "sk-test")
     monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["kimi-"] == ("Moonshot", "MOONSHOT_API_KEY")
     with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
-        validate_model_config(
-            model="kimi-k3", config={}, catalog=model_catalog, llm_override=settings.lm.llm_override
-        )
+        validate_model_config(model="kimi-k3", config={}, catalog=model_catalog, llm_override="")
 
 
 def test_mimo_plugin_key_ignores_legacy_settings_field(
@@ -203,7 +192,6 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
     """The migrated Xiaomi binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "xiaomi_api_key", "sk-test")
     monkeypatch.delenv("MIMO_API_KEY", raising=False)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
 
     assert provider_key_map(catalog=model_catalog)["mimo-"] == ("Xiaomi", "MIMO_API_KEY")
@@ -212,7 +200,7 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
             model="mimo-v2.5-pro",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -226,7 +214,7 @@ def test_file_fallback_allows_key_after_gateway_pop(
             model="deepseek-flash",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
         == "deepseek-flash"
     )
@@ -243,7 +231,7 @@ def test_missing_key_still_fails(
             model="deepseek-flash",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -266,9 +254,7 @@ def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(
         },
     )
     assert (
-        validate_model_config(
-            model=model, config={}, catalog=model_catalog, llm_override=settings.lm.llm_override
-        )
+        validate_model_config(model=model, config={}, catalog=model_catalog, llm_override="")
         == "deepseek-flash"
     )
     assert (
@@ -276,7 +262,7 @@ def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(
             model=None,
             config={"llm_model": model},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
         == "deepseek-flash"
     )
@@ -296,15 +282,13 @@ def test_removed_model_fails_spawn_validation(
 ) -> None:
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
     with pytest.raises(ValueError, match=f"unknown model '{model}'"):
-        validate_model_config(
-            model=model, config={}, catalog=model_catalog, llm_override=settings.lm.llm_override
-        )
+        validate_model_config(model=model, config={}, catalog=model_catalog, llm_override="")
     with pytest.raises(ValueError, match=f"unknown model '{model}'"):
         validate_model_config(
             model=None,
             config={"llm_model": model},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
@@ -315,7 +299,7 @@ def test_unknown_model_still_fails(env_file: Path, *, model_catalog: ModelCatalo
             model="no-such-model-xyz",
             config={},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
+            llm_override="",
         )
 
 
