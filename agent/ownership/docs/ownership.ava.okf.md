@@ -59,5 +59,9 @@ Each cleanup attempts only listed IDs below its cutoff, excluding page sessions,
 through the existing backend identity checks. It never holds the lifecycle lock
 across PTY calls or chases later allocations. Errors stay visible without rolling
 back termination; crash leftovers and late sessions require operator cleanup.
+Graceful post-commit notification, browser-page release and requested shell cleanup
+are independently attempted. A cancellation during browser release cannot skip shell
+cleanup; the first failure is raised after the attempts, with later failures attached
+as notes. Ordinary browser-release errors remain best-effort warnings.
 Execution-child resource closure and admission fences remain separate. See
 [the cleanup decision](../../../docs/decisions/runtime/processes/2026-10-10-termination-pty-cleanup-after-commit.md).

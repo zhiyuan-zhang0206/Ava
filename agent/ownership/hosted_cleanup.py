@@ -37,24 +37,34 @@ async def finish_termination(
     *,
     page_releaser: Callable[[int], Awaitable[object]] = release_agent_chrome_pages,
 ) -> None:
-    """Attempt post-commit effects while preserving a publication failure."""
-    publication_error: BaseException | None = None
+    """Attempt every post-commit effect and preserve the first failure, including cancellation."""
+    primary_error: BaseException | None = None
     try:
         await publish_agent_updated(bus, agent_id)
     except BaseException as exc:
-        publication_error = exc
-    await release_browser_pages(agent_id, page_releaser=page_releaser)
+        primary_error = exc
+    try:
+        await release_browser_pages(agent_id, page_releaser=page_releaser)
+    except BaseException as browser_error:
+        if primary_error is None:
+            primary_error = browser_error
+        else:
+            primary_error.add_note(f"Post-commit browser cleanup also failed: {browser_error!r}")
+            logger.opt(exception=browser_error).error(
+                "termination committed but browser cleanup also failed after publication failure",
+                agent_id=agent_id,
+            )
     try:
         if cutoff is not None and killer is not None:
             await asyncio.to_thread(killer, agent_id, cutoff)
     except BaseException as cleanup_error:
-        if publication_error is None:
+        if primary_error is None:
             raise
-        publication_error.add_note(f"Post-commit shell cleanup also failed: {cleanup_error!r}")
+        primary_error.add_note(f"Post-commit shell cleanup also failed: {cleanup_error!r}")
         logger.opt(exception=cleanup_error).error(
-            "termination committed but shell cleanup also failed after publication failure",
+            "termination committed but shell cleanup also failed after an earlier failure",
             agent_id=agent_id,
             cutoff=cutoff,
         )
-    if publication_error is not None:
-        raise publication_error
+    if primary_error is not None:
+        raise primary_error
