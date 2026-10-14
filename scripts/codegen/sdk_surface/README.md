@@ -12,9 +12,9 @@ marker. Its empty definition name identifies a namespace, not a callable;
 binding the root does not prove any of its members.
 Invalid query syntax raises `ValueError`. A proof retains the exact exposed
 path, actual definition module/name, source location, declaring marker or plugin
-contribution location, and availability. Definition names retain private
-spelling: for example, the `ava.memory.search` declaration leads to `_search`,
-not to a fictional public definition named `search`. A namespace definition has
+contribution location, and availability. Definition names are those of the
+implementing object: for example, the `ava.memory.search` declaration leads to `search_unwrapped`,
+not to a fictional definition named `search`. A namespace definition has
 an empty `definition_name` and its source begins at line 1.
 
 Availability describes declarations, not the live process:

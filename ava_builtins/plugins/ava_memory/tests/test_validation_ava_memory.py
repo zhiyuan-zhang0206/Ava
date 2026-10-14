@@ -19,7 +19,7 @@ class TestMemoryEntries:
             lambda q, k, **_kw: seen.update(q=q, k=k) or [],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
 
-        memory_plugin._search(("query",))  # pyright: ignore[reportArgumentType]
+        memory_plugin.search_unwrapped(("query",))  # pyright: ignore[reportArgumentType]
         assert seen["q"] == "query"
 
     def test_search_query_multi_element_type_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -28,4 +28,4 @@ class TestMemoryEntries:
 
         monkeypatch.setattr(gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="query must be a string"):
-            memory_plugin._search(("a", "b"))  # pyright: ignore[reportArgumentType]
+            memory_plugin.search_unwrapped(("a", "b"))  # pyright: ignore[reportArgumentType]

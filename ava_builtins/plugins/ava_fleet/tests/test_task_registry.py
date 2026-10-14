@@ -704,7 +704,7 @@ def test_failed_notification_policy_lookup_rolls_back_assignment(
         record_notes(db_conn) as send_note,
         # Fleet-plugin tests can replace the sys.modules entry in this xdist
         # worker. Patch the collection-time module that update() calls.
-        patch.object(task_registry, "_is_terminated", side_effect=RuntimeError),
+        patch.object(task_registry, "is_terminated", side_effect=RuntimeError),
         pytest.raises(RuntimeError),
     ):
         task_registry.update(task_id, owner=new_owner, operation_key=str(uuid4()))

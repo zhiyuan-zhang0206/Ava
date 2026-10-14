@@ -30,11 +30,11 @@ from base.agents.tasks.status import TaskStatus
 # The statuses update() may assign to a task. base/agents/tasks/task_status.TaskStatus is
 # the one source of the set (SDK + gateway + DB CHECK + generated frontend
 # types; the system root is permanently in_progress and immutable — see
-# _write_task_update; create() begins every regular task in_progress).
-_STATUSES = frozenset(s.value for s in TaskStatus)
+# write_task_update; create() begins every regular task in_progress).
+TASK_STATUS_VALUES = frozenset(s.value for s in TaskStatus)
 
 
-class _Unset:
+class Unset:
     """Sentinel for update() keyword defaults: tells 'argument not passed'
     (leave the field as-is). Both the sentinel and None mean 'do not change'
     for owner and remind_interval_seconds; only an explicit value triggers a write.
@@ -47,10 +47,10 @@ class _Unset:
         return "<unchanged>"
 
 
-_UNSET = _Unset()
+UNSET_FIELD = Unset()
 
 
-_DEFAULT_PRIORITY = _task_priority.DEFAULT_PRIORITY
+DEFAULT_PRIORITY = _task_priority.DEFAULT_PRIORITY
 _MAX_REMIND_INTERVAL_SECONDS = _task_priority.MAX_REMIND_INTERVAL_SECONDS
 _resolve_create_args = _task_priority.resolve_create_args
 
@@ -74,18 +74,18 @@ def _append_note_to_results(cur, task_id: int, note: str) -> None:  # noqa: ANN0
     )
 
 
-def _validate_status(status: str | None) -> None:
+def validate_status(status: str | None) -> None:
     """Reject a status that is not one of the rungs."""
-    if status is not None and status not in _STATUSES:
-        raise ValueError(f"status must be one of {sorted(_STATUSES)}, got {status!r}")
+    if status is not None and status not in TASK_STATUS_VALUES:
+        raise ValueError(f"status must be one of {sorted(TASK_STATUS_VALUES)}, got {status!r}")
 
 
-def _nothing_to_update(sets: builtins.list[str], note: str | None) -> bool:
+def nothing_to_update(sets: builtins.list[str], note: str | None) -> bool:
     """True when update() received no field to change and no note to append."""
     return not sets and note is None
 
 
-def _owner_actually_changed(
+def owner_actually_changed(
     owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
     old_owner: int | None,
     new_owner: int | None,
@@ -99,10 +99,10 @@ def _owner_is_changing(owner: int | None) -> bool:
     """True when update() received an explicit new owner. owner=None now means
     "no change" (same as not passing it), not "release"; only an explicit agent
     id triggers a reassignment."""
-    return owner is not _UNSET and owner is not None
+    return owner is not UNSET_FIELD and owner is not None
 
 
-def _collect_update_fields(
+def collect_update_fields(
     task_id: int,
     status: str | None,
     title: str | None,
@@ -144,7 +144,7 @@ def _collect_update_fields(
         sets.append("owner = %s")
         params.append(owner)
         changes.append(f"owner → #{owner}")
-    if remind_interval_seconds is not None and remind_interval_seconds is not _UNSET:
+    if remind_interval_seconds is not None and remind_interval_seconds is not UNSET_FIELD:
         _validate_remind_interval_seconds(remind_interval_seconds)
         sets.append("remind_interval_seconds = %s")
         params.append(remind_interval_seconds)
@@ -158,7 +158,7 @@ def _collect_update_fields(
     return sets, params, payload, owner_changing, changes
 
 
-def _write_task_update(
+def write_task_update(
     cur: psycopg.Cursor,
     task_id: int,
     status: str | None,

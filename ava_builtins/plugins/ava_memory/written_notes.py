@@ -44,7 +44,7 @@ def note_location(path: str | Path) -> tuple[str, str] | None:
     if target.suffix != ".md":
         return None
     roots = (
-        ("shared", sdk._pool_root()),
+        ("shared", sdk.pool_root()),
         ("personal", base.paths.workspace_dir(require_agent_id()) / "memory"),
     )
     for scope, root in roots:

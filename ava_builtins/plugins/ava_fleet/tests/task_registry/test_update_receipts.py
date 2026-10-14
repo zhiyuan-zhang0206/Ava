@@ -42,7 +42,9 @@ def test_concurrent_duplicate_note_has_one_business_effect(
         try:
             context = AvaContext(identity=AgentIdentity(actor, True), clients=clients)
             barrier.wait()
-            task_registry._update(context, tid, note="one progress line", operation_key="same")
+            task_registry.update_in_context(
+                context, tid, note="one progress line", operation_key="same"
+            )
         finally:
             clients.close()
 

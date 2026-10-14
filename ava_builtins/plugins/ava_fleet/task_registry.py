@@ -26,15 +26,15 @@ if TYPE_CHECKING:
 
 from ._task_assignment import TaskAssignment, create_and_assign_guarded
 from ._task_update import (
-    _DEFAULT_PRIORITY,
-    _STATUSES,
-    _UNSET,
-    _collect_update_fields,
-    _nothing_to_update,
-    _owner_actually_changed,
-    _Unset,
-    _validate_status,
-    _write_task_update,
+    DEFAULT_PRIORITY,
+    TASK_STATUS_VALUES,
+    UNSET_FIELD,
+    Unset,
+    collect_update_fields,
+    nothing_to_update,
+    owner_actually_changed,
+    validate_status,
+    write_task_update,
 )
 
 # `list` / `get` shadow builtins intentionally: these are the agent-facing names
@@ -63,7 +63,7 @@ def create(
     parent: int,
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
-    priority: str = _DEFAULT_PRIORITY,
+    priority: str = DEFAULT_PRIORITY,
     operation_key: str,
 ) -> Task:
     """Args:
@@ -77,7 +77,7 @@ def create(
     operation_key: reuse the same key and inputs to return the original Task.
         The returned snapshot may be outdated; use get(task.id) for current state.
     """
-    return _create(
+    return create_in_context(
         ava.context,
         title,
         description,
@@ -89,7 +89,7 @@ def create(
     )
 
 
-def _create(
+def create_in_context(
     context: AvaContext,
     title: str,
     description: str,
@@ -97,7 +97,7 @@ def _create(
     parent: int,
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
-    priority: str = _DEFAULT_PRIORITY,
+    priority: str = DEFAULT_PRIORITY,
     operation_key: str,
 ) -> Task:
     """Apply create with one explicit context, including admission revalidation."""
@@ -165,7 +165,7 @@ def create_and_assign(
     machine: str | None = None,
     parent: int,
     remind_interval_seconds: int | None = None,
-    priority: str = _DEFAULT_PRIORITY,
+    priority: str = DEFAULT_PRIORITY,
 ) -> TaskAssignment:
     """Create an agent and its assigned task under one operation key.
 
@@ -215,10 +215,10 @@ def update(
     title: str | None = None,
     description: str | None = None,
     results: str | None = None,
-    owner: int | None = _UNSET,  # type: ignore[assignment]
-    remind_interval_seconds: int | None = _UNSET,  # type: ignore[assignment]
+    owner: int | None = UNSET_FIELD,  # type: ignore[assignment]
+    remind_interval_seconds: int | None = UNSET_FIELD,  # type: ignore[assignment]
     priority: str | None = None,
-    parent_id: int | None = _UNSET,  # type: ignore[assignment]
+    parent_id: int | None = UNSET_FIELD,  # type: ignore[assignment]
     note: str | None = None,
     operation_key: str,
 ) -> None:
@@ -236,7 +236,7 @@ def update(
             replay a committed update without another note or notification.
             Different effective fields with the same key raise ValueError.
     """
-    _update(
+    update_in_context(
         ava.context,
         task_id,
         status=status,
@@ -252,12 +252,12 @@ def update(
     )
 
 
-def _update_value(value: int | _Unset | None) -> int | None:
+def _update_value(value: int | Unset | None) -> int | None:
     """Normalize the two unchanged spellings at typed business-call boundaries."""
-    return None if isinstance(value, _Unset) else value
+    return None if isinstance(value, Unset) else value
 
 
-def _update(
+def update_in_context(
     context: AvaContext,
     task_id: int,
     *,
@@ -265,10 +265,10 @@ def _update(
     title: str | None = None,
     description: str | None = None,
     results: str | None = None,
-    owner: int | _Unset | None = _UNSET,
-    remind_interval_seconds: int | _Unset | None = _UNSET,
+    owner: int | Unset | None = UNSET_FIELD,
+    remind_interval_seconds: int | Unset | None = UNSET_FIELD,
     priority: str | None = None,
-    parent_id: int | _Unset | None = _UNSET,
+    parent_id: int | Unset | None = UNSET_FIELD,
     note: str | None = None,
     operation_key: str,
 ) -> None:
@@ -278,19 +278,19 @@ def _update(
     title = coerce_str(title, "title", allow_none=True)
     description = coerce_str(description, "description", allow_none=True)
     results = coerce_str(results, "results", allow_none=True)
-    if owner is not _UNSET:
+    if owner is not UNSET_FIELD:
         owner = coerce_typed(owner, "owner", int, allow_none=True)
-    if remind_interval_seconds is not _UNSET:
+    if remind_interval_seconds is not UNSET_FIELD:
         remind_interval_seconds = coerce_typed(
             remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
         )
     priority = coerce_str(priority, "priority", allow_none=True)
-    if parent_id is not _UNSET:
+    if parent_id is not UNSET_FIELD:
         parent_id = coerce_typed(parent_id, "parent_id", int, allow_none=True)
     note = coerce_str(note, "note", allow_none=True)
-    _validate_status(status)
+    validate_status(status)
 
-    sets, params, payload, owner_changing, changes = _collect_update_fields(
+    sets, params, payload, owner_changing, changes = collect_update_fields(
         task_id,
         status,
         title,
@@ -300,7 +300,7 @@ def _update(
         _update_value(remind_interval_seconds),
         priority,
     )
-    if _nothing_to_update(sets, note) and parent_id is _UNSET:
+    if nothing_to_update(sets, note) and parent_id is UNSET_FIELD:
         raise ValueError(
             "update needs at least one of status, title, description, results, "
             "owner, remind_interval_seconds, priority, parent_id, note to change"
@@ -310,7 +310,7 @@ def _update(
     # so it must not notify — and therefore must not resurrect — the owner.
     # Batch reparenting used to fire one owner notification per move, each
     # auto-resurrecting a terminated owner (62-agent wake storm, 2026-08-27).
-    parent_only = parent_id is not _UNSET and _nothing_to_update(sets, note)
+    parent_only = parent_id is not UNSET_FIELD and nothing_to_update(sets, note)
     # Reset the reminder counters on any update — a fresh overdue window starts
     # from this update, so any previous reminder is stale. The delegator
     # escalation marker goes with them: clearing it lets the fresh window
@@ -338,10 +338,10 @@ def _update(
     with context.sql.transaction(), context.sql.cursor() as cur:
         if replay_update(cur, actor, task_id, operation_key, request_body, context=context):
             return
-        if parent_id is not _UNSET:
+        if parent_id is not UNSET_FIELD:
             sets.append("parent_id = %s")
             params.append(resolve_reparent(cur, task_id, cast(int | None, parent_id)))
-        old_owner, current_title, new_owner, updated_event = _write_task_update(
+        old_owner, current_title, new_owner, updated_event = write_task_update(
             cur,
             task_id,
             status,
@@ -355,7 +355,7 @@ def _update(
             owner_changing,
             actor,
         )
-        if parent_id is not _UNSET:
+        if parent_id is not UNSET_FIELD:
             changes.append("parent → root" if parent_id is None else f"parent → #{parent_id}")
         note_events = _queue_after_update(
             cur,
@@ -365,7 +365,7 @@ def _update(
             new_owner,
             actor,
             changes,
-            owner_changed=_owner_actually_changed(owner_changing, old_owner, new_owner),
+            owner_changed=owner_actually_changed(owner_changing, old_owner, new_owner),
             parent_only=parent_only,
         )
         record_update(cur, actor, task_id, operation_key, request_body)
@@ -404,7 +404,7 @@ def _queue_after_update(
         return _queue_owner_change(
             cur, task_id, title, old_owner, new_owner, actor, changes=changes
         )
-    if new_owner is not None and actor != new_owner and not _is_terminated(cur, new_owner):
+    if new_owner is not None and actor != new_owner and not is_terminated(cur, new_owner):
         return _queue_owner_updated(cur, task_id, title, new_owner, actor, changes)
     return []
 
@@ -428,7 +428,7 @@ def _queue_owner_change(
         old_owner,
         new_owner,
         actor=actor,
-        previous_owner_terminated=old_owner is None or _is_terminated(cur, old_owner),
+        previous_owner_terminated=old_owner is None or is_terminated(cur, old_owner),
         description=description,
         changes=changes,
     )
@@ -458,7 +458,7 @@ def _queue_owner_updated(
     return [receipt.event for receipt in receipts if receipt.event is not None]
 
 
-def _is_terminated(cur: psycopg.Cursor, agent_id: int) -> bool:
+def is_terminated(cur: psycopg.Cursor, agent_id: int) -> bool:
     """True when an agent is gone -- terminated, or absent from agents_meta.
 
     Gates only the previous-owner notification: a terminated former owner is
@@ -544,8 +544,8 @@ def list(
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     status = coerce_str(status, "status", allow_none=True)
     recursive = coerce_typed(recursive, "recursive", bool)
-    if status is not None and status not in _STATUSES:
-        raise ValueError(f"status must be one of {sorted(_STATUSES)}, got {status!r}")
+    if status is not None and status not in TASK_STATUS_VALUES:
+        raise ValueError(f"status must be one of {sorted(TASK_STATUS_VALUES)}, got {status!r}")
 
     sql, params = _build_list_query(parent, owner, status, recursive)
     with ava.DB.cursor() as cur:
