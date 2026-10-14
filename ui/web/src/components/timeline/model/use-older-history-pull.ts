@@ -6,8 +6,6 @@ const PULL_SPACE_PX = 80;
 const PULL_THRESHOLD_PX = 64;
 const AT_TOP_PX = 1;
 
-const contentHeight = (viewport: HTMLElement) => viewport.scrollHeight - PULL_SPACE_PX;
-
 type Phase = "idle" | "scrolling" | "pulling" | "loading" | "returning";
 interface PullGesture {
   phase: Phase;
@@ -35,7 +33,8 @@ export function useOlderHistoryPull(
   const gesture = useRef(freshGesture());
   const [visual, setVisual] = useState({ threadKey, offset: 0, returning: false });
   if (visual.threadKey !== threadKey) setVisual({ threadKey, offset: 0, returning: false });
-  useLayoutEffect(() => { latest.current = { canLoad, loadPage, onUpwardIntent }; });
+  const contentHeight = useCallback((viewport: HTMLElement) =>
+    viewport.scrollHeight - (gesture.current.viewport ? PULL_SPACE_PX : 0), []);
 
   const show = useCallback((offset: number, returning = false) => {
     setVisual((previous) => previous.offset === offset && previous.returning === returning
@@ -54,6 +53,9 @@ export function useOlderHistoryPull(
     const content = contentRef.current;
     if (!space || !content) return;
     const current = gesture.current;
+    // Empty/exhausted views need no artificial scroll range. Once prepared,
+    // keep it fixed through a request and its final history landing.
+    if (!current.viewport && !latest.current.canLoad()) return;
     if (!current.viewport) current.minHeight = content.style.minHeight;
     current.viewport = viewport;
     // Prepare before hit-testing the first wheel. Adding range from inside
@@ -62,6 +64,12 @@ export function useOlderHistoryPull(
     space.style.height = `${PULL_SPACE_PX}px`;
     if (current.phase === "idle" && viewport.scrollTop < PULL_SPACE_PX) viewport.scrollTop = PULL_SPACE_PX;
   }, [spaceRef, contentRef]);
+
+  useLayoutEffect(() => {
+    latest.current = { canLoad, loadPage, onUpwardIntent };
+    const viewport = spaceRef.current?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (viewport) prepare(viewport);
+  });
 
   useLayoutEffect(() => {
     gesture.current = freshGesture();
@@ -108,6 +116,7 @@ export function useOlderHistoryPull(
 
   const onScroll = useCallback((viewport: HTMLElement) => {
     const current = gesture.current;
+    if (!current.viewport) return false;
     if (current.phase === "pulling" || current.phase === "returning") {
       const offset = Math.max(0, PULL_SPACE_PX - viewport.scrollTop);
       const hadOffset = current.offset > 0;
@@ -140,6 +149,7 @@ export function useOlderHistoryPull(
     }
     if (event.deltaY === 0) return;
     if (event.deltaY < 0) latest.current.onUpwardIntent();
+    if (!current.viewport) return;
     const momentum = (event as WheelEvent & { readonly momentum?: boolean }).momentum;
     const atTop = viewport.scrollTop <= PULL_SPACE_PX + AT_TOP_PX;
     if (momentum === true) {
