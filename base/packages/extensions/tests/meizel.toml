@@ -1,2 +1,8 @@
+[uses]
+"test_install_registry.py" = ["_mutator_child.py"]
+
 [debt.first-party-patch]
 "test_materialize.py#monkeypatch.setattr base.packages.extensions.materialize.last_written_hash" = 4
+
+[debt.stdlib-patch]
+"_mutator_child.py#assignment os.replace" = 1

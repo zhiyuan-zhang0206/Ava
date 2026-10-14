@@ -40,12 +40,21 @@ exports = ["cancel_fixture.py"]
 "test_multiple_tool_calls.py#monkeypatch.setattr agent.graph.exec.node.run_agent_code" = 7
 "test_multiple_tool_calls.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2
 
+[debt.private-module]
+"test_exec_protocol.py -> resources/_envelope_crash_child.py" = 1
+
+[debt.restricted-python]
+"test_exec_process.py#python -c" = 3
+
 [debt.stdlib-patch]
 "test_exec_editable_guard.py#monkeypatch.setattr os.environ" = 1
 "test_exec_output_crop.py#monkeypatch.setattr pathlib.Path.chmod" = 1
 "test_exec_output_crop.py#monkeypatch.setattr pathlib.Path.open" = 1
 "test_exec_output_crop.py#monkeypatch.setattr pathlib.Path.unlink" = 1
 "test_exec_turn_config.py#monkeypatch.setattr asyncio.wait_for" = 1
+
+[debt.undeclared-edge]
+"test_exec_protocol.py -> resources/_envelope_crash_child.py" = 1
 
 [debt.unresolved-patch]
 "test_exec_output_crop.py#monkeypatch.setattr crop_config.exec_output_crop_after_lines" = 2

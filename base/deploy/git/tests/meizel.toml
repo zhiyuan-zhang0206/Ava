@@ -25,6 +25,9 @@
 "test_source_tree_guard.py#monkeypatch.setattr base.deploy.git.source_tree_guard.git" = 2
 "test_source_tree_guard.py#monkeypatch.setattr base.paths.ava_home" = 10
 
+[debt.restricted-python]
+"test_worktree_guard.py#python -c" = 2
+
 [debt.stdlib-patch]
 "test_memory_repo.py#monkeypatch.setattr subprocess.run" = 2
 

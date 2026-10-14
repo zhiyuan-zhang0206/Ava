@@ -1,5 +1,8 @@
 exports = ["test_provider_plugins.py"]
 
+[uses]
+"test_fresh_catalog_process.py" = ["_fresh_catalog_child.py"]
+
 [debt.env-patch]
 "test_validate_model_config.py#monkeypatch.delenv os.environ.ANTHROPIC_API_KEY" = 1
 "test_validate_model_config.py#monkeypatch.delenv os.environ.DASHSCOPE_API_KEY" = 1

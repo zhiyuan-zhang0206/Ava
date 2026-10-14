@@ -6,3 +6,4 @@ exports = ["model_owner.py", "sdk.py", "workspace.py"]
 [debt.first-party-patch]
 "gateway.py#monkeypatch.setattr gateway.app.app.state.gateway_process_input" = 1
 "model_owner.py#monkeypatch.setattr ava.__plugin_installation__" = 1
+"sdk.py#del ava.context" = 1

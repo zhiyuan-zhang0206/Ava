@@ -2,6 +2,8 @@ exports = ["capture"]
 
 [uses]
 "_lower_exit_child.py" = ["otlp"]
+"test_emitter_lifecycle.py" = ["_emitter_lifecycle_child.py"]
+"test_lower_telemetry_exit.py" = ["_lower_exit_child.py"]
 "test_observability.py" = ["otlp"]
 "test_pipeline_sink_isolation.py" = ["otlp"]
 "test_telemetry.py" = ["otlp"]
@@ -20,6 +22,7 @@ exports = ["capture"]
 "test_tracing_lifecycle.py#monkeypatch.setenv os.environ.TRACELOOP_TRACE_CONTENT" = 1
 
 [debt.first-party-patch]
+"_lower_exit_child.py#assignment base.telemetry.tracing._arm_tracing" = 1
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.emit" = 2
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.emit_prepared" = 7
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.event_id" = 1
@@ -35,6 +38,7 @@ exports = ["capture"]
 "test_telemetry.py#monkeypatch.setattr base.cluster.home_slug" = 2
 "test_telemetry.py#monkeypatch.setattr base.paths.logs_dir" = 2
 "test_telemetry.py#monkeypatch.setattr base.telemetry.delivery.mirror.JSONL_RETENTION_DAYS" = 1
+"test_telemetry_event_store.py#assignment base.telemetry.event_store.retry_at" = 1
 "test_telemetry_event_store.py#monkeypatch.setattr base.telemetry.event_store.emit" = 1
 "test_telemetry_event_store.py#monkeypatch.setattr base.telemetry.event_store.write" = 3
 "test_telemetry_otlp_gate.py#monkeypatch.setattr base.cluster.derive.home_label" = 4
@@ -54,7 +58,11 @@ exports = ["capture"]
 "test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing._arm_tracing" = 2
 "test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing._state" = 1
 
+[debt.restricted-python]
+"test_telemetry_otlp_exit_delivery.py#python -c" = 1
+
 [debt.stdlib-patch]
+"_emitter_lifecycle_child.py#assignment threading.Thread" = 1
 "test_emitter_lifecycle.py#monkeypatch.setattr threading.Thread" = 1
 
 [debt.third-party-patch]

@@ -4,3 +4,6 @@ exports = ["feishu.py", "feishu_ws_proxy.py", "telegram.py", "weixin.py", "weixi
 "feishu.py" = ["feishu_inbound.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py"]
 "feishu_inbound.py" = ["feishu_poll_cursor.py"]
 "weixin_login.py" = ["weixin.py"]
+
+[debt.third-party-patch]
+"feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = 1

@@ -25,6 +25,9 @@ exports = ["recovery_admission.py", "test_hosted_lifecycle.py", "test_predecesso
 "test_predecessor_closure.py#monkeypatch.setattr base.deploy.maintenance.admission.pending_command" = 1
 "test_predecessor_closure.py#monkeypatch.setattr base.deploy.maintenance.admission.record_drained" = 1
 
+[debt.restricted-python]
+"test_hosted_backlog_recovery.py#python -c" = 1
+
 [debt.third-party-patch]
 "test_hosted_dispatcher_cancellation.py#monkeypatch.setattr psycopg_pool.AsyncConnectionPool._check_connection" = 1
 

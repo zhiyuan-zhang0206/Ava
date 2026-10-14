@@ -1,6 +1,7 @@
 exports = ["child.py", "domain_owner.py"]
 
 [uses]
+"domain_owner.py" = ["owner_child.py"]
 "owner_child.py" = ["child.py"]
 "tests" = ["child.py", "owner_child.py"]
 

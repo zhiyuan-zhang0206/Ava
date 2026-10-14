@@ -1,4 +1,4 @@
-exports = ["build_okf_data.py", "gen_event_registry.py", "gen_pyright_test_environments.py"]
+exports = ["build_okf_data.py", "dump_openapi.py", "gen_config_lite_table.py", "gen_event_registry.py", "gen_pyright_test_environments.py"]
 
 [uses]
 "tests" = ["build_app_update_manifest.py"]

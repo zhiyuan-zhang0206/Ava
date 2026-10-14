@@ -1,7 +1,7 @@
 exports = ["admission.py"]
 
 [uses]
-"restart" = ["admission.py"]
+"restart" = ["admission.py", "child.py"]
 "test_application_proof.py" = ["admission.py"]
 "test_claim_response.py" = ["admission.py"]
 "test_closing_anchor.py" = ["admission.py", "faults.py"]

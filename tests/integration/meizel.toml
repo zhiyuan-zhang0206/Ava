@@ -1,8 +1,24 @@
+[uses]
+"test_schedule_runner_cleanup.py" = ["child_schedule_runner.py"]
+
 [debt.env-patch]
 "test_cluster_instance.py#monkeypatch.setenv os.environ" = 1
 "test_cluster_instance.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
 
 [debt.first-party-patch]
+"child_schedule_runner.py#assignment ava.ensure_plugins_loaded" = 2
+"child_schedule_runner.py#assignment base.config.settings.gateway.schedule_stall_timeout_seconds" = 1
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.FAILURE_RECORD_DEADLINE_S" = 2
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.StallGuard._sample" = 1
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.base.host.proc.kill_process_tree" = 1
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.finish_completed" = 2
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.load" = 1
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.record_error" = 3
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.record_run_end" = 1
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.record_run_start" = 1
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.runpy.run_path" = 1
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.schedule_dir" = 1
+"child_schedule_runner.py#assignment services.wake.schedule_manager.engine.settings.gateway.schedule_stall_timeout_seconds" = 1
 "test_cluster_instance.py#monkeypatch.setattr base.cluster.get_record" = 2
 "test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane" = 1
 "test_cluster_instance.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
@@ -19,3 +35,10 @@
 "test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.reserve_delivery" = 1
 "test_termination_shell_cleanup.py#monkeypatch.setattr agent.ownership.hosted_cleanup.publish_agent_updated" = 1
 "test_termination_shell_cleanup.py#monkeypatch.setattr base.agents.incarnation.exec_request_evidence.exec_run_dir" = 2
+
+[debt.restricted-python]
+"test_schedule_runner_cleanup.py#python -c" = 1
+
+[debt.stdlib-patch]
+"child_schedule_runner.py#del selectors.__file__" = 1
+"child_schedule_runner.py#del subprocess.__file__" = 1

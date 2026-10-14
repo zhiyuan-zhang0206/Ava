@@ -1,3 +1,6 @@
+[uses]
+"test_gateway_entry_imports_httpx.py" = ["child_gateway_httpx_probe.py"]
+
 [debt.first-party-patch]
 "test_alert_classes.py#monkeypatch.setattr gateway.cluster.alert_classes.ALERT_CLASSES_LIMIT" = 1
 "test_alert_classes.py#monkeypatch.setattr gateway.cluster.alert_classes.SAMPLES_LIMIT" = 1

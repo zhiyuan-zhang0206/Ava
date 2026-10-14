@@ -5,6 +5,14 @@ exports = ["metrics.py"]
 "plugin.py" = ["sdk.py", "written_notes.py"]
 "services.py" = ["default_config.py"]
 "skills" = ["pool_ops.py"]
-"tests" = ["agent_runtime.py", "default_config.py", "inherit.py", "notes.py", "plugin.py", "pool_ops.py", "sdk.py", "services.py", "template", "written_notes.py"]
+"tests" = ["agent_runtime.py", "default_config.py", "inherit.py", "notes.py", "plugin.py", "pool_ops.py", "sdk.py", "services.py", "skills", "template", "written_notes.py"]
 "write_checks.py" = ["template"]
 "written_notes.py" = ["agent_runtime.py", "sdk.py"]
+
+[debt.not-exported]
+"pool_ops.py -> skills/scripts/gen_indexes.py" = 1
+"pool_ops.py -> skills/scripts/rebuild_memory_index.py" = 1
+
+[debt.undeclared-edge]
+"pool_ops.py -> skills/scripts/gen_indexes.py" = 1
+"pool_ops.py -> skills/scripts/rebuild_memory_index.py" = 1

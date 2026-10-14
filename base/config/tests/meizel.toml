@@ -2,6 +2,7 @@ exports = ["config_authority.py", "configuration.py", "served_gateway_home.py"]
 
 [uses]
 "conftest.py" = ["config_authority.py"]
+"test_config_boot_owner.py" = ["_boot_owner_child.py"]
 
 [debt.env-patch]
 "configuration.py#patch.dict os.environ" = 1
@@ -23,9 +24,14 @@ exports = ["config_authority.py", "configuration.py", "served_gateway_home.py"]
 "test_unit_home.py#monkeypatch.setenv os.environ.AVA_HOME" = 2
 
 [debt.first-party-patch]
+"_boot_lite_child.py#assignment base.config._full.build" = 8
+"_boot_lite_child.py#assignment base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 2
 "served_gateway_home.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config._full.build" = 2
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.load_ava_env" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config.settings" = 1
 "test_runtime_config.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
+
+[debt.restricted-python]
+"test_config_boot_lite.py#python subprocess with arguments built with *" = 1

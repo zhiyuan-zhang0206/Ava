@@ -1,3 +1,6 @@
+[uses]
+"test_throwaway_storage.py" = ["child_throwaway_storage.py"]
+
 [debt.first-party-patch]
 "test_database_gate.py#monkeypatch.setattr base.db.connections.connect" = 1
 "test_database_gate.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1

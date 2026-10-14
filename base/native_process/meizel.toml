@@ -1,4 +1,4 @@
-exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "exec_kill_notice.py", "loaded_commit.py", "os_platform.py", "ownership.py", "root_control", "runtime_incarnation.py", "stop_timing.py", "turn_identity.py"]
+exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "exec_kill_notice.py", "loaded_commit.py", "os_platform.py", "ownership.py", "reparent.py", "root_control", "runtime_incarnation.py", "stop_timing.py", "turn_identity.py"]
 
 [uses]
 "code_version.py" = ["loaded_commit.py"]

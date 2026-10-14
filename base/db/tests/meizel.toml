@@ -1,5 +1,9 @@
 exports = ["fakes.py", "live_agents.py"]
 
+[uses]
+"test_boot_authority.py" = ["_boot_authority_child.py"]
+"test_connect_helpers.py" = ["_stale_worker_child.py"]
+
 [debt.env-patch]
 "test_db_guard.py#monkeypatch.delenv os.environ.AVA_TEST_DB" = 5
 "test_db_guard.py#monkeypatch.setenv os.environ.AVA_TEST_DB" = 4

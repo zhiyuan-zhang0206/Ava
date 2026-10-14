@@ -9,3 +9,6 @@
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.run_locked_backup" = 1
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.run_with_progress" = 1
 "test_run_with_progress_without_a_sink_defers.py#monkeypatch.setattr services.backup.dump.subprocess.run" = 1
+
+[debt.restricted-python]
+"test_run_with_progress_without_a_sink_defers.py#python subprocess that runs something other than a literal repository file" = 2

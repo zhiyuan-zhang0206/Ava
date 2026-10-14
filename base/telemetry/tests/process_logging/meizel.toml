@@ -1,7 +1,13 @@
+[uses]
+"test_log_init_idempotent.py" = ["_log_init_child.py"]
+
 [debt.first-party-patch]
+"_log_init_child.py#assignment base.host.env.bootstrap.fetch_bootstrap_config" = 1
+"test_event_pipeline_adapter.py#assignment base.telemetry.process_logging.log_info_sample_counter" = 3
 "test_log_batching.py#monkeypatch.setattr base.paths.logs_dir" = 1
 "test_log_batching.py#monkeypatch.setattr base.telemetry.delivery.loss.report_loss" = 1
 "test_log_batching.py#monkeypatch.setattr base.telemetry.delivery.mirror.jsonl_failures" = 1
+"test_log_init_idempotent.py#assignment base.log.process.init_done" = 2
 "test_log_init_idempotent.py#patch.object base.log.process.add_file_sink" = 8
 "test_log_init_idempotent.py#patch.object base.log.process.logger.add" = 9
 "test_log_init_idempotent.py#patch.object base.log.process.logger.configure" = 2

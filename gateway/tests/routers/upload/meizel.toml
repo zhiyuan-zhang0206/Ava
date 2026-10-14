@@ -1,4 +1,8 @@
+[uses]
+"test_upload_batch_faults.py" = ["child_batch_writer.py"]
+
 [debt.first-party-patch]
+"child_batch_writer.py#assignment gateway.routers.upload.batches.publish_files" = 1
 "test_upload_batch_faults.py#monkeypatch.setattr gateway.routers.upload.batches.publish_files" = 1
 "test_upload_batch_faults.py#monkeypatch.setattr gateway.routers.upload.batches.write_transaction" = 1
 "test_upload_batch_identity.py#monkeypatch.setattr base.lm.factory.model_supports_vision" = 1
@@ -9,5 +13,6 @@
 "test_upload_endpoint.py#monkeypatch.setattr gateway.routers.upload.router.MAX_UPLOAD_BYTES" = 1
 
 [debt.stdlib-patch]
+"child_batch_writer.py#assignment os.link" = 1
 "test_upload_batch_identity.py#monkeypatch.setattr pathlib.Path.home" = 1
 "test_upload_endpoint.py#monkeypatch.setattr pathlib.Path.home" = 18

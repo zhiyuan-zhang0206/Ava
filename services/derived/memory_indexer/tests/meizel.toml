@@ -2,6 +2,7 @@ exports = ["fake_provider.py"]
 
 [uses]
 "test_memory_indexer_config.py" = ["fake_provider.py"]
+"test_memory_indexer_import.py" = ["child_daemon_import.py"]
 
 [debt.env-patch]
 "test_memory_search_reconcile.py#patch.dict os.environ" = 1

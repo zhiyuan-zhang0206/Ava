@@ -1,3 +1,6 @@
+[uses]
+"test_test_selector.py" = ["child_estimate_seconds.py"]
+
 [debt.env-patch]
 "test_test_selector.py#monkeypatch.delenv os.environ.TEST_SELECTION_MODE" = 1
 "test_test_selector.py#monkeypatch.setenv os.environ.TEST_SELECTION_MODE" = 1
@@ -17,7 +20,9 @@
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.require_preview" = 1
 
 [debt.restricted-python]
-"test_test_selector.py#python -c source that imports first-party code" = 1
+"test_hooks_scratch_home.py#python -c" = 1
+"test_test_selector.py#python -c" = 1
+"test_worktree_guard.py#python -c" = 2
 
 [debt.stdlib-patch]
 "test_pr_flow_export.py#monkeypatch.setattr pathlib.Path.replace" = 1

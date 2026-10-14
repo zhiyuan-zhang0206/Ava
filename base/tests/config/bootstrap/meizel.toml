@@ -1,3 +1,6 @@
+[uses]
+"test_config_lite_parity.py" = ["_lite_parity_child.py"]
+
 [debt.env-patch]
 "test_impersonation_config.py#monkeypatch.setenv os.environ" = 1
 

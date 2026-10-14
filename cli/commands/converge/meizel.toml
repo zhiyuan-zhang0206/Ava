@@ -12,3 +12,6 @@ exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py
 "steps.py" = ["spec.py"]
 "tests" = ["health_preflight.py", "os_jobs.py", "spec.py", "steps.py"]
 "walg.py" = ["spec.py"]
+
+[debt.restricted-python]
+"steps.py#python subprocess that runs something other than a literal repository file" = 1

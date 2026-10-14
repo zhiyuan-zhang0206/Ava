@@ -7,6 +7,8 @@
 "test_web_search.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
+"test_web_injection.py#assignment ava.state" = 1
+"test_web_injection.py#assignment ava.state_update" = 1
 "test_web_injection.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 2
 "test_web_injection.py#monkeypatch.setattr base.config.settings.web.web_fetch_injection_check_enabled" = 1
 "test_web_injection.py#monkeypatch.setattr base.lm.decision.call.decide" = 5

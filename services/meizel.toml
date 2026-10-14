@@ -5,7 +5,7 @@ exports = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfi
 "backup" = ["pidfile.py"]
 "derived" = ["pidfile.py"]
 "entrypoints" = ["pidfile.py"]
-"supervision" = ["agent_runner", "derived", "desktop", "entrypoints", "wake"]
+"supervision" = ["agent_runner", "derived", "desktop", "entrypoints", "redis_bridge", "wake"]
 "tests" = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfile.py", "upkeep", "wake"]
 "upkeep" = ["pidfile.py"]
 "wake" = ["pidfile.py"]
@@ -14,3 +14,7 @@ exports = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfi
 "tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_hard_exit" = 1
 "tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_is_running" = 1
 "tests/test_backup_process_composition.py -> backup/scheduler/daemon.py#_remove_pidfile" = 2
+
+[debt.undeclared-edge]
+"desktop/permissions_helper/tests/permissions_helper/test_root_keeper_method_requests_and_results.py -> supervision/ava_root/__init__.py" = 1
+"desktop/permissions_helper/tests/permissions_helper/test_root_keeper_method_requests_and_results.py -> supervision/ava_root/__main__.py" = 1

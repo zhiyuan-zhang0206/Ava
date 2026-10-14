@@ -19,5 +19,14 @@ exports = ["conftest.py", "fakes", "process_support.py", "visual"]
 "conftest.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
 "test_fixture_dependencies.py#monkeypatch.setenv os.environ.PYTHONPATH" = 2
 
+[debt.first-party-patch]
+"_credentials.py#assignment base.config.settings.data_plane.cluster_secret" = 2
+"conftest.py#assignment base.config.settings.data_plane.db_url" = 2
+"conftest.py#assignment base.config.settings.data_plane.events_channel" = 2
+"conftest.py#assignment base.config.settings.data_plane.redis_url" = 2
+
+[debt.stdlib-patch]
+"process_support.py#assignment sys.argv" = 1
+
 [debt.third-party-patch]
 "_credentials.py#monkeypatch.setattr httpx.Client.send" = 1

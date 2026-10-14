@@ -18,5 +18,8 @@ exports = []
 "test_plugins_config_runtime.py#monkeypatch.setattr base.paths.ava_home" = 1
 "test_plugins_config_runtime.py#monkeypatch.setattr base.paths.plugins_dir" = 1
 
+[debt.restricted-python]
+"test_config_boot_race.py#python -c" = 1
+
 [debt.unresolved-patch]
 "test_flags.py#monkeypatch.setattr type(settings).has_domain" = 1

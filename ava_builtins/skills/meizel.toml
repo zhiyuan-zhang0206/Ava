@@ -1,0 +1,4 @@
+exports = ["coordination"]
+
+[uses]
+"tests" = ["integrations", "practice"]

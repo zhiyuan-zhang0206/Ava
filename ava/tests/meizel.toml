@@ -1,6 +1,11 @@
 [external]
 "test_self_evolution_evaluate.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 
+[uses]
+"test_agent_identity.py" = ["bootstrap"]
+"test_log_batching.py" = ["bootstrap"]
+"test_metering_ava.py" = ["bootstrap"]
+
 [debt.env-patch]
 "test_agent_identity.py#monkeypatch.delenv os.environ.AVA_AGENT_ID" = 6
 "test_agent_identity.py#monkeypatch.setenv os.environ.AVA_AGENT_ID" = 6
@@ -14,10 +19,14 @@
 [debt.first-party-patch]
 "test_agent_identity.py#monkeypatch.setattr ava.DB.cursor" = 1
 "test_agent_identity.py#monkeypatch.setattr ava.gateway_client.post" = 1
+"test_attachment_transport.py#assignment ava.state" = 1
+"test_attachment_transport.py#assignment ava.state_update" = 1
 "test_attachment_transport.py#monkeypatch.setattr ava.__plugin_installation__" = 9
 "test_attachment_transport.py#monkeypatch.setattr ava.files.agent_identity.agent_id" = 1
 "test_attachment_transport.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 6
 "test_core.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
+"test_security.py#assignment ava.state" = 2
+"test_security.py#assignment ava.state_update" = 2
 "test_security.py#monkeypatch.setattr ava.security.logger.warning" = 1
 "test_security.py#monkeypatch.setattr base.config.settings.agent.security_scan_enabled" = 1
 "test_self_evolution_evaluate.py#monkeypatch.setattr ava.agents.spawn" = 1

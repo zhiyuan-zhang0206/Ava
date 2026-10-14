@@ -1,0 +1,2 @@
+[uses]
+"test_machine_value_imports.py" = ["_machine_import_child.py"]

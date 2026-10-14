@@ -1,7 +1,10 @@
 exports = ["staging.py", "worker_process.py"]
 
 [uses]
-"worker_process.py" = ["staging.py"]
+"worker_process.py" = ["staging.py", "worker_bootstrap.py"]
 
 [loads]
 "worker_bootstrap.py" = ["services/backup/scheduler"]
+
+[debt.stdlib-patch]
+"worker_bootstrap.py#assignment sys.argv" = 1

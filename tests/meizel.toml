@@ -20,3 +20,7 @@ exports = ["components", "e2e", "factories", "fixtures", "path_scoped", "scripts
 "ci/test_owned_gateway_port.py -> e2e/_ports.py" = 1
 "harness/test_e2e_truncate_retry.py -> e2e/_truncate.py" = 1
 "ui/test_visual_snapshot.py -> e2e/visual/_visual_snapshot.py" = 1
+
+[debt.stdlib-patch]
+"_asyncio_stall_probe.py#assignment asyncio.events.new_event_loop" = 2
+"_asyncio_stall_probe.py#assignment asyncio.new_event_loop" = 2

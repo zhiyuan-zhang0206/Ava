@@ -1,3 +1,9 @@
+[uses]
+"test_config_boot_lite_base.py" = ["_config_child.py"]
+"test_config_env_values.py" = ["_config_child.py"]
+"test_config_fetch_source.py" = ["_config_child.py"]
+"test_home_resolution.py" = ["_config_child.py"]
+
 [debt.env-patch]
 "test_cluster_tz.py#monkeypatch.delenv os.environ.TZ" = 2
 "test_config_boot_lite_base.py#monkeypatch.setenv os.environ.AVA_HOME" = 1
@@ -29,6 +35,7 @@
 "test_cluster_tz.py#monkeypatch.setattr base.config.settings.general" = 2
 "test_config_env_values.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 12
 "test_config_env_values.py#monkeypatch.setattr base.log.logger" = 1
+"test_config_lifecycle.py#assignment base.config.config_registry.DOMAIN_MODELS" = 2
 "test_config_profiles.py#monkeypatch.setattr base.config.config_registry.DOMAIN_MODELS" = 2
 "test_config_profiles.py#monkeypatch.setattr base.config.settings" = 3
 "test_config_registry.py#monkeypatch.setattr base.config.config_registry.DOMAIN_MODELS" = 1

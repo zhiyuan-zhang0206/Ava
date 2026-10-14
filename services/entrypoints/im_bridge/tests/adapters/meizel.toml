@@ -26,10 +26,14 @@ exports = ["weixin_native.py"]
 
 [debt.first-party-patch]
 "test_feishu_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.feishu.logger" = 2
+"test_feishu_worker_exit.py#assignment services.entrypoints.im_bridge.daemon.run" = 1
 "test_prepared_timeline.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 2
 "test_segment_retry_safety.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 1
 "test_services_weixin_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.weixin.load_account" = 1
 "test_telegram_adapter.py#monkeypatch.setattr services.entrypoints.im_bridge.adapters.telegram.logger" = 3
+
+[debt.not-exported]
+"test_feishu_worker_exit.py -> feishu_adapter/child_blocked_ws.py" = 1
 
 [debt.private-name]
 "test_prepared_timeline.py -> test_telegram_adapter.py#_config" = 1
@@ -41,6 +45,9 @@ exports = ["weixin_native.py"]
 "test_feishu_adapter.py#monkeypatch.setattr lark_oapi.Client.builder" = 1
 "test_feishu_adapter.py#monkeypatch.setattr lark_oapi.ws.client._ws_connect_kwargs" = 1
 "test_feishu_adapter.py#monkeypatch.setattr websockets.connect" = 1
+
+[debt.undeclared-edge]
+"test_feishu_worker_exit.py -> feishu_adapter/child_blocked_ws.py" = 1
 
 [debt.unresolved-patch]
 "test_feishu_owner_seed.py#monkeypatch.setattr adapter.send" = 1
