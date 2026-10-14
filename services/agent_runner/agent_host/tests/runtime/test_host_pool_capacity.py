@@ -18,6 +18,7 @@ from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from base.clock import SYSTEM_TIMERS
+from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -151,13 +152,14 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     """The default 64 leases fit; the 65th waits without blocking control.
 
     The old 20-client workload pool cannot reach this borrower barrier.
     """
     with (
-        postgres(machine_name=machine_identity.name) as direct,
+        postgres(config=throwaway_config, machine_name=machine_identity.name) as direct,
         pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
     ):
         # The host pools dial the cluster's access URL, which is this pooler.
@@ -319,6 +321,7 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     """Exercise six pool pairs without claiming a thousand full agent turns.
 
@@ -329,7 +332,7 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
     """
     started = time.monotonic()
     with (
-        postgres(machine_name=machine_identity.name) as direct,
+        postgres(config=throwaway_config, machine_name=machine_identity.name) as direct,
         pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
     ):
         # The host pools dial the cluster's access URL, which is this pooler.

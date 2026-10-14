@@ -67,7 +67,9 @@ def wait_port(port: int, timeout: float = 30.0, host: str = "127.0.0.1") -> None
 
 
 @contextmanager
-def postgres(*, machine_name: Callable[[], str], watch_stalls: bool = True) -> Generator[str]:
+def postgres(
+    *, config: ThrowawayConfig, machine_name: Callable[[], str], watch_stalls: bool = True
+) -> Generator[str]:
     """A throwaway Postgres cluster with db/schema.sql + checkpoint tables + all
     pending migrations applied, ready for the test suite. Yields a psycopg
     connection URL.
@@ -84,7 +86,7 @@ def postgres(*, machine_name: Callable[[], str], watch_stalls: bool = True) -> G
     from base.deploy.schema.migrations import apply_pending_migrations
 
     with throwaway_postgres(
-        schema_sql=_SCHEMA_SQL.read_text(), watch_stalls=watch_stalls, config=ThrowawayConfig(None)
+        schema_sql=_SCHEMA_SQL.read_text(), watch_stalls=watch_stalls, config=config
     ) as url:
         # Non-autocommit conn: apply_pending_migrations manages its own
         # per-migration transactions + advisory lock.

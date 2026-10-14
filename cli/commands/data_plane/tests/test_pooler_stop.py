@@ -139,6 +139,7 @@ def native_pooler(
     monkeypatch: pytest.MonkeyPatch,
     postgres_access: None,
     data_plane_config: DataPlaneConfig,
+    throwaway_config: ThrowawayConfig,
 ) -> Iterator[tuple[OwnedPooler, str, str]]:
     binary = pooler.pgbouncer_bin()
     if not (Path(binary).exists() or shutil.which(binary)):
@@ -154,7 +155,7 @@ def native_pooler(
     directory.mkdir()
     config = directory / "pgbouncer.ini"
     (directory / "userlist.txt").write_text('"ava" ""\n"ava_pooler_admin" ""\n')
-    with throwaway_postgres(config=ThrowawayConfig(None)) as direct:
+    with throwaway_postgres(config=throwaway_config) as direct:
         backend_port = urlsplit(direct).port
         assert backend_port is not None
         identity, port = _start_private_pooler(binary, directory, backend_port)

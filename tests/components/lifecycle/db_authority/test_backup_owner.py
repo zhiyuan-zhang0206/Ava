@@ -110,7 +110,10 @@ def _assert_owner_dial(conninfo: str) -> None:
 
 
 def test_scheduled_backup_dumps_as_the_owner_and_restores(
-    maintenance: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    maintenance: Born,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     from services.backup import restore_drill
     from services.backup.scheduler import worker
@@ -165,7 +168,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
         database_for_url=database_for_url,
         foreground=True,
         scratch_root=scratch,
-        throwaway=ThrowawayConfig(None),
+        throwaway=throwaway_config,
     )
     assert report.agents == 1
     assert report.sample_agent_id == agent_id
