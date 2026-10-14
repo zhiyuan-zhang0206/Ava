@@ -13,7 +13,7 @@
 "tests.path_scoped.agent_tests" = [
     "test_maintenance_recovery.py",
 ]
-"tests.path_scoped.db_authority_tests" = [
+"base.deploy.tests.db_authority_tests" = [
     "test_single_box.py",
 ]
 "base.paths.tests.homes" = [

@@ -15,10 +15,10 @@ from psycopg import sql
 from base.cluster.authority import check_invariant, ensure_groups, mint_generation
 from base.cluster.authority import groups as groups_module
 from base.cluster.authority import roles as roles_module
+from base.deploy.tests.db_authority_tests import OWNER, AuthorityCluster
 from base.host.db_authority import ledger as ledger_module
 from base.host.db_authority.ledger import activate, create_ledger, require_ledger
 from base.host.db_authority.model import CatalogRefusedError, LedgerRefusedError
-from tests.path_scoped.db_authority_tests import OWNER, AuthorityCluster
 
 _LOGIN_ATTRIBUTES = (
     "SELECT rolcanlogin, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolreplication,"

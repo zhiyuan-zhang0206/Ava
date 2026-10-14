@@ -1,4 +1,4 @@
-exports = ["api_keys.py", "ava_tests.py", "cli_tests.py", "db_authority_tests.py", "gateway_tests.py", "pty_jobs.py", "pty_reaper.py", "structure_tests.py"]
+exports = ["api_keys.py", "ava_tests.py", "cli_tests.py", "gateway_tests.py", "pty_jobs.py", "pty_reaper.py", "structure_tests.py"]
 
 [uses]
 "ava_tests.py" = ["api_keys.py"]

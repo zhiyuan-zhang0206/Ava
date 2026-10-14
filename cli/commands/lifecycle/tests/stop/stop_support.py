@@ -31,6 +31,7 @@ from base.cluster.machine import MachineIdentity
 from base.deploy.maintenance import pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
+from base.deploy.tests.maintenance_factory import WHEN
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
@@ -43,7 +44,6 @@ from cli.commands.lifecycle import _stop_extras, root_driver
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as strict
 from ops import pty_close_notices
-from tests.components.agent.test_maintenance import WHEN
 from tests.e2e.process_support import kill_group_if_alive
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.pty_reaper import PtyReaper

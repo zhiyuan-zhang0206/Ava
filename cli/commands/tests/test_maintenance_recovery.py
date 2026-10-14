@@ -33,6 +33,9 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
+from base.deploy.tests.maintenance_factory import WHEN, maintenance_agent
+from base.deploy.tests.maintenance_factory import isolate as isolate
+from base.deploy.tests.maintenance_factory import maintenance_agent as _agent
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -43,9 +46,6 @@ from services.agent_runner.agent_host import runtime
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
-from tests.factories.maintenance import WHEN, maintenance_agent
-from tests.factories.maintenance import isolate as isolate
-from tests.factories.maintenance import maintenance_agent as _agent
 
 
 async def test_successor_cannot_sign_original_host_final_cleanup(

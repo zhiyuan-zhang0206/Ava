@@ -1,6 +1,6 @@
 """Group grants and the fail-closed invariant on real PostgreSQL 17, and
 MAINTAIN/VACUUM. The runner matrix itself is exercised through a group login in
-tests/components/base/test_runner_role.py."""
+base/agents/incarnation/tests/test_runner_role.py."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from base.cluster.authority import (
     ensure_monitor,
     vacuum_or_fail,
 )
+from base.deploy.tests.db_authority_tests import OWNER, AuthorityCluster
 from base.host.db_authority.model import CatalogRefusedError
-from tests.path_scoped.db_authority_tests import OWNER, AuthorityCluster
 
 # (mutation run by the admin, expected violation fragment)
 _UNKNOWN_EFFECTS = [

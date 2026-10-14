@@ -21,6 +21,8 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenancePhase
 from base.deploy.state import host_deploy_state
+from base.deploy.tests.maintenance_factory import WHEN
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.host import proc
 from base.sessions.pty import client
 from base.sessions.pty.paths import SERVICE_UNIT
@@ -47,8 +49,6 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from ops import agent_pause, pty_close_notices
 from ops.cluster_status import pause
-from tests.components.agent.test_maintenance import WHEN
-from tests.components.agent.test_maintenance import isolate as isolate
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline

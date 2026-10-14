@@ -27,12 +27,12 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from base.deploy.state import host_deploy_state
+from base.deploy.tests.maintenance_factory import WHEN
+from base.deploy.tests.maintenance_factory import isolate as isolate
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon, health
 from services.agent_runner.agent_ops import maintenance as activity
-from tests.components.agent.test_maintenance import WHEN
-from tests.components.agent.test_maintenance import isolate as isolate
 
 
 async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
