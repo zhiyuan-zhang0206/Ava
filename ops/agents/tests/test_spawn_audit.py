@@ -18,6 +18,7 @@ from base.agents.birth import transaction
 from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -25,7 +26,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from ops.agents.tests.test_agents_internals import insert_checkpoint, spawn_agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _audit(

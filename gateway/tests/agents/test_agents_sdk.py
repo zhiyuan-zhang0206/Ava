@@ -19,12 +19,12 @@ from ava.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
 from ava.sdk_surface.installation import Installation
 from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.agents.sdk_support import inbound_rows, spawn_agent
 from gateway.tests.agents.sdk_support import sdk_via_gateway as sdk_via_gateway
 from tests.fixtures.pin_agent import pin_agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _agent_spawner(db: psycopg.Connection, agent_id: int) -> str:

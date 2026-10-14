@@ -9,6 +9,7 @@ import pytest
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import ResurrectResult
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -19,7 +20,6 @@ from ops.lifecycle.tests.test_operations import (
     stub_pool as stub_pool,
 )
 from ops.rpc_schemas import ResurrectAgentRequest, ResurrectAgentResponse
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestResurrectIfTerminatedPlacement:

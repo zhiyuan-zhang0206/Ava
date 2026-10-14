@@ -18,10 +18,10 @@ from fastapi.testclient import TestClient
 from base import config
 from base.cluster import rate_limit
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.app import app, lifespan
 from gateway.http.auth.router import router
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

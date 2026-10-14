@@ -14,12 +14,12 @@ from agent.tests.impersonation.test_impersonation import relays as relays
 from base.agents.impersonation.tests.impersonation_support import attested_caller, recorded_tree
 from base.agents.incarnation.resources import ResourceProcess
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_successor_admission_ends_an_active_lease_without_restoring_the_dead_owner(

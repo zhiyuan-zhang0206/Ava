@@ -16,6 +16,7 @@ from psycopg.types.json import Jsonb
 import gateway.cluster.status as status_mod
 from base.api_contracts.status import MachineStatus
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -26,7 +27,6 @@ from gateway.cluster.roster_probe import IdentityMismatchLog
 from gateway.cluster.snapshots import Snapshot
 from ops.cluster import rpc as cluster_rpc
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _ROW = tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)

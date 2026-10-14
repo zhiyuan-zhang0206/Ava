@@ -17,9 +17,9 @@ from base.cluster.machine import (
     MachineRoleMissing,
     MachineRoles,
 )
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.native_process.root_control import client
 from services.supervision.healthchecks import otel_collector as hc
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _role_machine(read_role: Callable[[], MachineRoles]) -> MachineIdentity:

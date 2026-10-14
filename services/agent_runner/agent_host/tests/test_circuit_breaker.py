@@ -23,6 +23,7 @@ from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -41,7 +42,6 @@ from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures im
     LONG_SUMMARY,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # ── breaker open (runloop `_handle_fatal_llm_error`) ──
 

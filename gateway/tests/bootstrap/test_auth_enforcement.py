@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import gateway.app as gateway_app
 from base import config
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.auth import bearer_header
 from gateway.app import app
 from gateway.http.middleware.cors import cors_allowed_origins
@@ -24,7 +25,6 @@ from gateway.tests.bootstrap.test_auth import (
 )
 from gateway.tests.bootstrap.test_auth import patch_secret as patch_secret
 from tests.fixtures.gateway_config import gateway_test_client
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # ── Unauthenticated requests get 401 ──────────────────────────────────
 

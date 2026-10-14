@@ -12,6 +12,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.inbox.native_cancel import accept_native_cancel
 from base.agents.incarnation.native_work_models import NativeWorkUncertainError
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -30,7 +31,6 @@ from services.agent_runner.agent_host.tests.history.test_hosted_compact_failure 
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.managed_work import managed_work
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_force_observation_waits_for_actual_projection_continuation(

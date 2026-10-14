@@ -11,13 +11,13 @@ from fastapi.testclient import TestClient
 
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.packages.plugin_config_admin import panel_metadata
 from gateway.routers.configuration import runtime
 from ops.cluster import rpc
 from ops.rpc_schemas import ConfigReadResult, HostConfigField
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture

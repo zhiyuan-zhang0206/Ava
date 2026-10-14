@@ -25,11 +25,11 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.incarnation.resources import ExecAllocation, IncarnationResources, ResourceProcess
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
 from tests.factories.maintenance import WHEN, maintenance_agent
 from tests.factories.maintenance import isolate as isolate
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 _MINUTE_AGO = datetime.now(UTC) - timedelta(minutes=1)
 

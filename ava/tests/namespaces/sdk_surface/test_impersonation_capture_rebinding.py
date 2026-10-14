@@ -29,11 +29,11 @@ from base.agents.tests.capture_inputs import capture_rows, capture_state, open_c
 from base.agents.tests.capture_inputs import lease as lease
 from base.agents.tests.capture_inputs import owner as owner
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class _CaptureOwner:

@@ -9,13 +9,13 @@ from fastapi.testclient import TestClient
 
 from base.agents.birth import transaction
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.agents import creation as agent_creation
 from gateway.app import app
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.path_scoped.gateway_tests import local_spawn_in_process as local_spawn_in_process
 
 CASES = [

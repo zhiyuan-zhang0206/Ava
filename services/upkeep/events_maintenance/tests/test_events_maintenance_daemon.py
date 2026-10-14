@@ -29,6 +29,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.config.domains.daemon.settings import DaemonSettings
 from base.daemon.endpoints import ServiceEndpoint
@@ -42,7 +43,6 @@ from services.upkeep.events_maintenance.tests.slices import (
     events_maintenance_config,
     events_maintenance_db,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # The pool is never touched — `run_maintenance` / `maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()

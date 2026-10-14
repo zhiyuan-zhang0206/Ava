@@ -17,9 +17,9 @@ from base.agents.context import AvaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from tests.fixtures.identity_restore import SdkIdentitySlot
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 __all__ = ["sdk_environment", "sdk_identity", "sdk_metering"]
 

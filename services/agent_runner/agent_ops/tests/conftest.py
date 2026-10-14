@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -16,7 +17,6 @@ from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.tests.homes import unit_home as unit_home
 from services.agent_runner.agent_ops import boot
 from tests.fixtures.unit.config_authority import config_authority as config_authority
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.unit.sdk import sdk_environment as sdk_environment
 from tests.fixtures.unit.sdk import sdk_identity as sdk_identity
 from tests.fixtures.unit.sdk import sdk_metering as sdk_metering

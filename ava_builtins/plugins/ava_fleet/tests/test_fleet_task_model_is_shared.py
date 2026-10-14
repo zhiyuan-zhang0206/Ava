@@ -3,7 +3,7 @@
 Split out of `ops/agents/tests/test_creation_transactions.py`."""
 
 from base.agents.tasks.model import Task
-from tests.fixtures.unit.identity import machine_identity as machine_identity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 
 
 def test_fleet_task_model_remains_the_shared_model() -> None:

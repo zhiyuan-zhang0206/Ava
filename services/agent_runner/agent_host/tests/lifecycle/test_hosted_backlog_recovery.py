@@ -18,6 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.state import AgentState
 from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -31,7 +32,6 @@ from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import 
     checkpoint_graph as _graph,
 )
 from tests.components.base.poll_until import poll_until_async
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 async def test_pending_scan_classifies_lifecycle_work_and_lease(

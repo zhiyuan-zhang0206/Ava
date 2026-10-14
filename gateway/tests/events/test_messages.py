@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
     current_default_completion_notice_policy,
@@ -20,7 +21,6 @@ from base.daemon.schedules.completion_notices import (
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
 from gateway.app import app
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 UPLOAD_HEADERS = {"Idempotency-Key": "silent-upload", "Idempotency-Scope": "principal-v1"}
 

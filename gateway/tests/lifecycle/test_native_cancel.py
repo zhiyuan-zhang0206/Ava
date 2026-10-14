@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.tests.claim.test_inbound_ownership import insert
 from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -23,7 +24,6 @@ from services.agent_runner.agent_host.tests.native_cancel.test_return_boundaries
     blocked_host,
 )
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def auth_headers(patch: pytest.MonkeyPatch) -> dict[str, str]:

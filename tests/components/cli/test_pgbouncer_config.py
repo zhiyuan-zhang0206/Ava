@@ -18,10 +18,10 @@ import pytest
 from base.cluster.dataplane import direct_url
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
 from cli.commands.data_plane import pgbouncer
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def _assert_transaction_pooling_with_scram_clients(ini: str) -> None:

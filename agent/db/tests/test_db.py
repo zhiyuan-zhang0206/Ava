@@ -25,12 +25,12 @@ from agent import db as agent_db
 from agent.db import finalize_claimed_inbounds
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, agent_exists, create_agent, list_agents
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 # Redis pub/sub wake-latency discrimination, used by the tests that prove a wake
 # rode a real publish, not the defensive SELECT-recheck fallback. `wait_one`

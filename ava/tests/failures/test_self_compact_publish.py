@@ -13,13 +13,13 @@ import ava
 from base.agents.lifecycle import SystemHalt
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.tests.fakes import patch_sync_redis
 from base.lm.catalog import ModelCatalog
 from base.telemetry import audit_events
 from tests.fixtures.pin_agent import pin_agent
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class _BoomSyncClient:

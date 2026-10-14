@@ -27,6 +27,7 @@ from base.agents.incarnation.hosted_force import original_host_force
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent, pool
@@ -38,7 +39,6 @@ from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import enqueue_termination_inbounds, force_terminate_transaction
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 def test_reminder_commands_are_bare_ava(

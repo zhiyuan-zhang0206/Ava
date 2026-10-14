@@ -10,8 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.app import app
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 class TestRefreshPath:

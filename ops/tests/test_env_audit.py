@@ -15,6 +15,7 @@ import pytest
 
 from base import telemetry
 from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config as runtime_config
 from base.host.env import dotenv_file
 from base.telemetry import Event
@@ -25,7 +26,6 @@ from ops.env_audit import (
     last_env_write_record,
     record_env_write,
 )
-from tests.fixtures.unit.identity import machine_identity as machine_identity
 
 
 @pytest.fixture
