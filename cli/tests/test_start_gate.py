@@ -13,6 +13,7 @@ import pytest
 import cli.commands.lifecycle.start as lifecycle_start
 from base import cluster
 from base.host.permissions_helper.client import HelperFactory
+from base.host.system.hostport import Host
 from base.paths.home import resolve_ava_home
 from cli import start_identity, start_intent, startup_support
 from cli.commands.cluster import unit_join
@@ -62,7 +63,7 @@ def start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any
     monkeypatch.setattr(startup_support, "init_cli_logging", _no_logging)
     monkeypatch.setattr(lifecycle_start, "cmd_start", runtime)
 
-    def boot_handoff(*, helper: HelperFactory) -> None:
+    def boot_handoff(*, helper: HelperFactory, host: Host) -> None:
         del helper
 
     monkeypatch.setattr(root_driver, "complete_boot_start", boot_handoff)

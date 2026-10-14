@@ -21,6 +21,7 @@ from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import ConfigBoot, settings
 from base.deploy.schema.migrations import assert_schema_current
 from base.host.net.auth import require_cluster_secret
+from base.host.system.hostport import Host
 from base.native_process.os_platform import raise_fd_limit
 from base.telemetry.process_logging import init_gateway_process
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
@@ -100,7 +101,7 @@ def main(*, app: Any) -> None:
     # inherit the raised ceiling.
     raise_fd_limit(65536)
 
-    process = GatewayProcess(config=config, image=LOADED_IMAGE, machine=machine)
+    process = GatewayProcess(config=config, image=LOADED_IMAGE, machine=machine, host=Host.system())
     with process.lifetime():
         _serve_process(process, app)
 

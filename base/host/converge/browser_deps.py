@@ -8,18 +8,15 @@ from ``base.host.system.probes``; it must never import ``base.config`` or a
 
 from __future__ import annotations
 
-import sys
-
+from base.host.system.hostport import Host
 from base.host.system.probes import NPX_INCAPABILITY_REASON
 
 
-def node_install_command() -> str:
+def node_install_command(*, host: Host) -> str:
     """Copy-pasteable per-platform command that installs Node.js (npx)."""
-    if sys.platform == "darwin":
+    if host.platform.system == "darwin":
         return "brew install node  (or: brew install node@22 && brew link --force node@22)"
-    if sys.platform.startswith("linux"):
-        return "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs"
-    return "install Node.js >= 20.9 (see https://nodejs.org)"
+    return "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs"
 
 
 def browser_deps_notice(reason: str) -> str:
@@ -30,12 +27,12 @@ def browser_deps_notice(reason: str) -> str:
     )
 
 
-def browser_deps_warning(reason: str) -> str:
+def browser_deps_warning(reason: str, *, host: Host) -> str:
     """Return a prominent repair warning for a browser dependency gap."""
     if reason == NPX_INCAPABILITY_REASON:
         repair = (
             "| Install Node.js (npx):                                         |\n"
-            f"|   {node_install_command()}\n"
+            f"|   {node_install_command(host=host)}\n"
         )
     elif reason.startswith("no Chrome"):
         repair = (

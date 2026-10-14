@@ -21,6 +21,7 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle import service_selection
+from base.host.system.hostport import Host
 from cli.commands._repo import repo_root
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.bringup import print_data_plane_status
@@ -43,7 +44,7 @@ def root_tree_units() -> dict[str, dict[str, object]]:
 
 
 def _status_roster(
-    roles: MachineRoles | None, *, machine: MachineIdentity
+    roles: MachineRoles | None, *, machine: MachineIdentity, host: Host
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
     """Explain every service excluded by capabilities or the durable desired set."""
     # Show this host's role roster WITH each gated-out service's reason, so a
@@ -55,7 +56,7 @@ def _status_roster(
     if roles is None:
         services_to_show = tuple((spec, None) for spec in build_services())
     else:
-        services_to_show = services_for_capabilities_annotated(roles, machine=machine)
+        services_to_show = services_for_capabilities_annotated(roles, machine=machine, host=host)
     selection = service_selection.read_selection()
     return tuple(
         (spec, reason if selection.enabled(spec.session) else "disabled by desired service set")
@@ -64,7 +65,7 @@ def _status_roster(
 
 
 def cmd_status(
-    *, database_factory: DatabaseFactory, machine: MachineIdentity, config: ConfigBoot
+    *, database_factory: DatabaseFactory, machine: MachineIdentity, config: ConfigBoot, host: Host
 ) -> int:
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands._repo as _repo_commands
@@ -74,7 +75,7 @@ def cmd_status(
     print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
     print_hold_section()
     print()
-    services_to_show = _status_roster(roles, machine=machine)
+    services_to_show = _status_roster(roles, machine=machine, host=host)
     name_w = max((len(session_name(spec.session)) for spec, _reason in services_to_show), default=7)
     # The root is the only service owner. Do not infer liveness from old records.
     root_units = root_tree_units()

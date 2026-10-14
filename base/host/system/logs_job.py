@@ -15,6 +15,7 @@ from xml.sax.saxutils import escape
 from loguru import logger
 
 import base.host.system.cron
+from base.host.system.hostport import Host
 
 FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3"
 _CRON_MARKER = "# ava-logs-maintenance"
@@ -29,12 +30,12 @@ def launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
-def _shell_command() -> str:
-    ava = shlex.quote(base.host.system.cron.ava_binary_path())
+def _shell_command(*, host: Host) -> str:
+    ava = shlex.quote(base.host.system.cron.ava_binary_path(host=host))
     return f"{ava} logs rotate && {ava} logs retention --family-days {FAMILY_DAYS}"
 
 
-def launchd_plist_content() -> str:
+def launchd_plist_content(*, host: Host) -> str:
     log_file = Path(base.host.system.cron.job_home()) / "logs" / "logs-maintenance.out.log"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -47,9 +48,9 @@ def launchd_plist_content() -> str:
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>{escape(_shell_command())}</string>
+        <string>{escape(_shell_command(host=host))}</string>
     </array>
-{base.host.system.cron.launchd_env_block()}
+{base.host.system.cron.launchd_env_block(host=host)}
     <key>StartCalendarInterval</key>
     <dict>
             <key>Hour</key>
@@ -68,25 +69,25 @@ def launchd_plist_content() -> str:
 """
 
 
-def register_macos() -> int:
+def register_macos(*, host: Host) -> int:
     """Rewrite and reload the daily LaunchAgent."""
     label = _LABEL
     plist_path = launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(launchd_plist_content(), encoding="utf-8")
+    plist_path.write_text(launchd_plist_content(host=host), encoding="utf-8")
 
-    if base.host.system.cron.reload_launchd_job(label, plist_path) != 0:
+    if base.host.system.cron.reload_launchd_job(label, plist_path, host=host) != 0:
         return 1
     logger.info("launchd job '{}' loaded (daily at {:02d}:{:02d})", label, _HOUR, _MINUTE)
     return 0
 
 
-def unregister_macos() -> int:
-    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path())
+def unregister_macos(*, host: Host) -> int:
+    base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path(), host=host)
     return 0
 
 
-def register_linux() -> int:
+def register_linux(*, host: Host) -> int:
     """Replace the 04:40 maintenance line in the user crontab.
 
     Lines are matched by the marker as a substring.
@@ -96,6 +97,7 @@ def register_linux() -> int:
         "retention cannot be registered",
         missing_returncode=1,
         missing_stream=sys.stderr,
+        host=host,
     )
     if missing_rc is not None:
         return missing_rc
@@ -103,26 +105,27 @@ def register_linux() -> int:
     marker = _CRON_MARKER
     entry = (
         f"{_MINUTE} {_HOUR} * * * {base.host.system.cron.cron_env_prefix()}"
-        f"/bin/sh -c {shlex.quote(_shell_command())}  {marker}"
+        f"/bin/sh -c {shlex.quote(_shell_command(host=host))}  {marker}"
     )
     if base.host.system.cron.replace_crontab_entry(
         marker,
         entry,
         skip_phrase="logs-maintenance registration",
         update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
+        host=host,
     ):
         return 1
     logger.info("crontab logs-maintenance entry added ({})", marker)
     return 0
 
 
-def unregister_linux() -> int:
+def unregister_linux(*, host: Host) -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _CRON_MARKER, write_failure_rc=1, on_removed=None
+        _CRON_MARKER, write_failure_rc=1, on_removed=None, host=host
     )
 
 
-def register_logs_job(*, enabled_reader: Callable[[], bool]) -> None:
+def register_logs_job(*, enabled_reader: Callable[[], bool], host: Host) -> None:
     """Register the daily logs-maintenance job."""
     if not base.host.system.cron.os_jobs_enabled(enabled_reader=enabled_reader):
         base.host.system.cron.skip_os_job("logs-maintenance")
@@ -130,12 +133,19 @@ def register_logs_job(*, enabled_reader: Callable[[], bool]) -> None:
     if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
         return
     base.host.system.cron.register_platform_job(
-        "logs-maintenance", macos=register_macos, linux=register_linux
+        "logs-maintenance",
+        macos=lambda: register_macos(host=host),
+        linux=lambda: register_linux(host=host),
+        host=host,
     )
 
 
-def unregister_logs_job() -> None:
+def unregister_logs_job(*, host: Host) -> None:
     """Remove the daily logs-maintenance job (a no-op outside the default home)."""
     if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
         return
-    base.host.system.cron.unregister_platform_job(macos=unregister_macos, linux=unregister_linux)
+    base.host.system.cron.unregister_platform_job(
+        macos=lambda: unregister_macos(host=host),
+        linux=lambda: unregister_linux(host=host),
+        host=host,
+    )

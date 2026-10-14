@@ -16,6 +16,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db import pool as db_pool
 from base.db.code_version_gate import ProcessDbGate
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import OpStatus
@@ -50,6 +52,7 @@ def dispatches(monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool) -> list[di
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[OpStatus, dict[str, object]]:
         del local_machine
         assert pool is dispatch_pool
@@ -96,6 +99,7 @@ async def test_changed_kind_or_payload_fails_without_dispatch(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     status, result = await daemon.dispatch_idempotent_pass(
         kind,
@@ -110,6 +114,7 @@ async def test_changed_kind_or_payload_fails_without_dispatch(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status is OpStatus.FAILED
     assert "identity conflict" in str(result["error"])
@@ -140,6 +145,7 @@ async def test_key_order_does_not_change_request_identity(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     second = await daemon.dispatch_idempotent_pass(
         "status_probe",
@@ -154,6 +160,7 @@ async def test_key_order_does_not_change_request_identity(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert second == first
     assert len(dispatches) == 1
@@ -185,6 +192,7 @@ async def test_effect_then_exception_keeps_uncertain_claim(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[OpStatus, dict[str, object]]:
         del local_machine
         with pool.connection() as conn:
@@ -207,6 +215,7 @@ async def test_effect_then_exception_keeps_uncertain_claim(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     status, result = await daemon.dispatch_idempotent_pass(
         "lifecycle",
@@ -221,6 +230,7 @@ async def test_effect_then_exception_keeps_uncertain_claim(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
@@ -260,6 +270,7 @@ async def test_owner_cancellation_never_frees_its_key(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[OpStatus, dict[str, object]]:
         del local_machine
         nonlocal calls
@@ -283,6 +294,7 @@ async def test_owner_cancellation_never_frees_its_key(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     )
     await started.wait()
@@ -302,6 +314,7 @@ async def test_owner_cancellation_never_frees_its_key(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
@@ -333,6 +346,7 @@ async def test_old_ops_receipt_does_not_expire_into_fresh_execution(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     db_conn.execute("UPDATE api_idempotency SET completed_at=now()-interval '8 days'")
     db_conn.commit()
@@ -349,6 +363,7 @@ async def test_old_ops_receipt_does_not_expire_into_fresh_execution(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert second == first
     assert len(dispatches) == 1
@@ -384,6 +399,7 @@ async def test_unknown_legacy_identity_fails_closed(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status is OpStatus.FAILED
     assert "legacy identity unavailable" in str(result["error"])
@@ -422,6 +438,7 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
                 database=ops_database,
                 image=ops_image,
                 local_machine=machine_identity,
+                host=fake_host(),
             )
     finally:
         db_conn.execute("ALTER TABLE api_idempotency DROP CONSTRAINT reject_test_result")
@@ -439,6 +456,7 @@ async def test_result_write_failure_keeps_claim_without_reexecuting(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])

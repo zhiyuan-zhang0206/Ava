@@ -7,7 +7,13 @@ import subprocess
 import pytest
 
 from base.host.proc import CommandRunner
-from base.host.tests.fake_commands import DARWIN_ARM64, LINUX_X86, FakeCommands, Reply, fake_host
+from base.host.system.tests.fake_commands import (
+    DARWIN_ARM64,
+    LINUX_X86,
+    FakeCommands,
+    Reply,
+    fake_host,
+)
 
 
 def test_it_is_a_command_runner_that_records_each_call() -> None:

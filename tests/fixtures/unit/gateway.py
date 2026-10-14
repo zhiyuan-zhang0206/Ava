@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.config.tests.configuration import snapshot_process_config
+from base.host.system.tests.fake_commands import fake_host
 
 
 @pytest.fixture
@@ -36,7 +37,9 @@ def gateway_unit(
     config = snapshot_process_config()
     config.boot()
     machine_identity.set(role="gateway")
-    process = GatewayProcess(config=config, image=LOADED_IMAGE, machine=machine_identity)
+    process = GatewayProcess(
+        config=config, image=LOADED_IMAGE, machine=machine_identity, host=fake_host()
+    )
     monkeypatch.setattr(gateway_app.app.state, "gateway_process_input", process, raising=False)
     _ = db_conn  # per-test truncate side effect
     with (

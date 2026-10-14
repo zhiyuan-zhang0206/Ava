@@ -37,7 +37,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
-from base.host.tests.fake_commands import DARWIN_ARM64, fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.paths import ava_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline

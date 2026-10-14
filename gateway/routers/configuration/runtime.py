@@ -46,6 +46,7 @@ from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.hostport import Host
 from base.packages.plugin_config_admin import (
     panel_metadata,
     panel_overrides,
@@ -122,7 +123,12 @@ def _target_capabilities(
 
 
 async def _dispatch_config_read(
-    target: str, *, db: Database, authority: ConfigAuthority, local_machine: MachineIdentity
+    target: str,
+    *,
+    db: Database,
+    authority: ConfigAuthority,
+    local_machine: MachineIdentity,
+    host: Host,
 ) -> ConfigReadResult:
     """Run config_read on `target` via its ops server — one uniform path.
 
@@ -171,7 +177,10 @@ async def _dispatch_config_read(
         )
     return ConfigReadResult.model_validate(
         await asyncio.to_thread(
-            host_config.config_read_op, authority=authority, local_machine=local_machine.name()
+            host_config.config_read_op,
+            authority=authority,
+            local_machine=local_machine.name(),
+            host=host,
         )
     )
 
@@ -237,6 +246,7 @@ async def _dispatch_config_write(
     actor: str | None = None,
     trace_id: str | None = None,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> ConfigWriteOpResult:
     """Run config_write on `target` via its ops server — one uniform path.
 
@@ -298,6 +308,7 @@ async def _dispatch_config_write(
             actor=actor,
             trace_id=trace_id,
             local_machine=local_machine.name(),
+            host=host,
         )
     )
 
@@ -346,6 +357,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
         db=request.app.state.db,
         authority=request.app.state.config_authority,
         local_machine=request.app.state.machine,
+        host=request.app.state.host,
     )
     host_fields = read.host_fields
 
@@ -605,6 +617,7 @@ async def _put_local(
     actor: str | None,
     trace_id: str | None,
     local_machine: MachineIdentity,
+    host: Host,
 ) -> tuple[ConfigWriteOpResult, list[str]]:
     """The Cluster-view PUT: host fields first, then (when they applied) the cluster `.env`."""
     # Host first: if a host field is rejected the write returns applied=False
@@ -620,6 +633,7 @@ async def _put_local(
         actor=actor,
         trace_id=trace_id,
         local_machine=local_machine,
+        host=host,
     )
     cluster_changed: set[str] = set()
     if host_result.applied and has_cluster_patch:
@@ -753,6 +767,7 @@ async def put_config(
             actor=actor,
             trace_id=trace_id,
             local_machine=request.app.state.machine,
+            host=request.app.state.host,
         )
     else:
         # Remote target: cluster config is machine-independent; only host fields
@@ -769,6 +784,7 @@ async def put_config(
             actor=actor,
             trace_id=trace_id,
             local_machine=request.app.state.machine,
+            host=request.app.state.host,
         )
         restart_required = host_result.restart_required
 

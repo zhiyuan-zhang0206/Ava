@@ -17,6 +17,8 @@ from dotenv import dotenv_values
 
 from base import cluster
 from base.host.permissions_helper.client import HelperFactory
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.native_process.os_platform import file_lock
 from base.paths import ava_home
 from cli import init_intent, start_intent
@@ -632,9 +634,11 @@ def test_public_start_holds_home_lock_through_runtime_start(
 
     monkeypatch.setattr(start, "cmd_start", runtime)
     prepare_init_identity(_single_box())
+    # A macOS host has no boot unit to hand the root to, so the boot tail reads nothing from /proc.
+    mac = replace(command_runtime, host=fake_host(platform=DARWIN_ARM64))
     assert (
         start_intent.run_start(
-            _start_args(command_runtime=command_runtime),
+            _start_args(command_runtime=mac),
             retained_children=[],
             database_factory=operator_database,
             producer=producer,
@@ -666,7 +670,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
 
     monkeypatch.setattr(start, "cmd_start", runtime)
 
-    def publish_pid(*, helper: HelperFactory) -> None:
+    def publish_pid(*, helper: HelperFactory, host: Host) -> None:
         del helper
         calls.append("publish PID")
 

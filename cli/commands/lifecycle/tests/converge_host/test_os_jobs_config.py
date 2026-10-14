@@ -9,8 +9,17 @@ import pytest
 from base.cluster.derive import production_identity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.proc import CommandRunner
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
-from base.host.tests.fake_commands import fake_host
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import (
+    DARWIN_ARM64,
+    LINUX_X86,
+    FakeCommands,
+    Reply,
+    fake_host,
+)
+from base.host.system.tests.fake_crontab import FakeCrontab
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.os_jobs import (
@@ -27,6 +36,14 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
+
+
+def _isolated_ava(*, host: Host) -> str:
+    return "/isolated/.venv/bin/ava"
+
+
+def _usr_bin(*, host: Host) -> str:
+    return "/usr/bin"
 
 
 def test_converge_constructs_one_lazy_owner_per_operation(
@@ -94,7 +111,7 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
     refresh: list[Callable[[], bool]] = []
     removed: list[bool] = []
 
-    def register(*, enabled_reader: Callable[[], bool]) -> None:
+    def register(*, enabled_reader: Callable[[], bool], host: Host) -> None:
         readers.append(enabled_reader)
 
     def register_packages(
@@ -102,13 +119,14 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
         enabled_reader: Callable[[], bool],
         refresh_enabled_reader: Callable[[], bool],
         tick_reader: Callable[[], int],
+        host: Host,
     ) -> None:
         readers.append(enabled_reader)
         refresh.append(refresh_enabled_reader)
         ticks.append(tick_reader)
 
     def register_walg(
-        *, enabled_reader: Callable[[], bool], backup_hour_reader: Callable[[], int]
+        *, enabled_reader: Callable[[], bool], backup_hour_reader: Callable[[], int], host: Host
     ) -> None:
         readers.append(enabled_reader)
         hours.append(backup_hour_reader)
@@ -117,14 +135,20 @@ def test_all_six_formal_steps_pass_live_readers_from_the_same_owner(
     monkeypatch.setattr(autostart, "register_autostart", register)
     monkeypatch.setattr(logs_job, "register_logs_job", register)
 
-    def register_pr_flow(*, enabled_reader: Callable[[], bool], production: bool) -> None:
+    def register_pr_flow(
+        *, enabled_reader: Callable[[], bool], production: bool, host: Host
+    ) -> None:
         assert production is production_identity(machine=ctx.machine, home=ctx.ava_home)
-        register(enabled_reader=enabled_reader)
+        register(enabled_reader=enabled_reader, host=host)
 
     monkeypatch.setattr(pr_flow_job, "register_pr_flow_job", register_pr_flow)
     monkeypatch.setattr(packages_job, "register_packages_job", register_packages)
     monkeypatch.setattr(walg_job, "register_walg_job", register_walg)
-    monkeypatch.setattr(walg_job, "unregister_walg_job", lambda: removed.append(True))
+
+    def fake_unregister_walg_job(*, host: Host) -> None:
+        removed.append(True)
+
+    monkeypatch.setattr(walg_job, "unregister_walg_job", fake_unregister_walg_job)
     for step in [
         ensure_health_probe_cron,
         ensure_cluster_autostart,
@@ -157,8 +181,6 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    from types import SimpleNamespace
-
     owner = ConfigBoot()
     for name, value in [
         ("os_jobs_enabled", True),
@@ -168,6 +190,10 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
         ("walg_config_file", default_home / "walg.json"),
     ]:
         owner.set_field(name, value)
+    crontab = FakeCrontab()
+    launchctl = FakeCommands()
+    launchctl.on("launchctl", Reply(), repeat=True)
+    runner: CommandRunner = launchctl if platform == "macos" else crontab
     ctx = ConvergeCtx(
         repo=default_home,
         ava_home=default_home,
@@ -177,32 +203,25 @@ def test_formal_steps_reach_real_backend_with_live_policy_and_isolated_os(
         producer=operator_pipeline,
         machine=machine_from_boot(owner),
         helper=refuse_helper,
-        host=fake_host(),
+        host=fake_host(
+            runner,
+            platform=DARWIN_ARM64 if platform == "macos" else LINUX_X86,
+            programs={"crontab": "/usr/bin/crontab"},
+        ),
         services=frozenset(),
     )
-    monkeypatch.setattr(cron, "is_macos", lambda: platform == "macos")
-    monkeypatch.setattr(cron, "is_linux", lambda: platform != "macos")
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/isolated/.venv/bin/ava")
-    monkeypatch.setattr(cron, "launchd_path_env", lambda: "/usr/bin")
-    tables: list[str] = []
-
-    def which(_name: str) -> str:
-        return "/usr/bin/crontab"
-
-    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
-        assert argv[0] in {"launchctl", "crontab"}
-        if argv == ["crontab", "-"]:
-            tables.append(str(kwargs["input"]))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(cron.shutil, "which", which)
-    monkeypatch.setattr(cron.subprocess, "run", run)
+    monkeypatch.setattr(cron, "ava_binary_path", _isolated_ava)
+    monkeypatch.setattr(cron, "launchd_path_env", _usr_bin)
 
     def specs() -> tuple[str, str]:
         ensure_packages_refresh_job(ctx)
         ensure_walg_job(ctx)
         if platform == "linux":
-            return tables[-2], tables[-1]
+            line = {
+                marker: next(ln for ln in crontab.lines if ln.endswith(marker))
+                for marker in ("# ava-packages-refresh", "# ava-walg")
+            }
+            return line["# ava-packages-refresh"], line["# ava-walg"]
         directory = Path.home() / "Library" / "LaunchAgents"
         return (
             (directory / "com.ava.packages-refresh.plist").read_text(),

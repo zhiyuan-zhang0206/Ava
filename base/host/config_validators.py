@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.system.hostport import Host
 from base.host.system.probes import browser_capable, display_available, resolve_chrome_binary
 
 
@@ -35,7 +36,9 @@ class ValidationResult:
 # Per-field validator functions
 
 
-def _validate_browser_enabled(value: object, chrome_binary: str | None) -> ValidationResult:
+def _validate_browser_enabled(
+    value: object, chrome_binary: str | None, host: Host
+) -> ValidationResult:
     """Gate the ``True`` value: display + Chrome binary + npx must all be present.
 
     Uses the shared ``browser_capable()`` predicate (same gate as
@@ -44,18 +47,20 @@ def _validate_browser_enabled(value: object, chrome_binary: str | None) -> Valid
     """
     if not value:
         return ValidationResult(ok=True)
-    if browser_capable(chrome_binary):
+    if browser_capable(chrome_binary, host=host):
         return ValidationResult(ok=True)
     # Give the most specific reason by probing individual preconditions.
-    if not display_available():
+    if not display_available(host=host):
         return ValidationResult(ok=False, reason="no display detected")
-    chrome = resolve_chrome_binary(chrome_binary)
+    chrome = resolve_chrome_binary(chrome_binary, host=host)
     if chrome is None or not Path(chrome).exists():
         return ValidationResult(ok=False, reason="Chrome binary not found")
     return ValidationResult(ok=False, reason="npx not found (Node.js required)")
 
 
-def _validate_chrome_binary(value: object, _chrome_binary: str | None) -> ValidationResult:
+def _validate_chrome_binary(
+    value: object, _chrome_binary: str | None, _host: Host
+) -> ValidationResult:
     """The given path must exist on this host."""
     p = Path(str(value))
     if p.exists():
@@ -63,7 +68,9 @@ def _validate_chrome_binary(value: object, _chrome_binary: str | None) -> Valida
     return ValidationResult(ok=False, reason=f"path not found: {p}")
 
 
-def _validate_ops_concurrency(value: object, _chrome_binary: str | None) -> ValidationResult:
+def _validate_ops_concurrency(
+    value: object, _chrome_binary: str | None, _host: Host
+) -> ValidationResult:
     """Must be an int in [1, 64].  Bools (subclass of int) and non-ints are rejected."""
     # isinstance(True, int) is True in Python — reject bools explicitly.
     if isinstance(value, bool) or not isinstance(value, int):
@@ -77,7 +84,7 @@ _TRANSFER_BACKENDS = frozenset({"drive", "none"})
 
 
 def _validate_cross_machine_transfer_backend(
-    value: object, _chrome_binary: str | None
+    value: object, _chrome_binary: str | None, _host: Host
 ) -> ValidationResult:
     """A closed set of backends — reject anything else rather than let a typo
     land in .env (fail-fast at write time, not at the next settings load)."""
@@ -91,7 +98,7 @@ def _validate_cross_machine_transfer_backend(
 
 # Maps a host field name to its validator.  Only fields with a real local
 # precondition have an entry; absent -> always ok (see ``validate`` below).
-VALIDATORS: dict[str, Callable[[object, str | None], ValidationResult]] = {
+VALIDATORS: dict[str, Callable[[object, str | None, Host], ValidationResult]] = {
     "browser_enabled": _validate_browser_enabled,
     "chrome_binary": _validate_chrome_binary,
     "ops_concurrency": _validate_ops_concurrency,
@@ -103,7 +110,9 @@ VALIDATORS: dict[str, Callable[[object, str | None], ValidationResult]] = {
 # Public API
 
 
-def validate(field_name: str, value: object, *, chrome_binary: str | None) -> ValidationResult:
+def validate(
+    field_name: str, value: object, *, chrome_binary: str | None, host: Host
+) -> ValidationResult:
     """Validate a proposed value for a host config field on this machine.
 
     Looks up ``field_name`` in ``VALIDATORS``.  If no validator is registered
@@ -111,15 +120,17 @@ def validate(field_name: str, value: object, *, chrome_binary: str | None) -> Va
     free-text fields like ``machine_description``), not a fail-fast violation.
 
     Seam 4 (runner handler) calls this before writing a field. ``chrome_binary`` is the
-    host's configured ``AVA_CHROME_BINARY`` override: the caller reads Settings, this module never does.
+    host's configured ``AVA_CHROME_BINARY`` override: the caller reads Settings, this module never does. ``host`` is the machine the value is judged against.
     """
     validator = VALIDATORS.get(field_name)
     if validator is None:
         return ValidationResult(ok=True)
-    return validator(value, chrome_binary)
+    return validator(value, chrome_binary, host)
 
 
-def read_time_capability(field_name: str, *, chrome_binary: str | None) -> ValidationResult | None:
+def read_time_capability(
+    field_name: str, *, chrome_binary: str | None, host: Host
+) -> ValidationResult | None:
     """Return a static pre-value capability verdict for ``field_name``, or None.
 
     A read-time gate applies to fields where the "on" state may be statically
@@ -134,5 +145,5 @@ def read_time_capability(field_name: str, *, chrome_binary: str | None) -> Valid
     if field_name == "browser_enabled":
         # FBT003: True here is the candidate value being validated, not a
         # boolean-trap flag argument.
-        return validate("browser_enabled", True, chrome_binary=chrome_binary)  # noqa: FBT003
+        return validate("browser_enabled", True, chrome_binary=chrome_binary, host=host)  # noqa: FBT003
     return None

@@ -10,7 +10,8 @@ import pytest
 
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.host.tests.fake_commands import fake_host
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import walg as converge_walg_module
@@ -186,11 +187,15 @@ def job_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     calls: list[str] = []
 
-    def register(*, enabled_reader: object, backup_hour_reader: object) -> None:
+    def register(*, enabled_reader: object, backup_hour_reader: object, host: Host) -> None:
         calls.append("register")
 
     monkeypatch.setattr(walg_job, "register_walg_job", register)
-    monkeypatch.setattr(walg_job, "unregister_walg_job", lambda: calls.append("unregister"))
+
+    def fake_unregister_walg_job(*, host: Host) -> None:
+        calls.append("unregister")
+
+    monkeypatch.setattr(walg_job, "unregister_walg_job", fake_unregister_walg_job)
     return calls
 
 

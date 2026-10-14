@@ -12,6 +12,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import rpc
@@ -65,6 +66,7 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == OpStatus.COMPLETED
     assert result == {"wake_published": True}

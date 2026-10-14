@@ -31,6 +31,7 @@ from pathlib import Path
 from loguru import logger
 
 from base.config import settings
+from base.host.system.hostport import Host
 from base.host.system.probes import browser_incapability, resolve_chrome_binary
 from base.paths import logs_dir
 
@@ -42,13 +43,13 @@ from .profile import profile_dir as profile_dir
 _CDP_TIMEOUT_S = 2.0
 
 
-def assert_browser_capable() -> None:
+def assert_browser_capable(*, host: Host) -> None:
     """Raise RuntimeError with a precise, actionable message if this machine
     cannot host the shared headed browser. Called by the converge preflight and
     main(). The capability check itself lives in base.host.system.probes
     (browser_incapability); this raises its reason so a launch fails loudly with
     the same wording the operator sees in `ava status`."""
-    reason = browser_incapability(settings.services.chrome_binary)
+    reason = browser_incapability(settings.services.chrome_binary, host=host)
     if reason is not None:
         raise RuntimeError(f"ava-browser: {reason}")
 
@@ -89,7 +90,8 @@ def main() -> None:
     # Fail loud BEFORE the log redirect so the reason is visible in the
     # session log — this also guards healthcheck-triggered respawns, not just the first
     # launch (the converge preflight only runs at `ava start`).
-    assert_browser_capable()
+    host = Host.system()
+    assert_browser_capable(host=host)
     cdp_port = settings.services.browser_cdp_port  # the recorded/`.env` port; default 9222
     if cdp_reachable(cdp_port):
         # Something already serves this CDP port — either a manually-started
@@ -118,7 +120,7 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    binary = resolve_chrome_binary(settings.services.chrome_binary)
+    binary = resolve_chrome_binary(settings.services.chrome_binary, host=host)
     if binary is None:  # assert_browser_capable already raised if so — this narrows the type
         sys.exit(127)
     # On macOS a detached process can see a display while lacking the active GUI

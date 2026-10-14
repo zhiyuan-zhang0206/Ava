@@ -14,7 +14,6 @@ an abrupt root death. It must never erase that retained custody.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -24,7 +23,7 @@ from loguru import logger
 
 from base.host.atomic_io import write_text_atomic
 from base.host.system.boot_policy import BOOT_MAX_ATTEMPTS, BOOT_RETRY_INTERVAL_S
-from base.native_process.os_platform import is_linux
+from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
@@ -64,13 +63,13 @@ def root_pid_path(home: Path) -> Path:
     return home / "run" / "ava-root" / "systemd.pid"
 
 
-def _default_context() -> BootUnitContext:
+def _default_context(*, host: Host) -> BootUnitContext:
     import grp
     import pwd
 
     from base.paths import ava_home, repo_root
 
-    entry = pwd.getpwuid(os.getuid())
+    entry = pwd.getpwuid(host.uid)
     group = grp.getgrgid(entry.pw_gid).gr_name
     return BootUnitContext(
         home=ava_home(),
@@ -84,27 +83,25 @@ def _default_context() -> BootUnitContext:
 # --- detection --------------------------------------------------------------
 
 
-def systemd_running() -> bool:
+def systemd_running(*, host: Host) -> bool:
     """True when this host runs systemd as its service manager."""
     return (
-        is_linux()
-        and shutil.which("systemctl") is not None
+        host.platform.system == "linux"
+        and host.which("systemctl") is not None
         and Path("/run/systemd/system").is_dir()
     )
 
 
-def systemctl(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
-    """One bounded seam for read-only systemctl calls (tests patch this)."""
-    return subprocess.run(  # noqa: S603 — fixed systemctl verbs, literal args
-        ["systemctl", *args], capture_output=True, text=True, check=False, timeout=timeout
-    )
+def systemctl(*args: str, timeout: float = 30.0, host: Host) -> subprocess.CompletedProcess[str]:
+    """Run a bounded read-only systemctl query through the supplied host."""
+    return host.run(["systemctl", *args], capture_output=True, text=True, timeout=timeout)
 
 
-def unit_enabled() -> bool:
+def unit_enabled(*, host: Host) -> bool:
     """Whether the boot unit is installed and enabled."""
-    if not systemd_running():
+    if not systemd_running(host=host):
         return False
-    return systemctl("is-enabled", UNIT_NAME).stdout.strip() == "enabled"
+    return systemctl("is-enabled", UNIT_NAME, host=host).stdout.strip() == "enabled"
 
 
 # --- rendering --------------------------------------------------------------
@@ -191,15 +188,17 @@ def process_cgroup(pid: int) -> str:
     raise RuntimeError(f"PID {pid} has no observable systemd cgroup")
 
 
-def in_boot_unit() -> bool:
+def in_boot_unit(*, host: Host) -> bool:
     """Interactive start has no systemd readiness tail, even on Linux."""
-    if not is_linux():
+    if host.platform.system != "linux":
         return False
     return process_cgroup(os.getpid()) == f"/system.slice/{UNIT_NAME}"
 
 
-def manager_properties() -> dict[str, str]:
-    result = systemctl("show", "--property=MainPID,ControlPID,ControlGroup,ActiveState", UNIT_NAME)
+def manager_properties(*, host: Host) -> dict[str, str]:
+    result = systemctl(
+        "show", "--property=MainPID,ControlPID,ControlGroup,ActiveState", UNIT_NAME, host=host
+    )
     if result.returncode:
         raise RuntimeError(f"cannot observe systemd root ownership: {result.stderr.strip()}")
     values = dict(row.split("=", 1) for row in result.stdout.splitlines() if "=" in row)
@@ -208,7 +207,7 @@ def manager_properties() -> dict[str, str]:
     return values
 
 
-def publish_root_ready(home: Path, root: OwnedProcess) -> None:
+def publish_root_ready(home: Path, root: OwnedProcess, *, host: Host) -> None:
     """Publish the ready root; systemd adopts only after successful caller exit.
 
     Type=forking waits for this ordinary start process to exit before reading
@@ -216,10 +215,10 @@ def publish_root_ready(home: Path, root: OwnedProcess) -> None:
     closure. Interactive start writes nothing. This hint never replaces the
     birth-bound root custody checked by the caller.
     """
-    if not in_boot_unit():
+    if not in_boot_unit(host=host):
         return
     expected = f"/system.slice/{UNIT_NAME}"
-    before = manager_properties()
+    before = manager_properties(host=host)
     if (
         not root.live()
         or process_cgroup(root.pid) != expected
@@ -240,17 +239,17 @@ def publish_root_ready(home: Path, root: OwnedProcess) -> None:
 # --- privileged steps -------------------------------------------------------
 
 
-def privileged(argv: list[str], *, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
+def privileged(
+    argv: list[str], *, timeout: float = 120.0, host: Host
+) -> subprocess.CompletedProcess[str]:
     """Run one root step: direct when already root, else `sudo -n` (no prompt).
 
     A missing binary (`sudo` on a minimal host, or the tool itself) becomes the
     same actionable failure shape as a non-zero exit -- never a raw traceback.
     """
-    command = argv if os.geteuid() == 0 else ["sudo", "-n", *argv]
+    command = argv if host.uid == 0 else ["sudo", "-n", *argv]
     try:
-        return subprocess.run(  # noqa: S603 — sudo -n + fixed verbs/paths from this module
-            command, capture_output=True, text=True, check=False, timeout=timeout
-        )
+        return host.run(command, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as e:
         raise RuntimeError(
             f"{command[0]} not found on this host -- this step needs root: make "
@@ -267,8 +266,8 @@ def _privileged_failure(what: str, result: subprocess.CompletedProcess[str]) -> 
     )
 
 
-def _privileged_or_raise(argv: list[str], what: str) -> None:
-    result = privileged(argv)
+def _privileged_or_raise(argv: list[str], what: str, *, host: Host) -> None:
+    result = privileged(argv, host=host)
     if result.returncode != 0:
         raise RuntimeError(_privileged_failure(what, result))
 
@@ -283,13 +282,13 @@ def _read_text(path: Path) -> str | None:
 # --- native registration / retirement -------------------------------------------
 
 
-def install(*, context: BootUnitContext | None = None) -> list[str]:
+def install(*, context: BootUnitContext | None = None, host: Host) -> list[str]:
     """Register and enable the sole Linux boot route without recursive startup."""
-    if not systemd_running():
+    if not systemd_running(host=host):
         raise RuntimeError(
             "the boot unit needs a Linux host running systemd as its service manager"
         )
-    ctx = context if context is not None else _default_context()
+    ctx = context if context is not None else _default_context(host=host)
     steps: list[str] = []
 
     destination = unit_path()
@@ -303,20 +302,21 @@ def install(*, context: BootUnitContext | None = None) -> list[str]:
             _privileged_or_raise(
                 ["install", "-m", "0644", str(holder), str(destination)],
                 f"write {destination}",
+                host=host,
             )
         finally:
             holder.unlink(missing_ok=True)
-        _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload")
+        _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload", host=host)
         steps.append(f"installed system unit {destination}")
 
-    if not unit_enabled():
-        _privileged_or_raise(["systemctl", "enable", UNIT_NAME], f"enable {UNIT_NAME}")
+    if not unit_enabled(host=host):
+        _privileged_or_raise(["systemctl", "enable", UNIT_NAME], f"enable {UNIT_NAME}", host=host)
         steps.append(f"enabled {UNIT_NAME}")
     logger.info("boot unit ready for {}", ctx.home)
     return steps
 
 
-def uninstall() -> list[str]:
+def uninstall(*, host: Host) -> list[str]:
     """Remove the host's boot unit after a successful native stop.
 
     Safe when nothing is installed, and safe to call on non-systemd hosts (a
@@ -324,28 +324,28 @@ def uninstall() -> list[str]:
     jobs. Removes only the exact unit path of `UNIT_NAME`, then resets the failed
     record systemd keeps listing for a removed unit whose last stop failed.
     """
-    if not is_linux():
+    if host.platform.system != "linux":
         return []
     steps: list[str] = []
     name = UNIT_NAME
     destination = unit_path()
     if destination.exists():
-        _privileged_or_raise(["systemctl", "disable", "--now", name], f"stop {name}")
-        _privileged_or_raise(["rm", "-f", str(destination)], f"remove {destination}")
-        _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload")
+        _privileged_or_raise(["systemctl", "disable", "--now", name], f"stop {name}", host=host)
+        _privileged_or_raise(["rm", "-f", str(destination)], f"remove {destination}", host=host)
+        _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload", host=host)
         steps.append(f"removed {destination}")
-    if _failed_record(name):
-        _privileged_or_raise(["systemctl", "reset-failed", name], f"reset-failed {name}")
+    if _failed_record(name, host=host):
+        _privileged_or_raise(["systemctl", "reset-failed", name], f"reset-failed {name}", host=host)
         steps.append(f"cleared the failed record of {name}")
     return steps
 
 
-def _failed_record(name: str) -> bool:
+def _failed_record(name: str, *, host: Host) -> bool:
     """A failed unit outlives its removed file as a `not-found failed` record
     until reset; checked also when a previous removal left one behind."""
-    if not systemd_running():
+    if not systemd_running(host=host):
         return False
-    result = systemctl("show", "--property=ActiveState", "--value", name)
+    result = systemctl("show", "--property=ActiveState", "--value", name, host=host)
     if result.returncode:
         raise RuntimeError(f"cannot observe {name}: {result.stderr.strip()}")
     return result.stdout.strip() == "failed"

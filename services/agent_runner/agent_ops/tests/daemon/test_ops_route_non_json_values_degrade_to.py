@@ -24,6 +24,8 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon
@@ -73,6 +75,7 @@ async def test_ops_route_non_json_values_degrade_to_str(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         return "completed", {"at": datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)}
@@ -91,6 +94,7 @@ async def test_ops_route_non_json_values_degrade_to_str(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == 200
     assert ctype == "application/json"
@@ -128,6 +132,7 @@ async def test_ops_route_failed_status_is_still_http_200(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         return "failed", {"error": "boom"}
@@ -154,6 +159,7 @@ async def test_ops_route_failed_status_is_still_http_200(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == 200
     assert json.loads(body) == {"status": "failed", "result": {"error": "boom"}}
@@ -185,6 +191,7 @@ async def test_ops_route_malformed_body_400(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == 400
     assert "invalid JSON" in json.loads(body)["error"]
@@ -201,6 +208,7 @@ async def test_ops_route_malformed_body_400(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == 400
     assert "kind" in json.loads(body)["error"]
@@ -235,6 +243,7 @@ async def test_ops_route_crash_becomes_failed_result(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         raise RuntimeError("kaboom")
@@ -261,6 +270,7 @@ async def test_ops_route_crash_becomes_failed_result(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == 200
     parsed = json.loads(body)
@@ -310,6 +320,7 @@ async def test_ops_route_semaphore_caps_concurrency(
         database: Callable[[], Database],
         image: LoadedCommit,
         local_machine: MachineIdentity,
+        host: Host,
     ) -> tuple[str, dict[str, object]]:
         del local_machine
         nonlocal in_flight, peak
@@ -351,6 +362,7 @@ async def test_ops_route_semaphore_caps_concurrency(
                 database=ops_database,
                 image=ops_image,
                 local_machine=machine_identity,
+                host=fake_host(),
             )
             for b in bodies
         ]
@@ -570,6 +582,7 @@ async def test_ops_route_dedupes_by_envelope_key(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     code2, payload2, _ = await daemon.ops_route(
         body,
@@ -584,6 +597,7 @@ async def test_ops_route_dedupes_by_envelope_key(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
 
     assert code1 == 200 and code2 == 200
@@ -630,6 +644,7 @@ async def test_ops_route_without_key_does_not_dedupe(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     await daemon.ops_route(
         body,
@@ -644,6 +659,7 @@ async def test_ops_route_without_key_does_not_dedupe(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
 
     assert calls["n"] == 2  # no key → no dedup → both execute
@@ -701,6 +717,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     )
     await asyncio.to_thread(started.wait, 10)

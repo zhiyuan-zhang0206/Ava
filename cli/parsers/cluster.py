@@ -40,7 +40,7 @@ def _h_cluster_resume(args: argparse.Namespace) -> int:
 def _h_cluster_destroy(args: argparse.Namespace) -> int:
     from cli.commands.cluster.home import cmd_cluster_destroy
 
-    return cmd_cluster_destroy(drop_db=args.drop_db)
+    return cmd_cluster_destroy(drop_db=args.drop_db, host=args.runtime.host)
 
 
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:
@@ -54,16 +54,16 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
     )
 
 
-def _h_cluster_health_probe_register(_args: argparse.Namespace) -> int:
+def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
     from cli.commands.cluster.cron import cmd_cron_register
 
-    return cmd_cron_register()
+    return cmd_cron_register(host=args.runtime.host)
 
 
-def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
+def _h_cluster_health_probe_unregister(args: argparse.Namespace) -> int:
     from cli.commands.cluster.cron import cmd_cron_unregister
 
-    return cmd_cron_unregister()
+    return cmd_cron_unregister(host=args.runtime.host)
 
 
 def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:

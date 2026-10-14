@@ -20,14 +20,26 @@ from base.host.system.boot_unit import (
     uninstall,
     unit_enabled,
 )
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import (
+    DARWIN_ARM64,
+    LINUX_X86,
+    FakeCommands,
+    Reply,
+    fake_host,
+)
 
 
-def _no_binary(_name: str) -> None:
-    return None
+def _linux() -> Host:
+    return fake_host(platform=LINUX_X86)
 
 
-def _systemctl_binary(_name: str) -> str:
-    return "/usr/bin/systemctl"
+def _systemd_up(*, host: Host) -> bool:
+    return True
+
+
+def _systemd_down(*, host: Host) -> bool:
+    return False
 
 
 def _context(tmp_path: Path) -> BootUnitContext:
@@ -105,12 +117,10 @@ def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
 def test_systemd_running_requires_linux_systemctl_and_the_runtime_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(boot_unit, "is_linux", lambda: False)
-    assert systemd_running() is False
-    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
-    monkeypatch.setattr(boot_unit.shutil, "which", _no_binary)
-    assert systemd_running() is False
-    monkeypatch.setattr(boot_unit.shutil, "which", _systemctl_binary)
+    programs = {"systemctl": "/usr/bin/systemctl"}
+    assert systemd_running(host=fake_host(platform=DARWIN_ARM64, programs=programs)) is False
+    assert systemd_running(host=_linux()) is False
+    linux = fake_host(platform=LINUX_X86, programs=programs)
 
     # /run/systemd/system is the booted-with-systemd marker; pin the path probe
     # rather than the host so the test reads the same on macOS and in CI.
@@ -118,32 +128,23 @@ def test_systemd_running_requires_linux_systemctl_and_the_runtime_dir(
         return types.SimpleNamespace(is_dir=lambda: True)
 
     monkeypatch.setattr(boot_unit, "Path", fake_path)
-    assert systemd_running() is True
+    assert systemd_running(host=linux) is True
 
 
-def test_unit_enabled_reads_the_one_systemctl_seam(
-    ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[tuple[str, ...]] = []
-
-    def fake_systemctl(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        return subprocess.CompletedProcess(args, 0, "enabled\n", "")
-
-    monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
-    monkeypatch.setattr(boot_unit, "systemctl", fake_systemctl)
-    assert unit_enabled() is True
-    assert calls == [("is-enabled", "ava-boot.service")]
+def test_unit_enabled_reads_the_one_systemctl_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_up)
+    commands = FakeCommands()
+    commands.on(["systemctl", "is-enabled"], Reply("enabled\n"), Reply("disabled\n"))
+    host = fake_host(commands, platform=LINUX_X86)
+    assert unit_enabled(host=host) is True
+    assert commands.argvs == [("systemctl", "is-enabled", "ava-boot.service")]
 
     # Anything but the literal word "enabled" is not ownership.
-    def disabled(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args, 0, "disabled\n", "")
-
-    monkeypatch.setattr(boot_unit, "systemctl", disabled)
-    assert unit_enabled() is False
+    assert unit_enabled(host=host) is False
     # A host without systemd can never have an enabled unit.
-    monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
-    assert unit_enabled() is False
+    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_down)
+    assert unit_enabled(host=host) is False
+    assert len(commands.calls) == 2
 
 
 # --- install / uninstall / status --------------------------------------------
@@ -153,10 +154,10 @@ def _install_seams(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, enabled: bool
 ) -> tuple[list[list[str]], dict[str, str]]:
     """Patch the module's seams so install never touches the real host."""
-    monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
+    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_up)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", tmp_path / "etc-systemd")
 
-    def unit_enabled() -> bool:
+    def unit_enabled(*, host: Host) -> bool:
         return enabled
 
     monkeypatch.setattr(boot_unit, "unit_enabled", unit_enabled)
@@ -164,7 +165,10 @@ def _install_seams(
     installed: dict[str, str] = {}
 
     def fake_privileged(
-        argv: list[str], *, timeout: float = 120.0
+        argv: list[str],
+        *,
+        timeout: float = 120.0,
+        host: Host,
     ) -> subprocess.CompletedProcess[str]:
         recorded.append(argv)
         if argv and argv[0] == "install":
@@ -180,9 +184,9 @@ def _install_seams(
 def test_install_refuses_without_systemd(
     ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
+    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_down)
     with pytest.raises(RuntimeError, match="systemd"):
-        install(context=ctx)
+        install(context=ctx, host=_linux())
 
 
 def test_uninstall_removes_only_the_boot_units_paths(
@@ -191,11 +195,13 @@ def test_uninstall_removes_only_the_boot_units_paths(
     units = tmp_path / "etc-systemd"
     units.mkdir()
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", units)
-    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
     recorded: list[list[str]] = []
 
     def fake_privileged(
-        argv: list[str], *, timeout: float = 120.0
+        argv: list[str],
+        *,
+        timeout: float = 120.0,
+        host: Host,
     ) -> subprocess.CompletedProcess[str]:
         recorded.append(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -209,7 +215,7 @@ def test_uninstall_removes_only_the_boot_units_paths(
     # The egress template unit of the gateway host is not ours, and is named in no command.
     template = units / "ava-gateway-egress@.service"
     template.write_text("z")
-    steps = uninstall()
+    steps = uninstall(host=_linux())
 
     assert ["systemctl", "disable", "--now", "ava-boot.service"] in recorded
     assert ["rm", "-f", str(unit)] in recorded
@@ -222,12 +228,11 @@ def test_uninstall_removes_only_the_boot_units_paths(
     # Nothing left to remove -> a no-op (the mocked `rm -f` never ran for real).
     unit.unlink()
     before = list(recorded)
-    assert uninstall() == []
+    assert uninstall(host=_linux()) == []
     assert recorded == before
     # A non-Linux host never touches /etc, whatever is on disk.
     unit.write_text(render_unit(ctx))
-    monkeypatch.setattr(boot_unit, "is_linux", lambda: False)
-    assert uninstall() == []
+    assert uninstall(host=fake_host(platform=DARWIN_ARM64)) == []
     assert unit.exists()
 
 
@@ -238,18 +243,23 @@ def _manager_reports(
     units = tmp_path / "etc-systemd"
     units.mkdir(exist_ok=True)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", units)
-    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
-    monkeypatch.setattr(boot_unit, "systemd_running", lambda: True)
+    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_up)
     recorded: list[list[str]] = []
 
     def fake_privileged(
-        argv: list[str], *, timeout: float = 120.0
+        argv: list[str],
+        *,
+        timeout: float = 120.0,
+        host: Host,
     ) -> subprocess.CompletedProcess[str]:
         recorded.append(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    def show(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
-        del timeout
+    def show(
+        *args: str,
+        timeout: float = 30.0,
+        host: Host,
+    ) -> subprocess.CompletedProcess[str]:
         assert args[:3] == ("show", "--property=ActiveState", "--value"), args
         return subprocess.CompletedProcess(["systemctl", *args], 0, f"{active_state}\n", "")
 
@@ -267,7 +277,7 @@ def test_uninstall_leaves_no_failed_record_behind(
     name = "ava-boot.service"
     (units / name).write_text(render_unit(ctx))
 
-    steps = uninstall()
+    steps = uninstall(host=_linux())
 
     reset = ["systemctl", "reset-failed", name]
     assert recorded.index(["systemctl", "daemon-reload"]) < recorded.index(reset)
@@ -275,7 +285,7 @@ def test_uninstall_leaves_no_failed_record_behind(
     # A residue a previous destroy left (no file any more) is cleared too.
     (units / name).unlink()  # what the mocked `rm -f` would have done
     recorded.clear()
-    assert uninstall() == [f"cleared the failed record of {name}"]
+    assert uninstall(host=_linux()) == [f"cleared the failed record of {name}"]
     assert recorded == [reset]
 
 
@@ -283,22 +293,27 @@ def test_uninstall_resets_nothing_it_did_not_leave_failed(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _units, recorded = _manager_reports(monkeypatch, tmp_path, "inactive")
-    assert uninstall() == []
+    assert uninstall(host=_linux()) == []
     assert recorded == []
 
 
-def test_privileged_translates_a_missing_sudo(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_privileged_translates_a_missing_sudo() -> None:
     """A host without sudo must fail actionably (RuntimeError with guidance),
     not surface a raw FileNotFoundError traceback through the CLI wrappers."""
-
-    def run_missing(_cmd: list[str], **_kw: object) -> None:
-        raise FileNotFoundError(2, "No such file or directory", "sudo")
-
-    monkeypatch.setattr(boot_unit.os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(boot_unit.subprocess, "run", run_missing)
+    commands = FakeCommands()
+    commands.on("sudo", FileNotFoundError(2, "No such file or directory", "sudo"))
 
     with pytest.raises(RuntimeError, match="passwordless sudo"):
-        boot_unit.privileged(["true"])
+        boot_unit.privileged(["true"], host=fake_host(commands, uid=1000))
+
+
+def test_privileged_runs_a_root_command_directly_and_others_through_sudo() -> None:
+    commands = FakeCommands()
+    commands.on(["true"], Reply())
+    commands.on(["sudo"], Reply())
+    boot_unit.privileged(["true"], host=fake_host(commands, uid=0))
+    boot_unit.privileged(["true"], host=fake_host(commands, uid=1000))
+    assert commands.argvs == [("true",), ("sudo", "-n", "true")]
 
 
 def test_the_boot_unit_carries_no_home() -> None:
@@ -313,17 +328,15 @@ def test_interactive_start_never_publishes(
 ) -> None:
     from base.native_process.ownership import OwnedProcess
 
-    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
-
     def interactive(_pid: int) -> str:
         return "/user.slice/interactive.scope"
 
-    def no_manager() -> dict[str, str]:
+    def no_manager(*, host: Host) -> dict[str, str]:
         pytest.fail("interactive")
 
     monkeypatch.setattr(boot_unit, "process_cgroup", interactive)
     monkeypatch.setattr(boot_unit, "manager_properties", no_manager)
-    boot_unit.publish_root_ready(ctx.home, OwnedProcess(123, 1.0, 1))
+    boot_unit.publish_root_ready(ctx.home, OwnedProcess(123, 1.0, 1), host=_linux())
 
 
 @pytest.mark.parametrize("fault", ["dead", "foreign", "manager", "reused", "none"])
@@ -335,7 +348,7 @@ def test_root_publication_binds_native_custody(
     owner = OwnedProcess(123, 1.0, 1)
     expected = "/system.slice/ava-boot.service"
 
-    def in_unit() -> bool:
+    def in_unit(*, host: Host) -> bool:
         return True
 
     def cgroup(_pid: int) -> str:
@@ -346,7 +359,7 @@ def test_root_publication_binds_native_custody(
     def live(_self: OwnedProcess) -> bool:
         return next(alive)
 
-    def properties() -> dict[str, str]:
+    def properties(*, host: Host) -> dict[str, str]:
         return {
             "MainPID": "0",
             "ControlPID": "999" if fault == "manager" else str(boot_unit.os.getpid()),
@@ -362,31 +375,35 @@ def test_root_publication_binds_native_custody(
     if fault == "none":
         path.parent.mkdir(parents=True)
         path.write_text("999999\n")  # A stale hint is replaced, never adopted as authority.
-        boot_unit.publish_root_ready(ctx.home, owner)
+        boot_unit.publish_root_ready(ctx.home, owner, host=_linux())
         assert path.read_text() == "123\n"
         assert path.stat().st_mode & 0o777 == 0o600
     else:
         with pytest.raises(RuntimeError, match=r"custody|birth"):
-            boot_unit.publish_root_ready(ctx.home, owner)
+            boot_unit.publish_root_ready(ctx.home, owner, host=_linux())
         assert not path.exists()
 
 
 def test_uninstall_failed_stop_preserves_unit(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(boot_unit, "is_linux", lambda: True)
     monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", tmp_path)
     target = boot_unit.unit_path()
     target.write_text(render_unit(ctx))
     calls: list[list[str]] = []
 
-    def fail_stop(argv: list[str], *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+    def fail_stop(
+        argv: list[str],
+        *,
+        timeout: float = 120,
+        host: Host,
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 1, "", "stop failed")
 
     monkeypatch.setattr(boot_unit, "privileged", fail_stop)
     with pytest.raises(RuntimeError, match="stop failed"):
-        uninstall()
+        uninstall(host=_linux())
     assert target.exists()
     assert calls == [["systemctl", "disable", "--now", "ava-boot.service"]]
 
@@ -395,7 +412,7 @@ def test_install_enables_native_unit_without_recursively_starting(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorded, installed = _install_seams(monkeypatch, tmp_path, enabled=False)
-    steps = install(context=ctx)
+    steps = install(context=ctx, host=_linux())
     assert installed["content"] == render_unit(ctx)
     assert ["systemctl", "enable", "ava-boot.service"] in recorded
     assert ["systemctl", "start", "ava-boot.service"] not in recorded
@@ -410,5 +427,5 @@ def test_unchanged_enabled_unit_never_restarts_or_rewrites(
     target = boot_unit.unit_path()
     target.parent.mkdir()
     target.write_text(render_unit(ctx))
-    assert install(context=ctx) == []
+    assert install(context=ctx, host=_linux()) == []
     assert recorded == []

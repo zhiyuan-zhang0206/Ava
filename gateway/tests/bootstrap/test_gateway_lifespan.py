@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.host.system.hostport import Host
 from gateway import app as gateway_app
 from tests.fixtures.gateway_config import gateway_test_process
 
@@ -34,7 +35,7 @@ def flusher_tasks(
     monkeypatch.setattr(gateway_app.latency, "latency_flusher", flush)
     monkeypatch.setattr(gateway_app.rejection_log, "auth401_flusher", flush)
 
-    def register_cron(*, enabled_reader: Callable[[], bool]) -> None:
+    def register_cron(*, enabled_reader: Callable[[], bool], host: Host) -> None:
         return None
 
     monkeypatch.setattr(gateway_app, "register_os_cron", register_cron)

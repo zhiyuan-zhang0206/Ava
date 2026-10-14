@@ -45,6 +45,7 @@ from base.host.private_storage import (
     private_tree_root_problem,
     scan_non_regular_nodes,
 )
+from base.host.system.hostport import Host
 from cli.start_runtime import StartRuntime
 
 _TREE_ROOTS = ("logs", "workspaces", "memory")
@@ -56,6 +57,7 @@ def preflight_start_readiness(
     check_launcher: bool = True,
     runtime: StartRuntime | None = None,
     machine: MachineIdentity,
+    host: Host,
 ) -> int:
     """Vet the local state the coming `ava start` needs, before the stop.
 
@@ -85,7 +87,7 @@ def preflight_start_readiness(
             "ahead of this one reports the same condition)"
         )
     else:
-        port_fatal, port_observations = _port_findings(roles, machine=machine)
+        port_fatal, port_observations = _port_findings(roles, machine=machine, host=host)
         fatal += port_fatal
         observations += port_observations
 
@@ -122,7 +124,9 @@ def _machine_roles(*, machine: MachineIdentity) -> MachineRoles | None:
     return _repo_commands.roles_or_none(machine=machine)
 
 
-def _port_findings(roles: MachineRoles, *, machine: MachineIdentity) -> tuple[list[str], list[str]]:
+def _port_findings(
+    roles: MachineRoles, *, machine: MachineIdentity, host: Host
+) -> tuple[list[str], list[str]]:
     """(fatal, observations) for the health-port gate, checked on the roster that
     the update's own `ava start` will launch with.
 
@@ -142,7 +146,7 @@ def _port_findings(roles: MachineRoles, *, machine: MachineIdentity) -> tuple[li
     try:
         available = {s.session for s in _roster.build_services()}
         roster = root_tree_roster(
-            roles, resolve_selection(available, persist=False), machine=machine
+            roles, resolve_selection(available, persist=False), machine=machine, host=host
         )
         occupied = _probe_commands.occupied_health_ports(roster)
     except Exception as exc:  # a preflight must not fail the update

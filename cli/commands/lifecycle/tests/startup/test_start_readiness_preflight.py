@@ -22,6 +22,7 @@ from base import paths
 from base.cluster.machine import MachineIdentity
 from base.deploy.schema import migrations
 from base.host.system import backend
+from base.host.system.tests.fake_commands import fake_host
 from cli.commands import probe
 from cli.commands.lifecycle import _start_readiness_preflight as preflight
 from cli.commands.lifecycle import root_driver
@@ -97,7 +98,7 @@ def repo(tmp_path: Path) -> Path:
 
 def _run(repo: Path, *, check_launcher: bool = True, command_runtime: CommandRuntime) -> int:
     return preflight.preflight_start_readiness(
-        repo, check_launcher=check_launcher, machine=command_runtime.machine
+        repo, check_launcher=check_launcher, machine=command_runtime.machine, host=fake_host()
     )
 
 

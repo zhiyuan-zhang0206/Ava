@@ -16,6 +16,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
+from base.host.system.tests.fake_commands import fake_host
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.agent_ops import boot, daemon
 
@@ -153,6 +154,7 @@ async def test_server_failure_releases_owned_resources(
             image=ops_image,
             local_machine=machine_identity,
             config=config,
+            host=fake_host(),
         )
 
     assert sorted(events) == ["health", "pidfile", "pool"]

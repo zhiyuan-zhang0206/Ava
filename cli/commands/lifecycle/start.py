@@ -20,6 +20,7 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.host.system.hostport import Host
 from base.paths import prod_service_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands._repo import repo_root
@@ -281,6 +282,7 @@ def _roster_for(
     *,
     publish: bool = True,
     machine: MachineIdentity,
+    host: Host,
 ) -> tuple[ServiceSpec, ...]:
     """The launch roster of the resolved service selection; `publish=False` only inspects it."""
     import cli.commands.lifecycle.root_driver as _root_driver_commands
@@ -289,7 +291,7 @@ def _roster_for(
 
     names = {
         spec.session
-        for spec, _reason in services_for_capabilities_annotated(roles, machine=machine)
+        for spec, _reason in services_for_capabilities_annotated(roles, machine=machine, host=host)
     }
     launch_skip = resolve_selection(
         names,
@@ -299,7 +301,7 @@ def _roster_for(
         persist=selection.persist_services,
         **({} if publish else {"publish": False}),
     )
-    return _root_driver_commands.start_roster(roles, launch_skip, machine=machine)
+    return _root_driver_commands.start_roster(roles, launch_skip, machine=machine, host=host)
 
 
 def _admit_start(
@@ -315,7 +317,9 @@ def _admit_start(
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
     # Resolve desired services without publishing changes before admission.
-    roster = _roster_for(state.roles, selection, publish=False, machine=command.machine)
+    roster = _roster_for(
+        state.roles, selection, publish=False, machine=command.machine, host=command.host
+    )
     try:
         state.live = _root_driver_commands.admit_live_start(
             roster,
@@ -491,7 +495,7 @@ def cmd_start_body(
         return rc
 
     # Preparation may materialize plugins on a cold start; publish only now.
-    roster = _roster_for(roles, selection, machine=command.machine)
+    roster = _roster_for(roles, selection, machine=command.machine, host=command.host)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
     # another unit already answers on — this is the last point at which nothing
@@ -538,7 +542,12 @@ def cmd_start_body(
     )
 
     print("\n→ status")
-    cmd_status(database_factory=database_factory, machine=command.machine, config=command.config)
+    cmd_status(
+        database_factory=database_factory,
+        machine=command.machine,
+        config=command.config,
+        host=command.host,
+    )
 
     # 7) gateway reachability hint.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:

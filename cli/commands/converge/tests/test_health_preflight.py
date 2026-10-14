@@ -15,7 +15,7 @@ import pytest
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineRoles
-from base.host.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import health_preflight as _hp

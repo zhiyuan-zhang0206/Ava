@@ -8,6 +8,7 @@ import pytest
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from ava.mcps import _daemon as daemon
+from base.host.system.tests.fake_commands import fake_host
 
 
 class CountingSession:
@@ -48,10 +49,10 @@ async def test_daemon_warm_session_rejects_changed_overlay(
     spawn = MagicMock(side_effect=AssertionError("no server may start"))
     monkeypatch.setattr(mcp.client.stdio, "stdio_client", spawn)
     request = {"id": 1, "method": "call_tool", "params": {"server": "fs", "tool": "bump"}}
-    assert (await daemon.dispatch_with_retry(request, scope))["ok"] is True
+    assert (await daemon.dispatch_with_retry(request, scope, host=fake_host()))["ok"] is True
     assert session.effects == 1
     (unit_home / "mcp_enabled.json").write_text(overlay)
-    response = await daemon.dispatch_with_retry(request, scope)
+    response = await daemon.dispatch_with_retry(request, scope, host=fake_host())
     assert response["ok"] is False
     reason = "mcp_enabled.json" if overlay == "{not json" else "not configured"
     assert reason in response["error"]

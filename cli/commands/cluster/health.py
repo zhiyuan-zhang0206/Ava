@@ -32,6 +32,7 @@ from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.host.system.hostport import Host
 from cli.commands.cluster._provider_guard import run_provider_guard
 from cli.database.runtime import CommandRuntime
 
@@ -232,7 +233,7 @@ def schema_health(*, database_factory: DatabaseFactory) -> bool:
         return True
 
 
-def service_probes(*, machine: MachineIdentity) -> list[str]:
+def service_probes(*, machine: MachineIdentity, host: Host) -> list[str]:
     """Probe every service this host's roles should be running; return the failing
     services, each annotated with why (empty = all responding).
 
@@ -259,7 +260,7 @@ def service_probes(*, machine: MachineIdentity) -> list[str]:
     except (OSError, ValueError, RuntimeError, TypeError) as exc:
         return [f"service selection unavailable ({exc})"]
     failing: list[str] = []
-    for spec, gate_reason in services_for_capabilities_annotated(roles, machine=machine):
+    for spec, gate_reason in services_for_capabilities_annotated(roles, machine=machine, host=host):
         if gate_reason is not None or not selection.enabled(spec.session):
             continue
         probe = _probe_commands.probe_service(spec)
@@ -497,7 +498,7 @@ def _check_alert_only_health(*, database_factory: DatabaseFactory, command: Comm
     """Observe the remaining service, host, and provider health signals."""
 
     # 5. Per-service health and the host-level Redis bridge.
-    failing = service_probes(machine=command.machine) + [
+    failing = service_probes(machine=command.machine, host=command.host) + [
         failure
         for failure in (redis_bridge_probe(machine=command.machine, config=command.config),)
         if failure is not None

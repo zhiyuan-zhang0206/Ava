@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
-import os
-import types
 from pathlib import Path
 
 import pytest
 
 from base import paths
 from base.host.system import cron
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import (
+    DARWIN_ARM64,
+    LINUX_X86,
+    FakeCommands,
+    Reply,
+    fake_host,
+)
+
+_UID = 501
 
 
 @pytest.fixture()
@@ -26,19 +34,19 @@ def _plant_plist(fake_home: Path, label: str) -> Path:
     return p
 
 
-def _record_launchctl(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    calls: list[list[str]] = []
-
-    def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
-        calls.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-    return calls
+def _launchctl() -> tuple[FakeCommands, Host]:
+    """A macOS host whose `launchctl` always succeeds, and the commands it was asked."""
+    commands = FakeCommands()
+    commands.on("launchctl", Reply(), repeat=True)
+    return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
 
 
-def _desired_plist(_interval_s: int) -> str:
+def _desired_plist(_interval_s: int, *, host: Host) -> str:
     return "<desired-plist/>"
+
+
+def _fixed_ava(*, host: Host) -> str:
+    return "/x/ava"
 
 
 def _never_descendant(_label: str) -> bool:
@@ -54,11 +62,11 @@ def test_register_macos_never_reloads_its_own_launchd_job(
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", label)
     monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
-    calls = _record_launchctl(monkeypatch)
+    commands, host = _launchctl()
 
-    assert cron.register_macos(300) == 0
+    assert cron.register_macos(300, host=host) == 0
     assert plist.read_text() == "<old-plist/>"
-    assert calls == []
+    assert commands.argvs == []
 
 
 def test_register_macos_still_reloads_from_another_launchd_job(
@@ -71,11 +79,38 @@ def test_register_macos_still_reloads_from_another_launchd_job(
     monkeypatch.setenv("XPC_SERVICE_NAME", "com.ava.autostart")
     monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
     monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
-    calls = _record_launchctl(monkeypatch)
+    commands, host = _launchctl()
 
-    assert cron.register_macos(300) == 0
+    assert cron.register_macos(300, host=host) == 0
     assert plist.read_text() == "<desired-plist/>"
-    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
+
+
+def _crontab(
+    monkeypatch: pytest.MonkeyPatch,
+    existing: str = "",
+    *,
+    read_rc: int = 0,
+    read_error: str = "",
+    write_rc: int = 0,
+    write_error: str = "",
+) -> tuple[FakeCommands, Host]:
+    """A Linux host with `crontab` installed, holding `existing`, and the commands it was asked.
+
+    The generated job line names a fixed `ava` binary, whatever checkout the tests run in.
+    """
+    monkeypatch.setattr(cron, "ava_binary_path", _fixed_ava)
+    commands = FakeCommands()
+    commands.on(["crontab", "-l"], Reply(existing, read_error, read_rc), repeat=True)
+    commands.on(["crontab", "-"], Reply("", write_error, write_rc), repeat=True)
+    host = fake_host(commands, platform=LINUX_X86, programs={"crontab": "/usr/bin/crontab"})
+    return commands, host
+
+
+def _written(commands: FakeCommands) -> str | None:
+    """The crontab body the code wrote with `crontab -`, or None when it never wrote."""
+    bodies = [str(call.kwargs["input"]) for call in commands.calls if call.argv == ("crontab", "-")]
+    return bodies[-1] if bodies else None
 
 
 def test_register_linux_aborts_when_crontab_read_fails(
@@ -84,53 +119,34 @@ def test_register_linux_aborts_when_crontab_read_fails(
     """A `crontab -l` failure that is NOT the benign 'no crontab for <user>'
     (permissions, broken cron) must abort — proceeding would rewrite the user's
     real crontab from an empty read."""
-    import shutil
+    commands, host = _crontab(monkeypatch, read_rc=1, read_error="permission denied")
 
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-
-    def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
-        if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=1, stdout="", stderr="permission denied")
-        raise AssertionError(f"must not reach a crontab write: {cmd}")
-
-    monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-    assert cron.register_linux(300) == 1
+    assert cron.register_linux(300, host=host) == 1
     assert "avoid clobbering" in capsys.readouterr().err
+    assert _written(commands) is None
 
 
 def test_register_linux_treats_no_crontab_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    import shutil
+    commands, host = _crontab(monkeypatch, read_rc=1, read_error="no crontab for u")
 
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
-    writes: dict[str, str] = {}
+    assert cron.register_linux(300, host=host) == 0
+    assert "health-probe" in str(_written(commands))
 
-    def _run(cmd, **kw):  # type: ignore[no-untyped-def]
-        if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=1, stdout="", stderr="no crontab for u")
-        if cmd == ["crontab", "-"]:
-            writes["input"] = kw.get("input", "")  # pyright: ignore[reportUnknownMemberType]
-            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-    assert cron.register_linux(300) == 0
-    assert "health-probe" in writes["input"]
+def _local_ava(*, host: Host) -> str:
+    return "/Users/x/.local/bin/ava"
+
+
+def _brew_ava(*, host: Host) -> str:
+    return "/opt/homebrew/bin/ava"
 
 
 def test_launchd_path_env_includes_brew_bin(monkeypatch: pytest.MonkeyPatch) -> None:
     """launchd hands a job a minimal PATH without Homebrew's bin. Both LaunchAgents
     this repo writes (autostart, watchdog probe) shell out to the repo's tools, so the composed
     PATH must carry the brew prefix, the dir holding `ava`, and the system dirs."""
-    import shutil
-
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/Users/x/.local/bin/ava")
-    monkeypatch.setattr(
-        shutil,
-        "which",
-        lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    path = cron.launchd_path_env()
+    monkeypatch.setattr(cron, "ava_binary_path", _local_ava)
+    path = cron.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
     assert "/opt/homebrew/bin" in path  # brew bin (launchd omits it)
     assert "/Users/x/.local/bin" in path  # dir holding `ava`
     assert "/usr/bin" in path  # base system dirs
@@ -139,26 +155,17 @@ def test_launchd_path_env_includes_brew_bin(monkeypatch: pytest.MonkeyPatch) -> 
 def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatch) -> None:
     """No brew on PATH (a fresh box, or launchd's own stripped env): fall back to
     the standard Apple-silicon / Intel prefixes rather than emitting no brew dir."""
-    import shutil
-
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/Users/x/.local/bin/ava")
-    monkeypatch.setattr(shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    path = cron.launchd_path_env()
+    monkeypatch.setattr(cron, "ava_binary_path", _local_ava)
+    path = cron.launchd_path_env(host=fake_host())
     assert "/opt/homebrew/bin" in path
     assert "/usr/local/bin" in path
 
 
 def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
     """`ava` living in the brew prefix must not produce a doubled entry."""
-    import shutil
-
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/opt/homebrew/bin/ava")
-    monkeypatch.setattr(
-        shutil,
-        "which",
-        lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert cron.launchd_path_env().split(":").count("/opt/homebrew/bin") == 1
+    monkeypatch.setattr(cron, "ava_binary_path", _brew_ava)
+    host = fake_host(programs={"brew": "/opt/homebrew/bin/brew"})
+    assert cron.launchd_path_env(host=host).split(":").count("/opt/homebrew/bin") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -167,37 +174,11 @@ def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
 # Its marker names the job, not a home: the host runs one cluster.
 
 
-def _crontab_stub(
-    monkeypatch: pytest.MonkeyPatch,
-    existing: str,
-    writes: dict[str, str],
-    *,
-    read_rc: int = 0,
-    read_error: str = "",
-    write_rc: int = 0,
-    write_error: str = "",
-) -> None:
-    import shutil
-
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cron, "ava_binary_path", lambda: "/x/ava")
-
-    def _run(cmd, **kw):  # type: ignore[no-untyped-def]
-        if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=read_rc, stdout=existing, stderr=read_error)
-        if cmd == ["crontab", "-"]:
-            writes["input"] = kw.get("input", "")  # pyright: ignore[reportUnknownMemberType]
-        return types.SimpleNamespace(returncode=write_rc, stdout="", stderr=write_error)
-
-    monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-
-
 def test_register_linux_stamps_the_fixed_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, "", writes)
+    commands, host = _crontab(monkeypatch)
 
-    assert cron.register_linux(300) == 0
-    (line,) = writes["input"].splitlines()
+    assert cron.register_linux(300, host=host) == 0
+    (line,) = str(_written(commands)).splitlines()
     assert line.endswith("cluster health-probe # ava-health-probe")
     assert "--auto-rollback" not in line
     assert "--threshold" not in line
@@ -209,15 +190,14 @@ def test_register_linux_keeps_unrelated_lines_and_reports_success(
     other_job = (
         "*/1 * * * * /x/ava cluster watchdog-probe --role gateway  # ava-watchdog-probe.gateway"
     )
-    writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, f"0 3 * * * backup\n{other_job}\n", writes)
+    commands, host = _crontab(monkeypatch, f"0 3 * * * backup\n{other_job}\n")
 
-    assert cron.register_linux(300) == 0
+    assert cron.register_linux(300, host=host) == 0
     assert capsys.readouterr() == (
         "  . crontab entry added (every 5 min)\n",
         "",
     )
-    body = writes["input"]
+    body = str(_written(commands))
     assert "0 3 * * * backup" in body and other_job in body
     assert body.count("# ava-health-probe") == 1
 
@@ -246,58 +226,45 @@ def test_register_linux_failure_messages_and_rc(
     expected_out: str,
     expected_err: str,
 ) -> None:
-    writes: dict[str, str] = {}
-    _crontab_stub(
+    commands, host = _crontab(
         monkeypatch,
-        "",
-        writes,
         read_rc=read_rc,
         read_error=read_error,
         write_rc=write_rc,
         write_error=write_error,
     )
 
-    assert cron.register_linux(300) == 1
+    assert cron.register_linux(300, host=host) == 1
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == (expected_out, expected_err)
-    assert ("input" in writes) == (read_rc == 0)
+    assert (_written(commands) is not None) == (read_rc == 0)
 
 
-def test_register_linux_missing_crontab_message_and_rc(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(cron.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert cron.register_linux(300) == 0
+def test_register_linux_missing_crontab_message_and_rc(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cron.register_linux(300, host=fake_host(platform=LINUX_X86)) == 0
     assert capsys.readouterr() == (
         "  ! health probe cron: crontab not installed on this host (skipping); cluster runs without a health-probe cron\n",
         "",
     )
 
 
-def test_unregister_linux_removes_only_the_probe_line(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_unregister_linux_removes_only_the_probe_line(monkeypatch: pytest.MonkeyPatch) -> None:
     probe = "*/5 * * * * /x/ava cluster health-probe # ava-health-probe"
-    writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, f"{probe}\n0 3 * * * backup\n", writes)
+    commands, host = _crontab(monkeypatch, f"{probe}\n0 3 * * * backup\n")
 
-    assert cron.unregister_linux() == 0
-    assert probe not in writes["input"]
-    assert "0 3 * * * backup" in writes["input"]
+    assert cron.unregister_linux(host=host) == 0
+    assert probe not in str(_written(commands))
+    assert "0 3 * * * backup" in str(_written(commands))
 
 
-def test_unregister_linux_ignores_the_watchdog_probe_lines(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_unregister_linux_ignores_the_watchdog_probe_lines(monkeypatch: pytest.MonkeyPatch) -> None:
     """The watchdog probe writes its own crontab lines with its own marker; a
     health-probe unregister must not sweep them away."""
     probe_line = "*/1 * * * * /x/ava cluster watchdog-probe --role gateway  # ava-watchdog-probe.gateway.ava-mine"
-    writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, f"{probe_line}\n", writes)
+    commands, host = _crontab(monkeypatch, f"{probe_line}\n")
 
-    assert cron.unregister_linux() == 0
-    assert writes == {}  # nothing matched, so the crontab was never rewritten
+    assert cron.unregister_linux(host=host) == 0
+    assert _written(commands) is None  # nothing matched, so the crontab was never rewritten
 
 
 @pytest.mark.parametrize(
@@ -316,20 +283,19 @@ def test_unregister_linux_ignores_the_watchdog_probe_lines(
     ],
 )
 def test_unregister_linux_messages_and_success_gated_removal(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     read_rc: int,
     existing: str,
     write_rc: int,
     expected_out: str,
     should_write: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    writes: dict[str, str] = {}
-    _crontab_stub(monkeypatch, existing, writes, read_rc=read_rc, write_rc=write_rc)
+    commands, host = _crontab(monkeypatch, existing, read_rc=read_rc, write_rc=write_rc)
 
-    assert cron.unregister_linux() == 0
+    assert cron.unregister_linux(host=host) == 0
     assert capsys.readouterr() == (expected_out, "")
-    assert ("input" in writes) == should_write
+    assert (_written(commands) is not None) == should_write
 
 
 def test_unregister_macos_removes_only_the_probe_plist(
@@ -345,18 +311,12 @@ def test_unregister_macos_removes_only_the_probe_plist(
     probe.write_text("<plist/>")
     autostart.write_text("<plist/>")
 
-    booted: list[str] = []
+    commands, host = _launchctl()
 
-    def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
-        booted.append(cmd[-1])  # pyright: ignore[reportUnknownArgumentType]
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert cron.unregister_macos() == 0
+    assert cron.unregister_macos(host=host) == 0
     assert not probe.exists()
     assert autostart.exists()
-    assert booted == [f"gui/{os.getuid()}/com.ava.health-probe"]
+    assert [argv[-1] for argv in commands.argvs] == [f"gui/{_UID}/com.ava.health-probe"]
 
 
 # ── registration guard: worktree checkout must not register prod's probe ──
@@ -366,11 +326,10 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Stub the host's cron registrar to record the interval it is asked for."""
     calls: list[str] = []
 
-    def register(interval_s: int) -> int:
+    def register(interval_s: int, *, host: Host) -> int:
         calls.append(str(interval_s))
         return 0
 
-    monkeypatch.setattr(cron, "is_macos", lambda: True)
     monkeypatch.setattr(cron, "register_macos", register)
     return calls
 
@@ -387,7 +346,7 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
     monkeypatch.setattr(paths, "repo_root", lambda: default_home / "Ava" / ".worktrees" / "r4")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled_reader=lambda: True)
+    cron.register_os_cron(enabled_reader=lambda: True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == []  # registrar never called; registration refused
 
@@ -401,7 +360,7 @@ def test_register_allowed_from_the_homes_own_source_checkout(
     monkeypatch.setattr(paths, "repo_root", lambda: prod_home / "source")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled_reader=lambda: True)
+    cron.register_os_cron(enabled_reader=lambda: True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == ["300"]
 
@@ -413,7 +372,7 @@ def test_register_allowed_for_a_default_home_without_source(
     monkeypatch.setattr(paths, "repo_root", lambda: default_home / "dev-src")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled_reader=lambda: True)
+    cron.register_os_cron(enabled_reader=lambda: True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == ["300"]
 
@@ -434,11 +393,11 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
         return candidate == label
 
     monkeypatch.setattr(cron, "descends_from_launchd_job", _is_current)
-    calls = _record_launchctl(monkeypatch)
+    commands, host = _launchctl()
 
-    assert cron.register_macos(300) == 0
+    assert cron.register_macos(300, host=host) == 0
     assert plist.read_text() == "<old-plist/>"
-    assert calls == []
+    assert commands.argvs == []
 
 
 def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
@@ -451,8 +410,8 @@ def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
     monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
     monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
-    calls = _record_launchctl(monkeypatch)
+    commands, host = _launchctl()
 
-    assert cron.register_macos(300) == 0
+    assert cron.register_macos(300, host=host) == 0
     assert plist.read_text() == "<desired-plist/>"
-    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]

@@ -16,6 +16,7 @@ import base.host.permissions_helper.client as permissions_helper_client
 import base.paths as base_paths
 import cli.commands.lifecycle.start_generation as lifecycle_start_generation
 from base.daemon.health import DaemonProbe
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.native_process.ownership import OwnedProcess
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.sessions.tests.scripted_helper import ScriptedHelper, serve
@@ -395,9 +396,8 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
 
 
 def test_mac_boot_tail_does_not_read_or_notify(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(driver.sys, "platform", "darwin")
     monkeypatch.setattr(driver, "root_client", lambda: pytest.fail("no root read"))
-    driver.complete_boot_start(helper=refuse_helper)
+    driver.complete_boot_start(helper=refuse_helper, host=fake_host(platform=DARWIN_ARM64))
 
 
 def test_root_launch_digest_controls_reuse(tmp_path: Path) -> None:

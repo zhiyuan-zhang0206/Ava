@@ -15,7 +15,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.cluster.ports import new_home_ports
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
-from base.host.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import redis_bridge as bridge

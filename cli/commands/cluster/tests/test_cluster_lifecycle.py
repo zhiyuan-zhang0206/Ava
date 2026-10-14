@@ -14,6 +14,8 @@ import base.host.system.autostart as system_autostart
 import base.host.system.cron as system_cron
 import services.desktop.permissions_helper.launchd_job as permissions_helper_launchd_job
 from base.host.permissions_helper.client import HelperAtSocket
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from cli import start_identity
 from cli.commands.cluster import home as lifecycle
 
@@ -50,7 +52,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, roles: list[str]) -> P
     def stop() -> int:
         return 0
 
-    def unregister_jobs() -> None:
+    def unregister_jobs(*, host: Host) -> None:
         return None
 
     def helper(*_args: object, **_kwargs: object) -> None:
@@ -75,7 +77,7 @@ def _nothing_to_stop() -> int:
     return 0
 
 
-def _no_jobs() -> None:
+def _no_jobs(*, host: Host) -> None:
     return None
 
 
@@ -106,7 +108,7 @@ def test_destroy_checks_helper_before_detaching(
 
     monkeypatch.setattr(launchd_job, "unregister_helper", unregister)
     _at_a_terminal(monkeypatch, str(home))
-    assert lifecycle.cmd_cluster_destroy() == 0
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
     assert seen == [home]
     assert _detached(home)
 
@@ -130,7 +132,7 @@ def test_destroy_refuses_without_an_interactive_terminal(
     stop = Mock()
     monkeypatch.setattr(lifecycle, "stop_cluster", stop)
 
-    assert lifecycle.cmd_cluster_destroy() == 1
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
     assert "interactive terminal" in err.getvalue()
     prompt.assert_not_called()
     stop.assert_not_called()
@@ -147,7 +149,7 @@ def test_a_different_answer_changes_nothing(
     data = home / "pg"
     data.mkdir()
 
-    assert lifecycle.cmd_cluster_destroy(drop_db=True) == 1
+    assert lifecycle.cmd_cluster_destroy(drop_db=True, host=fake_host()) == 1
     stop.assert_not_called()
     assert data.is_dir()
     assert not (home / "destroy-intent.json").exists()
@@ -158,7 +160,7 @@ def test_end_of_input_changes_nothing(home: Path, monkeypatch: pytest.MonkeyPatc
     stop = Mock()
     monkeypatch.setattr(lifecycle, "stop_cluster", stop)
 
-    assert lifecycle.cmd_cluster_destroy() == 1
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
     stop.assert_not_called()
     assert not (home / "destroy-intent.json").exists()
 
@@ -170,7 +172,7 @@ def test_the_prompt_says_what_happens_and_what_is_deleted(
     from base.cluster.dataplane.pg_admin import pg_socket_path
 
     _at_a_terminal(monkeypatch, str(home))
-    assert lifecycle.cmd_cluster_destroy(drop_db=True) == 0
+    assert lifecycle.cmd_cluster_destroy(drop_db=True, host=fake_host()) == 0
 
     out = capsys.readouterr().out
     assert str(home) in out and "agent-runner, gateway" in out
@@ -184,7 +186,7 @@ def test_the_prompt_lists_no_deletion_without_drop_db(
     home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _at_a_terminal(monkeypatch, str(home))
-    assert lifecycle.cmd_cluster_destroy() == 0
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
 
     out = capsys.readouterr().out
     assert "DELETE" not in out and "cannot be undone" not in out
@@ -206,7 +208,7 @@ def test_the_default_home_can_be_destroyed(
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", _no_helper)
     _at_a_terminal(monkeypatch, str(prod))
 
-    assert lifecycle.cmd_cluster_destroy() == 0
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
     assert _detached(prod)
 
 
@@ -218,7 +220,7 @@ def test_stop_failure_leaves_home_attached_and_never_unloads_helper(
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", unload)
     _at_a_terminal(monkeypatch, str(home))
 
-    assert lifecycle.cmd_cluster_destroy() == 4
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 4
     assert not _detached(home)
     unload.assert_not_called()
 
@@ -236,7 +238,7 @@ def test_ambiguous_cleanup_leaves_home_attached(
         monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", fail)
     _at_a_terminal(monkeypatch, str(home))
 
-    assert lifecycle.cmd_cluster_destroy() == 1
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
     assert not _detached(home)
 
 
@@ -249,7 +251,7 @@ def test_destroy_preserves_credentials_and_data(
     data.mkdir(parents=True)
     _at_a_terminal(monkeypatch, str(home))
 
-    assert lifecycle.cmd_cluster_destroy() == 0
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
     assert env.read_text() == "PRIVATE_KEY=retain\n"
     assert data.is_dir()
 
@@ -270,7 +272,7 @@ def test_drop_db_removes_the_data_directories_after_the_stop(
     monkeypatch.setattr(lifecycle, "stop_cluster", stop)
     _at_a_terminal(monkeypatch, str(home))
 
-    assert lifecycle.cmd_cluster_destroy(drop_db=True) == 0
+    assert lifecycle.cmd_cluster_destroy(drop_db=True, host=fake_host()) == 0
     assert order == ["stop"]
     assert not (home / "pg").exists() and not (home / "redis").exists()
     assert (home / ".env").read_text() == "KEEP=1\n"
@@ -282,7 +284,7 @@ def test_destroy_refuses_a_home_without_a_start_intent(
     monkeypatch.setattr(start_identity, "read_intent", _no_intent)
     prompt = _at_a_terminal(monkeypatch)
 
-    assert lifecycle.cmd_cluster_destroy() == 1
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
     prompt.assert_not_called()
     assert not (home / "destroy-intent.json").exists()
 
@@ -302,12 +304,12 @@ def test_interrupted_cleanup_retries_to_completion(
 
     monkeypatch.setattr(target, interrupted)
     _at_a_terminal(monkeypatch, str(home), str(home))
-    assert lifecycle.cmd_cluster_destroy() == 1
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 1
     assert not _detached(home)
     assert (home / "destroy-intent.json").exists()
 
     monkeypatch.setattr(target, recovered)
-    assert lifecycle.cmd_cluster_destroy() == 0
+    assert lifecycle.cmd_cluster_destroy(host=fake_host()) == 0
     assert _detached(home)
 
 
@@ -328,9 +330,13 @@ def test_every_scheduled_job_is_retired_including_pr_flow_and_the_walg_tick(
         (pr_flow_job, "unregister_pr_flow_job", "PR flow"),
         (walg_job, "unregister_walg_job", "WAL-G tick"),
     ):
-        monkeypatch.setattr(module, name, lambda label=label: retired.append(label))
 
-    lifecycle.unregister_scheduled_jobs()
+        def fake_unregister_job(label: str = label, *, host: Host) -> None:
+            retired.append(label)
+
+        monkeypatch.setattr(module, name, fake_unregister_job)
+
+    lifecycle.unregister_scheduled_jobs(host=fake_host())
 
     assert retired == [
         "health probe",
@@ -347,15 +353,19 @@ def test_a_failed_job_removal_is_raised_after_the_others_ran(
 ) -> None:
     from base.host.system import autostart, logs_job
 
-    def fail() -> None:
+    def fail(*, host: Host) -> None:
         raise RuntimeError("launchctl unavailable")
 
     ran: list[str] = []
     monkeypatch.setattr(autostart, "unregister_autostart", fail)
-    monkeypatch.setattr(logs_job, "unregister_logs_job", lambda: ran.append("logs"))
+
+    def fake_unregister_logs_job(*, host: Host) -> None:
+        ran.append("logs")
+
+    monkeypatch.setattr(logs_job, "unregister_logs_job", fake_unregister_logs_job)
 
     with pytest.raises(RuntimeError, match=r"autostart \(launchctl unavailable\)"):
-        lifecycle.unregister_scheduled_jobs()
+        lifecycle.unregister_scheduled_jobs(host=fake_host())
     assert ran == ["logs"]
 
 
@@ -370,7 +380,9 @@ def test_destroying_a_scratch_home_never_reaches_the_hosts_scheduler(
     monkeypatch.setattr(system_cron, "unregister_platform_job", reached)
     monkeypatch.setattr(system_autostart, "unregister_platform_job", reached)
 
-    lifecycle.unregister_scheduled_jobs()  # no AssertionError == nothing was touched
+    lifecycle.unregister_scheduled_jobs(
+        host=fake_host()
+    )  # no AssertionError == nothing was touched
 
 
 def test_cron_cli_keeps_its_interval_and_passes_a_live_owned_gate(
@@ -385,12 +397,12 @@ def test_cron_cli_keeps_its_interval_and_passes_a_live_owned_gate(
     owner.set_field("os_jobs_enabled", False)
     observed: list[tuple[int, Callable[[], bool]]] = []
 
-    def register(*, interval_s: int, enabled_reader: Callable[[], bool]) -> None:
+    def register(*, interval_s: int, enabled_reader: Callable[[], bool], host: Host) -> None:
         observed.append((interval_s, enabled_reader))
 
     monkeypatch.setattr(command, "ConfigBoot", lambda: owner)
     monkeypatch.setattr(command, "register_os_cron", register)
-    assert command.cmd_cron_register(interval_s=420) == 0
+    assert command.cmd_cron_register(interval_s=420, host=fake_host()) == 0
     interval, gate = observed[0]
     assert interval == 420 and gate() is False
     owner.set_field("os_jobs_enabled", True)
@@ -407,5 +419,5 @@ def test_cron_cli_keeps_registration_failure_returncode(
         raise RuntimeError("scheduler denied")
 
     monkeypatch.setattr(command, "register_os_cron", failed)
-    assert command.cmd_cron_register() == 1
+    assert command.cmd_cron_register(host=fake_host()) == 1
     assert capsys.readouterr().out == "  * scheduler denied\n"

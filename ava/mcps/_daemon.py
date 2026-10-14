@@ -47,6 +47,7 @@ from ava.mcps.config import (
     server_url,
 )
 from base.config import settings
+from base.host.system.hostport import Host
 from base.log.sinks import add_sink
 from base.paths import ava_home
 
@@ -218,6 +219,7 @@ async def connect_server(
     *,
     timeout_seconds: Callable[[], float],
     stdio_client: Callable[..., Any] = open_stdio_client,
+    host: Host,
 ) -> Any:
     """Start MCP server and return (session, AsyncExitStack).
 
@@ -234,7 +236,7 @@ async def connect_server(
 
     cfg = load_config()
     spec = cfg[server]
-    assert_requirements(spec)
+    assert_requirements(spec, host=host)
     url = server_url(spec)
     if url is not None:
         return await connect_http(
@@ -342,12 +344,10 @@ async def handle_ping(req_id: Any) -> dict[str, Any]:
 
 
 async def _handle_list_tools(
-    req_id: Any,
-    server: str,
-    scope: Scope,
+    req_id: Any, server: str, scope: Scope, *, host: Host
 ) -> dict[str, Any]:
     """List the configured server's tools in the daemon wire format."""
-    session = await get_session(server, scope)
+    session = await get_session(server, scope, host=host)
     result = await session.list_tools()
     tools = [
         {
@@ -366,11 +366,13 @@ async def _handle_call_tool(
     params: dict[str, Any],
     server: str,
     scope: Scope,
+    *,
+    host: Host,
 ) -> dict[str, Any]:
     """Call one MCP tool and serialize its result for the daemon wire protocol."""
     tool = params.get("tool", "")
     args = params.get("args") or {}
-    session = await get_session(server, scope)
+    session = await get_session(server, scope, host=host)
     # The computer-mcp direct-dial session carries the calling agent's identity
     # to the computer daemon (governance + audit). Duck-typed: only
     # ComputerLineSession has the attribute.
@@ -419,21 +421,20 @@ async def _dispatch_request(
     params: dict[str, Any],
     server: str,
     scope: Scope,
+    *,
+    host: Host,
 ) -> dict[str, Any]:
     """Dispatch one parsed client request to its protocol method handler."""
     if method == "ping":
         return await handle_ping(req_id)
     if method == "list_tools":
-        return await _handle_list_tools(req_id, server, scope)
+        return await _handle_list_tools(req_id, server, scope, host=host)
     if method == "call_tool":
-        return await _handle_call_tool(req, req_id, params, server, scope)
+        return await _handle_call_tool(req, req_id, params, server, scope, host=host)
     return {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}
 
 
-async def dispatch_with_retry(
-    req: dict[str, Any],
-    scope: Scope,
-) -> dict[str, Any]:
+async def dispatch_with_retry(req: dict[str, Any], scope: Scope, *, host: Host) -> dict[str, Any]:
     """Serve one request; one bad call becomes an error response, not a dropped connection."""
     req_id = req.get("id")
     method = req.get("method")
@@ -445,7 +446,9 @@ async def dispatch_with_retry(
         # transport failure to MCPCallError before reaching here.
         for _attempt in range(3):
             try:
-                return await _dispatch_request(req, req_id, method, params, server, scope)
+                return await _dispatch_request(
+                    req, req_id, method, params, server, scope, host=host
+                )
             except Exception as e:
                 if _attempt == 2 or not is_mcp_transport_error(e):
                     raise
@@ -462,9 +465,7 @@ async def dispatch_with_retry(
 
 
 async def handle_client(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
-    scope: Scope,
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, scope: Scope, *, host: Host
 ) -> None:
     """Handle one Unix socket client connection."""
     try:
@@ -479,7 +480,7 @@ async def handle_client(
                     writer.write((json.dumps(resp) + "\n").encode())
                     await writer.drain()
                     continue
-                resp = await dispatch_with_retry(req, scope)
+                resp = await dispatch_with_retry(req, scope, host=host)
                 writer.write((json.dumps(resp, ensure_ascii=False) + "\n").encode())
                 await writer.drain()
     finally:
@@ -488,10 +489,7 @@ async def handle_client(
             await writer.wait_closed()
 
 
-async def get_session(
-    server: str,
-    scope: Scope,
-) -> Any:
+async def get_session(server: str, scope: Scope, *, host: Host) -> Any:
     """Get or create MCP server session (thread-safe).
 
     Shared servers (`"shared": true` in their spec) live in the daemon-wide
@@ -519,7 +517,7 @@ async def get_session(
             return buckets.sessions[server]
 
         session, stack = await connect_server(
-            server, scope.oauth_locks, timeout_seconds=scope.timeout_seconds
+            server, scope.oauth_locks, timeout_seconds=scope.timeout_seconds, host=host
         )
         if shared is True:
             session = SerialSession(session, lock)
@@ -529,7 +527,7 @@ async def get_session(
 
 
 async def handle_connection(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, daemon: DaemonWide
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, daemon: DaemonWide, *, host: Host
 ) -> None:
     """One client connection = one agent's session space.
 
@@ -548,7 +546,7 @@ async def handle_connection(
         timeout_seconds=daemon.timeout_seconds,
     )
     try:
-        await handle_client(reader, writer, scope)
+        await handle_client(reader, writer, scope, host=host)
     finally:
         await scope.local.close()
 
@@ -685,7 +683,7 @@ def unlink_own_socket(socket_path: str, self_ino: int) -> None:
             Path(socket_path).unlink()
 
 
-async def run_daemon(socket_path: str, *, timeout_seconds: Callable[[], float]) -> None:
+async def run_daemon(socket_path: str, *, timeout_seconds: Callable[[], float], host: Host) -> None:
     """Start the shared MCP daemon, listening on one Unix socket.
 
     A single per-machine process (ops roster session "mcp-daemon") serves every
@@ -700,7 +698,7 @@ async def run_daemon(socket_path: str, *, timeout_seconds: Callable[[], float]) 
     daemon = DaemonWide(timeout_seconds=timeout_seconds)
 
     async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await handle_connection(reader, writer, daemon)
+        await handle_connection(reader, writer, daemon, host=host)
 
     server = await asyncio.start_unix_server(_serve, path=socket_path)
     # The inode WE bound: an exit cleanup must not unlink a later occupant's
@@ -766,7 +764,9 @@ def main() -> None:
         sys.exit(1)
     asyncio.run(
         run_daemon(
-            socket_path, timeout_seconds=lambda: settings.sandbox.mcp_connect_timeout_seconds
+            socket_path,
+            timeout_seconds=lambda: settings.sandbox.mcp_connect_timeout_seconds,
+            host=Host.system(),
         )
     )
 

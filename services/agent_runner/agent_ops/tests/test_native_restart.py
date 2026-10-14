@@ -18,6 +18,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.lifecycle.native_restart import restart_native_work_op
@@ -89,10 +91,12 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
     result: dict[str, object] | None = None
     injected = False
 
-    async def lose_response(*args: Any, local_machine: MachineIdentity, **kwargs: Any) -> Any:
+    async def lose_response(
+        *args: Any, local_machine: MachineIdentity, host: Host, **kwargs: Any
+    ) -> Any:
         assert local_machine is machine_identity
         nonlocal result, injected
-        status, result = await actual(*args, local_machine=local_machine, **kwargs)
+        status, result = await actual(*args, local_machine=local_machine, host=host, **kwargs)
         assert status is OpStatus.COMPLETED
         if not injected:
             injected = True
@@ -114,6 +118,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
             database=ops_database,
             image=ops_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     original = result
     assert original is not None
@@ -133,6 +138,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status is OpStatus.COMPLETED and recovered == original
     assert db_conn.execute(
@@ -153,6 +159,7 @@ async def test_domain_receipt_recovers_without_generic_claim_or_second_command(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status is OpStatus.FAILED
     assert result == {"error": "guarded restart envelope identity differs"}

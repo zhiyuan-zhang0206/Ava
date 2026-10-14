@@ -5,15 +5,14 @@ from __future__ import annotations
 import sys
 
 from base.host.brew_pin import unpinned_formulae
-from base.native_process.os_platform import is_macos
 from cli.commands.converge.spec import ConvergeCtx
 
 
-def ensure_brew_pin(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def ensure_brew_pin(ctx: ConvergeCtx) -> None:
     """Warn when an approved formula is unpinned; never repair or block start."""
-    if not is_macos():
+    if ctx.host.platform.system != "darwin":
         return
-    missing = unpinned_formulae()
+    missing = unpinned_formulae(run=ctx.host.run)
     if not missing:
         return
     commands = ", ".join(f"`brew pin {formula}`" for formula in missing)

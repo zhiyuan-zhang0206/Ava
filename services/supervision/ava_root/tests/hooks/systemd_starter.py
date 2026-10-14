@@ -19,6 +19,7 @@ from typing import Any, cast
 import psutil
 
 from base.host.system.boot_unit import publish_root_ready, root_pid_path
+from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient, RootClientError, native_identity
 
@@ -51,7 +52,7 @@ def main(params: dict[str, Any]) -> None:
     if failure == "before":
         receipt.with_suffix(".failure").write_text("before")
         raise RuntimeError("failed before publication")
-    publish_root_ready(home, native_identity(status["root"]))
+    publish_root_ready(home, native_identity(status["root"]), host=Host.system())
     if failure == "after":
         receipt.with_suffix(".failure").write_text("after")
         raise RuntimeError("failed after publication")

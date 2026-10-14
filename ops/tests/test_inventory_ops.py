@@ -21,6 +21,8 @@ import pytest
 import ava.mcps.config as mcp_cfg_mod
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugins import enable_config, mcp_enabled
 from ops.inventory import inventory_read_op, inventory_write_op
 from ops.rpc_schemas import FieldWriteResult
@@ -63,7 +65,7 @@ def test_inventory_read_op_lists_real_plugins(
     """The repo's real built-in plugins (ava_code, etc.) appear, each with
     an enabled bool + a description. (ava_compact moved to core, Issue #1284.)"""
     machine_identity.set(name="test-machine")
-    result = inventory_read_op(local_machine=machine_identity)
+    result = inventory_read_op(local_machine=machine_identity, host=fake_host())
     assert result.machine == "test-machine"
     plugins = result.plugins
     # Real repo plugins discovered under <repo>/ava_builtins/plugins/.
@@ -83,7 +85,7 @@ def test_inventory_read_op_mcp_server_default_on(
     one-line description."""
     machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"fs": {"command": "run-fs", "args": ["--root", "/"]}})
-    result = inventory_read_op(local_machine=machine_identity)
+    result = inventory_read_op(local_machine=machine_identity, host=fake_host())
     servers = result.mcp_servers
     assert "fs" in servers
     assert servers["fs"].enabled is True
@@ -99,7 +101,7 @@ def test_inventory_read_op_overlay_reflected(
     machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"X": {"command": "x"}})
     mcp_enabled.set_mcp_enabled("X", enabled=False)
-    result = inventory_read_op(local_machine=machine_identity)
+    result = inventory_read_op(local_machine=machine_identity, host=fake_host())
     assert result.mcp_servers["X"].enabled is False
 
 
@@ -117,12 +119,13 @@ def test_inventory_rejects_invalid_requirements_before_read_or_write(
     before = mcp_enabled.local_config_path().read_bytes()
 
     with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
-        inventory_read_op(local_machine=machine_identity)
+        inventory_read_op(local_machine=machine_identity, host=fake_host())
     with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
         inventory_write_op(
             plugins={"ava_code": False},
             mcp_servers={"broken": True},
             local_machine=machine_identity,
+            host=fake_host(),
         )
     assert mcp_enabled.local_config_path().read_bytes() == before
     assert not enable_config.local_config_path().exists()
@@ -136,7 +139,7 @@ def test_inventory_can_disable_server_with_invalid_requirements(
     _write_machine_mcp(_machine_only_mcp, {"broken": spec})
 
     result = inventory_write_op(
-        plugins={}, mcp_servers={"broken": False}, local_machine=machine_identity
+        plugins={}, mcp_servers={"broken": False}, local_machine=machine_identity, host=fake_host()
     )
     assert result.applied is True
     assert result.mcp_results["broken"] == FieldWriteResult(ok=True, reason=None)
@@ -155,7 +158,10 @@ def test_inventory_write_op_plugin_happy_path(
     """Disabling a present plugin -> applied=True, and the local config reflects it."""
     machine_identity.set(name="test-machine")
     result = inventory_write_op(
-        plugins={"ava_code": False}, mcp_servers={}, local_machine=machine_identity
+        plugins={"ava_code": False},
+        mcp_servers={},
+        local_machine=machine_identity,
+        host=fake_host(),
     )
     assert result.applied is True
     assert result.plugin_results["ava_code"] == FieldWriteResult(ok=True, reason=None)
@@ -174,6 +180,7 @@ def test_inventory_write_op_atomic_rejects_unknown_plugin(
         plugins={"ava_code": False, "does-not-exist": True},
         mcp_servers={},
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert result.applied is False
     assert result.plugin_results["ava_code"].ok is True
@@ -189,7 +196,7 @@ def test_inventory_write_op_rejects_unknown_mcp_server(
     """An MCP name not in the merged map is rejected with a reason; applied=False."""
     machine_identity.set(name="test-machine")
     result = inventory_write_op(
-        plugins={}, mcp_servers={"ghost": True}, local_machine=machine_identity
+        plugins={}, mcp_servers={"ghost": True}, local_machine=machine_identity, host=fake_host()
     )
     assert result.applied is False
     assert result.mcp_results["ghost"].ok is False
@@ -203,11 +210,15 @@ def test_inventory_write_op_mcp_capability_rejected(
     (applied=False) but can always be disabled."""
     machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"that": {"command": "x", "requires": {"display": True}}})
+
     # Patch the symbol where server_capability looks it up.
-    monkeypatch.setattr(mcp_cfg_mod, "display_available", lambda: False)
+    def fake_display_available(*, host: Host) -> bool:
+        return False
+
+    monkeypatch.setattr(mcp_cfg_mod, "display_available", fake_display_available)
 
     enable = inventory_write_op(
-        plugins={}, mcp_servers={"that": True}, local_machine=machine_identity
+        plugins={}, mcp_servers={"that": True}, local_machine=machine_identity, host=fake_host()
     )
     assert enable.applied is False
     assert enable.mcp_results["that"].ok is False
@@ -216,7 +227,7 @@ def test_inventory_write_op_mcp_capability_rejected(
     assert mcp_enabled.read_enabled() == {}
 
     disable = inventory_write_op(
-        plugins={}, mcp_servers={"that": False}, local_machine=machine_identity
+        plugins={}, mcp_servers={"that": False}, local_machine=machine_identity, host=fake_host()
     )
     assert disable.applied is True
     assert disable.mcp_results["that"] == FieldWriteResult(ok=True, reason=None)
@@ -228,7 +239,9 @@ def test_inventory_write_op_empty_payload_trivially_applied(
 ) -> None:
     """Empty payload -> applied=True, nothing written."""
     machine_identity.set(name="test-machine")
-    result = inventory_write_op(plugins={}, mcp_servers={}, local_machine=machine_identity)
+    result = inventory_write_op(
+        plugins={}, mcp_servers={}, local_machine=machine_identity, host=fake_host()
+    )
     assert result.applied is True
     assert result.plugin_results == {}
     assert result.mcp_results == {}
@@ -243,7 +256,10 @@ def test_inventory_write_op_applies_both_plugin_and_mcp(
     machine_identity.set(name="test-machine")
     _write_machine_mcp(_machine_only_mcp, {"fs": {"command": "x"}})
     result = inventory_write_op(
-        plugins={"ava_code": False}, mcp_servers={"fs": False}, local_machine=machine_identity
+        plugins={"ava_code": False},
+        mcp_servers={"fs": False},
+        local_machine=machine_identity,
+        host=fake_host(),
     )
     assert result.applied is True
     cfg = enable_config.load(set(enable_config.discover_plugins()))
@@ -264,6 +280,8 @@ def test_inventory_ops_reject_gateway(
     surfacing the gateway checkout's built-in plugins/MCP."""
     machine_identity.set(role=frozenset({"gateway"}))
     with pytest.raises(RuntimeError, match="only on an agent-runner"):
-        inventory_read_op(local_machine=machine_identity)
+        inventory_read_op(local_machine=machine_identity, host=fake_host())
     with pytest.raises(RuntimeError, match="only on an agent-runner"):
-        inventory_write_op(plugins={}, mcp_servers={}, local_machine=machine_identity)
+        inventory_write_op(
+            plugins={}, mcp_servers={}, local_machine=machine_identity, host=fake_host()
+        )

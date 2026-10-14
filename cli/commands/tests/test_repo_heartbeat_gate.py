@@ -7,19 +7,25 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.host.system.tests.fake_commands import fake_host
 from cli.database.tests.command_inputs import command_machine as command_machine
 from services.supervision.roster import spec
 
 
 def _sessions(role: str, *, machine: MachineIdentity) -> set[str]:
-    return {s.session for s in spec.services_for_capabilities(frozenset({role}), machine=machine)}
+    return {
+        s.session
+        for s in spec.services_for_capabilities(
+            frozenset({role}), machine=machine, host=fake_host()
+        )
+    }
 
 
 def _annotated(role: str, *, machine: MachineIdentity) -> dict[str, str | None]:
     return {
         s.session: reason
         for s, reason in spec.services_for_capabilities_annotated(
-            frozenset({role}), machine=machine
+            frozenset({role}), machine=machine, host=fake_host()
         )
     }
 

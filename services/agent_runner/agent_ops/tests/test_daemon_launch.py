@@ -12,6 +12,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
@@ -59,6 +60,7 @@ async def test_launch_dispatch(
         database=ops_database,
         image=ops_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert (status, result) == ("completed", {"id": 777})
     assert seen == [(777, pool)]

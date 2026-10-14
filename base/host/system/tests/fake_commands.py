@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from base.host.proc import CommandRunner
 from base.host.system.hostport import Host
 from base.native_process.os_platform import Platform
 
@@ -149,7 +150,7 @@ class FakeCommands:
 
 
 def fake_host(
-    commands: FakeCommands | None = None,
+    commands: CommandRunner | None = None,
     *,
     platform: Platform = LINUX_X86,
     programs: Mapping[str, str] | None = None,

@@ -20,6 +20,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
+from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from gateway.app import app
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
@@ -157,6 +158,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
             authority=config_authority,
             image=app.state.process_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
 
 
@@ -227,6 +229,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
             db=app.state.db,
             authority=config_authority,
             local_machine=machine_identity,
+            host=fake_host(),
         )
         assert status == OpStatus.COMPLETED
         if calls == 1:
@@ -292,6 +295,7 @@ async def test_unknown_remote_kind_holds(
             database=lambda: app.state.db,
             image=app.state.process_image,
             local_machine=machine_identity,
+            host=fake_host(),
         )
     assert status == OpStatus.FAILED and "unknown kind" in str(result["error"])
     # Source does not reinterpret an unsupported version as another op kind.
@@ -429,6 +433,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
         authority=config_authority,
         image=app.state.process_image,
         local_machine=machine_identity,
+        host=fake_host(),
     )
     assert status == OpStatus.FAILED and result["reason"] == "upload-source-unavailable-v1"
     assert not path.exists()
@@ -553,6 +558,7 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
             db=app.state.db,
             authority=config_authority,
             local_machine=machine_identity,
+            host=fake_host(),
         )
         assert status == OpStatus.COMPLETED
         return result

@@ -15,6 +15,7 @@ from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.host.permissions_helper.client import HelperFactory
+from base.host.system.hostport import Host
 from base.log import logger
 from base.sessions.helperproc import HELPER_PROTOCOLS, helper_spawn_committed, helper_wire_ok
 from cli.commands.data_plane.config import data_plane_config_from_settings
@@ -40,22 +41,22 @@ class RootDriverError(RuntimeError):
     """The root-driven tree could not be brought up, reconciled or stopped."""
 
 
-def complete_boot_start(*, helper: HelperFactory) -> None:
+def complete_boot_start(*, helper: HelperFactory, host: Host) -> None:
     """Hand Linux systemd the verified root after ordinary readiness succeeds."""
-    if sys.platform != "linux":
+    if host.platform.system != "linux":
         return
     from base.host.system.boot_unit import in_boot_unit, publish_root_ready
     from base.native_process.root_control.client import native_identity
     from base.paths import ava_home
 
     home = ava_home()
-    if not in_boot_unit():
+    if not in_boot_unit(host=host):
         return
     snapshot = root_status(root_client())
     if snapshot is None:
         raise RootDriverError("cannot hand systemd an unobservable root")
     require_root_owner(snapshot, helper=helper)
-    publish_root_ready(home, native_identity(snapshot["root"]))
+    publish_root_ready(home, native_identity(snapshot["root"]), host=host)
 
 
 class LaunchOutcome(NamedTuple):
@@ -91,14 +92,14 @@ def service_extra_env(spec: ServiceSpec, *, remote_data_plane: bool) -> dict[str
 
 
 def root_tree_roster(
-    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
+    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity, host: Host
 ) -> tuple[ServiceSpec, ...]:
     """The capability/config-selected units for this root."""
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
     return tuple(
         spec
-        for spec, reason in services_for_capabilities_annotated(roles, machine=machine)
+        for spec, reason in services_for_capabilities_annotated(roles, machine=machine, host=host)
         if reason is None and spec.session not in launch_skip
     )
 
@@ -573,10 +574,10 @@ def ensure_root_service_tree(
 
 
 def start_roster(
-    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity
+    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity, host: Host
 ) -> tuple[ServiceSpec, ...]:
     """Return the sole root-owned service roster."""
-    return root_tree_roster(roles, launch_skip, machine=machine)
+    return root_tree_roster(roles, launch_skip, machine=machine, host=host)
 
 
 def launch_service_tree(
