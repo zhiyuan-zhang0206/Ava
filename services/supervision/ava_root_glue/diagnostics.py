@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from threading import Event, Lock
 
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
@@ -60,10 +61,12 @@ class DiagnosticMonitor:
         self._states = {check.name: _State(ProbeRunner()) for check in self._checks}
         self.unfinished_probes: tuple[str, ...] = ()
         self._closed = False
+        self._report_admission = Lock()
 
     async def stop(self) -> None:
         """Close the finite roster and join its native workers within one budget."""
-        self._closed = True
+        with self._report_admission:
+            self._closed = True
         for state in self._states.values():
             state.runner.close()
         deadline = time.monotonic() + 0.2
@@ -91,15 +94,19 @@ class DiagnosticMonitor:
         if time.monotonic() < state.next_due:
             return
         state.next_due = time.monotonic() + check.interval_s
-        result = await state.runner.observe(self._sample(check), check.timeout_s)
+        report_closed = Event()
+        try:
+            result = await state.runner.observe(self._sample(check, report_closed), check.timeout_s)
+        finally:
+            with self._report_admission:
+                report_closed.set()
         state.result = result
         state.sampled_at = time.time()
         recovered = result.alive and state.failures > 0
         state.failures = state.failures + 1 if not result.alive else 0
         self._report_sample(check, state, result, recovered=recovered)
 
-    @staticmethod
-    def _sample(check: Diagnostic) -> Callable[[], DaemonProbe]:
+    def _sample(self, check: Diagnostic, report_closed: Event) -> Callable[[], DaemonProbe]:
         """The check's one bounded worker pass: its probe, then its reporter.
 
         The reporter runs inside the same observation as the sample it acts on.
@@ -111,10 +118,17 @@ class DiagnosticMonitor:
         reporter = check.report
         if reporter is None:
             return check.probe
+        deadline = time.monotonic() + check.timeout_s
 
         def sample_and_report() -> DaemonProbe:
             result = check.probe()
             if isinstance(result, DaemonProbe) and result.verdict != ProbeVerdict.UNAVAILABLE:
+                with self._report_admission:
+                    if self._closed or report_closed.is_set():
+                        return DaemonProbe.unavailable("diagnostic report admission closed")
+                    if time.monotonic() >= deadline:
+                        return DaemonProbe.unavailable("diagnostic sample exceeded its deadline")
+                    # Admission starts the report; stop never waits for the callback.
                 try:
                     reporter(result)
                 except Exception as exc:

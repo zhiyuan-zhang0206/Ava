@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from threading import Event
+from contextlib import suppress
+from threading import Event, Thread, current_thread
 from time import monotonic
 
 import pytest
@@ -19,6 +20,140 @@ async def _eventually(event: Event) -> None:
     while not event.is_set() and monotonic() < deadline:
         await asyncio.sleep(0.001)
     assert event.is_set()
+
+
+async def _joined(worker: Thread) -> None:
+    await asyncio.to_thread(worker.join, 1)
+    assert not worker.is_alive(), "released diagnostic worker did not retire"
+
+
+@pytest.mark.parametrize("late", [DaemonProbe.up("late green"), DaemonProbe.down("late red")])
+async def test_probe_deadline_discards_late_report_and_allows_a_fresh_round(
+    late: DaemonProbe,
+) -> None:
+    entered, release = Event(), Event()
+    workers: list[Thread] = []
+    reported: list[DaemonProbe] = []
+
+    def probe() -> DaemonProbe:
+        if workers:
+            return DaemonProbe.up("fresh sample")
+        workers.append(current_thread())
+        entered.set()
+        release.wait(3)
+        return late
+
+    monitor = DiagnosticMonitor(
+        [Diagnostic("held", probe, interval_s=0.001, timeout_s=0.01, report=reported.append)]
+    )
+    try:
+        await monitor.run_round()
+        assert entered.is_set()
+        state = monitor.health_snapshot()["diagnostic:held"]
+        assert isinstance(state, dict) and state["last_verdict"] == "unavailable"
+        release.set()
+        await _joined(workers[0])
+        assert reported == []  # no stop: only the expired observation closes admission
+        await monitor.run_round()
+        assert [result.detail for result in reported] == ["fresh sample"]
+    finally:
+        release.set()
+        await monitor.stop()
+
+
+async def test_stop_closes_reporting_before_the_probe_deadline() -> None:
+    entered, release = Event(), Event()
+    workers: list[Thread] = []
+    reported: list[DaemonProbe] = []
+
+    def probe() -> DaemonProbe:
+        workers.append(current_thread())
+        entered.set()
+        release.wait(3)
+        return DaemonProbe.up("late green")
+
+    monitor = DiagnosticMonitor([Diagnostic("held", probe, timeout_s=5, report=reported.append)])
+    round_task = asyncio.create_task(monitor.run_round())
+    try:
+        await _eventually(entered)
+        await monitor.stop()
+        assert monitor.unfinished_probes == ("held",)
+        release.set()
+        await _joined(workers[0])
+        await round_task
+        assert reported == []
+    finally:
+        release.set()
+        await round_task
+        await monitor.stop()
+
+
+async def test_cancelled_round_closes_reporting_without_stopping_the_monitor() -> None:
+    entered, release = Event(), Event()
+    workers: list[Thread] = []
+    reported: list[DaemonProbe] = []
+
+    def probe() -> DaemonProbe:
+        if workers:
+            return DaemonProbe.up("fresh sample")
+        workers.append(current_thread())
+        entered.set()
+        release.wait(3)
+        return DaemonProbe.down("abandoned failure")
+
+    monitor = DiagnosticMonitor(
+        [Diagnostic("held", probe, interval_s=0.001, timeout_s=5, report=reported.append)]
+    )
+    round_task = asyncio.create_task(monitor.run_round())
+    try:
+        await _eventually(entered)
+        round_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await round_task
+        release.set()
+        await _joined(workers[0])
+        assert reported == []  # before deadline, and monitor.stop has not run
+        await asyncio.sleep(0.002)
+        await monitor.run_round()
+        assert [result.detail for result in reported] == ["fresh sample"]
+    finally:
+        release.set()
+        round_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await round_task
+        await monitor.stop()
+
+
+async def test_stop_keeps_an_admitted_report_in_its_worker_without_waiting_for_it() -> None:
+    entered, release = Event(), Event()
+    workers: list[Thread] = []
+    completed: list[DaemonProbe] = []
+
+    def report(result: DaemonProbe) -> None:
+        workers.append(current_thread())
+        entered.set()
+        release.wait(3)
+        completed.append(result)
+
+    monitor = DiagnosticMonitor(
+        [Diagnostic("held", lambda: DaemonProbe.up("fresh sample"), timeout_s=5, report=report)]
+    )
+    round_task = asyncio.create_task(monitor.run_round())
+    try:
+        await _eventually(entered)
+        started = monotonic()
+        await monitor.stop()
+        assert monotonic() - started < 1, "report callback held the stop admission lock"
+        assert monitor.unfinished_probes == ("held",)
+        assert completed == []
+        release.set()
+        await _joined(workers[0])
+        await round_task
+        assert [result.detail for result in completed] == ["fresh sample"]
+    finally:
+        release.set()
+        await round_task
+        await monitor.stop()
 
 
 async def test_stopped_diagnostic_reports_live_worker_and_closes_admission() -> None:
