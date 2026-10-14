@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import urllib.request
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from functools import partial
-from typing import Any
 
 from ava.sdk_surface import settings as sdk_settings
 from ava.sdk_surface.injection_check import begin_check
 from ava.security import finding_delivery_active, record_model_finding, scan_content
 from ava.web.deps import BraveConfig, FetchModel, JinaConfig, WebDeps
 from base.config.service_read import ConfigAuthority
+from base.host.net.ports import SYSTEM_URL_OPENER
 from base.lm import factory
 
 __all__ = ["web_deps", "web_deps_for"]
@@ -50,15 +48,11 @@ def web_deps_for(authority: ConfigAuthority) -> WebDeps:
             catalog=sdk_settings.model_catalog(),
             overrides=sdk_settings.model_overrides(),
         ),
-        open_url=_open_url,
+        open_url=SYSTEM_URL_OPENER,
         build_chat_model=factory.build_chat_model,
         scan=_scan,
         begin_check=_checker(),
     )
-
-
-def _open_url(request: urllib.request.Request, timeout: float) -> AbstractContextManager[Any]:
-    return urllib.request.urlopen(request, timeout=timeout)  # noqa: S310 — endpoints come from settings; the defaults are https:// literals
 
 
 def _scan(content: str, source: str) -> str:
