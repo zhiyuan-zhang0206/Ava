@@ -130,8 +130,8 @@ class LmSettings(EnvSettings):
         default="jev-1.13.0",
         alias="AVA_REPLY_SUGGESTION_GATE_MODEL",
         description=(
-            "Decision model that judges whether the agent's last message is waiting for "
-            "the user before any draft is generated. Must be a registered decision "
+            "Decision model that judges whether a reply suggestion would help the user "
+            "before any draft is generated. Must be a registered decision "
             "model (not a chat model); an unknown id fails the gateway at boot."
         ),
         json_schema_extra={
@@ -149,8 +149,8 @@ class LmSettings(EnvSettings):
         le=1.0,
         alias="AVA_REPLY_SUGGESTION_GATE_THRESHOLD",
         description=(
-            "Minimum probability (0-1) the gate model must give to 'the agent is waiting "
-            "for the user' for a reply to be drafted. Raise it to draft less often."
+            "Minimum probability (0-1) the gate model must give to 'a reply suggestion "
+            "would help the user' for replies to be drafted. Raise it to draft less often."
         ),
         json_schema_extra={
             "restart_required": "",

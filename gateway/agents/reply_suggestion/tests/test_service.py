@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.output_parsers import JsonOutputParser
 
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.lm.catalog import ModelCatalog
@@ -17,19 +19,19 @@ from base.lm.catalog.decide.types import (
     estimate_tokens,
 )
 from gateway.agents.reply_suggestion import service as service_module
+from gateway.agents.reply_suggestion.schemas import MAX_SUGGESTION_CHARS, DraftReplies
 from gateway.agents.reply_suggestion.service import (
     CACHE_ENTRIES,
     DRAFT_INSTRUCTION,
     DRAFT_USAGE_KIND,
     GATE_USAGE_KIND,
-    MAX_SUGGESTION_CHARS,
 )
 from gateway.agents.reply_suggestion.tests.support import (
     Harness,
     agent_text,
-    awaiting,
     conversation,
     inbound,
+    useful_reply,
 )
 
 
@@ -43,7 +45,7 @@ def usage_rows(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     def record(message: AIMessage, model: str, **kwargs: Any) -> None:
-        rows.append({"model": model, **kwargs})
+        rows.append({"message": message, "model": model, **kwargs})
 
     monkeypatch.setattr(service_module, "log_usage_from_message", record)
     return rows
@@ -54,7 +56,7 @@ async def test_a_running_agent_gets_no_suggestion_and_no_model_is_called(harness
 
     result = await harness.service.suggest(7)
 
-    assert (result.suggestion, result.reason) == (None, "agent_not_idle")
+    assert (result.suggestions, result.reason) == ([], "agent_not_idle")
     assert harness.loads == []
     assert harness.decide.calls == []
     assert harness.chat.invocations == []
@@ -80,21 +82,21 @@ async def test_the_cluster_switch_turns_the_pipeline_off(harness: Harness) -> No
 
 
 async def test_a_gate_below_the_threshold_returns_no_suggestion(harness: Harness) -> None:
-    harness.decide.result = awaiting(0.2)
+    harness.decide.result = useful_reply(0.2)
 
     result = await harness.service.suggest(7)
 
-    assert (result.suggestion, result.reason) == (None, "not_awaiting_reply")
+    assert (result.suggestions, result.reason) == ([], "not_useful")
     assert len(harness.decide.calls) == 1
     assert harness.chat.invocations == []
 
 
 async def test_a_gate_exactly_at_the_threshold_passes(harness: Harness) -> None:
-    harness.decide.result = awaiting(0.5)
+    harness.decide.result = useful_reply(0.5)
 
     result = await harness.service.suggest(7)
 
-    assert result.suggestion == "Yes, go ahead."
+    assert result.suggestions == ["Yes, go ahead.", "Wait, explain the plan first."]
 
 
 async def test_the_gate_asks_its_question_about_the_excerpt_and_is_billed_to_the_agent(
@@ -105,8 +107,8 @@ async def test_the_gate_asks_its_question_about_the_excerpt_and_is_billed_to_the
     model, state, questions, kwargs = harness.decide.calls[0]
     assert model == "gate-model"
     assert state == "[User]\nPlease prepare the release.\n\n[Assistant]\nDeploy now?"
-    assert list(questions) == ["awaiting"]
-    assert isinstance(questions["awaiting"], YesNo)
+    assert list(questions) == ["useful_reply"]
+    assert isinstance(questions["useful_reply"], YesNo)
     assert kwargs["usage_kind"] == GATE_USAGE_KIND == "reply_suggestion_gate"
     assert kwargs["for_agent_id"] == 7
     assert kwargs["catalog"] is harness.service._catalog
@@ -115,18 +117,28 @@ async def test_the_gate_asks_its_question_about_the_excerpt_and_is_billed_to_the
 async def test_a_passing_gate_drafts_with_the_instruction_first(
     harness: Harness, usage_rows: list[dict[str, Any]]
 ) -> None:
-    harness.chat.reply = "  Yes, deploy it.\n"
+    harness.chat.reply = '{"suggestions": ["  Yes, deploy it.  ", "Wait, explain the plan first."]}'
 
     result = await harness.service.suggest(7)
 
-    assert (result.suggestion, result.reason) == ("Yes, deploy it.", None)
+    assert (result.suggestions, result.reason) == (
+        ["Yes, deploy it.", "Wait, explain the plan first."],
+        None,
+    )
     assert harness.chat.built == ["chat-model"]
+    assert harness.chat.bindings == [
+        (
+            DraftReplies.model_json_schema(),
+            {"method": "json_schema", "strict": True, "include_raw": True},
+        )
+    ]
     (messages,) = harness.chat.invocations
     assert [type(m) for m in messages] == [SystemMessage, HumanMessage]
     assert messages[0].content == DRAFT_INSTRUCTION
     assert messages[1].content == harness.decide.calls[0][1]
     assert usage_rows == [
         {
+            "message": harness.chat.raw,
             "model": "chat-model",
             "usage_kind": DRAFT_USAGE_KIND,
             "latency_ms": usage_rows[0]["latency_ms"],
@@ -163,7 +175,7 @@ async def test_a_completed_result_is_served_from_the_cache(harness: Harness) -> 
 
 
 async def test_a_gate_refusal_is_cached_too(harness: Harness) -> None:
-    harness.decide.result = awaiting(0.1)
+    harness.decide.result = useful_reply(0.1)
 
     await harness.service.suggest(7)
     await harness.service.suggest(7)
@@ -201,7 +213,7 @@ async def test_a_gate_failure_degrades_to_no_suggestion_with_a_warning(
 
     result = await harness.service.suggest(7)
 
-    assert (result.suggestion, result.reason) == (None, "gate_failed")
+    assert (result.suggestions, result.reason) == ([], "gate_failed")
     assert harness.chat.invocations == []
     warnings = [r for r in loguru_records if r["level"].name == "WARNING"]
     assert [r["extra"]["event"] for r in warnings] == ["reply_suggestion_gate_failed"]
@@ -214,7 +226,7 @@ async def test_a_failure_is_not_cached_so_the_next_request_retries(harness: Harn
 
     result = await harness.service.suggest(7)
 
-    assert result.suggestion == "Yes, go ahead."
+    assert result.suggestions == ["Yes, go ahead.", "Wait, explain the plan first."]
     assert len(harness.decide.calls) == 2
 
 
@@ -225,20 +237,90 @@ async def test_a_draft_failure_degrades_to_no_suggestion_with_a_warning(
 
     result = await harness.service.suggest(7)
 
-    assert (result.suggestion, result.reason) == (None, "generation_failed")
+    assert (result.suggestions, result.reason) == ([], "generation_failed")
     warnings = [r for r in loguru_records if r["level"].name == "WARNING"]
     assert [r["extra"]["event"] for r in warnings] == ["reply_suggestion_draft_failed"]
 
 
-@pytest.mark.parametrize("reply", ["", "   \n", "x" * (MAX_SUGGESTION_CHARS + 1)])
-async def test_an_empty_or_overlong_draft_is_rejected_not_trimmed(
-    harness: Harness, reply: str
-) -> None:
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "",
+        "not JSON",
+        json.dumps({"suggestions": []}),
+        json.dumps({"suggestions": ["   \n"]}),
+        json.dumps({"suggestions": ["x" * (MAX_SUGGESTION_CHARS + 1)]}),
+        json.dumps({"suggestions": ["Yes", " yes "]}),
+        json.dumps({"suggestions": ["Yes", 42]}),
+        json.dumps(["Yes"]),
+        json.dumps({}),
+        json.dumps({"suggestions": ["Yes"], "unexpected": "extra"}),
+    ],
+)
+async def test_invalid_candidates_are_rejected_as_a_whole(harness: Harness, reply: str) -> None:
     harness.chat.reply = reply
 
     result = await harness.service.suggest(7)
 
-    assert (result.suggestion, result.reason) == (None, "invalid_generation")
+    assert (result.suggestions, result.reason) == ([], "invalid_generation")
+
+
+@pytest.mark.parametrize(
+    "candidates",
+    [
+        ["Continue."],
+        ["Continue.", "Pause."],
+        ["Use A.", "Use B.", "Use C.", "Use D."],
+    ],
+)
+async def test_model_candidate_count_and_order_reach_the_response(
+    harness: Harness, candidates: list[str]
+) -> None:
+    harness.chat.reply = json.dumps({"suggestions": candidates})
+
+    result = await harness.service.suggest(7)
+
+    assert result.suggestions == candidates
+    assert result.reason is None
+    assert len(harness.chat.invocations) == 1
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"model_provider": "openai", "status": "incomplete"},
+        {"model_provider": "anthropic", "stop_reason": "max_tokens"},
+        {"model_provider": "openai", "status": "failed"},
+        {"model_provider": "anthropic"},
+    ],
+)
+async def test_unfinished_structured_output_is_rejected_even_if_the_text_is_valid(
+    harness: Harness, metadata: dict[str, str], usage_rows: list[dict[str, Any]]
+) -> None:
+    harness.chat.metadata = metadata
+
+    result = await harness.service.suggest(7)
+
+    assert (result.suggestions, result.reason) == ([], "invalid_generation")
+    assert usage_rows[0]["message"] is harness.chat.raw
+
+
+async def test_an_incomplete_document_repaired_by_langchain_is_rejected(harness: Harness) -> None:
+    raw = AIMessage(
+        content='{"suggestions": ["Use A."]',
+        response_metadata={"model_provider": "openai", "status": "completed"},
+    )
+    parsed = JsonOutputParser().invoke(raw)
+    assert parsed == {"suggestions": ["Use A."]}
+
+    async def repaired_reply(_messages: Any) -> dict[str, Any]:
+        return {"raw": raw, "parsed": parsed, "parsing_error": None}
+
+    harness.chat.ainvoke = repaired_reply  # pyright: ignore[reportAttributeAccessIssue]
+
+    result = await harness.service.suggest(7)
+
+    assert (result.suggestions, result.reason) == ([], "invalid_generation")
 
 
 async def test_a_conversation_without_agent_text_has_nothing_to_suggest(harness: Harness) -> None:
@@ -264,7 +346,7 @@ async def test_a_missing_gate_key_degrades_like_any_decision_error(
 
     result = await harness.service.suggest(7)
 
-    assert (result.suggestion, result.reason) == (None, "gate_failed")
+    assert (result.suggestions, result.reason) == ([], "gate_failed")
     assert harness.chat.invocations == []
 
 

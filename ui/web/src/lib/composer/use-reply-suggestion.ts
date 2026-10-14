@@ -1,7 +1,7 @@
-// Reply suggestion for the selected agent: a drafted reply shown as grey text in the
+// Reply suggestions for the selected agent: drafted replies shown as grey text in the
 // empty composer.
 //
-// The hook is the only writer of the suggestion. It asks the gateway once per agent
+// The hook is the only writer of the candidates. It asks the gateway once per agent
 // turn: when the agent is idle, its last visible timeline item is its own message, and
 // nothing new has started for REPLY_SUGGESTION_DELAY_MS. Anything that makes the turn
 // stale -- a new turn (busy again, or a new last item), another agent, a hidden page, the
@@ -44,10 +44,10 @@ function lastConversationItem(items: readonly BackendTimelineItem[]): BackendTim
   return null;
 }
 
-export function useReplySuggestion({ agentId, status, busy, items, enabled }: Params): string | null {
+export function useReplySuggestion({ agentId, status, busy, items, enabled }: Params): readonly string[] | null {
   const visible = useDocumentVisible();
   const requested = useRef(new Set<string>());
-  const [answer, setAnswer] = useState<{ turnKey: string; text: string } | null>(null);
+  const [answer, setAnswer] = useState<{ turnKey: string; texts: readonly string[] } | null>(null);
 
   const last = lastConversationItem(items);
   const turnKey =
@@ -71,7 +71,7 @@ export function useReplySuggestion({ agentId, status, busy, items, enabled }: Pa
           // An answer that raced its own abort belongs to a turn that is gone.
           if (controller.signal.aborted) return;
           settled = true;
-          if (response.suggestion) setAnswer({ turnKey, text: response.suggestion });
+          if (response.suggestions.length > 0) setAnswer({ turnKey, texts: response.suggestions });
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
@@ -86,5 +86,5 @@ export function useReplySuggestion({ agentId, status, busy, items, enabled }: Pa
     };
   }, [eligible, agentId, turnKey]);
 
-  return eligible && answer !== null && answer.turnKey === turnKey ? answer.text : null;
+  return eligible && answer !== null && answer.turnKey === turnKey ? answer.texts : null;
 }
