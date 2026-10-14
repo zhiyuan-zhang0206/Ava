@@ -196,6 +196,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events | — |
 | `im_push_failed` | an IM bridge outbound send failed after its single retry (failures = the adapter's consecutive-failure count) | anomaly | channel, failures | — | events | — |
 | `im_feishu_owner_seed_failed` | the feishu owner chat could not be restored at bridge boot; feishu notifications are blind until the user messages the bot | anomaly | reason, chats | — | events | — |
+| `im_push_health` | one per-channel IM bridge push-health sample: age of the last delivered push and pending deliveries, consumed by the leg-staleness alert rule | observation | channel, last_ok_age_s, pending | — | events | — |
 | `native_cancel_uncertain` | native cancel recovery lacks exact execution or certified stop proof; the supported consumer holds new work | anomaly | agent_id, work_id | — | events | — |
 | `agent_continuation_lost` | an agent's turn failed while its continuation was owed to a draining maintenance hold; its interrupted work may be lost | anomaly | failure_category, holder, reason | — | events | — |
 | `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file | — |

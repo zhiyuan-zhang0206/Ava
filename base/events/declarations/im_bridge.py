@@ -29,6 +29,20 @@ class ImFeishuOwnerSeedFailed(TypedDict):
     chats: int
 
 
+class ImPushHealth(TypedDict):
+    """`im_push_health` payload -- services/entrypoints/im_bridge/push_health.py.
+
+    One sample per configured channel per sampling interval: `last_ok_age_s`
+    is the seconds since the channel's newest delivered push (the negative
+    PUSH_HEALTH_NEVER_SENT sentinel when none is on record); `pending` is the
+    count of accepted pushes still waiting for a delivery attempt. The Grafana
+    rule owns the staleness threshold and the notification (task #4935)."""
+
+    channel: str
+    last_ok_age_s: float
+    pending: int
+
+
 EVENTS: dict[str, EventSpec] = {
     "im_push_failed": telemetry_event(
         "im_push_failed",
@@ -43,5 +57,11 @@ EVENTS: dict[str, EventSpec] = {
         "notifications are blind until the user messages the bot",
         payload=ImFeishuOwnerSeedFailed,
         tier="anomaly",
+    ),
+    "im_push_health": telemetry_event(
+        "im_push_health",
+        "one per-channel IM bridge push-health sample: age of the last delivered "
+        "push and pending deliveries, consumed by the leg-staleness alert rule",
+        payload=ImPushHealth,
     ),
 }
