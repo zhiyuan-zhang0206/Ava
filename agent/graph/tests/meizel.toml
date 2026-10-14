@@ -2,6 +2,7 @@ exports = ["cancel_fixture.py", "test_llm_helpers.py"]
 
 [uses]
 "llm_helpers" = ["cancel_fixture.py", "test_llm_helpers.py"]
+"path_scopes.toml" = ["cancel_fixture.py"]
 
 [external]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"

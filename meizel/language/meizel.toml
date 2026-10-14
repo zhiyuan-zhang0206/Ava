@@ -1,4 +1,4 @@
-exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py", "type_checking.py"]
+exports = ["fixtures.py", "mounts.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py", "type_checking.py"]
 
 [uses]
 "python_commands.py" = ["restricted.py"]
