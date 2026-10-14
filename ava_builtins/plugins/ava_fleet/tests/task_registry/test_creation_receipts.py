@@ -42,7 +42,7 @@ def test_concurrent_creation_returns_same_original_task(
         try:
             context = AvaContext(identity=AgentIdentity(actor, True), clients=clients)
             barrier.wait()
-            return task_registry._create(
+            return task_registry.create_in_context(
                 context,
                 "concurrent creation",
                 "work",

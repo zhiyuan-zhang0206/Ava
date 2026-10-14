@@ -9,7 +9,7 @@ from ava.sdk_surface import agent_identity
 from base.agents.context import AvaContext
 from base.api_contracts.idempotency import validate_idempotency_key
 
-from ._task_update import _UNSET
+from ._task_update import UNSET_FIELD
 
 
 def update_identity(key: str, *, context: AvaContext) -> tuple[int, str]:
@@ -23,7 +23,7 @@ def update_request(values: dict[str, object]) -> dict[str, object]:
     return {
         name: value
         for name, value in values.items()
-        if value is not _UNSET and (value is not None or name == "parent_id")
+        if value is not UNSET_FIELD and (value is not None or name == "parent_id")
     }
 
 

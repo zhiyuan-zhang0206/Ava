@@ -96,7 +96,7 @@ def __getattr__(name: str) -> Path:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _pool_root() -> Path:
+def pool_root() -> Path:
     """The pool root as `PATH` reads: an assigned value wins, else the home's."""
     return globals().get("PATH") or __getattr__("PATH")
 
@@ -118,7 +118,7 @@ class MemoryMatch(NamedTuple):
     chunk: str
 
 
-def _search(query: str, k: int = 5, *, timeout: float | None = None) -> list[MemoryMatch]:
+def search_unwrapped(query: str, k: int = 5, *, timeout: float | None = None) -> list[MemoryMatch]:
     """Find shared memory notes relevant to a query.
 
     Return up to `k` matches, most relevant first. Each is judged on its best passage,
@@ -131,11 +131,11 @@ def _search(query: str, k: int = 5, *, timeout: float | None = None) -> list[Mem
     timeout = coerce_typed(timeout, "timeout", (int, float), allow_none=True)
     results = _client.memory_search(query, k, purpose="search", timeout=timeout)
     return [
-        MemoryMatch(_pool_root() / r.path, r.description, list(r.tags), r.score, r.chunk)
+        MemoryMatch(pool_root() / r.path, r.description, list(r.tags), r.score, r.chunk)
         for r in results
     ]
 
 
 # Public binding — the plugin's wrap("memory.search", ...) replaces this name,
-# leaving the private implementation (`_search`) untouched for validation tests.
-search = _search
+# leaving the private implementation (`search_unwrapped`) untouched for validation tests.
+search = search_unwrapped
