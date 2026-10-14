@@ -18,6 +18,7 @@ from base.agents.incarnation.native_work_models import NativeWorkTarget
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddBindings
 from gateway.tests.lifecycle.guarded_compact.host.restart.child_fixture import (
     prepare_agent,
     read_child,
@@ -25,7 +26,6 @@ from gateway.tests.lifecycle.guarded_compact.host.restart.child_fixture import (
 )
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel, make_host
-from tests.fixtures.model_catalog import AddBindings
 
 
 @pytest.mark.parametrize("fence", ["target_replaced", "resurrect", "force_terminate"])

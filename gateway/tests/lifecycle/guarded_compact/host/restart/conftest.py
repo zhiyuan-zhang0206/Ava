@@ -7,10 +7,10 @@ import pytest
 
 from base.config import Settings, settings
 from base.config.service_read import ConfigAuthority
-from tests.fixtures.model_catalog import add_bindings as add_bindings
-from tests.fixtures.model_catalog import add_models as add_models
-from tests.fixtures.model_catalog import model_catalog as model_catalog
-from tests.fixtures.model_catalog import set_prices as set_prices
+from base.packages.tests.model_catalog import add_bindings as add_bindings
+from base.packages.tests.model_catalog import add_models as add_models
+from base.packages.tests.model_catalog import model_catalog as model_catalog
+from base.packages.tests.model_catalog import set_prices as set_prices
 
 
 @pytest.fixture

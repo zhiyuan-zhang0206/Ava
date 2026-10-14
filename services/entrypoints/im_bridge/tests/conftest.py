@@ -7,6 +7,10 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.packages.tests.model_catalog import add_bindings as add_bindings
+from base.packages.tests.model_catalog import add_models as add_models
+from base.packages.tests.model_catalog import model_catalog as model_catalog
+from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.tests.homes import unit_home as unit_home
 from services.entrypoints.im_bridge.types import (
     IMAdapter,
@@ -14,10 +18,6 @@ from services.entrypoints.im_bridge.types import (
     OutboundChunk,
     PreparedOutboundSend,
 )
-from tests.fixtures.model_catalog import add_bindings as add_bindings
-from tests.fixtures.model_catalog import add_models as add_models
-from tests.fixtures.model_catalog import model_catalog as model_catalog
-from tests.fixtures.model_catalog import set_prices as set_prices
 from tests.fixtures.unit.config_authority import config_authority as config_authority
 from tests.fixtures.unit.identity import machine_identity as machine_identity
 from tests.fixtures.unit.sdk import sdk_environment as sdk_environment

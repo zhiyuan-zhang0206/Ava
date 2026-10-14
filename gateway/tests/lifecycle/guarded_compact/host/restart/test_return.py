@@ -16,10 +16,10 @@ from base.agents.incarnation.native_restart_models import NativeRestartRequest
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import AddBindings
 from gateway.tests.lifecycle.guarded_compact.host.admission import admit
 from gateway.tests.test_idempotency import client as client
 from services.agent_runner.agent_host.tests.guarded_compact_support import SummaryModel
-from tests.fixtures.model_catalog import AddBindings
 
 
 @pytest.mark.parametrize("lost", ["none", "before_apply", "after_apply", "after_observe_cleanup"])

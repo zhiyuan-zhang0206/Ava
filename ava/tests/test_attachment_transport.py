@@ -15,7 +15,7 @@ from ava.sdk_surface.installation import Installation
 from ava.self import attach
 from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
 from base.lm.catalog import ModelCatalog
-from tests.fixtures.model_catalog import AddModels
+from base.packages.tests.model_catalog import AddModels
 
 
 def take_attachments() -> list[dict[str, object]]:

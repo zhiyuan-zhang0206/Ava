@@ -10,7 +10,7 @@
     "test_turn_dispatcher.py",
 ]
 "base.paths.tests.homes" = ["."]
-"tests.fixtures.model_catalog" = [
+"base.packages.tests.model_catalog" = [
     "test_agent_host.py",
     "test_circuit_breaker.py",
     "test_circuit_breaker_audit.py",

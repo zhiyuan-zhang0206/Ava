@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage
 from base import config
 from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderBinding
-from tests.fixtures.model_catalog import AddBindings
+from base.packages.tests.model_catalog import AddBindings
 
 
 class _RecordedSpan:

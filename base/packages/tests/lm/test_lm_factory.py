@@ -19,7 +19,7 @@ from base.config import settings
 from base.host.env import dotenv_file
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import model_supports_vision, provider_key_map, validate_model_config
-from tests.fixtures.model_catalog import AddModels
+from base.packages.tests.model_catalog import AddModels
 
 
 @pytest.fixture

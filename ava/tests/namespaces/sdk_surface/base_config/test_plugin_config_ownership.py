@@ -16,10 +16,10 @@ from base.packages.plugins.config_registration import (
     validate_config_overlay,
 )
 from base.packages.plugins.plugin_errors import SchemaDriftError
-from base.packages.plugins.tests.test_plugin_config import (
+from base.packages.tests.plugin_config.test_plugin_config import (
     FixtureConfig,
 )
-from base.packages.plugins.tests.test_plugin_config import (
+from base.packages.tests.plugin_config.test_plugin_config import (
     isolated_registry as isolated_registry,
 )
 

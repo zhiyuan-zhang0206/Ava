@@ -18,7 +18,7 @@ from base.lm.registry import (
     resolve_setting,
     tuning_field_names,
 )
-from tests.fixtures.model_catalog import AddModels
+from base.packages.tests.model_catalog import AddModels
 
 # ---------------------------------------------------------------------------
 # resolve_setting layering

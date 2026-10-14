@@ -21,8 +21,8 @@ from fastapi.testclient import TestClient
 from base.config import field_names, settings
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import DEFAULT_TUNING, ModelSpec, ModelTuning, tuning_field_names
+from base.packages.tests.model_catalog import AddModels
 from gateway.app import app
-from tests.fixtures.model_catalog import AddModels
 
 TUNED_MODEL = "test-tuned-model"
 

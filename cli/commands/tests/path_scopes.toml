@@ -19,7 +19,7 @@
 "base.paths.tests.homes" = [
     "test_maintenance_recovery.py",
 ]
-"tests.fixtures.model_catalog" = [
+"base.packages.tests.model_catalog" = [
     "test_maintenance_recovery.py",
 ]
 "tests.fixtures.unit.sdk" = [

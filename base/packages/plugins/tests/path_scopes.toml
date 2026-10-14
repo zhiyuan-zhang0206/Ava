@@ -6,5 +6,4 @@
 "tests.fixtures.unit.sdk" = [
     "test_config_boot_race.py",
     "test_enable_config.py",
-    "test_plugin_config.py",
 ]
