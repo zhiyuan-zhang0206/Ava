@@ -29,6 +29,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import macos_firewall as fw
 from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -52,6 +53,7 @@ def _ctx(
         database_factory=operator_database,
         producer=producer,
         machine=machine_from_boot(machine_config),
+        helper=refuse_helper,
     )  # type: ignore[arg-type]
 
 

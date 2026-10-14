@@ -11,6 +11,7 @@ import pytest
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system import logs_job as job
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -42,6 +43,7 @@ def test_converge_registers_logs_maintenance(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config),
+        helper=refuse_helper,
     )
     ensure_logs_maintenance(ctx)
     assert calls == ["register"]

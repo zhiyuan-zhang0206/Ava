@@ -12,7 +12,7 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.deploy.git import cluster_drift
-from base.host.permissions_helper import client
+from base.sessions.tests.scripted_helper import ScriptedHelper, serve
 from base.telemetry import EventPipeline
 from cli import python_install
 from cli.commands.converge import frontend_env as _fe_env
@@ -571,16 +571,17 @@ def test_screen_capture_step_records_the_helpers_answer(
         read_status,
     )
 
-    ctx = _ctx(tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline)
-    screen_capture_environment(monkeypatch, tmp_path, config=ctx.config)
     status = ScreenCaptureStatus(
         state=ScreenCaptureState.HELPER_UNREACHABLE, diagnostic="socket did not answer"
     )
-    monkeypatch.setattr(
-        client.PermissionsHelperClient,
-        "check_screen_capture",
-        lambda _self: status,  # pyright: ignore[reportUnknownArgumentType]
+    ctx = _ctx(
+        tmp_path,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        helper=serve(ScriptedHelper(check_screen_capture=status)),
     )
+    screen_capture_environment(monkeypatch, tmp_path, config=ctx.config)
 
     converge_host.ensure_screen_capture(ctx)
 
@@ -603,14 +604,16 @@ def test_screen_capture_step_clears_a_stale_file_when_the_grant_is_back(
         write_status,
     )
 
-    ctx = _ctx(tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    available = ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE)
+    ctx = _ctx(
+        tmp_path,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        helper=serve(ScriptedHelper(check_screen_capture=available)),
+    )
     screen_capture_environment(monkeypatch, tmp_path, config=ctx.config)
     write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale"))
-    monkeypatch.setattr(
-        client.PermissionsHelperClient,
-        "check_screen_capture",
-        lambda _self: ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE),  # pyright: ignore[reportUnknownArgumentType]
-    )
 
     converge_host.ensure_screen_capture(ctx)
     assert read_status() is None
@@ -644,11 +647,6 @@ def test_screen_capture_step_skips_hosts_with_no_helper(
     )
     write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale"))
 
-    def boom(_self: client.PermissionsHelperClient):
-        raise AssertionError("must not probe a host that cannot run a helper")
-
-    monkeypatch.setattr(client.PermissionsHelperClient, "check_screen_capture", boom)
-
     converge_host.ensure_screen_capture(ctx)
     assert read_status() is None
 
@@ -666,12 +664,17 @@ def test_accessibility_step_records_the_helpers_answer(
         read_status,
     )
 
-    ctx = _ctx(tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline)
-    accessibility_environment(monkeypatch, tmp_path, config=ctx.config)
     status = AccessibilityStatus(
         state=AccessibilityState.HELPER_UNREACHABLE, diagnostic="socket did not answer"
     )
-    monkeypatch.setattr(client.PermissionsHelperClient, "check_accessibility", lambda _self: status)  # pyright: ignore[reportUnknownArgumentType]
+    ctx = _ctx(
+        tmp_path,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        helper=serve(ScriptedHelper(check_accessibility=status)),
+    )
+    accessibility_environment(monkeypatch, tmp_path, config=ctx.config)
 
     converge_host.ensure_accessibility(ctx)
 
@@ -694,14 +697,16 @@ def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
         write_status,
     )
 
-    ctx = _ctx(tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline)
+    granted = AccessibilityStatus(state=AccessibilityState.GRANTED)
+    ctx = _ctx(
+        tmp_path,
+        tmp_path,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        helper=serve(ScriptedHelper(check_accessibility=granted)),
+    )
     accessibility_environment(monkeypatch, tmp_path, config=ctx.config)
     write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale"))
-    monkeypatch.setattr(
-        client.PermissionsHelperClient,
-        "check_accessibility",
-        lambda _self: AccessibilityStatus(state=AccessibilityState.GRANTED),  # pyright: ignore[reportUnknownArgumentType]
-    )
 
     converge_host.ensure_accessibility(ctx)
     assert read_status() is None
@@ -732,11 +737,6 @@ def test_accessibility_step_skips_hosts_with_no_helper(
         monkeypatch, tmp_path, enabled=enabled, incapability=incapability, config=ctx.config
     )
     write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale"))
-
-    def boom(_self: client.PermissionsHelperClient):
-        raise AssertionError("must not probe a host that cannot run a helper")
-
-    monkeypatch.setattr(client.PermissionsHelperClient, "check_accessibility", boom)
 
     converge_host.ensure_accessibility(ctx)
     assert read_status() is None

@@ -12,12 +12,11 @@ import contextlib
 import os
 import signal
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 import psutil
 
-from base.host.permissions_helper.client import PermissionsHelperClient
+from base.host.permissions_helper.client import HelperFactory, PermissionsHelperClient
 from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
@@ -149,7 +148,7 @@ def _wait_until_dead(process: psutil.Process, timeout: float) -> bool:
 class HelperProcSessionBackend(SessionBackend):
     """Named sessions whose processes are direct children of the macOS helper."""
 
-    def __init__(self, client_factory: Callable[[], PermissionsHelperClient]) -> None:
+    def __init__(self, client_factory: HelperFactory) -> None:
         # A factory, not a client: only a spawn dials the helper, and a process that merely
         # lists sessions (the gateway) must not read the helper port to build one.
         self._client_factory = client_factory

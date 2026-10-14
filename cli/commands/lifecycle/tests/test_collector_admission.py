@@ -12,6 +12,7 @@ import pytest
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import root_driver
 from cli.commands.observability import otel_collector as oc
@@ -46,6 +47,7 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_763),
+        helper=refuse_helper,
     )
 
     def must_not_install(*_args: object, **_kwargs: object) -> None:
@@ -86,6 +88,7 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_798),
+        helper=refuse_helper,
     )
 
     installed: list[tuple[object, object, object]] = []
@@ -131,6 +134,7 @@ def test_collector_preparation_never_controls_a_running_service_tree(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_829),
+        helper=refuse_helper,
     )
 
     def no_root_control() -> None:
@@ -166,6 +170,7 @@ def test_non_lgtm_gateway_reports_and_preserves_residual_config(
         database_factory=operator_database,
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config_859),
+        helper=refuse_helper,
     )
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)

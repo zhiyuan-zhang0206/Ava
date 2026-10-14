@@ -1,4 +1,4 @@
-exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record.py", "env_forwarding.py", "helper_chain_guard.py", "helperproc.py", "hosting.py", "log_prefix.py", "page_session.py", "posixproc.py", "protocol.py", "pty", "record.py"]
+exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record.py", "env_forwarding.py", "helper_chain_guard.py", "helperproc.py", "hosting.py", "log_prefix.py", "page_session.py", "posixproc.py", "protocol.py", "pty", "record.py", "tests"]
 
 [uses]
 "backend.py" = ["env_forwarding.py", "helperproc.py", "posixproc.py", "protocol.py", "pty", "record.py"]
